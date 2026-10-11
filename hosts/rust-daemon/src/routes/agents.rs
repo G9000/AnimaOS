@@ -18,7 +18,8 @@ pub(crate) const AGENT_BUSY_MESSAGE: &str =
 /// mapped legacy sessions; the generic run route may not write into them, so
 /// a client `roomId` can never alias a mapped `legacy-room:<hash>` session id
 /// (spec §3.1).
-const RESERVED_ROOM_PREFIXES: [&str; 5] = [
+const RESERVED_ROOM_PREFIXES: [&str; 6] = [
+    "discord:",
     "telegram:",
     "schedule:",
     "job:",
@@ -923,7 +924,7 @@ mod tests {
             assert_eq!(error.status(), StatusCode::BAD_REQUEST, "{room}");
             assert_eq!(
                 error.message(),
-                "roomId must be non-empty, at most 256 bytes, and outside the reserved telegram:, schedule:, job:, peer:, and legacy-room: namespaces"
+                "roomId must be non-empty, at most 256 bytes, and outside the reserved discord:, telegram:, schedule:, job:, peer:, and legacy-room: namespaces"
             );
         }
         let accepted = handle_run_agent(

@@ -20,6 +20,8 @@ pub(crate) struct RunStopUndo {
     pub(crate) inbound: Vec<TelegramInboundRecord>,
     pub(crate) outbound: Vec<TelegramOutboundRecord>,
     pub(crate) jobs: Vec<AgentJobRecord>,
+    pub(crate) discord_inbound: Vec<crate::connectors::discord::DiscordInboundRecord>,
+    pub(crate) discord_outbound: Vec<crate::connectors::discord::DiscordOutboundRecord>,
     /// Approvals the stop settled, as they were (spec §4.6).
     pub(crate) approvals: Vec<ApprovalUndo>,
 }
@@ -30,6 +32,8 @@ impl RunStopUndo {
         self.runs.is_empty()
             && self.inbound.is_empty()
             && self.outbound.is_empty()
+            && self.discord_inbound.is_empty()
+            && self.discord_outbound.is_empty()
             && self.jobs.is_empty()
             && self.approvals.is_empty()
     }
@@ -72,6 +76,9 @@ impl DaemonState {
             // A Telegram reply committed but not delivered yet is never sent.
             if record.source == RunSource::Telegram {
                 self.suppress_undelivered_reply(&record, &mut undo);
+            }
+            if record.source == RunSource::Discord {
+                self.suppress_discord_reply(&record, &mut undo);
             }
             return Some(RunStopPlan {
                 run: record,
@@ -138,6 +145,7 @@ impl DaemonState {
         for (source, source_ref) in sources {
             match source {
                 RunSource::Telegram => self.stop_inbound(&source_ref, &mut plan.undo),
+                RunSource::Discord => self.stop_discord_inbound(&source_ref, &mut plan.undo),
                 RunSource::Job => self.stop_job(&source_ref, now_ms, &mut plan.undo),
                 _ => {}
             }
@@ -176,6 +184,36 @@ impl DaemonState {
         {
             undo.inbound.push(record.clone());
             record.processing_state = InboundProcessingState::Stopped;
+        }
+    }
+
+    fn stop_discord_inbound(&mut self, source_ref: &str, undo: &mut RunStopUndo) {
+        use crate::connectors::discord::DiscordProcessingState;
+        let Some((connector, message)) = source_ref.rsplit_once(':') else {
+            return;
+        };
+        if let Some(record) = self
+            .discord_inbound
+            .get_mut(&(connector.into(), message.into()))
+            .filter(|r| r.processing_state == DiscordProcessingState::Processing)
+        {
+            undo.discord_inbound.push(record.clone());
+            record.processing_state = DiscordProcessingState::Stopped;
+        }
+    }
+    fn suppress_discord_reply(&mut self, run: &RunRecord, undo: &mut RunStopUndo) {
+        let Some(reply) = &run.reply_message_id else {
+            return;
+        };
+        for record in self
+            .discord_outbound
+            .values_mut()
+            .filter(|r| r.agent_id == run.agent_id && &r.assistant_message_id == reply)
+        {
+            let previous = record.clone();
+            if crate::connectors::discord::request_outbound_stop(record) {
+                undo.discord_outbound.push(previous);
+            }
         }
     }
 
@@ -245,6 +283,22 @@ impl DaemonState {
                 .is_some_and(|current| current.delivery_state == OutboundDeliveryState::Suppressed)
             {
                 self.outbound.insert(previous.id.clone(), previous);
+            }
+        }
+        for previous in undo.discord_inbound {
+            let key = (previous.connector_id.clone(), previous.message_id.clone());
+            if self.discord_inbound.get(&key).is_some_and(|r| {
+                r.processing_state == crate::connectors::discord::DiscordProcessingState::Stopped
+                    && r.run_id == previous.run_id
+            }) {
+                self.discord_inbound.insert(key, previous);
+            }
+        }
+        for previous in undo.discord_outbound {
+            let mut changed = previous.clone();
+            crate::connectors::discord::request_outbound_stop(&mut changed);
+            if self.discord_outbound.get(&previous.id) == Some(&changed) {
+                self.discord_outbound.insert(previous.id.clone(), previous);
             }
         }
         for previous in undo.jobs {

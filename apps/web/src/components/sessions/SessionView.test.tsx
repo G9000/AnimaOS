@@ -317,6 +317,68 @@ describe('SessionView', () => {
     ).toBeVisible();
   });
 
+  it('labels native Discord sessions and uses the ordinary session composer', () => {
+    renderView({
+      session: sessionFixture('discord:dc-1', {
+        kind: 'discord',
+        origin: 'discord',
+        title: 'Discord · private-chat',
+      }),
+      discordAvailable: true,
+    });
+    expect(
+      screen.getByText('Discord', { selector: '.session-kind-badge' }),
+    ).toBeVisible();
+    expect(screen.getByPlaceholderText('Reply on Discord…')).toBeVisible();
+  });
+
+  it('blocks Discord replies when its selected connector cannot deliver', () => {
+    renderView({
+      session: sessionFixture('discord:dc-1', {
+        kind: 'discord',
+        origin: 'discord',
+      }),
+      discordAvailable: false,
+    });
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.getByRole('note')).toHaveTextContent(
+      'Check its status in Connectors',
+    );
+  });
+
+  it.each(['degraded', 'loading', 'missing credentials'])(
+    'keeps Stop available while Discord delivery is unavailable (%s)',
+    async () => {
+      const user = userEvent.setup();
+      const stop = vi.fn();
+      renderView({
+        session: sessionFixture('discord:dc-1', {
+          kind: 'discord',
+          origin: 'discord',
+        }),
+        discordAvailable: false,
+        composer: {
+          draft: 'Do not send',
+          setDraft: vi.fn(),
+          sending: false,
+          disabled: false,
+          offline: false,
+          onSend: vi.fn(),
+          error: null,
+          onDismissError: vi.fn(),
+          runActive: true,
+          onStop: stop,
+        },
+      });
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Send' }),
+      ).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Stop' }));
+      expect(stop).toHaveBeenCalledOnce();
+    },
+  );
+
   it('shows a message that is still on its way', () => {
     renderView({
       session: sessionFixture('chat:plans', { title: 'Plans' }),

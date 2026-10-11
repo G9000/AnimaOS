@@ -29,6 +29,7 @@ pub(crate) const PRUNE_INTERVAL_MS: u64 = 10 * 60 * 1_000;
 pub(crate) struct PruneUndo {
     agents: Vec<AgentRuntimeSnapshot>,
     marked_outbound: Vec<String>,
+    marked_discord_outbound: Vec<String>,
     /// `(agent, session, previous pruned_through)` of each session record
     /// this pass moved forward.
     sessions: Vec<(String, String, Option<SessionPrunedThrough>)>,
@@ -56,6 +57,12 @@ impl DaemonState {
             .values()
             .filter(|record| !record.delivery_state.is_settled())
             .map(|record| record.assistant_message_id.as_str())
+            .chain(
+                self.discord_outbound
+                    .values()
+                    .filter(|r| !r.delivery_state.is_settled())
+                    .map(|r| r.assistant_message_id.as_str()),
+            )
             .collect::<HashSet<_>>();
         let active_sessions = self.runs.active_sessions();
         let mut prunable_by_agent = Vec::new();
@@ -140,6 +147,15 @@ impl DaemonState {
             .iter()
             .map(String::as_str)
             .collect::<HashSet<_>>();
+        for (id, record) in self.discord_outbound.iter_mut() {
+            if record.delivery_state.is_settled()
+                && !record.message_pruned
+                && undo.message_ids.contains(&record.assistant_message_id)
+            {
+                record.message_pruned = true;
+                undo.marked_discord_outbound.push(id.clone());
+            }
+        }
         for (id, record) in self.outbound.iter_mut() {
             if record.delivery_state.is_settled()
                 && !record.message_pruned
@@ -179,6 +195,11 @@ impl DaemonState {
             if let Err(error) = self.restore_removed_agent(snapshot) {
                 warn!(agent_id = %agent_id, error = %error, "could not restore an agent's hot tail after a failed prune");
                 still_pruned.insert(agent_id);
+            }
+        }
+        for id in undo.marked_discord_outbound {
+            if let Some(record) = self.discord_outbound.get_mut(&id) {
+                record.message_pruned = false;
             }
         }
         for id in undo.marked_outbound {

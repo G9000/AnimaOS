@@ -329,6 +329,53 @@ describe('useSessionCommands', () => {
     expect(options.queueSend).not.toHaveBeenCalled();
   });
 
+  it('uses native Discord text runs, blocks unavailable delivery, skills and attachments, and stops through the ordinary control', async () => {
+    const session = sessionFixture('discord:dc-1', {
+      kind: 'discord',
+      origin: 'discord',
+    });
+    const stop = vi
+      .spyOn(daemon, 'stopRun')
+      .mockResolvedValue(runFixture('run_1', { status: 'cancelled' }));
+    const { result, options, rerender } = setup({
+      session,
+      routeSessionId: session.id,
+      discordReady: false,
+      draft: 'Hello',
+    });
+    act(() => result.current.send());
+    expect(options.queueSend).not.toHaveBeenCalled();
+    rerender({ ...options, discordReady: true });
+    act(() => result.current.send());
+    expect(options.queueSend).toHaveBeenCalledWith(
+      session,
+      CHAT_KEY,
+      'Hello',
+      expect.any(String),
+      'queue',
+    );
+    vi.mocked(options.queueSend).mockClear();
+    rerender({ ...options, discordReady: true, draft: '/notes write this' });
+    act(() => result.current.send());
+    expect(options.queueSend).not.toHaveBeenCalled();
+    expect(options.updateChat).toHaveBeenLastCalledWith(CHAT_KEY, {
+      draft: '/notes write this',
+      error:
+        'Skills are unavailable in Discord sessions. Use a web chat to run a skill.',
+    });
+    rerender({ ...options, discordReady: true, attachmentIds: ['att_1'] });
+    act(() => result.current.send());
+    expect(options.queueSend).not.toHaveBeenCalled();
+    expect(options.updateChat).toHaveBeenLastCalledWith(CHAT_KEY, {
+      error:
+        'Discord sessions accept text only. Use a web chat for attachments.',
+    });
+    await act(async () => {
+      await result.current.stopRun({ agentId: 'agent-main', id: 'run_1' });
+    });
+    expect(stop).toHaveBeenCalledWith('agent-main', 'run_1');
+  });
+
   it('/usage opens the usage page', () => {
     const { result, options } = setup();
     act(() => result.current.send('/usage'));

@@ -636,7 +636,11 @@ mod tests {
             );
             let saved: serde_json::Value =
                 serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-            assert_eq!(saved["version"], 11, "{version:?}");
+            assert_eq!(
+                saved["version"],
+                crate::control_plane_store::CONTROL_PLANE_STORE_VERSION,
+                "{version:?}"
+            );
             assert_eq!(state.read().await.agent_count(), 1);
             let _ = std::fs::remove_dir_all(dir);
         }
@@ -687,7 +691,10 @@ mod tests {
         );
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(saved["version"], 11);
+        assert_eq!(
+            saved["version"],
+            crate::control_plane_store::CONTROL_PLANE_STORE_VERSION
+        );
         let guard = state.read().await;
         assert_eq!(guard.agent_count(), 1);
         assert_eq!(
@@ -737,7 +744,10 @@ mod tests {
         );
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(saved["version"], 11);
+        assert_eq!(
+            saved["version"],
+            crate::control_plane_store::CONTROL_PLANE_STORE_VERSION
+        );
         assert_eq!(saved["approvalRules"], serde_json::json!([]));
         let guard = state.read().await;
         assert_eq!(guard.agent_count(), 1);
@@ -788,7 +798,10 @@ mod tests {
         );
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(saved["version"], 11);
+        assert_eq!(
+            saved["version"],
+            crate::control_plane_store::CONTROL_PLANE_STORE_VERSION
+        );
         assert_eq!(saved["skills"], serde_json::json!([]));
         assert_eq!(saved["skillDrafts"], serde_json::json!([]));
         let guard = state.read().await;
@@ -844,7 +857,10 @@ mod tests {
         );
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(saved["version"], 11);
+        assert_eq!(
+            saved["version"],
+            crate::control_plane_store::CONTROL_PLANE_STORE_VERSION
+        );
         assert_eq!(saved["scheduleFires"], serde_json::json!([]));
         let guard = state.read().await;
         let restored = &guard.schedules["schedule-1"];
@@ -910,7 +926,10 @@ mod tests {
         );
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(saved["version"], 11);
+        assert_eq!(
+            saved["version"],
+            crate::control_plane_store::CONTROL_PLANE_STORE_VERSION
+        );
         assert_eq!(saved["pricingOverrides"], serde_json::json!([]));
         let guard = state.read().await;
         assert_eq!(guard.agent_count(), 1);
@@ -953,7 +972,10 @@ mod tests {
         );
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(saved["version"], 11);
+        assert_eq!(
+            saved["version"],
+            crate::control_plane_store::CONTROL_PLANE_STORE_VERSION
+        );
         let guard = state.read().await;
         assert_eq!(guard.agent_count(), 1);
         assert_eq!(guard.pricing_overrides, vec![sample_override()]);
@@ -962,7 +984,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_version_eleven_snapshot_writes_no_backup() {
+    async fn a_current_priced_snapshot_writes_no_backup() {
         let dir = temp_dir("current-attachments");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("control-plane.json");
@@ -979,6 +1001,7 @@ mod tests {
 
         assert!(!crate::control_plane_store::pre_usage_backup_path(&path).exists());
         assert!(!crate::control_plane_store::pre_attachments_backup_path(&path).exists());
+        assert!(!crate::control_plane_store::pre_discord_backup_path(&path).exists());
         assert!(!crate::control_plane_store::pre_automations_backup_path(&path).exists());
         assert_eq!(
             state.read().await.pricing_overrides,
@@ -988,14 +1011,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_snapshot_newer_than_eleven_is_refused() {
-        let dir = temp_dir("newer-than-eleven");
+    async fn a_snapshot_newer_than_current_is_refused() {
+        let dir = temp_dir("newer-than-current");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("control-plane.json");
         let mut value =
             serde_json::to_value(crate::state::DaemonState::new().control_plane_snapshot())
                 .unwrap();
-        value["version"] = 12.into();
+        value["version"] = (CONTROL_PLANE_STORE_VERSION + 1).into();
         let original = serde_json::to_string_pretty(&value).unwrap();
         std::fs::write(&path, &original).unwrap();
         let state = Arc::new(tokio::sync::RwLock::new(crate::state::DaemonState::new()));
@@ -1008,14 +1031,16 @@ mod tests {
         .expect_err("a newer snapshot must be refused");
 
         assert!(
-            error
-                .to_string()
-                .contains("unsupported control plane store version: 12"),
+            error.to_string().contains(&format!(
+                "unsupported control plane store version: {}",
+                CONTROL_PLANE_STORE_VERSION + 1
+            )),
             "{error}"
         );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
         assert!(!crate::control_plane_store::pre_usage_backup_path(&path).exists());
         assert!(!crate::control_plane_store::pre_attachments_backup_path(&path).exists());
+        assert!(!crate::control_plane_store::pre_discord_backup_path(&path).exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -1029,7 +1054,10 @@ mod tests {
         configure_control_plane_store(&fresh, Some(config.clone()))
             .await
             .unwrap();
-        assert!(path.exists(), "a fresh start saves a version-11 snapshot");
+        assert!(
+            path.exists(),
+            "a fresh start saves a current-format snapshot"
+        );
 
         let restarted = Arc::new(tokio::sync::RwLock::new(crate::state::DaemonState::new()));
         configure_control_plane_store(&restarted, Some(config))
@@ -1043,11 +1071,12 @@ mod tests {
         assert!(!crate::control_plane_store::pre_automations_backup_path(&path).exists());
         assert!(!crate::control_plane_store::pre_usage_backup_path(&path).exists());
         assert!(!crate::control_plane_store::pre_attachments_backup_path(&path).exists());
+        assert!(!crate::control_plane_store::pre_discord_backup_path(&path).exists());
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(
-            saved["version"], 11,
-            "a version-11 snapshot writes no backup"
+            saved["version"], CONTROL_PLANE_STORE_VERSION,
+            "a current-format snapshot writes no backup"
         );
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1055,7 +1084,7 @@ mod tests {
     // Controller ruling (pre-flight audit): the backup is written only when the
     // loaded version is below CONTROL_PLANE_STORE_VERSION, so a later version
     // bump can never clobber it. This simulates a backup already on disk from a
-    // prior upgrade and proves loading a current (v11) snapshot never rewrites it.
+    // prior upgrade and proves loading a current-format snapshot never rewrites it.
     #[tokio::test]
     async fn loading_a_current_snapshot_leaves_an_existing_pre_upgrade_backup_untouched() {
         let dir = temp_dir("current-with-backup");
@@ -1066,7 +1095,10 @@ mod tests {
         configure_control_plane_store(&fresh, Some(config.clone()))
             .await
             .unwrap();
-        assert!(path.exists(), "a fresh start saves a version-11 snapshot");
+        assert!(
+            path.exists(),
+            "a fresh start saves a current-format snapshot"
+        );
 
         let backup = crate::control_plane_store::pre_sessions_backup_path(&path);
         let preexisting_backup = "{\"version\":3,\"agents\":[],\"swarms\":[]}";
@@ -1125,5 +1157,46 @@ mod tests {
             "the atomic writer's temp file must not survive a failed rename"
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(test)]
+mod discord_upgrade_startup_tests {
+    use super::*;
+    #[tokio::test]
+    async fn configure_store_upgrades_v11_only_after_independent_discord_backup_and_reloads_v12() {
+        let path = std::env::temp_dir().join(format!(
+            "anima-startup-discord-upgrade-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let original = "{\n  \"version\":11, \"agents\":[], \"swarms\":[]\n}\n";
+        let previous_attachments = crate::control_plane_store::pre_attachments_backup_path(&path);
+        std::fs::write(&previous_attachments, "older attachments backup").unwrap();
+        std::fs::write(&path, original).unwrap();
+        let config = ControlPlaneStoreConfig::Json(path.clone());
+        let state = Arc::new(tokio::sync::RwLock::new(crate::state::DaemonState::new()));
+        configure_control_plane_store(&state, Some(config.clone()))
+            .await
+            .unwrap();
+        let discord_backup = crate::control_plane_store::pre_discord_backup_path(&path);
+        assert_eq!(std::fs::read_to_string(&discord_backup).unwrap(), original);
+        assert_eq!(
+            std::fs::read_to_string(&previous_attachments).unwrap(),
+            "older attachments backup"
+        );
+        let saved = load_control_plane_snapshot(&config).await.unwrap().unwrap();
+        assert_eq!(saved.version, CONTROL_PLANE_STORE_VERSION);
+        assert!(saved.discord_connectors.is_empty());
+        assert!(saved.discord_credential_intents.is_empty());
+        assert!(saved.discord_inbound.is_empty());
+        assert!(saved.discord_outbound.is_empty());
+        let restarted = Arc::new(tokio::sync::RwLock::new(crate::state::DaemonState::new()));
+        configure_control_plane_store(&restarted, Some(config))
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&discord_backup).unwrap(), original);
+        std::fs::remove_file(discord_backup).unwrap();
+        std::fs::remove_file(previous_attachments).unwrap();
+        std::fs::remove_file(path).unwrap();
     }
 }

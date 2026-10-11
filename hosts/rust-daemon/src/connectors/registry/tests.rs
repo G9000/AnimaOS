@@ -108,6 +108,167 @@ fn request() -> ConnectorSendRequest {
     }
 }
 
+#[derive(Default)]
+struct DiscordFixture {
+    calls: Mutex<Vec<(String, String)>>,
+}
+use crate::connectors::discord::{
+    client::{DiscordTransport, DiscordTransportError},
+    credentials::DiscordBotToken,
+    model::{DiscordBotIdentity, DiscordChannelMetadata, DiscordMessageBatch, DiscordSendReceipt},
+};
+#[async_trait]
+impl DiscordTransport for DiscordFixture {
+    async fn get_me(
+        &self,
+        token: &DiscordBotToken,
+    ) -> Result<DiscordBotIdentity, DiscordTransportError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push((token.expose().into(), "identify".into()));
+        Ok(DiscordBotIdentity {
+            id: "7".into(),
+            username: None,
+            display_name: None,
+        })
+    }
+    async fn get_channel(
+        &self,
+        _: &DiscordBotToken,
+        _: &str,
+    ) -> Result<DiscordChannelMetadata, DiscordTransportError> {
+        panic!("metadata discovery cannot call native preflight")
+    }
+    async fn latest_cursor(
+        &self,
+        _: &DiscordBotToken,
+        _: &str,
+    ) -> Result<String, DiscordTransportError> {
+        panic!("metadata discovery cannot poll")
+    }
+    async fn receive(
+        &self,
+        token: &DiscordBotToken,
+        channel: &str,
+        cursor: &str,
+    ) -> Result<DiscordMessageBatch, DiscordTransportError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push((token.expose().into(), format!("receive:{channel}:{cursor}")));
+        Ok(DiscordMessageBatch {
+            messages: Vec::new(),
+            next_cursor: cursor.into(),
+            boundary_proven: true,
+        })
+    }
+    async fn send_chunk(
+        &self,
+        token: &DiscordBotToken,
+        channel: &str,
+        text: &str,
+        attempt: &str,
+    ) -> Result<DiscordSendReceipt, DiscordTransportError> {
+        self.calls.lock().unwrap().push((
+            token.expose().into(),
+            format!("send:{channel}:{text}:{attempt}"),
+        ));
+        Ok(DiscordSendReceipt {
+            message_id: "88".into(),
+            channel_id: channel.into(),
+        })
+    }
+}
+#[tokio::test]
+async fn discord_registry_is_passive_and_bound_dispatch_preserves_captured_token_channel() {
+    let native = Arc::new(DiscordFixture::default());
+    let registry =
+        ConnectorRegistry::with_discord(Arc::new(FixtureTransport::default()), native.clone());
+    assert_eq!(
+        registry
+            .metadata
+            .list()
+            .map(|d| d.protocol_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["discord", "telegram"]
+    );
+    assert!(registry.discord_native().is_some());
+    assert!(native.calls.lock().unwrap().is_empty());
+    let old = DiscordBotToken::parse("captured-old").unwrap();
+    let current = DiscordBotToken::parse("captured-current").unwrap();
+    registry.discord(&old, "42").identify().await.unwrap();
+    registry
+        .discord(&old, "42")
+        .receive(ConnectorReceiveRequest {
+            cursor: "9007199254740993".into(),
+        })
+        .await
+        .unwrap();
+    registry
+        .discord(&current, "42")
+        .send(ConnectorSendRequest {
+            destination: "42".into(),
+            text: "fixture".into(),
+            attempt_id: "outbound:0".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        *native.calls.lock().unwrap(),
+        vec![
+            ("captured-old".into(), "identify".into()),
+            ("captured-old".into(), "receive:42:9007199254740993".into()),
+            (
+                "captured-current".into(),
+                "send:42:fixture:outbound:0".into()
+            )
+        ]
+    );
+}
+#[tokio::test]
+async fn discord_adapter_rejects_arbitrary_destinations_and_oversized_native_chunks_before_effect()
+{
+    let native = Arc::new(DiscordFixture::default());
+    let registry =
+        ConnectorRegistry::with_discord(Arc::new(FixtureTransport::default()), native.clone());
+    let token = DiscordBotToken::parse("fixture").unwrap();
+    let adapter = registry.discord(&token, "42");
+    for (destination, text) in [
+        ("43", "valid".into()),
+        ("42", "🦀".repeat(1001)),
+        ("42", "x".repeat(2001)),
+    ] {
+        assert_eq!(
+            adapter
+                .send(ConnectorSendRequest {
+                    destination: destination.into(),
+                    text,
+                    attempt_id: "attempt".into()
+                })
+                .await
+                .unwrap_err(),
+            DiscordTransportError::InvalidInput
+        );
+    }
+    for cursor in ["01", "-1", "18446744073709551616"] {
+        assert_eq!(
+            adapter
+                .receive(ConnectorReceiveRequest {
+                    cursor: cursor.into()
+                })
+                .await
+                .unwrap_err(),
+            DiscordTransportError::InvalidInput
+        );
+    }
+    assert!(native.calls.lock().unwrap().is_empty());
+    assert_eq!(
+        DiscordTransportError::Uncertain.kind(),
+        ConnectorErrorKind::Uncertain
+    );
+}
+
 #[tokio::test]
 async fn registered_bridge_is_passive_and_preserves_credentials_payloads_and_cursor() {
     let native = Arc::new(FixtureTransport::default());

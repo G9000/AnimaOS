@@ -20,57 +20,59 @@ the companion console sends to session `/runs` and consumes `/events`.
 
 | Method   | Path                                                                                         |
 | -------- | -------------------------------------------------------------------------------------------- |
+| `DELETE` | `/api/agents/{agent_id}`                                                                     |
 | `DELETE` | `/api/agents/{agent_id}/approval-rules/{rule_id}`                                            |
 | `DELETE` | `/api/agents/{agent_id}/avatar`                                                              |
 | `DELETE` | `/api/agents/{agent_id}/connectors/{connector_id}`                                           |
+| `DELETE` | `/api/agents/{agent_id}/connectors/discord/{connector_id}`                                   |
 | `DELETE` | `/api/agents/{agent_id}/connectors/gcalendar/{connector_id}`                                 |
 | `DELETE` | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}`                           |
 | `DELETE` | `/api/agents/{agent_id}/schedules/{schedule_id}`                                             |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}`                                               |
-| `DELETE` | `/api/agents/{agent_id}`                                                                     |
 | `DELETE` | `/api/connectors/oauth-apps/{provider}`                                                      |
 | `DELETE` | `/api/memories/{memory_id}`                                                                  |
 | `DELETE` | `/api/memories/entities/{entity_id}`                                                         |
 | `DELETE` | `/api/memories/facts/{fact_id}`                                                              |
-| `DELETE` | `/api/providers/chatgpt/login`                                                               |
 | `DELETE` | `/api/providers/chatgpt`                                                                     |
+| `DELETE` | `/api/providers/chatgpt/login`                                                               |
 | `DELETE` | `/api/skills/{slug}`                                                                         |
-| `GET`    | `/api/agents/{agent_id}/approval-policy`                                                     |
+| `GET`    | `/api/agents`                                                                                |
+| `GET`    | `/api/agents/{agent_id}`                                                                     |
 | `GET`    | `/api/agents/{agent_id}/agent-files`                                                         |
+| `GET`    | `/api/agents/{agent_id}/approval-policy`                                                     |
 | `GET`    | `/api/agents/{agent_id}/approval-rules`                                                      |
 | `GET`    | `/api/agents/{agent_id}/attachments/{attachment_id}`                                         |
 | `GET`    | `/api/agents/{agent_id}/avatar`                                                              |
+| `GET`    | `/api/agents/{agent_id}/connectors`                                                          |
 | `GET`    | `/api/agents/{agent_id}/connectors/{connector_id}/messages`                                  |
-| `GET`    | `/api/agents/{agent_id}/connectors/gcalendar/{connector_id}/writes`                          |
+| `GET`    | `/api/agents/{agent_id}/connectors/discord`                                                  |
 | `GET`    | `/api/agents/{agent_id}/connectors/gcalendar`                                                |
+| `GET`    | `/api/agents/{agent_id}/connectors/gcalendar/{connector_id}/writes`                          |
+| `GET`    | `/api/agents/{agent_id}/connectors/mail/{provider}`                                          |
 | `GET`    | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/drafts`                    |
 | `GET`    | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/messages`                  |
-| `GET`    | `/api/agents/{agent_id}/connectors/mail/{provider}`                                          |
-| `GET`    | `/api/agents/{agent_id}/connectors`                                                          |
 | `GET`    | `/api/agents/{agent_id}/events`                                                              |
 | `GET`    | `/api/agents/{agent_id}/jobs`                                                                |
 | `GET`    | `/api/agents/{agent_id}/memories/recent`                                                     |
 | `GET`    | `/api/agents/{agent_id}/runs/{run_id}`                                                       |
-| `GET`    | `/api/agents/{agent_id}/schedules/{schedule_id}/history`                                     |
 | `GET`    | `/api/agents/{agent_id}/schedules`                                                           |
+| `GET`    | `/api/agents/{agent_id}/schedules/{schedule_id}/history`                                     |
+| `GET`    | `/api/agents/{agent_id}/sessions`                                                            |
+| `GET`    | `/api/agents/{agent_id}/sessions/{session_id}`                                               |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/export`                                        |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/messages`                                      |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/runs`                                          |
-| `GET`    | `/api/agents/{agent_id}/sessions/{session_id}`                                               |
-| `GET`    | `/api/agents/{agent_id}/sessions`                                                            |
 | `GET`    | `/api/agents/{agent_id}/tasks`                                                               |
-| `GET`    | `/api/agents/{agent_id}`                                                                     |
-| `GET`    | `/api/agents`                                                                                |
 | `GET`    | `/api/approvals`                                                                             |
 | `GET`    | `/api/capabilities`                                                                          |
 | `GET`    | `/api/connectors/gcalendar/callback`                                                         |
 | `GET`    | `/api/connectors/mail/{provider}/callback`                                                   |
 | `GET`    | `/api/connectors/oauth-apps/{provider}`                                                      |
-| `GET`    | `/api/goals/{goal_id}/jobs`                                                                  |
 | `GET`    | `/api/goals`                                                                                 |
+| `GET`    | `/api/goals/{goal_id}/jobs`                                                                  |
 | `GET`    | `/api/health`                                                                                |
-| `GET`    | `/api/logs/stream`                                                                           |
 | `GET`    | `/api/logs`                                                                                  |
+| `GET`    | `/api/logs/stream`                                                                           |
 | `GET`    | `/api/memories/{memory_id}/trace`                                                            |
 | `GET`    | `/api/memories/entities`                                                                     |
 | `GET`    | `/api/memories/facts`                                                                        |
@@ -79,92 +81,99 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/memories/recent`                                                                       |
 | `GET`    | `/api/memories/relationships`                                                                |
 | `GET`    | `/api/memories/search`                                                                       |
-| `GET`    | `/api/providers/chatgpt/status`                                                              |
 | `GET`    | `/api/providers`                                                                             |
+| `GET`    | `/api/providers/chatgpt/status`                                                              |
 | `GET`    | `/api/ready`                                                                                 |
 | `GET`    | `/api/search`                                                                                |
 | `GET`    | `/api/skill-drafts`                                                                          |
-| `GET`    | `/api/skills/{slug}`                                                                         |
 | `GET`    | `/api/skills`                                                                                |
+| `GET`    | `/api/skills/{slug}`                                                                         |
 | `GET`    | `/api/status`                                                                                |
-| `GET`    | `/api/swarms/{swarm_id}/events`                                                              |
-| `GET`    | `/api/swarms/{swarm_id}`                                                                     |
 | `GET`    | `/api/swarms`                                                                                |
+| `GET`    | `/api/swarms/{swarm_id}`                                                                     |
+| `GET`    | `/api/swarms/{swarm_id}/events`                                                              |
 | `GET`    | `/api/usage/export.csv`                                                                      |
 | `GET`    | `/api/usage/pricing`                                                                         |
 | `GET`    | `/api/usage/records`                                                                         |
 | `GET`    | `/api/usage/summary`                                                                         |
+| `GET`    | `/api/workspace`                                                                             |
 | `GET`    | `/api/workspace/avatar`                                                                      |
 | `GET`    | `/api/workspace/file`                                                                        |
 | `GET`    | `/api/workspace/files`                                                                       |
 | `GET`    | `/api/workspace/inspect`                                                                     |
-| `GET`    | `/api/workspace`                                                                             |
+| `PATCH`  | `/api/agents/{agent_id}`                                                                     |
+| `PATCH`  | `/api/agents/{agent_id}/connectors/discord/{connector_id}`                                   |
 | `PATCH`  | `/api/agents/{agent_id}/schedules/{schedule_id}`                                             |
 | `PATCH`  | `/api/agents/{agent_id}/sessions/{session_id}`                                               |
-| `PATCH`  | `/api/agents/{agent_id}`                                                                     |
 | `PATCH`  | `/api/memories/{memory_id}`                                                                  |
 | `PATCH`  | `/api/memories/facts/{fact_id}`                                                              |
 | `PATCH`  | `/api/skills/{slug}`                                                                         |
 | `POST`   | `/api/agencies/create`                                                                       |
 | `POST`   | `/api/agencies/generate`                                                                     |
+| `POST`   | `/api/agents`                                                                                |
 | `POST`   | `/api/agents/{agent_id}/approval-rules`                                                      |
 | `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/messages`                                  |
 | `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/pairings/{chat_id}/approve`                |
 | `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/restart`                                   |
+| `POST`   | `/api/agents/{agent_id}/connectors/discord`                                                  |
+| `POST`   | `/api/agents/{agent_id}/connectors/discord/{connector_id}/activate`                          |
+| `POST`   | `/api/agents/{agent_id}/connectors/discord/{connector_id}/outbound/suppress`                 |
+| `POST`   | `/api/agents/{agent_id}/connectors/discord/{connector_id}/restart`                           |
+| `POST`   | `/api/agents/{agent_id}/connectors/discord/{connector_id}/retry`                             |
+| `POST`   | `/api/agents/{agent_id}/connectors/gcalendar`                                                |
 | `POST`   | `/api/agents/{agent_id}/connectors/gcalendar/{connector_id}/writes/{write_id}/approve`       |
 | `POST`   | `/api/agents/{agent_id}/connectors/gcalendar/{connector_id}/writes/{write_id}/reject`        |
-| `POST`   | `/api/agents/{agent_id}/connectors/gcalendar`                                                |
+| `POST`   | `/api/agents/{agent_id}/connectors/mail/{provider}`                                          |
+| `POST`   | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/drafts`                    |
 | `POST`   | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/drafts/{draft_id}/approve` |
 | `POST`   | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/drafts/{draft_id}/reject`  |
-| `POST`   | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/drafts`                    |
-| `POST`   | `/api/agents/{agent_id}/connectors/mail/{provider}`                                          |
 | `POST`   | `/api/agents/{agent_id}/connectors/telegram`                                                 |
+| `POST`   | `/api/agents/{agent_id}/jobs`                                                                |
 | `POST`   | `/api/agents/{agent_id}/jobs/{job_id}/approve`                                               |
 | `POST`   | `/api/agents/{agent_id}/jobs/{job_id}/cancel`                                                |
 | `POST`   | `/api/agents/{agent_id}/jobs/{job_id}/retry`                                                 |
 | `POST`   | `/api/agents/{agent_id}/jobs/{job_id}/review`                                                |
-| `POST`   | `/api/agents/{agent_id}/jobs`                                                                |
 | `POST`   | `/api/agents/{agent_id}/messages`                                                            |
 | `POST`   | `/api/agents/{agent_id}/run`                                                                 |
 | `POST`   | `/api/agents/{agent_id}/runs/{run_id}/stop`                                                  |
+| `POST`   | `/api/agents/{agent_id}/schedules`                                                           |
 | `POST`   | `/api/agents/{agent_id}/schedules/{schedule_id}/run`                                         |
 | `POST`   | `/api/agents/{agent_id}/schedules/import`                                                    |
-| `POST`   | `/api/agents/{agent_id}/schedules`                                                           |
+| `POST`   | `/api/agents/{agent_id}/sessions`                                                            |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/attachments`                                   |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/compact`                                       |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/runs`                                          |
-| `POST`   | `/api/agents/{agent_id}/sessions`                                                            |
 | `POST`   | `/api/agents/generate-profile`                                                               |
-| `POST`   | `/api/agents`                                                                                |
 | `POST`   | `/api/approvals/{approval_id}/decision`                                                      |
-| `POST`   | `/api/goals/{goal_id}/status`                                                                |
 | `POST`   | `/api/goals`                                                                                 |
+| `POST`   | `/api/goals/{goal_id}/status`                                                                |
+| `POST`   | `/api/memories`                                                                              |
 | `POST`   | `/api/memories/entities`                                                                     |
 | `POST`   | `/api/memories/evaluated`                                                                    |
 | `POST`   | `/api/memories/evaluations`                                                                  |
 | `POST`   | `/api/memories/relationships`                                                                |
 | `POST`   | `/api/memories/retention`                                                                    |
-| `POST`   | `/api/memories`                                                                              |
 | `POST`   | `/api/providers/chatgpt/login`                                                               |
 | `POST`   | `/api/schedules/preview`                                                                     |
 | `POST`   | `/api/skill-drafts/{draft_id}/approve`                                                       |
 | `POST`   | `/api/skill-drafts/{draft_id}/reject`                                                        |
 | `POST`   | `/api/skills/{slug}/approve`                                                                 |
 | `POST`   | `/api/skills/import`                                                                         |
-| `POST`   | `/api/swarms/{swarm_id}/run`                                                                 |
 | `POST`   | `/api/swarms`                                                                                |
+| `POST`   | `/api/swarms/{swarm_id}/run`                                                                 |
 | `POST`   | `/api/workspace/bootstrap`                                                                   |
 | `POST`   | `/api/workspace/pick-folder`                                                                 |
 | `POST`   | `/api/workspace/resume`                                                                      |
 | `PUT`    | `/api/agents/{agent_id}/approval-policy`                                                     |
 | `PUT`    | `/api/agents/{agent_id}/avatar`                                                              |
 | `PUT`    | `/api/agents/{agent_id}/connectors/{connector_id}/credential`                                |
+| `PUT`    | `/api/agents/{agent_id}/connectors/discord/{connector_id}/credential`                        |
 | `PUT`    | `/api/agents/{agent_id}/tasks`                                                               |
 | `PUT`    | `/api/connectors/oauth-apps/{provider}`                                                      |
 | `PUT`    | `/api/skills/{slug}`                                                                         |
 | `PUT`    | `/api/usage/pricing`                                                                         |
-| `PUT`    | `/api/workspace/avatar`                                                                      |
 | `PUT`    | `/api/workspace`                                                                             |
+| `PUT`    | `/api/workspace/avatar`                                                                      |
 
 <!-- openapi-route-inventory:end -->
 
@@ -701,11 +710,17 @@ the console, while auth/transport failures retain their actual meaning. Browser
 voice requires no server speech endpoints. Focused Hermes provider-format reuse
 is credited with its MIT notice in
 [HERMES-NOTICE](../../packages/core-rust/crates/anima-model-adapters/HERMES-NOTICE).
-Optional community connector lifecycle, Discord and Drive remain follow-ups.
+Selected-channel Discord REST chat is available through the native connector
+setup and durable session flow. See [Contributing connectors](CONNECTOR-CONTRIBUTING.md#selected-discord-channel)
+for activation, sender access, polling limits and uncertain-output review. Its
+focused upstream adaptation is credited in
+[Discord notice](src/connectors/discord/HERMES-NOTICE). Installable community
+modules and selected Drive read/search remain follow-ups.
 
 For upgrades and rollback, use a stopped complete snapshot/history/memory/uploads/
 keyring/Caddy backup generation with recorded binaries and vault password. The
-v11 pre-attachments snapshot backup is only a component; restoring JSON alone can
+v12 pre-Discord snapshot backup (`.pre-discord.bak` for v11 input) is only a component;
+restoring JSON alone can
 leave newer history rows that reappear later. Do not edit snapshot versions or
 apply historical pre-M2 SQL instructions to an M9/M10 rollback. See
 [VPS backup and acceptance procedures](../../deploy/vps/README.md).

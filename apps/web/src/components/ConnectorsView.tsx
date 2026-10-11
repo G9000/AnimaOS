@@ -814,9 +814,11 @@ function CalendarCard({ agentId }: { agentId: string }) {
 export function ConnectorsView({
   agentId,
   telegram,
+  discord,
 }: {
   agentId: string;
   telegram: ReactNode;
+  discord?: ReactNode;
 }) {
   const [oauthGeneration, setOauthGeneration] = useState({
     google: 0,
@@ -871,6 +873,11 @@ export function ConnectorsView({
           <div className="min-w-0 rounded-2xl border border-line bg-panel/60 p-4 sm:p-6">
             {telegram}
           </div>
+          {discord && (
+            <div className="min-w-0 rounded-2xl border border-line bg-panel/60 p-4 sm:p-6">
+              {discord}
+            </div>
+          )}
           <CalendarCard
             key={`${agentId}:calendar:${oauthGeneration.google}`}
             agentId={agentId}

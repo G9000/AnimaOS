@@ -104,8 +104,9 @@ describe('session groups', () => {
         sessionFixture('job:1', { kind: 'job' }),
         sessionFixture('chat:1'),
         sessionFixture('telegram:t', { kind: 'telegram' }),
+        sessionFixture('discord:d', { kind: 'discord' }),
       ]),
-    ).toEqual(['chat', 'telegram', 'job']);
+    ).toEqual(['chat', 'telegram', 'discord', 'job']);
   });
 
   it('names export files like the daemon', () => {

@@ -61,6 +61,7 @@ export interface SessionCommandOptions {
   clearAttachments?: () => void;
   /** A Telegram session's connector is there to carry replies. */
   telegramReady: boolean;
+  discordReady?: boolean;
   /** The open session's reply in progress. */
   activeRun: Run | null;
   updateChat: (key: string, patch: CommandChatPatch) => void;
@@ -203,6 +204,17 @@ export function useSessionCommands(
       const attachmentIds = current.attachmentIds
         ? [...current.attachmentIds]
         : attachments.map((item) => item.id);
+      if (
+        current.session?.kind === 'discord' &&
+        attachmentIds.length > 0 &&
+        current.chatKey
+      ) {
+        current.updateChat(current.chatKey, {
+          error:
+            'Discord sessions accept text only. Use a web chat for attachments.',
+        });
+        return;
+      }
       const sameAttachments =
         JSON.stringify(current.resend?.attachmentIds ?? []) ===
         JSON.stringify(attachmentIds);
@@ -254,7 +266,16 @@ export function useSessionCommands(
         });
         return;
       }
+      if (session.kind === 'discord' && skill) {
+        current.updateChat(chatKey, {
+          draft: text,
+          error:
+            'Skills are unavailable in Discord sessions. Use a web chat to run a skill.',
+        });
+        return;
+      }
       if (session.kind === 'telegram' && !current.telegramReady) return;
+      if (session.kind === 'discord' && !current.discordReady) return;
       // A restored message sent unchanged keeps its key; anything else is new.
       const idempotencyKey =
         restored && current.resend
@@ -308,6 +329,8 @@ export function useSessionCommands(
           run.sessionId !== session.id ||
           !isOwnerWritten(run)
         )
+          return false;
+        if (session.kind === 'discord' && !latest.current.discordReady)
           return false;
         const key = crypto.randomUUID();
         if (run.input.attachmentIds.length)

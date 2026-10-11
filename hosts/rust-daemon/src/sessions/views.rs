@@ -619,6 +619,11 @@ pub(crate) fn transcript_markdown(
     for message in messages {
         let speaker = match message.role {
             MessageRole::User if is_checkin_message(message) => "Check-in",
+            MessageRole::User
+                if is_inbound_message(message) && record.kind == SessionKind::Discord =>
+            {
+                "Discord"
+            }
             MessageRole::User if is_inbound_message(message) => "Telegram",
             MessageRole::User if record.kind == SessionKind::Helper => "Request",
             MessageRole::User => "You",
@@ -685,6 +690,7 @@ mod tests {
         let origin = match kind {
             SessionKind::Chat => SessionOrigin::Web,
             SessionKind::Telegram => SessionOrigin::Telegram,
+            SessionKind::Discord => SessionOrigin::Discord,
             SessionKind::Checkin => SessionOrigin::Schedule,
             SessionKind::Job => SessionOrigin::Job,
             SessionKind::Helper => SessionOrigin::Delegation,

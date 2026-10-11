@@ -136,6 +136,7 @@ export function subscriptionNote(totals: UsageTotals): string | null {
 const SOURCE_LABELS: Record<string, string> = {
   chat: 'Chat',
   telegram: 'Telegram',
+  discord: 'Discord',
   automation: 'Automation',
   job: 'Job',
   helper: 'Helper',

@@ -368,6 +368,13 @@ describe('RunOutcomeCard', () => {
     // An inbound turn (`<connector>:<update>`), which the daemon re-runs.
     { source: 'telegram', sourceRef: 'telegram-1-1:42', offered: false },
     { source: 'telegram', sourceRef: null, offered: false },
+    { source: 'discord', sourceRef: 'discord-1-1', offered: true },
+    {
+      source: 'discord',
+      sourceRef: 'discord-1-1:18446744073709551615',
+      offered: false,
+    },
+    { source: 'discord', sourceRef: null, offered: false },
     { source: 'schedule', sourceRef: 'schedule-1', offered: false },
     { source: 'job', sourceRef: 'job-1:1', offered: false },
     { source: 'delegation', sourceRef: null, offered: false },

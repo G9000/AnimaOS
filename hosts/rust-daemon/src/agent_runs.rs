@@ -1266,6 +1266,24 @@ impl AgentRunCoordinator {
         ) = {
             let mut guard = self.state.write().await;
             validate_run_request(&guard, &agent_id, &room)?;
+            if let Some(connector_id) = room_id.strip_prefix("discord:") {
+                let authorized = source == RunSource::Discord
+                    && parent.is_none()
+                    && guard.discord_connectors.get(connector_id).is_some_and(|c| {
+                        c.is_active()
+                            && c.agent_id == agent_id
+                            && c.room_id == room_id
+                            && source_ref.as_ref().is_some_and(|r| {
+                                r == connector_id || r.starts_with(&format!("{connector_id}:"))
+                            })
+                    });
+                if !authorized {
+                    return Err(ApiError::conflict(
+                        "Discord room requires native connector authority",
+                    ));
+                }
+            }
+
             if let Some(key) = retry_key.as_deref() {
                 // Retry-keyed tool steps stay replay-safe only while one run owns the key.
                 if guard.runs.has_in_flight_idempotency_key(&agent_id, key) {

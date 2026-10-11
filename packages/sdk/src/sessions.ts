@@ -3,11 +3,18 @@ import type { DaemonClient } from './client.js';
 import type { UsageTotals } from './usage.js';
 import type { UploadedAttachment } from './attachments.js';
 
-export type SessionKind = 'chat' | 'telegram' | 'checkin' | 'job' | 'helper';
+export type SessionKind =
+  | 'chat'
+  | 'telegram'
+  | 'discord'
+  | 'checkin'
+  | 'job'
+  | 'helper';
 export type SessionOrigin =
   | 'web'
   | 'api'
   | 'telegram'
+  | 'discord'
   | 'schedule'
   | 'job'
   | 'delegation'

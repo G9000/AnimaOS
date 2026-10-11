@@ -43,6 +43,8 @@ export interface SessionSend {
   skill?: string;
   /** Telegram errors are scrubbed of bot tokens before they are shown. */
   telegram: boolean;
+  /** Native Discord setup errors use static safe UI messages. */
+  discord?: boolean;
   createdAtMs: number;
   /** Failed attempts so far. */
   failures: number;

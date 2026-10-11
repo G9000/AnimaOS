@@ -1,6 +1,7 @@
 # Contributing connectors to AnimaOS
 
-M12 provides a Rust transport contract and a Telegram pilot. Community connectors
+M12 introduced the Rust transport contract and Telegram pilot. M13 adds native
+selected-channel Discord REST chat. Community connectors
 are reviewed source contributions compiled into a host. They run with the host's
 OS privileges and require a rebuild. There is no downloadable connector installer,
 dynamic ABI, process/WASM loader, or connector sandbox.
@@ -10,6 +11,8 @@ dynamic ABI, process/WASM loader, or connector sandbox.
 - Portable metadata and transport contracts: `anima_core::connectors` in
   `packages/core-rust/crates/anima-core/src/connectors`.
 - Native Telegram bridge: `src/connectors/adapters/telegram.rs` in this host.
+- Native Discord bridge and lifecycle: `src/connectors/adapters/discord.rs` and
+  `src/connectors/discord/` in this host.
 - Trusted built-in registration: `src/connectors/registry.rs` in this host.
 - Host authorization, credential storage, pairing, lifecycle, durable inbound
   admission and outbound settlement: existing connector runtime modules.
@@ -93,12 +96,55 @@ Run the existing host gate, which also runs its core Rust dependency tests, with
 `bun x nx run rust-daemon:lint --skipNxCache` for Rust formatting. Follow `AGENTS.md`
 and the milestone handover for environment and staging constraints.
 
-M12 preserves the owner HTTP API, SDK and console. Its internal registry has no
+M12 preserved the owner HTTP API, SDK and console; M13 adds a separate Discord
+owner namespace and setup card. The internal registry has no
 catalog/installer endpoint. A new provider requires a separate reviewed host
 authorization, consent, credential and persistence design; adding a descriptor
 alone does not enable it. The selected roadmap is Telegram, Discord, Gmail,
-Calendar and Drive. Existing Gmail/Calendar integrations have not been migrated
-to this contract in M12; Discord and selected Drive read/search remain future work.
+Calendar and Drive. Existing Gmail/Calendar integrations retain their native
+services. Registry migration alone is not required for functional integrations.
+Selected Drive read/search is the next bounded milestone.
+
+## Selected Discord channel
+
+The owner configures one guild text channel and a nonempty list of permitted
+user IDs. A bot's access to the channel does not establish its privacy; the owner
+checks channel permissions and confirms the selection. New records are saved
+disabled. First activation establishes a latest-message baseline, so earlier
+history is not dispatched. Later enable/restart preserves the saved cursor.
+The bot requires View Channel, Read Message History and Send Messages permissions.
+Message Content intent restrictions also affect REST responses; configure the
+bot in the Discord Developer Portal. See the official [message resource](https://docs.discord.com/developers/resources/message)
+and [intent documentation](https://docs.discord.com/developers/events/gateway).
+
+The client polls the selected channel and proves a bounded backward catch-up
+window before the host atomically commits permitted receipts and its cursor.
+An unproven or oversized backlog pauses visibly. Sender IDs, message IDs and
+channel IDs are native decimal strings; they never become floating-point numbers
+or grant agent authority. Self, bot, webhook and unsupported messages do not run
+the agent. Channel/user selection changes require disconnecting and recreating
+the connector. Credentials remain private, generation-bound and independently
+stored from Telegram.
+
+Each reply chunk has a durable send intent and receipt. Ambiguous/partial sends
+are Unknown and do not automatically replay. The owner checks Discord before
+explicitly suppressing uncertain output; this retains delivered receipts and
+history, sends nothing and allows new work. Safe Retry refuses Unknown output.
+Provider retry delays are honored; recent nonce deduplication does not provide
+durable exactly-once delivery. All mentions are disabled on outgoing messages.
+At most eight conservatively bounded chunks are sent, with an Anima truncation
+notice if needed; the complete reply remains in session history.
+
+REST polling has seconds of latency and cannot observe Gateway edits, deletions,
+reactions, threads, slash commands or voice. Messages deleted before polling can
+be missed. Stop is available through the web conversation controls. These limits
+are explicit; this is not a complete upstream Discord adapter port.
+
+Snapshot version 12 adds native Discord journals. A version 11 JSON store is
+backed up as `.pre-discord.bak` before upgrading; existing earlier backup suffixes
+remain unchanged. Older binaries refuse the newer snapshot, so rollback uses
+the pre-upgrade backup. Verification uses fake stores/transports and does not
+touch an owner's actual store or perform live Discord delivery.
 
 Use Anima/AnimaOS in product names. When adapting upstream code or behavior, record
 the exact source revision and scope, retain applicable copyright/license notices,

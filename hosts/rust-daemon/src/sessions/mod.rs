@@ -46,6 +46,7 @@ const DELEGATED_TASK_PREFIX: &str = "Task delegated by workspace manager ";
 pub(crate) enum SessionKind {
     Chat,
     Telegram,
+    Discord,
     Checkin,
     Job,
     Helper,
@@ -56,6 +57,7 @@ impl SessionKind {
         match self {
             Self::Chat => "chat",
             Self::Telegram => "telegram",
+            Self::Discord => "discord",
             Self::Checkin => "checkin",
             Self::Job => "job",
             Self::Helper => "helper",
@@ -66,6 +68,7 @@ impl SessionKind {
         match value {
             "chat" => Some(Self::Chat),
             "telegram" => Some(Self::Telegram),
+            "discord" => Some(Self::Discord),
             "checkin" => Some(Self::Checkin),
             "job" => Some(Self::Job),
             "helper" => Some(Self::Helper),
@@ -78,7 +81,7 @@ impl SessionKind {
     pub(crate) const fn capabilities(self, schedule_exists: bool) -> SessionCapabilities {
         let (send, steer, rename, delete, compact) = match self {
             Self::Chat => (true, true, true, true, true),
-            Self::Telegram => (true, false, true, false, true),
+            Self::Telegram | Self::Discord => (true, false, true, false, true),
             Self::Checkin => (true, true, true, !schedule_exists, true),
             Self::Job | Self::Helper => (false, false, false, false, false),
         };
@@ -102,6 +105,7 @@ pub(crate) enum SessionOrigin {
     Web,
     Api,
     Telegram,
+    Discord,
     Schedule,
     Job,
     Delegation,
@@ -114,6 +118,7 @@ impl SessionOrigin {
             Self::Web => "web",
             Self::Api => "api",
             Self::Telegram => "telegram",
+            Self::Discord => "discord",
             Self::Schedule => "schedule",
             Self::Job => "job",
             Self::Delegation => "delegation",
@@ -365,6 +370,9 @@ pub(crate) fn kind_for_room(
     source: Option<RunSource>,
     helper_agent: bool,
 ) -> (SessionKind, SessionOrigin) {
+    if room_id.starts_with("discord:") {
+        return (SessionKind::Discord, SessionOrigin::Discord);
+    }
     if room_id.starts_with("telegram:") {
         return (SessionKind::Telegram, SessionOrigin::Telegram);
     }
@@ -490,6 +498,10 @@ pub(crate) fn session_title(
                 .unwrap_or_else(|| DEFAULT_CHAT_TITLE.to_string()),
             TitleSource::FirstMessage,
         ),
+        SessionKind::Discord => (
+            labelled("Discord", context.bot_username.map(str::to_string)),
+            TitleSource::System,
+        ),
         SessionKind::Telegram => (
             labelled(
                 "Telegram",
@@ -550,12 +562,20 @@ pub(crate) fn is_checkin_message(message: &Message) -> bool {
 
 /// A message that arrived from a Telegram chat.
 pub(crate) fn is_inbound_message(message: &Message) -> bool {
-    message.role == MessageRole::User && metadata_str(message, "source") == Some("telegram")
+    message.role == MessageRole::User
+        && matches!(
+            metadata_str(message, "source"),
+            Some("telegram" | "discord")
+        )
 }
 
 /// A Telegram owner turn sent from the web console.
 pub(crate) fn is_owner_web_turn(message: &Message) -> bool {
-    message.role == MessageRole::User && metadata_str(message, "source") == Some("telegramThread")
+    message.role == MessageRole::User
+        && matches!(
+            metadata_str(message, "source"),
+            Some("telegramThread" | "discordThread")
+        )
 }
 
 /// The `sourceRef` prefix the calendar connector's own write-confirmation

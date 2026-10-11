@@ -4,6 +4,45 @@ export type ConnectorStatus = 'pairing' | 'active' | 'reauthRequired';
 export type MailProvider = 'gmail' | 'outlook';
 export type OAuthAppProvider = 'google' | 'microsoft';
 
+export type DiscordConnectorStatus =
+  | 'disabled'
+  | 'ready'
+  | 'credentialRequired'
+  | 'error'
+  | 'degraded'
+  | 'reconciling';
+export interface DiscordConnector {
+  id: string;
+  agentId: string;
+  roomId: string;
+  type: 'discord';
+  bot: { id: string; username: string | null; displayName: string | null };
+  channel: {
+    id: string;
+    guildId: string;
+    name: string | null;
+    kind: 'guildText';
+  };
+  approvedUserIds: string[];
+  enabled: boolean;
+  status: DiscordConnectorStatus;
+  createdAtMs: number;
+  updatedAtMs: number;
+  pendingInbound: number;
+  pendingOutbound: number;
+  unknownOutbound: number;
+  deliveredMessageIds: string[];
+  warning: string | null;
+}
+export interface CreateDiscordConnectorInput {
+  botToken: string;
+  guildId: string;
+  channelId: string;
+  approvedUserIds: string[];
+  /** The owner's confirmation, not provider verification of channel privacy. */
+  privateChannelConfirmed: true;
+}
+
 export interface OAuthAppStatus {
   provider: OAuthAppProvider;
   configured: boolean;
@@ -110,6 +149,97 @@ export interface CalendarConnectResult {
 /** Owner-facing integrations. Approvals must only follow explicit owner review. */
 export class ConnectorsClient {
   constructor(private readonly client: DaemonClient) {}
+
+  async discordConnectors(agentId: string): Promise<DiscordConnector[]> {
+    const response = await this.client.requestJson<{
+      connectors: DiscordConnector[];
+    }>(discordPath(agentId));
+    return response.connectors;
+  }
+  /** Saves a selected channel disabled; activate explicitly to start with new messages. */
+  createDiscordConnector(
+    agentId: string,
+    input: CreateDiscordConnectorInput,
+  ): Promise<DiscordConnector> {
+    return this.discordMutation(discordPath(agentId), 'POST', input);
+  }
+  activateDiscordConnector(
+    agentId: string,
+    connectorId: string,
+  ): Promise<DiscordConnector> {
+    return this.discordMutation(
+      `${discordPath(agentId, connectorId)}/activate`,
+      'POST',
+    );
+  }
+  replaceDiscordCredential(
+    agentId: string,
+    connectorId: string,
+    botToken: string,
+  ): Promise<DiscordConnector> {
+    return this.discordMutation(
+      `${discordPath(agentId, connectorId)}/credential`,
+      'PUT',
+      { botToken },
+    );
+  }
+  setDiscordEnabled(
+    agentId: string,
+    connectorId: string,
+    enabled: boolean,
+  ): Promise<DiscordConnector> {
+    return this.discordMutation(discordPath(agentId, connectorId), 'PATCH', {
+      enabled,
+    });
+  }
+  restartDiscordConnector(
+    agentId: string,
+    connectorId: string,
+  ): Promise<DiscordConnector> {
+    return this.discordMutation(
+      `${discordPath(agentId, connectorId)}/restart`,
+      'POST',
+    );
+  }
+  /** Retries safely pending/failed output only; uncertain sends are never resent. */
+  retryDiscordDelivery(
+    agentId: string,
+    connectorId: string,
+  ): Promise<DiscordConnector> {
+    return this.discordMutation(
+      `${discordPath(agentId, connectorId)}/retry`,
+      'POST',
+    );
+  }
+  /** Call only after the owner checks Discord and explicitly acknowledges uncertainty. */
+  suppressDiscordUnknownDelivery(
+    agentId: string,
+    connectorId: string,
+  ): Promise<DiscordConnector> {
+    return this.discordMutation(
+      `${discordPath(agentId, connectorId)}/outbound/suppress`,
+      'POST',
+      { acknowledgeUncertainty: true },
+    );
+  }
+  async deleteDiscordConnector(
+    agentId: string,
+    connectorId: string,
+  ): Promise<void> {
+    await this.client.requestJson(discordPath(agentId, connectorId), {
+      method: 'DELETE',
+    });
+  }
+  private async discordMutation(
+    path: string,
+    method: string,
+    body?: unknown,
+  ): Promise<DiscordConnector> {
+    const response = await this.client.requestJson<{
+      connector: DiscordConnector;
+    }>(path, { method, ...(body === undefined ? {} : { body }) });
+    return response.connector;
+  }
 
   oauthAppStatus(provider: OAuthAppProvider): Promise<OAuthAppStatus> {
     return this.client.requestJson(oauthAppPath(provider));
@@ -272,6 +402,13 @@ export class ConnectorsClient {
 
 function oauthAppPath(provider: OAuthAppProvider): string {
   return `/api/connectors/oauth-apps/${encodeURIComponent(provider)}`;
+}
+
+function discordPath(agentId: string, connectorId?: string): string {
+  return connectorPath(agentId, [
+    'discord',
+    ...(connectorId === undefined ? [] : [connectorId]),
+  ]);
 }
 
 function mailPath(
