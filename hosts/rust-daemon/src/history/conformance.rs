@@ -1217,6 +1217,22 @@ impl HistoryStore for FlakyHistoryStore {
         "flaky"
     }
 
+    async fn upsert_attachments(
+        &self,
+        rows: &[crate::attachments::AttachmentRecord],
+    ) -> Result<(), HistoryError> {
+        self.check()?;
+        self.inner.upsert_attachments(rows).await
+    }
+    async fn get_attachment(
+        &self,
+        agent_id: &str,
+        attachment_id: &str,
+    ) -> Result<Option<crate::attachments::AttachmentRecord>, HistoryError> {
+        self.check()?;
+        self.inner.get_attachment(agent_id, attachment_id).await
+    }
+
     async fn upsert_messages(&self, messages: &[HistoryMessage]) -> Result<(), HistoryError> {
         self.check()?;
         if self.panic_on_write.swap(false, Ordering::SeqCst) {
@@ -1372,4 +1388,110 @@ impl HistoryStore for FlakyHistoryStore {
         self.check()?;
         self.inner.delete_agent(agent_id).await
     }
+}
+
+pub(crate) fn attachment_record(
+    id: &str,
+    agent: &str,
+    session: &str,
+) -> crate::attachments::AttachmentRecord {
+    use crate::attachments::{AttachmentKind, AttachmentRecord};
+    AttachmentRecord {
+        id: id.into(),
+        agent_id: agent.into(),
+        session_id: session.into(),
+        name: "notes.txt".into(),
+        mime: "text/plain".into(),
+        size: 5,
+        kind: AttachmentKind::Text,
+        path: "uploads/2026-09-23/notes.txt".into(),
+        created_at_ms: 100,
+        workspace_root: "private-root".into(),
+        sha256: "digest".into(),
+    }
+}
+
+pub(crate) async fn assert_history_store_attachment_conformance(store: &dyn HistoryStore) {
+    let agent = format!("agent-{}", uuid::Uuid::new_v4());
+    let other = format!("agent-{}", uuid::Uuid::new_v4());
+    let a = attachment_record(&uuid::Uuid::new_v4().to_string(), &agent, "chat:a");
+    let b = attachment_record(&uuid::Uuid::new_v4().to_string(), &agent, "chat:b");
+    let c = attachment_record(&uuid::Uuid::new_v4().to_string(), &other, "chat:a");
+    store
+        .upsert_attachments(&[a.clone(), b.clone(), c.clone()])
+        .await
+        .unwrap();
+    store
+        .upsert_attachments(std::slice::from_ref(&a))
+        .await
+        .unwrap();
+    assert_eq!(
+        store.get_attachment(&agent, &a.id).await.unwrap(),
+        Some(a.clone())
+    );
+    assert_eq!(store.get_attachment(&other, &a.id).await.unwrap(), None);
+    for changed in [
+        attachment_record(&a.id, &other, "chat:a"),
+        {
+            let mut row = a.clone();
+            row.sha256 = "changed".into();
+            row
+        },
+        {
+            let mut row = a.clone();
+            row.workspace_root = "other-root".into();
+            row
+        },
+        {
+            let mut row = a.clone();
+            row.path = "uploads/other.txt".into();
+            row
+        },
+        attachment_record(&a.id, &agent, "chat:b"),
+    ] {
+        assert!(store.upsert_attachments(&[changed]).await.is_err());
+        assert_eq!(
+            store.get_attachment(&agent, &a.id).await.unwrap(),
+            Some(a.clone())
+        );
+    }
+    let pending = attachment_record(&uuid::Uuid::new_v4().to_string(), &agent, "chat:a");
+    let mut rewrite = a.clone();
+    rewrite.sha256 = "rewritten".into();
+    assert!(store
+        .upsert_attachments(&[pending.clone(), rewrite])
+        .await
+        .is_err());
+    assert_eq!(
+        store.get_attachment(&agent, &pending.id).await.unwrap(),
+        None,
+        "a conflicting batch must roll back"
+    );
+    store.delete_session(&agent, "chat:a").await.unwrap();
+    assert_eq!(store.get_attachment(&agent, &a.id).await.unwrap(), None);
+    assert_eq!(
+        store.get_attachment(&agent, &b.id).await.unwrap(),
+        Some(b.clone())
+    );
+    assert_eq!(
+        store.get_attachment(&other, &c.id).await.unwrap(),
+        Some(c.clone())
+    );
+    store.delete_agent(&agent).await.unwrap();
+    assert_eq!(store.get_attachment(&agent, &b.id).await.unwrap(), None);
+    assert_eq!(store.get_attachment(&other, &c.id).await.unwrap(), Some(c));
+}
+
+#[tokio::test]
+async fn attachment_store_errors_propagate_without_metadata() {
+    let store = FlakyHistoryStore::new();
+    let row = attachment_record("id", "agent", "session");
+    store.set_failing(true);
+    assert!(store
+        .upsert_attachments(std::slice::from_ref(&row))
+        .await
+        .is_err());
+    assert!(store.get_attachment("agent", "id").await.is_err());
+    store.set_failing(false);
+    assert!(store.get_attachment("agent", "id").await.unwrap().is_none());
 }

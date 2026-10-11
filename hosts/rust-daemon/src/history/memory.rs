@@ -11,6 +11,7 @@ use super::{
     HistoryStore, MessagePageQuery, UsagePageQuery, EPHEMERAL_HISTORY_MAX_ROWS,
 };
 use crate::approvals::ApprovalRequest;
+use crate::attachments::AttachmentRecord;
 use crate::runs::RunRecord;
 use crate::schedules::ScheduleFireRecord;
 use crate::usage::UsageRecord;
@@ -33,6 +34,8 @@ struct Tables {
     schedule_run_seqs: BTreeMap<u64, String>,
     usage: HashMap<String, (u64, UsageRecord)>,
     usage_seqs: BTreeMap<u64, String>,
+    attachments: HashMap<String, (u64, AttachmentRecord)>,
+    attachment_seqs: BTreeMap<u64, String>,
 }
 
 impl MemoryHistoryStore {
@@ -102,6 +105,47 @@ impl HistoryStore for MemoryHistoryStore {
 
     fn is_ephemeral(&self) -> bool {
         true
+    }
+
+    async fn upsert_attachments(&self, rows: &[AttachmentRecord]) -> Result<(), HistoryError> {
+        let mut guard = self.tables();
+        let tables = &mut *guard;
+        // Validate the full batch before insertion/eviction so a rejected rewrite
+        // cannot partially commit or consume capacity.
+        let mut batch = HashMap::new();
+        for row in rows {
+            if tables
+                .attachments
+                .get(&row.id)
+                .is_some_and(|(_, old)| old != row)
+                || batch.insert(&row.id, row).is_some_and(|old| old != row)
+            {
+                return Err(HistoryError::new(super::ATTACHMENT_ID_CONFLICT));
+            }
+        }
+        for row in rows {
+            upsert(
+                &mut tables.attachments,
+                &mut tables.attachment_seqs,
+                &mut tables.next_seq,
+                row.id.clone(),
+                row.clone(),
+                self.max_rows,
+            );
+        }
+        Ok(())
+    }
+    async fn get_attachment(
+        &self,
+        agent_id: &str,
+        attachment_id: &str,
+    ) -> Result<Option<AttachmentRecord>, HistoryError> {
+        Ok(self
+            .tables()
+            .attachments
+            .get(attachment_id)
+            .filter(|(_, row)| row.agent_id == agent_id)
+            .map(|(_, row)| row.clone()))
     }
 
     async fn upsert_messages(&self, messages: &[HistoryMessage]) -> Result<(), HistoryError> {
@@ -413,6 +457,11 @@ impl HistoryStore for MemoryHistoryStore {
     async fn delete_session(&self, agent_id: &str, session_id: &str) -> Result<(), HistoryError> {
         let mut guard = self.tables();
         let tables = &mut *guard;
+        remove_where(
+            &mut tables.attachments,
+            &mut tables.attachment_seqs,
+            |row| row.agent_id == agent_id && row.session_id == session_id,
+        );
         remove_where(&mut tables.messages, &mut tables.message_seqs, |row| {
             row.agent_id == agent_id && row.session_id == session_id
         });
@@ -430,6 +479,11 @@ impl HistoryStore for MemoryHistoryStore {
     async fn delete_agent(&self, agent_id: &str) -> Result<(), HistoryError> {
         let mut guard = self.tables();
         let tables = &mut *guard;
+        remove_where(
+            &mut tables.attachments,
+            &mut tables.attachment_seqs,
+            |row| row.agent_id == agent_id,
+        );
         remove_where(&mut tables.messages, &mut tables.message_seqs, |row| {
             row.agent_id == agent_id
         });
@@ -467,6 +521,7 @@ mod tests {
     async fn memory_store_meets_the_conformance_suite() {
         let store = MemoryHistoryStore::new();
         assert_history_store_conformance(&store).await;
+        crate::history::conformance::assert_history_store_attachment_conformance(&store).await;
         assert_history_store_session_search_conformance(&store).await;
         assert_history_store_checkin_text_conformance(&store).await;
         assert_history_store_indexed_text_cap_conformance(&store).await;
@@ -506,5 +561,29 @@ mod tests {
         assert_eq!(store.existing_message_ids(&all_ids).await.unwrap().len(), 2);
         assert!(store.is_ephemeral());
         assert_eq!(store.label(), "memory");
+    }
+    #[tokio::test]
+    async fn attachment_capacity_and_failed_batch_are_bounded() {
+        use crate::history::conformance::attachment_record;
+        let store = MemoryHistoryStore::with_max_rows(2);
+        let a = attachment_record("a", "agent", "chat:a");
+        let b = attachment_record("b", "agent", "chat:a");
+        let c = attachment_record("c", "agent", "chat:a");
+        store
+            .upsert_attachments(&[a.clone(), b.clone(), c.clone()])
+            .await
+            .unwrap();
+        assert!(store.get_attachment("agent", "a").await.unwrap().is_none());
+        store
+            .upsert_attachments(std::slice::from_ref(&b))
+            .await
+            .unwrap();
+        let d = attachment_record("d", "agent", "chat:a");
+        let mut changed = c.clone();
+        changed.sha256 = "different".into();
+        assert!(store.upsert_attachments(&[d, changed]).await.is_err());
+        assert_eq!(store.get_attachment("agent", "b").await.unwrap(), Some(b));
+        assert_eq!(store.get_attachment("agent", "c").await.unwrap(), Some(c));
+        assert!(store.get_attachment("agent", "d").await.unwrap().is_none());
     }
 }
