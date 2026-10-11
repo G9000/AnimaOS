@@ -1,3 +1,20 @@
+# Handover: companion console build (M0–M12 merged; M13 active)
+
+## Start here (2026-10-12): continue through the usable assistant target
+
+- Latest owner instruction: "just merge and continue please until we come to stage of usuable similar to the hermes agent. just copy their code."
+  This grants standing merge-and-continue authorization for the selected daily-use milestones after their reviews and local gates. Do not repeat merge/check-in questions. Preserve the existing no-services, no-dependencies, explicit-staging and unrelated-edit constraints.
+- PR #18 merged at `f7a58084bc6a36273f528882463b4f516ef96bb1`; M0–M12 are on main. Its tested source `76011cd` and publication `8dc1635` are included.
+- Active branch `g9000/companion-discord-m13` is cut from that updated main; only unrelated `nx.json` was dirty at activation. Never stage it or `anima.yaml`.
+- M13 delivers selected-channel Discord REST chat through the portable Rust contract, with owner-configured sender access, bounded catch-up and durable admission/delivery/recovery. REST limitations are explicit; no Gateway/voice/slash-command parity claim. Planner draft is in `.superpowers/sdd/2026-10-12-companion-discord-m13/`; controller publishes the plan and five binding risks before implementers.
+- Reference source is read-only `C:/Users/leoca/AppData/Local/hermes/hermes-agent`, revision `f3ef9db68332063a3625661f3a9b259f60abdb4e`, MIT Nous Research 2025. Discord code is `plugins/platforms/discord/adapter.py` and `recovery.py`; do not use the old guessed gateway path. Port selected actual code/behavior into Rust, record scope/revision and retain notices. No profiles/config/environment secrets or Python runtime execution.
+- Product names stay Anima/AnimaOS. Upstream names remain only for accurate attribution/source evidence and historical identifiers.
+- Usable target: provider-connected web/Telegram/Discord chat; Markdown identity/project instructions; workspace/tool access; remembered context; durable schedules/tasks with visible uncertain recovery; existing Gmail/Calendar plus selected Drive read/search. Make source contribution boundaries honest. Assess real code gaps rather than claiming broad reference parity. Account consent, live provider/channel delivery and always-on deployment remain separate live acceptance when the owner permits services.
+- Controller uses one branch per milestone from merged main, lean plan plus five binding risks, delegated implementation, one daemon batch and final web/SDK review, one fix wave and relevant local gates. Keep cargo incremental disabled and compile serialized; no new target directory, dependencies/features, daemons, databases, containers or Docker Postgres55432 actions.
+- Commits use the already-authorized per-command unsigned override. Do not pause for GPG. Finish each milestone with explicit-path commit/push/PR attachment, then merge its verified head under standing authorization and continue from updated main. Preserve exact resume/evidence in this handover and the ignored milestone ledger.
+
+## Historical M12 publication before the authorized merge
+
 # Handover: companion console build (M0–M11 merged; M12 ready)
 
 ## Start here (2026-10-12): M12 modular connector foundation ready
