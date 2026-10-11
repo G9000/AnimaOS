@@ -2,7 +2,7 @@
 
 This document is for the next agent picking up the companion console upgrade.
 
-## Start here (2026-10-12): M11 Hermes Markdown port verified; publication next
+## Start here (2026-10-12): M11 Hermes Markdown port verified; PR #17 open
 
 - M0–M10 are on main. Owner explicitly authorized PR #16 merge; `f80e653`
   includes final M10 head `eee9bb8`. Do not merge another PR without a new explicit
@@ -10,8 +10,7 @@ This document is for the next agent picking up the companion console upgrade.
 - Owner clarified Markdown defines agents and instructed reuse of installed
   Hermes code/behavior ported to an independent Rust long-running runtime. M11
   implements the focused AGENTS/SOUL port on `g9000/hermes-agent-files-m11`, cut
-  from merged main `f80e653`. Plan `d273b3e` was pushed; final sources/docs are
-  verified and ready for the controller's explicit commit/push/PR publication.
+  from merged main `f80e653`. Implementation `5c7c496` is committed and pushed; [PR #17](https://github.com/G9000/animaOS-SWARM/pull/17) is OPEN against main and attached to the chat. Final publication documentation follows that source commit.
 - Published lean plan: `docs/superpowers/plans/2026-10-12-hermes-agent-files-m11.md`.
   Controller binding five-risk rulings, two daemon batch reviews, final web/SDK
   review and one fix wave are complete. A1 hard-link bypass and B1 summary reserve/
@@ -63,8 +62,7 @@ This document is for the next agent picking up the companion console upgrade.
   GPG unlock or change global signing config. Stage explicit files only; preserve
   unrelated `nx.json`, never stage it or `anima.yaml`. Continue no dependencies/
   features, services, Docker Postgres55432, worktree/stash/reset/restore/checkout-path.
-- Resume: finish current M11 commit/push/PR publication if not yet recorded below;
-  otherwise await explicit owner M11 merge instruction. Do not repeat implementation,
+- Resume: await explicit owner authorization to merge PR #17. All tracked M11 work is committed and pushed. Do not repeat implementation,
   reviews or passing gates without new changes/failures. Ledger/rules retain exact
   decisions at `.superpowers/sdd/2026-10-12-hermes-agent-files-m11/`.
 

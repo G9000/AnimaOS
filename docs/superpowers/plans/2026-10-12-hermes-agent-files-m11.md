@@ -1108,7 +1108,7 @@ remains; visible states and actual request tests keep claims honest.
 - [x] Pass current-tree relevant gates.
 - [x] Retain complete MIT/source notices.
 - [x] Update handover evidence/M12 dependency.
-- [ ] Controller stages, commits and publishes.
+- [x] Controller stages, commits and publishes.
 
 ## Controller rulings on the risks (binding)
 
@@ -1129,3 +1129,5 @@ A1 hard-link filename bypass was fixed using existing capability metadata link c
 Current functional gates: Nx Rust core627 + host1597 =2224passed,8ignored; SDK123passed,3service-skipped; web1133passed104files; SDK/web typecheck/build and Cargo/Nx formatting pass. Local fake/provider-capture/in-process evidence does not prove live providers, Unix-only behavior or deployment readiness. The required Rust gate caught stale test assumptions and they were corrected to capture actual provider prompts and use existing upload normalization.
 
 Detailed commands, decisions and logs are retained in ignored `.superpowers/sdd/2026-10-12-hermes-agent-files-m11/`. Master/handover carry publication and exact resume state. M12 prepared plan is tracked separately; no connector implementation or M11 merge is authorized by this completion record.
+
+Publication: implementation `5c7c496` pushed; [PR #17](https://github.com/G9000/animaOS-SWARM/pull/17) is open against main. Final handover/status documentation follows that source commit. Await explicit owner merge authorization.
