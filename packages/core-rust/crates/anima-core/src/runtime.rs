@@ -38,8 +38,8 @@ use observer::{tool_result_text, StepSink};
 #[path = "runtime/control.rs"]
 mod control;
 pub use control::{
-    CancelSignal, CancelWait, RunControl, SteeringInbox, CANCELLED_TOOL_RESULT, RUN_STOPPED_ERROR,
-    STEER_METADATA_KEY, STOPPED_METADATA_KEY,
+    CancelCause, CancelSignal, CancelWait, RunControl, SteeringInbox, CANCELLED_TOOL_RESULT,
+    RUN_STOPPED_ERROR, STEER_METADATA_KEY, STOPPED_METADATA_KEY,
 };
 
 static NEXT_AGENT_ID: AtomicU64 = AtomicU64::new(0);
@@ -697,7 +697,14 @@ impl AgentRuntime {
                                     let cancelled = self.tag_for_run(
                                         content_from_tool_result(
                                             tool_call,
-                                            TaskResult::error(CANCELLED_TOOL_RESULT, 0),
+                                            TaskResult::error(
+                                                self.control
+                                                    .as_ref()
+                                                    .map_or(CANCELLED_TOOL_RESULT, |control| {
+                                                        control.cancel.tool_result()
+                                                    }),
+                                                0,
+                                            ),
                                             false,
                                         ),
                                         Some(&step_id),
@@ -1052,13 +1059,24 @@ impl AgentRuntime {
     /// the agent goes back to `Idle`; a stop is never a failure.
     fn finish_stopped(&mut self, start: u64) -> TaskResult<Content> {
         let duration_ms = now_millis().saturating_sub(start);
-        let result = TaskResult::error(RUN_STOPPED_ERROR, duration_ms);
+        self.mark_cancelled(duration_ms)
+    }
+
+    /// Records the winning cooperative cancellation when a host's grace expires.
+    /// Completed effects and previously recorded text/usage remain unchanged.
+    pub fn mark_cancelled(&mut self, duration_ms: u64) -> TaskResult<Content> {
+        let error = self
+            .control
+            .as_ref()
+            .map_or(RUN_STOPPED_ERROR, |control| control.cancel.run_error());
+        let result = TaskResult::error(error, duration_ms);
+        if error != RUN_STOPPED_ERROR {
+            self.mark_failed(error, duration_ms);
+            return result;
+        }
         self.state.status = AgentStatus::Idle;
         self.last_task = Some(result.clone());
-        self.record_event(
-            EventType::TaskFailed,
-            DataValue::String(RUN_STOPPED_ERROR.to_string()),
-        );
+        self.record_event(EventType::TaskFailed, DataValue::String(error.to_string()));
         result
     }
 

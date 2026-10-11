@@ -14,6 +14,7 @@ use crate::openai_compatible::{build_openai_compatible_body, parse_openai_compat
 use crate::stream::{
     consume_anthropic_sse, consume_google_sse, consume_ollama_ndjson, consume_openai_sse,
 };
+use crate::transport::transport_error;
 use crate::ProviderDefinition;
 use crate::{ProviderAdapterConfig, ProviderCredential};
 
@@ -115,7 +116,14 @@ pub struct ProviderModelAdapter {
 
 impl ProviderModelAdapter {
     pub fn new(config: ProviderAdapterConfig) -> Self {
-        Self::with_client(config, Client::new())
+        Self::try_new(config).expect("bounded provider transport initialization failed")
+    }
+
+    pub fn try_new(config: ProviderAdapterConfig) -> Result<Self, String> {
+        Ok(Self::with_client(
+            config,
+            crate::transport::bounded_provider_client()?,
+        ))
     }
 
     pub fn with_client(config: ProviderAdapterConfig, client: Client) -> Self {
@@ -693,10 +701,6 @@ pub(crate) fn sanitize_upstream_body(body: &str, api_key: Option<&str>) -> Strin
         .filter(|key| !key.is_empty())
         .map_or_else(|| body.to_owned(), |key| body.replace(key, "[REDACTED]"));
     redacted.chars().take(1_024).collect()
-}
-
-fn transport_error(provider: &str, operation: &str, error: reqwest::Error) -> String {
-    format!("{provider} {operation} failed: {}", error.without_url())
 }
 
 fn join_base_url(base_url: &str, path: &str) -> String {

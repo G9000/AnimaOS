@@ -94,7 +94,9 @@ struct ScriptedModel {
     ids: Vec<&'static str>,
     requests: Mutex<Vec<ModelGenerateRequest>>,
     cancel_on_first: Option<CancelSignal>,
+    cancel_cause: super::CancelCause,
     stall_after: Option<&'static str>,
+    usage_before_stall: Option<TokenUsage>,
 }
 
 impl ScriptedModel {
@@ -103,7 +105,9 @@ impl ScriptedModel {
             ids: ids.to_vec(),
             requests: Mutex::new(Vec::new()),
             cancel_on_first: None,
+            cancel_cause: super::CancelCause::OwnerStop,
             stall_after: None,
+            usage_before_stall: None,
         }
     }
 
@@ -137,10 +141,13 @@ impl ModelAdapter for ScriptedModel {
             requests.push(request.clone());
             requests.len() == 1
         };
+        if let Some(usage) = &self.usage_before_stall {
+            sink.emit(ModelStreamFrame::Usage(usage.clone())).await?;
+        }
         if let Some(stall) = self.stall_after {
             sink.emit(ModelStreamFrame::TextDelta(stall.into())).await?;
             if let Some(cancel) = &self.cancel_on_first {
-                cancel.cancel();
+                cancel.cancel_with(self.cancel_cause);
             }
             futures::future::pending::<()>().await;
             unreachable!("a stalled stream never resumes");
@@ -158,7 +165,7 @@ impl ModelAdapter for ScriptedModel {
         sink.emit(ModelStreamFrame::Final(response)).await?;
         if first {
             if let Some(cancel) = &self.cancel_on_first {
-                cancel.cancel();
+                cancel.cancel_with(self.cancel_cause);
             }
         }
         Ok(())
@@ -466,4 +473,55 @@ fn a_stop_leaves_the_steers_it_never_drained_in_the_inbox_for_the_host() {
         vec![text("Also book the gym")],
         "the host gets the steer back"
     );
+}
+
+#[test]
+fn helper_deadline_answers_tools_with_its_cause() {
+    let control = RunControl::new();
+    let model = Arc::new(ScriptedModel {
+        cancel_on_first: Some(control.cancel.clone()),
+        cancel_cause: super::CancelCause::HelperDeadline,
+        ..ScriptedModel::new(&["deadline-tool"])
+    });
+    let (mut runtime, _) = controlled(model, &control);
+    let result = block_on(runtime.run_with_tools(text("look it up"), |_, _, _| async {
+        panic!("a cancelled tool must not execute");
+        #[allow(unreachable_code)]
+        TaskResult::success(text("never"), 0)
+    }));
+    assert_eq!(result.error.as_deref(), Some("Helper task timed out"));
+    assert_eq!(runtime.state().status, AgentStatus::Failed);
+    let tool = runtime
+        .messages()
+        .iter()
+        .find(|message| message.role == MessageRole::Tool)
+        .unwrap();
+    assert!(tool.content.text.contains("helper deadline reached"));
+    assert!(!tool.content.text.contains("stopped by owner"));
+    assert_eq!(
+        metadata(tool, "toolCallId"),
+        Some(&DataValue::String("deadline-tool".into()))
+    );
+}
+
+#[test]
+fn helper_deadline_while_streaming_keeps_partial_text() {
+    let control = RunControl::new();
+    let model = Arc::new(ScriptedModel {
+        cancel_on_first: Some(control.cancel.clone()),
+        cancel_cause: super::CancelCause::HelperDeadline,
+        stall_after: Some("Partial helper answer"),
+        usage_before_stall: Some(TokenUsage {
+            prompt_tokens: 12,
+            completion_tokens: 3,
+            total_tokens: 15,
+            ..TokenUsage::default()
+        }),
+        ..ScriptedModel::new(&[])
+    });
+    let (mut runtime, _) = controlled(model, &control);
+    let result = block_on(runtime.run(text("hi")));
+    assert_eq!(result.error.as_deref(), Some("Helper task timed out"));
+    assert_eq!(runtime.messages()[1].content.text, "Partial helper answer");
+    assert_eq!(runtime.state().token_usage.total_tokens, 15);
 }

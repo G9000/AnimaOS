@@ -11,6 +11,7 @@ mod models;
 mod ollama;
 mod openai_compatible;
 mod stream;
+mod transport;
 
 pub use adapter::ProviderModelAdapter;
 pub use attachments::{image_reference_text, model_supports_images};
