@@ -1,17 +1,17 @@
-# Handover: companion console build (M0–M8 merged; M9 publication in progress)
+# Handover: companion console build (M0–M8 merged; M9 PR open)
 
 This document is for the next agent picking up the companion console upgrade. Read it first; it tells you where everything is and what to do next.
 
-## Start here (2026-10-11): M9 implemented; publication in progress
+## Start here (2026-10-11): M9 PR #15 open; M10 plan prepared
 
 **State**
 
 - M0–M8 are merged to `main`. The last merges were #12 (M6), #13 (M7) and #14 (M8); `main` is at `86cc87f`.
 - M9 (attachments and browser voice) implementation is complete on `feat/companion-console-m9`, cut from `main`. Lean plan: `docs/superpowers/plans/2026-09-23-companion-console-m9.md`; the owner authorized Codex subagents because Claude was signed out. Both daemon batch reviews, the final web/SDK review and one fix wave are finished. The full Rust gate caught old snapshot expectations; test-only corrections preserved historical migration coverage and passed the rerun.
-- Signed commits through `425b220` contain the complete implementation and review fixes. Both waiting daemon commits completed and their signatures were verified. The owner explicitly resumed work; signing/publication are continuing. Documentation is being committed next, followed by push and a PR to `main`.
+- M9 is signed and pushed through `9efe2d6`. [PR #15](https://github.com/G9000/animaOS-SWARM/pull/15) is OPEN against `main` and attached to the Codex chat; it is not merged. Both waiting daemon commits finished, and the latest implementation/documentation signatures were verified. Only unrelated `nx.json` remains locally modified.
 - The working tree uses snapshot **v11** with `.pre-attachments.bak` / `control_plane.backup.10`; merged `main` still uses v10.
 - Hermes image routing/provider formats were used as Rust porting references. `packages/core-rust/crates/anima-model-adapters/HERMES-NOTICE` retains the upstream MIT notice and revision `f3ef9db68332063a3625661f3a9b259f60abdb4e`. The owner clarified “remember” means reuse code/behavior, not a new memory feature.
-- A lean M10 plan draft is being prepared in the ignored `.superpowers/sdd/2026-09-23-companion-console-m10/plan-draft.md`. No M10 branch or tracked implementation starts before the owner explicitly merges M9.
+- The lean M10 plan draft (10 tasks, about 1,200 lines) and controller top-five binding risk rulings are ready in the ignored `.superpowers/sdd/2026-09-23-companion-console-m10/plan-draft.md`; its ledger records the precise resume point. No M10 branch or tracked implementation starts before the owner explicitly merges M9.
 - Compatibility: new v11 consumed steer keys preserve full input after transcript pruning; older keys require a matching scoped transcript to prove equality, otherwise replay returns 409.
 - Fresh local gates on this working tree:
   - `rust-daemon:test`: **2,156 passed, 7 ignored** in aggregate: host 1,542 plus its `core-rust:test` dependency 614. The ignored tests require Postgres.
@@ -20,12 +20,13 @@ This document is for the next agent picking up the companion console upgrade. Re
   - Logs: `.superpowers/sdd/2026-09-23-companion-console-m9/gate-rust-rerun.log` and `gate-web-sdk.log` (ignored local working files). Full web output includes act warnings from the unchanged `WorkspaceOperations` removed-filter test; the touched 312-test focused set was clean. Source matches `origin/main` and its API methods are mocked.
 - Evidence limits: no live-provider image acceptance, real microphone/TTS, Unix link fixtures, Postgres execution or VPS deployment. One earlier SDK run accidentally started its existing temporary daemon fixture; it cleaned up, and subsequent controller process checks found no daemon. The opt-out now prevents recurrence.
 
-**Resume publication, not implementation**
+**Resume M10 after explicit M9 merge**
 
-1. All implementation commits are signed; finish the remaining documentation commit and publication without repeating implementation or reviews.
-2. Commit the remaining frozen implementation, review fixes and docs with explicit file paths and GPG signing. Do not stage `nx.json` or `anima.yaml`. The final working-file SHA256 inventory and grouped explicit publication manifests are in `remaining-manifest.txt` and `publication-*.paths.txt` in the ledger folder. Frozen worker manifests and the decision ledger are under `.superpowers/sdd/2026-09-23-companion-console-m9/` and `target/m9-logs/`; both are ignored.
-3. Push `feat/companion-console-m9`, open a PR to `main`, attach it to this Codex chat, and update this note with its URL. Local test evidence is current; rerun relevant gates only if code changes.
-4. Merge only when the owner explicitly says "merge". Then cut `feat/companion-console-m10` from updated `main`, write the lean M10 deployment/docs plan and continue. Do not start M10 on the unmerged M9 branch.
+1. Do not repeat M9 implementation or reviews. PR #15 is ready for the owner’s merge instruction; never infer merge approval from “continue” or “go.”
+2. After the owner explicitly says “merge,” merge PR #15, update local `main`, and cut `feat/companion-console-m10` from that merged main. Preserve the unrelated `nx.json` edit; no stash/reset/restore/worktree operations.
+3. Copy the prepared draft into `docs/superpowers/plans/2026-09-23-companion-console-m10.md`, recreate M10 rules from M9, verify target/interface names against merged main, then sign the plan. Its binding controller rulings are already appended; no separate pre-flight audit is needed.
+4. Execute the ten M10 tasks with bounded Codex implementers (owner authorized), daemon batch review, one final web/SDK review, one fix wave and gates. Use focused Hermes code/behavior reuse with notices. Runtime/container/TLS/provider acceptance remains unverified under the no-service constraint; automatic destructive session TTL is not invented without a product policy.
+5. Local ledgers, gate logs and draft artifacts remain under ignored `.superpowers/sdd/`; all M9 tracked work is committed and pushed. Re-run relevant checks only for new changes.
 
 **Milestone workflow reference (M9 implementation is already complete)**
 
