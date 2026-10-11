@@ -89,3 +89,16 @@ it('hides empty replies and respects disabled state', () => {
   );
   expect(screen.getByRole('button', { name: 'Read aloud' })).toBeDisabled();
 });
+
+it('reflects disabled controller state even when the bubble omits a separate disabled prop', () => {
+  const controller: ReadAloudController = {
+    supported: true,
+    disabled: true,
+    speakingMessageId: null,
+    error: null,
+    read: vi.fn(),
+    stop: vi.fn(),
+  };
+  render(<ReadAloud messageId="reply" text="Reply" controller={controller} />);
+  expect(screen.getByRole('button', { name: 'Read aloud' })).toBeDisabled();
+});

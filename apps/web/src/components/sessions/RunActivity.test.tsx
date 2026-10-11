@@ -29,6 +29,22 @@ const step: ToolStep = {
 };
 
 describe('RunActivity', () => {
+  it('shows honest reference-only chips for queued attachment-only inputs before history arrives', () => {
+    const run = runFixture('attachment-only', {
+      input: { text: '', attachmentIds: ['att_unknown'], skill: null },
+    });
+    render(
+      <RunActivity
+        agentName="Nova"
+        renderMessage={renderMessage}
+        live={emptyLiveRun(run)}
+      />,
+    );
+    expect(screen.getByText('Saved attachment 1')).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: /Download/ }),
+    ).not.toBeInTheDocument();
+  });
   it('shows a working run with its tool cards and streamed text', async () => {
     const user = userEvent.setup();
     const run = runFixture('run_1', {

@@ -122,6 +122,52 @@ function steered() {
 }
 
 describe('useSessionPending', () => {
+  it('keeps attachment metadata on pending bubbles and matches steers by ordered IDs as well as text', () => {
+    const attachment = {
+      id: 'att_1',
+      name: 'brief.txt',
+      mime: 'text/plain',
+      size: 3,
+      kind: 'text' as const,
+      path: 'attachments/brief.txt',
+      createdAtMs: 1,
+    };
+    const sending = send({
+      steeringRunId: 'run_7',
+      attachmentIds: ['att_1'],
+      attachments: [attachment],
+    });
+    const live = {
+      ...emptyLiveRun(joined()),
+      steers: [
+        {
+          messageId: 'different',
+          text: sending.text,
+          attachmentIds: ['att_other'],
+        },
+      ],
+    };
+    const { result, rerender } = setup({ sends: [sending], runs: [live] });
+    expect(result.current[0].attachments).toEqual([
+      { ...attachment, type: 'file' },
+    ]);
+    rerender({
+      sends: [sending],
+      runs: [
+        {
+          ...live,
+          steers: [
+            {
+              messageId: 'correct',
+              text: sending.text,
+              attachmentIds: ['att_1'],
+            },
+          ],
+        },
+      ],
+    });
+    expect(result.current).toEqual([]);
+  });
   it('shows the open session’s sends with their state', () => {
     const { result } = setup({
       sends: [

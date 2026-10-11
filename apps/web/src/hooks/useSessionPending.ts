@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
+import { messageAttachment } from '../lib/attachments';
 import type { SessionMessage } from '@animaOS-SWARM/sdk';
 
 import type { LiveRun } from '../lib/session-events';
@@ -59,17 +60,20 @@ function shownSteers(
   sends: readonly SessionSend[],
   runs: readonly LiveRun[],
 ): Set<string> {
-  const taken = new Map<string, string[]>();
+  const taken = new Map<string, LiveRun['steers']>();
   for (const live of runs)
-    if (live.steers.length > 0)
-      taken.set(
-        live.run.id,
-        live.steers.map((steer) => steer.text),
-      );
+    if (live.steers.length > 0) taken.set(live.run.id, [...live.steers]);
   const shown = new Set<string>();
   for (const send of sends) {
     const texts = send.steeringRunId ? taken.get(send.steeringRunId) : null;
-    const index = texts ? texts.indexOf(send.text) : -1;
+    const index = texts
+      ? texts.findIndex(
+          (steer) =>
+            steer.text === send.text &&
+            JSON.stringify(steer.attachmentIds ?? []) ===
+              JSON.stringify(send.attachmentIds ?? []),
+        )
+      : -1;
     if (!texts || index < 0) continue;
     texts.splice(index, 1);
     shown.add(send.key);
@@ -212,6 +216,9 @@ export function useSessionPending({
         (item): PendingBubble => ({
           key: item.key,
           text: item.text,
+          ...(item.attachments?.length
+            ? { attachments: item.attachments.map(messageAttachment) }
+            : {}),
           createdAtMs: item.createdAtMs,
           status: item.steeringRunId
             ? 'steering'

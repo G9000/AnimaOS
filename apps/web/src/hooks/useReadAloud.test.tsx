@@ -1,4 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
+import { useLayoutEffect } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { READ_ALOUD_ERROR, useReadAloud } from './useReadAloud';
 
@@ -145,7 +146,6 @@ it('ignores empty text and does not start while disabled', () => {
   expect(synthesis.speak).not.toHaveBeenCalled();
   expect(synthesis.cancel).not.toHaveBeenCalled();
 });
-import { useLayoutEffect } from 'react';
 
 it('rejects an old start/error during the layout phase before boundary effect cleanup', () => {
   let lateStart: Utterance['onstart'] = null;

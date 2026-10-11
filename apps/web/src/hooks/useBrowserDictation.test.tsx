@@ -1,4 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
+import { useLayoutEffect } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useBrowserDictation } from './useBrowserDictation';
 
@@ -112,7 +113,6 @@ it('explicit cancel clears preview and detaches without committing a final resul
   expect(Recognition.instances).toHaveLength(1);
   expect(recognition.abort).toHaveBeenCalledOnce();
 });
-import { useLayoutEffect } from 'react';
 
 it('rejects an old result during the layout phase before boundary effect cleanup', () => {
   const transcript = vi.fn();

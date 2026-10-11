@@ -28,6 +28,9 @@ import {
   type TranscriptActions,
 } from '../../lib/transcript';
 import { ghostBtnCls } from '../ui-bits';
+import { useReadAloud } from '../../hooks/useReadAloud';
+import type { AttachmentDraft } from '../../lib/attachments';
+import type { KnownRunAttachments } from '../../lib/run-attachments';
 
 export interface SessionComposerState {
   draft: string;
@@ -49,6 +52,15 @@ export interface SessionComposerState {
   runActive?: boolean;
   onStop?: () => void;
   onSteer?: () => void;
+  conversationKey?: string | null;
+  voiceDisabled?: boolean;
+  savedAttachmentCount?: number;
+  attachments?: {
+    items: readonly AttachmentDraft[];
+    onAdd(files: readonly File[]): void;
+    onRemove(localId: string): void;
+    error?: string | null;
+  };
 }
 
 export interface SessionViewProps {
@@ -56,6 +68,7 @@ export interface SessionViewProps {
   /** null for a new chat that has no session yet. */
   session: Session | null;
   messages: ChatMessage[];
+  knownAttachments?: KnownRunAttachments;
   /** Messages on their way to the daemon (spec §15.5). */
   pending?: readonly PendingBubble[];
   /** The session's runs from its stream and ledger (spec §15.2). */
@@ -238,6 +251,7 @@ export function SessionView({
   agent,
   session,
   messages,
+  knownAttachments,
   pending = EMPTY_PENDING,
   runs = EMPTY_RUNS,
   actions,
@@ -267,6 +281,16 @@ export function SessionView({
   const saveAgentName =
     saveAgentId === agent.id ? agent.name : GENERIC_SAVE_AGENT_NAME;
   const sessionId = session?.id ?? null;
+  const voiceKey =
+    composer.conversationKey ??
+    `${session?.agentId ?? agent.id}\u0000${sessionId ?? 'home'}`;
+  const readAloud = useReadAloud(
+    voiceKey,
+    missing ||
+      composer.disabled ||
+      composer.offline ||
+      composer.voiceDisabled === true,
+  );
   const saveTarget = useMemo(
     () =>
       saveAgentId && sessionId
@@ -285,8 +309,8 @@ export function SessionView({
     [actions, save, savedState],
   );
   const conversation = useMemo(
-    () => ({ ...agent, messages }),
-    [agent, messages],
+    () => ({ ...agent, id: session?.agentId ?? agent.id, messages }),
+    [agent, session?.agentId, messages],
   );
   const trimmedThrough =
     session?.contextTrimmed?.droppedThroughMessageId ?? null;
@@ -360,7 +384,14 @@ export function SessionView({
         emptyState={
           session && session.kind !== 'chat' ? NO_MESSAGES : undefined
         }
+        readAloud={readAloud}
+        knownAttachments={knownAttachments}
       />
+      {readAloud.error && (
+        <p role="alert" className="px-4 text-sm text-danger">
+          {readAloud.error}
+        </p>
+      )}
       {footer.kind === 'composer' ? (
         <Composer
           agentName={agent.name}
@@ -378,6 +409,10 @@ export function SessionView({
           runActive={composer.runActive}
           onStop={composer.onStop}
           onSteer={composer.onSteer}
+          conversationKey={voiceKey}
+          voiceDisabled={composer.voiceDisabled}
+          attachments={composer.attachments}
+          savedAttachmentCount={composer.savedAttachmentCount}
         />
       ) : (
         <div className="session-footer-note" role="note">

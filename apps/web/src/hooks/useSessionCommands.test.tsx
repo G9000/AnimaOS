@@ -86,6 +86,146 @@ afterEach(() => {
 });
 
 describe('useSessionCommands', () => {
+  it('replays an unchanged recovered raw API input before trimming or interpreting its slash command', () => {
+    const text = ' \n /help raw request \t ';
+    const { result, options, rerender } = setup({
+      draft: text,
+      attachmentIds: ['att_2', 'att_1'],
+      resend: {
+        text,
+        idempotencyKey: 'failed-send-again',
+        attachmentIds: ['att_2', 'att_1'],
+        skill: 'notes',
+      },
+    });
+    act(() => result.current.send());
+    expect(options.queueSend).toHaveBeenCalledWith(
+      options.session,
+      CHAT_KEY,
+      text,
+      'failed-send-again',
+      'queue',
+      'notes',
+      { attachmentIds: ['att_2', 'att_1'], attachments: [] },
+    );
+    expect(options.showCommands).not.toHaveBeenCalled();
+    rerender({ ...options, draft: 'changed input' });
+    act(() => result.current.send());
+    const second = vi.mocked(options.queueSend).mock.calls[1];
+    expect(second[3]).not.toBe('failed-send-again');
+    expect(second[5]).toBeUndefined();
+  });
+  it('retains the explicit skill of a recovered raw message', () => {
+    const { result, options } = setup({
+      draft: 'raw request',
+      resend: {
+        text: 'raw request',
+        idempotencyKey: 'original',
+        skill: 'notes',
+      },
+    });
+    act(() => result.current.send());
+    expect(options.queueSend).toHaveBeenCalledWith(
+      options.session,
+      CHAT_KEY,
+      'raw request',
+      'original',
+      'queue',
+      'notes',
+    );
+  });
+  it('sends attachment-only input and keeps restored IDs with their original retry key', () => {
+    const attachment = {
+      id: 'att_1',
+      name: 'brief.txt',
+      mime: 'text/plain',
+      size: 4,
+      kind: 'text' as const,
+      path: 'attachments/brief.txt',
+      createdAtMs: 1,
+    };
+    const clearAttachments = vi.fn();
+    const { result, options } = setup({
+      attachments: [attachment],
+      clearAttachments,
+      resend: {
+        text: '',
+        idempotencyKey: 'original',
+        attachmentIds: ['att_1'],
+      },
+    });
+    act(() => result.current.send());
+    expect(options.queueSend).toHaveBeenCalledWith(
+      options.session,
+      CHAT_KEY,
+      '',
+      'original',
+      'queue',
+      undefined,
+      { attachmentIds: ['att_1'], attachments: [attachment] },
+    );
+    expect(clearAttachments).toHaveBeenCalledOnce();
+  });
+
+  it('blocks unfinished files and keeps chips for local slash commands', () => {
+    const attachment = {
+      id: 'att_1',
+      name: 'brief.txt',
+      mime: 'text/plain',
+      size: 4,
+      kind: 'text' as const,
+      path: 'attachments/brief.txt',
+      createdAtMs: 1,
+    };
+    const clearAttachments = vi.fn();
+    const { result, options, rerender } = setup({
+      draft: '/new',
+      attachments: [attachment],
+      clearAttachments,
+    });
+    act(() => result.current.send());
+    expect(options.newChat).not.toHaveBeenCalled();
+    expect(clearAttachments).not.toHaveBeenCalled();
+    expect(options.updateChat).toHaveBeenCalledWith(
+      CHAT_KEY,
+      expect.objectContaining({
+        error: expect.stringContaining('attachments'),
+      }),
+    );
+    rerender({ ...options, draft: 'hello', attachmentsBlocked: true });
+    act(() => result.current.send());
+    expect(options.queueSend).not.toHaveBeenCalled();
+  });
+
+  it('retains run input IDs on sendAgain and refuses a different session', () => {
+    const { result, options } = setup();
+    const run = runFixture('retry', {
+      sessionId: 'room-7',
+      input: {
+        text: 'raw input',
+        attachmentIds: ['att_2', 'att_1'],
+        skill: null,
+      },
+    });
+    act(() => {
+      expect(result.current.sendAgain(run)).toBe(true);
+    });
+    expect(options.queueSend).toHaveBeenCalledWith(
+      options.session,
+      CHAT_KEY,
+      'raw input',
+      expect.any(String),
+      'queue',
+      undefined,
+      { attachmentIds: ['att_2', 'att_1'] },
+    );
+    act(() => {
+      expect(result.current.sendAgain({ ...run, sessionId: 'foreign' })).toBe(
+        false,
+      );
+    });
+    expect(options.queueSend).toHaveBeenCalledOnce();
+  });
   it('queues the draft, keeping a restored message’s key', () => {
     const { result, options, rerender } = setup({
       draft: ' Book the train ',

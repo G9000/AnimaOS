@@ -1,8 +1,12 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { revealInvisible } from '../lib/skills';
+
 export const READ_ALOUD_ERROR =
   'Read aloud could not continue. Try again when you’re ready.';
 
 export interface ReadAloudController {
   supported: boolean;
+  disabled?: boolean;
   speakingMessageId: string | null;
   error: string | null;
   read(messageId: string, text: string): void;
@@ -56,7 +60,7 @@ export function useReadAloud(
     messageId: string;
   } | null>(null);
 
-  const release = (cancel: boolean) => {
+  const release = useCallback((cancel: boolean) => {
     const owned = current.current;
     current.current = null;
     if (!owned) return false;
@@ -69,7 +73,7 @@ export function useReadAloud(
       }
     }
     return true;
-  };
+  }, []);
 
   useEffect(() => {
     mounted.current = true;
@@ -79,65 +83,74 @@ export function useReadAloud(
       mounted.current = false;
       release(true);
     };
-  }, [conversationKey, disabled]);
+  }, [conversationKey, disabled, release]);
 
-  const activeBoundary = () =>
-    mounted.current &&
-    !boundary.current.disabled &&
-    boundary.current.generation === generation;
+  const activeBoundary = useCallback(
+    () =>
+      mounted.current &&
+      !boundary.current.disabled &&
+      boundary.current.generation === generation,
+    [generation],
+  );
 
-  const stop = () => {
+  const stop = useCallback(() => {
     if (!activeBoundary()) return;
     release(true);
     setSpeakingMessageId(null);
     setError(null);
-  };
+  }, [activeBoundary, release]);
 
-  const read = (messageId: string, text: string) => {
-    const speech = browserSpeech();
-    if (!speech || !activeBoundary() || !text.trim()) return;
-    if (current.current?.messageId === messageId) {
-      stop();
-      return;
-    }
-    const hadPrevious = release(true);
-    setSpeakingMessageId(null);
-    setError(null);
-    try {
-      if (!hadPrevious) speech.synthesis.cancel();
-      const utterance = new speech.Constructor(revealInvisible(text).text);
-      current.current = { utterance, synthesis: speech.synthesis, messageId };
-      const active = () =>
-        activeBoundary() && current.current?.utterance === utterance;
-      utterance.onstart = () => {
-        if (active()) setSpeakingMessageId(messageId);
-      };
-      utterance.onend = () => {
-        if (!active()) return;
-        release(false);
-        setSpeakingMessageId(null);
-      };
-      utterance.onerror = () => {
-        if (!active()) return;
-        release(false);
+  const read = useCallback(
+    (messageId: string, text: string) => {
+      const speech = browserSpeech();
+      if (!speech || !activeBoundary() || !text.trim()) return;
+      if (current.current?.messageId === messageId) {
+        stop();
+        return;
+      }
+      const hadPrevious = release(true);
+      setSpeakingMessageId(null);
+      setError(null);
+      try {
+        if (!hadPrevious) speech.synthesis.cancel();
+        const utterance = new speech.Constructor(revealInvisible(text).text);
+        current.current = { utterance, synthesis: speech.synthesis, messageId };
+        const active = () =>
+          activeBoundary() && current.current?.utterance === utterance;
+        utterance.onstart = () => {
+          if (active()) setSpeakingMessageId(messageId);
+        };
+        utterance.onend = () => {
+          if (!active()) return;
+          release(false);
+          setSpeakingMessageId(null);
+        };
+        utterance.onerror = () => {
+          if (!active()) return;
+          release(false);
+          setSpeakingMessageId(null);
+          setError(READ_ALOUD_ERROR);
+        };
+        speech.synthesis.speak(utterance);
+      } catch {
+        release(true);
         setSpeakingMessageId(null);
         setError(READ_ALOUD_ERROR);
-      };
-      speech.synthesis.speak(utterance);
-    } catch {
-      release(true);
-      setSpeakingMessageId(null);
-      setError(READ_ALOUD_ERROR);
-    }
-  };
+      }
+    },
+    [activeBoundary, release, stop],
+  );
 
-  return {
-    supported: Boolean(browserSpeech()),
-    speakingMessageId,
-    error,
-    read,
-    stop,
-  };
+  const supported = Boolean(browserSpeech());
+  return useMemo(
+    () => ({
+      supported,
+      disabled,
+      speakingMessageId,
+      error,
+      read,
+      stop,
+    }),
+    [supported, disabled, speakingMessageId, error, read, stop],
+  );
 }
-import { useEffect, useRef, useState } from 'react';
-import { revealInvisible } from '../lib/skills';

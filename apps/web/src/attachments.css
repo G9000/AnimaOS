@@ -1,0 +1,84 @@
+.studio-attachment-chips,
+.studio-message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  max-width: 100%;
+}
+.studio-attachment-chip,
+.studio-message-attachment {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: 0.75rem;
+  padding: 0.5rem;
+  background: var(--color-panel-2);
+  font-size: 0.8rem;
+}
+.studio-attachment-details,
+.studio-message-attachment > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.studio-attachment-chip strong,
+.studio-message-attachment strong {
+  font-weight: 500;
+}
+.studio-attachment-chip small,
+.studio-message-attachment small {
+  color: var(--color-ink-3);
+}
+.studio-draft-thumbnail {
+  height: 2.5rem;
+  width: 2.5rem;
+  object-fit: contain;
+  border-radius: 0.4rem;
+}
+.studio-attachment-image {
+  display: block;
+  max-width: min(100%, 24rem);
+  max-height: 18rem;
+  object-fit: contain;
+  border-radius: 0.5rem;
+}
+.studio-attachment-picker button,
+.studio-dictation-button,
+.studio-read-aloud,
+.studio-attachment-chip button,
+.studio-message-attachment button {
+  cursor: pointer;
+  border: 1px solid var(--color-line);
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  color: var(--color-ink-2);
+  font-size: 0.75rem;
+}
+.studio-attachment-picker button:disabled,
+.studio-dictation-button:disabled,
+.studio-message-attachment button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.studio-attachment-dropzone[data-dragging] {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 1rem;
+}
+.studio-dictation-control {
+  margin-top: 0.5rem;
+}
+.studio-read-aloud[aria-pressed='true'],
+.studio-dictation-button[aria-pressed='true'] {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}

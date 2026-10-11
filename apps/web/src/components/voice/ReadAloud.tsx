@@ -17,7 +17,7 @@ export function ReadAloud({
   return (
     <button
       type="button"
-      disabled={disabled}
+      disabled={disabled || controller.disabled}
       aria-pressed={speaking}
       onClick={() => controller.read(messageId, text)}
       className="studio-read-aloud"

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -83,6 +83,52 @@ afterEach(() => {
 });
 
 describe('SessionView', () => {
+  it('uses a single read-aloud controller for assistant replies and cancels on session changes', async () => {
+    class Utterance {
+      onstart: (() => void) | null = null;
+      onend: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor(public text: string) {}
+    }
+    const speak = vi.fn();
+    const cancel = vi.fn();
+    vi.stubGlobal('SpeechSynthesisUtterance', Utterance);
+    vi.stubGlobal('speechSynthesis', { speak, cancel });
+    try {
+      const message = (
+        id: string,
+        role: 'User' | 'Assistant' | 'Tool' | 'System',
+        text: string,
+      ) => ({ id, role, content: { text }, created_at_ms: 1 });
+      const view = renderView({
+        session: sessionFixture('first'),
+        messages: [
+          message('user', 'User', 'User text'),
+          message('assistant', 'Assistant', 'Reply\u200B'),
+          message('tool', 'Tool', 'Tool secret'),
+          message('system', 'System', 'System secret'),
+          message('empty', 'Assistant', ''),
+        ],
+      });
+      expect(
+        screen.getAllByRole('button', { name: 'Read aloud' }),
+      ).toHaveLength(1);
+      await userEvent.click(screen.getByRole('button', { name: 'Read aloud' }));
+      expect(speak.mock.calls[0][0].text).toBe('Reply⟨U+200B⟩');
+      act(() => speak.mock.calls[0][0].onstart?.());
+      expect(
+        screen.getByRole('button', { name: 'Stop reading' }),
+      ).toBeVisible();
+      await act(async () => {
+        view.rerender({ session: sessionFixture('second') });
+        await Promise.resolve();
+      });
+      expect(cancel).toHaveBeenCalledTimes(2);
+      expect(speak.mock.calls[0][0].onend).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
   it('saves a message to the viewed session’s agent as a memory', async () => {
     const user = userEvent.setup();
     const saveMemory = vi

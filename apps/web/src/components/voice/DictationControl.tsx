@@ -1,3 +1,6 @@
+import { useBrowserDictation } from '../../hooks/useBrowserDictation';
+import { revealInvisible } from '../../lib/skills';
+
 export interface DictationControlProps {
   disabled?: boolean;
   conversationKey?: string | null;
@@ -53,5 +56,3 @@ export function DictationControl({
     </div>
   );
 }
-import { useBrowserDictation } from '../../hooks/useBrowserDictation';
-import { revealInvisible } from '../../lib/skills';

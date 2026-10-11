@@ -55,6 +55,99 @@ describe('isRetryableSendError', () => {
 });
 
 describe('useSessionSends', () => {
+  it('keeps ordered attachment IDs and safe metadata through retries and manual recovery', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const attachment = {
+      id: 'att_1',
+      name: 'brief.txt',
+      mime: 'text/plain',
+      size: 4,
+      kind: 'text' as const,
+      path: 'attachments/brief.txt',
+      createdAtMs: 1,
+    };
+    const failure = new DaemonConnectionError('', new Error('down'));
+    const startRun = vi.spyOn(daemon, 'startRun').mockRejectedValue(failure);
+    const onFailed = vi.fn();
+    const { result, unmount } = renderHook(() =>
+      useSessionSends({ onAccepted: vi.fn(), onFailed }),
+    );
+    await act(async () =>
+      result.current.send({
+        ...message('with-files'),
+        text: '',
+        attachmentIds: ['att_2', 'att_1'],
+        skill: 'notes',
+        attachments: [
+          {
+            ...attachment,
+            previewUrl: 'blob:secret',
+            data: 'private',
+          } as typeof attachment,
+        ],
+      }),
+    );
+    const saved = JSON.parse(
+      sessionStorage.getItem('animaos.pendingSends') ?? 'null',
+    )[0];
+    expect(saved).toMatchObject({
+      agentId: 'agent-main',
+      sessionId: 'chat:1',
+      attachmentIds: ['att_2', 'att_1'],
+      attachments: [attachment],
+      skill: 'notes',
+    });
+    expect(JSON.stringify(saved)).not.toMatch(/blob:|private/);
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(
+      startRun.mock.calls.map(([, , input, key]) => [input.attachmentIds, key]),
+    ).toEqual([
+      [['att_2', 'att_1'], 'with-files'],
+      [['att_2', 'att_1'], 'with-files'],
+    ]);
+    unmount();
+    const onRestore = vi.fn();
+    renderHook(() =>
+      useSessionSends({ onAccepted: vi.fn(), onFailed, onRestore }),
+    );
+    expect(onRestore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachmentIds: ['att_2', 'att_1'],
+        attachments: [attachment],
+      }),
+    );
+    expect(startRun).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects malformed attachment recovery and bounds recovered messages', () => {
+    const base = {
+      key: 'r',
+      text: 'restore',
+      conversation: 'agent-main\u0000session:chat:1',
+      createdAtMs: 1,
+      agentId: 'agent-main',
+      sessionId: 'chat:1',
+    };
+    sessionStorage.setItem(
+      'animaos.pendingSends',
+      JSON.stringify([
+        { ...base, attachmentIds: ['same', 'same'] },
+        {
+          ...base,
+          attachmentIds: Array.from({ length: 11 }, (_, i) => `att_${i}`),
+        },
+        { ...base, attachmentIds: ['bad\u200B'] },
+        { ...base, attachmentIds: ['att_1'], attachments: [{ id: 'att_1' }] },
+        { ...base, attachmentIds: ['att_1'], sessionId: 'another' },
+        { ...base, text: 'x'.repeat(200001) },
+      ]),
+    );
+    const onRestore = vi.fn();
+    renderHook(() =>
+      useSessionSends({ onAccepted: vi.fn(), onFailed: vi.fn(), onRestore }),
+    );
+    expect(onRestore).not.toHaveBeenCalled();
+  });
   it('sends a skill message with its skill', async () => {
     const startRun = vi.spyOn(daemon, 'startRun').mockResolvedValue({
       run: runFixture('run_1'),

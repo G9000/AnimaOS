@@ -5,7 +5,9 @@ import {
   type Approval,
   type LiveToolCard,
   type Run,
+  type SessionMessageAttachment,
 } from '@animaOS-SWARM/sdk';
+import { messageAttachment } from './attachments';
 
 /** The streamed text of one model call (spec §4.5 steps). */
 export interface LiveStep {
@@ -26,7 +28,12 @@ export interface LiveRun {
   /** The `run.progress` phase until the run moves on, e.g. `compacting`. */
   phase: string | null;
   /** Owner messages steered into the run, in order. */
-  steers: { messageId: string; text: string }[];
+  steers: {
+    messageId: string;
+    text: string;
+    attachmentIds?: string[];
+    attachments?: SessionMessageAttachment[];
+  }[];
   /** The run's calls waiting for the owner, oldest first (spec §7.3). */
   approvals: Approval[];
 }
@@ -340,7 +347,16 @@ export function applyEvent(state: LiveState, event: AgentEvent): LiveState {
               ...live,
               steers: [
                 ...live.steers,
-                { messageId: event.messageId, text: event.text },
+                {
+                  messageId: event.messageId,
+                  text: event.text,
+                  ...(event.attachmentIds
+                    ? { attachmentIds: event.attachmentIds }
+                    : {}),
+                  ...(event.attachments
+                    ? { attachments: event.attachments.map(messageAttachment) }
+                    : {}),
+                },
               ],
             },
       );
