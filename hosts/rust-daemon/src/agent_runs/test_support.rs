@@ -26,6 +26,13 @@ use crate::sessions::{SessionKind, SessionOrigin, SessionRecord, TitleSource};
 use crate::state::{DaemonState, OwnerDecision};
 use crate::tools::ToolExecutionContext;
 
+/// Shared state for tests outside the coordinator module without broadening production fields.
+pub(crate) fn coordinator_state(
+    coordinator: &AgentRunCoordinator,
+) -> crate::app::SharedDaemonState {
+    Arc::clone(&coordinator.state)
+}
+
 /// One scripted model call.
 #[derive(Clone, Debug)]
 pub(crate) enum Step {

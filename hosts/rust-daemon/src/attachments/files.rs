@@ -288,4 +288,25 @@ mod tests {
             .success());
         assert!(read_attachment_bytes(&temp.0, &row).is_err());
     }
+    #[test]
+    fn instruction_named_uploads_remain_ordinary_upload_data() {
+        let temp = Temp::new();
+        for name in [
+            "AGENTS.md",
+            "SOUL.md",
+            "agents.MD",
+            "ANIMA.md",
+            "AGENTS.override.md",
+        ] {
+            let validated = validate_upload(name, b"ordinary upload").unwrap();
+            let saved =
+                save_upload(&temp.0, "2026-09-23", &validated.name, b"ordinary upload").unwrap();
+            assert!(saved.path.starts_with("uploads/2026-09-23/"));
+            assert!(!temp.0.join(name).exists());
+            assert_eq!(
+                std::fs::read(temp.0.join(saved.path)).unwrap(),
+                b"ordinary upload"
+            );
+        }
+    }
 }

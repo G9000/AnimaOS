@@ -25,8 +25,7 @@ use super::{
     },
     utility::{current_time_iso_utc, evaluate_expression},
     web::{parse_exa_results, strip_html_text},
-    workspace_root_path, write_workspace_bytes, ToolExecutionContext, ToolRegistry,
-    DEFAULT_MAX_BACKGROUND_PROCESSES,
+    workspace_root_path, ToolExecutionContext, ToolRegistry, DEFAULT_MAX_BACKGROUND_PROCESSES,
 };
 use crate::memory_embeddings::MemoryEmbeddingRuntime;
 use anima_core::{
@@ -1804,4 +1803,125 @@ async fn memory_add_refuses_hidden_text_and_stores_nothing() {
     .await;
     assert_eq!(zero_width.status, TaskStatus::Success);
     assert_eq!(memory.read().await.size(), 1);
+}
+#[tokio::test]
+async fn protected_instruction_writes_without_owner_gate_are_denied() {
+    let root =
+        std::env::temp_dir().join(format!("anima-instruction-gate-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let registry = ToolRegistry::new();
+    let tools = registry
+        .resolve_descriptors(["write_file", "edit_file", "multi_edit"])
+        .unwrap();
+    let context = ToolExecutionContext::new(
+        Arc::new(AsyncRwLock::new(MemoryManager::new())),
+        Arc::new(AsyncRwLock::new(MemoryEmbeddingRuntime::disabled())),
+        None,
+        registry,
+        new_shared_process_manager_with_limit(DEFAULT_MAX_BACKGROUND_PROCESSES),
+        Some(root.clone()),
+        None,
+    );
+    let agent = AgentState {
+        id: "instruction-writer".into(),
+        name: "writer".into(),
+        status: AgentStatus::Running,
+        config: AgentConfig {
+            name: "writer".into(),
+            model: "offline".into(),
+            bio: None,
+            lore: None,
+            knowledge: None,
+            topics: None,
+            adjectives: None,
+            style: None,
+            provider: None,
+            system: None,
+            tools: Some(tools),
+            plugins: None,
+            settings: None,
+        },
+        created_at_ms: 1,
+        token_usage: Default::default(),
+    };
+    let message = Message {
+        id: "input".into(),
+        agent_id: agent.id.clone(),
+        room_id: "test".into(),
+        content: Content::default(),
+        role: MessageRole::User,
+        created_at_ms: 1,
+    };
+    for tool in ["write_file", "edit_file", "multi_edit"] {
+        let result = context
+            .clone()
+            .execute_tool(
+                agent.clone(),
+                message.clone(),
+                ToolCall {
+                    id: tool.into(),
+                    name: tool.into(),
+                    args: BTreeMap::from([
+                        ("file_path".into(), DataValue::String("SOUL.md".into())),
+                        ("content".into(), DataValue::String("must not write".into())),
+                    ]),
+                },
+            )
+            .await;
+        assert_eq!(
+            result.error.as_deref(),
+            Some(crate::agent_files::write_policy::REFUSED)
+        );
+        assert!(!root.join("SOUL.md").exists());
+    }
+    fs::write(root.join("SOUL.md"), "preserve instruction inode").unwrap();
+    fs::hard_link(root.join("SOUL.md"), root.join("ordinary-alias.md")).unwrap();
+    for tool in ["write_file", "edit_file", "multi_edit"] {
+        let result = context
+            .clone()
+            .execute_tool(
+                agent.clone(),
+                message.clone(),
+                ToolCall {
+                    id: tool.into(),
+                    name: tool.into(),
+                    args: BTreeMap::from([
+                        (
+                            "file_path".into(),
+                            DataValue::String("ordinary-alias.md".into()),
+                        ),
+                        ("content".into(), DataValue::String("must not write".into())),
+                    ]),
+                },
+            )
+            .await;
+        assert_eq!(
+            result.error.as_deref(),
+            Some(crate::agent_files::write_policy::REFUSED)
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("SOUL.md")).unwrap(),
+            "preserve instruction inode"
+        );
+    }
+    let ordinary = context
+        .execute_tool(
+            agent,
+            message,
+            ToolCall {
+                id: "notes".into(),
+                name: "write_file".into(),
+                args: BTreeMap::from([
+                    ("file_path".into(), DataValue::String("notes.md".into())),
+                    ("content".into(), DataValue::String("ordinary".into())),
+                ]),
+            },
+        )
+        .await;
+    assert_eq!(ordinary.status, TaskStatus::Success);
+    assert_eq!(
+        fs::read_to_string(root.join("notes.md")).unwrap(),
+        "ordinary"
+    );
+    fs::remove_dir_all(root).unwrap();
 }

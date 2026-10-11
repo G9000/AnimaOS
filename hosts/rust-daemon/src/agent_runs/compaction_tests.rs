@@ -699,6 +699,11 @@ async fn a_helper_deadline_ends_its_compaction() {
                 room_id: "chat:long",
                 input: &input,
                 config: build.runtime.config(),
+                tools: &build.tools,
+                adapter: &build.adapter,
+                files: &Arc::new(crate::agent_files::AcceptedAgentFiles::empty(
+                    crate::agent_files::Availability::Available,
+                )),
                 deadline: Some(deadline),
             },
             &mut context,
@@ -742,6 +747,11 @@ async fn a_run_lets_go_of_its_dropped_turns_once_compaction_is_decided() {
                     room_id: "chat:long",
                     input: &input,
                     config: build.runtime.config(),
+                    tools: &build.tools,
+                    adapter: &build.adapter,
+                    files: &Arc::new(crate::agent_files::AcceptedAgentFiles::empty(
+                        crate::agent_files::Availability::Available,
+                    )),
                     deadline: None,
                 },
                 &mut context,
@@ -1042,4 +1052,157 @@ async fn a_pruned_span_the_store_does_not_have_is_a_compaction_error() {
             .map(|trimmed| trimmed.dropped_through_message_id.as_str()),
         Some("p6")
     );
+}
+
+/// A secondary call sees transcript data only, and changing source/config while
+/// it runs cannot replace the already accepted primary identity on rebuild.
+#[tokio::test]
+async fn compaction_rebuild_keeps_accepted_files_and_secondary_never_sees_them() {
+    let adapter = BeforeSummary::new(
+        ScriptedModel::with_secondary(
+            vec![Step::Text(vec!["Booked"])],
+            vec![Step::Text(vec!["Trip summary."])],
+        ),
+        |state| {
+            let root = &state.workspace.as_ref().unwrap().root_path;
+            std::fs::write(root.join("SOUL.md"), "Identity beta private sentinel.").unwrap();
+            for runtime in state.agents.values_mut() {
+                runtime.update_config(anima_core::AgentConfigUpdate {
+                    system: Some("New legacy persona".into()),
+                    ..Default::default()
+                });
+            }
+        },
+    );
+    let (coordinator, agent_id) = long_session(adapter.clone(), true).await;
+    let root = crate::skills::test_support::temp_workspace("compaction-agent-files");
+    std::fs::write(root.join("SOUL.md"), "Identity alpha private sentinel.").unwrap();
+    {
+        let mut state = coordinator.state.write().await;
+        state.workspace =
+            crate::skills::test_support::with_workspace(DaemonState::new(), &root).workspace;
+        let runtime = state.agents.get_mut(&agent_id).unwrap();
+        let mut config = runtime.config().clone();
+        config
+            .settings
+            .as_mut()
+            .unwrap()
+            .additional
+            .insert("workspaceRole".into(), DataValue::String("lead".into()));
+        runtime.replace_config(config);
+    }
+    assert!(adapter.state.set(Arc::clone(&coordinator.state)).is_ok());
+    coordinator
+        .run(chat_request(&agent_id, "chat:long", "book one"))
+        .await
+        .unwrap();
+    let secondary = adapter.inner.secondary_requests();
+    assert!(
+        !secondary.is_empty(),
+        "a real secondary compaction call ran"
+    );
+    for request in secondary {
+        assert!(!request.system.contains("private sentinel"));
+        assert!(request
+            .messages
+            .iter()
+            .all(|m| !m.content.text.contains("private sentinel")));
+    }
+    let primary = &adapter.inner.requests()[0];
+    assert!(primary.system.contains("Identity alpha private sentinel"));
+    assert!(!primary.system.contains("Identity beta private sentinel"));
+    assert!(!primary.system.contains("New legacy persona"));
+    let state = coordinator.state.read().await;
+    let summary = &state
+        .sessions
+        .get(&agent_id, "chat:long")
+        .unwrap()
+        .summary
+        .as_ref()
+        .unwrap()
+        .text;
+    assert!(!summary.contains("private sentinel"));
+}
+
+#[tokio::test]
+async fn agent_files_compaction_keeps_admitted_workspace_tools_and_attachment_adapter() {
+    use crate::agent_files::{AcceptedAgentFiles, Availability};
+    use crate::skills::test_support::{temp_workspace, with_workspace};
+    let adapter = BeforeSummary::new(
+        ScriptedModel::with_secondary(
+            vec![Step::Text(vec!["Booked"])],
+            vec![Step::Text(vec!["Summary"])],
+        ),
+        |state| {
+            state
+                .workspace
+                .as_mut()
+                .unwrap()
+                .root_path
+                .push("workspace-b");
+        },
+    );
+    let (coordinator, agent_id) = long_session(adapter.clone(), true).await;
+    assert!(adapter.state.set(Arc::clone(&coordinator.state)).is_ok());
+    let root = temp_workspace("agent-files-compaction-binding");
+    let workspace = with_workspace(DaemonState::new(), &root).workspace;
+    coordinator.state.write().await.workspace = workspace;
+    let input = book_one();
+    let (build, live_run, record) = run_parts(&coordinator, &agent_id, &input).await;
+    let mut context = build.context;
+    let mut files = AcceptedAgentFiles::empty(Availability::Available);
+    files.rendered = anima_core::render_agent_files(
+        Some(&anima_core::AgentFileSection {
+            label: "SOUL.md".into(),
+            text: "Workspace A identity".into(),
+        }),
+        &[],
+        anima_core::AgentFileRenderBudget {
+            max_identity_chars: 200,
+            max_project_chars: 200,
+            max_total_chars: 200,
+        },
+    );
+    let files = Arc::new(files);
+    let mut rebuilt = coordinator
+        .compact_before_run(
+            &live_run,
+            &record,
+            RunCompaction {
+                room_id: "chat:long",
+                input: &input,
+                config: build.runtime.config(),
+                files: &files,
+                tools: &build.tools,
+                adapter: &build.adapter,
+                deadline: None,
+            },
+            &mut context,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        coordinator
+            .state
+            .read()
+            .await
+            .workspace
+            .as_ref()
+            .unwrap()
+            .root_path,
+        root.join("workspace-b")
+    );
+    assert_eq!(
+        crate::tools::ctx_workspace_root(&rebuilt.tools),
+        Some(root.as_path())
+    );
+    assert!(
+        Arc::ptr_eq(&rebuilt.adapter, &build.adapter),
+        "attachment adapter retains the exact admitted workspace/session binding"
+    );
+    rebuilt.runtime.run(input).await;
+    assert!(adapter.inner.requests()[0]
+        .system
+        .contains("Workspace A identity"));
+    assert!(adapter.inner.requests()[0].system.contains("Summary"));
 }

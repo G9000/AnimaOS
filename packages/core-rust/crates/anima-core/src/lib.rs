@@ -1,3 +1,8 @@
+pub mod agent_files;
+pub use agent_files::{
+    render_agent_files, render_agent_files_with_admissions, truncate_agent_file,
+    AgentFileRenderBudget, AgentFileSection, RenderedAgentFiles, RuntimePromptIdentity,
+};
 pub mod agent;
 pub mod communication;
 pub use communication::{AgentCommunicationRoute, MAX_AGENT_COMMUNICATION_HOPS};

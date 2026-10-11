@@ -276,19 +276,25 @@ impl DaemonState {
                 // An explicit matcher, or the approval's suggestion; either
                 // way it must pass for the tool (a suggestion may carry an
                 // empty value when no safe one exists).
-                let matcher = match decision.kind {
-                    ApprovalDecisionKind::AllowSession | ApprovalDecisionKind::AllowAlways => Some(
-                        validate_matcher(
-                            &previous.tool,
-                            decision
-                                .matcher
-                                .as_ref()
-                                .unwrap_or(&previous.suggested_matcher),
-                        )
-                        .map_err(SettleRefusal::Invalid)?,
-                    ),
-                    ApprovalDecisionKind::AllowOnce | ApprovalDecisionKind::Deny => None,
-                };
+                let matcher =
+                    if crate::agent_files::write_policy::exact_record(&previous.arguments) {
+                        None
+                    } else {
+                        match decision.kind {
+                            ApprovalDecisionKind::AllowSession
+                            | ApprovalDecisionKind::AllowAlways => Some(
+                                validate_matcher(
+                                    &previous.tool,
+                                    decision
+                                        .matcher
+                                        .as_ref()
+                                        .unwrap_or(&previous.suggested_matcher),
+                                )
+                                .map_err(SettleRefusal::Invalid)?,
+                            ),
+                            ApprovalDecisionKind::AllowOnce | ApprovalDecisionKind::Deny => None,
+                        }
+                    };
                 let status = if decision.kind == ApprovalDecisionKind::Deny {
                     ApprovalStatus::Denied
                 } else {
@@ -1211,5 +1217,33 @@ mod tests {
                 .unwrap_err(),
             SettleRefusal::Conflict(APPROVAL_SESSION_GONE)
         );
+    }
+    #[test]
+    fn exact_instruction_decisions_never_create_reusable_grants() {
+        for kind in [
+            ApprovalDecisionKind::AllowSession,
+            ApprovalDecisionKind::AllowAlways,
+        ] {
+            let (mut state, link) = daemon();
+            let mut call = fetch();
+            call.args.insert(
+                crate::agent_files::write_policy::EXACT_MARKER.into(),
+                anima_core::DataValue::Bool(true),
+            );
+            let pending = state.open_approval(&ask(&link, call), 10).unwrap().approval;
+            let settled = state
+                .settle_approval(&pending.id, owner(kind, 1), 11)
+                .unwrap()
+                .approval;
+            assert_eq!(settled.status, ApprovalStatus::Allowed);
+            assert!(settled.resolution.unwrap().matcher.is_none());
+            assert!(state.approvals.rules_for(&link.agent_id).is_empty());
+            assert!(state
+                .sessions
+                .get(&link.agent_id, "chat:a")
+                .unwrap()
+                .session_allowances
+                .is_empty());
+        }
     }
 }

@@ -232,6 +232,37 @@ impl ApprovalGate {
         }
     }
 
+    /// Protected instructions ignore reusable allows, while preserving policy deny.
+    pub(crate) async fn check_exact(
+        &self,
+        agent: &AgentState,
+        original: &ToolCall,
+        redacted: &ToolCall,
+    ) -> GateOutcome {
+        if self
+            .coordinator
+            .approval_verdict(agent, &self.run.session_id, original)
+            .await
+            == Verdict::Deny
+        {
+            return GateOutcome::Refuse(TaskResult::error(DENIED_BY_POLICY, 0));
+        }
+        if is_helper_config(&agent.config) {
+            return GateOutcome::Refuse(TaskResult::error(HELPER_NEEDS_APPROVAL, 0));
+        }
+        let outcome = self.ask(agent, redacted).await;
+        if matches!(outcome, GateOutcome::Approved)
+            && self
+                .coordinator
+                .approval_verdict(agent, &self.run.session_id, original)
+                .await
+                == Verdict::Deny
+        {
+            return GateOutcome::Refuse(TaskResult::error(DENIED_BY_POLICY, 0));
+        }
+        outcome
+    }
+
     async fn ask(&self, agent: &AgentState, call: &ToolCall) -> GateOutcome {
         let timeout = self.coordinator.approval_timeout(self.source);
         // Taken before the request is made, so the wait ends when the

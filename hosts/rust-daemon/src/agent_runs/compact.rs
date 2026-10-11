@@ -35,6 +35,9 @@ pub(super) struct RunCompaction<'a> {
     /// The run's own configuration: its provider and model write the
     /// summary, and the rebuilt runtime keeps it.
     pub(super) config: &'a AgentConfig,
+    pub(super) files: &'a Arc<crate::agent_files::AcceptedAgentFiles>,
+    pub(super) tools: &'a crate::tools::ToolExecutionContext,
+    pub(super) adapter: &'a Arc<dyn anima_core::ModelAdapter>,
     /// A helper's execution deadline, which its compaction counts toward
     /// (fix round 1); the compaction ends by the earlier of it and its own.
     pub(super) deadline: Option<Instant>,
@@ -219,6 +222,7 @@ impl AgentRunCoordinator {
         let deadline = run
             .and_then(|run| run.deadline)
             .map_or(own_deadline, |helper| helper.min(own_deadline));
+        let acceptance_cancel = cancel.clone();
         let stopped = async move {
             match cancel {
                 Some(cancel) => cancel.cancelled().await,
@@ -243,6 +247,12 @@ impl AgentRunCoordinator {
         let transaction = self.control_plane_transaction().await;
         let (before, rebuilt, persist) = {
             let mut guard = self.state.write().await;
+            if acceptance_cancel
+                .as_ref()
+                .is_some_and(CancelSignal::is_cancelled)
+            {
+                return Compacted::Stopped;
+            }
             let Some(session) = guard.sessions.get_mut(agent_id, session_id) else {
                 return Compacted::Failed(SESSION_GONE.into());
             };
@@ -264,8 +274,15 @@ impl AgentRunCoordinator {
                     // ruling 3): what its selection still leaves out is the
                     // session's `contextTrimmed`, saved with the summary.
                     rebuilt = run.and_then(|run| {
-                        let mut build =
-                            guard.build_run_runtime(agent_id, run.room_id, run.input)?;
+                        let mut build = guard.build_run_runtime_with_bindings(
+                            agent_id,
+                            run.room_id,
+                            run.input,
+                            Some(run.config),
+                            &run.files.rendered,
+                            run.tools.clone(),
+                            Arc::clone(run.adapter),
+                        )?;
                         // A PATCH meanwhile applies to later runs (spec §4.4).
                         build.runtime.replace_config(run.config.clone());
                         Some(build)

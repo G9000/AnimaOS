@@ -187,10 +187,25 @@ impl ToolExecutionContext {
         let Some(handler) = self.tool_registry.lookup(&tool_call.name) else {
             return TaskResult::error(format!("Unknown tool: {}", tool_call.name), 0);
         };
-        // Spec §7.3: after the live checks, before dispatch. An approval can
-        // take minutes, so what it approved is checked again first.
+        let protected = match crate::agent_files::write_policy::capture(
+            self.workspace_root.as_deref(),
+            &tool_call,
+        ) {
+            Ok(value) => value,
+            Err(reason) => return TaskResult::error(reason, 0),
+        };
+        if protected.is_some() && self.approvals.is_none() {
+            return TaskResult::error(crate::agent_files::write_policy::REFUSED, 0);
+        }
         if let Some(gate) = &self.approvals {
-            match gate.check(&agent, &tool_call).await {
+            let outcome = match &protected {
+                Some(target) => {
+                    gate.check_exact(&agent, &tool_call, &target.approval_call(&tool_call))
+                        .await
+                }
+                None => gate.check(&agent, &tool_call).await,
+            };
+            match outcome {
                 crate::approvals::GateOutcome::Proceed => {}
                 crate::approvals::GateOutcome::Approved => {
                     if let Err(refused) = self.live_checks(&agent, &tool_call).await {
@@ -198,6 +213,14 @@ impl ToolExecutionContext {
                     }
                 }
                 crate::approvals::GateOutcome::Refuse(result) => return result,
+            }
+        }
+        if let Some(target) = &protected {
+            if !target.revalidate(self.workspace_root.as_deref(), &tool_call) {
+                return TaskResult::error(
+                    "Instruction file target changed while awaiting approval",
+                    0,
+                );
             }
         }
         handler(self, agent, user_message, tool_call).await

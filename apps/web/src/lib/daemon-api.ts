@@ -348,6 +348,8 @@ export interface WorkspaceResumeResponse {
 }
 
 export const daemon = {
+  agentFilesPreview: (id: string, options: { signal?: AbortSignal } = {}) =>
+    setupClient.agentFiles.preview(id, options),
   capabilities: () => setupClient.capabilities(),
   listWorkspaceFiles: () => setupClient.workspace.listFiles(),
   readWorkspaceFile: (path: string) => setupClient.workspace.readFile(path),

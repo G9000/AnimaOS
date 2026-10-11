@@ -15,6 +15,7 @@ import {
 import { AlertIcon, TrashIcon, XIcon } from './icons';
 import { ChatGptConnection } from './ChatGptConnection';
 import { AgentProfileDetails, AgentMemoryView } from './AgentProfileDetails';
+import { AgentFilesPanel } from './AgentFilesPanel';
 import { AgentTasksView, AgentProactiveView } from './AgentWork';
 import {
   ErrorBanner,
@@ -375,6 +376,7 @@ export function SettingsPanel({
                 agent={agent}
                 disabled={controlsDisabled}
               />
+              <AgentFilesPanel agentId={agent.id} />
               {/* System prompt */}
               <section className="space-y-2.5">
                 <SectionTitle>Personality & instructions</SectionTitle>

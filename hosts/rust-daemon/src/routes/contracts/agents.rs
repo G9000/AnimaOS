@@ -381,6 +381,13 @@ impl PluginDescriptorRequest {
 impl AgentSettingsRequest {
     fn into_domain(mut self) -> Result<AgentSettings, &'static str> {
         let mut settings = AgentSettings::default();
+        if self
+            .additional
+            .get("agentFilesProfileEnabled")
+            .is_some_and(|value| !value.is_boolean())
+        {
+            return Err("agentFilesProfileEnabled must be a boolean");
+        }
 
         settings.temperature = self
             .temperature

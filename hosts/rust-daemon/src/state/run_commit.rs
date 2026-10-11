@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use anima_core::primitives::now_millis;
 use anima_core::{
-    select_context, AgentRuntime, AgentRuntimeSnapshot, AgentState, AgentStatus, Content,
-    ContextSummary, Message, MessageRole, Provider, RuntimeRunBase, TokenEstimator,
+    select_context, AgentConfig, AgentRuntime, AgentRuntimeSnapshot, AgentState, AgentStatus,
+    Content, ContextSummary, Message, MessageRole, Provider, RenderedAgentFiles, RuntimeRunBase,
+    TokenEstimator,
 };
 
 use super::DaemonState;
@@ -19,6 +20,7 @@ use crate::tools::ToolExecutionContext;
 pub(crate) struct RunBuild {
     pub(crate) runtime: AgentRuntime,
     pub(crate) tools: ToolExecutionContext,
+    pub(crate) adapter: Arc<dyn anima_core::ModelAdapter>,
     pub(crate) base: RuntimeRunBase,
     pub(crate) context: RunContextReport,
 }
@@ -94,7 +96,50 @@ impl DaemonState {
         room_id: &str,
         input: &Content,
     ) -> Option<RunBuild> {
+        self.build_run_runtime_with_files(
+            agent_id,
+            room_id,
+            input,
+            None,
+            &RenderedAgentFiles::default(),
+        )
+    }
+
+    /// Final selection reserves accepted file text before selecting whole turns.
+    /// The isolated configuration was frozen at durable run start.
+    pub(crate) fn build_run_runtime_with_files(
+        &self,
+        agent_id: &str,
+        room_id: &str,
+        input: &Content,
+        config: Option<&AgentConfig>,
+        files: &RenderedAgentFiles,
+    ) -> Option<RunBuild> {
+        self.build_run_runtime_with_bindings(
+            agent_id,
+            room_id,
+            input,
+            config,
+            files,
+            self.tool_execution_context(),
+            self.session_model_adapter(agent_id, room_id),
+        )
+    }
+
+    /// Rebuild history while retaining the admitted tool and attachment scope.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn build_run_runtime_with_bindings(
+        &self,
+        agent_id: &str,
+        room_id: &str,
+        input: &Content,
+        config: Option<&AgentConfig>,
+        files: &RenderedAgentFiles,
+        tools: ToolExecutionContext,
+        adapter: Arc<dyn anima_core::ModelAdapter>,
+    ) -> Option<RunBuild> {
         let canonical = self.agents.get(agent_id)?;
+        let config = config.unwrap_or_else(|| canonical.config());
         let history = self.model_visible_history(agent_id, room_id);
         let session = self
             .sessions
@@ -110,11 +155,16 @@ impl DaemonState {
                 .and_then(|session| session.context_calibration_permille)
                 .map_or(1.0, |permille| f64::from(permille) / 1000.0),
         );
-        let budget = ContextBudget::for_config(canonical.config());
+        let budget = ContextBudget::for_config(config);
         let selection = select_context(
             &history,
             summary.as_ref(),
-            budget.history_tokens(estimator.text_tokens(&input.text)),
+            budget
+                .history_tokens(estimator.text_tokens(&input.text))
+                .saturating_sub(
+                    (files.estimated_tokens as f64 * estimator.calibration().max(1.0)).ceil()
+                        as u64,
+                ),
             &estimator,
         );
         let raw = TokenEstimator::default();
@@ -126,7 +176,8 @@ impl DaemonState {
             + raw.text_tokens(&input.text)
             + summary
                 .as_ref()
-                .map_or(0, |summary| raw.text_tokens(&summary.text));
+                .map_or(0, |summary| raw.text_tokens(&summary.text))
+            + files.estimated_tokens;
         let pruned = session.and_then(|session| uncovered_pruned_through(session, &history));
         let context = RunContextReport {
             budget_tokens: budget.budget_tokens,
@@ -136,8 +187,10 @@ impl DaemonState {
         };
         let mut runtime = AgentRuntime::from_snapshot(
             canonical.run_snapshot(selection.messages),
-            self.session_model_adapter(agent_id, room_id),
+            Arc::clone(&adapter),
         );
+        runtime.replace_config(config.clone());
+        runtime.set_agent_files(files.clone());
         self.wire_runtime(&mut runtime);
         if let Some(summary) = summary {
             let mut providers = crate::components::default_providers(Arc::clone(&self.memory));
@@ -148,7 +201,8 @@ impl DaemonState {
         let base = runtime.run_base();
         Some(RunBuild {
             runtime,
-            tools: self.tool_execution_context(),
+            tools,
+            adapter,
             base,
             context,
         })

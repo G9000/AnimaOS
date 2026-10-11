@@ -1,4 +1,5 @@
 export { AgentsClient, action, agent, plugin } from './agents.js';
+export { AgentFilesClient } from './agent-files.js';
 export { AttachmentsClient } from './attachments.js';
 export type { UploadedAttachment } from './attachments.js';
 export { AgenciesClient } from './agencies.js';
@@ -216,6 +217,11 @@ export type {
   AgentUpdateInput,
 } from './agents.js';
 export type {
+  AgentFileKind,
+  AgentFileState,
+  AgentFileReasonCode,
+  AgentFileManifestEntry,
+  AgentFilesPreview,
   DaemonAgentConfig,
   DaemonAgentMessage,
   DaemonAgentSettings,
