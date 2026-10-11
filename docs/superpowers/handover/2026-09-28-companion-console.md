@@ -2,6 +2,79 @@
 
 This document is for the next agent picking up the companion console upgrade. Read it first; it tells you where everything is and what to do next.
 
+## Start here (2026-10-11): M0–M8 merged; next is M9
+
+**State**
+
+- M0–M8 are merged to `main`. The last merges were #12 (M6), #13 (M7) and #14 (M8); `main` is at `86cc87f`.
+- M9 (attachments and voice) has not started. Its branch, `feat/companion-console-m9`, was cut from `main` and holds only this note.
+- Snapshot version is 10.
+- Last gates on `main`'s content:
+  - `rust-daemon:test`: 2,082 passed, 7 ignored.
+  - Web: 1,042 tests.
+  - SDK: 103 tests.
+
+**How to continue: one branch per milestone, stay cheap (the owner is token-constrained)**
+
+1. Have **Sonnet** write a **lean plan**, modelled on `docs/superpowers/plans/2026-09-23-companion-console-m8.md`:
+   - Interfaces, rules, test lists and commands; full code only for tricky pieces; about 1,000–2,000 lines.
+   - Output: `docs/superpowers/plans/2026-09-23-companion-console-m9.md`.
+   - Sources: spec §12.1–§12.2, the master plan's M9 section, and the codebase.
+2. The controller rules on the plan's top-5 risks: append a "Controller rulings on the risks (binding)" section and commit the plan. No separate pre-flight audit.
+3. Implement task by task:
+   - Sonnet implementers; Opus only for concurrency- or security-subtle tasks.
+   - Implementers read the plan directly plus `.superpowers/sdd/2026-09-23-companion-console-m9/rules.md`. Copy it from the M8 folder and change m8 to m9; those working files are gitignored, so recreate them from `rules.md` in this handover if missing.
+4. Reviews:
+   - Batch-review the daemon tasks (2–4 at a time, Sonnet; Opus for risky areas).
+   - One final web+SDK review covers all web tasks.
+   - One fix wave.
+5. Run the gates:
+   - `bun x nx run rust-daemon:test --skipNxCache`
+   - `bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache`
+   - `cargo fmt --all --check`
+   - `bun x nx format:check --base=origin/main`
+6. Update the master-plan status row and this handover, push, and open a PR to `main`. Merge only when the owner says "merge".
+7. Keep a ledger in `.superpowers/sdd/<milestone>/progress.md`, recording each decision as `Ruling: <what> — <why> — <cost if wrong>`.
+
+**Rules every agent follows**
+
+- Prefix every cargo command with `CARGO_INCREMENTAL=0`.
+- Commits and staging:
+  - Stage by explicit path. Never stage `nx.json` or `anima.yaml`; they show as modified locally but aren't ours.
+  - Never use `git stash`, `reset`, `checkout -- <path>`, `restore` or `worktree`.
+- Environment:
+  - No new dependencies or dependency features.
+  - Don't start a real daemon, dev server, database or container. No Postgres is available, so Postgres tests stay `#[ignore]`.
+  - Don't touch the Docker Postgres on port 55432.
+- Code shape:
+  - `agent_runs.rs`, `connectors/runtime.rs` and `ViewHarness.tsx` only gain wiring lines.
+  - Lock order: control-plane transaction → state lock → leaf mutexes. No std lock across `.await`.
+  - Owner mutations run their transaction/save/undo body in `tokio::spawn`, so they're drop-safe.
+- Content and tests:
+  - Model-written text renders in the web only as text, with hidden characters revealed (`lib/skills.ts` `revealInvisible`, `components/memory/RevealedText.tsx`).
+  - Refuse hidden Unicode wherever the model writes (`skills::is_smuggling_character`, `memory_text.rs`).
+  - Strings are named constants, each tested once.
+  - Tests are never wall-clock-racy, and web tests stay pristine (no new `act()` warnings).
+
+**Gotchas**
+
+- **GPG:** commits are GPG-signed. When gpg-agent's cache expires, `git commit` blocks on a pinentry dialog until the owner types the passphrase. Run long commits in the background and ask the owner.
+- **Line endings:** with `autocrlf`, git can check files out with CRLF, which `nx format:check` flags. `nx format:write` on those files fixes it, and nothing is committed if only line endings differ.
+- **Corrupted build artifacts:** errors such as "invalid metadata", "not found in rlib format" or an internal compiler error mean the build artifacts are corrupted. Fix them with `cargo clean -p anima-daemon -p anima-core -p anima-model-adapters -p anima-memory`, then rerun.
+- **CI:** it always fails at the Nx Cloud step. The local gates are the verification.
+- **`gh pr edit`:** it fails; use `gh api -X PATCH repos/G9000/animaOS-SWARM/pulls/N`.
+- **Stacked PRs:** they don't retarget automatically. PATCH `base=main` before merging.
+
+**Open follow-ups**
+
+- Owner auth for the older memory routes.
+- Hidden-text refusal for evaluator extractions.
+- A `memory.updated` event.
+- Token estimation for end-only usage providers.
+- A combined usage summary endpoint.
+- Telegram/CLI notice that an approval is waiting.
+- Skip a skill scan while the previous one's blocking work is still running.
+
 ## Update 2026-10-09: M8 done, PR open (stacked on M7)
 
 - **M8 (Usage, logs, health) is complete** on `feat/companion-console-m8`. Its PR targets `feat/companion-console-m7`; merge #12, then #13, then M8.
