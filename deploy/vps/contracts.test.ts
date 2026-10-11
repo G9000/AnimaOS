@@ -33,8 +33,10 @@ describe('offline one-owner deployment contracts', () => {
 
   test('only gateway web ports are public; credentials stay server-side', () => {
     expect(
-      [...gateway.matchAll(/- "(\d+):(\d+)"/g)].map((match) => match[0]),
-    ).toEqual(['- "80:80"', '- "443:443"']);
+      [...gateway.matchAll(/- ['"](\d+):(\d+)['"]/g)].map(
+        (match) => `${match[1]}:${match[2]}`,
+      ),
+    ).toEqual(['80:80', '443:443']);
     expect(daemon).not.toMatch(/^\s+ports:/m);
     expect(daemon).toContain('network_mode: service:gateway');
     expect(daemon).toContain('ANIMAOS_RS_HOST: 127.0.0.1');

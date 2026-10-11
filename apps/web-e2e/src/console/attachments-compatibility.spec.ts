@@ -6,16 +6,14 @@ test('attachment-only send retains upload IDs and owner Blob thumbnail request',
   page,
 }) => {
   const fixture = await openConsole(page);
-  await page
-    .getByLabel('Choose attachments')
-    .setInputFiles({
-      name: 'pixel.png',
-      mimeType: 'image/png',
-      buffer: Buffer.from(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9uoAAAAASUVORK5CYII=',
-        'base64',
-      ),
-    });
+  await page.getByLabel('Choose attachments').setInputFiles({
+    name: 'pixel.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9uoAAAAASUVORK5CYII=',
+      'base64',
+    ),
+  });
   await expect(
     page.getByRole('button', { name: 'Send', exact: true }),
   ).toBeEnabled();

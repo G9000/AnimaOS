@@ -1,33 +1,50 @@
 # @animaOS-SWARM/web
 
-Browser playground for the animaOS workspace.
+Anima's companion console talks to the Rust daemon through `@animaOS-SWARM/sdk`.
+The chat front door presents one persistent companion; retained agents and bounded
+helpers remain behind it. The separate `apps/playground` is a different surface.
 
-This app is the active browser surface for local daemon-driven workflows. It currently exposes:
+The console provides session navigation, streaming replies, queue/steer/Stop,
+approval review, skills, automations, editable memory, usage, logs and health.
+Messages use accepted session `/runs` and the agent `/events` stream. Reload
+rejoins an existing run from a fresh snapshot; it does not automatically replay
+tools. An absent `/api/status` or other required console endpoint shows **Update
+the daemon**. Authentication failures are not labeled an old daemon, and the
+console does not fall back to the legacy blocking `/run` endpoint.
 
-- health status for the daemon control plane
-- live lists of registered agents and swarms
-- an agency playground that turns a plain-language brief into a generated agency workspace
-- optional CLI-style seed memory generation when creating that workspace
-- one-click spawning of the returned team as a live swarm through the Rust daemon
+Attachments upload into the configured workspace, with progress, chips,
+authenticated previews/downloads and exact-retry ID recovery. Limits are ten IDs
+per input, 10 MiB images, 1 MiB text and 25 MiB documents. Known vision models
+can receive four selected images; other models receive references. Documents are
+saved/downloadable, with an explicit unread-file note. Session deletion removes
+metadata and does not physically delete saved files.
 
-The playground talks to the daemon REST API, including `/api/health`, `/api/providers`, `/api/agencies/create`, and `/api/swarms`.
+Dictation and read-aloud use browser speech APIs when supported, with microphone
+permission for dictation. They cancel when the conversation becomes inactive.
+Browser speech may use an external service; these are not daemon voice APIs.
+Model text is rendered as text with hidden characters revealed.
 
-## Quick Example
+## Local development and checks
 
-```bash
+The normal operator workflow starts the selected Rust host and browser surfaces:
+
+```sh
 bun dev --host rust
 ```
 
-Open the web URL printed by `workspace-dev`, or run the app directly with `bun x nx serve @animaOS-SWARM/web`.
+Open the console URL printed by `workspace-dev`. Host selection belongs in that
+launcher. The console uses the loopback daemon on `127.0.0.1:8080`; the Rust host
+wraps reusable `packages/core-rust` code. Elixir/Python hosts are placeholders.
 
-## Build
+```sh
+bun x nx run @animaOS-SWARM/web:build
+bun x nx run @animaOS-SWARM/web:typecheck
+bun x nx run @animaOS-SWARM/web:test
+```
 
-Run `bun x nx build @animaOS-SWARM/web`.
-
-## Typecheck
-
-Run `bun x nx typecheck @animaOS-SWARM/web`.
-
-## Test
-
-Run `bun x nx test @animaOS-SWARM/web`.
+For offline browser evidence, see [web-e2e](../web-e2e/README.md). Its explicit
+`e2e-console` target loads built assets and simulated APIs/SSE without a server.
+It proves browser/SDK behavior against fixtures; real provider, microphone,
+gateway/TLS and deployment acceptance remain separate checks. See the
+[daemon API](../../hosts/rust-daemon/README.md) and
+[VPS procedures](../../deploy/vps/README.md).

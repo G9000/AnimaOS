@@ -1,31 +1,47 @@
-# @animaOS-SWARM/ui-e2e
+# @animaOS-SWARM/web-e2e
 
-Cross-browser Playwright smoke coverage for the web app.
+Browser coverage for `@animaOS-SWARM/web`, the companion console.
 
-This project validates the served browser surface for `@animaOS-SWARM/ui`. It is the consumer-boundary check for the current web app, not a reusable library.
+## Offline console journeys
 
-Current e2e coverage includes:
-
-- booting the preview server through Nx before browser tests start
-- checking the top-level control-grid heading in the browser
-- booting an isolated live server plus Vite dev server pair for websocket browser validation
-- proving that externally created agents and swarms appear in the dashboard without a manual refresh
-- proving that externally started agent tasks stream progress and land in the selected agent output pane
-- proving that externally started swarm tasks stream completion plus structured result payloads into the selected dashboard output pane
-- proving that recorded task history can be queried from the browser search workflow after live agent execution
-- proving that ingested documents can be queried from the browser search workflow after local knowledge indexing
-- proving that multi-chunk documents return the matching indexed excerpt instead of a raw payload fallback
-- running the same smoke path across Playwright browser projects
-
-The isolated live harness sets `UI_SUPPRESS_WS_PROXY_RESET=1` so harmless websocket shutdown noise from Playwright browser teardown does not pollute the live-suite output.
-
-## Quick Example
-
-```bash
-bun x nx e2e @animaOS-SWARM/ui-e2e
-bun x nx run @animaOS-SWARM/ui-e2e:e2e-live
+```sh
+bun x nx run @animaOS-SWARM/web-e2e:e2e-console --skipNxCache
+bun x nx run @animaOS-SWARM/web-e2e:typecheck --skipNxCache
+bun x nx run @animaOS-SWARM/web-e2e:deployment-contracts --skipNxCache
 ```
 
-## Typecheck
+`playwright.console.config.ts` has no `webServer`. Its target builds SDK/web
+dependencies, then serves built assets by browser route fulfillment. Fake APIs
+validate current session/run requests; browser-local streams deliver real SSE
+bytes to the SDK parser and normal reducers. Unexpected requests fail the fixture.
+No daemon, dev server, database or container is started. Deployment contracts
+inspect configuration files and never import the service-starting gateway suite.
 
-Run `bun x nx typecheck @animaOS-SWARM/ui-e2e`.
+Journeys cover send/tool/final reply, approval, Stop, reload/reconnect, mobile
+navigation, attachment-only input and older-daemon compatibility. Fixture state
+survives page reload while stream readers are replaced. Tests exercise observable
+UI and request contracts rather than injecting finished component state.
+
+Use installed browsers; no browser download is required or performed by this
+target. On Windows the console configuration uses the installed Edge channel;
+other hosts use packaged Chromium. It creates isolated test contexts, not the
+owner's persistent profile. Failure traces/screenshots are diagnostic artifacts.
+
+Simulated browser passes do not establish real HTTP chunking, selected-model
+streaming, microphone/TTS support, Caddy/TLS, Linux keyring or container restart
+behavior. See [deployment acceptance](../../deploy/vps/README.md).
+
+## Service-starting suites
+
+The default `e2e`, companion configuration and `e2e-live` suites use preview/dev
+servers or live harnesses. They are retained for separately authorized runtime
+testing and excluded from the no-service milestone gates:
+
+```sh
+bun x nx run @animaOS-SWARM/web-e2e:e2e
+bun x nx run @animaOS-SWARM/web-e2e:e2e-live
+```
+
+The live suite checks legacy websocket integrations; it does not substitute for
+the current session/SSE console contract. Do not use default/live targets when
+services are prohibited.

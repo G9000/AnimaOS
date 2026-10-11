@@ -31,19 +31,19 @@
 
 ## Status
 
-| Milestone                  | Detailed plan                         | Status                                                                                                                      |
-| -------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| M0 Security and groundwork | `2026-09-23-companion-console-m0.md`  | done (Nx rust-daemon:test 1,082 passed at 4e3eb7d)                                                                          |
-| M1 Run coordinator         | `2026-09-23-companion-console-m1.md`  | done (Nx rust-daemon:test 1,141 passed at ef5b6fe)                                                                          |
-| M2 Sessions                | `2026-09-23-companion-console-m2.md`  | done (Nx rust-daemon:test 1,287 passed; sdk + web test, typecheck, build green at 5b020c4)                                  |
-| M3 Live runs               | `2026-09-23-companion-console-m3.md`  | done (Nx rust-daemon:test 1,564 passed; sdk + web test, typecheck, build green at 6737da3)                                  |
-| M4 Approvals               | `2026-09-23-companion-console-m4.md`  | done (Nx rust-daemon:test 1654 passed; sdk + web test, typecheck, build green at 20c6221)                                   |
-| M5 Skills                  | `2026-09-23-companion-console-m5.md`  | done (Nx rust-daemon:test 1775 passed; sdk + web test, typecheck, build green at e9d57f9)                                   |
-| M6 Automations             | `2026-09-23-companion-console-m6.md`  | done (Nx rust-daemon:test 1874 passed; sdk + web test, typecheck, build green at ccce91b)                                   |
-| M7 Memory                  | `2026-09-23-companion-console-m7.md`  | done (Nx rust-daemon:test 1925 passed; sdk + web test, typecheck, build green at e33f919)                                   |
-| M8 Usage, logs, health     | `2026-09-23-companion-console-m8.md`  | done (Nx rust-daemon:test 2082 passed; sdk + web test, typecheck, build green at 65122bd)                                   |
-| M9 Attachments and voice   | `2026-09-23-companion-console-m9.md`  | implemented; Rust 2156 passed/7 ignored; web 1117, SDK 117/3 skipped; typecheck/build green; done; PR #15 merged at 647d606 |
-| M10 Deployment and docs    | `2026-09-23-companion-console-m10.md` | active on feat/companion-console-m10 from merged main 647d606; local deployment contracts/parser pass; full gates pending   |
+| Milestone                  | Detailed plan                         | Status                                                                                                                                                                      |
+| -------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M0 Security and groundwork | `2026-09-23-companion-console-m0.md`  | done (Nx rust-daemon:test 1,082 passed at 4e3eb7d)                                                                                                                          |
+| M1 Run coordinator         | `2026-09-23-companion-console-m1.md`  | done (Nx rust-daemon:test 1,141 passed at ef5b6fe)                                                                                                                          |
+| M2 Sessions                | `2026-09-23-companion-console-m2.md`  | done (Nx rust-daemon:test 1,287 passed; sdk + web test, typecheck, build green at 5b020c4)                                                                                  |
+| M3 Live runs               | `2026-09-23-companion-console-m3.md`  | done (Nx rust-daemon:test 1,564 passed; sdk + web test, typecheck, build green at 6737da3)                                                                                  |
+| M4 Approvals               | `2026-09-23-companion-console-m4.md`  | done (Nx rust-daemon:test 1654 passed; sdk + web test, typecheck, build green at 20c6221)                                                                                   |
+| M5 Skills                  | `2026-09-23-companion-console-m5.md`  | done (Nx rust-daemon:test 1775 passed; sdk + web test, typecheck, build green at e9d57f9)                                                                                   |
+| M6 Automations             | `2026-09-23-companion-console-m6.md`  | done (Nx rust-daemon:test 1874 passed; sdk + web test, typecheck, build green at ccce91b)                                                                                   |
+| M7 Memory                  | `2026-09-23-companion-console-m7.md`  | done (Nx rust-daemon:test 1925 passed; sdk + web test, typecheck, build green at e33f919)                                                                                   |
+| M8 Usage, logs, health     | `2026-09-23-companion-console-m8.md`  | done (Nx rust-daemon:test 2082 passed; sdk + web test, typecheck, build green at 65122bd)                                                                                   |
+| M9 Attachments and voice   | `2026-09-23-companion-console-m9.md`  | implemented; Rust 2156 passed/7 ignored; web 1117, SDK 117/3 skipped; typecheck/build green; done; PR #15 merged at 647d606                                                 |
+| M10 Deployment and docs    | `2026-09-23-companion-console-m10.md` | local implementation complete; Rust2186/8ignored, web1124, SDK117/3skipped, browser16; typecheck/build/contracts/Compose parser pass; manual deployment acceptance deferred |
 
 Dependencies: M0 → M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9 → M10. M4–M9 depend on M3's ledger, runs, and event stream; their internal order follows the spec's milestone list.
 

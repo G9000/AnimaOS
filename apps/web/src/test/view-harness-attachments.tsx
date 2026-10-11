@@ -21,9 +21,7 @@ export function registerAttachmentJourneys({
   mockProviders,
   routes,
 }: {
-  openLiveSession: (
-    overrides?: Partial<Session>,
-  ) => Promise<{
+  openLiveSession: (overrides?: Partial<Session>) => Promise<{
     input: HTMLElement;
     stream: ReturnType<typeof scriptedAgentEvents>['streams'][number];
     events: ReturnType<typeof scriptedAgentEvents>;
