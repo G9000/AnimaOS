@@ -42,7 +42,98 @@ pub(crate) struct WorkspaceBytes {
     pub(crate) canonical_root: PathBuf,
     directory: Dir,
 }
+#[derive(Debug)]
+pub(crate) enum InstructionReadError {
+    Missing,
+    Linked,
+    NonRegular,
+    Oversized,
+    Unreadable,
+}
+impl From<io::Error> for InstructionReadError {
+    fn from(error: io::Error) -> Self {
+        if error.kind() == io::ErrorKind::NotFound {
+            Self::Missing
+        } else {
+            Self::Unreadable
+        }
+    }
+}
 impl WorkspaceBytes {
+    /// Opened-handle link count, including Windows; an ordinary name can alias
+    /// an instruction inode through a hard link without changing canonical paths.
+    pub(crate) fn instruction_link_count(&self, relative: &str) -> io::Result<Option<u64>> {
+        use cap_fs_ext::MetadataExt;
+        let (directory, name) = match self.parent(relative, false) {
+            Ok(parent) => parent,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        match open_regular_file(&directory, &name) {
+            Ok(file) => Ok(Some(file.metadata()?.nlink())),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+    /// Bounded marker existence only; never parses a repository marker or follows
+    /// a marker link. Used only inside an already authorized directory chain.
+    pub(crate) fn instruction_marker_exists(&self, relative: &str) -> bool {
+        self.parent(relative, false)
+            .ok()
+            .and_then(|(directory, name)| directory.symlink_metadata(name).ok())
+            .is_some_and(|metadata| !linked(&metadata) && (metadata.is_file() || metadata.is_dir()))
+    }
+    /// Instruction reads inspect and open each component through held nofollow
+    /// capabilities. Size observations come only from the opened regular file.
+    pub(crate) fn read_instruction_file(
+        &self,
+        relative: &str,
+        max: usize,
+    ) -> Result<Vec<u8>, InstructionReadError> {
+        let parts = components(relative)?;
+        let mut directory = self.directory.try_clone()?;
+        for component in &parts[..parts.len() - 1] {
+            let metadata = directory.symlink_metadata(component)?;
+            if linked(&metadata) {
+                return Err(InstructionReadError::Linked);
+            }
+            if !metadata.is_dir() {
+                return Err(InstructionReadError::NonRegular);
+            }
+            directory = directory.open_dir_nofollow(component)?;
+            let metadata = directory.dir_metadata()?;
+            if linked(&metadata) {
+                return Err(InstructionReadError::Linked);
+            }
+            if !metadata.is_dir() {
+                return Err(InstructionReadError::NonRegular);
+            }
+        }
+        let name = parts.last().expect("validated components");
+        let metadata = directory.symlink_metadata(name)?;
+        if linked(&metadata) {
+            return Err(InstructionReadError::Linked);
+        }
+        if !metadata.is_file() {
+            return Err(InstructionReadError::NonRegular);
+        }
+        let file = open_regular_file(&directory, name)?;
+        let expected = file.metadata()?.len();
+        if expected > max as u64 {
+            return Err(InstructionReadError::Oversized);
+        }
+        let mut bytes = Vec::with_capacity(expected as usize);
+        (&file)
+            .take(max.saturating_add(1) as u64)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() > max {
+            return Err(InstructionReadError::Oversized);
+        }
+        if bytes.len() as u64 != expected || file.metadata()?.len() != expected {
+            return Err(InstructionReadError::Unreadable);
+        }
+        Ok(bytes)
+    }
     /// Canonical binding and capability are captured once per operation.
     pub(crate) fn open(root: &Path) -> io::Result<Self> {
         Self::open_canonical(root.canonicalize()?)

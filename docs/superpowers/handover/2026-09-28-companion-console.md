@@ -1,42 +1,72 @@
-# Handover: companion console build (M0–M10 merged; M11 active)
+# Handover: companion console build (M0–M10 merged; M11 ready)
 
-This document is for the next agent picking up the companion console upgrade. Read it first; it tells you where everything is and what to do next.
+This document is for the next agent picking up the companion console upgrade.
 
-## Start here (2026-10-12): M10 merged; M11 Hermes Markdown agent files active
+## Start here (2026-10-12): M11 Hermes Markdown port verified; publication next
 
-- Owner explicitly authorized merging PR #16 and preparing the next connector
-  milestone. M10 merged at `f80e653`, including final `eee9bb8`; M0–M10 are on main.
-- Owner then clarified standard Markdown defines agents, and instructed reuse of
-  the installed Hermes codebase ported to an independent Rust long-running agent.
-  M11 now handles AGENTS.md/SOUL.md prompt sources before connector implementation.
-- Active branch `g9000/hermes-agent-files-m11` is cut from merged main `f80e653`
-  (renamed from the initial connector preparation branch). Preserve unrelated
-  `nx.json`; no runtime changes have been made yet. Lean M11 planner is active.
-- Ledger/rules: `.superpowers/sdd/2026-10-12-hermes-agent-files-m11/`. Next: publish
-  its source-grounded lean plan and controller's binding five-risk rulings, port
-  core prompt behavior + safe host loader + protected writers/SDK/UI, batch review,
-  one fix wave and relevant local gates; then commit unsigned, push, open PR.
-  M11 merge still requires a new explicit owner instruction.
-- Verified local Hermes source revision remains `f3ef9db68332063a3625661f3a9b259f60abdb4e`.
-  `agent/prompt_builder.py`, `agent/system_prompt.py`, `agent/context_file_sources.py`
-  and `tools/file_tools_write_guards.py` provide actual precedence, primary SOUL
-  identity, bounded reads/truncation, source status and protected-write behavior.
-  Port focused code with MIT copyright/provenance, preserving Rust durability,
-  approvals, permission checks and credential ownership. No new memory store,
-  Python runtime or ambient Hermes-profile reads are authorized.
-- The M12 modular connector preparation is complete: about 1,250 lines and five
-  binding controller risk rulings in ignored
-  `.superpowers/sdd/2026-10-12-companion-connectors-m12/plan-draft.md`. It depends
-  on M11 merge. Start with portable trusted Rust traits/registry + Telegram pilot,
-  then scoped Discord, Gmail/Calendar reuse and selected Drive reads. Compile-in
-  community contributions are distinct from an unimplemented installable ABI.
-- No new dependencies/features, real daemons/services/databases/containers, live
-  provider requests or Docker Postgres55432 actions. Existing unsigned-commit
-  override persists; no GPG unlock needed. Stage explicit paths only, never
-  nx.json/anima.yaml, no stash/reset/restore/checkout--path/worktree operations.
-- M10's passing local gates are preserved below; repeat only checks relevant to
-  new M11 changes. Current container/TLS/Unix/provider/restore acceptance stays
-  unexecuted until separately authorized.
+- M0–M10 are on main. Owner explicitly authorized PR #16 merge; `f80e653`
+  includes final M10 head `eee9bb8`. Do not merge another PR without a new explicit
+  owner instruction.
+- Owner clarified Markdown defines agents and instructed reuse of installed
+  Hermes code/behavior ported to an independent Rust long-running runtime. M11
+  implements the focused AGENTS/SOUL port on `g9000/hermes-agent-files-m11`, cut
+  from merged main `f80e653`. Plan `d273b3e` was pushed; final sources/docs are
+  verified and ready for the controller's explicit commit/push/PR publication.
+- Published lean plan: `docs/superpowers/plans/2026-10-12-hermes-agent-files-m11.md`.
+  Controller binding five-risk rulings, two daemon batch reviews, final web/SDK
+  review and one fix wave are complete. A1 hard-link bypass and B1 summary reserve/
+  B2 compaction workspace binding are fixed. A2 path-deny finding was rejected:
+  actual policy denies risk classes, while rules/allowances grant allows only.
+- Portable core renderer/transient identity lives in anima-core; safe host file
+  loader, selected threat-pattern port, manifest, protected writers and runtime
+  admission live in focused daemon modules. SOUL replaces legacy persona while
+  preserving knowledge and immutable host role/delegation/origin. Runs keep one
+  snapshot through tools, steers and compaction; later runs read current files.
+  Configuration remains frozen at durable start. No durable schema/version change.
+- File scope is configured workspace only, with companion-only root SOUL fallback
+  or optional hex-ID profile. No ambient home/cwd/Hermes profiles, uploaded-file
+  promotion, automatic migration, new memory store or Python runtime. Enabling
+  `settings.agentFilesProfileEnabled` creates no files; it uses existing agent
+  creation/workspace configuration, with no new Settings PATCH/console toggle.
+- Current Settings preview and owner API show content-free metadata with explicit
+  `current_preview`, capture time and digest; they do not claim active-run history.
+  Model instruction writes demand exact owner decisions, create no reusable grants,
+  recheck revisions, and refuse multiply hard-linked targets. Approved shell remains
+  trusted full OS execution; no injection-immunity/sandbox guarantee is claimed.
+- Hermes source revision verified: `f3ef9db68332063a3625661f3a9b259f60abdb4e`.
+  MIT copyright/provenance retained in `hosts/rust-daemon/HERMES-NOTICE` and
+  `packages/core-rust/crates/anima-core/HERMES-NOTICE`. Focused pattern/source
+  behavior is adapted; differences and limits are documented in daemon README.
+- Fresh local gates on final functional sources: Rust **2,224 passed, 8 ignored**
+  (core dependency 627; host 1,597), web **1,133 passed**, SDK **123 passed, 3 skipped**.
+  SDK/web typechecks/builds pass. Cargo fmt and explicit owned-file Nx format checks
+  pass. Logs are ignored under `.superpowers/sdd/2026-10-12-hermes-agent-files-m11/`:
+  `gate-rust-current.log`, `gate-web-sdk-repair.log`, initial passing build outputs
+  in `gate-web-sdk.log`, plus formatter logs. The seven Postgres tests and one
+  manual inventory-print helper remain ignored; SDK service tests are explicitly
+  skipped. Existing web warning origins remain Operations/Dashboard/unknown
+  connection; focused preview tests have no new act/unhandled warnings.
+- No real daemon, dev server, database, container, live provider, microphone or
+  Hermes runtime/profile/credential access during M11. Tests use fake workspaces,
+  provider captures and in-process routes. Windows junction/hard-link boundaries
+  and cancellation/compaction fixtures pass; Unix-only cases remain unexecuted.
+  Browser/live deployment/restore acceptance was not rerun and is not implied.
+- M12 connector preparation is now tracked and reviewable at
+  `docs/superpowers/plans/2026-10-12-companion-connectors-m12.md`, with binding
+  controller five-risk rulings. No connector source is implemented. After explicit
+  M11 merge, create `g9000/companion-connectors-m12` from updated main only when
+  implementation is authorized. Scope foundation/trusted compile-in Rust traits
+  and registry plus existing Telegram pilot; later Discord, Gmail/Calendar reuse
+  and selected Drive reads follow separately verified plans. Installable ABI is
+  deferred; do not promise sandboxed/drop-in community modules.
+- Unsigned per-command controller commits remain owner-authorized. Never request
+  GPG unlock or change global signing config. Stage explicit files only; preserve
+  unrelated `nx.json`, never stage it or `anima.yaml`. Continue no dependencies/
+  features, services, Docker Postgres55432, worktree/stash/reset/restore/checkout-path.
+- Resume: finish current M11 commit/push/PR publication if not yet recorded below;
+  otherwise await explicit owner M11 merge instruction. Do not repeat implementation,
+  reviews or passing gates without new changes/failures. Ledger/rules retain exact
+  decisions at `.superpowers/sdd/2026-10-12-hermes-agent-files-m11/`.
 
 The following section retains M10 publication evidence.
 

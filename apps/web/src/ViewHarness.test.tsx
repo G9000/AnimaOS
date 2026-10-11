@@ -65,6 +65,21 @@ import {
 import { ViewHarness } from './ViewHarness';
 import { registerAttachmentJourneys } from './test/view-harness-attachments';
 
+// The controller journeys exercise the real child panel against an offline preview.
+// Error and stale-response behavior is covered in AgentFilesPanel.test.tsx.
+beforeEach(() => {
+  vi.spyOn(daemon, 'agentFilesPreview').mockResolvedValue({
+    mode: 'current_preview',
+    availability: 'unavailable_workspace',
+    capturedAtMs: 1,
+    snapshotDigest: 'offline-fixture',
+    identitySource: 'legacy',
+    projectSourceKind: null,
+    estimatedTokens: 0,
+    entries: [],
+  });
+});
+
 registerAttachmentJourneys({
   openLiveSession,
   mockProviders,

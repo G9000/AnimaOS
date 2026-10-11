@@ -15,6 +15,14 @@ import type {
 import type { AgentDetail } from '../lib/types';
 import { SettingsPanel } from './SettingsPanel';
 
+// Preview transport/lifecycle are covered by AgentFilesPanel.test.tsx. Keep
+// settings focus and save tests independent of an owner network request.
+vi.mock('./AgentFilesPanel', () => ({
+  AgentFilesPanel: ({ agentId }: { agentId: string }) => (
+    <section aria-label="Agent files" data-agent-id={agentId} />
+  ),
+}));
+
 const providers: DaemonProvider[] = [
   {
     id: 'openai',

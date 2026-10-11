@@ -1073,6 +1073,7 @@ async fn spawn_helper_checks_current_parent_authority_before_each_tool_action() 
 struct TeamModelAdapter {
     target: StdMutex<String>,
     configs: StdMutex<Vec<AgentConfig>>,
+    systems: StdMutex<Vec<String>>,
 }
 
 #[async_trait]
@@ -1086,6 +1087,7 @@ impl ModelAdapter for TeamModelAdapter {
         request: &ModelGenerateRequest,
     ) -> Result<ModelGenerateResponse, String> {
         self.configs.lock().unwrap().push(config.clone());
+        self.systems.lock().unwrap().push(request.system.clone());
         if config.name == "Manager"
             && !request
                 .messages
@@ -1123,6 +1125,7 @@ async fn manager_delegates_real_work_and_restores_config() {
     let adapter = Arc::new(TeamModelAdapter {
         target: StdMutex::new(String::new()),
         configs: StdMutex::new(vec![]),
+        systems: StdMutex::new(vec![]),
     });
     let state = Arc::new(RwLock::new(DaemonState::with_model_adapter(
         adapter.clone(),
@@ -1188,7 +1191,8 @@ async fn manager_delegates_real_work_and_restores_config() {
         .any(|message| message.content.text == "Content plan completed"));
     let _ = std::fs::remove_file(path);
     let configs = adapter.configs.lock().unwrap();
-    assert!(configs[0].system.as_ref().unwrap().contains("Alice"));
+    assert_eq!(configs[0].system, manager.config.system);
+    assert!(adapter.systems.lock().unwrap()[0].contains("Alice"));
     assert!(configs[0].allows_tool("delegate_to_agent"));
     assert!(!configs
         .iter()
@@ -3182,6 +3186,7 @@ async fn a_delegated_run_links_its_parent_run_and_session() {
     let adapter = Arc::new(TeamModelAdapter {
         target: StdMutex::new(String::new()),
         configs: StdMutex::new(vec![]),
+        systems: StdMutex::new(vec![]),
     });
     let state = Arc::new(RwLock::new(DaemonState::with_model_adapter(
         adapter.clone(),

@@ -29,6 +29,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `DELETE` | `/api/providers/chatgpt`                                                                     |
 | `DELETE` | `/api/skills/{slug}`                                                                         |
 | `GET`    | `/api/agents/{agent_id}/approval-policy`                                                     |
+| `GET`    | `/api/agents/{agent_id}/agent-files`                                                         |
 | `GET`    | `/api/agents/{agent_id}/approval-rules`                                                      |
 | `GET`    | `/api/agents/{agent_id}/attachments/{attachment_id}`                                         |
 | `GET`    | `/api/agents/{agent_id}/avatar`                                                              |
@@ -701,3 +702,93 @@ v11 pre-attachments snapshot backup is only a component; restoring JSON alone ca
 leave newer history rows that reappear later. Do not edit snapshot versions or
 apply historical pre-M2 SQL instructions to an M9/M10 rollback. See
 [VPS backup and acceptance procedures](../../deploy/vps/README.md).
+
+## Standard Markdown agent files
+
+The daemon ports focused Hermes agent-file behavior into its Rust runtime. The
+upstream source is revision `f3ef9db68332063a3625661f3a9b259f60abdb4e`, credited in
+`HERMES-NOTICE` and the core crate notice. This supports familiar instruction files;
+it does not claim complete Hermes/OpenClaw compatibility or proven prompt security.
+
+Place UTF-8 `SOUL.md` in the configured workspace root to define the companion's
+identity. The companion is the agent with `settings.workspaceRole: lead`. Other
+agents and helpers do not inherit that root identity. An accepted SOUL replaces
+legacy bio, lore, adjectives, topics, style and `system` persona for the isolated
+run; knowledge and the daemon's mandatory role/delegation/origin guidance remain.
+Missing, empty, blocked or excluded SOUL retains the complete legacy persona.
+Mandatory tool permissions and owner authority remain server policy.
+
+An optional boolean `settings.agentFilesProfileEnabled: true` selects only that
+agent's `.animaos-swarm/agent-profiles/<hex-agent-id>/SOUL.md`. Encode each UTF-8 byte
+of the server-generated agent ID as two lowercase hexadecimal digits. The fake ID
+`demo` would use `.animaos-swarm/agent-profiles/64656d6f/SOUL.md`. Profile mode does
+not fall back to root SOUL even for the companion. Configure this through the
+existing agent creation/workspace configuration flow; the existing agent PATCH
+route does not edit settings, and the console preview has no profile toggle.
+Enabling the setting creates no directories or files. Loading never writes or
+migrates existing instructions. No ambient OS home, process cwd, Hermes profile,
+caller-selected project directory or uploaded attachment is discovered.
+
+Project instruction priority at the configured root is:
+
+1. `.hermes.md`, then `HERMES.md`; complete initial YAML frontmatter is stripped
+   from these files without granting it configuration authority.
+2. `AGENTS.override.md`, then `AGENTS.md`, then `agents.md`.
+3. `CLAUDE.md`, then `claude.md`.
+4. `.cursorrules`.
+
+The loader implements a bounded root-to-project AGENTS chain for internal scoped
+calls, with nearest Hermes precedence, but public runs currently use the configured
+root. Missing, empty, unreadable or blocked candidates fall through to a usable
+candidate and appear in the manifest. This deliberately differs from upstream
+blocked-source shadowing. Identical normalized AGENTS text is included once.
+`.cursor/rules/*.mdc`, `USER.md` and `MEMORY.md` automatic loading are deferred;
+existing durable memory remains authoritative.
+
+The source text is read once at run admission, before final history selection.
+Active runs retain that snapshot through tools, steers and compaction; queued runs
+read current files when they start. Agent configuration is frozen at durable run
+start, as before; later configuration edits affect later runs. Files consume a
+reserved part of the context budget, with identity retained before project text.
+File bodies are not copied into configuration, transcript, semantic memory or
+persisted run metadata by this feature. The selected model provider receives the
+accepted prompt text. The Settings preview and owner-authorized
+`GET /api/agents/{agent_id}/agent-files` return relative names, states, byte/character
+counts, digests and threat IDs only. `mode: current_preview` and `capturedAtMs`
+explicitly describe a current load, which can differ from an active run's snapshot.
+Refresh does not reload an active run.
+
+Reads are capability-relative, reject linked/reparse/nonregular files and stay
+within the configured workspace. Bounds are 262,144 bytes per file, 1,048,576
+aggregate bytes, 96 candidates, 16 directory levels, 65,536 normalized scan
+characters, 20,000 rendered characters and a five-second total loading deadline.
+Two retained worker permits bound blocking reads; cancellation returns without
+waiting for the worker, and late results cannot install instructions. An OS-stuck
+read can retain a permit until it returns; this does not promise thread termination
+or an atomic multi-file filesystem transaction. Head/tail truncation is Unicode
+scalar safe, uses a bounded 70/30 allocation after reserving its marker, and counts
+markers and headings within the render budget.
+
+All sources, including SOUL, undergo bounded suspicious-instruction screening
+before truncation. A filename does not attest authorship; this Rust port has no
+upstream owner-authored SOUL exemption or trust database. Invalid UTF-8, NUL,
+hidden controls, oversized input and scanner-limit excess are excluded. The
+focused regex filter can miss attacks or reject benign prose; passing it grants
+no permissions and does not establish injection immunity. Full Unicode NFKC is
+not implemented; full-width ASCII folding is the documented bounded adaptation.
+
+Agent `write_file`, `edit_file` and `multi_edit` calls targeting instruction names
+require an exact owner decision even under reusable allow rules. Explicit denies
+still apply. Targets and revisions/absence are checked before waiting and again
+before dispatch; drift refuses the write. Such decisions create no reusable grants.
+Direct/swarm calls without an approval gate refuse these writes. Protected names
+also cover deferred USER/MEMORY/cursor rules, with case-insensitive matching.
+Ordinary uploads retain their existing sanitized display/collision names under `uploads/<date>/...`; root
+instruction discovery never promotes them. Authenticated owner file editing keeps
+its existing authority. Approved shell/background process execution retains full
+OS access and can change instructions: file-tool protection is not a sandbox.
+
+Validation uses fake workspaces, provider captures and in-process owner requests.
+It does not exercise live providers, real daemons, deployment restart, containers
+or Postgres. M12 connector preparation follows this milestone; no new connector
+provider or dynamic community loader is introduced here.

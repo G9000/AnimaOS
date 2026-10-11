@@ -1,5 +1,57 @@
 import type { AgentStatus, Attachment, TokenUsage } from '@animaOS-SWARM/core';
 
+export type AgentFileKind = 'soul' | 'hermes' | 'agents' | 'claude' | 'cursor';
+export type AgentFileState =
+  | 'loaded'
+  | 'truncated'
+  | 'shadowed'
+  | 'duplicate'
+  | 'empty'
+  | 'missing'
+  | 'unreadable'
+  | 'invalid_utf8'
+  | 'linked'
+  | 'non_regular'
+  | 'oversized'
+  | 'blocked'
+  | 'budget_excluded'
+  | 'timed_out'
+  | 'cancelled';
+export type AgentFileReasonCode =
+  | 'read_failed'
+  | 'invalid_scope'
+  | 'file_too_large'
+  | 'scan_limit'
+  | 'threat_detected'
+  | 'total_read_limit'
+  | 'candidate_limit'
+  | 'render_budget'
+  | 'deadline'
+  | 'cancelled';
+export interface AgentFileManifestEntry {
+  relativePath: string;
+  kind: AgentFileKind;
+  state: AgentFileState;
+  rawByteCount: number;
+  admittedCharCount: number;
+  digest: string | null;
+  truncated: boolean;
+  threatIds: string[];
+  reasonCode: AgentFileReasonCode | null;
+}
+
+/** Metadata only. Current files may differ from an active run's fixed snapshot. */
+export interface AgentFilesPreview {
+  mode: 'current_preview';
+  availability: 'available' | 'unavailable_workspace' | 'stale_scope';
+  capturedAtMs: number;
+  snapshotDigest: string;
+  identitySource: 'legacy' | 'workspace_soul' | 'profile_soul';
+  projectSourceKind: Exclude<AgentFileKind, 'soul'> | null;
+  estimatedTokens: number;
+  entries: AgentFileManifestEntry[];
+}
+
 /** JSON returned by the daemon; distinct from in-process runtime objects. */
 export interface DaemonContent {
   text: string;

@@ -1,4 +1,5 @@
 import { AgentsClient } from './agents.js';
+import { AgentFilesClient } from './agent-files.js';
 import { AttachmentsClient } from './attachments.js';
 import { GoalsClient } from './goals.js';
 import { AgenciesClient } from './agencies.js';
@@ -71,6 +72,7 @@ export class DaemonConnectionError extends Error {
 }
 
 export class DaemonClient {
+  readonly agentFiles: AgentFilesClient;
   readonly attachments: AttachmentsClient;
   readonly agencies: AgenciesClient;
   readonly workspace: WorkspaceClient;
@@ -102,6 +104,7 @@ export class DaemonClient {
     }
 
     this.fetchImpl = fetchImpl;
+    this.agentFiles = new AgentFilesClient(this);
     this.attachments = new AttachmentsClient(this);
     this.agencies = new AgenciesClient(this);
     this.workspace = new WorkspaceClient(this);

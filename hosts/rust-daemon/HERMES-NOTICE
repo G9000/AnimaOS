@@ -1,0 +1,47 @@
+Hermes Agent attribution for agent_files/{disk,selection,scan}.rs
+Source: https://github.com/NousResearch/hermes-agent
+Revision: f3ef9db68332063a3625661f3a9b259f60abdb4e
+
+Adapted agent/prompt_builder.py source selection (_agents_md_directory_chain,
+_agents_md_candidates, _hermes_md_candidates, _claude_md_candidates,
+_cursorrules_candidates, discover_context_files, load_soul_md) and
+ tools/threat_patterns.py::_PATTERNS / scan_for_threats, focused all-scope patterns.
+Selected threat IDs: prompt_injection, sys_prompt_override, disregard_rules,
+bypass_restrictions, html_comment_injection, hidden_div, translate_execute,
+deception_hide, exfil_curl, exfil_wget, read_secrets. Context/strict-scope
+patterns are intentionally omitted. Fixtures are invented local strings,
+including short representative attack/identity strings; no private files.
+
+Intentional differences: configured-root capabilities only, no ambient home/cwd;
+derived profile namespace; all files including SOUL screened; blocked candidates
+fall through; whole sources above 65,536 Unicode scalars excluded instead of
+scanning a prefix; full-width ASCII fold only rather than Python NFKC; no trust
+exceptions; SHA-256 content-free manifest. Fixed bounded Rust regex matching is
+advisory and can miss threats or reject legitimate discussion. Ordinary identity
+prose remains accepted. Immutable snapshots do not freeze the filesystem.
+
+An OS-stuck blocking read cannot be killed. The five-second caller deadline
+includes admission; two process-wide permits remain held until actual worker
+completion. Later loads fall back if both workers are stuck. Cancellation never
+publishes a late result. No claim of physical thread termination is made.
+MIT License
+
+Copyright (c) 2025 Nous Research
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

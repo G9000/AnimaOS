@@ -1,6 +1,6 @@
 # M11: Standard Markdown Agent Files — Lean Plan
 
-> Draft only. Controller publishes final plan after five binding rulings. Use superpowers:subagent-driven-development with bounded Codex workers. This assignment prepares an ignored plan only; no source implementation, staging or commit.
+> Published execution plan. Five binding controller rulings appear below. The owner authorized a focused Rust port with Codex workers, batch reviews and one fix wave; the controller handles explicit staging and unsigned publication. This is a bounded Hermes adaptation, not full parity.
 
 **Goal:** Standard SOUL.md and AGENTS.md define agent identity and project instructions in
 the existing Rust long-running runtime, with safe bounded loading, isolated run admission,
@@ -513,16 +513,16 @@ Owned files:
 
 Steps:
 
-- [ ] Inspect prompt assembly and snapshot serialization.
-- [ ] Write meaningful failing prompt replacement tests.
-- [ ] Define transient identity/render interfaces.
-- [ ] Implement pure bounded Unicode rendering.
-- [ ] Apply runtime override without canonical mutation.
-- [ ] Separate immutable host guidance from persona.
-- [ ] Preserve old no-file prompt behavior.
-- [ ] Retain full MIT/provenance.
-- [ ] Run focused core tests via confirmed Nx filter.
-- [ ] Report files/tests to controller, no staging.
+- [x] Inspect prompt assembly and snapshot serialization.
+- [x] Write meaningful failing prompt replacement tests.
+- [x] Define transient identity/render interfaces.
+- [x] Implement pure bounded Unicode rendering.
+- [x] Apply runtime override without canonical mutation.
+- [x] Separate immutable host guidance from persona.
+- [x] Preserve old no-file prompt behavior.
+- [x] Retain full MIT/provenance.
+- [x] Verify core behavior through the required Nx dependency gate.
+- [x] Report files/tests to controller, no staging.
 
 Tests:
 
@@ -575,18 +575,18 @@ Owned files:
 
 Steps:
 
-- [ ] Create fake workspace fixtures.
-- [ ] Write profile/source precedence regressions.
-- [ ] Reuse capability root and nofollow reads.
-- [ ] Implement fixed bounded enumeration.
-- [ ] Implement BOM/frontmatter/UTF-8 normalization.
-- [ ] Compile vetted supported upstream patterns.
-- [ ] Scan whole admissible text before truncation.
-- [ ] Render snapshot/manifest from one byte set.
-- [ ] Add owned blocking-worker deadline wrapper.
-- [ ] Add bounded semaphore/cancellation behavior.
-- [ ] Verify notices and intentional differences.
-- [ ] Run focused loader tests.
+- [x] Create fake workspace fixtures.
+- [x] Write profile/source precedence regressions.
+- [x] Reuse capability root and nofollow reads.
+- [x] Implement fixed bounded enumeration.
+- [x] Implement BOM/frontmatter/UTF-8 normalization.
+- [x] Compile vetted supported upstream patterns.
+- [x] Scan whole admissible text before truncation.
+- [x] Render snapshot/manifest from one byte set.
+- [x] Add owned blocking-worker deadline wrapper.
+- [x] Add bounded semaphore/cancellation behavior.
+- [x] Verify notices and intentional differences.
+- [x] Run focused loader tests.
 
 Selection tests:
 
@@ -688,17 +688,17 @@ Owned files:
 
 Steps:
 
-- [ ] Write allow-rule/no-gate bypass regressions.
-- [ ] Classify normalized and resolved targets safely.
-- [ ] Force exact owner decision before allowances.
-- [ ] Preserve explicit deny/live tool authority.
-- [ ] Bind approval to target revision and args.
-- [ ] Recheck after owner decision.
-- [ ] Refuse protected direct/swarm no-gate calls.
-- [ ] Verify root-only discovery never follows upload namespace.
-- [ ] Preserve existing display metadata and uploads/date collision behavior.
-- [ ] Document trusted full OS process limit.
-- [ ] Run focused approval/upload tests.
+- [x] Write allow-rule/no-gate bypass regressions.
+- [x] Classify normalized and resolved targets safely.
+- [x] Force exact owner decision before allowances.
+- [x] Preserve explicit deny/live tool authority.
+- [x] Bind approval to target revision and args.
+- [x] Recheck after owner decision.
+- [x] Refuse protected direct/swarm no-gate calls.
+- [x] Verify root-only discovery never follows upload namespace.
+- [x] Preserve existing display metadata and uploads/date collision behavior.
+- [x] Document trusted full OS process limit.
+- [x] Verify approval/upload regressions through the full required host gate.
 
 Tests:
 
@@ -741,7 +741,7 @@ Tests:
 37. Case-variant attachment cannot become control source.
 38. Hermes/override attachment cannot become source.
 39. Upload collision allocator unchanged.
-40. Original display filename unchanged.
+40. Existing upload normalization/display/collision behavior unchanged.
 41. Attachment ID/download stored path unchanged.
 42. Loader never probes uploads namespace.
 43. Ordinary upload behavior unchanged.
@@ -768,17 +768,17 @@ Owned files:
 
 Steps:
 
-- [ ] Capture scope under state read lock.
-- [ ] Release lock before loader.
-- [ ] Admit before first model/history selection.
-- [ ] Check generation/config/session after load.
-- [ ] Attach same Arc to primary/rebuild.
-- [ ] Keep immutable role guidance separate.
-- [ ] Reserve file tokens before trimming.
-- [ ] Count file tokens once in calibration.
-- [ ] Exclude file text from commit delta.
-- [ ] Reuse snapshot after compaction.
-- [ ] Run meaningful overlapping-session regressions.
+- [x] Capture scope under state read lock.
+- [x] Release lock before loader.
+- [x] Admit before first model/history selection.
+- [x] Check generation/config/session after load.
+- [x] Attach same Arc to primary/rebuild.
+- [x] Keep immutable role guidance separate.
+- [x] Reserve file tokens before trimming.
+- [x] Count file tokens once in calibration.
+- [x] Exclude file text from commit delta.
+- [x] Reuse snapshot after compaction.
+- [x] Run meaningful overlapping-session regressions.
 
 Tests:
 
@@ -842,13 +842,13 @@ Owned files:
 
 Steps:
 
-- [ ] Define closed content-free DTO.
-- [ ] Use same loader under captured current scope.
-- [ ] Add owner auth route and OpenAPI schema.
-- [ ] Validate profile boolean only.
-- [ ] Add SDK method/exports.
-- [ ] Test auth/error/cancel/content absence.
-- [ ] Run host route and SDK checks.
+- [x] Define closed content-free DTO.
+- [x] Use same loader under captured current scope.
+- [x] Add owner auth route and OpenAPI schema.
+- [x] Validate profile boolean only.
+- [x] Add SDK method/exports.
+- [x] Test auth/error/cancel/content absence.
+- [x] Run host route and SDK checks.
 
 Tests:
 
@@ -900,16 +900,16 @@ Owned files:
 
 Steps:
 
-- [ ] Add focused current-preview child panel.
-- [ ] Guard late selected-agent responses.
-- [ ] Show relative names/state/digests only.
-- [ ] Explain preview versus fixed active run.
-- [ ] Optionally expose boolean profile checkbox.
-- [ ] Add accessible loading/empty/error states.
-- [ ] Write setup/limits/examples with fake data.
-- [ ] Complete batch reviews and one fix wave.
-- [ ] Run required current-tree gates.
-- [ ] Update handover evidence and M12 dependency.
+- [x] Add focused current-preview child panel.
+- [x] Guard late selected-agent responses.
+- [x] Show relative names/state/digests only.
+- [x] Explain preview versus fixed active run.
+- [x] Resolve optional profile checkbox: omit per controller ruling; existing configuration flow remains.
+- [x] Add accessible loading/empty/error states.
+- [x] Write setup/limits/examples with fake data.
+- [x] Complete batch reviews and one fix wave.
+- [x] Run required current-tree gates.
+- [x] Update handover evidence and M12 dependency.
 
 Web tests:
 
@@ -1099,15 +1099,15 @@ remains; visible states and actual request tests keep claims honest.
 
 ## Controller completion checklist
 
-- [ ] Bind the five decisions.
-- [ ] Resolve actual Nx inventory.
-- [ ] Freeze exact interfaces before workers.
-- [ ] Publish final plan.
-- [ ] Execute six bounded tasks.
-- [ ] Complete reviews and one fix wave.
-- [ ] Pass current-tree relevant gates.
-- [ ] Retain complete MIT/source notices.
-- [ ] Update handover evidence/M12 dependency.
+- [x] Bind the five decisions.
+- [x] Resolve actual Nx inventory.
+- [x] Freeze exact interfaces before workers.
+- [x] Publish final plan.
+- [x] Execute six bounded tasks.
+- [x] Complete reviews and one fix wave.
+- [x] Pass current-tree relevant gates.
+- [x] Retain complete MIT/source notices.
+- [x] Update handover evidence/M12 dependency.
 - [ ] Controller stages, commits and publishes.
 
 ## Controller rulings on the risks (binding)
@@ -1119,3 +1119,13 @@ remains; visible states and actual request tests keep claims honest.
 5. Ruling: Reserve accepted file tokens before history selection, count them once, reuse one snapshot after compaction, and persist no source bodies; expose content-free current_preview from the same loader — late additions overflow context and rereads misrepresent active instructions — cost if wrong: small budgets exclude useful files and current preview can differ from active runs; provider prompt capture and visible states establish the bounded behavior.
 
 Execution authorization: the owner explicitly requested this Rust port now and authorized Codex subagents. Their cheap batch-review/one-fix-wave workflow supersedes per-task skill review loops. No worktrees, extra approval pauses, new dependencies or services. Six tasks are scoped implementation rather than full Hermes parity; meaningful behavioral regressions may consolidate the draft's overlapping test lists.
+
+## Execution evidence (2026-10-12)
+
+Six bounded tasks, two daemon batch reviews, the final web/SDK review and one fix wave are complete. Overlapping draft test scenarios were consolidated into meaningful regressions. Optional Settings profile toggle was omitted because the existing AgentDetail/PATCH contracts do not expose settings; profile configuration uses existing creation/workspace configuration.
+
+A1 hard-link filename bypass was fixed using existing capability metadata link counts. A2's path-deny premise was rejected after inspecting the class-wide deny evaluator and allow-only matchers. B1 now reserves retained summary before file allocation; B2 preserves admitted tool/attachment adapter workspace binding across compaction. The self roster omits legacy biography when SOUL applies. Existing upload normalization and collision behavior remains.
+
+Current functional gates: Nx Rust core627 + host1597 =2224passed,8ignored; SDK123passed,3service-skipped; web1133passed104files; SDK/web typecheck/build and Cargo/Nx formatting pass. Local fake/provider-capture/in-process evidence does not prove live providers, Unix-only behavior or deployment readiness. The required Rust gate caught stale test assumptions and they were corrected to capture actual provider prompts and use existing upload normalization.
+
+Detailed commands, decisions and logs are retained in ignored `.superpowers/sdd/2026-10-12-hermes-agent-files-m11/`. Master/handover carry publication and exact resume state. M12 prepared plan is tracked separately; no connector implementation or M11 merge is authorized by this completion record.

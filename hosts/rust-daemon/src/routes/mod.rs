@@ -1,5 +1,6 @@
 mod agencies;
 mod agent_avatar;
+mod agent_files;
 mod agents;
 mod approvals;
 mod attachments;
@@ -122,6 +123,7 @@ use crate::runtime_model::provider_summaries;
         run_agent_entry,
         get_agent_avatar_entry,
         get_agent_tasks_entry,
+        agent_files::preview,
         put_agent_tasks_entry,
         put_agent_avatar_entry,
         delete_agent_avatar_entry,
@@ -200,7 +202,11 @@ use crate::runtime_model::provider_summaries;
         status::get_status,
         attachments::upload, attachments::serve,
     ),
-    components(schemas(self::contracts::AgentSummariesEnvelope, self::contracts::AttachmentEnvelope, self::contracts::AttachmentResponse)),
+    components(schemas(self::contracts::AgentSummariesEnvelope, self::contracts::AttachmentEnvelope, self::contracts::AttachmentResponse,
+        self::contracts::agent_files::AgentFilesPreview, self::contracts::agent_files::PreviewMode,
+        crate::agent_files::AgentFilesManifest, crate::agent_files::AgentFileManifestEntry,
+        crate::agent_files::Availability, crate::agent_files::IdentitySource, crate::agent_files::ProjectSourceKind,
+        crate::agent_files::AgentFileKind, crate::agent_files::AgentFileState, crate::agent_files::ReasonCode)),
     tags(
         (name = "attachments", description = "Owner-authorized session uploads and downloads"),
         (name = "health", description = "Daemon health endpoints"),
@@ -740,6 +746,10 @@ fn router_with_services_with_policies(
         .route(
             "/api/agents/{agent_id}/tasks",
             get(get_agent_tasks_entry).put(put_agent_tasks_entry),
+        )
+        .route(
+            "/api/agents/{agent_id}/agent-files",
+            get(agent_files::preview),
         )
         .route(
             "/api/agents/{agent_id}/avatar",
@@ -2119,6 +2129,7 @@ async fn handle_memory_search(uri: Uri, state: &SharedDaemonState) -> AxumRespon
 
 #[cfg(test)]
 mod tests {
+    mod agent_files;
     mod approvals;
     mod attachments;
     mod automations;
