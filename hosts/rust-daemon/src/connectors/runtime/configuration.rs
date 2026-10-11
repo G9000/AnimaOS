@@ -32,8 +32,9 @@ impl ConnectorManager {
         }
 
         let bot = self
-            .transport
-            .get_me(&token)
+            .registry
+            .telegram(&token)
+            .identify()
             .await
             .map_err(map_token_validation_error)?;
         let now = now_ms();
@@ -195,8 +196,9 @@ impl ConnectorManager {
             .copied()
             .unwrap_or_else(|| connector_operational_status(&preflight_connector));
         let bot = self
-            .transport
-            .get_me(&token)
+            .registry
+            .telegram(&token)
+            .identify()
             .await
             .map_err(map_token_validation_error)?;
         let previous_token = match self.credentials.load(&connector_id).await {

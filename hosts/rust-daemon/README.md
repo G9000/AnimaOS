@@ -1,5 +1,12 @@
 # anima-daemon
 
+## Connector contributions
+
+The Rust connector contract and Telegram pilot support reviewed, trusted source
+contributions compiled into this host. See [Contributing connectors](CONNECTOR-CONTRIBUTING.md)
+for interfaces, authority boundaries and verification. Community adapters require
+a rebuild and run with host privileges; installable modules are deferred.
+
 ## API route inventory
 
 This marked inventory follows `ApiDoc::openapi()`. Detailed authorization and limits

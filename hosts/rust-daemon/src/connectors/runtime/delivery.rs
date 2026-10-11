@@ -239,8 +239,13 @@ impl ConnectorManager {
             .id;
         let outbound = &claim.outbound;
         let delivery = self
-            .transport
-            .send_message(token, chat_id, &outbound.text)
+            .registry
+            .telegram(token)
+            .send(ConnectorSendRequest {
+                destination: chat_id.clone(),
+                text: outbound.text.clone(),
+                attempt_id: outbound.id.clone(),
+            })
             .await;
         let _mutation = self.mutation_lock.lock().await;
         let (previous_connector_outbound, persist) = {

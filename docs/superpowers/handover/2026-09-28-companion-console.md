@@ -1,6 +1,6 @@
-# Handover: companion console build (M0–M11 merged; M12 active)
+# Handover: companion console build (M0–M11 merged; M12 ready)
 
-## Start here (2026-10-12): M12 modular connector foundation active
+## Start here (2026-10-12): M12 modular connector foundation ready
 
 - Owner explicitly instructed merge and continue. PR #17 merged at
   `37218944488001caa4e34ae7f6fa13cde1f36d6b`, including Anima naming correction
@@ -23,10 +23,28 @@
   community contributions are trusted compile-in source with host privileges.
   Installable ABI/sidecars/WASM and new Discord/Drive providers remain deferred.
   Existing owner API/SDK/UI do not gain installer or activation claims.
-- Core and host implementers are active. Controller owns contribution docs/status.
-  Next: finish bounded source integration, one daemon batch and final API/UI review,
-  one fix wave, required Rust Nx dependency gate plus lint/format; update evidence,
-  commit unsigned/push/open PR. A new M12 merge still requires explicit owner action.
+- Implementation and contribution guide are complete. One daemon batch review and
+  final API/SDK/web/docs review found no actionable issues; the single fix wave
+  reconciled the host trait aliases and formatting. Public core trait remains
+  `ConnectorTransport`; host imports alias it as `AsyncConnectorTransport`.
+- Fresh local Nx host test gate passed, including its core dependency:
+  **2,230 Rust tests passed** (core 630, host 1,600), **8 ignored** (five Postgres,
+  one live subscription smoke, one model-download test and one inventory printer).
+  All six new contract/adapter tests pass, with existing lifecycle/claim/recovery
+  fixtures traversing the new seam. Rust lint (`cargo fmt --all --check`) passes.
+  Logs: `.superpowers/sdd/2026-10-12-companion-connectors-m12/gate-rust.log` and
+  `gate-lint.log`. Explicit owned Markdown formatting is checked at publication.
+- HTTP owner API, SDK/web sources, snapshot version 11 and dependency manifests
+  are unchanged. TypeScript and Astro gates are conditional and were not repeated
+  for unchanged sources. Local fakes establish compatibility, not live delivery.
+- Contribution instructions: `hosts/rust-daemon/CONNECTOR-CONTRIBUTING.md`.
+  Portable text bounds are 1,048,576 Unicode scalars; excessive requests fail
+  before transport, with a static native error. `attempt_id` is host correlation,
+  not a provider deduplication promise. No new lifecycle or durable schema.
+- Resume: finish M12 commit/push/PR publication, then await explicit owner M12
+  merge authorization. After that merge, the next bounded connector scope is
+  Discord REST chat; Gmail/Calendar contract migration and selected Drive read/search
+  follow separately. Do not create another milestone branch from unmerged M12.
 - No new dependencies/features, services/daemons/providers/keyring reads/databases/
   containers or Docker Postgres55432 actions. Prefix cargo with CARGO_INCREMENTAL=0;
   serialize compilation, keep existing target dirs. Explicit file staging only;

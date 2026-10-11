@@ -327,6 +327,7 @@ pub(crate) enum TelegramTransportError {
     InvalidChatId,
     InvalidOffset,
     InvalidMessage,
+    InvalidRequestBounds,
 }
 
 impl TelegramTransportError {
@@ -342,6 +343,7 @@ impl TelegramTransportError {
         Self::InvalidChatId,
         Self::InvalidOffset,
         Self::InvalidMessage,
+        Self::InvalidRequestBounds,
     ];
 }
 
@@ -368,6 +370,9 @@ impl fmt::Display for TelegramTransportError {
             Self::InvalidChatId => formatter.write_str("Telegram chat identifier is invalid"),
             Self::InvalidOffset => formatter.write_str("Telegram update offset is invalid"),
             Self::InvalidMessage => formatter.write_str("Telegram message is empty"),
+            Self::InvalidRequestBounds => {
+                formatter.write_str("Telegram request violates portable connector bounds")
+            }
         }
     }
 }

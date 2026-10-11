@@ -1,4 +1,4 @@
-# Companion Connectors M12 — Prepared Lean Plan
+# Companion Connectors M12 — Lean Plan
 
 > Execution authorized by the owner on 2026-10-12: merge PR #17 and continue. M11 merged at `3721894`, including naming correction `21120aa`. Active branch `g9000/companion-connectors-m12` is cut from that main. Binding five-risk rulings and post-merge interfaces appear below.
 
@@ -11,9 +11,9 @@ through documented traits and host registration. Describe installable modules
 as future work requiring a genuine isolation, process, and dependency policy.
 
 Active branch: `g9000/companion-connectors-m12`.
-Create it from updated main only after M11 merges. Do not create it during
-preparation. M10 was merged at `f80e653`; reverify M11's actual merge before
-implementation because this draft cannot predict the post-M11 tree.
+It was cut from main `3721894` after the owner-authorized M11 merge. The original
+preparation below is retained for design evidence; binding controller interface
+decisions at the end supersede draft interfaces.
 
 Priority order remains Telegram, Discord, Gmail, Calendar, Drive.
 M12 implements foundation plus Telegram only. Discord REST chat is the next
@@ -1274,5 +1274,37 @@ Ruling: Freeze registration at bootstrap with trusted source contributions, no p
 Ruling: Run required rust-daemon:test once with its core-rust:test dependency, plus lint/format — resolved Nx already runs the core task; separate standalone full core execution duplicates work — cost if wrong: inspect both task outcomes/counts instead of assume dependency success. Serialize cargo; no new target directories, dependencies/features, real services/providers/databases/containers, GPG prompts, or automatic PR merge. Existing unsigned per-command commits and explicit paths persist.
 
 Bounds: registry/descriptor/request constants and meaningful tests are owned by the portable-contract implementer; preserve valid Telegram cursor/send behavior and existing splitting. New validation errors must be before any transport effect, and no raw payload/credential appears in generic public errors. Document any new upper bound and its cost explicitly in the ledger before wiring.
+
+## M12 execution outcome (2026-10-12)
+
+Core descriptor catalog and `ConnectorTransport` are implemented without new
+dependencies. The daemon routes Telegram identify, poll, durable delivery and
+pairing notices through the registered credential-borrowing adapter. Native
+payload/error/chunking behavior and existing host lifecycle fences are retained.
+Reviewed source contributions and their host privileges/rebuild requirements are
+documented in `hosts/rust-daemon/CONNECTOR-CONTRIBUTING.md`.
+
+One daemon batch review and one final API/SDK/web/docs review found no actionable
+issues. The single fix wave reconciled host import aliases and formatting.
+Current-tree Nx Rust gate: **2,230 passed, 8 ignored**, comprising core dependency
+630 and host 1,600. Ignored cases: five Postgres, one live subscription smoke, one
+model download and one inventory printer. All six new consolidated tests pass.
+Nx Rust lint passes. HTTP/SDK/web, durable schema v11 and manifests are unchanged;
+conditional TypeScript/Astro gates were not repeated. No services, databases,
+containers, providers, user profiles or secrets were accessed.
+
+Ruling: Metadata bounds apply to fields, not a fixed catalog count — reviewed
+compile-in source registration is passive and not external discovery — cost if
+wrong: a future external catalog needs its own discovery and resource bounds.
+Ruling: Portable text is capped at 1,048,576 Unicode scalars, with cursor128,
+destination256 and attempt128 — bound requests before effects while retaining
+native splitting — cost if wrong: enormous output fails closed with static native
+`InvalidRequestBounds`; valid text whitespace/control handling remains native.
+Ruling: The host test target's core dependency run satisfies both required Rust
+test suites — avoid duplicate compilation while inspecting both outcomes — cost
+if wrong: failed dependency or host outcomes must block publication independently.
+
+Publication remains on the M12 branch against main. M12 merge needs a new explicit
+owner instruction; next connector work begins from main after that merge.
 
 Anima/AnimaOS is our product naming. Upstream names appear only in attribution or source-reference evidence. The 77 acceptance scenarios guide consolidated behavioral coverage and regression reuse, not 77 mandatory new tests.
