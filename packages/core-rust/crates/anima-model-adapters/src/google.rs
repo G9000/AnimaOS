@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use crate::attachments::{model_supports_images, prepare_user_content};
 use anima_core::{
     AgentConfig, Content, DataValue, Message, MessageRole, ModelGenerateRequest,
     ModelGenerateResponse, ModelStopReason, TokenUsage, ToolCall,
@@ -24,7 +25,7 @@ pub(super) fn build_google_body(
     );
     body.insert(
         "contents".into(),
-        Value::Array(build_google_contents(request)?),
+        Value::Array(build_google_contents(config, request)?),
     );
 
     if let Some(tools) = build_google_tools(config)? {
@@ -45,16 +46,27 @@ pub(super) fn build_google_body(
     Ok(Value::Object(body))
 }
 
-fn build_google_contents(request: &ModelGenerateRequest) -> Result<Vec<Value>, String> {
+fn build_google_contents(
+    config: &AgentConfig,
+    request: &ModelGenerateRequest,
+) -> Result<Vec<Value>, String> {
+    let supports_images = model_supports_images(
+        config.provider.as_deref().unwrap_or("google"),
+        &config.model,
+    );
     let mut contents: Vec<Value> = Vec::new();
 
     for (index, message) in request.messages.iter().enumerate() {
         match message.role {
             MessageRole::System => {}
-            MessageRole::User => contents.push(json!({
-                "role": "user",
-                "parts": [{ "text": message.content.text }],
-            })),
+            MessageRole::User => {
+                let prepared = prepare_user_content(&message.content, supports_images)?;
+                let mut parts = vec![json!({"text":prepared.text})];
+                parts.extend(prepared.images.iter().map(
+                    |image| json!({"inline_data":{"mime_type":image.mime, "data":image.base64}}),
+                ));
+                contents.push(json!({"role":"user", "parts":parts}));
+            }
             MessageRole::Assistant => {
                 let parts = match preserved_google_response_parts(message)? {
                     Some(parts) => parts,
@@ -412,6 +424,9 @@ fn google_stream_error(error: &Value) -> String {
     };
     format!(
         "Google stream failed: {}",
-        detail.chars().take(200).collect::<String>()
+        crate::adapter::sanitize_upstream_body(&detail, None)
+            .chars()
+            .take(200)
+            .collect::<String>()
     )
 }

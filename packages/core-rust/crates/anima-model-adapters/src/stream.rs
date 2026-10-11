@@ -45,17 +45,19 @@ impl ModelAdapter for DeterministicModelAdapter {
     async fn generate(
         &self,
         _config: &AgentConfig,
-        _request: &ModelGenerateRequest,
+        request: &ModelGenerateRequest,
     ) -> Result<ModelGenerateResponse, String> {
+        let _prepared = crate::attachments::text_fallback_request(request)?;
         Ok(self.response())
     }
 
     async fn stream(
         &self,
         _config: &AgentConfig,
-        _request: &ModelGenerateRequest,
+        request: &ModelGenerateRequest,
         sink: &dyn ModelStreamSink,
     ) -> Result<(), String> {
+        let _prepared = crate::attachments::text_fallback_request(request)?;
         for delta in self.text.split_inclusive(' ') {
             let _ = sink
                 .emit(ModelStreamFrame::TextDelta(delta.to_owned()))

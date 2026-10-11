@@ -574,6 +574,9 @@ async fn response_payload(
 }
 
 pub(crate) fn sanitize_upstream_body(body: &str, api_key: Option<&str>) -> String {
+    if crate::attachments::image_payload_error(body) {
+        return "[image payload redacted]".into();
+    }
     let redacted = api_key
         .filter(|key| !key.is_empty())
         .map_or_else(|| body.to_owned(), |key| body.replace(key, "[REDACTED]"));

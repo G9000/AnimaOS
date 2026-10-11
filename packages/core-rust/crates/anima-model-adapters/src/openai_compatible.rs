@@ -1,3 +1,4 @@
+use crate::attachments::{model_supports_images, prepare_user_content};
 use anima_core::{
     AgentConfig, Content, MessageRole, ModelGenerateRequest, ModelGenerateResponse,
     ModelStopReason, ToolCall, ToolDescriptor,
@@ -17,7 +18,7 @@ pub(super) fn build_openai_compatible_body(
     body.insert("model".into(), Value::String(config.model.clone()));
     body.insert(
         "messages".into(),
-        Value::Array(build_openai_compatible_messages(request)?),
+        Value::Array(build_openai_compatible_messages(config, request)?),
     );
 
     if let Some(tools) = build_openai_compatible_tools(config)? {
@@ -35,7 +36,14 @@ pub(super) fn build_openai_compatible_body(
     Ok(Value::Object(body))
 }
 
-fn build_openai_compatible_messages(request: &ModelGenerateRequest) -> Result<Vec<Value>, String> {
+fn build_openai_compatible_messages(
+    config: &AgentConfig,
+    request: &ModelGenerateRequest,
+) -> Result<Vec<Value>, String> {
+    let supports_images = model_supports_images(
+        config.provider.as_deref().unwrap_or("openai"),
+        &config.model,
+    );
     let mut messages = vec![json!({
         "role": "system",
         "content": request.system,
@@ -47,10 +55,19 @@ fn build_openai_compatible_messages(request: &ModelGenerateRequest) -> Result<Ve
                 "role": "system",
                 "content": message.content.text,
             })),
-            MessageRole::User => messages.push(json!({
-                "role": "user",
-                "content": message.content.text,
-            })),
+            MessageRole::User => {
+                let prepared = prepare_user_content(&message.content, supports_images)?;
+                let content = if prepared.images.is_empty() {
+                    Value::String(prepared.text)
+                } else {
+                    let mut parts = vec![json!({"type":"text", "text":prepared.text})];
+                    parts.extend(prepared.images.iter().map(
+                        |image| json!({"type":"image_url", "image_url":{"url":image.data_uri}}),
+                    ));
+                    Value::Array(parts)
+                };
+                messages.push(json!({"role":"user", "content":content}));
+            }
             MessageRole::Assistant => {
                 let tool_calls = assistant_tool_calls_json(message)?;
                 let content = if message.content.text.is_empty() {

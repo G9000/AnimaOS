@@ -3,6 +3,74 @@ use anima_core::{Content, DataValue, Message, MessageRole, ModelStopReason, Tool
 use serde_json::json;
 use std::collections::BTreeMap;
 
+#[test]
+fn attachment_subscription_request_keeps_images_and_tool_history() {
+    let mut request = ModelGenerateRequest {
+        system: "System".into(),
+        temperature: None,
+        max_tokens: None,
+        messages: vec![message(MessageRole::User, "Describe", None)],
+    };
+    request.messages[0].content.attachments = Some(vec![
+        anima_core::Attachment {
+            attachment_type: anima_core::AttachmentType::Image,
+            name: "photo.png".into(),
+            data: "data:image/png;base64,aGVsbG8=".into(),
+            mime_type: Some("image/png".into()),
+        },
+        anima_core::Attachment {
+            attachment_type: anima_core::AttachmentType::Image,
+            name: "photo.jpg".into(),
+            data: "data:image/jpeg;base64,d29ybGQ=".into(),
+            mime_type: Some("image/jpeg".into()),
+        },
+    ]);
+    request.messages.extend([
+        message(
+            MessageRole::Assistant,
+            "",
+            Some(BTreeMap::from([(
+                "toolCalls".into(),
+                DataValue::Array(vec![DataValue::Object(BTreeMap::from([
+                    ("id".into(), DataValue::String("call_image".into())),
+                    ("name".into(), DataValue::String("lookup".into())),
+                    ("args".into(), DataValue::Object(BTreeMap::new())),
+                ]))]),
+            )])),
+        ),
+        message(
+            MessageRole::Tool,
+            "record",
+            Some(BTreeMap::from([(
+                "toolCallId".into(),
+                DataValue::String("call_image".into()),
+            )])),
+        ),
+    ]);
+    let body = request_body(&config(), &request).unwrap();
+    assert_eq!(
+        body["input"][0]["content"],
+        json!([
+            {"type":"input_text", "text":"Describe"},
+            {"type":"input_image", "image_url":"data:image/png;base64,aGVsbG8="},
+            {"type":"input_image", "image_url":"data:image/jpeg;base64,d29ybGQ="}
+        ])
+    );
+    assert_eq!(body["input"][1]["type"], "function_call");
+    assert_eq!(body["input"][1]["call_id"], "call_image");
+    assert_eq!(body["input"][2]["type"], "function_call_output");
+    assert_eq!(body["input"][2]["call_id"], "call_image");
+    let mut unknown = config();
+    unknown.model = "unknown".into();
+    let body = request_body(&unknown, &request).unwrap();
+    assert_eq!(body["input"][0]["content"].as_array().unwrap().len(), 1);
+    assert!(body["input"][0]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("cannot view"));
+    assert!(!body.to_string().contains("aGVsbG8="));
+}
+
 fn config() -> AgentConfig {
     AgentConfig {
         name: "subscription test".into(),

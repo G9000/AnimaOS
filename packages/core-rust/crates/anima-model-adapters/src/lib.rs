@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 mod adapter;
 mod anthropic;
+mod attachments;
 mod catalog;
 mod chatgpt;
 mod common;
@@ -12,6 +13,7 @@ mod openai_compatible;
 mod stream;
 
 pub use adapter::ProviderModelAdapter;
+pub use attachments::{image_reference_text, model_supports_images};
 pub use catalog::provider_definitions;
 pub use chatgpt::ChatGptResponsesAdapter;
 pub use models::{
@@ -61,5 +63,7 @@ impl std::fmt::Debug for ProviderAdapterConfig {
     }
 }
 
+#[cfg(test)]
+mod attachments_tests;
 #[cfg(test)]
 mod tests;
