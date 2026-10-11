@@ -10,6 +10,7 @@ import {
   isTerminalRunStatus,
   type RunMode,
   type Session,
+  type UploadedAttachment,
 } from '@animaOS-SWARM/sdk';
 
 import { AlertIcon } from './components/icons';
@@ -57,6 +58,10 @@ import { useHashRoute, type HashRoute } from './lib/hash-route';
 import { exportFileName, sessionKey } from './lib/session-groups';
 import { loadDraft, storeDraft } from './lib/drafts';
 import { safeIntegrationError } from './lib/telegram';
+import { useAttachmentSession } from './hooks/useAttachmentSession';
+import { useAttachments } from './hooks/useAttachments';
+import { recoveredDraft } from './lib/attachments';
+import type { SendAttachments } from './hooks/useSessionSends';
 
 interface AgentOperation {
   generation: number;
@@ -69,6 +74,9 @@ interface FailedDraft {
   text: string;
   /** A failed message keeps its key, so resending it unchanged is joined, not doubled. */
   idempotencyKey?: string;
+  attachmentIds?: string[];
+  attachments?: UploadedAttachment[];
+  skill?: string;
 }
 
 type ChatState = {
@@ -78,7 +86,12 @@ type ChatState = {
   sending: boolean;
   error: string | null;
   /** A restored message; sent again unchanged, it reuses its key. */
-  resend: { text: string; idempotencyKey: string } | null;
+  resend: {
+    text: string;
+    idempotencyKey: string;
+    attachmentIds?: string[];
+    skill?: string;
+  } | null;
   /** The last Telegram reply's run; `queued` once it completed while the
    *  connector had an approved chat, which queues its reply for delivery. */
   delivery: { runId: string; queued: boolean } | null;
@@ -407,10 +420,7 @@ export function ViewHarness() {
     // back in that chat's recovery panel, its key reused if it is resent.
     onRestore: (item) =>
       updateChat(item.conversation, (current) => ({
-        failedDrafts: [
-          ...current.failedDrafts,
-          { requestId: item.key, text: item.text, idempotencyKey: item.key },
-        ],
+        failedDrafts: [...current.failedDrafts, recoveredDraft(item)],
       })),
     onAccepted: (item, result) => {
       if (!availableAgentIdsRef.current.has(item.agentId)) return;
@@ -427,10 +437,7 @@ export function ViewHarness() {
       if (!availableAgentIdsRef.current.has(item.agentId)) return;
       const recover = () =>
         updateChat(item.conversation, (current) => ({
-          failedDrafts: [
-            ...current.failedDrafts,
-            { requestId: item.key, text: item.text, idempotencyKey: item.key },
-          ],
+          failedDrafts: [...current.failedDrafts, recoveredDraft(item)],
           error: item.telegram
             ? safeIntegrationError(caught)
             : errorMessage(caught),
@@ -517,10 +524,7 @@ export function ViewHarness() {
       if (!availableAgentIdsRef.current.has(item.agentId)) return;
       // A new key when sent again: the steer's may still name its old run.
       updateChat(item.conversation, (current) => ({
-        failedDrafts: [
-          ...current.failedDrafts,
-          { requestId: item.key, text: item.text },
-        ],
+        failedDrafts: [...current.failedDrafts, recoveredDraft(item, false)],
       }));
     },
   });
@@ -826,6 +830,7 @@ export function ViewHarness() {
     idempotencyKey: string,
     mode: RunMode = 'queue',
     skill?: string,
+    attachmentInput?: SendAttachments,
   ) => {
     if (
       !availableAgentIdsRef.current.has(target.agentId) ||
@@ -840,19 +845,48 @@ export function ViewHarness() {
       text,
       mode,
       ...(skill ? { skill } : {}),
+      ...(attachmentInput ?? {}),
       telegram: target.kind === 'telegram',
     });
   };
 
-  /** A new chat becomes a session with its first message (spec §3.3). */
-  const startChat = async (targetId: string, text: string, skill?: string) => {
+  const attachmentSession = useAttachmentSession({
+    chatKey: activeChatKey,
+    agentId,
+    session: activeSession,
+  });
+  const attachments = useAttachments({
+    chatKey: activeChatKey,
+    agentId: activeSession?.agentId ?? agentId,
+    sessionId: routeSessionId,
+    ensureSession: () =>
+      attachmentSession.ensureSession().then((session) => session.id),
+    enabled:
+      agent !== null &&
+      connection === 'online' &&
+      !resetting &&
+      !sessionLoading &&
+      !daemonTooOld &&
+      (activeSession?.capabilities.send ?? true) &&
+      (activeSession?.kind !== 'telegram' || activeConnector !== null),
+  });
+  const savedAttachmentIds = attachments.readyAttachmentIds;
+
+  /** A new chat uses the same session creation as its attachment uploads. */
+  const startChat = async (
+    targetId: string,
+    text: string,
+    skill?: string,
+    attachmentInput?: SendAttachments,
+  ) => {
     const homeKey = chatKey(targetId, HOME_CONVERSATION);
+    const lifecycleGeneration = agentLifecycleGenerationRef.current;
     if (pendingSendsRef.current.has(homeKey)) return;
     pendingSendsRef.current.add(homeKey);
     updateChat(homeKey, { sending: true, error: null, draft: '' });
     let session: Session;
     try {
-      session = await daemon.createSession(targetId);
+      session = await attachmentSession.ensureSession();
     } catch (caught) {
       pendingSendsRef.current.delete(homeKey);
       updateChat(homeKey, (current) => ({
@@ -866,7 +900,12 @@ export function ViewHarness() {
       return;
     }
     pendingSendsRef.current.delete(homeKey);
-    if (currentAgentIdRef.current !== targetId) {
+    attachmentSession.forget(homeKey);
+    if (
+      currentAgentIdRef.current !== targetId ||
+      agentLifecycleGenerationRef.current !== lifecycleGeneration ||
+      resetInFlightRef.current !== null
+    ) {
       updateChat(homeKey, { sending: false });
       return;
     }
@@ -891,7 +930,17 @@ export function ViewHarness() {
         lastConversationRef.current = created;
       else navigate(created, { replace: true });
     }
-    if (skill)
+    if (attachmentInput)
+      queueSend(
+        session,
+        target,
+        text,
+        crypto.randomUUID(),
+        'queue',
+        skill,
+        attachmentInput,
+      );
+    else if (skill)
       queueSend(session, target, text, crypto.randomUUID(), 'queue', skill);
     else queueSend(session, target, text, crypto.randomUUID());
   };
@@ -963,11 +1012,17 @@ export function ViewHarness() {
     chatKey: activeChatKey,
     draft,
     resend: chat.resend,
+    attachments: attachments.readyAttachments,
+    attachmentIds: savedAttachmentIds,
+    attachmentsBlocked: attachments.items.some(
+      (item) => item.status !== 'ready',
+    ),
+    clearAttachments: attachments.clear,
     telegramReady: activeConnector !== null,
     activeRun,
     updateChat,
-    startChat: (text, skill) => {
-      if (agent) void startChat(agent.id, text, skill);
+    startChat: (text, skill, attachmentInput) => {
+      if (agent) void startChat(agent.id, text, skill, attachmentInput);
     },
     queueSend,
     slashCommands,
@@ -1001,10 +1056,7 @@ export function ViewHarness() {
       const item = sends.cancel(key);
       if (!item) return;
       updateChat(item.conversation, (current) => ({
-        failedDrafts: [
-          ...current.failedDrafts,
-          { requestId: item.key, text: item.text, idempotencyKey: item.key },
-        ],
+        failedDrafts: [...current.failedDrafts, recoveredDraft(item)],
       }));
     },
     sendAgain: commands.sendAgain,
@@ -1106,6 +1158,7 @@ export function ViewHarness() {
       agent={sessionAgent ?? agent}
       session={viewedSession}
       messages={routeSessionId ? chatMessages : []}
+      knownAttachments={sends.knownRunAttachments}
       pending={openPending}
       runs={live.runs}
       actions={transcriptActions}
@@ -1125,6 +1178,15 @@ export function ViewHarness() {
       onSuggestion={setDraft}
       composer={{
         draft,
+        conversationKey: activeChatKey,
+        voiceDisabled: showSettings || conversationHidden,
+        attachments: {
+          items: attachments.items,
+          onAdd: attachments.add,
+          onRemove: attachments.remove,
+          error: attachments.error,
+        },
+        savedAttachmentCount: savedAttachmentIds.length,
         setDraft,
         sending,
         // Usable while the companion works: messages queue (spec §15.3).
@@ -1144,12 +1206,19 @@ export function ViewHarness() {
             ? commands.steer
             : undefined,
         recovery:
-          failedDraft && !sending
+          failedDrafts.length > 0 && !sending
             ? {
                 count: failedDrafts.length,
-                text: failedDraft,
+                text: failedDraft ?? '',
                 restore: () => {
                   if (!activeChatKey) return;
+                  if (
+                    !attachments.restore(
+                      failedDrafts[0]?.attachments ?? [],
+                      failedDrafts[0]?.attachmentIds,
+                    )
+                  )
+                    return;
                   updateChat(activeChatKey, (current) => {
                     const [first, ...rest] = current.failedDrafts;
                     if (!first) return {};
@@ -1158,12 +1227,20 @@ export function ViewHarness() {
                         ? `${current.draft}\n\n${first.text}`
                         : first.text,
                       failedDrafts: rest,
-                      resend: first.idempotencyKey
-                        ? {
-                            text: first.text,
-                            idempotencyKey: first.idempotencyKey,
-                          }
-                        : current.resend,
+                      resend:
+                        first.idempotencyKey ||
+                        first.attachmentIds?.length ||
+                        first.skill
+                          ? {
+                              text: first.text,
+                              idempotencyKey:
+                                first.idempotencyKey ?? crypto.randomUUID(),
+                              ...(first.skill ? { skill: first.skill } : {}),
+                              ...(first.attachmentIds
+                                ? { attachmentIds: first.attachmentIds }
+                                : {}),
+                            }
+                          : current.resend,
                     };
                   });
                 },

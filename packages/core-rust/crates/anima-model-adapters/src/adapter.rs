@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use reqwest::Client;
 
 use crate::anthropic::{build_anthropic_body, parse_anthropic_response};
+use crate::attachments::{request_contains_images, request_error, IMAGE_REQUEST_FAILED};
 use crate::catalog::{resolve_provider, ProviderKind};
 use crate::google::{build_google_body, parse_google_response};
 use crate::ollama::{build_ollama_body, parse_ollama_response};
@@ -162,8 +163,13 @@ impl ProviderModelAdapter {
             .send()
             .await
             .map_err(|error| transport_error("Anthropic", "request", error))?;
-        let payload =
-            response_payload(response, "Anthropic", credential.api_key.as_deref()).await?;
+        let payload = response_payload(
+            response,
+            "Anthropic",
+            credential.api_key.as_deref(),
+            request_contains_images(request),
+        )
+        .await?;
         parse_anthropic_response(&payload)
     }
 
@@ -188,7 +194,13 @@ impl ProviderModelAdapter {
             .send()
             .await
             .map_err(|error| transport_error("Google", "request", error))?;
-        let payload = response_payload(response, "Google", credential.api_key.as_deref()).await?;
+        let payload = response_payload(
+            response,
+            "Google",
+            credential.api_key.as_deref(),
+            request_contains_images(request),
+        )
+        .await?;
         parse_google_response(&payload)
     }
 
@@ -215,7 +227,13 @@ impl ProviderModelAdapter {
             .send()
             .await
             .map_err(|error| transport_error(provider_name, "request", error))?;
-        let payload = response_payload(response, provider_name, api_key).await?;
+        let payload = response_payload(
+            response,
+            provider_name,
+            api_key,
+            request_contains_images(request),
+        )
+        .await?;
         parse_openai_compatible_response(&payload, provider_name)
     }
 
@@ -241,7 +259,13 @@ impl ProviderModelAdapter {
             .send()
             .await
             .map_err(|error| transport_error("Ollama", "request", error))?;
-        let payload = response_payload(response, "Ollama", credential.api_key.as_deref()).await?;
+        let payload = response_payload(
+            response,
+            "Ollama",
+            credential.api_key.as_deref(),
+            request_contains_images(request),
+        )
+        .await?;
         parse_ollama_response(&payload)
     }
 
@@ -274,15 +298,27 @@ impl ProviderModelAdapter {
                 })?;
             if response.status().is_success() {
                 if is_json_response(&response) {
-                    let payload = response_payload(response, "Anthropic", Some(&api_key)).await?;
+                    let payload = response_payload(
+                        response,
+                        "Anthropic",
+                        Some(&api_key),
+                        request_contains_images(request),
+                    )
+                    .await?;
                     return emit_final(sink, parse_anthropic_response(&payload)?).await;
                 }
-                return consume_anthropic_sse(response, sink).await;
+                return consume_anthropic_sse(response, sink, request_contains_images(request))
+                    .await;
             }
             let retry = !retried && retryable(response.status());
-            let error = response_payload(response, "Anthropic", Some(&api_key))
-                .await
-                .unwrap_err();
+            let error = response_payload(
+                response,
+                "Anthropic",
+                Some(&api_key),
+                request_contains_images(request),
+            )
+            .await
+            .unwrap_err();
             if !retry {
                 return Err(after_retry(retried, error));
             }
@@ -325,19 +361,36 @@ impl ProviderModelAdapter {
             })?;
             if response.status().is_success() {
                 if is_json_response(&response) {
-                    let payload = response_payload(response, provider_name, api_key).await?;
+                    let payload = response_payload(
+                        response,
+                        provider_name,
+                        api_key,
+                        request_contains_images(request),
+                    )
+                    .await?;
                     return emit_final(
                         sink,
                         parse_openai_compatible_response(&payload, provider_name)?,
                     )
                     .await;
                 }
-                return consume_openai_sse(response, sink, provider).await;
+                return consume_openai_sse(
+                    response,
+                    sink,
+                    provider,
+                    request_contains_images(request),
+                )
+                .await;
             }
             let retry = !retried && retryable(response.status());
-            let error = response_payload(response, provider_name, api_key)
-                .await
-                .unwrap_err();
+            let error = response_payload(
+                response,
+                provider_name,
+                api_key,
+                request_contains_images(request),
+            )
+            .await
+            .unwrap_err();
             if !retry {
                 return Err(after_retry(retried, error));
             }
@@ -373,15 +426,32 @@ impl ProviderModelAdapter {
                 })?;
             if response.status().is_success() {
                 if is_json_response(&response) {
-                    let payload = response_payload(response, "Google", Some(&api_key)).await?;
+                    let payload = response_payload(
+                        response,
+                        "Google",
+                        Some(&api_key),
+                        request_contains_images(request),
+                    )
+                    .await?;
                     return emit_final(sink, parse_google_response(&payload)?).await;
                 }
-                return consume_google_sse(response, sink, &api_key).await;
+                return consume_google_sse(
+                    response,
+                    sink,
+                    &api_key,
+                    request_contains_images(request),
+                )
+                .await;
             }
             let retry = !retried && retryable(response.status());
-            let error = response_payload(response, "Google", Some(&api_key))
-                .await
-                .unwrap_err();
+            let error = response_payload(
+                response,
+                "Google",
+                Some(&api_key),
+                request_contains_images(request),
+            )
+            .await
+            .unwrap_err();
             if !retry {
                 return Err(after_retry(retried, error));
             }
@@ -415,25 +485,31 @@ impl ProviderModelAdapter {
             .await
             .map_err(|error| transport_error("Ollama", "stream request", error))?;
         if !response.status().is_success() {
-            return Err(response_payload(response, "Ollama", api_key)
-                .await
-                .unwrap_err());
+            return Err(response_payload(
+                response,
+                "Ollama",
+                api_key,
+                request_contains_images(request),
+            )
+            .await
+            .unwrap_err());
         }
         if is_json_response(&response) {
-            let payload = response_payload(response, "Ollama", api_key).await?;
+            let payload = response_payload(
+                response,
+                "Ollama",
+                api_key,
+                request_contains_images(request),
+            )
+            .await?;
             return emit_final(sink, parse_ollama_response(&payload)?).await;
         }
-        consume_ollama_ndjson(response, sink).await
+        consume_ollama_ndjson(response, sink, request_contains_images(request)).await
     }
 }
 
-#[async_trait]
-impl ModelAdapter for ProviderModelAdapter {
-    fn provider(&self) -> &str {
-        "providers"
-    }
-
-    async fn generate(
+impl ProviderModelAdapter {
+    async fn generate_inner(
         &self,
         config: &AgentConfig,
         request: &ModelGenerateRequest,
@@ -483,7 +559,7 @@ impl ModelAdapter for ProviderModelAdapter {
         }
     }
 
-    async fn stream(
+    async fn stream_inner(
         &self,
         config: &AgentConfig,
         request: &ModelGenerateRequest,
@@ -538,6 +614,34 @@ impl ModelAdapter for ProviderModelAdapter {
     }
 }
 
+#[async_trait]
+impl ModelAdapter for ProviderModelAdapter {
+    fn provider(&self) -> &str {
+        "providers"
+    }
+
+    async fn generate(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+    ) -> Result<ModelGenerateResponse, String> {
+        self.generate_inner(config, request)
+            .await
+            .map_err(|error| request_error(error, request_contains_images(request)))
+    }
+
+    async fn stream(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        sink: &dyn ModelStreamSink,
+    ) -> Result<(), String> {
+        self.stream_inner(config, request, sink)
+            .await
+            .map_err(|error| request_error(error, request_contains_images(request)))
+    }
+}
+
 fn retryable(status: reqwest::StatusCode) -> bool {
     status.as_u16() == 429 || status.is_server_error()
 }
@@ -556,8 +660,16 @@ async fn response_payload(
     response: reqwest::Response,
     provider: &str,
     api_key: Option<&str>,
+    image_request: bool,
 ) -> Result<serde_json::Value, String> {
     let status = response.status();
+    // Never read an upstream diagnostic body for an image-bearing request.
+    if image_request && !status.is_success() {
+        return Err(format!(
+            "{provider} API error ({}): {IMAGE_REQUEST_FAILED}",
+            status.as_u16()
+        ));
+    }
     let text = response
         .text()
         .await
@@ -574,6 +686,9 @@ async fn response_payload(
 }
 
 pub(crate) fn sanitize_upstream_body(body: &str, api_key: Option<&str>) -> String {
+    if crate::attachments::image_payload_error(body) {
+        return "[image payload redacted]".into();
+    }
     let redacted = api_key
         .filter(|key| !key.is_empty())
         .map_or_else(|| body.to_owned(), |key| body.replace(key, "[REDACTED]"));

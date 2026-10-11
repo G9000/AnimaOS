@@ -9,6 +9,29 @@ import {
   type DaemonSnapshot,
 } from './daemon-api';
 
+it('retains session attachment metadata without using file paths as URLs', () => {
+  const attachment = {
+    type: 'image' as const,
+    id: 'att_1',
+    name: 'photo.png',
+    mime: 'image/png',
+    size: 3,
+    kind: 'image' as const,
+    path: 'attachments/photo.png',
+    createdAtMs: 1,
+  };
+  expect(
+    toChatMessage({
+      id: 'm',
+      role: 'user',
+      text: '',
+      attachments: [attachment],
+      metadata: {},
+      createdAtMs: 1,
+    }).content.attachments,
+  ).toEqual([attachment]);
+});
+
 function snapshot(): DaemonSnapshot {
   return {
     state: {

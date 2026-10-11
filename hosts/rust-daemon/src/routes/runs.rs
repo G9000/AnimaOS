@@ -95,10 +95,7 @@ fn validate_input(input: &StartRunRequest) -> Result<(), ApiError> {
             "at most 10 attachments are allowed per message",
         ));
     }
-    if !input.attachment_ids.is_empty() {
-        // Attachments arrive in M9; until then no id is known.
-        return Err(ApiError::bad_request_static("unknown attachment ids"));
-    }
+    crate::agent_runs::attachments::validate_attachment_ids(&input.attachment_ids)?;
     Ok(())
 }
 
@@ -156,6 +153,20 @@ pub(super) async fn start_session_run(
     if let Err(error) = validate_input(&input) {
         return rejected(error);
     }
+    if let Some(replayed) = state
+        .agent_runs
+        .replayed_run_with_attachments(
+            &agent_id,
+            &session_id,
+            &input.text,
+            &idempotency_key,
+            &input.attachment_ids,
+            input.skill.as_deref(),
+        )
+        .await
+    {
+        return accepted_response(replayed);
+    }
     if let Some(skill) = input.skill.as_deref() {
         if matches!(input.mode, StartRunMode::Steer) {
             return rejected(ApiError::bad_request_static(SKILL_CANNOT_STEER));
@@ -165,7 +176,14 @@ pub(super) async fn start_session_run(
         if let Err(message) = state.agent_runs.skills().check_runnable(skill).await {
             return match state
                 .agent_runs
-                .replayed_run(&agent_id, &session_id, &input.text, &idempotency_key)
+                .replayed_run_with_attachments(
+                    &agent_id,
+                    &session_id,
+                    &input.text,
+                    &idempotency_key,
+                    &input.attachment_ids,
+                    input.skill.as_deref(),
+                )
                 .await
             {
                 Some(answer) => accepted_response(answer),
@@ -237,7 +255,14 @@ pub(super) async fn start_session_run(
         Some(None) => {
             return match state
                 .agent_runs
-                .replayed_run(&agent_id, &session_id, &input.text, &idempotency_key)
+                .replayed_run_with_attachments(
+                    &agent_id,
+                    &session_id,
+                    &input.text,
+                    &idempotency_key,
+                    &input.attachment_ids,
+                    input.skill.as_deref(),
+                )
                 .await
             {
                 Some(answer) => accepted_response(answer),
@@ -247,12 +272,13 @@ pub(super) async fn start_session_run(
         None => (
             RunSource::Web,
             None,
-            state.agent_runs.web_start_with_skill(
+            state.agent_runs.web_start_with_attachments(
                 agent_id.clone(),
                 room_id,
                 input.text.clone(),
                 idempotency_key.clone(),
                 input.skill.clone(),
+                input.attachment_ids.clone(),
             ),
         ),
     };
@@ -267,6 +293,7 @@ pub(super) async fn start_session_run(
                 agent_id,
                 session_id,
                 text: input.text,
+                attachment_ids: input.attachment_ids,
                 idempotency_key,
                 mode,
                 source,

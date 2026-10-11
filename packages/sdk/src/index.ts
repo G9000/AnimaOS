@@ -1,4 +1,6 @@
 export { AgentsClient, action, agent, plugin } from './agents.js';
+export { AttachmentsClient } from './attachments.js';
+export type { UploadedAttachment } from './attachments.js';
 export { AgenciesClient } from './agencies.js';
 export type {
   AgencyGenerateRequest,

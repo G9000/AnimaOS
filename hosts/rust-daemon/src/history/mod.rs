@@ -32,6 +32,7 @@ use crate::usage::UsageRecord;
 
 /// Rows per in-memory table in ephemeral mode (spec §13.1).
 pub(crate) const EPHEMERAL_HISTORY_MAX_ROWS: usize = 100_000;
+const ATTACHMENT_ID_CONFLICT: &str = "Attachment ID is already bound to another record";
 /// Searches use at most this many query words.
 pub(crate) const MAX_SEARCH_TOKENS: usize = 8;
 /// Search snippets hold at most this many characters, plus ellipses.
@@ -203,6 +204,17 @@ pub(crate) trait HistoryStore: Send + Sync {
     fn is_ephemeral(&self) -> bool {
         false
     }
+
+    /// Immutable attachment IDs; only an identical record may be written again.
+    async fn upsert_attachments(
+        &self,
+        rows: &[crate::attachments::AttachmentRecord],
+    ) -> Result<(), HistoryError>;
+    async fn get_attachment(
+        &self,
+        agent_id: &str,
+        attachment_id: &str,
+    ) -> Result<Option<crate::attachments::AttachmentRecord>, HistoryError>;
 
     async fn upsert_messages(&self, messages: &[HistoryMessage]) -> Result<(), HistoryError>;
 

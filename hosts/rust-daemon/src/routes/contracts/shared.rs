@@ -45,6 +45,8 @@ pub(crate) struct AttachmentResponse {
     pub(crate) attachment_type: String,
     pub(crate) name: String,
     pub(crate) data: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) mime: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -126,7 +128,11 @@ impl TaskRequest {
                 metadata
                     .into_iter()
                     // A skill is chosen only through the run route's checks.
-                    .filter(|(key, _)| key != crate::skills::SKILL_METADATA_KEY)
+                    .filter(|(key, _)| {
+                        key != crate::skills::SKILL_METADATA_KEY
+                            && key != crate::attachments::ATTACHMENT_RECORDS_KEY
+                            && key != crate::attachments::ATTACHMENT_INPUT_TEXT_KEY
+                    })
                     .map(|(key, value)| {
                         Ok::<(String, DataValue), &'static str>((key, json_to_data_value(value)?))
                     })
@@ -158,6 +164,7 @@ impl AttachmentRequest {
             attachment_type,
             name,
             data,
+            mime_type: None,
         })
     }
 }
@@ -183,6 +190,7 @@ impl From<&Attachment> for AttachmentResponse {
             .to_string(),
             name: value.name.clone(),
             data: value.data.clone(),
+            mime: value.mime_type.clone(),
         }
     }
 }

@@ -11,6 +11,7 @@ use super::{
     HistoryError, HistoryMessage, HistoryStore, MessagePageQuery, UsagePageQuery,
 };
 use crate::approvals::ApprovalRequest;
+use crate::attachments::AttachmentRecord;
 use crate::runs::RunRecord;
 use crate::schedules::ScheduleFireRecord;
 use crate::usage::UsageRecord;
@@ -136,6 +137,40 @@ fn decode_row(row: &sqlx::postgres::PgRow) -> Result<HistoryMessage, HistoryErro
 impl HistoryStore for PostgresHistoryStore {
     fn label(&self) -> &'static str {
         "postgres"
+    }
+
+    async fn upsert_attachments(&self, rows: &[AttachmentRecord]) -> Result<(), HistoryError> {
+        let mut transaction = self.pool.begin().await?;
+        for row in rows {
+            let count = sqlx::query("INSERT INTO history_attachments (id, agent_id, session_id, created_at_ms, record) VALUES ($1,$2,$3,$4,$5)
+                ON CONFLICT(id) DO UPDATE SET record = history_attachments.record
+                WHERE history_attachments.agent_id = EXCLUDED.agent_id AND history_attachments.session_id = EXCLUDED.session_id
+                  AND history_attachments.created_at_ms = EXCLUDED.created_at_ms AND history_attachments.record = EXCLUDED.record")
+                .bind(&row.id).bind(&row.agent_id).bind(&row.session_id).bind(to_i64(row.created_at_ms)?).bind(serde_json::to_value(row)?)
+                .execute(&mut *transaction).await?.rows_affected();
+            if count != 1 {
+                return Err(HistoryError::new(super::ATTACHMENT_ID_CONFLICT));
+            }
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+    async fn get_attachment(
+        &self,
+        agent_id: &str,
+        attachment_id: &str,
+    ) -> Result<Option<AttachmentRecord>, HistoryError> {
+        let row =
+            sqlx::query("SELECT record FROM history_attachments WHERE agent_id = $1 AND id = $2")
+                .bind(agent_id)
+                .bind(attachment_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        row.map(|row| {
+            let json: serde_json::Value = row.try_get("record")?;
+            serde_json::from_value(json).map_err(HistoryError::from)
+        })
+        .transpose()
     }
 
     async fn upsert_messages(&self, messages: &[HistoryMessage]) -> Result<(), HistoryError> {
@@ -565,6 +600,7 @@ mod tests {
     async fn postgres_store_meets_the_conformance_suite(pool: PgPool) {
         let store = PostgresHistoryStore::new(pool);
         assert_history_store_conformance(&store).await;
+        crate::history::conformance::assert_history_store_attachment_conformance(&store).await;
         assert_history_store_session_search_conformance(&store).await;
         assert_history_store_checkin_text_conformance(&store).await;
         assert_history_store_indexed_text_cap_conformance(&store).await;

@@ -1,3 +1,4 @@
+use crate::attachments::{model_supports_images, prepare_user_content};
 use anima_core::{
     AgentConfig, Content, DataValue, Message, MessageRole, ModelGenerateRequest,
     ModelGenerateResponse, ModelStopReason, TokenUsage, ToolCall,
@@ -18,7 +19,7 @@ pub(super) fn build_anthropic_body(
     body.insert("system".into(), Value::String(request.system.clone()));
     body.insert(
         "messages".into(),
-        Value::Array(build_anthropic_messages(request)?),
+        Value::Array(build_anthropic_messages(config, request)?),
     );
 
     if let Some(tools) = build_anthropic_tools(config)? {
@@ -36,7 +37,14 @@ pub(super) fn build_anthropic_body(
     Ok(Value::Object(body))
 }
 
-fn build_anthropic_messages(request: &ModelGenerateRequest) -> Result<Vec<Value>, String> {
+fn build_anthropic_messages(
+    config: &AgentConfig,
+    request: &ModelGenerateRequest,
+) -> Result<Vec<Value>, String> {
+    let supports_images = model_supports_images(
+        config.provider.as_deref().unwrap_or("anthropic"),
+        &config.model,
+    );
     let mut messages: Vec<Value> = Vec::new();
 
     for message in &request.messages {
@@ -49,6 +57,10 @@ fn build_anthropic_messages(request: &ModelGenerateRequest) -> Result<Vec<Value>
                             content.push_str(&message.content.text);
                             continue;
                         }
+                        if let Some(Value::Array(content)) = last.get_mut("content") {
+                            content.push(json!({"type":"text", "text":message.content.text}));
+                            continue;
+                        }
                     }
                 }
                 messages.push(json!({
@@ -56,10 +68,17 @@ fn build_anthropic_messages(request: &ModelGenerateRequest) -> Result<Vec<Value>
                     "content": message.content.text,
                 }));
             }
-            MessageRole::User => messages.push(json!({
-                "role": "user",
-                "content": message.content.text,
-            })),
+            MessageRole::User => {
+                let prepared = prepare_user_content(&message.content, supports_images)?;
+                let content = if prepared.images.is_empty() {
+                    Value::String(prepared.text)
+                } else {
+                    let mut parts = vec![json!({"type":"text", "text":prepared.text})];
+                    parts.extend(prepared.images.iter().map(|image| json!({"type":"image", "source":{"type":"base64", "media_type":image.mime, "data":image.base64}})));
+                    Value::Array(parts)
+                };
+                messages.push(json!({"role":"user", "content":content}));
+            }
             MessageRole::Assistant => {
                 let tool_use = anthropic_assistant_tool_use(message)?;
                 let mut content_blocks: Vec<Value> = Vec::new();

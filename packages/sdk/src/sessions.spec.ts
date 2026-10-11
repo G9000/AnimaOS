@@ -4,6 +4,7 @@ import {
   createDaemonClient,
   DaemonHttpError,
   DaemonTooOldError,
+  type SessionMessageAttachment,
 } from './index.js';
 
 function transport(respond: (url: string) => Response) {
@@ -27,6 +28,40 @@ const session = {
 };
 
 describe('sessions client', () => {
+  it('preserves legacy and uploaded message attachments in the same page', async () => {
+    const legacy: SessionMessageAttachment = {
+      type: 'file',
+      name: 'legacy.txt',
+    };
+    const uploaded: SessionMessageAttachment = {
+      type: 'image',
+      name: 'photo.png',
+      id: 'att_1',
+      mime: 'image/png',
+      size: 3,
+      kind: 'image',
+      path: 'attachments/photo.png',
+      createdAtMs: 1,
+    };
+    const { sessions } = transport(() =>
+      Response.json({
+        messages: [
+          {
+            id: 'message',
+            role: 'user',
+            text: '',
+            attachments: [legacy, uploaded],
+            metadata: {},
+            createdAtMs: 1,
+          },
+        ],
+        nextBefore: null,
+      }),
+    );
+    const page = await sessions.messages('agent', 'session');
+    expect(page.messages[0].attachments).toEqual([legacy, uploaded]);
+    expect(page.messages[0].attachments[0]).not.toHaveProperty('id');
+  });
   it('lists sessions with encoded filters', async () => {
     const page = { sessions: [session], nextCursor: 'next' };
     const { sessions, requests } = transport(() => Response.json(page));

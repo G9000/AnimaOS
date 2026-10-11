@@ -1,6 +1,7 @@
 mod agencies;
 mod agents;
 mod approvals;
+mod attachments;
 mod connectors;
 mod gcalendar;
 mod logs;
@@ -28,6 +29,7 @@ pub(crate) use agents::{
     GenerateProfileRequest,
 };
 pub(crate) use approvals::*;
+pub(crate) use attachments::{AttachmentEnvelope, AttachmentResponse};
 pub(crate) use connectors::*;
 pub(crate) use gcalendar::*;
 pub(crate) use logs::{LogLineResponse, LogsEnvelope};

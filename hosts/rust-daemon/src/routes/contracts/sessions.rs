@@ -208,10 +208,23 @@ pub(crate) struct SessionEnvelope {
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct SessionAttachmentResponse {
     #[serde(rename = "type")]
     pub(crate) attachment_type: String,
     pub(crate) name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) mime: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) created_at_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -251,14 +264,26 @@ impl From<&PageMessage> for SessionMessageResponse {
                 .attachments
                 .iter()
                 .flatten()
-                .map(|attachment| SessionAttachmentResponse {
-                    attachment_type: match attachment.attachment_type {
-                        AttachmentType::File => "file",
-                        AttachmentType::Image => "image",
-                        AttachmentType::Url => "url",
+                .map(|attachment| {
+                    let metadata = crate::attachments::metadata::matching_metadata(
+                        &message.content,
+                        attachment,
+                    );
+                    SessionAttachmentResponse {
+                        attachment_type: match attachment.attachment_type {
+                            AttachmentType::File => "file",
+                            AttachmentType::Image => "image",
+                            AttachmentType::Url => "url",
+                        }
+                        .into(),
+                        name: attachment.name.clone(),
+                        id: metadata.as_ref().map(|row| row.id.clone()),
+                        mime: metadata.as_ref().map(|row| row.mime.clone()),
+                        size: metadata.as_ref().map(|row| row.size),
+                        kind: metadata.as_ref().map(|row| row.kind.as_str().into()),
+                        path: metadata.as_ref().map(|row| row.path.clone()),
+                        created_at_ms: metadata.as_ref().map(|row| row.created_at_ms),
                     }
-                    .into(),
-                    name: attachment.name.clone(),
                 })
                 .collect(),
             metadata: message

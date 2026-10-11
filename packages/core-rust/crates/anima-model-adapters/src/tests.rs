@@ -23,6 +23,9 @@ use crate::{
     ProviderModelAdapter,
 };
 
+#[path = "attachments_error_tests.rs"]
+mod attachment_errors;
+
 struct FrameSink(Mutex<Vec<ModelStreamFrame>>);
 
 struct DroppedSink(AtomicUsize);

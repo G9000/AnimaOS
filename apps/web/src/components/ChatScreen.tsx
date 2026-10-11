@@ -28,6 +28,21 @@ import { RunOutcomeCard } from './sessions/RunOutcomeCard';
 import { DelegatedTurn, TrimmedDivider } from './sessions/TranscriptNotes';
 import { slashSuggestions, type SlashCommand } from '../lib/slash-commands';
 import { SlashCommandMenu } from './sessions/SlashCommandMenu';
+import {
+  AttachmentControls,
+  AttachmentDropZone,
+} from './attachments/AttachmentControls';
+import { AttachmentChips } from './attachments/AttachmentChips';
+import { MessageAttachments } from './attachments/MessageAttachments';
+import type { AttachmentDraft } from '../lib/attachments';
+import { DictationControl } from './voice/DictationControl';
+import { ReadAloud } from './voice/ReadAloud';
+import type { ReadAloudController } from '../hooks/useReadAloud';
+import { revealInvisible } from '../lib/skills';
+import {
+  EMPTY_RUN_ATTACHMENTS,
+  type KnownRunAttachments,
+} from '../lib/run-attachments';
 
 /* ── Messages ── */
 function EventPill({ message }: { message: ChatMessage }) {
@@ -58,11 +73,15 @@ const Bubble = memo(function Bubble({
   message,
   onSave,
   savedLookup,
+  agentId,
+  readAloud,
 }: {
   message: ChatMessage;
   /** Offers Save to memory on a user or assistant message with text. */
   onSave?: (message: ChatMessage) => Promise<SaveOutcome>;
   savedLookup?: (messageId: string) => SavedState | null;
+  agentId: string;
+  readAloud?: ReadAloudController;
 }) {
   if (message.role !== 'User' && message.role !== 'Assistant') {
     return <EventPill message={message} />;
@@ -83,12 +102,27 @@ const Bubble = memo(function Bubble({
               : 'glass rounded-2xl rounded-bl-md text-ink'
           }`}
         >
-          <MarkdownMessage>{message.content.text}</MarkdownMessage>
+          <MarkdownMessage>
+            {revealInvisible(message.content.text).text}
+          </MarkdownMessage>
+          {message.content.attachments && (
+            <MessageAttachments
+              agentId={agentId}
+              attachments={message.content.attachments}
+            />
+          )}
         </div>
         <div className="studio-message-meta mt-1 px-1 font-mono text-[10px] text-ink-3">
           <span>{formatTime(message.created_at_ms)}</span>
           {flag && <span className="message-flag">{flag}</span>}
           <CopyMessage text={message.content.text} />
+          {!isUser && readAloud && (
+            <ReadAloud
+              messageId={message.id}
+              text={message.content.text}
+              controller={readAloud}
+            />
+          )}
           {onSave && message.content.text.trim() !== '' && (
             <SaveToMemory
               message={message}
@@ -248,19 +282,26 @@ function anchorsFor(transcript: readonly TranscriptItem[]): string[][] {
   });
 }
 
-const renderBubble = (message: ChatMessage) => <Bubble message={message} />;
-
 /** Memoized on its item: history items keep their identity while a run
  *  streams, so only the items that changed render again. */
 const TranscriptEntry = memo(function TranscriptEntry({
   item,
   agentName,
   actions,
+  agentId,
+  readAloud,
+  knownAttachments,
 }: {
   item: TranscriptItem;
   agentName: string;
   actions?: TranscriptActions;
+  agentId: string;
+  readAloud?: ReadAloudController;
+  knownAttachments: KnownRunAttachments;
 }) {
+  const renderBubble = (message: ChatMessage) => (
+    <Bubble message={message} agentId={agentId} readAloud={readAloud} />
+  );
   switch (item.kind) {
     case 'message':
       return (
@@ -268,13 +309,15 @@ const TranscriptEntry = memo(function TranscriptEntry({
           message={item.message}
           onSave={actions?.onSaveToMemory}
           savedLookup={actions?.savedToMemory}
+          agentId={agentId}
+          readAloud={readAloud}
         />
       );
     case 'revised':
       return (
         <details className="revised-draft">
           <summary>Earlier draft (revised)</summary>
-          <Bubble message={item.message} />
+          <Bubble message={item.message} agentId={agentId} />
         </details>
       );
     case 'delegated':
@@ -290,6 +333,7 @@ const TranscriptEntry = memo(function TranscriptEntry({
           agentName={agentName}
           actions={actions}
           renderMessage={renderBubble}
+          knownAttachments={knownAttachments}
         />
       );
     case 'outcome':
@@ -329,6 +373,8 @@ export const MessageList = memo(function MessageList({
   emptyState,
   items,
   actions,
+  readAloud,
+  knownAttachments = EMPTY_RUN_ATTACHMENTS,
 }: {
   agent: AgentDetail;
   sending: boolean;
@@ -344,6 +390,8 @@ export const MessageList = memo(function MessageList({
    *  built from `agent.messages` when absent. */
   items?: readonly TranscriptItem[];
   actions?: TranscriptActions;
+  readAloud?: ReadAloudController;
+  knownAttachments?: KnownRunAttachments;
 }) {
   const [awayFromBottom, setAwayFromBottom] = useState(false);
   const [highlight, setHighlight] = useState<string | null>(null);
@@ -465,6 +513,9 @@ export const MessageList = memo(function MessageList({
                       item={item}
                       agentName={agent.name}
                       actions={actions}
+                      agentId={agent.id}
+                      readAloud={readAloud}
+                      knownAttachments={knownAttachments}
                     />
                   </div>
                 );
@@ -504,6 +555,10 @@ export function Composer({
   runActive = false,
   onStop,
   onSteer,
+  attachments,
+  conversationKey,
+  savedAttachmentCount = 0,
+  voiceDisabled = false,
 }: {
   agentName: string;
   /** The textarea's name and placeholder; defaults to "Message <agent>". */
@@ -530,8 +585,27 @@ export function Composer({
   runActive?: boolean;
   onStop?: () => void;
   onSteer?: () => void;
+  conversationKey?: string | null;
+  voiceDisabled?: boolean;
+  savedAttachmentCount?: number;
+  attachments?: {
+    items: readonly AttachmentDraft[];
+    onAdd(files: readonly File[]): void;
+    onRemove(localId: string): void;
+    error?: string | null;
+  };
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const latestDraft = useRef(draft);
+  latestDraft.current = draft;
+  const changeDraft = (value: string) => {
+    latestDraft.current = value;
+    setDraft(value);
+  };
+  const appendDictation = (text: string) => {
+    const previous = latestDraft.current.trimEnd();
+    changeDraft(`${previous}${previous ? ' ' : ''}${text}`);
+  };
   const menuId = useId();
   const [activeIndex, setActiveIndex] = useState(0);
   const [dismissedFor, setDismissedFor] = useState<string | null>(null);
@@ -542,7 +616,17 @@ export function Composer({
   const selected = menuOpen
     ? suggestions[Math.min(activeIndex, suggestions.length - 1)]
     : null;
-  const canSend = !disabled && !sending && !offline && draft.trim().length > 0;
+  const attachmentsBlocked =
+    attachments?.items.some((item) => item.status !== 'ready') ?? false;
+  const hasAttachments =
+    (attachments?.items.some((item) => item.status === 'ready') ?? false) ||
+    savedAttachmentCount > 0;
+  const canSend =
+    !disabled &&
+    !sending &&
+    !offline &&
+    !attachmentsBlocked &&
+    (draft.trim().length > 0 || hasAttachments);
   const canPick = !disabled && !sending && !offline;
   const steerable = runActive && onSteer !== undefined;
 
@@ -621,83 +705,108 @@ export function Composer({
             onPick={(command) => pick(command)}
           />
         )}
-        <div className="studio-composer-box glass-strong focus-glow flex items-end gap-2 rounded-2xl p-2 transition-all duration-200">
-          <textarea
-            data-workspace-composer
-            ref={taRef}
-            value={draft}
-            disabled={disabled}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              const composing = e.nativeEvent.isComposing || e.keyCode === 229;
-              if (selected) {
-                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                  e.preventDefault();
-                  const step = e.key === 'ArrowDown' ? 1 : -1;
-                  setActiveIndex(
-                    (index) =>
-                      (Math.min(index, suggestions.length - 1) +
-                        step +
-                        suggestions.length) %
-                      suggestions.length,
-                  );
-                  return;
-                }
-                if (e.key === 'Escape') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setDismissedFor(draft);
-                  return;
-                }
-                if (
-                  (e.key === 'Tab' && !e.shiftKey) ||
-                  (e.key === 'Enter' && !e.shiftKey && !composing)
-                ) {
-                  e.preventDefault();
-                  pick(selected, e.key === 'Tab');
-                  return;
-                }
-              }
-              if (e.key === 'Enter' && !e.shiftKey && !composing) {
-                e.preventDefault();
-                if (!canSend) return;
-                if ((e.metaKey || e.ctrlKey) && steerable) onSteer?.();
-                else onSend();
-              }
-            }}
-            onFocus={() => setBlurred(false)}
-            onBlur={() => setBlurred(true)}
-            rows={1}
-            aria-label={inputLabel}
-            aria-autocomplete={commands ? 'list' : undefined}
-            aria-controls={menuOpen ? menuId : undefined}
-            aria-activedescendant={
-              selected ? `${menuId}-${selected.name}` : undefined
-            }
-            placeholder={`${inputLabel}…`}
-            className="max-h-48 flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-relaxed text-ink placeholder-ink-3 outline-none"
+        {attachments && (
+          <AttachmentChips
+            items={attachments.items}
+            onRemove={attachments.onRemove}
           />
-          {runActive && onStop ? (
-            <button
-              type="button"
-              onClick={onStop}
-              aria-label="Stop"
-              className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-line-strong bg-panel-2 text-ink transition hover:bg-panel active:scale-95"
-            >
-              <StopIcon size={15} />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => onSend()}
-              disabled={!canSend}
-              aria-label="Send"
-              className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-accent text-accent-fg shadow-lg shadow-accent/25 transition hover:bg-accent/90 active:scale-95 disabled:cursor-not-allowed disabled:opacity-25 disabled:shadow-none disabled:active:scale-100"
-            >
-              <SendIcon size={15} />
-            </button>
-          )}
-        </div>
+        )}
+        {attachments?.error && (
+          <p role="alert" className="text-xs text-danger">
+            {attachments.error}
+          </p>
+        )}
+        <AttachmentDropZone disabled={!canPick} onAdd={attachments?.onAdd}>
+          <div className="studio-composer-box glass-strong focus-glow flex items-end gap-2 rounded-2xl p-2 transition-all duration-200">
+            {attachments && (
+              <AttachmentControls
+                disabled={!canPick}
+                onAdd={attachments.onAdd}
+              />
+            )}
+            <textarea
+              data-workspace-composer
+              ref={taRef}
+              value={draft}
+              disabled={disabled}
+              onChange={(e) => changeDraft(e.target.value)}
+              onKeyDown={(e) => {
+                const composing =
+                  e.nativeEvent.isComposing || e.keyCode === 229;
+                if (selected) {
+                  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const step = e.key === 'ArrowDown' ? 1 : -1;
+                    setActiveIndex(
+                      (index) =>
+                        (Math.min(index, suggestions.length - 1) +
+                          step +
+                          suggestions.length) %
+                        suggestions.length,
+                    );
+                    return;
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setDismissedFor(draft);
+                    return;
+                  }
+                  if (
+                    (e.key === 'Tab' && !e.shiftKey) ||
+                    (e.key === 'Enter' && !e.shiftKey && !composing)
+                  ) {
+                    e.preventDefault();
+                    pick(selected, e.key === 'Tab');
+                    return;
+                  }
+                }
+                if (e.key === 'Enter' && !e.shiftKey && !composing) {
+                  e.preventDefault();
+                  if (!canSend) return;
+                  if ((e.metaKey || e.ctrlKey) && steerable) onSteer?.();
+                  else onSend();
+                }
+              }}
+              onFocus={() => setBlurred(false)}
+              onBlur={() => setBlurred(true)}
+              rows={1}
+              aria-label={inputLabel}
+              aria-autocomplete={commands ? 'list' : undefined}
+              aria-controls={menuOpen ? menuId : undefined}
+              aria-activedescendant={
+                selected ? `${menuId}-${selected.name}` : undefined
+              }
+              placeholder={`${inputLabel}…`}
+              className="max-h-48 flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-relaxed text-ink placeholder-ink-3 outline-none"
+            />
+            {runActive && onStop ? (
+              <button
+                type="button"
+                onClick={onStop}
+                aria-label="Stop"
+                className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-line-strong bg-panel-2 text-ink transition hover:bg-panel active:scale-95"
+              >
+                <StopIcon size={15} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onSend()}
+                disabled={!canSend}
+                aria-label="Send"
+                className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-accent text-accent-fg shadow-lg shadow-accent/25 transition hover:bg-accent/90 active:scale-95 disabled:cursor-not-allowed disabled:opacity-25 disabled:shadow-none disabled:active:scale-100"
+              >
+                <SendIcon size={15} />
+              </button>
+            )}
+          </div>
+        </AttachmentDropZone>
+        <DictationControl
+          disabled={!canPick || voiceDisabled}
+          conversationKey={conversationKey}
+          onTranscript={appendDictation}
+        />
         <div className="mt-2 flex items-center justify-between px-2 font-mono text-[10px] text-ink-3">
           <span>
             {steerable

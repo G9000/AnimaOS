@@ -1578,6 +1578,7 @@ fn runtime_run_preserves_successful_tool_content_shape() {
                         attachment_type: AttachmentType::File,
                         name: "notes.txt".into(),
                         data: "payload".into(),
+                        mime_type: None,
                     }]),
                     metadata: Some(metadata),
                 },

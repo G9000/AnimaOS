@@ -14,6 +14,7 @@ use super::{
     HistoryError, HistoryMessage, HistoryStore, MessagePageQuery, UsagePageQuery,
 };
 use crate::approvals::ApprovalRequest;
+use crate::attachments::AttachmentRecord;
 use crate::runs::RunRecord;
 use crate::schedules::ScheduleFireRecord;
 use crate::usage::UsageRecord;
@@ -314,6 +315,55 @@ struct RunRow {
 impl HistoryStore for SqliteHistoryStore {
     fn label(&self) -> &'static str {
         "sqlite"
+    }
+
+    async fn upsert_attachments(&self, rows: &[AttachmentRecord]) -> Result<(), HistoryError> {
+        let rows = rows
+            .iter()
+            .map(|row| {
+                Ok((
+                    row.id.clone(),
+                    row.agent_id.clone(),
+                    row.session_id.clone(),
+                    to_i64(row.created_at_ms)?,
+                    serde_json::to_string(row)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, HistoryError>>()?;
+        self.run(move |connection| {
+            let transaction = connection.transaction()?;
+            for (id, agent, session, created, record) in &rows {
+                let count = transaction.execute("INSERT INTO attachments (id, agent_id, session_id, created_at_ms, record) VALUES (?1,?2,?3,?4,?5)
+                    ON CONFLICT(id) DO UPDATE SET record = attachments.record
+                    WHERE attachments.agent_id = excluded.agent_id AND attachments.session_id = excluded.session_id
+                      AND attachments.created_at_ms = excluded.created_at_ms AND attachments.record = excluded.record",
+                    params![id,agent,session,created,record])?;
+                if count != 1 { return Err(HistoryError::new(super::ATTACHMENT_ID_CONFLICT)); }
+            }
+            transaction.commit()?;
+            Ok(())
+        }).await
+    }
+    async fn get_attachment(
+        &self,
+        agent_id: &str,
+        attachment_id: &str,
+    ) -> Result<Option<AttachmentRecord>, HistoryError> {
+        let agent = agent_id.to_string();
+        let id = attachment_id.to_string();
+        self.run(move |connection| {
+            let record: Option<String> = connection
+                .query_row(
+                    "SELECT record FROM attachments WHERE agent_id = ?1 AND id = ?2",
+                    params![agent, id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            record
+                .map(|json| serde_json::from_str(&json).map_err(HistoryError::from))
+                .transpose()
+        })
+        .await
     }
 
     async fn upsert_messages(&self, messages: &[HistoryMessage]) -> Result<(), HistoryError> {
@@ -915,6 +965,7 @@ mod tests {
             .await
             .expect("the store opens and creates its directory");
         assert_history_store_conformance(&store).await;
+        crate::history::conformance::assert_history_store_attachment_conformance(&store).await;
         assert_history_store_session_search_conformance(&store).await;
         assert_history_store_checkin_text_conformance(&store).await;
         assert_history_store_indexed_text_cap_conformance(&store).await;
@@ -1032,5 +1083,27 @@ mod tests {
             error.message(),
             "history store schema version 99 is newer than this daemon supports (1)"
         );
+    }
+    #[tokio::test]
+    async fn attachment_records_reopen_in_existing_v1_schema() {
+        let temp = TempHistory::new("attachment-reopen");
+        let row = crate::history::conformance::attachment_record("id", "agent", "chat:a");
+        {
+            let store = SqliteHistoryStore::open(temp.0.clone()).await.unwrap();
+            store
+                .upsert_attachments(std::slice::from_ref(&row))
+                .await
+                .unwrap();
+        }
+        let store = SqliteHistoryStore::open(temp.0.clone()).await.unwrap();
+        assert_eq!(
+            store.get_attachment("agent", "id").await.unwrap(),
+            Some(row)
+        );
+        let connection = Connection::open(&temp.0).unwrap();
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 1);
     }
 }

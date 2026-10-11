@@ -45,9 +45,21 @@ import {
   type UsageRecordsQuery,
 } from '@animaOS-SWARM/sdk';
 
+/** Shared owner transport policy. The current console uses same-origin cookies;
+ *  future owner headers belong here for both fetch and multipart XHR. */
+export function daemonRequestHeaders(): Record<string, string> {
+  return {};
+}
+
 const setupClient = createDaemonClient({
   baseUrl: '',
-  fetch: (...args) => globalThis.fetch(...args),
+  fetch: (url, init) => {
+    const headers = daemonRequestHeaders();
+    new Headers(init?.headers).forEach((value, name) => {
+      headers[name] = value;
+    });
+    return globalThis.fetch(url, { ...init, headers });
+  },
 });
 
 export interface DaemonProvider {
@@ -211,6 +223,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
     ...init,
     headers: {
+      ...daemonRequestHeaders(),
       ...(init?.body ? { 'content-type': 'application/json' } : {}),
       ...init?.headers,
     },
@@ -361,6 +374,11 @@ export const daemon = {
     agentId: string,
     input: { title?: string } = {},
   ): Promise<Session> => setupClient.sessions.create(agentId, input),
+  downloadAttachment: (
+    agentId: string,
+    attachmentId: string,
+    options: { signal?: AbortSignal } = {},
+  ) => setupClient.attachments.download(agentId, attachmentId, options),
   updateSession: (
     agentId: string,
     sessionId: string,
@@ -792,6 +810,9 @@ export function toChatMessage(message: SessionMessage): ChatMessage {
     role: checkin ? 'System' : SESSION_ROLES[message.role],
     content: {
       text: checkin ? message.text.replace(CHECKIN_SUFFIX, '') : message.text,
+      ...(message.attachments.length
+        ? { attachments: message.attachments }
+        : {}),
       metadata: message.metadata,
     },
     created_at_ms: message.createdAtMs,

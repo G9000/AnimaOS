@@ -136,7 +136,7 @@ impl DaemonState {
         };
         let mut runtime = AgentRuntime::from_snapshot(
             canonical.run_snapshot(selection.messages),
-            Arc::clone(&self.model_adapter),
+            self.session_model_adapter(agent_id, room_id),
         );
         self.wire_runtime(&mut runtime);
         if let Some(summary) = summary {

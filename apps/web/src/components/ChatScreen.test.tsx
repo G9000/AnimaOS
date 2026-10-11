@@ -46,6 +46,44 @@ const agent: AgentDetail = {
 };
 
 describe('MessageList', () => {
+  it('reveals hidden characters consistently with read-aloud text', () => {
+    render(
+      <MessageList
+        agent={{
+          ...agent,
+          messages: [
+            { ...messages[1], content: { text: 'Hello\u200B friend' } },
+          ],
+        }}
+        sending={false}
+        scrollerRef={{ current: null }}
+        onSuggestion={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('Hello⟨U+200B⟩ friend')).toBeVisible();
+  });
+  it('shows legacy attachments on an empty-text message', () => {
+    render(
+      <MessageList
+        agent={{
+          ...agent,
+          messages: [
+            {
+              ...messages[0],
+              content: {
+                text: '',
+                attachments: [{ type: 'file', name: 'brief.txt' }],
+              },
+            },
+          ],
+        }}
+        sending={false}
+        scrollerRef={{ current: null }}
+        onSuggestion={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('brief.txt')).toBeVisible();
+  });
   it('preserves the reading position when new messages arrive and offers an explicit jump', async () => {
     const user = userEvent.setup();
     const scrollerRef = { current: null as HTMLDivElement | null };
@@ -446,6 +484,84 @@ describe('MessageList', () => {
         'min-w-0',
       );
     }
+  });
+});
+
+describe('composer attachments', () => {
+  const props = {
+    agentName: 'Nova',
+    draft: '',
+    setDraft: vi.fn(),
+    sending: false,
+    disabled: false,
+    onSend: vi.fn(),
+    error: null,
+    onDismissError: vi.fn(),
+  };
+  it('allows attachment-only sends once ready but blocks upload/errors while Stop stays usable', async () => {
+    const attachment = {
+      id: 'att_1',
+      name: 'brief.txt',
+      mime: 'text/plain',
+      size: 3,
+      kind: 'text' as const,
+      path: 'attachments/brief.txt',
+      createdAtMs: 1,
+    };
+    const item = {
+      localId: 'local',
+      name: 'brief.txt',
+      status: 'ready' as const,
+      progress: 100,
+      attachment,
+    };
+    const attachments = { items: [item], onAdd: vi.fn(), onRemove: vi.fn() };
+    const { rerender } = render(
+      <Composer {...props} attachments={attachments} />,
+    );
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(props.onSend).toHaveBeenCalled();
+    rerender(
+      <Composer
+        {...props}
+        draft="hello"
+        attachments={{
+          ...attachments,
+          items: [{ ...item, status: 'uploading' }],
+        }}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    const stop = vi.fn();
+    rerender(
+      <Composer
+        {...props}
+        draft="hello"
+        attachments={{ ...attachments, items: [{ ...item, status: 'error' }] }}
+        runActive
+        onStop={stop}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    expect(stop).toHaveBeenCalledOnce();
+  });
+  it('uses local drop and paste handlers while ordinary text stays available', () => {
+    const onAdd = vi.fn();
+    render(
+      <Composer
+        {...props}
+        attachments={{ items: [], onAdd, onRemove: vi.fn() }}
+      />,
+    );
+    const file = new File(['x'], 'brief.txt');
+    const field = screen.getByRole('textbox');
+    fireEvent.drop(field, { dataTransfer: { files: [file] } });
+    expect(onAdd).toHaveBeenCalledWith([file]);
+    fireEvent.paste(field, {
+      clipboardData: { items: [], files: [], getData: () => 'normal text' },
+    });
+    expect(onAdd).toHaveBeenCalledOnce();
   });
 });
 

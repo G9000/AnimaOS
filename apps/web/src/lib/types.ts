@@ -1,6 +1,7 @@
 // UI view-model types shared by the daemon client and the components.
 // The daemon wire format (snake_case here, camelCase on the wire) is adapted
 // into these shapes by daemon-api.ts `toAgentDetail`.
+import type { SessionMessageAttachment } from '@animaOS-SWARM/sdk';
 
 export interface TokenUsage {
   prompt_tokens: number;
@@ -14,6 +15,7 @@ export interface ChatMessage {
   role: 'User' | 'Assistant' | 'System' | 'Tool';
   content: {
     text: string;
+    attachments?: SessionMessageAttachment[];
     metadata?: Record<string, unknown> | null;
   };
   created_at_ms: number;

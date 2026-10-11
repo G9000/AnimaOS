@@ -15,6 +15,13 @@ import { ApprovalCard } from './ApprovalCard';
 import { AutomationNoticeCard } from './AutomationNoticeCard';
 import { HelperCard } from './HelperCard';
 import { ToolStepCard } from './ToolStepCard';
+import { AttachmentReferences } from '../attachments/AttachmentReferences';
+import { messageAttachment } from '../../lib/attachments';
+import {
+  attachmentsForRun,
+  EMPTY_RUN_ATTACHMENTS,
+  type KnownRunAttachments,
+} from '../../lib/run-attachments';
 
 type RenderMessage = (message: ChatMessage) => ReactNode;
 
@@ -131,13 +138,19 @@ export function RunActivity({
   agentName,
   actions,
   renderMessage,
+  knownAttachments = EMPTY_RUN_ATTACHMENTS,
 }: {
   live: LiveRun;
   agentName: string;
   actions?: TranscriptActions;
   renderMessage: RenderMessage;
+  knownAttachments?: KnownRunAttachments;
 }) {
   const { run } = live;
+  const attachments = attachmentsForRun(knownAttachments, run);
+  const unknownIds = run.input.attachmentIds.filter(
+    (id) => !attachments.some((item) => item.id === id),
+  );
   const active = isActiveRun(run);
   const elapsed = useElapsed(
     run.startedAtMs,
@@ -149,7 +162,12 @@ export function RunActivity({
     ? renderMessage({
         id: `${run.id}:input`,
         role: 'User',
-        content: { text: run.input.text },
+        content: {
+          text: run.input.text,
+          ...(attachments.length
+            ? { attachments: attachments.map(messageAttachment) }
+            : {}),
+        },
         created_at_ms: run.createdAtMs,
       })
     : null;
@@ -158,6 +176,7 @@ export function RunActivity({
     return (
       <div className="run-queued">
         {input}
+        <AttachmentReferences ids={unknownIds} />
         <div className="run-queued-meta">
           <span>Queued</span>
           {actions?.onCancelQueued && (
@@ -182,12 +201,17 @@ export function RunActivity({
       aria-label={active ? `${agentName} is replying` : `${agentName}’s reply`}
     >
       {input}
+      <AttachmentReferences ids={unknownIds} />
       {live.steers.map((steer) => (
         <div key={steer.messageId}>
           {renderMessage({
             id: steer.messageId,
             role: 'User',
-            content: { text: steer.text, metadata: { steer: true } },
+            content: {
+              text: steer.text,
+              metadata: { steer: true },
+              ...(steer.attachments ? { attachments: steer.attachments } : {}),
+            },
             created_at_ms: at,
           })}
         </div>
@@ -258,7 +282,10 @@ export function PendingMessage({
       {renderMessage({
         id: `pending:${pending.key}`,
         role: 'User',
-        content: { text: pending.text },
+        content: {
+          text: pending.text,
+          ...(pending.attachments ? { attachments: pending.attachments } : {}),
+        },
         created_at_ms: pending.createdAtMs,
       })}
       <p className="pending-message-label">

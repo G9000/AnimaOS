@@ -489,6 +489,7 @@ async fn a_steer_sent_while_awaiting_approval_waits_for_the_next_model_call() {
     assert_eq!(pending.run_id, first);
 
     let steer = AcceptRun {
+        attachment_ids: Vec::new(),
         mode: SessionRunMode::Steer,
         text: "also note the date".into(),
         ..accept(&agent_id, "chat:s", "key-steer")

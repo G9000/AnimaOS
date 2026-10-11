@@ -22,6 +22,7 @@ use crate::runs::{
 use crate::state::DaemonState;
 
 mod approvals;
+pub(crate) mod attachments;
 mod automations;
 mod compact;
 mod conversations;
@@ -5923,3 +5924,5 @@ mod tests {
         );
     }
 }
+#[cfg(test)]
+mod attachment_tests;

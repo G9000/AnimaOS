@@ -1,6 +1,7 @@
 import { DaemonHttpError } from './client.js';
 import type { DaemonClient } from './client.js';
 import type { UsageTotals } from './usage.js';
+import type { UploadedAttachment } from './attachments.js';
 
 export type SessionKind = 'chat' | 'telegram' | 'checkin' | 'job' | 'helper';
 export type SessionOrigin =
@@ -104,6 +105,13 @@ export interface SessionListOptions {
 export interface SessionMessageAttachment {
   type: 'file' | 'image' | 'url';
   name: string;
+  /** Absent on legacy attachment entries, which remain display-only. */
+  id?: string;
+  mime?: string;
+  size?: number;
+  kind?: UploadedAttachment['kind'];
+  path?: string;
+  createdAtMs?: number;
 }
 
 export interface SessionMessage {

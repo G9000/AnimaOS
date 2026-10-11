@@ -14,6 +14,29 @@ import {
   trimCommittedRun,
   type LiveState,
 } from './session-events';
+
+it('retains public attachment metadata from steered events and converts image/file message types', () => {
+  const run = runFixture('run_1');
+  const before = applyEvent(EMPTY_LIVE_STATE, runEvent('run.started', run, 1));
+  const attachment = {
+    id: 'att_1',
+    name: 'photo.png',
+    mime: 'image/png',
+    size: 3,
+    kind: 'image' as const,
+    path: 'attachments/photo.png',
+    createdAtMs: 1,
+  };
+  const after = applyEvent(before, {
+    ...steeredEvent(run, 'm', '', 2),
+    attachmentIds: ['att_1'],
+    attachments: [attachment],
+  });
+  expect(after.runs.run_1.steers[0]).toMatchObject({
+    attachmentIds: ['att_1'],
+    attachments: [{ ...attachment, type: 'image' }],
+  });
+});
 import {
   approvalEvent,
   approvalFixture,

@@ -11,7 +11,8 @@ use crate::model::{
     ModelStreamSink, ToolCall,
 };
 use crate::primitives::{
-    Content, DataValue, LockRecover, Message, MessageRole, TaskResult, TaskStatus,
+    Attachment, AttachmentType, Content, DataValue, LockRecover, Message, MessageRole, TaskResult,
+    TaskStatus,
 };
 use async_trait::async_trait;
 use futures::executor::block_on;
@@ -354,13 +355,27 @@ fn steers_join_the_conversation_before_the_next_model_call() {
     let (mut runtime, frames) = controlled(model.clone(), &control);
     let steering = control.steering.clone();
     let tool_calls = Arc::new(AtomicUsize::new(0));
+    let steered_content = Content {
+        text: "Also book the gym".into(),
+        attachments: Some(vec![Attachment {
+            attachment_type: AttachmentType::File,
+            name: "schedule.txt".into(),
+            data: "uploads/schedule.txt".into(),
+            mime_type: Some("text/plain".into()),
+        }]),
+        metadata: Some(BTreeMap::from([(
+            "references".into(),
+            DataValue::Array(vec![DataValue::String("ref-schedule".into())]),
+        )])),
+    };
 
     let result = block_on(runtime.run_with_tools(text("plan my week"), {
         let tool_calls = Arc::clone(&tool_calls);
+        let steered_content = steered_content.clone();
         move |_, _, _| {
             tool_calls.fetch_add(1, Ordering::SeqCst);
             steering
-                .push(text("Also book the gym"))
+                .push(steered_content.clone())
                 .expect("the inbox is open while the run works");
             async move { TaskResult::success(text("calendar read"), 0) }
         }
@@ -373,6 +388,11 @@ fn steers_join_the_conversation_before_the_next_model_call() {
     let steer = second.last().expect("the steer is the newest message");
     assert_eq!(steer.role, MessageRole::User);
     assert_eq!(steer.content.text, "Also book the gym");
+    assert_eq!(steer.content.attachments, steered_content.attachments);
+    assert_eq!(
+        metadata(steer, "references"),
+        steered_content.metadata.as_ref().unwrap().get("references")
+    );
     assert_eq!(metadata(steer, "steer"), Some(&DataValue::Bool(true)));
     assert_eq!(
         metadata(steer, "runId"),
@@ -396,6 +416,7 @@ fn steers_join_the_conversation_before_the_next_model_call() {
     assert!(frames.0.lock_recover().contains(&RunFrame::Steered {
         message_id: runtime.messages()[3].id.clone(),
         text: "Also book the gym".into(),
+        content: runtime.messages()[3].content.clone(),
     }));
     assert!(control.steering.drain().is_empty());
 }

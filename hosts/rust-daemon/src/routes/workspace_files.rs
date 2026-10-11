@@ -3,8 +3,8 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt, OpenOptionsSyncExt};
-use cap_std::fs::{Dir, Metadata, OpenOptions};
+use cap_fs_ext::DirExt;
+use cap_std::fs::{Dir, Metadata};
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -66,17 +66,7 @@ pub(super) async fn preview(
 }
 
 fn linked(metadata: &Metadata) -> bool {
-    if metadata.file_type().is_symlink() {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        use cap_std::fs::MetadataExt;
-        if metadata.file_attributes() & 0x400 != 0 {
-            return true;
-        }
-    }
-    false
+    crate::tools::workspace_bytes::linked(metadata)
 }
 
 fn excluded(name: &str) -> bool {
@@ -335,13 +325,9 @@ fn preview_file(root: &Path, relative: &str) -> Result<WorkspaceFileResponse, Ap
 }
 
 fn open_regular_file(directory: &Dir, name: &str) -> Result<cap_std::fs::File, ApiError> {
-    let mut options = OpenOptions::new();
-    options.read(true).follow(FollowSymlinks::No).nonblock(true);
-    // Capability-relative no-follow opens resist replacement races. Nonblock
-    // prevents a concurrent FIFO replacement from waiting for a writer.
-    let file = directory.open_with(name, &options).map_err(io_error)?;
-    let metadata = file.metadata().map_err(io_error)?;
-    if !metadata.is_file() || linked(&metadata) || hidden(&metadata) {
+    let file =
+        crate::tools::workspace_bytes::open_regular_file(directory, name).map_err(io_error)?;
+    if hidden(&file.metadata().map_err(io_error)?) {
         return Err(ApiError::bad_request_static(
             "Only regular text files can be previewed",
         ));

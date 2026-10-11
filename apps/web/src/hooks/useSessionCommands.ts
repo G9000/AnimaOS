@@ -5,7 +5,14 @@ import {
   type Dispatch,
   type SetStateAction,
 } from 'react';
-import type { Run, RunMode, Session } from '@animaOS-SWARM/sdk';
+import type {
+  Run,
+  RunMode,
+  Session,
+  UploadedAttachment,
+} from '@animaOS-SWARM/sdk';
+import type { SendAttachments } from './useSessionSends';
+import { ATTACHMENT_ERRORS } from '../lib/attachments';
 
 import { daemon } from '../lib/daemon-api';
 import type { Navigate } from '../lib/hash-route';
@@ -41,7 +48,17 @@ export interface SessionCommandOptions {
   chatKey: string | null;
   draft: string;
   /** A restored message; sent again unchanged, it keeps its key. */
-  resend: { text: string; idempotencyKey: string } | null;
+  resend: {
+    text: string;
+    idempotencyKey: string;
+    attachmentIds?: string[];
+    skill?: string;
+  } | null;
+  attachments?: readonly UploadedAttachment[];
+  /** Saved IDs whose display metadata is unavailable (manual run recovery). */
+  attachmentIds?: readonly string[];
+  attachmentsBlocked?: boolean;
+  clearAttachments?: () => void;
   /** A Telegram session's connector is there to carry replies. */
   telegramReady: boolean;
   /** The open session's reply in progress. */
@@ -49,7 +66,11 @@ export interface SessionCommandOptions {
   updateChat: (key: string, patch: CommandChatPatch) => void;
   /** Starts a new chat with its first message (spec §3.3), sent with
    *  `skill` when it is a `/skill` message. */
-  startChat: (text: string, skill?: string) => void;
+  startChat: (
+    text: string,
+    skill?: string,
+    attachments?: SendAttachments,
+  ) => void;
   queueSend: (
     target: Pick<Session, 'agentId' | 'id' | 'kind'>,
     conversation: string,
@@ -57,6 +78,7 @@ export interface SessionCommandOptions {
     idempotencyKey: string,
     mode?: RunMode,
     skill?: string,
+    attachments?: SendAttachments,
   ) => void;
   /** The commands the composer offers: the built-ins and the skills. */
   slashCommands: readonly SlashCommand[];
@@ -175,14 +197,39 @@ export function useSessionCommands(
 
     const submit = (mode: RunMode, override?: string) => {
       const current = latest.current;
-      if (!current.canSend()) return;
-      const text = (override ?? current.draft).trim();
-      if (!text) return;
-      const command = parseSlashCommand(text, current.slashCommands);
+      if (!current.canSend() || current.attachmentsBlocked) return;
+      const rawText = override ?? current.draft;
+      const attachments = [...(current.attachments ?? [])];
+      const attachmentIds = current.attachmentIds
+        ? [...current.attachmentIds]
+        : attachments.map((item) => item.id);
+      const sameAttachments =
+        JSON.stringify(current.resend?.attachmentIds ?? []) ===
+        JSON.stringify(attachmentIds);
+      const exactReplay =
+        current.resend !== null &&
+        current.resend.text === rawText &&
+        sameAttachments;
+      const text = exactReplay ? rawText : rawText.trim();
+      if (!text && attachmentIds.length === 0) return;
+      const attached: SendAttachments | undefined = attachmentIds.length
+        ? { attachmentIds, attachments }
+        : undefined;
+      const parsed = parseSlashCommand(text, current.slashCommands);
+      // An unchanged recovered input already was a message, including API text
+      // that looks like a local command. Preserve its identity before normalization.
+      const command = exactReplay ? null : parsed;
       // A skill is a message: the whole text goes, with its skill (spec §15.3).
-      const skill = command?.command.skill;
+      const restored = current.resend?.text === text && sameAttachments;
+      const skill =
+        (exactReplay ? current.resend?.skill : parsed?.command.skill) ??
+        (restored ? current.resend?.skill : undefined);
       if (command && !skill && current.chatKey) {
         const key = current.chatKey;
+        if (attachmentIds.length) {
+          current.updateChat(key, { error: ATTACHMENT_ERRORS.localCommand });
+          return;
+        }
         current.updateChat(key, { draft: '', error: null });
         const problem = runSlashCommand(command, handlers());
         // A command that cannot run here says why and stays in the composer.
@@ -190,7 +237,10 @@ export function useSessionCommands(
         return;
       }
       if (!current.routeSessionId) {
-        if (skill) current.startChat(text, skill);
+        if (attached) {
+          current.startChat(text, skill, attached);
+          current.clearAttachments?.();
+        } else if (skill) current.startChat(text, skill);
         else current.startChat(text);
         return;
       }
@@ -207,7 +257,7 @@ export function useSessionCommands(
       if (session.kind === 'telegram' && !current.telegramReady) return;
       // A restored message sent unchanged keeps its key; anything else is new.
       const idempotencyKey =
-        current.resend?.text === text
+        restored && current.resend
           ? current.resend.idempotencyKey
           : crypto.randomUUID();
       current.updateChat(chatKey, {
@@ -221,7 +271,17 @@ export function useSessionCommands(
         mode === 'steer' && !skill && activeRun && session.capabilities.steer
           ? 'steer'
           : 'queue';
-      if (skill)
+      if (attached)
+        current.queueSend(
+          session,
+          chatKey,
+          text,
+          idempotencyKey,
+          sendMode,
+          skill,
+          attached,
+        );
+      else if (skill)
         current.queueSend(
           session,
           chatKey,
@@ -231,6 +291,7 @@ export function useSessionCommands(
           skill,
         );
       else current.queueSend(session, chatKey, text, idempotencyKey, sendMode);
+      current.clearAttachments?.();
     };
 
     return {
@@ -249,7 +310,17 @@ export function useSessionCommands(
         )
           return false;
         const key = crypto.randomUUID();
-        if (run.input.skill)
+        if (run.input.attachmentIds.length)
+          queueSend(
+            session,
+            chatKey,
+            run.input.text,
+            key,
+            'queue',
+            run.input.skill ?? undefined,
+            { attachmentIds: [...run.input.attachmentIds] },
+          );
+        else if (run.input.skill)
           queueSend(
             session,
             chatKey,

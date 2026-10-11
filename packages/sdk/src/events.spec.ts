@@ -23,6 +23,46 @@ function sseResponse(chunks: string[]): Response {
 }
 
 describe('agent events client', () => {
+  it('preserves optional public attachment metadata on steered events while legacy steers remain valid', async () => {
+    const attachment = {
+      id: 'att_1',
+      name: 'brief.txt',
+      mime: 'text/plain',
+      size: 3,
+      kind: 'text' as const,
+      path: 'attachments/brief.txt',
+      createdAtMs: 1,
+    };
+    const legacy: AgentEvent = {
+      type: 'run.steered',
+      agentId: 'agent',
+      sessionId: 'session',
+      runId: 'run',
+      messageId: 'legacy',
+      text: 'hello',
+      seq: 1,
+      at: 1,
+    };
+    const attached: AgentEvent = {
+      ...legacy,
+      messageId: 'attached',
+      seq: 2,
+      text: '',
+      attachmentIds: ['att_1'],
+      attachments: [attachment],
+    };
+    const client = createDaemonClient({
+      fetch: async () =>
+        sseResponse([
+          `event: run.steered\ndata: ${JSON.stringify(legacy)}\n\n`,
+          `event: run.steered\ndata: ${JSON.stringify(attached)}\n\n`,
+        ]),
+    });
+    const received: AgentEvent[] = [];
+    for await (const event of client.events.stream('agent'))
+      received.push(event);
+    expect(received).toEqual([legacy, attached]);
+  });
   it('streams typed events and skips keep-alives', async () => {
     const requests: string[] = [];
     const client = createDaemonClient({

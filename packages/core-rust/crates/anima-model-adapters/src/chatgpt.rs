@@ -1,4 +1,5 @@
 //! Subscription inference only. OAuth storage, refresh, and account selection belong to the host.
+use crate::attachments::{model_supports_images, prepare_user_content};
 use crate::common::{
     assistant_tool_calls_json, tool_call_args, tool_call_id, tool_parameters_schema_json,
 };
@@ -122,6 +123,7 @@ impl ModelStreamSink for FinalSink {
 }
 
 fn request_body(config: &AgentConfig, request: &ModelGenerateRequest) -> Result<Value, String> {
+    let supports_images = model_supports_images("chatgpt", &config.model);
     let mut input = Vec::new();
     for message in &request.messages {
         match message.role {
@@ -135,7 +137,13 @@ fn request_body(config: &AgentConfig, request: &ModelGenerateRequest) -> Result<
                         "name":call["function"]["name"], "arguments":call["function"]["arguments"]}));
                 }
             }
-            role => input.push(json!({"role":if role == MessageRole::System {"developer"} else {"user"},
+            MessageRole::User => {
+                let prepared = prepare_user_content(&message.content, supports_images)?;
+                let mut parts = vec![json!({"type":"input_text", "text":prepared.text})];
+                parts.extend(prepared.images.iter().map(|image| json!({"type":"input_image", "image_url":image.data_uri})));
+                input.push(json!({"role":"user", "content":parts}));
+            }
+            MessageRole::System => input.push(json!({"role":"developer",
                 "content":[{"type":"input_text", "text":message.content.text}]})),
         }
     }

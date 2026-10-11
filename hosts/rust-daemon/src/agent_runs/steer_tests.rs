@@ -17,6 +17,7 @@ use crate::runs::{RunLedger, RunRecord, RunSource, RunStatus, RunSteer, RunStopR
 
 pub(super) fn message(agent_id: &str, key: &str, text: &str, mode: SessionRunMode) -> AcceptRun {
     AcceptRun {
+        attachment_ids: Vec::new(),
         agent_id: agent_id.into(),
         session_id: "chat:s".into(),
         text: text.into(),
@@ -605,6 +606,8 @@ async fn steers_left_beyond_the_queue_cap_are_offered_again_instead() {
             .unwrap()
             .pending_steers
             .push(RunSteer {
+                attachment_ids: Vec::new(),
+                skill: None,
                 idempotency_key: "steer-2".into(),
                 text: "steer-2".into(),
                 accepted_at_ms: anima_core::primitives::now_millis() + 60_000,

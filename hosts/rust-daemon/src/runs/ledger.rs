@@ -179,7 +179,21 @@ pub(crate) struct RunStepUsage {
 pub(crate) struct RunSteer {
     pub(crate) idempotency_key: String,
     pub(crate) text: String,
+    #[serde(default)]
+    pub(crate) attachment_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) skill: Option<String>,
     pub(crate) accepted_at_ms: u64,
+}
+
+impl RunSteer {
+    pub(crate) fn input(&self) -> RunInput {
+        RunInput {
+            text: self.text.clone(),
+            attachment_ids: self.attachment_ids.clone(),
+            skill: self.skill.clone(),
+        }
+    }
 }
 
 /// A steer a run's committed transcript took in: its key, which answers a
@@ -189,6 +203,8 @@ pub(crate) struct RunSteer {
 pub(crate) struct SteeredKey {
     pub(crate) idempotency_key: String,
     pub(crate) accepted_at_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) input: Option<RunInput>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -356,6 +372,7 @@ impl RunRecord {
                 self.steered_keys.push(SteeredKey {
                     idempotency_key: steer.idempotency_key.clone(),
                     accepted_at_ms: steer.accepted_at_ms,
+                    input: Some(steer.input()),
                 });
             }
         }
@@ -433,7 +450,8 @@ impl RunRecord {
         std::mem::take(&mut self.pending_steers)
             .into_iter()
             .map(|steer| {
-                Self::queued(
+                let input = steer.input();
+                let mut record = Self::queued(
                     RunStart {
                         agent_id: self.agent_id.clone(),
                         session_id: self.session_id.clone(),
@@ -446,7 +464,9 @@ impl RunRecord {
                         parent_run_id: None,
                     },
                     steer.accepted_at_ms,
-                )
+                );
+                record.input = input;
+                record
             })
             .collect()
     }
@@ -1015,18 +1035,21 @@ mod tests {
         assert!(value.get("steeredKeys").is_none());
         let mut steered = record.clone();
         steered.pending_steers = vec![RunSteer {
+            attachment_ids: Vec::new(),
+            skill: None,
             idempotency_key: "key-2".into(),
             text: "and this".into(),
             accepted_at_ms: 43,
         }];
         steered.steered_keys = vec![SteeredKey {
+            input: None,
             idempotency_key: "key-3".into(),
             accepted_at_ms: 44,
         }];
         let written = serde_json::to_value(&steered).unwrap();
         assert_eq!(
             written["pendingSteers"],
-            json!([{"idempotencyKey": "key-2", "text": "and this", "acceptedAtMs": 43}])
+            json!([{"idempotencyKey": "key-2", "text": "and this", "attachmentIds": [], "acceptedAtMs": 43}])
         );
         assert_eq!(
             written["steeredKeys"],
@@ -1173,6 +1196,8 @@ mod tests {
     fn restart_recovery_offers_the_steers_a_run_still_held_once() {
         let now = 5 * TERMINAL_RUN_RETENTION_MS;
         let steer = |key: &str, at: u64| RunSteer {
+            attachment_ids: Vec::new(),
+            skill: None,
             idempotency_key: key.into(),
             text: format!("text of {key}"),
             accepted_at_ms: at,
@@ -1226,11 +1251,15 @@ mod tests {
         let mut run = record("agent-a", since - 100);
         run.pending_steers = vec![
             RunSteer {
+                attachment_ids: Vec::new(),
+                skill: None,
                 idempotency_key: "old-pending".into(),
                 text: "old".into(),
                 accepted_at_ms: since - 1,
             },
             RunSteer {
+                attachment_ids: Vec::new(),
+                skill: None,
                 idempotency_key: "pending".into(),
                 text: "new".into(),
                 accepted_at_ms: since,
@@ -1238,10 +1267,12 @@ mod tests {
         ];
         run.steered_keys = vec![
             SteeredKey {
+                input: None,
                 idempotency_key: "old-steered".into(),
                 accepted_at_ms: since - 1,
             },
             SteeredKey {
+                input: None,
                 idempotency_key: "steered".into(),
                 accepted_at_ms: now,
             },
@@ -1273,6 +1304,8 @@ mod tests {
         let mut ledger = RunLedger::default();
         let mut holding = mirrored("agent-a", now - 2 * TERMINAL_RUN_RETENTION_MS);
         holding.pending_steers = vec![RunSteer {
+            attachment_ids: Vec::new(),
+            skill: None,
             idempotency_key: "key-2".into(),
             text: "and this".into(),
             accepted_at_ms: 1,
@@ -1598,6 +1631,8 @@ mod tests {
 
     fn steer(key: &str) -> RunSteer {
         RunSteer {
+            attachment_ids: Vec::new(),
+            skill: None,
             idempotency_key: key.into(),
             text: key.into(),
             accepted_at_ms: 1,
@@ -1769,5 +1804,54 @@ mod tests {
         assert_eq!(IDEMPOTENCY_WINDOW_MS, 24 * 60 * 60 * 1000);
         assert_eq!(RUN_STOPPED, "stopped");
         assert_eq!(STOPPED_BY_OWNER, "Stopped by owner");
+    }
+    #[test]
+    fn legacy_steer_defaults_and_new_consumed_input_round_trip() {
+        let steer: super::RunSteer = serde_json::from_value(
+            serde_json::json!({"idempotencyKey":"old","text":"raw","acceptedAtMs":1}),
+        )
+        .unwrap();
+        assert!(steer.attachment_ids.is_empty());
+        assert!(steer.skill.is_none());
+        let key: super::SteeredKey =
+            serde_json::from_value(serde_json::json!({"idempotencyKey":"old","acceptedAtMs":1}))
+                .unwrap();
+        assert!(key.input.is_none());
+        let input = super::RunInput {
+            text: "raw".into(),
+            attachment_ids: vec!["att-one".into(), "att-two".into()],
+            skill: Some("raw-skill".into()),
+        };
+        let key = super::SteeredKey {
+            idempotency_key: "new".into(),
+            accepted_at_ms: 2,
+            input: Some(input.clone()),
+        };
+        assert_eq!(
+            serde_json::from_value::<super::SteeredKey>(serde_json::to_value(key).unwrap())
+                .unwrap()
+                .input,
+            Some(input)
+        );
+    }
+    #[test]
+    fn restart_pending_steer_keeps_ordered_ids_and_raw_skill() {
+        let mut run = record("agent-a", 10);
+        run.start("model".into(), None, 11);
+        run.pending_steers.push(RunSteer {
+            idempotency_key: "restart-steer".into(),
+            text: "raw text".into(),
+            attachment_ids: vec!["att-b".into(), "att-a".into()],
+            skill: Some("raw-skill".into()),
+            accepted_at_ms: 12,
+        });
+        let ledger = RunLedger::restored(vec![run], &HashSet::from(["agent-a".to_string()]), 20);
+        let recovered = ledger
+            .find_by_idempotency_key("agent-a", "restart-steer", 0)
+            .unwrap();
+        assert_eq!(recovered.input.text, "raw text");
+        assert_eq!(recovered.input.attachment_ids, vec!["att-b", "att-a"]);
+        assert_eq!(recovered.input.skill.as_deref(), Some("raw-skill"));
+        assert_eq!(recovered.status, RunStatus::Interrupted);
     }
 }

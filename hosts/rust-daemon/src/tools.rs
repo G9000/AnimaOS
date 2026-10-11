@@ -13,6 +13,7 @@ pub(crate) mod todo;
 mod utility;
 mod web;
 mod workspace;
+pub(crate) mod workspace_bytes;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};

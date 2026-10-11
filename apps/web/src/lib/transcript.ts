@@ -2,6 +2,7 @@ import {
   isTerminalRunStatus,
   type Automation,
   type Run,
+  type SessionMessageAttachment,
 } from '@animaOS-SWARM/sdk';
 
 import type { SaveOutcome, SavedState } from '../hooks/useSaveToMemory';
@@ -52,6 +53,7 @@ export interface ToolStep {
 export interface PendingBubble {
   key: string;
   text: string;
+  attachments?: SessionMessageAttachment[];
   createdAtMs: number;
   status: 'sending' | 'retrying' | 'steering';
 }

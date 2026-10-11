@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use crate::attachments::{model_supports_images, prepare_user_content};
 use anima_core::{
     AgentConfig, Content, DataValue, Message, MessageRole, ModelGenerateRequest,
     ModelGenerateResponse, ModelStopReason, TokenUsage, ToolCall,
@@ -24,7 +25,7 @@ pub(super) fn build_google_body(
     );
     body.insert(
         "contents".into(),
-        Value::Array(build_google_contents(request)?),
+        Value::Array(build_google_contents(config, request)?),
     );
 
     if let Some(tools) = build_google_tools(config)? {
@@ -45,16 +46,27 @@ pub(super) fn build_google_body(
     Ok(Value::Object(body))
 }
 
-fn build_google_contents(request: &ModelGenerateRequest) -> Result<Vec<Value>, String> {
+fn build_google_contents(
+    config: &AgentConfig,
+    request: &ModelGenerateRequest,
+) -> Result<Vec<Value>, String> {
+    let supports_images = model_supports_images(
+        config.provider.as_deref().unwrap_or("google"),
+        &config.model,
+    );
     let mut contents: Vec<Value> = Vec::new();
 
     for (index, message) in request.messages.iter().enumerate() {
         match message.role {
             MessageRole::System => {}
-            MessageRole::User => contents.push(json!({
-                "role": "user",
-                "parts": [{ "text": message.content.text }],
-            })),
+            MessageRole::User => {
+                let prepared = prepare_user_content(&message.content, supports_images)?;
+                let mut parts = vec![json!({"text":prepared.text})];
+                parts.extend(prepared.images.iter().map(
+                    |image| json!({"inline_data":{"mime_type":image.mime, "data":image.base64}}),
+                ));
+                contents.push(json!({"role":"user", "parts":parts}));
+            }
             MessageRole::Assistant => {
                 let parts = match preserved_google_response_parts(message)? {
                     Some(parts) => parts,
@@ -309,6 +321,7 @@ fn missing_candidates_error(payload: &Value) -> String {
 /// metadata as a non-streamed one.
 #[derive(Default)]
 pub(crate) struct GoogleStreamAccumulator {
+    image_request: bool,
     parts: Vec<Value>,
     finish_reason: Option<String>,
     usage: Option<Value>,
@@ -321,11 +334,20 @@ pub(crate) struct GoogleStreamAccumulator {
 const MAX_GOOGLE_STREAM_PARTS: usize = 4_096;
 
 impl GoogleStreamAccumulator {
+    pub(crate) fn with_image_request(image_request: bool) -> Self {
+        Self {
+            image_request,
+            ..Self::default()
+        }
+    }
     /// Takes one SSE payload; returns the text it adds. A `thought: true` part
     /// (spec §12.4) never contributes to the visible delta, though it is still
     /// kept in the raw parts below for replay.
     pub(crate) fn push(&mut self, payload: &Value) -> Result<Option<String>, String> {
         if let Some(error) = payload.get("error") {
+            if self.image_request {
+                return Err(crate::attachments::IMAGE_REQUEST_FAILED.into());
+            }
             return Err(google_stream_error(error));
         }
         if let Some(usage) = payload.get("usageMetadata") {
@@ -412,6 +434,9 @@ fn google_stream_error(error: &Value) -> String {
     };
     format!(
         "Google stream failed: {}",
-        detail.chars().take(200).collect::<String>()
+        crate::adapter::sanitize_upstream_body(&detail, None)
+            .chars()
+            .take(200)
+            .collect::<String>()
     )
 }

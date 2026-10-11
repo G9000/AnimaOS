@@ -5263,6 +5263,7 @@ mod snapshot_tests {
                     attachment_type: AttachmentType::File,
                     name: "provider-output.txt".into(),
                     data: EXECUTOR_SENTINEL.into(),
+                    mime_type: None,
                 }]),
                 metadata: Some(BTreeMap::from([
                     (
@@ -5394,6 +5395,7 @@ mod snapshot_tests {
                     attachment_type: AttachmentType::File,
                     name: "secret.txt".into(),
                     data: "model-only-sensitive-attachment".into(),
+                    mime_type: None,
                 }]),
                 metadata: Some(BTreeMap::from([(
                     "private".into(),

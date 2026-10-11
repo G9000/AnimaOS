@@ -4,9 +4,25 @@ import {
   DaemonHttpError,
   type RunMode,
   type StartRunResult,
+  type UploadedAttachment,
 } from '@animaOS-SWARM/sdk';
 
 import { daemon } from '../lib/daemon-api';
+import {
+  rememberRunAttachments,
+  EMPTY_RUN_ATTACHMENTS,
+  type KnownRunAttachments,
+} from '../lib/run-attachments';
+import {
+  attachmentMetadata,
+  validAttachmentId,
+  MAX_DRAFT_ATTACHMENTS,
+} from '../lib/attachments';
+
+export interface SendAttachments {
+  attachmentIds: string[];
+  attachments?: UploadedAttachment[];
+}
 
 /** Automatic retries of a send that may not have arrived (spec §15.5). */
 export const SEND_RETRY_DELAYS_MS: readonly number[] = [1_000, 2_000, 4_000];
@@ -20,6 +36,8 @@ export interface SessionSend {
   /** The chat state the send belongs to (ViewHarness's `chatKey`). */
   conversation: string;
   text: string;
+  attachmentIds?: string[];
+  attachments?: UploadedAttachment[];
   mode: RunMode;
   /** The skill a `/skill` message was sent with (spec §8.3). */
   skill?: string;
@@ -69,19 +87,94 @@ export interface PersistedSend {
   /** The chat it belongs to (ViewHarness's chatKey). */
   conversation: string;
   createdAtMs: number;
+  agentId?: string;
+  sessionId?: string;
+  attachmentIds?: string[];
+  attachments?: UploadedAttachment[];
+  skill?: string;
 }
 
 const PENDING_SENDS_STORAGE_KEY = 'animaos.pendingSends';
 
-function isPersistedSend(value: unknown): value is PersistedSend {
-  if (typeof value !== 'object' || value === null) return false;
+function decodePersistedSend(value: unknown): PersistedSend | null {
+  if (typeof value !== 'object' || value === null) return null;
   const item = value as Record<string, unknown>;
-  return (
-    typeof item.key === 'string' &&
-    typeof item.text === 'string' &&
-    typeof item.conversation === 'string' &&
-    typeof item.createdAtMs === 'number'
-  );
+  if (
+    !(
+      typeof item.key === 'string' &&
+      item.key.length > 0 &&
+      item.key.length <= 512 &&
+      typeof item.text === 'string' &&
+      item.text.length <= 200_000 &&
+      typeof item.conversation === 'string' &&
+      item.conversation.length > 0 &&
+      item.conversation.length <= 1024 &&
+      Number.isSafeInteger(item.createdAtMs) &&
+      (item.createdAtMs as number) >= 0
+    )
+  )
+    return null;
+  const base: PersistedSend = {
+    key: item.key,
+    text: item.text,
+    conversation: item.conversation,
+    createdAtMs: item.createdAtMs as number,
+  };
+  if (item.skill !== undefined) {
+    if (
+      typeof item.skill !== 'string' ||
+      !/^[a-z0-9][a-z0-9-]{0,63}$/.test(item.skill)
+    )
+      return null;
+    base.skill = item.skill;
+  }
+  if (item.attachmentIds === undefined && item.attachments === undefined)
+    return base;
+  if (
+    !Array.isArray(item.attachmentIds) ||
+    item.attachmentIds.length > MAX_DRAFT_ATTACHMENTS ||
+    !item.attachmentIds.every(validAttachmentId) ||
+    new Set(item.attachmentIds).size !== item.attachmentIds.length
+  )
+    return null;
+  if (
+    item.attachmentIds.length === 0 &&
+    (item.attachments === undefined ||
+      (Array.isArray(item.attachments) && item.attachments.length === 0))
+  )
+    return base;
+  if (
+    typeof item.agentId !== 'string' ||
+    !validAttachmentId(item.agentId) ||
+    typeof item.sessionId !== 'string' ||
+    !validAttachmentId(item.sessionId) ||
+    item.conversation !== `${item.agentId}\u0000session:${item.sessionId}`
+  )
+    return null;
+  if (
+    item.attachments !== undefined &&
+    (!Array.isArray(item.attachments) ||
+      item.attachments.length > MAX_DRAFT_ATTACHMENTS)
+  )
+    return null;
+  const attachments =
+    (item.attachments as unknown[] | undefined)?.map(attachmentMetadata) ?? [];
+  const attachmentIds = item.attachmentIds as string[];
+  if (
+    attachments.some(
+      (attachment) => !attachment || !attachmentIds.includes(attachment.id),
+    ) ||
+    new Set(attachments.map((attachment) => attachment?.id)).size !==
+      attachments.length
+  )
+    return null;
+  return {
+    ...base,
+    agentId: item.agentId,
+    sessionId: item.sessionId,
+    attachmentIds: [...item.attachmentIds],
+    attachments: attachments as UploadedAttachment[],
+  };
 }
 
 function loadPendingSends(): PersistedSend[] {
@@ -89,7 +182,12 @@ function loadPendingSends(): PersistedSend[] {
     const raw = window.sessionStorage.getItem(PENDING_SENDS_STORAGE_KEY);
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter(isPersistedSend) : [];
+    return Array.isArray(parsed)
+      ? parsed
+          .slice(0, 200)
+          .map(decodePersistedSend)
+          .filter((item): item is PersistedSend => item !== null)
+      : [];
   } catch {
     return [];
   }
@@ -115,6 +213,17 @@ function toPersisted(send: SessionSend): PersistedSend {
     text: send.text,
     conversation: send.conversation,
     createdAtMs: send.createdAtMs,
+    ...(send.skill ? { skill: send.skill } : {}),
+    ...(send.attachmentIds?.length
+      ? {
+          agentId: send.agentId,
+          sessionId: send.sessionId,
+          attachmentIds: [...send.attachmentIds],
+          attachments: (send.attachments ?? [])
+            .map(attachmentMetadata)
+            .filter((item): item is UploadedAttachment => item !== null),
+        }
+      : {}),
   };
 }
 
@@ -122,6 +231,8 @@ function toPersisted(send: SessionSend): PersistedSend {
  *  accepts a session's messages in the order they were written (spec §4.3). */
 export class SendQueue {
   private sends: SessionSend[] = [];
+  private knownAttachments: KnownRunAttachments = EMPTY_RUN_ATTACHMENTS;
+  readonly attachmentSnapshot = () => this.knownAttachments;
   private readonly listeners = new Set<() => void>();
   private readonly busy = new Set<string>();
   /** Retries waiting to fire: each holds its send's lane busy. */
@@ -146,9 +257,31 @@ export class SendQueue {
 
   readonly send = (input: NewSessionSend): void => {
     if (this.sends.some((item) => item.key === input.key)) return;
+    this.knownAttachments = rememberRunAttachments(
+      this.knownAttachments,
+      input.agentId,
+      input.sessionId,
+      `request:${input.key}`,
+      input.attachments ?? [],
+    );
     this.set([
       ...this.sends,
-      { ...input, createdAtMs: Date.now(), failures: 0, steeringRunId: null },
+      {
+        ...input,
+        ...(input.attachmentIds
+          ? { attachmentIds: [...input.attachmentIds] }
+          : {}),
+        ...(input.attachments
+          ? {
+              attachments: input.attachments
+                .map(attachmentMetadata)
+                .filter((item): item is UploadedAttachment => item !== null),
+            }
+          : {}),
+        createdAtMs: Date.now(),
+        failures: 0,
+        steeringRunId: null,
+      },
     ]);
     this.pump(laneOf(input));
   };
@@ -254,6 +387,9 @@ export class SendQueue {
         send.sessionId,
         {
           text: send.text,
+          ...(send.attachmentIds?.length
+            ? { attachmentIds: send.attachmentIds }
+            : {}),
           mode: send.mode,
           ...(send.skill ? { skill: send.skill } : {}),
         },
@@ -269,6 +405,14 @@ export class SendQueue {
     if (this.closed) return;
     // A send forgotten meanwhile (its companion was deleted) is not reported.
     if (this.current(send.key)) {
+      if (!result.steer)
+        this.knownAttachments = rememberRunAttachments(
+          this.knownAttachments,
+          send.agentId,
+          send.sessionId,
+          `run:${result.run.id}`,
+          send.attachments ?? [],
+        );
       if (result.steer) this.patch(send.key, { steeringRunId: result.run.id });
       else this.settle(send.key);
       this.callbacks.onAccepted(send, result);
@@ -323,6 +467,7 @@ export function useSessionSends(callbacks: SessionSendCallbacks) {
   const sends = useSyncExternalStore(queue.subscribe, queue.snapshot);
   return {
     sends,
+    knownRunAttachments: queue.attachmentSnapshot(),
     send: queue.send,
     settle: queue.settle,
     cancel: queue.cancel,

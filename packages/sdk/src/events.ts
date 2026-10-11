@@ -1,6 +1,7 @@
 import type { Approval } from './approvals.js';
 import type { DaemonClient } from './client.js';
 import type { Run } from './runs.js';
+import type { UploadedAttachment } from './attachments.js';
 
 /** One tool call of a run in flight. */
 export interface LiveToolCard {
@@ -57,7 +58,13 @@ export type AgentEvent =
     })
   | (EventBase & { type: RunLifecycleEventType; run: Run })
   | (EventBase & { type: 'run.progress'; phase: string })
-  | (EventBase & { type: 'run.steered'; messageId: string; text: string })
+  | (EventBase & {
+      type: 'run.steered';
+      messageId: string;
+      text: string;
+      attachmentIds?: string[];
+      attachments?: UploadedAttachment[];
+    })
   | (EventBase & {
       type: 'step.delta';
       stepId: string;

@@ -10,6 +10,7 @@
 @import './automations.css';
 @import './memory.css';
 @import './system.css';
+@import './attachments.css';
 
 @source '../../packages/ui/src/**/*.{ts,tsx}';
 

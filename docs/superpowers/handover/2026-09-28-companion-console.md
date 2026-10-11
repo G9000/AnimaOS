@@ -1,6 +1,95 @@
-# Handover: companion console build (M0–M3 done, M4 planned)
+# Handover: companion console build (M0–M8 merged; M9 PR open)
 
 This document is for the next agent picking up the companion console upgrade. Read it first; it tells you where everything is and what to do next.
+
+## Start here (2026-10-11): M9 PR #15 open; M10 plan prepared
+
+**State**
+
+- M0–M8 are merged to `main`. The last merges were #12 (M6), #13 (M7) and #14 (M8); `main` is at `86cc87f`.
+- M9 (attachments and browser voice) implementation is complete on `feat/companion-console-m9`, cut from `main`. Lean plan: `docs/superpowers/plans/2026-09-23-companion-console-m9.md`; the owner authorized Codex subagents because Claude was signed out. Both daemon batch reviews, the final web/SDK review and one fix wave are finished. The full Rust gate caught old snapshot expectations; test-only corrections preserved historical migration coverage and passed the rerun.
+- M9 is signed and pushed through `9efe2d6`. [PR #15](https://github.com/G9000/animaOS-SWARM/pull/15) is OPEN against `main` and attached to the Codex chat; it is not merged. Both waiting daemon commits finished, and the latest implementation/documentation signatures were verified. Only unrelated `nx.json` remains locally modified.
+- The working tree uses snapshot **v11** with `.pre-attachments.bak` / `control_plane.backup.10`; merged `main` still uses v10.
+- Hermes image routing/provider formats were used as Rust porting references. `packages/core-rust/crates/anima-model-adapters/HERMES-NOTICE` retains the upstream MIT notice and revision `f3ef9db68332063a3625661f3a9b259f60abdb4e`. The owner clarified “remember” means reuse code/behavior, not a new memory feature.
+- The lean M10 plan draft (10 tasks, about 1,200 lines) and controller top-five binding risk rulings are ready in the ignored `.superpowers/sdd/2026-09-23-companion-console-m10/plan-draft.md`; its ledger records the precise resume point. No M10 branch or tracked implementation starts before the owner explicitly merges M9.
+- Compatibility: new v11 consumed steer keys preserve full input after transcript pruning; older keys require a matching scoped transcript to prove equality, otherwise replay returns 409.
+- Fresh local gates on this working tree:
+  - `rust-daemon:test`: **2,156 passed, 7 ignored** in aggregate: host 1,542 plus its `core-rust:test` dependency 614. The ignored tests require Postgres.
+  - SDK/web test, typecheck and build: **web 1,117 passed; SDK 117 passed, 3 skipped**. Set `ANIMA_SKIP_SERVICE_TESTS=1`; those three SDK tests start a real service and are excluded under the owner's rule.
+  - `cargo fmt --all --check`: passed after a controller-only test-module ordering correction. Nx format:check against origin/main also passed.
+  - Logs: `.superpowers/sdd/2026-09-23-companion-console-m9/gate-rust-rerun.log` and `gate-web-sdk.log` (ignored local working files). Full web output includes act warnings from the unchanged `WorkspaceOperations` removed-filter test; the touched 312-test focused set was clean. Source matches `origin/main` and its API methods are mocked.
+- Evidence limits: no live-provider image acceptance, real microphone/TTS, Unix link fixtures, Postgres execution or VPS deployment. One earlier SDK run accidentally started its existing temporary daemon fixture; it cleaned up, and subsequent controller process checks found no daemon. The opt-out now prevents recurrence.
+
+**Resume M10 after explicit M9 merge**
+
+1. Do not repeat M9 implementation or reviews. PR #15 is ready for the owner’s merge instruction; never infer merge approval from “continue” or “go.”
+2. After the owner explicitly says “merge,” merge PR #15, update local `main`, and cut `feat/companion-console-m10` from that merged main. Preserve the unrelated `nx.json` edit; no stash/reset/restore/worktree operations.
+3. Copy the prepared draft into `docs/superpowers/plans/2026-09-23-companion-console-m10.md`, recreate M10 rules from M9, verify target/interface names against merged main, then sign the plan. Its binding controller rulings are already appended; no separate pre-flight audit is needed.
+4. Execute the ten M10 tasks with bounded Codex implementers (owner authorized), daemon batch review, one final web/SDK review, one fix wave and gates. Use focused Hermes code/behavior reuse with notices. Runtime/container/TLS/provider acceptance remains unverified under the no-service constraint; automatic destructive session TTL is not invented without a product policy.
+5. Local ledgers, gate logs and draft artifacts remain under ignored `.superpowers/sdd/`; all M9 tracked work is committed and pushed. Re-run relevant checks only for new changes.
+
+**Milestone workflow reference (M9 implementation is already complete)**
+
+1. Have **Sonnet** write a **lean plan**, modelled on `docs/superpowers/plans/2026-09-23-companion-console-m8.md`:
+   - Interfaces, rules, test lists and commands; full code only for tricky pieces; about 1,000–2,000 lines.
+   - Output: `docs/superpowers/plans/2026-09-23-companion-console-m9.md`.
+   - Sources: spec §12.1–§12.2, the master plan's M9 section, and the codebase.
+2. The controller rules on the plan's top-5 risks: append a "Controller rulings on the risks (binding)" section and commit the plan. No separate pre-flight audit.
+3. Implement task by task:
+   - Sonnet implementers; Opus only for concurrency- or security-subtle tasks.
+   - Implementers read the plan directly plus `.superpowers/sdd/2026-09-23-companion-console-m9/rules.md`. Copy it from the M8 folder and change m8 to m9; those working files are gitignored, so recreate them from `rules.md` in this handover if missing.
+4. Reviews:
+   - Batch-review the daemon tasks (2–4 at a time, Sonnet; Opus for risky areas).
+   - One final web+SDK review covers all web tasks.
+   - One fix wave.
+5. Run the gates:
+   - Use `NX_DAEMON=false`, `NX_ISOLATE_PLUGINS=false`, `NX_NO_CLOUD=true`, `CI=1`, `ANIMA_SKIP_SERVICE_TESTS=1`, and `NX_NATIVE_FILE_CACHE_DIRECTORY=node_modules/.cache/nx-native-m9`; set `CARGO_INCREMENTAL=0` before cargo or Rust Nx targets. Sandbox native-cache/realpath restrictions require escalated local checks; no dependency installation is needed.
+   - `bun x nx run rust-daemon:test --skipNxCache`
+   - `bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache`
+   - `cargo fmt --all --check`
+   - `bun x nx format:check --base=origin/main`
+6. Update the master-plan status row and this handover, push, and open a PR to `main`. Merge only when the owner says "merge".
+7. Keep a ledger in `.superpowers/sdd/<milestone>/progress.md`, recording each decision as `Ruling: <what> — <why> — <cost if wrong>`.
+
+**Rules every agent follows**
+
+- Prefix every cargo command with `CARGO_INCREMENTAL=0`.
+- Commits and staging:
+  - Stage by explicit path. Never stage `nx.json` or `anima.yaml`; they show as modified locally but aren't ours.
+  - Never use `git stash`, `reset`, `checkout -- <path>`, `restore` or `worktree`.
+- Environment:
+  - No new dependencies or dependency features.
+  - Don't start a real daemon, dev server, database or container. No Postgres is available, so Postgres tests stay `#[ignore]`.
+  - Don't touch the Docker Postgres on port 55432.
+- Code shape:
+  - `agent_runs.rs`, `connectors/runtime.rs` and `ViewHarness.tsx` only gain wiring lines.
+  - Lock order: control-plane transaction → state lock → leaf mutexes. No std lock across `.await`.
+  - Owner mutations run their transaction/save/undo body in `tokio::spawn`, so they're drop-safe.
+- Content and tests:
+  - Model-written text renders in the web only as text, with hidden characters revealed (`lib/skills.ts` `revealInvisible`, `components/memory/RevealedText.tsx`).
+  - Refuse hidden Unicode wherever the model writes (`skills::is_smuggling_character`, `memory_text.rs`).
+  - Strings are named constants, each tested once.
+  - Tests are never wall-clock-racy, and web tests stay pristine (no new `act()` warnings).
+
+**Gotchas**
+
+- **GPG:** commits are GPG-signed. When gpg-agent's cache expires, `git commit` blocks on a pinentry dialog until the owner types the passphrase. Run long commits in the background and ask the owner.
+- **Line endings:** with `autocrlf`, git can check files out with CRLF, which `nx format:check` flags. `nx format:write` on those files fixes it, and nothing is committed if only line endings differ.
+- **Corrupted build artifacts:** errors such as "invalid metadata", "not found in rlib format" or an internal compiler error mean the build artifacts are corrupted. Fix them with `cargo clean -p anima-daemon -p anima-core -p anima-model-adapters -p anima-memory`, then rerun.
+- **CI:** it always fails at the Nx Cloud step. The local gates are the verification.
+- **`gh pr edit`:** it fails; use `gh api -X PATCH repos/G9000/animaOS-SWARM/pulls/N`.
+- **Stacked PRs:** they don't retarget automatically. PATCH `base=main` before merging.
+
+**Open follow-ups**
+
+- Owner direction (2026-10-11): use Hermes as a focused behavioral reference and keep Anima's independent Rust engine. Start with Telegram, Discord and Gmail, Calendar and Drive rather than integration parity. Connectors should support optional community modules. Today's TS `ModPlugin` is stateless/tool-only and Rust connectors are built-ins; a lifecycle-capable community connector interface is still needed. This is outside M9.
+- Owner auth for the older memory routes.
+- Hidden-text refusal for evaluator extractions.
+- A `memory.updated` event.
+- Token estimation for end-only usage providers.
+- A combined usage summary endpoint.
+- Telegram/CLI notice that an approval is waiting.
+- Skip a skill scan while the previous one's blocking work is still running.
 
 ## Update 2026-10-09: M8 done, PR open (stacked on M7)
 

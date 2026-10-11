@@ -1,3 +1,4 @@
+use crate::attachments::{model_supports_images, prepare_user_content};
 use anima_core::{
     AgentConfig, Content, MessageRole, ModelGenerateRequest, ModelGenerateResponse,
     ModelStopReason, TokenUsage,
@@ -14,7 +15,7 @@ pub(super) fn build_ollama_body(
     body.insert("think".into(), Value::Bool(false));
     body.insert(
         "messages".into(),
-        Value::Array(build_ollama_messages(request)),
+        Value::Array(build_ollama_messages(config, request)?),
     );
 
     let mut options = Map::new();
@@ -31,7 +32,14 @@ pub(super) fn build_ollama_body(
     Ok(Value::Object(body))
 }
 
-fn build_ollama_messages(request: &ModelGenerateRequest) -> Vec<Value> {
+fn build_ollama_messages(
+    config: &AgentConfig,
+    request: &ModelGenerateRequest,
+) -> Result<Vec<Value>, String> {
+    let supports_images = model_supports_images(
+        config.provider.as_deref().unwrap_or("ollama"),
+        &config.model,
+    );
     let mut messages = vec![json!({
         "role": "system",
         "content": request.system,
@@ -44,13 +52,25 @@ fn build_ollama_messages(request: &ModelGenerateRequest) -> Vec<Value> {
             MessageRole::Assistant => "assistant",
             MessageRole::Tool => "tool",
         };
-        messages.push(json!({
+        let mut entry = json!({
             "role": role,
             "content": message.content.text,
-        }));
+        });
+        if message.role == MessageRole::User {
+            let prepared = prepare_user_content(&message.content, supports_images)?;
+            entry["content"] = Value::String(prepared.text);
+            if !prepared.images.is_empty() {
+                entry["images"] = json!(prepared
+                    .images
+                    .iter()
+                    .map(|image| image.base64)
+                    .collect::<Vec<_>>());
+            }
+        }
+        messages.push(entry);
     }
 
-    messages
+    Ok(messages)
 }
 
 pub(super) fn parse_ollama_response(payload: &Value) -> Result<ModelGenerateResponse, String> {
@@ -98,17 +118,30 @@ pub(super) fn parse_ollama_response(payload: &Value) -> Result<ModelGenerateResp
 /// One streamed native Ollama response (NDJSON lines, spec §12.4).
 #[derive(Default)]
 pub(crate) struct OllamaStreamAccumulator {
+    image_request: bool,
     text: String,
     done: Option<Value>,
 }
 
 impl OllamaStreamAccumulator {
+    pub(crate) fn with_image_request(image_request: bool) -> Self {
+        Self {
+            image_request,
+            ..Self::default()
+        }
+    }
     /// Takes one NDJSON line; returns the text it adds.
     pub(crate) fn push(&mut self, payload: &Value) -> Result<Option<String>, String> {
         if let Some(error) = payload.get("error").and_then(Value::as_str) {
+            if self.image_request {
+                return Err(crate::attachments::IMAGE_REQUEST_FAILED.into());
+            }
             return Err(format!(
                 "Ollama stream failed: {}",
-                error.chars().take(200).collect::<String>()
+                crate::adapter::sanitize_upstream_body(error, None)
+                    .chars()
+                    .take(200)
+                    .collect::<String>()
             ));
         }
         let delta = payload

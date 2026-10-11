@@ -17,288 +17,290 @@ import { daemonTestEnvironment } from './daemon-environment.js';
 
 const workspaceRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
-  '../../..'
+  '../../..',
 );
 const daemonManifestPath = resolve(workspaceRoot, 'Cargo.toml');
 const daemonTargetDir = resolve(
   workspaceRoot,
   'target',
-  'sdk-daemon-integration'
+  'sdk-daemon-integration',
 );
 const buildDaemon = promisify(execFile);
 
-describe.sequential('@animaOS-SWARM/sdk real daemon integration', () => {
-  let daemonProcess: ChildProcess | null = null;
-  let daemonOutput = '';
-  let temporaryWorkspace: string | undefined;
-  let modelStub:
-    | Awaited<ReturnType<typeof startOpenAiCompatibleStub>>
-    | undefined;
-  let client = createDaemonClient();
+describe
+  .skipIf(process.env.ANIMA_SKIP_SERVICE_TESTS === '1')
+  .sequential('@animaOS-SWARM/sdk real daemon integration', () => {
+    let daemonProcess: ChildProcess | null = null;
+    let daemonOutput = '';
+    let temporaryWorkspace: string | undefined;
+    let modelStub:
+      | Awaited<ReturnType<typeof startOpenAiCompatibleStub>>
+      | undefined;
+    let client = createDaemonClient();
 
-  beforeAll(async () => {
-    // Compilation has its own deadline. A cold Rust build is not a failed
-    // health check, and running the binary directly lets cleanup own its PID.
-    const targetDir = resolve(
-      workspaceRoot,
-      process.env.CARGO_TARGET_DIR ?? daemonTargetDir
-    );
-    await buildDaemon(
-      'cargo',
-      [
-        'build',
-        '--manifest-path',
-        daemonManifestPath,
-        '-p',
-        'anima-daemon',
-        '--target-dir',
-        targetDir,
-      ],
-      {
-        cwd: workspaceRoot,
-        windowsHide: true,
-        timeout: 300_000,
-        maxBuffer: 8 * 1024 * 1024,
-      }
-    );
-    temporaryWorkspace = await mkdtemp(join(tmpdir(), 'anima-sdk-test-'));
-    modelStub = await startOpenAiCompatibleStub();
-    const port = await reservePort();
-    const baseUrl = `http://127.0.0.1:${String(port)}`;
-
-    const spawnedProcess = spawn(
-      join(
-        targetDir,
-        'debug',
-        process.platform === 'win32' ? 'anima-daemon.exe' : 'anima-daemon'
-      ),
-      [],
-      {
-        cwd: temporaryWorkspace,
-        env: {
-          ...daemonTestEnvironment(process.env, temporaryWorkspace, port),
-          // Provider credentials belong to the host, not untrusted agent settings.
-          OPENAI_API_KEY: 'sdk-integration-key',
-          OPENAI_BASE_URL: `${modelStub.baseUrl}/v1`,
+    beforeAll(async () => {
+      // Compilation has its own deadline. A cold Rust build is not a failed
+      // health check, and running the binary directly lets cleanup own its PID.
+      const targetDir = resolve(
+        workspaceRoot,
+        process.env.CARGO_TARGET_DIR ?? daemonTargetDir,
+      );
+      await buildDaemon(
+        'cargo',
+        [
+          'build',
+          '--manifest-path',
+          daemonManifestPath,
+          '-p',
+          'anima-daemon',
+          '--target-dir',
+          targetDir,
+        ],
+        {
+          cwd: workspaceRoot,
+          windowsHide: true,
+          timeout: 300_000,
+          maxBuffer: 8 * 1024 * 1024,
         },
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
+      );
+      temporaryWorkspace = await mkdtemp(join(tmpdir(), 'anima-sdk-test-'));
+      modelStub = await startOpenAiCompatibleStub();
+      const port = await reservePort();
+      const baseUrl = `http://127.0.0.1:${String(port)}`;
+
+      const spawnedProcess = spawn(
+        join(
+          targetDir,
+          'debug',
+          process.platform === 'win32' ? 'anima-daemon.exe' : 'anima-daemon',
+        ),
+        [],
+        {
+          cwd: temporaryWorkspace,
+          env: {
+            ...daemonTestEnvironment(process.env, temporaryWorkspace, port),
+            // Provider credentials belong to the host, not untrusted agent settings.
+            OPENAI_API_KEY: 'sdk-integration-key',
+            OPENAI_BASE_URL: `${modelStub.baseUrl}/v1`,
+          },
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      );
+      daemonProcess = spawnedProcess;
+
+      spawnedProcess.stdout?.on('data', (chunk: Buffer | string) => {
+        daemonOutput += chunk.toString();
+      });
+      spawnedProcess.stderr?.on('data', (chunk: Buffer | string) => {
+        daemonOutput += chunk.toString();
+      });
+
+      client = createDaemonClient({ baseUrl });
+      await waitForDaemonHealthy(client, spawnedProcess, () => daemonOutput);
+    }, 360_000);
+
+    afterAll(async () => {
+      await stopDaemonProcess(daemonProcess);
+      daemonProcess = null;
+      await modelStub?.close();
+      if (temporaryWorkspace) {
+        await rm(temporaryWorkspace, { recursive: true, force: true });
       }
-    );
-    daemonProcess = spawnedProcess;
-
-    spawnedProcess.stdout?.on('data', (chunk: Buffer | string) => {
-      daemonOutput += chunk.toString();
-    });
-    spawnedProcess.stderr?.on('data', (chunk: Buffer | string) => {
-      daemonOutput += chunk.toString();
     });
 
-    client = createDaemonClient({ baseUrl });
-    await waitForDaemonHealthy(client, spawnedProcess, () => daemonOutput);
-  }, 360_000);
+    it('exercises health, memories, and agent reads against the Rust daemon', async () => {
+      await expect(client.health()).resolves.toEqual({
+        status: 'ok',
+      });
 
-  afterAll(async () => {
-    await stopDaemonProcess(daemonProcess);
-    daemonProcess = null;
-    await modelStub?.close();
-    if (temporaryWorkspace) {
-      await rm(temporaryWorkspace, { recursive: true, force: true });
-    }
-  });
+      const agentName = `sdk-e2e-agent-${Date.now().toString(36)}`;
+      const createdAgent = await client.agents.create(
+        agent({
+          name: agentName,
+          model: 'gpt-5.4',
+          settings: { temperature: 0.2, customFlag: true },
+        }),
+      );
 
-  it('exercises health, memories, and agent reads against the Rust daemon', async () => {
-    await expect(client.health()).resolves.toEqual({
-      status: 'ok',
-    });
+      expect(createdAgent.state.name).toBe(agentName);
+      expect(createdAgent.state.config.bio).toBeNull();
+      expect(createdAgent.state.config.settings?.additional.customFlag).toBe(
+        true,
+      );
+      expect(createdAgent.state.config.settings?.temperature).toBe(0.2);
+      expect(createdAgent.messages).toEqual([]);
 
-    const agentName = `sdk-e2e-agent-${Date.now().toString(36)}`;
-    const createdAgent = await client.agents.create(
-      agent({
-        name: agentName,
-        model: 'gpt-5.4',
-        settings: { temperature: 0.2, customFlag: true },
-      })
-    );
+      const agents = await client.agents.list();
+      expect(
+        agents.some((entry) => entry.state.id === createdAgent.state.id),
+      ).toBe(true);
 
-    expect(createdAgent.state.name).toBe(agentName);
-    expect(createdAgent.state.config.bio).toBeNull();
-    expect(createdAgent.state.config.settings?.additional.customFlag).toBe(
-      true
-    );
-    expect(createdAgent.state.config.settings?.temperature).toBe(0.2);
-    expect(createdAgent.messages).toEqual([]);
+      await expect(
+        client.agents.get(createdAgent.state.id),
+      ).resolves.toMatchObject({
+        state: {
+          id: createdAgent.state.id,
+          name: agentName,
+        },
+      });
 
-    const agents = await client.agents.list();
-    expect(
-      agents.some((entry) => entry.state.id === createdAgent.state.id)
-    ).toBe(true);
-
-    await expect(
-      client.agents.get(createdAgent.state.id)
-    ).resolves.toMatchObject({
-      state: {
-        id: createdAgent.state.id,
-        name: agentName,
-      },
-    });
-
-    const memoryToken = `sdk-e2e-${Date.now().toString(36)}`;
-    const createdMemory = await client.memories.create({
-      agentId: createdAgent.state.id,
-      agentName,
-      type: 'fact',
-      content: `daemon integration memory ${memoryToken}`,
-      importance: 0.8,
-      tags: ['sdk', 'integration'],
-    });
-
-    expect(createdMemory.agentId).toBe(createdAgent.state.id);
-    expect(createdMemory.tags).toEqual(['sdk', 'integration']);
-
-    await expect(
-      client.memories.search(memoryToken, {
+      const memoryToken = `sdk-e2e-${Date.now().toString(36)}`;
+      const createdMemory = await client.memories.create({
         agentId: createdAgent.state.id,
-        limit: 5,
-      })
-    ).resolves.toEqual([
-      expect.objectContaining({
-        id: createdMemory.id,
         agentName,
         type: 'fact',
-      }),
-    ]);
-
-    await expect(
-      client.memories.recent({
-        agentId: createdAgent.state.id,
-        limit: 1,
-      })
-    ).resolves.toEqual([
-      expect.objectContaining({
-        id: createdMemory.id,
         content: `daemon integration memory ${memoryToken}`,
-      }),
-    ]);
+        importance: 0.8,
+        tags: ['sdk', 'integration'],
+      });
 
-    await expect(
-      client.agents.recentMemories(createdAgent.state.id, {
-        limit: 5,
-      })
-    ).resolves.toEqual([
-      expect.objectContaining({
-        id: createdMemory.id,
-        agentId: createdAgent.state.id,
-        agentName,
-      }),
-    ]);
-  }, 90000);
+      expect(createdMemory.agentId).toBe(createdAgent.state.id);
+      expect(createdMemory.tags).toEqual(['sdk', 'integration']);
 
-  it('runs a swarm and streams lifecycle events through the live daemon', async () => {
-    const createdSwarm = await client.swarms.create(
-      swarm({
-        strategy: 'round-robin',
-        manager: {
-          name: `sdk-e2e-manager-${Date.now().toString(36)}`,
-          model: 'gpt-5.4',
-          provider: 'openai',
-        },
-        workers: [
-          {
-            name: `sdk-e2e-worker-${Date.now().toString(36)}`,
+      await expect(
+        client.memories.search(memoryToken, {
+          agentId: createdAgent.state.id,
+          limit: 5,
+        }),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          id: createdMemory.id,
+          agentName,
+          type: 'fact',
+        }),
+      ]);
+
+      await expect(
+        client.memories.recent({
+          agentId: createdAgent.state.id,
+          limit: 1,
+        }),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          id: createdMemory.id,
+          content: `daemon integration memory ${memoryToken}`,
+        }),
+      ]);
+
+      await expect(
+        client.agents.recentMemories(createdAgent.state.id, {
+          limit: 5,
+        }),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          id: createdMemory.id,
+          agentId: createdAgent.state.id,
+          agentName,
+        }),
+      ]);
+    }, 90000);
+
+    it('runs a swarm and streams lifecycle events through the live daemon', async () => {
+      const createdSwarm = await client.swarms.create(
+        swarm({
+          strategy: 'round-robin',
+          manager: {
+            name: `sdk-e2e-manager-${Date.now().toString(36)}`,
             model: 'gpt-5.4',
             provider: 'openai',
           },
-        ],
-        maxTurns: 2,
-      })
-    );
+          workers: [
+            {
+              name: `sdk-e2e-worker-${Date.now().toString(36)}`,
+              model: 'gpt-5.4',
+              provider: 'openai',
+            },
+          ],
+          maxTurns: 2,
+        }),
+      );
 
-    expect(createdSwarm.status).toBe('idle');
+      expect(createdSwarm.status).toBe('idle');
 
-    const eventsPromise = collectSwarmEvents(
-      client.swarms.subscribe(createdSwarm.id),
-      'swarm:completed'
-    );
+      const eventsPromise = collectSwarmEvents(
+        client.swarms.subscribe(createdSwarm.id),
+        'swarm:completed',
+      );
 
-    const runResult = await client.swarms.run(createdSwarm.id, {
-      text: 'Coordinate a deterministic integration test',
-    });
-    const events = await eventsPromise;
+      const runResult = await client.swarms.run(createdSwarm.id, {
+        text: 'Coordinate a deterministic integration test',
+      });
+      const events = await eventsPromise;
 
-    expect(runResult.swarm.id).toBe(createdSwarm.id);
-    expect(runResult.result.status, JSON.stringify(runResult.result)).toBe(
-      'success'
-    );
-    expect(runResult.result.data).toMatchObject({
-      text: expect.stringContaining('stubbed'),
-    });
-    expect(modelStub!.requests.length).toBeGreaterThanOrEqual(2);
+      expect(runResult.swarm.id).toBe(createdSwarm.id);
+      expect(runResult.result.status, JSON.stringify(runResult.result)).toBe(
+        'success',
+      );
+      expect(runResult.result.data).toMatchObject({
+        text: expect.stringContaining('stubbed'),
+      });
+      expect(modelStub!.requests.length).toBeGreaterThanOrEqual(2);
 
-    const eventNames = events.map((event) => event.event);
-    expect(eventNames).toContain('swarm:running');
-    expect(eventNames).toContain('task:started');
-    expect(eventNames).toContain('agent:tokens');
-    expect(eventNames).toContain('swarm:completed');
+      const eventNames = events.map((event) => event.event);
+      expect(eventNames).toContain('swarm:running');
+      expect(eventNames).toContain('task:started');
+      expect(eventNames).toContain('agent:tokens');
+      expect(eventNames).toContain('swarm:completed');
 
-    expect(
-      events.some(
-        (event) =>
-          event.event === 'swarm:running' &&
-          typeof event.data === 'object' &&
-          event.data !== null &&
-          'swarmId' in event.data &&
-          event.data.swarmId === createdSwarm.id
-      )
-    ).toBe(true);
+      expect(
+        events.some(
+          (event) =>
+            event.event === 'swarm:running' &&
+            typeof event.data === 'object' &&
+            event.data !== null &&
+            'swarmId' in event.data &&
+            event.data.swarmId === createdSwarm.id,
+        ),
+      ).toBe(true);
 
-    expect(
-      events.some(
-        (event) =>
-          event.event === 'agent:tokens' &&
-          typeof event.data === 'object' &&
-          event.data !== null &&
-          'agentName' in event.data &&
-          typeof event.data.agentName === 'string' &&
-          event.data.agentName.includes('sdk-e2e-')
-      )
-    ).toBe(true);
-  }, 90000);
+      expect(
+        events.some(
+          (event) =>
+            event.event === 'agent:tokens' &&
+            typeof event.data === 'object' &&
+            event.data !== null &&
+            'agentName' in event.data &&
+            typeof event.data.agentName === 'string' &&
+            event.data.agentName.includes('sdk-e2e-'),
+        ),
+      ).toBe(true);
+    }, 90000);
 
-  it('returns task-level execution errors when runtime provider credentials are missing', async () => {
-    const createdAgent = await client.agents.create(
-      agent({
-        name: `sdk-e2e-missing-key-${Date.now().toString(36)}`,
-        model: 'claude-sonnet-4',
-        provider: 'anthropic',
-      })
-    );
+    it('returns task-level execution errors when runtime provider credentials are missing', async () => {
+      const createdAgent = await client.agents.create(
+        agent({
+          name: `sdk-e2e-missing-key-${Date.now().toString(36)}`,
+          model: 'claude-sonnet-4',
+          provider: 'anthropic',
+        }),
+      );
 
-    const runResult = await client.agents.run(createdAgent.state.id, {
-      text: 'Fail because there is no Anthropic key configured',
-    });
+      const runResult = await client.agents.run(createdAgent.state.id, {
+        text: 'Fail because there is no Anthropic key configured',
+      });
 
-    expect(runResult.result.status).toBe('error');
-    expect(runResult.result.error).toContain('ANTHROPIC_API_KEY');
-    expect(runResult.agent.lastTask).toMatchObject({
-      status: 'error',
-      error: expect.stringContaining('ANTHROPIC_API_KEY'),
-    });
-
-    await expect(
-      client.agents.get(createdAgent.state.id)
-    ).resolves.toMatchObject({
-      state: {
-        id: createdAgent.state.id,
-        name: createdAgent.state.name,
-      },
-      lastTask: {
+      expect(runResult.result.status).toBe('error');
+      expect(runResult.result.error).toContain('ANTHROPIC_API_KEY');
+      expect(runResult.agent.lastTask).toMatchObject({
         status: 'error',
         error: expect.stringContaining('ANTHROPIC_API_KEY'),
-      },
-    });
-  }, 90000);
-});
+      });
+
+      await expect(
+        client.agents.get(createdAgent.state.id),
+      ).resolves.toMatchObject({
+        state: {
+          id: createdAgent.state.id,
+          name: createdAgent.state.name,
+        },
+        lastTask: {
+          status: 'error',
+          error: expect.stringContaining('ANTHROPIC_API_KEY'),
+        },
+      });
+    }, 90000);
+  });
 
 async function reservePort(): Promise<number> {
   return new Promise((resolvePort, reject) => {
@@ -328,7 +330,7 @@ async function reservePort(): Promise<number> {
 async function waitForDaemonHealthy(
   client: ReturnType<typeof createDaemonClient>,
   daemonProcess: ChildProcess,
-  getOutput: () => string
+  getOutput: () => string,
 ): Promise<void> {
   const startedAt = Date.now();
 
@@ -336,8 +338,8 @@ async function waitForDaemonHealthy(
     if (daemonProcess.exitCode !== null) {
       throw new Error(
         `daemon exited before becoming healthy (code ${String(
-          daemonProcess.exitCode
-        )}).\n${getOutput()}`
+          daemonProcess.exitCode,
+        )}).\n${getOutput()}`,
       );
     }
 
@@ -357,7 +359,7 @@ async function waitForDaemonHealthy(
 }
 
 async function stopDaemonProcess(
-  daemonProcess: ChildProcess | null
+  daemonProcess: ChildProcess | null,
 ): Promise<void> {
   if (!daemonProcess || daemonProcess.exitCode !== null) {
     return;
@@ -386,7 +388,7 @@ function delay(ms: number): Promise<void> {
 
 async function collectSwarmEvents(
   stream: AsyncGenerator<{ event: string; data: unknown }>,
-  stopEventName: string
+  stopEventName: string,
 ): Promise<Array<{ event: string; data: unknown }>> {
   const events: Array<{ event: string; data: unknown }> = [];
 
@@ -444,7 +446,7 @@ async function startOpenAiCompatibleStub(): Promise<{
           completion_tokens: 4,
           total_tokens: 14,
         },
-      })
+      }),
     );
   });
 

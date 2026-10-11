@@ -67,28 +67,71 @@ function errorMessage(code: string): string {
   }
 }
 
-export function useBrowserDictation(onTranscript: (text: string) => void) {
+export interface BrowserDictationOptions {
+  conversationKey?: string | null;
+  disabled?: boolean;
+}
+
+export function useBrowserDictation(
+  onTranscript: (text: string) => void,
+  { conversationKey, disabled = false }: BrowserDictationOptions = {},
+) {
   const [state, setState] = useState<
     'idle' | 'starting' | 'listening' | 'stopping'
   >('idle');
   const [interim, setInterim] = useState('');
   const [error, setError] = useState<string | null>(null);
   const current = useRef<Recognition | null>(null);
+  const mounted = useRef(true);
+  const boundary = useRef({ conversationKey, disabled, generation: 0 });
+  if (
+    boundary.current.conversationKey !== conversationKey ||
+    boundary.current.disabled !== disabled
+  ) {
+    boundary.current = {
+      conversationKey,
+      disabled,
+      generation: boundary.current.generation + 1,
+    };
+  }
+  const generation = boundary.current.generation;
   const onTranscriptRef = useRef(onTranscript);
   onTranscriptRef.current = onTranscript;
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mounted.current = true;
+    setState('idle');
+    setInterim('');
+    setError(null);
+    return () => {
+      mounted.current = false;
       const recognition = current.current;
       current.current = null;
       if (recognition) abort(recognition);
-    },
-    [],
-  );
+    };
+  }, [conversationKey, disabled]);
+
+  const cancel = () => {
+    if (!mounted.current || boundary.current.generation !== generation) return;
+    const recognition = current.current;
+    current.current = null;
+    if (recognition) abort(recognition);
+    if (!mounted.current) return;
+    setState('idle');
+    setInterim('');
+    setError(null);
+  };
 
   const start = () => {
     const Constructor = browserRecognition();
-    if (!Constructor || current.current) return;
+    if (
+      !Constructor ||
+      current.current ||
+      !mounted.current ||
+      boundary.current.disabled ||
+      boundary.current.generation !== generation
+    )
+      return;
     setError(null);
     setInterim('');
     try {
@@ -98,11 +141,16 @@ export function useBrowserDictation(onTranscript: (text: string) => void) {
       recognition.interimResults = true;
       recognition.lang = navigator.language || 'en-US';
       const committed = new Set<number>();
+      const active = () =>
+        mounted.current &&
+        !boundary.current.disabled &&
+        boundary.current.generation === generation &&
+        current.current === recognition;
       recognition.onstart = () => {
-        if (current.current === recognition) setState('listening');
+        if (active()) setState('listening');
       };
       recognition.onresult = (event) => {
-        if (current.current !== recognition) return;
+        if (!active()) return;
         const final: string[] = [];
         const preview: string[] = [];
         for (let index = 0; index < event.results.length; index++) {
@@ -119,14 +167,14 @@ export function useBrowserDictation(onTranscript: (text: string) => void) {
         setInterim(preview.join(' '));
       };
       recognition.onend = () => {
-        if (current.current !== recognition) return;
+        if (!active()) return;
         current.current = null;
         detach(recognition);
         setState('idle');
         setInterim('');
       };
       recognition.onerror = (event) => {
-        if (current.current !== recognition) return;
+        if (!active()) return;
         current.current = null;
         abort(recognition);
         setState('idle');
@@ -147,12 +195,11 @@ export function useBrowserDictation(onTranscript: (text: string) => void) {
   };
 
   const stop = () => {
+    if (!mounted.current || boundary.current.generation !== generation) return;
     const recognition = current.current;
     if (!recognition) return;
     if (state === 'starting') {
-      current.current = null;
-      abort(recognition);
-      setState('idle');
+      cancel();
       return;
     }
     setState('stopping');
@@ -173,5 +220,6 @@ export function useBrowserDictation(onTranscript: (text: string) => void) {
     error,
     start,
     stop,
+    cancel,
   };
 }
