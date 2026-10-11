@@ -21,8 +21,8 @@ pub(crate) fn protected_name(path: &str) -> bool {
             | "memory.md"
             | "agents.md"
             | "agents.override.md"
-            | ".hermes.md"
-            | "hermes.md"
+            | ".anima.md"
+            | "anima.md"
             | "claude.md"
             | ".cursorrules"
     ) || (name.ends_with(".mdc")
@@ -178,7 +178,7 @@ mod tests {
             "USER.md",
             "MEMORY.md",
             "nested/AGENTS.override.md",
-            "profile/hermes.MD",
+            "profile/anima.MD",
             "CLAUDE.md",
             ".cursorrules",
             ".cursor/rules/nested/x.MDC",

@@ -88,6 +88,7 @@ describe('AgentFilesPanel', () => {
         agentId="one"
         loadPreview={async () =>
           preview({
+            projectSourceKind: 'anima',
             entries: [
               {
                 relativePath: 'AGENTS.md',
@@ -117,6 +118,7 @@ describe('AgentFilesPanel', () => {
       />,
     );
     expect(await screen.findByText('AGENTS.md')).toBeInTheDocument();
+    expect(screen.getByText(/Project instructions: Anima/)).toBeInTheDocument();
     expect(screen.getByText(/higher-priority source/)).toBeInTheDocument();
     expect(
       screen.getByText(/40 admitted characters · truncated/),

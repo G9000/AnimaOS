@@ -295,7 +295,7 @@ mod tests {
             "AGENTS.md",
             "SOUL.md",
             "agents.MD",
-            "HERMES.md",
+            "ANIMA.md",
             "AGENTS.override.md",
         ] {
             let validated = validate_upload(name, b"ordinary upload").unwrap();

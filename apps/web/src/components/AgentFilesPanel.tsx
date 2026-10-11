@@ -12,6 +12,13 @@ type PreviewState =
   | { agentId: string; status: 'loading' | 'unavailable' | 'error' }
   | { agentId: string; status: 'ready'; preview: AgentFilesPreview };
 
+const PROJECT_SOURCE_LABELS = {
+  anima: 'Anima',
+  agents: 'AGENTS.md',
+  claude: 'CLAUDE.md',
+  cursor: 'Cursor rules',
+};
+
 export function AgentFilesPanel({
   agentId,
   loadPreview = daemon.agentFilesPreview,
@@ -116,7 +123,10 @@ function PreviewDetails({ preview }: { preview: AgentFilesPreview }) {
             profile_soul: 'Agent profile SOUL.md',
           }[preview.identitySource]
         }{' '}
-        · Project instructions: {preview.projectSourceKind ?? 'none'}
+        · Project instructions:{' '}
+        {preview.projectSourceKind
+          ? PROJECT_SOURCE_LABELS[preview.projectSourceKind]
+          : 'none'}
       </p>
       <p>{preview.estimatedTokens} estimated tokens</p>
       <p className="break-all font-mono">

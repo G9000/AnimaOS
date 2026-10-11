@@ -1,4 +1,4 @@
-# M11: Standard Markdown Agent Files — Lean Plan
+# M11: Anima Markdown Agent Files — Lean Plan
 
 > Published execution plan. Five binding controller rulings appear below. The owner authorized a focused Rust port with Codex workers, batch reviews and one fix wave; the controller handles explicit staging and unsigned publication. This is a bounded Hermes adaptation, not full parity.
 
@@ -91,7 +91,8 @@ tools/threat_patterns.py; notices and implementation must use real names.
 
 Hermes treats SOUL as primary identity and prevents duplicate insertion into project
 context. It pins explicit profile home to avoid context-variable leakage. Project source
-priority is .hermes.md/HERMES.md → AGENTS chain → CLAUDE → cursor. AGENTS per-directory
+priority is .hermes.md/HERMES.md → AGENTS chain → CLAUDE → cursor. Anima adapts the
+first source names to .anima.md/ANIMA.md. AGENTS per-directory
 priority is override, uppercase, lowercase; empty or unreadable files fall through. Chain
 contents are deduplicated and the whole chain capped.
 
@@ -166,12 +167,12 @@ filesystem authority.
 ## Source selection
 
 SOUL occupies independent primary identity slot; never duplicate it as project context.
-Project source kinds follow verified Hermes order. AGENTS remains documented portable
-default; existing HERMES file can shadow it visibly.
+Project source kinds follow the adapted source order. AGENTS remains documented portable
+default; existing ANIMA file can shadow it visibly.
 
-Hermes candidate: nearest .hermes.md or HERMES.md within authorized root-to-project chain.
+Anima candidate: nearest .anima.md or ANIMA.md within authorized root-to-project chain.
 Dotted lowercase wins at same directory. Strip one complete leading YAML frontmatter block
-only for Hermes source. Do not parse or execute YAML. Frontmatter cannot change tools,
+only for Anima source. Do not parse or execute YAML. Frontmatter cannot change tools,
 model, root or profile. Frontmatter-only file falls through.
 
 AGENTS fallback: root-to-directory chain, each directory first usable AGENTS.override.md,
@@ -600,12 +601,12 @@ Selection tests:
 8. Malicious ID separators cannot traverse.
 9. No workspace means no ambient probes.
 10. No OS home/HERMES_HOME access.
-11. Nearest Hermes source within root wins.
-12. .hermes.md beats HERMES.md same directory.
-13. Frontmatter stripped only Hermes.
+11. Nearest Anima source within root wins.
+12. .anima.md beats ANIMA.md same directory.
+13. Frontmatter stripped only Anima.
 14. Frontmatter cannot configure authority.
 15. Frontmatter-only falls through.
-16. Usable Hermes shadows AGENTS visibly.
+16. Usable Anima shadows AGENTS visibly.
 17. AGENTS root-to-leaf stable ordering.
 18. Override beats ordinary AGENTS.
 19. Empty override falls through.
@@ -710,7 +711,7 @@ Tests:
 6. multi_edit all targets checked before effect.
 7. Mixed target batch writes nothing before owner.
 8. AGENTS.override protected.
-9. Hermes names protected.
+9. Anima names protected.
 10. CLAUDE/cursor names protected.
 11. Deferred cursor .mdc writes protected.
 12. USER/MEMORY writes protected.
@@ -739,7 +740,7 @@ Tests:
 35. Upload AGENTS remains under uploads/date.
 36. Upload SOUL remains under uploads/date.
 37. Case-variant attachment cannot become control source.
-38. Hermes/override attachment cannot become source.
+38. Anima/override attachment cannot become source.
 39. Upload collision allocator unchanged.
 40. Existing upload normalization/display/collision behavior unchanged.
 41. Attachment ID/download stored path unchanged.
@@ -943,7 +944,7 @@ Documentation checklist:
 - UTF-8 standard Markdown.
 - No automatic creation/migration.
 - AGENTS portable default.
-- Verified Hermes priority/shadowing.
+- Verified Anima priority/shadowing.
 - Override and chain limits.
 - CLAUDE/cursorrules fallback.
 - Deferred cursor glob.
@@ -1131,3 +1132,9 @@ Current functional gates: Nx Rust core627 + host1597 =2224passed,8ignored; SDK12
 Detailed commands, decisions and logs are retained in ignored `.superpowers/sdd/2026-10-12-hermes-agent-files-m11/`. Master/handover carry publication and exact resume state. M12 prepared plan is tracked separately; no connector implementation or M11 merge is authorized by this completion record.
 
 Publication: implementation `5c7c496` pushed; [PR #17](https://github.com/G9000/animaOS-SWARM/pull/17) is open against main. Final handover/status documentation follows that source commit. Await explicit owner merge authorization.
+
+## Owner naming correction (binding, 2026-10-12)
+
+The assistant is Anima/AnimaOS. Our project sources are `.anima.md` and `ANIMA.md`, with `anima` manifest/SDK source kinds. AGENTS.md and SOUL.md remain standard instructions and identity. Old upstream-branded filenames are not loaded or automatically renamed. Keep accurate upstream names in provenance/license credits and historical branch/ledger identifiers only; do not brand our agent, UI, PR or feature titles as Hermes.
+
+The published plan was renamed to `2026-10-12-anima-agent-files-m11.md`; the existing PR branch remains unchanged to preserve PR #17 continuity. Required local gates are rerun for the changed source selection and SDK/UI contract.

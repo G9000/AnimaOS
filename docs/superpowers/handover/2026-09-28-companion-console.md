@@ -2,7 +2,9 @@
 
 This document is for the next agent picking up the companion console upgrade.
 
-## Start here (2026-10-12): M11 Hermes Markdown port verified; PR #17 open
+## Start here (2026-10-12): M11 Anima Markdown definitions; PR #17 open
+
+- Owner naming rule: our assistant is Anima/AnimaOS. Use ANIMA.md/.anima.md alongside AGENTS.md/SOUL.md; source kinds and UI use Anima. Upstream Hermes names belong in provenance/license credits only, with historical branch/ledger identifiers retained for continuity. Naming correction is verified: Rust2224/8ignored, web1133, SDK123/3service-skipped; SDK/web typecheck/build and formatting pass. This correction is committed and pushed on PR #17 before stopping. The owner naming rule is persistent for future work.
 
 - M0–M10 are on main. Owner explicitly authorized PR #16 merge; `f80e653`
   includes final M10 head `eee9bb8`. Do not merge another PR without a new explicit
@@ -11,7 +13,7 @@ This document is for the next agent picking up the companion console upgrade.
   Hermes code/behavior ported to an independent Rust long-running runtime. M11
   implements the focused AGENTS/SOUL port on `g9000/hermes-agent-files-m11`, cut
   from merged main `f80e653`. Implementation `5c7c496` is committed and pushed; [PR #17](https://github.com/G9000/animaOS-SWARM/pull/17) is OPEN against main and attached to the chat. Final publication documentation follows that source commit.
-- Published lean plan: `docs/superpowers/plans/2026-10-12-hermes-agent-files-m11.md`.
+- Published lean plan: `docs/superpowers/plans/2026-10-12-anima-agent-files-m11.md`.
   Controller binding five-risk rulings, two daemon batch reviews, final web/SDK
   review and one fix wave are complete. A1 hard-link bypass and B1 summary reserve/
   B2 compaction workspace binding are fixed. A2 path-deny finding was rejected:
@@ -40,8 +42,8 @@ This document is for the next agent picking up the companion console upgrade.
   (core dependency 627; host 1,597), web **1,133 passed**, SDK **123 passed, 3 skipped**.
   SDK/web typechecks/builds pass. Cargo fmt and explicit owned-file Nx format checks
   pass. Logs are ignored under `.superpowers/sdd/2026-10-12-hermes-agent-files-m11/`:
-  `gate-rust-current.log`, `gate-web-sdk-repair.log`, initial passing build outputs
-  in `gate-web-sdk.log`, plus formatter logs. The seven Postgres tests and one
+  `gate-naming-rust.log`, `gate-naming-web-sdk.log`, with earlier evidence in
+  `gate-web-sdk.log`, plus formatter logs. The seven Postgres tests and one
   manual inventory-print helper remain ignored; SDK service tests are explicitly
   skipped. Existing web warning origins remain Operations/Dashboard/unknown
   connection; focused preview tests have no new act/unhandled warnings.

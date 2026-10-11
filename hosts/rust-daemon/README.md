@@ -705,10 +705,10 @@ apply historical pre-M2 SQL instructions to an M9/M10 rollback. See
 
 ## Standard Markdown agent files
 
-The daemon ports focused Hermes agent-file behavior into its Rust runtime. The
-upstream source is revision `f3ef9db68332063a3625661f3a9b259f60abdb4e`, credited in
+Anima's long-running Rust agent uses standard Markdown identity and instructions.
+Selected upstream helpers from revision `f3ef9db68332063a3625661f3a9b259f60abdb4e` are credited in
 `HERMES-NOTICE` and the core crate notice. This supports familiar instruction files;
-it does not claim complete Hermes/OpenClaw compatibility or proven prompt security.
+behavioral differences and prompt-screening limits are documented below.
 
 Place UTF-8 `SOUL.md` in the configured workspace root to define the companion's
 identity. The companion is the agent with `settings.workspaceRole: lead`. Other
@@ -731,14 +731,14 @@ caller-selected project directory or uploaded attachment is discovered.
 
 Project instruction priority at the configured root is:
 
-1. `.hermes.md`, then `HERMES.md`; complete initial YAML frontmatter is stripped
+1. `.anima.md`, then `ANIMA.md`; complete initial YAML frontmatter is stripped
    from these files without granting it configuration authority.
 2. `AGENTS.override.md`, then `AGENTS.md`, then `agents.md`.
 3. `CLAUDE.md`, then `claude.md`.
 4. `.cursorrules`.
 
 The loader implements a bounded root-to-project AGENTS chain for internal scoped
-calls, with nearest Hermes precedence, but public runs currently use the configured
+calls, with nearest Anima precedence, but public runs currently use the configured
 root. Missing, empty, unreadable or blocked candidates fall through to a usable
 candidate and appear in the manifest. This deliberately differs from upstream
 blocked-source shadowing. Identical normalized AGENTS text is included once.

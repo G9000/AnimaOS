@@ -99,7 +99,7 @@ impl Reader<'_> {
             return candidate;
         }
         let normalized = text;
-        let text = if kind == AgentFileKind::Hermes {
+        let text = if kind == AgentFileKind::Anima {
             selection::strip_frontmatter(&normalized)
         } else {
             &normalized
@@ -170,10 +170,10 @@ pub(super) fn load_scope(
         0
     });
     for (index, directory) in chain.iter().enumerate().rev() {
-        for name in [".hermes.md", "HERMES.md"] {
+        for name in [".anima.md", "ANIMA.md"] {
             candidates.push(reader.read(
                 selection::path(directory, name),
-                AgentFileKind::Hermes,
+                AgentFileKind::Anima,
                 index,
             ));
         }
@@ -222,7 +222,7 @@ pub(super) fn load_scope(
     let mut selected = vec![];
     let mut selected_kind = None;
     for (kind, project_kind) in [
-        (AgentFileKind::Hermes, ProjectSourceKind::Hermes),
+        (AgentFileKind::Anima, ProjectSourceKind::Anima),
         (AgentFileKind::Agents, ProjectSourceKind::Agents),
         (AgentFileKind::Claude, ProjectSourceKind::Claude),
         (AgentFileKind::Cursor, ProjectSourceKind::Cursor),

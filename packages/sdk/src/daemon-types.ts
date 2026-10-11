@@ -1,6 +1,6 @@
 import type { AgentStatus, Attachment, TokenUsage } from '@animaOS-SWARM/core';
 
-export type AgentFileKind = 'soul' | 'hermes' | 'agents' | 'claude' | 'cursor';
+export type AgentFileKind = 'soul' | 'anima' | 'agents' | 'claude' | 'cursor';
 export type AgentFileState =
   | 'loaded'
   | 'truncated'

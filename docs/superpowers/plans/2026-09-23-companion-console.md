@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the OpenClaw/Hermes-class companion console described in the spec: sessions, live runs, parallel sessions, approvals, skills, automations, memory editor, usage/logs/health, attachments, voice, and AI titles, on the Rust daemon and the web console.
+**Goal:** Build the AnimaOS companion console described in the spec: sessions, live runs, parallel sessions, approvals, skills, automations, memory editor, usage/logs/health, attachments, voice, and AI titles, on the Rust daemon and the web console.
 
 **Architecture:** Daemon-owned contracts in `hosts/rust-daemon`, reusable engine logic in `packages/core-rust` (`anima-core`, `anima-model-adapters`, `anima-memory`), typed clients in `packages/sdk`, UI in `apps/web`. Current state lives in the control-plane snapshot with a bounded message tail; history lives in a new row-based history store fed by an outbox. One SSE stream per companion carries all live events.
 
@@ -44,7 +44,7 @@
 | M8 Usage, logs, health             | `2026-09-23-companion-console-m8.md`     | done (Nx rust-daemon:test 2082 passed; sdk + web test, typecheck, build green at 65122bd)                                                                                                                                                                                   |
 | M9 Attachments and voice           | `2026-09-23-companion-console-m9.md`     | implemented; Rust 2156 passed/7 ignored; web 1117, SDK 117/3 skipped; typecheck/build green; done; PR #15 merged at 647d606                                                                                                                                                 |
 | M10 Deployment and docs            | `2026-09-23-companion-console-m10.md`    | local implementation complete; Rust2186/8ignored, web1124, SDK117/3skipped, browser16; typecheck/build/contracts/Compose parser pass; manual deployment acceptance deferred; [PR #16](https://github.com/G9000/animaOS-SWARM/pull/16) merged at f80e653                     |
-| M11 Hermes Markdown agent files    | `2026-10-12-hermes-agent-files-m11.md`   | implemented and locally verified; Rust2224/8ignored, web1133, SDK123/3skipped; typecheck/build/format pass; batch reviews and fix wave complete; [PR #17](https://github.com/G9000/animaOS-SWARM/pull/17) OPEN; implementation5c7c496 pushed; explicit owner merge required |
+| M11 Anima Markdown agent files     | `2026-10-12-anima-agent-files-m11.md`    | implemented and locally verified; Rust2224/8ignored, web1133, SDK123/3skipped; typecheck/build/format pass; batch reviews and fix wave complete; [PR #17](https://github.com/G9000/animaOS-SWARM/pull/17) OPEN; implementation5c7c496 pushed; explicit owner merge required |
 | M12 Modular connectors preparation | `2026-10-12-companion-connectors-m12.md` | prepared with five binding risk rulings; no connector implementation; future branch from main after M11 merge and implementation authorization                                                                                                                              |
 
 Dependencies: M0 → M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9 → M10. M4–M9 depend on M3's ledger, runs, and event stream; their internal order follows the spec's milestone list.
@@ -159,7 +159,7 @@ Carried from M3 (decided during M3's reviews):
 
 ## Follow-on milestones (owner direction, 2026-10-12)
 
-- M11: Hermes-style Markdown agent definition sources, primarily SOUL.md
+- M11: Anima Markdown agent definition sources, primarily SOUL.md
   identity and AGENTS.md project instructions, ported into the independent Rust
   long-running runtime. Active branch `g9000/hermes-agent-files-m11` from merged
   main f80e653. Lean plan and implementation complete with passing local gates;

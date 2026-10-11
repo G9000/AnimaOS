@@ -12,7 +12,8 @@ deception_hide, exfil_curl, exfil_wget, read_secrets. Context/strict-scope
 patterns are intentionally omitted. Fixtures are invented local strings,
 including short representative attack/identity strings; no private files.
 
-Intentional differences: configured-root capabilities only, no ambient home/cwd;
+Intentional differences: Anima-branded ANIMA.md/.anima.md project sources and
+anima manifest kinds; configured-root capabilities only, no ambient home/cwd;
 derived profile namespace; all files including SOUL screened; blocked candidates
 fall through; whole sources above 65,536 Unicode scalars excluded instead of
 scanning a prefix; full-width ASCII fold only rather than Python NFKC; no trust

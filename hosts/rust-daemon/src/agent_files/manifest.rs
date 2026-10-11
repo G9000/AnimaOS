@@ -20,14 +20,14 @@ closed_enum!(IdentitySource {
     ProfileSoul
 });
 closed_enum!(ProjectSourceKind {
-    Hermes,
+    Anima,
     Agents,
     Claude,
     Cursor
 });
 closed_enum!(AgentFileKind {
     Soul,
-    Hermes,
+    Anima,
     Agents,
     Claude,
     Cursor
