@@ -908,3 +908,33 @@ it('uses the SDK same-origin Discord transport and explicit uncertainty acknowle
     acknowledgeUncertainty: true,
   });
 });
+
+it('uses same-origin selected Drive status, consent and local disconnect transport', async () => {
+  const connector = { id: 'c /?', type: 'gdrive' };
+  const payload = {
+    configured: true,
+    connector,
+    consentUrl: 'https://accounts.google.com/o/oauth2/v2/auth?state=opaque',
+  };
+  const fetchMock = vi
+    .fn<typeof fetch>()
+    .mockImplementation(async () => Response.json(payload));
+  vi.stubGlobal('fetch', fetchMock);
+  expect(await daemon.driveStatus('a /?')).toEqual(payload);
+  expect(
+    await daemon.connectDrive('a /?', { selectedFileIds: ['File_1'] }),
+  ).toEqual(payload);
+  await expect(daemon.disconnectDrive('a /?', 'c /?')).resolves.toBeUndefined();
+  const path = '/api/agents/a%20%2F%3F/connectors/gdrive';
+  expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+    path,
+    path,
+    `${path}/c%20%2F%3F`,
+  ]);
+  expect(fetchMock.mock.calls.map(([, init]) => init?.method ?? 'GET')).toEqual(
+    ['GET', 'POST', 'DELETE'],
+  );
+  expect(JSON.parse(fetchMock.mock.calls[1][1]!.body as string)).toEqual({
+    selectedFileIds: ['File_1'],
+  });
+});

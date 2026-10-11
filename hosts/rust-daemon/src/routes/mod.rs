@@ -12,6 +12,7 @@ mod discord;
 mod events;
 mod folder_picker;
 mod gcalendar;
+mod gdrive;
 mod goals;
 mod health;
 mod http;
@@ -147,6 +148,7 @@ use crate::runtime_model::provider_summaries;
         workspace_file_entry,
         folder_picker::pick_folder,
         resume_workspace_entry,
+        gdrive::status,gdrive::connect,gdrive::disconnect,gdrive::callback,
         discord::list, discord::create, discord::activate, discord::replace, discord::set_enabled, discord::restart, discord::retry, discord::suppress, discord::delete,
         connectors::list_connectors,
         connectors::create_telegram_connector,
@@ -242,6 +244,7 @@ struct AppState {
     agent_runs: AgentRunCoordinator,
     connector_manager: ConnectorManager,
     discord: crate::connectors::discord::DiscordManager,
+    drive: crate::connectors::drive::DriveManager,
     calendar: crate::connectors::gcalendar::CalendarManager,
     scheduler: SchedulerService,
     jobs: crate::jobs::JobService,
@@ -261,12 +264,14 @@ impl AppState {
     ) -> Result<u64, crate::connectors::oauth_apps::OAuthAppError> {
         let calendar = self.calendar.clone();
         let mail = self.mail.clone();
+        let drive = self.drive.clone();
         self.oauth_apps
             .put_if_unused(provider, credentials, move || async move {
                 match provider {
                     crate::connectors::oauth_apps::OAuthProvider::Google => {
                         calendar.has_provider_dependency(provider).await
                             || mail.has_provider_dependency(provider).await
+                            || drive.has_provider_dependency(provider).await
                     }
                     crate::connectors::oauth_apps::OAuthProvider::Microsoft => {
                         mail.has_provider_dependency(provider).await
@@ -282,12 +287,14 @@ impl AppState {
     ) -> Result<u64, crate::connectors::oauth_apps::OAuthAppError> {
         let calendar = self.calendar.clone();
         let mail = self.mail.clone();
+        let drive = self.drive.clone();
         self.oauth_apps
             .delete_if_unused(provider, move || async move {
                 match provider {
                     crate::connectors::oauth_apps::OAuthProvider::Google => {
                         calendar.has_provider_dependency(provider).await
                             || mail.has_provider_dependency(provider).await
+                            || drive.has_provider_dependency(provider).await
                     }
                     crate::connectors::oauth_apps::OAuthProvider::Microsoft => {
                         mail.has_provider_dependency(provider).await
@@ -511,7 +518,48 @@ pub(crate) fn router_with_all_services_and_discord(
     bind_is_loopback: bool,
     discord: crate::connectors::discord::DiscordManager,
 ) -> Router {
-    router_with_services_with_policies_and_discord(
+    let drive = crate::connectors::drive::DriveManager::unconfigured(
+        &state,
+        agent_runs.control_plane_transactions(),
+        oauth_apps.clone(),
+    );
+    router_with_all_integrations(
+        state,
+        config,
+        run_limiter,
+        agent_runs,
+        connector_manager,
+        calendar,
+        mail,
+        oauth_apps,
+        scheduler,
+        jobs,
+        history_owner,
+        logs,
+        bind_is_loopback,
+        discord,
+        drive,
+    )
+}
+
+pub(crate) fn router_with_all_integrations(
+    state: SharedDaemonState,
+    config: DaemonConfig,
+    run_limiter: Arc<Semaphore>,
+    agent_runs: AgentRunCoordinator,
+    connector_manager: ConnectorManager,
+    calendar: crate::connectors::gcalendar::CalendarManager,
+    mail: crate::connectors::mail::MailManager,
+    oauth_apps: crate::connectors::oauth_apps::OAuthAppService,
+    scheduler: SchedulerService,
+    jobs: crate::jobs::JobService,
+    history_owner: crate::history::HistoryWorkerOwner,
+    logs: Arc<crate::logs::LogBuffer>,
+    bind_is_loopback: bool,
+    discord: crate::connectors::discord::DiscordManager,
+    drive: crate::connectors::drive::DriveManager,
+) -> Router {
+    router_with_services_with_policies_and_integrations(
         state,
         config,
         run_limiter,
@@ -527,6 +575,7 @@ pub(crate) fn router_with_all_services_and_discord(
         self::http::LocalOwnerPolicy::from_env(bind_is_loopback),
         self::http::ApiKeyPolicy::from_env(),
         discord,
+        drive,
     )
 }
 
@@ -586,8 +635,52 @@ fn router_with_services_with_policies_and_discord(
     api_key: self::http::ApiKeyPolicy,
     discord: crate::connectors::discord::DiscordManager,
 ) -> Router {
+    let drive = crate::connectors::drive::DriveManager::unconfigured(
+        &state,
+        agent_runs.control_plane_transactions(),
+        oauth_apps.clone(),
+    );
+    router_with_services_with_policies_and_integrations(
+        state,
+        config,
+        run_limiter,
+        agent_runs,
+        connector_manager,
+        calendar,
+        mail,
+        oauth_apps,
+        scheduler,
+        jobs,
+        history_owner,
+        logs,
+        local_owner,
+        api_key,
+        discord,
+        drive,
+    )
+}
+
+fn router_with_services_with_policies_and_integrations(
+    state: SharedDaemonState,
+    config: DaemonConfig,
+    run_limiter: Arc<Semaphore>,
+    agent_runs: AgentRunCoordinator,
+    connector_manager: ConnectorManager,
+    calendar: crate::connectors::gcalendar::CalendarManager,
+    mail: crate::connectors::mail::MailManager,
+    oauth_apps: crate::connectors::oauth_apps::OAuthAppService,
+    scheduler: SchedulerService,
+    jobs: crate::jobs::JobService,
+    history_owner: crate::history::HistoryWorkerOwner,
+    logs: Arc<crate::logs::LogBuffer>,
+    local_owner: self::http::LocalOwnerPolicy,
+    api_key: self::http::ApiKeyPolicy,
+    discord: crate::connectors::discord::DiscordManager,
+    drive: crate::connectors::drive::DriveManager,
+) -> Router {
     if let Ok(mut guard) = state.try_write() {
         guard.mail_manager = Some(mail.clone());
+        guard.drive_manager = Some(drive.weak());
     }
     mail.start();
     let app_state = AppState {
@@ -599,6 +692,7 @@ fn router_with_services_with_policies_and_discord(
         agent_runs,
         connector_manager,
         discord,
+        drive,
         calendar,
         scheduler,
         jobs,
@@ -620,6 +714,14 @@ fn router_with_services_with_policies_and_discord(
                 ),
         );
     let timed_routes = Router::new()
+        .route(
+            "/api/agents/{agent_id}/connectors/gdrive",
+            get(gdrive::status).post(gdrive::connect),
+        )
+        .route(
+            "/api/agents/{agent_id}/connectors/gdrive/{connector_id}",
+            axum::routing::delete(gdrive::disconnect),
+        )
         .route(
             "/api/agents/{agent_id}/connectors/discord",
             get(discord::list).post(discord::create),
@@ -1030,6 +1132,7 @@ fn router_with_services_with_policies_and_discord(
     Router::new()
         .merge(timed_routes)
         .merge(run_routes)
+        .route("/api/connectors/gdrive/callback", get(gdrive::callback))
         // A native dialog waits for the user, rather than the API request timeout.
         .route(
             "/api/workspace/pick-folder",
@@ -1047,6 +1150,7 @@ fn router_with_services_with_policies_and_discord(
         ))
         .fallback(not_found_entry)
         .layer(axum::middleware::from_fn(discord::protect_cache))
+        .layer(axum::middleware::from_fn(gdrive::protect_cache))
         .layer(request_middleware)
         .with_state(app_state)
 }

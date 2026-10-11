@@ -32,6 +32,7 @@ import {
   type AgentJobReviewInput,
   type CreateMemoryInput,
   type CreateDiscordConnectorInput,
+  type ConnectDriveInput,
   type GoalInput,
   type GoalStatus,
   type Session,
@@ -50,6 +51,10 @@ export type {
   DiscordConnector,
   DiscordConnectorStatus,
   CreateDiscordConnectorInput,
+  DriveConnector,
+  DriveStatus,
+  DriveConnectResult,
+  ConnectDriveInput,
 } from '@animaOS-SWARM/sdk';
 
 /** Shared owner transport policy. The current console uses same-origin cookies;
@@ -587,6 +592,11 @@ export const daemon = {
     request<{ connectors: TelegramConnector[] }>(
       `/agents/${encodeURIComponent(agentId)}/connectors`,
     ),
+  driveStatus: (agentId: string) => setupClient.connectors.driveStatus(agentId),
+  connectDrive: (agentId: string, input: ConnectDriveInput) =>
+    setupClient.connectors.connectDrive(agentId, input),
+  disconnectDrive: (agentId: string, connectorId: string) =>
+    setupClient.connectors.disconnectDrive(agentId, connectorId),
   discordConnectors: (agentId: string) =>
     setupClient.connectors.discordConnectors(agentId),
   createDiscordConnector: (

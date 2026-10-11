@@ -286,7 +286,8 @@ pub(super) async fn enforce_api_key(
     if request.method() == axum::http::Method::GET
         && matches!(
             path,
-            "/api/connectors/gcalendar/callback"
+            "/api/connectors/gdrive/callback"
+                | "/api/connectors/gcalendar/callback"
                 | "/api/connectors/mail/gmail/callback"
                 | "/api/connectors/mail/outlook/callback"
         )

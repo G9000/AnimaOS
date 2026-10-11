@@ -4,6 +4,9 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { ConnectorsView } from './ConnectorsView';
 const api = vi.hoisted(() => ({
   calendarStatus: vi.fn(),
+  driveStatus: vi.fn(),
+  connectDrive: vi.fn(),
+  disconnectDrive: vi.fn(),
   mailStatus: vi.fn(),
   connectMail: vi.fn(),
   disconnectMail: vi.fn(),
@@ -48,22 +51,26 @@ beforeEach(() => {
       clientIdHint: null,
       redirectUris:
         provider === 'google'
-          ? ['http://127.0.0.1:8080/api/connectors/google/callback']
+          ? [
+              'http://127.0.0.1:8080/api/connectors/google/callback',
+              'http://127.0.0.1:8080/api/connectors/gdrive/callback',
+            ]
           : ['http://127.0.0.1:8080/api/connectors/microsoft/callback'],
       tenant: provider === 'microsoft' ? 'common' : null,
     }),
   );
   api.calendarStatus.mockResolvedValue({ configured: false, connector: null });
+  api.driveStatus.mockResolvedValue({ configured: false, connector: null });
   api.mailStatus.mockResolvedValue({ configured: false, connector: null });
   api.mailMessages.mockResolvedValue([]);
   api.mailDrafts.mockResolvedValue([]);
 });
-it('shows all four services with honest OAuth setup state', async () => {
+it('shows all five services with honest OAuth setup state', async () => {
   render(
     <ConnectorsView agentId="main" telegram={<div>Telegram management</div>} />,
   );
   expect(screen.getByText('Telegram management')).toBeVisible();
-  for (const name of ['Google Calendar', 'Gmail', 'Outlook'])
+  for (const name of ['Google Calendar', 'Google Drive', 'Gmail', 'Outlook'])
     expect(screen.getByRole('heading', { name })).toBeVisible();
   await waitFor(() =>
     expect(screen.getAllByText('Setup required')).toHaveLength(5),
@@ -346,7 +353,9 @@ it('shows OAuth redirect URIs and accessible credential fields', async () => {
     screen.getByRole('heading', { name: 'OAuth app setup' }),
   ).toBeVisible();
   expect(
-    screen.getByText('One OAuth app enables Gmail and Google Calendar.'),
+    screen.getByText(
+      'One OAuth app enables Gmail, Google Calendar, and selected Google Drive files.',
+    ),
   ).toBeVisible();
   expect(screen.getByText('Enables Outlook.')).toBeVisible();
   expect(
@@ -356,6 +365,9 @@ it('shows OAuth redirect URIs and accessible credential fields', async () => {
   ).toBeVisible();
   expect(
     screen.getByText('http://127.0.0.1:8080/api/connectors/microsoft/callback'),
+  ).toBeVisible();
+  expect(
+    screen.getByText('http://127.0.0.1:8080/api/connectors/gdrive/callback'),
   ).toBeVisible();
   expect(screen.getByLabelText('Google client secret')).toHaveAttribute(
     'type',
@@ -407,6 +419,9 @@ it('saves Google credentials without connecting and refreshes both Google servic
       configured: googleConfigured,
       connector: null,
     }),
+  );
+  api.driveStatus.mockImplementation(() =>
+    Promise.resolve({ configured: googleConfigured, connector: null }),
   );
   const user = userEvent.setup();
   render(<ConnectorsView agentId="main" telegram={null} />);

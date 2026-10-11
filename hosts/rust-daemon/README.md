@@ -26,6 +26,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `DELETE` | `/api/agents/{agent_id}/connectors/{connector_id}`                                           |
 | `DELETE` | `/api/agents/{agent_id}/connectors/discord/{connector_id}`                                   |
 | `DELETE` | `/api/agents/{agent_id}/connectors/gcalendar/{connector_id}`                                 |
+| `DELETE` | `/api/agents/{agent_id}/connectors/gdrive/{connector_id}`                                    |
 | `DELETE` | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}`                           |
 | `DELETE` | `/api/agents/{agent_id}/schedules/{schedule_id}`                                             |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}`                                               |
@@ -47,6 +48,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/connectors/{connector_id}/messages`                                  |
 | `GET`    | `/api/agents/{agent_id}/connectors/discord`                                                  |
 | `GET`    | `/api/agents/{agent_id}/connectors/gcalendar`                                                |
+| `GET`    | `/api/agents/{agent_id}/connectors/gdrive`                                                   |
 | `GET`    | `/api/agents/{agent_id}/connectors/gcalendar/{connector_id}/writes`                          |
 | `GET`    | `/api/agents/{agent_id}/connectors/mail/{provider}`                                          |
 | `GET`    | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/drafts`                    |
@@ -66,6 +68,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/approvals`                                                                             |
 | `GET`    | `/api/capabilities`                                                                          |
 | `GET`    | `/api/connectors/gcalendar/callback`                                                         |
+| `GET`    | `/api/connectors/gdrive/callback`                                                            |
 | `GET`    | `/api/connectors/mail/{provider}/callback`                                                   |
 | `GET`    | `/api/connectors/oauth-apps/{provider}`                                                      |
 | `GET`    | `/api/goals`                                                                                 |
@@ -121,6 +124,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/connectors/discord/{connector_id}/restart`                           |
 | `POST`   | `/api/agents/{agent_id}/connectors/discord/{connector_id}/retry`                             |
 | `POST`   | `/api/agents/{agent_id}/connectors/gcalendar`                                                |
+| `POST`   | `/api/agents/{agent_id}/connectors/gdrive`                                                   |
 | `POST`   | `/api/agents/{agent_id}/connectors/gcalendar/{connector_id}/writes/{write_id}/approve`       |
 | `POST`   | `/api/agents/{agent_id}/connectors/gcalendar/{connector_id}/writes/{write_id}/reject`        |
 | `POST`   | `/api/agents/{agent_id}/connectors/mail/{provider}`                                          |
@@ -715,11 +719,12 @@ setup and durable session flow. See [Contributing connectors](CONNECTOR-CONTRIBU
 for activation, sender access, polling limits and uncertain-output review. Its
 focused upstream adaptation is credited in
 [Discord notice](src/connectors/discord/HERMES-NOTICE). Installable community
-modules and selected Drive read/search remain follow-ups.
+modules remain a follow-up. Selected Drive filename search and Google Docs/plain
+text reads use native agent-bound tools; see [Selected Drive files](#selected-drive-files).
 
 For upgrades and rollback, use a stopped complete snapshot/history/memory/uploads/
 keyring/Caddy backup generation with recorded binaries and vault password. The
-v12 pre-Discord snapshot backup (`.pre-discord.bak` for v11 input) is only a component;
+v13 pre-Drive snapshot backup (`.pre-drive.bak` for v12 input) is only a component;
 restoring JSON alone can
 leave newer history rows that reappear later. Do not edit snapshot versions or
 apply historical pre-M2 SQL instructions to an M9/M10 rollback. See
@@ -814,3 +819,35 @@ Validation uses fake workspaces, provider captures and in-process owner requests
 It does not exercise live providers, real daemons, deployment restart, containers
 or Postgres. M12 connector preparation follows this milestone; no new connector
 provider or dynamic community loader is introduced here.
+
+## Selected Drive files
+
+Configure the existing Google OAuth application in Settings, enable the Google
+Drive API for that project, and register the exact redirect URI displayed there:
+`/api/connectors/gdrive/callback` under the configured `ANIMA_PUBLIC_BASE_URL`.
+The local default is `http://127.0.0.1:8080`. In the agent's Connectors view, paste
+1–16 Google Drive/Docs links or file IDs, review the extracted IDs, then open Google
+consent. Links are parsed locally; they do not discover files or grant access.
+
+Google grants `https://www.googleapis.com/auth/drive.readonly`, which permits
+read/download access across the account. Anima separately restricts this agent to
+its immutable selected IDs. Only the connected agent receives `drive_search` and
+`drive_read`; IDs supplied to a tool do not grant authority. Search checks selected
+file names, using exact-ID metadata requests, rather than whole-account or content
+search. Change the selection by disconnecting and connecting again.
+
+Google Docs export as plain text; stored `text/plain` requires valid UTF-8. Other
+formats, folders and shortcuts return unsupported metadata. Reads reject trashed
+or download-denied files, stream at most 1 MiB, and return at most 32,768 Unicode
+scalars with explicit truncation, source link, timestamps and source/returned-text
+digests. Metadata changes observed around a read discard its content; this does
+not guarantee an atomic provider revision. File contents remain untrusted tool
+evidence and are never automatically instructions or memory writes.
+
+Disconnect removes local agent access and generation-specific credentials. It
+never calls Google's project-wide revocation endpoint. Pending private key cleanup
+is shown explicitly. Google's account app-access page can revoke the broader
+permission, but that can also disconnect Gmail and Calendar. Drive tokens remain
+separate from those integrations. A restart invalidates unfinished consent; start
+a fresh attempt. Live account consent, access and refresh lifetime require separate
+acceptance. The selected Rust port retains [source attribution](src/connectors/drive/HERMES-NOTICE).

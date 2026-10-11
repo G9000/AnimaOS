@@ -4,6 +4,31 @@ export type ConnectorStatus = 'pairing' | 'active' | 'reauthRequired';
 export type MailProvider = 'gmail' | 'outlook';
 export type OAuthAppProvider = 'google' | 'microsoft';
 
+export interface DriveConnector {
+  id: string;
+  agentId: string;
+  type: 'gdrive';
+  status: 'pairing' | 'active' | 'reauthRequired' | 'disconnected';
+  accountLabel: string | null;
+  selectedFileIds: string[];
+  requestedScope: 'https://www.googleapis.com/auth/drive.readonly';
+  enforcement: 'animaSelectedFiles';
+  cleanupPending: boolean;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+export interface ConnectDriveInput {
+  selectedFileIds: string[];
+}
+export interface DriveStatus {
+  configured: boolean;
+  connector: DriveConnector | null;
+}
+export interface DriveConnectResult {
+  connector: DriveConnector;
+  consentUrl: string;
+}
+
 export type DiscordConnectorStatus =
   | 'disabled'
   | 'ready'
@@ -149,6 +174,26 @@ export interface CalendarConnectResult {
 /** Owner-facing integrations. Approvals must only follow explicit owner review. */
 export class ConnectorsClient {
   constructor(private readonly client: DaemonClient) {}
+
+  driveStatus(agentId: string): Promise<DriveStatus> {
+    return this.client.requestJson(drivePath(agentId));
+  }
+  /** Begin owner consent for immutable selected files. Google consent is broader than Anima's selection. */
+  connectDrive(
+    agentId: string,
+    input: ConnectDriveInput,
+  ): Promise<DriveConnectResult> {
+    return this.client.requestJson(drivePath(agentId), {
+      method: 'POST',
+      body: input,
+    });
+  }
+  /** Revoke this agent's local Drive authority; does not revoke the Google project's grant. */
+  async disconnectDrive(agentId: string, connectorId: string): Promise<void> {
+    await this.client.requestJson(drivePath(agentId, connectorId), {
+      method: 'DELETE',
+    });
+  }
 
   async discordConnectors(agentId: string): Promise<DiscordConnector[]> {
     const response = await this.client.requestJson<{
@@ -402,6 +447,13 @@ export class ConnectorsClient {
 
 function oauthAppPath(provider: OAuthAppProvider): string {
   return `/api/connectors/oauth-apps/${encodeURIComponent(provider)}`;
+}
+
+function drivePath(agentId: string, connectorId?: string): string {
+  return connectorPath(agentId, [
+    'gdrive',
+    ...(connectorId === undefined ? [] : [connectorId]),
+  ]);
 }
 
 function discordPath(agentId: string, connectorId?: string): string {

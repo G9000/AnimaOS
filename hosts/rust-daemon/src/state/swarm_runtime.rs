@@ -37,6 +37,7 @@ impl DaemonState {
         let workspace_root = self.workspace.as_ref().map(|w| w.root_path.clone());
         let calendar = self.calendar_manager.clone();
         let mail = self.mail_manager.clone();
+        let drive = self.drive_manager.clone();
         let db = self.db.clone();
 
         Arc::new(move |context: CoordinatorAgentFactoryContext| {
@@ -49,6 +50,7 @@ impl DaemonState {
             let workspace_root = workspace_root.clone();
             let calendar = calendar.clone();
             let mail = mail.clone();
+            let drive = drive.as_ref().and_then(|manager| manager.upgrade());
             let event_stream = event_stream.clone();
             let db = db.clone();
 
@@ -69,7 +71,8 @@ impl DaemonState {
                     workspace_root,
                     calendar,
                 )
-                .with_mail(mail);
+                .with_mail(mail)
+                .with_drive(drive);
                 let runtime_events: Arc<dyn Fn(EngineEvent) + Send + Sync> = Arc::new({
                     let event_stream = event_stream.clone();
                     let agent_name = context.config.name.clone();

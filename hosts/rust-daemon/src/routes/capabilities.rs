@@ -101,6 +101,7 @@ fn metadata(name: &str) -> (&'static str, Vec<&'static str>) {
             ("research", vec!["A daemon-configured Exa API key and authorized provider usage; provider charges may apply."]),
         name if name.starts_with("calendar_") =>
             ("productivity", vec!["A connected Google Calendar. Changes remain drafts until owner approval."]),
+        name if name.starts_with("drive_") => ("productivity",vec!["Connected Google Drive, immutable selected file IDs, and a current agent tool grant."]),
         name if name.starts_with("mail_") =>
             ("productivity", vec!["A connected mailbox. Sending follows the connector's owner approval flow."]),
         _ => ("utility", vec!["An explicit agent tool grant."]),

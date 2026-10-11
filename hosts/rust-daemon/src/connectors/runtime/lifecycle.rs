@@ -24,6 +24,7 @@ impl ConnectorManager {
                 if state.in_flight_runs(&agent_id) > 0 {
                     return Err(ConnectorManagerError::AgentBusy);
                 }
+                if !crate::connectors::drive::can_tombstone_agent(&state,&agent_id){return Err(ConnectorManagerError::Persistence);}
             }
             let connectors = manager
                 .state
@@ -74,8 +75,11 @@ impl ConnectorManager {
             // ruling 2, M2 pre-flight audit; Task 6's durable-deletion
             // protocol): a crash right after a successful save still replays
             // this deletion on restart.
+            if !crate::connectors::drive::can_tombstone_agent(&*manager.state.read().await,&agent_id) {
+                drop(_transaction);manager.restore_agent_delete_configuration(&previous).await?;return Err(ConnectorManagerError::Persistence);
+            }
             let deletion = HistoryDeletion::agent(&agent_id);
-            let (agent_snapshot, previous_connectors, previous_inbound, previous_outbound, previous_schedules, cancelled_queued, previous_runs, previous_sessions, persist) = {
+            let (agent_snapshot, previous_connectors, previous_inbound, previous_outbound, previous_schedules, cancelled_queued, previous_runs, previous_sessions, previous_drive, persist) = {
                 let mut state = manager.state.write().await;
                 let agent_snapshot = state.get_agent(&agent_id);
                 let previous_connectors = previous
@@ -113,6 +117,7 @@ impl ConnectorManager {
                     }
                 }
                 state.schedules.retain(|_, schedule| schedule.agent_id != agent_id);
+                let previous_drive=crate::connectors::drive::tombstone_agent_records(&mut state,&agent_id).map_err(|_|ConnectorManagerError::Persistence)?;
                 state.remove_agent(&agent_id);
                 // Without this, the deleted agent's terminal runs would stay
                 // in the ledger until a restart: `unmirrored_terminal` skips
@@ -137,6 +142,7 @@ impl ConnectorManager {
                     cancelled_queued,
                     previous_runs,
                     previous_sessions,
+                    previous_drive,
                     persist,
                 )
             };
@@ -161,6 +167,7 @@ impl ConnectorManager {
                         state.sessions.insert(session);
                     }
                     state.clear_history_deletion(&deletion);
+                    crate::connectors::drive::rollback_agent_records(&mut state,previous_drive);
                     if let Some(agent_snapshot) = agent_snapshot {
                         state
                             .restore_removed_agent(agent_snapshot)
@@ -200,6 +207,9 @@ impl ConnectorManager {
                 manager.statuses.lock().await.remove(&connector.id);
                 manager.remove_delivery_authority(&connector.id);
             }
+            let drive=manager.state.read().await.drive_manager.as_ref().and_then(|weak|weak.upgrade());
+            drop(_transaction);
+            if let Some(drive)=drive {drive.cleanup_deleted_agent(&agent_id).await;}
             Ok(())
         })
         .await
