@@ -21,6 +21,8 @@ import { SessionSidebar } from './components/sessions/SessionSidebar';
 import { SessionView } from './components/sessions/SessionView';
 import { TelegramSettings } from './components/TelegramSettings';
 import { WorkspaceShell, availablePage } from './components/WorkspaceShell';
+import { useConversationLifecycle } from './hooks/useConversationLifecycle';
+import { useDaemonCompatibility } from './hooks/useDaemonCompatibility';
 import { useAgentIntegrations } from './hooks/useAgentIntegrations';
 import { useCompanionSessions } from './hooks/useCompanionSessions';
 import { useDaemonBootstrap } from './hooks/useDaemonBootstrap';
@@ -43,7 +45,7 @@ import {
   SESSION_MESSAGES_POLL_MS,
   useSessionMessages,
 } from './hooks/useSessionMessages';
-import { clearCheckins, importLegacyCheckins } from './lib/checkins';
+import { clearCheckins } from './lib/checkins';
 import {
   daemon,
   toAgentDetail,
@@ -506,8 +508,15 @@ export function ViewHarness() {
   // A daemon that cannot take a send asks for an update (spec §13.4): one
   // without the sessions routes (pre-M2), or one with sessions but neither
   // the event stream nor the runs route (M2).
+  const compatibility = useDaemonCompatibility({
+    enabled: connection === 'online',
+    epoch: live.state.epoch,
+  });
   const daemonTooOld =
-    sessions.daemonTooOld || live.status === 'unsupported' || runsRouteMissing;
+    compatibility.statusUnsupported ||
+    sessions.daemonTooOld ||
+    live.status === 'unsupported' ||
+    runsRouteMissing;
   const activeRun = live.activeRun;
   const openPending = useSessionPending({
     sends: sends.sends,
@@ -661,55 +670,15 @@ export function ViewHarness() {
     });
   };
 
-  useEffect(() => {
-    if (!agentId) return;
-    let current = true;
-    void importLegacyCheckins(agentId)
-      .then((result) => {
-        if (!current) return;
-        if (result.malformed > 0) {
-          setLegacyMigrationError(
-            `${result.malformed} legacy check-in record could not be imported and was kept in this browser.`,
-          );
-        } else if (result.imported > 0) {
-          setLegacyMigrationError(null);
-        }
-      })
-      .catch(() => {
-        if (current)
-          setLegacyMigrationError(
-            'Legacy check-ins could not be imported. They remain in this browser for retry.',
-          );
-      });
-    return () => {
-      current = false;
-    };
-  }, [agentId]);
-
-  // Opening an unread session marks it read up to its newest message, but
-  // not while a page hides it.
-  const markedReadRef = useRef(new Map<string, number>());
   const conversationHidden = availablePage(route) !== null;
-  useEffect(() => {
-    if (
-      conversationHidden ||
-      !activeSession?.unread ||
-      history.messages.length === 0
-    )
-      return;
-    const newest = history.messages[history.messages.length - 1].createdAtMs;
-    const key = sessionKey(activeSession);
-    if ((markedReadRef.current.get(key) ?? 0) >= newest) return;
-    markedReadRef.current.set(key, newest);
-    void daemon
-      .updateSession(activeSession.agentId, activeSession.id, {
-        lastReadAtMs: newest,
-      })
-      .then(
-        () => refreshSessions(),
-        () => markedReadRef.current.delete(key),
-      );
-  }, [activeSession, conversationHidden, history.messages, refreshSessions]);
+  useConversationLifecycle({
+    agentId,
+    activeSession,
+    conversationHidden,
+    messages: history.messages,
+    refreshSessions,
+    setLegacyMigrationError,
+  });
 
   const changeWorkspaceAvatar = useCallback(
     async (file: File) => {
