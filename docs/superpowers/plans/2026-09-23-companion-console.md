@@ -31,19 +31,19 @@
 
 ## Status
 
-| Milestone                  | Detailed plan                         | Status                                                                                                                                                                                                                                             |
-| -------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| M0 Security and groundwork | `2026-09-23-companion-console-m0.md`  | done (Nx rust-daemon:test 1,082 passed at 4e3eb7d)                                                                                                                                                                                                 |
-| M1 Run coordinator         | `2026-09-23-companion-console-m1.md`  | done (Nx rust-daemon:test 1,141 passed at ef5b6fe)                                                                                                                                                                                                 |
-| M2 Sessions                | `2026-09-23-companion-console-m2.md`  | done (Nx rust-daemon:test 1,287 passed; sdk + web test, typecheck, build green at 5b020c4)                                                                                                                                                         |
-| M3 Live runs               | `2026-09-23-companion-console-m3.md`  | done (Nx rust-daemon:test 1,564 passed; sdk + web test, typecheck, build green at 6737da3)                                                                                                                                                         |
-| M4 Approvals               | `2026-09-23-companion-console-m4.md`  | done (Nx rust-daemon:test 1654 passed; sdk + web test, typecheck, build green at 20c6221)                                                                                                                                                          |
-| M5 Skills                  | `2026-09-23-companion-console-m5.md`  | done (Nx rust-daemon:test 1775 passed; sdk + web test, typecheck, build green at e9d57f9)                                                                                                                                                          |
-| M6 Automations             | `2026-09-23-companion-console-m6.md`  | done (Nx rust-daemon:test 1874 passed; sdk + web test, typecheck, build green at ccce91b)                                                                                                                                                          |
-| M7 Memory                  | `2026-09-23-companion-console-m7.md`  | done (Nx rust-daemon:test 1925 passed; sdk + web test, typecheck, build green at e33f919)                                                                                                                                                          |
-| M8 Usage, logs, health     | `2026-09-23-companion-console-m8.md`  | done (Nx rust-daemon:test 2082 passed; sdk + web test, typecheck, build green at 65122bd)                                                                                                                                                          |
-| M9 Attachments and voice   | `2026-09-23-companion-console-m9.md`  | implemented; Rust 2156 passed/7 ignored; web 1117, SDK 117/3 skipped; typecheck/build green; done; PR #15 merged at 647d606                                                                                                                        |
-| M10 Deployment and docs    | `2026-09-23-companion-console-m10.md` | local implementation complete; Rust2186/8ignored, web1124, SDK117/3skipped, browser16; typecheck/build/contracts/Compose parser pass; manual deployment acceptance deferred; [PR #16](https://github.com/G9000/animaOS-SWARM/pull/16) open to main |
+| Milestone                  | Detailed plan                         | Status                                                                                                                                                                                                                                                  |
+| -------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M0 Security and groundwork | `2026-09-23-companion-console-m0.md`  | done (Nx rust-daemon:test 1,082 passed at 4e3eb7d)                                                                                                                                                                                                      |
+| M1 Run coordinator         | `2026-09-23-companion-console-m1.md`  | done (Nx rust-daemon:test 1,141 passed at ef5b6fe)                                                                                                                                                                                                      |
+| M2 Sessions                | `2026-09-23-companion-console-m2.md`  | done (Nx rust-daemon:test 1,287 passed; sdk + web test, typecheck, build green at 5b020c4)                                                                                                                                                              |
+| M3 Live runs               | `2026-09-23-companion-console-m3.md`  | done (Nx rust-daemon:test 1,564 passed; sdk + web test, typecheck, build green at 6737da3)                                                                                                                                                              |
+| M4 Approvals               | `2026-09-23-companion-console-m4.md`  | done (Nx rust-daemon:test 1654 passed; sdk + web test, typecheck, build green at 20c6221)                                                                                                                                                               |
+| M5 Skills                  | `2026-09-23-companion-console-m5.md`  | done (Nx rust-daemon:test 1775 passed; sdk + web test, typecheck, build green at e9d57f9)                                                                                                                                                               |
+| M6 Automations             | `2026-09-23-companion-console-m6.md`  | done (Nx rust-daemon:test 1874 passed; sdk + web test, typecheck, build green at ccce91b)                                                                                                                                                               |
+| M7 Memory                  | `2026-09-23-companion-console-m7.md`  | done (Nx rust-daemon:test 1925 passed; sdk + web test, typecheck, build green at e33f919)                                                                                                                                                               |
+| M8 Usage, logs, health     | `2026-09-23-companion-console-m8.md`  | done (Nx rust-daemon:test 2082 passed; sdk + web test, typecheck, build green at 65122bd)                                                                                                                                                               |
+| M9 Attachments and voice   | `2026-09-23-companion-console-m9.md`  | implemented; Rust 2156 passed/7 ignored; web 1117, SDK 117/3 skipped; typecheck/build green; done; PR #15 merged at 647d606                                                                                                                             |
+| M10 Deployment and docs    | `2026-09-23-companion-console-m10.md` | local implementation complete; Rust2186/8ignored, web1124, SDK117/3skipped, browser16; typecheck/build/contracts/Compose parser pass; manual deployment acceptance deferred; [PR #16](https://github.com/G9000/animaOS-SWARM/pull/16) merged at f80e653 |
 
 Dependencies: M0 → M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9 → M10. M4–M9 depend on M3's ledger, runs, and event stream; their internal order follows the spec's milestone list.
 
@@ -96,7 +96,7 @@ Carried from M3 (decided during M3's reviews):
   - Stopped or failed model calls record no token usage, even when a provider already reported prompt tokens.
   - A run's pending steers don't count toward the 8-per-agent queue cap.
   - Usage records for compaction and title calls are still missing.
-- M10:
+- M10 (historical carry-forwards, resolved by merged PR #16 except automatic session-record TTL pending product policy):
   - Rewrite the Playwright specs that mock the legacy `/run` route (`apps/web-e2e/src/companion.spec.ts`, `independent-agents.spec.ts`) for the event stream.
   - File-size chores: move `agent_runs.rs`'s inline tests out, split `connectors/runtime.rs`, and split `ViewHarness` and its test file.
   - Pre-M3 items:
@@ -154,3 +154,15 @@ Carried from M3 (decided during M3's reviews):
 - **T10.1** `deploy/vps/compose.yaml` and README (history store, upgrade and rollback), `hosts/rust-daemon/README.md` route table, `apps/web/README.md`.
 - **T10.2** Playwright specs in `apps/web-e2e`.
 - **T10.3** Full verification and isolated container smoke.
+
+## Follow-on milestones (owner direction, 2026-10-12)
+
+- M11: Hermes-compatible Markdown agent definition sources, primarily SOUL.md
+  identity and AGENTS.md project instructions, ported into the independent Rust
+  long-running runtime. Active branch `g9000/hermes-agent-files-m11` from merged
+  main f80e653. Lean plan/implementation pending; existing safety/durability remains.
+- M12: Modular connector contracts and registry with Telegram pilot, then small
+  Discord/Gmail/Calendar/Drive roadmap. Lean preparation and controller risk rulings
+  exist locally; implementation starts only from updated main after M11 merge.
+  Trusted compile-in community contributions are the first boundary; installable
+  modules require a separately accepted lifecycle/dependency/trust design.

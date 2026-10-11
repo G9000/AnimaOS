@@ -1,8 +1,46 @@
-# Handover: companion console build (M0–M9 merged; M10 local gates complete)
+# Handover: companion console build (M0–M10 merged; M11 active)
 
 This document is for the next agent picking up the companion console upgrade. Read it first; it tells you where everything is and what to do next.
 
-## Start here (2026-10-12): M10 PR #16 open; local gates complete
+## Start here (2026-10-12): M10 merged; M11 Hermes Markdown agent files active
+
+- Owner explicitly authorized merging PR #16 and preparing the next connector
+  milestone. M10 merged at `f80e653`, including final `eee9bb8`; M0–M10 are on main.
+- Owner then clarified standard Markdown defines agents, and instructed reuse of
+  the installed Hermes codebase ported to an independent Rust long-running agent.
+  M11 now handles AGENTS.md/SOUL.md prompt sources before connector implementation.
+- Active branch `g9000/hermes-agent-files-m11` is cut from merged main `f80e653`
+  (renamed from the initial connector preparation branch). Preserve unrelated
+  `nx.json`; no runtime changes have been made yet. Lean M11 planner is active.
+- Ledger/rules: `.superpowers/sdd/2026-10-12-hermes-agent-files-m11/`. Next: publish
+  its source-grounded lean plan and controller's binding five-risk rulings, port
+  core prompt behavior + safe host loader + protected writers/SDK/UI, batch review,
+  one fix wave and relevant local gates; then commit unsigned, push, open PR.
+  M11 merge still requires a new explicit owner instruction.
+- Verified local Hermes source revision remains `f3ef9db68332063a3625661f3a9b259f60abdb4e`.
+  `agent/prompt_builder.py`, `agent/system_prompt.py`, `agent/context_file_sources.py`
+  and `tools/file_tools_write_guards.py` provide actual precedence, primary SOUL
+  identity, bounded reads/truncation, source status and protected-write behavior.
+  Port focused code with MIT copyright/provenance, preserving Rust durability,
+  approvals, permission checks and credential ownership. No new memory store,
+  Python runtime or ambient Hermes-profile reads are authorized.
+- The M12 modular connector preparation is complete: about 1,250 lines and five
+  binding controller risk rulings in ignored
+  `.superpowers/sdd/2026-10-12-companion-connectors-m12/plan-draft.md`. It depends
+  on M11 merge. Start with portable trusted Rust traits/registry + Telegram pilot,
+  then scoped Discord, Gmail/Calendar reuse and selected Drive reads. Compile-in
+  community contributions are distinct from an unimplemented installable ABI.
+- No new dependencies/features, real daemons/services/databases/containers, live
+  provider requests or Docker Postgres55432 actions. Existing unsigned-commit
+  override persists; no GPG unlock needed. Stage explicit paths only, never
+  nx.json/anima.yaml, no stash/reset/restore/checkout--path/worktree operations.
+- M10's passing local gates are preserved below; repeat only checks relevant to
+  new M11 changes. Current container/TLS/Unix/provider/restore acceptance stays
+  unexecuted until separately authorized.
+
+The following section retains M10 publication evidence.
+
+## Historical M10 publication (2026-10-12): PR #16 was open; now merged
 
 - M0–M9 are merged to main. Owner explicitly authorized M9 PR #15 merge;
   merge commit `647d606` includes final M9 handover `c9909df`.
