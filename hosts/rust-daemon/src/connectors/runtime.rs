@@ -13,12 +13,16 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use anima_core::connectors::{
+    ConnectorReceiveRequest, ConnectorSendRequest, ConnectorTransport as AsyncConnectorTransport,
+};
 use anima_core::{Content, DataValue, MessageRole, TaskResult, TaskStatus};
 use async_trait::async_trait;
 use tokio::sync::{oneshot, watch, Mutex};
 use tokio::task::JoinHandle;
 
 use super::credentials::{ConnectorCredentialStore, CredentialStoreError, TelegramBotToken};
+use super::registry::ConnectorRegistry;
 use super::telegram::{
     TelegramClient, TelegramSentMessage, TelegramTransportError, TelegramUpdateBatch,
 };
@@ -148,7 +152,7 @@ pub(crate) struct ConnectorManager {
     state: SharedDaemonState,
     runs: AgentRunCoordinator,
     credentials: Arc<dyn ConnectorCredentialStore>,
-    transport: Arc<dyn TelegramTransport>,
+    registry: Arc<ConnectorRegistry>,
     lifecycle_lock: Arc<Mutex<()>>,
     mutation_lock: Arc<Mutex<()>>,
     statuses: Arc<Mutex<HashMap<String, ConnectorRuntimeStatus>>>,
@@ -186,7 +190,7 @@ impl ConnectorManager {
             state,
             runs,
             credentials,
-            transport,
+            registry: Arc::new(ConnectorRegistry::new(transport)),
             lifecycle_lock: Arc::new(Mutex::new(())),
             mutation_lock,
             statuses: Arc::new(Mutex::new(HashMap::new())),

@@ -194,7 +194,7 @@ impl ConnectorManager {
             state: Arc::clone(&self.state),
             runs: self.runs.clone(),
             credentials: Arc::clone(&self.credentials),
-            transport: Arc::clone(&self.transport),
+            registry: Arc::clone(&self.registry),
             lifecycle_lock: Arc::new(Mutex::new(())),
             mutation_lock: Arc::clone(&self.mutation_lock),
             statuses: Arc::clone(&self.statuses),
@@ -252,6 +252,7 @@ impl ConnectorManager {
                 Some(connector) if connector.is_active() => connector.next_update_id,
                 _ => return,
             };
+            let adapter = self.registry.telegram(&token);
             let batch = tokio::select! {
                 changed = cancel.changed() => {
                     let _ = changed;
@@ -261,7 +262,7 @@ impl ConnectorManager {
                     let _ = changed;
                     return;
                 }
-                result = self.transport.get_updates(&token, offset) => result,
+                result = adapter.receive(ConnectorReceiveRequest { cursor: offset.to_string() }) => result,
             };
             let batch = match batch {
                 Ok(batch) => {
@@ -364,12 +365,15 @@ impl ConnectorManager {
             if had_updates {
                 if let Some(chat_id) = pending_chat {
                     let _ = self
-                        .transport
-                        .send_message(
-                            &token,
-                            &chat_id,
-                            "This chat is waiting for approval in the AnimaOS web console.",
-                        )
+                        .registry
+                        .telegram(&token)
+                        .send(ConnectorSendRequest {
+                            destination: chat_id,
+                            text: "This chat is waiting for approval in the AnimaOS web console."
+                                .to_owned(),
+                            // Host-generated correlation for a non-durable notice; no deduplication claim.
+                            attempt_id: format!("host:pairing:{offset}"),
+                        })
                         .await;
                 }
             }

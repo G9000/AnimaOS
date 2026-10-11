@@ -8,6 +8,7 @@ pub mod communication;
 pub use communication::{AgentCommunicationRoute, MAX_AGENT_COMMUNICATION_HOPS};
 pub mod capability;
 pub mod components;
+pub mod connectors;
 pub mod context_window;
 pub mod definition;
 pub mod engine;
