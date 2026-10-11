@@ -1,4 +1,5 @@
 import { AgentsClient } from './agents.js';
+import { AttachmentsClient } from './attachments.js';
 import { GoalsClient } from './goals.js';
 import { AgenciesClient } from './agencies.js';
 import { WorkspaceClient } from './workspace.js';
@@ -70,6 +71,7 @@ export class DaemonConnectionError extends Error {
 }
 
 export class DaemonClient {
+  readonly attachments: AttachmentsClient;
   readonly agencies: AgenciesClient;
   readonly workspace: WorkspaceClient;
   readonly chatgpt: ChatGptClient;
@@ -100,6 +102,7 @@ export class DaemonClient {
     }
 
     this.fetchImpl = fetchImpl;
+    this.attachments = new AttachmentsClient(this);
     this.agencies = new AgenciesClient(this);
     this.workspace = new WorkspaceClient(this);
     this.agents = new AgentsClient(this);
@@ -177,6 +180,26 @@ export class DaemonClient {
       );
     }
     return this.readWithConnectionErrors(path, () => response.text());
+  }
+
+  /** Binary bytes; errors retain the same HTTP/connection policy as JSON. */
+  async requestBlob(path: string, init: RequestInit = {}): Promise<Blob> {
+    const response = await this.fetchWithConnectionErrors(path, {
+      ...init,
+      headers: {
+        accept: '*/*',
+        ...headersToObject(init.headers),
+      },
+    });
+    if (!response.ok) {
+      throw new DaemonHttpError(
+        response.status,
+        await this.readWithConnectionErrors(path, () =>
+          readResponseBody(response),
+        ),
+      );
+    }
+    return this.readWithConnectionErrors(path, () => response.blob());
   }
 
   async *subscribe<T = unknown>(

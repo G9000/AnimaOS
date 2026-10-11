@@ -28,6 +28,25 @@ const run = {
 };
 
 describe('runs client', () => {
+  it('retains ordered attachment IDs unchanged in accepted run input', async () => {
+    const { runs, requests } = transport(() =>
+      Response.json({ run }, { status: 202 }),
+    );
+    const attachmentIds = ['att_second', 'att_first'];
+    await runs.start(
+      'agent/a',
+      'chat:1',
+      { text: '', attachmentIds, mode: 'steer', skill: 'writer' },
+      { idempotencyKey: 'attachment-run' },
+    );
+    expect(JSON.parse(String(requests[0].init?.body))).toEqual({
+      text: '',
+      attachmentIds: ['att_second', 'att_first'],
+      mode: 'steer',
+      skill: 'writer',
+    });
+    expect(attachmentIds).toEqual(['att_second', 'att_first']);
+  });
   it('starts a run with its idempotency key and returns the accepted run', async () => {
     const { runs, requests } = transport(() =>
       Response.json({ run }, { status: 202 }),
