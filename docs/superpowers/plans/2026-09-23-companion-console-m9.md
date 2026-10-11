@@ -1444,15 +1444,6 @@ $env:NX_ISOLATE_PLUGINS='false'
 $env:NX_NO_CLOUD='true'
 $env:NX_NATIVE_FILE_CACHE_DIRECTORY=(Join-Path (Get-Location) 'node_modules/.cache/nx-native-m9')
 $env:CARGO_INCREMENTAL='0'
-bun x nx run core-rust:test --skipNxCache
-```
-
-```powershell
-$env:NX_DAEMON='false'
-$env:NX_ISOLATE_PLUGINS='false'
-$env:NX_NO_CLOUD='true'
-$env:NX_NATIVE_FILE_CACHE_DIRECTORY=(Join-Path (Get-Location) 'node_modules/.cache/nx-native-m9')
-$env:CARGO_INCREMENTAL='0'
 bun x nx run rust-daemon:test --skipNxCache
 ```
 
@@ -1461,6 +1452,7 @@ $env:NX_DAEMON='false'
 $env:NX_ISOLATE_PLUGINS='false'
 $env:NX_NO_CLOUD='true'
 $env:NX_NATIVE_FILE_CACHE_DIRECTORY=(Join-Path (Get-Location) 'node_modules/.cache/nx-native-m9')
+$env:ANIMA_SKIP_SERVICE_TESTS='1'
 bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache
 ```
 
@@ -1478,9 +1470,10 @@ bun x nx format:check --base=origin/main
 ```
 
 - Nx calls use require_escalated shell mode as diagnosed by the controller.
-- Core-rust test is necessary because daemon tests do not execute dependency unit tests.
+- `rust-daemon:test` depends on `core-rust:test` in its Nx target. Confirm both execute successfully in the gate output; a separate identical core gate is unnecessary.
 - Record actual pass/ignored counts; no assumed baseline numbers.
 - Do not start ignored database tests just to increase passing count.
+- Set `ANIMA_SKIP_SERVICE_TESTS=1`: the existing SDK daemon integration suite starts a real service and is excluded under the owner's no-service rule. Report its three skipped tests separately.
 - Local gates are the verification; known Nx Cloud CI failure is not a pass.
 - If full format detects unrelated pre-existing nx.json/anima.yaml drift, report it
   precisely and run explicit touched-path formatting evidence without staging them.
@@ -1605,3 +1598,9 @@ These rulings override earlier choices. No separate pre-flight audit is required
 5. **R5 — Browser lifetime.** Bind asynchronous work to a stable session generation, coalesce new-session creation, abort/ignore stale upload callbacks, revoke object URLs and cancel dictation/synthesis on session changes or disabled/unmounted surfaces. Authenticated blob retrieval carries owner credentials in headers, never URLs. Manual retry retains IDs with no automatic resend. Cost if wrong: wrong-session sends, lost drafts or stale speech.
 
 **Process adaptation:** The owner explicitly authorized Codex subagents after Claude reported signed out. Use the available subagents with bounded contexts; reserve the most careful review for file authority and transaction/steer boundaries. The controller owns explicit staging and signed commits. Batch A and B reviews record findings; accepted findings are resolved in one final fix wave, then the required local gates. M10 starts only after the owner merges M9 and a new milestone branch can be cut from main.
+
+**Document validation clarification:** Legacy Office compound files receive envelope-only validation, including a plausible body beyond the header. Their MIME is extension-derived; this does not establish the Office family or parse their contents. They remain saved and download-only. No Office parser or new dependency is authorized.
+
+**Product direction:** Use the installed Hermes source as a focused behavioral reference while keeping Anima's independent Rust engine. Connector priorities are Telegram, Discord and Gmail, Calendar and Drive, with optional community modules. The Rust host currently lacks a lifecycle-capable community connector interface; designing that boundary is a follow-up outside M9.
+
+**Hermes provenance:** Native image content-part formats and MIME routing use Hermes revision `f3ef9db68332063a3625661f3a9b259f60abdb4e` as a Rust porting reference. The crate's `HERMES-NOTICE` records the source files and retains the upstream MIT copyright and permission notice. Scoped file authority, limits and request-only hydration remain Anima contracts. The owner explicitly reaffirmed reuse of code and behavior.

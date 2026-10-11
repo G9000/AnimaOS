@@ -1,20 +1,33 @@
-# Handover: companion console build (M0–M3 done, M4 planned)
+# Handover: companion console build (M0–M8 merged; M9 publication in progress)
 
 This document is for the next agent picking up the companion console upgrade. Read it first; it tells you where everything is and what to do next.
 
-## Start here (2026-10-11): M0–M8 merged; next is M9
+## Start here (2026-10-11): M9 implemented; publication in progress
 
 **State**
 
 - M0–M8 are merged to `main`. The last merges were #12 (M6), #13 (M7) and #14 (M8); `main` is at `86cc87f`.
-- M9 (attachments and voice) has not started. Its branch, `feat/companion-console-m9`, was cut from `main` and holds only this note.
-- Snapshot version is 10.
-- Last gates on `main`'s content:
-  - `rust-daemon:test`: 2,082 passed, 7 ignored.
-  - Web: 1,042 tests.
-  - SDK: 103 tests.
+- M9 (attachments and browser voice) implementation is complete on `feat/companion-console-m9`, cut from `main`. Lean plan: `docs/superpowers/plans/2026-09-23-companion-console-m9.md`; the owner authorized Codex subagents because Claude was signed out. Both daemon batch reviews, the final web/SDK review and one fix wave are finished. The full Rust gate caught old snapshot expectations; test-only corrections preserved historical migration coverage and passed the rerun.
+- Signed commits through `425b220` contain the complete implementation and review fixes. Both waiting daemon commits completed and their signatures were verified. The owner explicitly resumed work; signing/publication are continuing. Documentation is being committed next, followed by push and a PR to `main`.
+- The working tree uses snapshot **v11** with `.pre-attachments.bak` / `control_plane.backup.10`; merged `main` still uses v10.
+- Hermes image routing/provider formats were used as Rust porting references. `packages/core-rust/crates/anima-model-adapters/HERMES-NOTICE` retains the upstream MIT notice and revision `f3ef9db68332063a3625661f3a9b259f60abdb4e`. The owner clarified “remember” means reuse code/behavior, not a new memory feature.
+- A lean M10 plan draft is being prepared in the ignored `.superpowers/sdd/2026-09-23-companion-console-m10/plan-draft.md`. No M10 branch or tracked implementation starts before the owner explicitly merges M9.
+- Compatibility: new v11 consumed steer keys preserve full input after transcript pruning; older keys require a matching scoped transcript to prove equality, otherwise replay returns 409.
+- Fresh local gates on this working tree:
+  - `rust-daemon:test`: **2,156 passed, 7 ignored** in aggregate: host 1,542 plus its `core-rust:test` dependency 614. The ignored tests require Postgres.
+  - SDK/web test, typecheck and build: **web 1,117 passed; SDK 117 passed, 3 skipped**. Set `ANIMA_SKIP_SERVICE_TESTS=1`; those three SDK tests start a real service and are excluded under the owner's rule.
+  - `cargo fmt --all --check`: passed after a controller-only test-module ordering correction. Nx format:check against origin/main also passed.
+  - Logs: `.superpowers/sdd/2026-09-23-companion-console-m9/gate-rust-rerun.log` and `gate-web-sdk.log` (ignored local working files). Full web output includes act warnings from the unchanged `WorkspaceOperations` removed-filter test; the touched 312-test focused set was clean. Source matches `origin/main` and its API methods are mocked.
+- Evidence limits: no live-provider image acceptance, real microphone/TTS, Unix link fixtures, Postgres execution or VPS deployment. One earlier SDK run accidentally started its existing temporary daemon fixture; it cleaned up, and subsequent controller process checks found no daemon. The opt-out now prevents recurrence.
 
-**How to continue: one branch per milestone, stay cheap (the owner is token-constrained)**
+**Resume publication, not implementation**
+
+1. All implementation commits are signed; finish the remaining documentation commit and publication without repeating implementation or reviews.
+2. Commit the remaining frozen implementation, review fixes and docs with explicit file paths and GPG signing. Do not stage `nx.json` or `anima.yaml`. The final working-file SHA256 inventory and grouped explicit publication manifests are in `remaining-manifest.txt` and `publication-*.paths.txt` in the ledger folder. Frozen worker manifests and the decision ledger are under `.superpowers/sdd/2026-09-23-companion-console-m9/` and `target/m9-logs/`; both are ignored.
+3. Push `feat/companion-console-m9`, open a PR to `main`, attach it to this Codex chat, and update this note with its URL. Local test evidence is current; rerun relevant gates only if code changes.
+4. Merge only when the owner explicitly says "merge". Then cut `feat/companion-console-m10` from updated `main`, write the lean M10 deployment/docs plan and continue. Do not start M10 on the unmerged M9 branch.
+
+**Milestone workflow reference (M9 implementation is already complete)**
 
 1. Have **Sonnet** write a **lean plan**, modelled on `docs/superpowers/plans/2026-09-23-companion-console-m8.md`:
    - Interfaces, rules, test lists and commands; full code only for tricky pieces; about 1,000–2,000 lines.
@@ -29,6 +42,7 @@ This document is for the next agent picking up the companion console upgrade. Re
    - One final web+SDK review covers all web tasks.
    - One fix wave.
 5. Run the gates:
+   - Use `NX_DAEMON=false`, `NX_ISOLATE_PLUGINS=false`, `NX_NO_CLOUD=true`, `CI=1`, `ANIMA_SKIP_SERVICE_TESTS=1`, and `NX_NATIVE_FILE_CACHE_DIRECTORY=node_modules/.cache/nx-native-m9`; set `CARGO_INCREMENTAL=0` before cargo or Rust Nx targets. Sandbox native-cache/realpath restrictions require escalated local checks; no dependency installation is needed.
    - `bun x nx run rust-daemon:test --skipNxCache`
    - `bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache`
    - `cargo fmt --all --check`
@@ -67,6 +81,7 @@ This document is for the next agent picking up the companion console upgrade. Re
 
 **Open follow-ups**
 
+- Owner direction (2026-10-11): use Hermes as a focused behavioral reference and keep Anima's independent Rust engine. Start with Telegram, Discord and Gmail, Calendar and Drive rather than integration parity. Connectors should support optional community modules. Today's TS `ModPlugin` is stateless/tool-only and Rust connectors are built-ins; a lifecycle-capable community connector interface is still needed. This is outside M9.
 - Owner auth for the older memory routes.
 - Hidden-text refusal for evaluator extractions.
 - A `memory.updated` event.
