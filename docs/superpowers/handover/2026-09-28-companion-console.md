@@ -2,14 +2,14 @@
 
 This document is for the next agent picking up the companion console upgrade. Read it first; it tells you where everything is and what to do next.
 
-## Start here (2026-10-12): M10 local gates complete; publish PR
+## Start here (2026-10-12): M10 PR #16 open; local gates complete
 
 - M0–M9 are merged to main. Owner explicitly authorized M9 PR #15 merge;
   merge commit `647d606` includes final M9 handover `c9909df`.
 - Current branch `feat/companion-console-m10` was cut from that merged main.
-  Implementation is committed through `f2d0814`, with web `9c3b298` and core
-  `bfc4d87`. Publish the final documentation and PR to main; do not repeat
-  implementation or reviews. **M10 merge needs a new explicit owner instruction.**
+  Implementation is committed through `f2d0814`, formatting/docs through `af2b5f8`, with web `9c3b298` and core
+  `bfc4d87`. [PR #16](https://github.com/G9000/animaOS-SWARM/pull/16) is OPEN against main and attached to the chat. All tracked M10 work is committed and pushed; do not repeat
+  implementation or reviews. **Resume: review/merge PR #16 only after a new explicit owner merge instruction.** Current local gates are finished. Live deployment/Unix signal/provider/restore acceptance is a separately authorized follow-up; do not start services under the existing constraint.
 - Published lean plan: `docs/superpowers/plans/2026-09-23-companion-console-m10.md`.
   Binding five-risk rulings plus the evidence-driven shared 40-second shutdown
   refinement are recorded. Codex implementers, both daemon batches, final web/SDK
