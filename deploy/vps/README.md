@@ -8,7 +8,9 @@ The package is intended for one trusted owner, one daemon, and one VPS. It is no
 
 Use a Linux VPS with Docker Engine and Docker Compose v2.20 or newer, a domain pointed at its public IP, and inbound TCP 80/443 available. Keep SSH restricted separately. Allow outbound HTTPS for certificate issuance, model providers, and connectors. Building the Rust image is resource intensive; use a build machine if the VPS is too small. The build uses the locked dependencies; the Rust/Debian base tags receive updates, so record the resulting image IDs for rollback.
 
-Both Docker images have built successfully on Linux containers. An isolated local smoke test verified daemon readiness, the actual Rust OS-keyring backend, workspace bootstrap/files, SQLite memory, authenticated gateway routing, and restoration of the agent, memory, workspace file, and a dummy credential after both a daemon restart and container removal/recreation with the same named volumes. The test published no ports and used no real credentials or model calls. Automated gateway checks also cover Origin/Fetch Metadata enforcement, exact OAuth callback exceptions, and SSE. Public TLS issuance, real provider/connector flows, VPS reboot, and off-site restore remain acceptance checks for your deployment. A healthy proxy alone does not establish a healthy daemon or a configured model.
+Historical evidence recorded in revision `285f92d` (2026-09-17): both images built on Linux containers, and an isolated smoke test covered readiness, the Rust OS-keyring backend, workspace bootstrap/files, SQLite memory, authenticated routing and data/dummy-credential restoration after restart and container recreation. Gateway regressions covered Origin/Fetch Metadata checks, callback exceptions and SSE. That evidence predates the companion-console milestones and does not verify the current images.
+
+M10 checks inspect deployment contracts and parse Compose with synthetic inputs. Browser journeys exercise the built console and actual SDK against simulated APIs/SSE bytes. No daemon, database, dev server or container is started for these checks. Current container/keyring/network recovery, public TLS, real providers/connectors, microphone behavior, VPS reboot and off-site restore remain manual acceptance checks. A healthy proxy alone does not establish a healthy daemon or a configured model.
 
 ## First installation
 
@@ -52,15 +54,17 @@ The exact GET OAuth callback paths are allowed to return from another site; thei
 
 ## Persistence and credentials
 
-| Named volume | Contents | Recovery requirement |
-| --- | --- | --- |
-| `anima-companion_daemon_state` | `control-plane.json` and `memory.sqlite`, including SQLite sidecars and embedding state | Back up the whole volume with the daemon stopped |
-| `anima-companion_workspace` | Workspace files and assets under `/workspace` | Keep the same `/workspace` path on restore |
-| `anima-companion_daemon_home` | Encrypted GNOME keyrings under `.local/share/keyrings`, plus daemon home files | Restore together with the original keyring password |
-| `anima-companion_caddy_data` | TLS certificates, private keys, and ACME account state | Treat backup as sensitive |
-| `anima-companion_caddy_config` | Caddy runtime configuration storage | Restore with the same deployment |
+| Named volume                   | Contents                                                                                     | Recovery requirement                                |
+| ------------------------------ | -------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `anima-companion_daemon_state` | `control-plane.json`, `memory.sqlite`, `history.sqlite`, SQLite sidecars and embedding state | Back up the whole volume with the daemon stopped    |
+| `anima-companion_workspace`    | Workspace files, uploaded attachments and assets under `/workspace`                          | Keep the same `/workspace` path on restore          |
+| `anima-companion_daemon_home`  | Encrypted GNOME keyrings under `.local/share/keyrings`, plus daemon home files               | Restore together with the original keyring password |
+| `anima-companion_caddy_data`   | TLS certificates, private keys, and ACME account state                                       | Treat backup as sensitive                           |
+| `anima-companion_caddy_config` | Caddy runtime configuration storage                                                          | Restore with the same deployment                    |
 
-The explicit JSON/SQLite paths make state durable even though `ANIMAOS_RS_PERSISTENCE_MODE=memory` selects the non-Postgres adapter. Agent state/conversation snapshots, jobs, goals, schedules, workspace settings, and connector records are in the control-plane snapshot. Durable memory uses SQLite; this is separate from workspace files and credential storage.
+The explicit JSON/SQLite paths make state durable even though `ANIMAOS_RS_PERSISTENCE_MODE=memory` selects the non-Postgres adapter. Agent state, hot conversation tails, jobs, goals, schedules, workspace settings and connector records are in the control-plane snapshot. Memory uses `/state/memory.sqlite`; full conversation history, runs, usage, approval/schedule records and attachment metadata use `/state/history.sqlite`. Upload bytes live under `/workspace`, and credentials live in the home/keyring volume. Session deletion removes attachment records but does not physically wipe workspace files. Usage may outlive deleted sessions.
+
+The table assumes Compose project name `anima-companion` from `compose.yaml`. If you override it with `-p` or `COMPOSE_PROJECT_NAME`, replace **every** named-volume prefix in backup/restore commands with that exact project name. Do not run those commands until the resolved volumes are verified. Treat the five volumes, protected `.env`, repository revision and image IDs as one stopped backup generation.
 
 Telegram bot tokens, ChatGPT access/refresh tokens, OAuth application secrets, and Google/Microsoft connector tokens use the daemon's existing OS-keyring backend. This image supplies a private D-Bus session and GNOME Secret Service, unlocks the persisted login keyring at startup, and verifies a write/read/delete probe before starting the daemon. A wrong password or unusable vault causes startup to fail instead of silently using transient credentials. See [GNOME keyring startup](https://wiki.gnome.org/Projects/GnomeKeyring/RunningDaemon) and the [daemon manual](https://manpages.debian.org/bookworm/gnome-keyring/gnome-keyring-daemon.1.en.html).
 
@@ -78,11 +82,11 @@ Compose sets `ANIMA_PUBLIC_BASE_URL=https://YOUR_DOMAIN`. The daemon uses this s
 
 Persisted state is not seamless resumption of arbitrary execution. Running jobs recover into `needs_review` with an interrupted-attempt explanation; inspect external effects before retrying. A streaming request or child process cannot continue across a container restart, and in-progress OAuth handshakes may need to be started again. Mail sends with uncertain outcomes require checking Sent mail before another send. This package supplies process restart and durable data, not guaranteed exactly-once execution or high availability.
 
-Delegated helpers cannot execute shell commands or manage background processes, even when the main companion has those tools. The helper's 120-second wait limit is not a universal cancellation guarantee: inspect status and external effects before retrying an interrupted or timed-out operation.
+Delegated helpers cannot execute shell commands or manage background processes, even when the main companion has those tools. Default provider clients have a 15-second connect timeout and a 300-second whole-request timeout, including streams; explicitly injected clients retain their caller's policy. Helper deadlines and daemon shutdown use distinct cancellation causes. Ctrl+C and Unix SIGTERM close producers before draining accepted runs (up to 30 seconds, within a shared 40-second shutdown limit and Compose's 45-second grace). If the limit expires, unsettled work requires restart/interruption review. Cancellation/timeouts cannot undo external effects: inspect status and delivery uncertainty before retrying. Telegram delivery is at-least-once; a successful send followed by failed persistence can be delivered again, and retrying an outbound message does not rerun the model.
 
 ## Backup
 
-Run these commands from `deploy/vps` during a quiet period. This stops services, so SQLite and keyring files are copied consistently. The archive includes `.env`, private keys, files, memory, and account credentials: encrypt it before copying it off the VPS, restrict access, and never commit it.
+Run these operator commands from `deploy/vps` during a quiet period. They are documented procedures, not commands executed during M10 verification. Stop both services so JSON, both SQLite databases (including `-wal`/`-shm` sidecars), uploads and keyring files are copied consistently. The archive includes `.env`, private keys, files, memory and account credentials: encrypt it before copying it off the VPS, restrict access and never commit it. Record repository revision, image IDs, snapshot version (currently **11**) and archive identity together.
 
 ```sh
 mkdir -p backups
@@ -100,7 +104,7 @@ docker run --rm \
 docker compose up -d
 ```
 
-Confirm the archive exists and can be listed with `tar -tzf backups/ARCHIVE.tar.gz` before considering the backup successful. Retain the repository revision and image IDs (`git rev-parse HEAD`, `docker compose images`) with each backup. Keep backups outside the live VPS as well.
+Confirm the archive can be listed with `tar -tzf backups/ARCHIVE.tar.gz`, including `state/control-plane.json`, both SQLite databases, workspace uploads, home/keyring and Caddy state, before considering it successful. Retain the repository revision and image IDs (`git rev-parse HEAD`, `docker compose images`) with each backup. Encrypt and keep a protected off-site copy; rehearse restore before retiring older backups. The snapshot's `.pre-attachments.bak` file alone is not a full backup.
 
 ## Restore to a fresh VPS
 
@@ -138,11 +142,15 @@ docker compose up -d
 docker compose ps
 ```
 
-`down` without `-v` preserves volumes and deliberately recreates both services so the daemon joins the replacement gateway network namespace. Do not replace the gateway alone while leaving a running daemon attached to its old namespace. If an update fails, stop the services, return to the recorded repository/image revision, and restore a backup into fresh volumes if a storage-format change prevents reading the current data. Do not assume older binaries can read newer snapshots.
+`down` without `-v` preserves volumes and deliberately recreates both services so the daemon joins the replacement gateway network namespace. Do not replace the gateway alone while leaving a running daemon attached to its old namespace. If an update fails, stop services, select recorded binaries/images and restore the complete matching pre-upgrade backup generation into fresh volumes. Restoring only control-plane JSON while keeping newer history can resurrect rows. Keep the same canonical `/workspace` root and original vault password; stop the original Telegram poller before starting a restored copy. Do not assume older binaries can read newer snapshots.
+
+The first M9 upgrade writes `<control-plane-file>.pre-attachments.bak` (v10 input; Postgres uses `control_plane.backup.10`) before saving v11. This is only one rollback component. Never edit a snapshot version integer to bypass refusal, and never delete history tables or migration records as a routine M9/M10 rollback. Older version-specific SQL rollback guidance in the daemon README applies only to those historical versions. Restore the full recorded generation instead of mixing schemas/data.
 
 For a provider API-key change, edit `.env` and recreate the daemon with `docker compose up -d --force-recreate daemon`. For gateway login/internal-token changes, recreate both services using the update sequence. Vault-password rotation requires a deliberate keyring password migration and is not supplied by this package.
 
 ## Local gateway regression checks
+
+The following gateway suite starts real listeners and is excluded by the current no-service milestone rule. Run it only when that runtime work is explicitly authorized.
 
 With Bun 1.3.8 and Caddy 2.10.2 installed:
 
@@ -151,3 +159,16 @@ CADDY_BINARY=/absolute/path/to/caddy bun test deploy/vps/gateway.test.ts
 ```
 
 Run this from the repository root. It launches Caddy only on loopback with test credentials and a harmless stub upstream, and checks authentication, forwarding-header removal, Origin/Fetch Metadata protection, exact callback exceptions, and SSE delivery. It does not validate live providers, the Linux keyring, Docker networking, or certificate issuance.
+
+## Offline milestone checks
+
+From the repository root, with the Nx daemon and Cloud disabled:
+
+```sh
+NX_DAEMON=false NX_ISOLATE_PLUGINS=false NX_NO_CLOUD=true bun x nx run @animaOS-SWARM/web-e2e:deployment-contracts --skipNxCache
+docker compose --env-file deploy/vps/fixtures/compose.test.env -f deploy/vps/compose.yaml config --quiet
+```
+
+The fixture contains synthetic parser inputs and cannot authenticate a real deployment. These checks never start Docker services. For real acceptance, also verify rejected cross-origin writes, unbuffered selected-model streaming, session/history/upload persistence after recreation, interrupted-run review without automatic tool replay, approvals/automations/skills/memory/usage, vault access, SIGTERM drain, reboot and encrypted off-site restore. Mark each result with its revision and target host; none is implied by offline passes.
+
+Hermes scoped-recovery and orderly-stop behavior informed the Rust console design; Anima retains its own runtime. The focused M9 provider-format port retains its upstream MIT notice and revision in [HERMES-NOTICE](../../packages/core-rust/crates/anima-model-adapters/HERMES-NOTICE). Discord, Drive and a community connector lifecycle remain follow-up work; they are not deployed by this package.

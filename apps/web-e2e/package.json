@@ -46,6 +46,39 @@
           "{projectRoot}/test-output/playwright/live-report",
           "{projectRoot}/test-output/playwright/live-blob-report"
         ]
+      },
+      "deployment-contracts": {
+        "executor": "nx:run-commands",
+        "options": {
+          "cwd": ".",
+          "command": "bun test deploy/vps/contracts.test.ts"
+        },
+        "cache": false
+      },
+      "e2e-console": {
+        "executor": "nx:run-commands",
+        "dependsOn": [
+          {
+            "projects": [
+              "@animaOS-SWARM/sdk",
+              "@animaOS-SWARM/web"
+            ],
+            "target": "build"
+          }
+        ],
+        "options": {
+          "cwd": "apps/web-e2e",
+          "command": "playwright test --config=playwright.console.config.ts"
+        },
+        "parallelism": false,
+        "cache": false,
+        "inputs": [
+          "default",
+          "^production"
+        ],
+        "outputs": [
+          "{projectRoot}/test-output/console"
+        ]
       }
     },
     "implicitDependencies": [

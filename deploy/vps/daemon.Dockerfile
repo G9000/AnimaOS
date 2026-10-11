@@ -4,7 +4,7 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY packages/core-rust ./packages/core-rust
 COPY hosts/rust-daemon ./hosts/rust-daemon
-RUN cargo build --release --locked -p anima-daemon
+RUN CARGO_INCREMENTAL=0 cargo build --release --locked -p anima-daemon
 
 FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \

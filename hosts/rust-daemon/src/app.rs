@@ -205,7 +205,9 @@ pub async fn serve(listener: TcpListener, config: DaemonConfig) -> io::Result<()
     let chatgpt_auth = crate::chatgpt_auth::ChatGptAuth::new();
     let state = Arc::new(RwLock::new(configured_state(
         &config,
-        Arc::new(RuntimeModelAdapter::from_env(chatgpt_auth.clone())),
+        Arc::new(
+            RuntimeModelAdapter::try_from_env(chatgpt_auth.clone()).map_err(io::Error::other)?,
+        ),
     )));
 
     configure_persistence(&state, &config).await?;
@@ -253,25 +255,52 @@ pub(crate) async fn serve_with_state(
     let history = runtime.history.clone();
     let live = state.read().await.live.clone();
     let router = router_with_runtime(state, config, runtime, bind_is_loopback);
-    axum::serve(listener, router)
-        .with_graceful_shutdown(async move {
-            shutdown.await;
-            // First, while streams still carry their events: new messages
-            // are refused, queued ones stay queued for the restart, and the
-            // accepted runs already going get up to 30 seconds to commit
-            // (final fix wave S2-A), as `jobs.shutdown` finishes its runs.
-            agent_runs.shutdown().await;
-            // Then the streams: graceful shutdown, which begins once this
-            // future ends, waits for every response to finish, and an agent
-            // event stream never ends on its own.
-            live.close();
-            jobs.shutdown().await;
-            scheduler.shutdown().await;
-            skills.shutdown().await;
-            connectors.shutdown().await;
-            history.shutdown().await;
-        })
-        .await
+    let shutdown_live = live.clone();
+    let drain_expired = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let workflow_expired = Arc::clone(&drain_expired);
+    let (started, deadline_started) = tokio::sync::oneshot::channel();
+    let server = axum::serve(listener, router).with_graceful_shutdown(async move {
+        shutdown.await;
+        let deadline = tokio::time::Instant::now() + lifecycle::SHUTDOWN_BUDGET;
+        let _ = started.send(deadline);
+        // All closes, admitted work, history and HTTP completion share this deadline.
+        let drained = lifecycle::run_shutdown_until(
+            tokio::time::sleep_until(deadline),
+            lifecycle::producer_first_shutdown(
+                async {
+                    agent_runs.request_shutdown();
+                    jobs.request_shutdown().await;
+                    scheduler.request_shutdown().await;
+                    skills.request_shutdown();
+                    connectors.request_shutdown().await;
+                },
+                async {
+                    agent_runs.shutdown().await;
+                    jobs.shutdown().await;
+                    scheduler.shutdown().await;
+                    skills.shutdown().await;
+                    connectors.shutdown().await;
+                    history.shutdown().await;
+                },
+            ),
+        )
+        .await;
+        workflow_expired.store(!drained, std::sync::atomic::Ordering::SeqCst);
+        shutdown_live.close();
+    });
+    let outcome = lifecycle::run_server_until_shutdown(async { server.await }, async {
+        let deadline = match deadline_started.await {
+            Ok(deadline) => deadline,
+            Err(_) => std::future::pending().await,
+        };
+        tokio::time::sleep_until(deadline)
+    })
+    .await;
+    if outcome.is_none() || drain_expired.load(std::sync::atomic::Ordering::SeqCst) {
+        tracing::warn!("shutdown budget expired; admitted work may have uncertain effects and requires restart review");
+        live.close();
+    }
+    outcome.unwrap_or(Ok(()))
 }
 
 fn daemon_runtime(state: SharedDaemonState, config: &DaemonConfig) -> io::Result<DaemonRuntime> {

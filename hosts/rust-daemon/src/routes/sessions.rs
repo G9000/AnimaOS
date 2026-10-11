@@ -292,6 +292,7 @@ pub(super) async fn create_session(
         let now_ms = now_millis();
         if !guard.session_limiter.try_acquire(&agent_id, now_ms) {
             return rejected(ApiError {
+                kind: crate::routes::ApiErrorKind::General,
                 status: StatusCode::TOO_MANY_REQUESTS,
                 message: TOO_MANY_NEW_CHATS.into(),
             });

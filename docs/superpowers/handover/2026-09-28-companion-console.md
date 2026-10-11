@@ -1,8 +1,59 @@
-# Handover: companion console build (M0–M8 merged; M9 PR open)
+# Handover: companion console build (M0–M9 merged; M10 local gates complete)
 
 This document is for the next agent picking up the companion console upgrade. Read it first; it tells you where everything is and what to do next.
 
-## Start here (2026-10-11): M9 PR #15 open; M10 plan prepared
+## Start here (2026-10-12): M10 PR #16 open; local gates complete
+
+- M0–M9 are merged to main. Owner explicitly authorized M9 PR #15 merge;
+  merge commit `647d606` includes final M9 handover `c9909df`.
+- Current branch `feat/companion-console-m10` was cut from that merged main.
+  Implementation is committed through `f2d0814`, formatting/docs through `af2b5f8`, with web `9c3b298` and core
+  `bfc4d87`. [PR #16](https://github.com/G9000/animaOS-SWARM/pull/16) is OPEN against main and attached to the chat. All tracked M10 work is committed and pushed; do not repeat
+  implementation or reviews. **Resume: review/merge PR #16 only after a new explicit owner merge instruction.** Current local gates are finished. Live deployment/Unix signal/provider/restore acceptance is a separately authorized follow-up; do not start services under the existing constraint.
+- Published lean plan: `docs/superpowers/plans/2026-09-23-companion-console-m10.md`.
+  Binding five-risk rulings plus the evidence-driven shared 40-second shutdown
+  refinement are recorded. Codex implementers, both daemon batches, final web/SDK
+  review and one fix wave are finished. A1 fixed job/schedule claim admission after
+  producer closure; four deterministic regressions preserve already admitted work.
+- Snapshot remains **v11**. Delivery claims are ephemeral and fenced by committed
+  credential/row identity. Telegram transport holds no global transaction/state
+  guard, and uncertain delivery remains at-least-once. Session search/snippet work
+  runs after capturing selected state outside the read lock. Module/test extraction
+  preserves the original 60 connector and 59 inline agent-run test names.
+- Fresh functional gates on the final sources:
+  - Rust Nx host test **2,186 passed, 8 ignored**: core dependency 621 and host
+    1,565. Seven ignored tests require Postgres; one is an explicit README inventory
+    print helper, not a required correctness test. Both Nx tasks passed.
+  - Web **1,124 passed**; SDK **117 passed, 3 skipped** with
+    `ANIMA_SKIP_SERVICE_TESTS=1`. All SDK/web test/typecheck/build dependency tasks passed.
+  - Offline installed-Edge browser **16 passed**, browser typecheck passed;
+    deployment contracts **4 passed**; dummy Compose `config --quiet` passed.
+  - Functional logs: ignored `.superpowers/sdd/2026-09-23-companion-console-m10/`
+    `gate-rust.log`, `gate-web-sdk.log`, `gate-browser-deploy.log`. Full web warnings
+    have only test origins already present in M9 logs; focused 122 tests were clean.
+    Existing chunk-size warnings remain. Cargo fmt and Nx format:check against origin/main both pass; formatter-only source adjustments are verified and the quote-independent deployment contracts/parser rerun passes.
+- No real daemon, dev server, database, container, provider or microphone started
+  during M10. Browser fixtures load built assets, normal SDK/SSE bytes and reducers;
+  they do not prove real HTTP chunking, TLS, keyring/container restart or live
+  providers. Current Unix signal/VPS/restore acceptance remains unexecuted under
+  the no-service rule. `deploy/vps/README.md` scopes old 2026-09-17 smoke evidence
+  and documents the complete stopped five-volume/env backup generation.
+- Owner authorized **unsigned commits** on 2026-10-12 to avoid GPG while absent.
+  This overrides every historical signing/pinentry instruction below. Controller
+  uses per-command `git -c commit.gpgsign=false commit`, never global config changes.
+- Preserve unrelated `nx.json`; never stage it or `anima.yaml`. Continue all
+  no-dependency/no-service/explicit-path/no-worktree/stash/reset/restore rules.
+  Ledger and worker notes: `.superpowers/sdd/2026-09-23-companion-console-m10/`.
+- Hermes focused provider formats/MIME behavior are ported with MIT provenance in
+  `packages/core-rust/crates/anima-model-adapters/HERMES-NOTICE` (revision
+  `f3ef9db68332063a3625661f3a9b259f60abdb4e`). Scoped recovery/orderly stop inform the
+  independent Rust runtime. Telegram/Discord/Gmail/Calendar/Drive priorities and
+  community connector lifecycle remain follow-ups; Discord/Drive/community lifecycle
+  are not shipped here. Automatic session-record TTL awaits a product policy.
+
+The following sections retain historical M9 evidence.
+
+## Historical state (2026-10-11): M9 PR #15 open; M10 plan prepared
 
 **State**
 

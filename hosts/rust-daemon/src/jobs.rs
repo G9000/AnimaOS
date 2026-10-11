@@ -14,6 +14,7 @@ use std::{
 use tokio::sync::{watch, Mutex, Notify};
 
 const MAX_JOBS: usize = 200;
+const JOB_PRODUCER_SHUTTING_DOWN: &str = "Job producer is shutting down";
 const MAX_ACTIVE: usize = 8;
 pub(crate) const JOB_STOPPED_ERROR: &str = "Stopped by owner; inspect effects before retrying";
 
@@ -40,6 +41,9 @@ pub(crate) struct JobService {
     runs: AgentRunCoordinator,
     wake: Arc<Notify>,
     worker: Arc<Mutex<Option<Worker>>>,
+    closing: Arc<std::sync::Mutex<bool>>,
+    #[cfg(test)]
+    claim_ready: Arc<Notify>,
 }
 
 impl JobService {
@@ -49,6 +53,9 @@ impl JobService {
             runs,
             wake: Arc::new(Notify::new()),
             worker: Arc::new(Mutex::new(None)),
+            closing: Arc::new(std::sync::Mutex::new(false)),
+            #[cfg(test)]
+            claim_ready: Arc::new(Notify::new()),
         }
     }
 
@@ -383,6 +390,13 @@ impl JobService {
     }
 
     pub(crate) async fn start(&self) -> Result<(), JobError> {
+        if *self
+            .closing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        {
+            return Err(JobError::Unavailable(JOB_PRODUCER_SHUTTING_DOWN.into()));
+        }
         let mut worker = self.worker.lock().await;
         if worker.is_some() {
             return Ok(());
@@ -416,9 +430,20 @@ impl JobService {
         Ok(())
     }
 
+    pub(crate) async fn request_shutdown(&self) {
+        *self
+            .closing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+        if let Some((stop, _)) = self.worker.lock().await.as_ref() {
+            let _ = stop.send(true);
+        }
+    }
+
     pub(crate) async fn shutdown(&self) {
-        let mut worker = self.worker.lock().await;
-        if let Some((stop, handle)) = worker.take() {
+        self.request_shutdown().await;
+        let worker = self.worker.lock().await.take();
+        if let Some((stop, handle)) = worker {
             let _ = stop.send(true);
             // Finish admitted runs; interrupting a model call cannot guarantee cancellation.
             let _ = handle.await;
@@ -431,7 +456,12 @@ impl JobService {
         let mut task_agents = HashMap::new();
         let mut tick = tokio::time::interval(Duration::from_millis(250));
         loop {
-            if *stop.borrow() {
+            if *stop.borrow()
+                || *self
+                    .closing
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+            {
                 break;
             }
             tokio::select! {
@@ -469,6 +499,13 @@ impl JobService {
             };
             queued.sort_by_key(|j| (j.created_at_ms, j.id.clone()));
             for candidate in queued {
+                if *self
+                    .closing
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                {
+                    break;
+                }
                 if agents.contains(&candidate.agent_id)
                     || self.runs.is_agent_busy(&candidate.agent_id)
                 {
@@ -487,8 +524,18 @@ impl JobService {
                     continue;
                 };
                 let id = candidate.id.clone();
+                let closing = Arc::clone(&self.closing);
+                #[cfg(test)]
+                self.claim_ready.notify_one();
                 let claimed = self
                     .mutate(move |state| {
+                        // Transaction -> state -> closing leaf; released before save/execute.
+                        let closing = closing
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        if *closing {
+                            return Err(JobError::Unavailable(JOB_PRODUCER_SHUTTING_DOWN.into()));
+                        }
                         let candidate = state.jobs.get(&id).ok_or(JobError::NotFound)?;
                         if !goals::dispatch_allowed(state, candidate) {
                             return Err(JobError::Conflict("Goal is paused or unavailable".into()));

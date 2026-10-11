@@ -289,13 +289,29 @@ impl AppState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ApiErrorKind {
+    General,
+    DaemonShuttingDown,
+}
+
 #[derive(Debug)]
 pub(crate) struct ApiError {
+    kind: ApiErrorKind,
     status: StatusCode,
     message: String,
 }
 
 impl ApiError {
+    pub(crate) fn kind(&self) -> ApiErrorKind {
+        self.kind
+    }
+    pub(crate) fn daemon_shutting_down(message: impl Into<String>) -> Self {
+        let mut error = Self::service_unavailable(message);
+        error.kind = ApiErrorKind::DaemonShuttingDown;
+        error
+    }
+
     pub(crate) fn message(&self) -> &str {
         &self.message
     }
@@ -306,6 +322,7 @@ impl ApiError {
 
     pub(crate) fn bad_request(message: impl Into<String>) -> Self {
         Self {
+            kind: ApiErrorKind::General,
             status: StatusCode::BAD_REQUEST,
             message: message.into(),
         }
@@ -321,6 +338,7 @@ impl ApiError {
 
     pub(crate) fn not_found() -> Self {
         Self {
+            kind: ApiErrorKind::General,
             status: StatusCode::NOT_FOUND,
             message: "not found".to_string(),
         }
@@ -328,6 +346,7 @@ impl ApiError {
 
     pub(crate) fn conflict(message: impl Into<String>) -> Self {
         Self {
+            kind: ApiErrorKind::General,
             status: StatusCode::CONFLICT,
             message: message.into(),
         }
@@ -335,6 +354,7 @@ impl ApiError {
 
     pub(crate) fn service_unavailable(message: impl Into<String>) -> Self {
         Self {
+            kind: ApiErrorKind::General,
             status: StatusCode::SERVICE_UNAVAILABLE,
             message: message.into(),
         }
@@ -342,6 +362,7 @@ impl ApiError {
 
     pub(crate) fn too_many_requests(message: impl Into<String>) -> Self {
         Self {
+            kind: ApiErrorKind::General,
             status: StatusCode::TOO_MANY_REQUESTS,
             message: message.into(),
         }
@@ -981,6 +1002,7 @@ async fn health_entry() -> AxumResponse {
 async fn capabilities_entry(State(state): State<AppState>, request: AxumRequest) -> AxumResponse {
     let mut response = if state.local_owner.authorize_read(request.headers()).is_err() {
         ApiError {
+            kind: crate::routes::ApiErrorKind::General,
             status: StatusCode::FORBIDDEN,
             message: "local owner authorization required".into(),
         }
@@ -1994,6 +2016,7 @@ async fn workspace_files_entry(
 ) -> AxumResponse {
     if state.local_owner.authorize_read(request.headers()).is_err() {
         return ApiError {
+            kind: crate::routes::ApiErrorKind::General,
             status: StatusCode::FORBIDDEN,
             message: "local owner authorization required".into(),
         }
@@ -2024,6 +2047,7 @@ async fn workspace_files_entry(
 async fn workspace_file_entry(State(state): State<AppState>, request: AxumRequest) -> AxumResponse {
     if state.local_owner.authorize_read(request.headers()).is_err() {
         return ApiError {
+            kind: crate::routes::ApiErrorKind::General,
             status: StatusCode::FORBIDDEN,
             message: "local owner authorization required".into(),
         }
@@ -2099,6 +2123,7 @@ mod tests {
     mod attachments;
     mod automations;
     mod capabilities;
+    mod docs_contracts;
     mod events;
     mod goals;
     mod jobs;

@@ -13,12 +13,11 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::http::StatusCode;
 use tokio::sync::watch;
 use tracing::warn;
 
 use super::AgentRunCoordinator;
-use crate::routes::ApiError;
+use crate::routes::{ApiError, ApiErrorKind};
 
 /// How long shutdown waits for the accepted runs already going to commit.
 pub(crate) const ACCEPTED_RUN_SHUTDOWN_WAIT_MS: u64 = 30_000;
@@ -99,10 +98,14 @@ impl AcceptedRuns {
 
     /// Begins shutdown, then waits up to the bound for the going runs to
     /// end. Returns the ones still going.
-    async fn close_and_wait(&self) -> Vec<String> {
-        let mut lifecycle = self.lifecycle.subscribe();
+    fn request_shutdown(&self) {
         self.lifecycle
             .send_modify(|lifecycle| lifecycle.closing = true);
+    }
+
+    async fn close_and_wait(&self) -> Vec<String> {
+        let mut lifecycle = self.lifecycle.subscribe();
+        self.request_shutdown();
         let ended = tokio::time::timeout(self.wait, async {
             let _ = lifecycle
                 .wait_for(|lifecycle| lifecycle.going.is_empty())
@@ -127,16 +130,20 @@ impl AcceptedRuns {
 /// `accept_run`'s refusal once shutdown has begun, and how an accepted run's
 /// admission wait ends then.
 pub(super) fn shutting_down() -> ApiError {
-    ApiError::service_unavailable(DAEMON_SHUTTING_DOWN)
+    ApiError::daemon_shutting_down(DAEMON_SHUTTING_DOWN)
 }
 
 /// Whether a start ended with `shutting_down()`: its run never started, so
 /// its session queue leaves it queued.
 pub(crate) fn is_shutting_down(error: &ApiError) -> bool {
-    error.status() == StatusCode::SERVICE_UNAVAILABLE && error.message() == DAEMON_SHUTTING_DOWN
+    error.kind() == ApiErrorKind::DaemonShuttingDown
 }
 
 impl AgentRunCoordinator {
+    pub(crate) fn request_shutdown(&self) {
+        self.accepted_runs.request_shutdown();
+    }
+
     /// Graceful shutdown's first step (`app::serve_with_state`): see the
     /// module documentation.
     pub(crate) async fn shutdown(&self) {
@@ -160,5 +167,30 @@ impl AgentRunCoordinator {
     pub(crate) fn with_accepted_shutdown_wait(mut self, wait: Duration) -> Self {
         self.accepted_runs.wait = wait;
         self
+    }
+}
+
+#[cfg(test)]
+mod typed_shutdown_tests {
+    use super::*;
+    #[test]
+    fn classification_uses_kind_instead_of_display_text() {
+        assert!(is_shutting_down(&ApiError::daemon_shutting_down(
+            "different display text"
+        )));
+        assert!(!is_shutting_down(&ApiError::service_unavailable(
+            DAEMON_SHUTTING_DOWN
+        )));
+    }
+    #[tokio::test]
+    async fn request_shutdown_closes_admission_before_drain_and_is_idempotent() {
+        let accepted = AcceptedRuns::default();
+        let going = accepted.begin("running").unwrap();
+        accepted.request_shutdown();
+        accepted.request_shutdown();
+        assert!(accepted.begin("new").is_none());
+        assert!(accepted.is_closing());
+        drop(going);
+        assert!(accepted.close_and_wait().await.is_empty());
     }
 }

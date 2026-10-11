@@ -5,7 +5,7 @@
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
@@ -20,9 +20,23 @@ pub const STOPPED_METADATA_KEY: &str = "stopped";
 /// Marks an owner message steered into a running run.
 pub const STEER_METADATA_KEY: &str = "steer";
 
+/// Why cooperative cancellation was requested. The first cause wins.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CancelCause {
+    OwnerStop = 1,
+    HelperDeadline = 2,
+    DaemonShutdown = 3,
+}
+
+pub const HELPER_DEADLINE_TOOL_RESULT: &str = "Cancelled before running (helper deadline reached)";
+pub const DAEMON_SHUTDOWN_TOOL_RESULT: &str = "Cancelled before running (daemon shutting down)";
+pub const HELPER_DEADLINE_ERROR: &str = "Helper task timed out";
+pub const DAEMON_SHUTDOWN_ERROR: &str = "Daemon shutting down";
+
 #[derive(Debug, Default)]
 struct CancelState {
-    cancelled: AtomicBool,
+    cause: AtomicU8,
     waiters: Mutex<Vec<Waker>>,
 }
 
@@ -38,7 +52,16 @@ impl CancelSignal {
     }
 
     pub fn cancel(&self) {
-        if !self.state.cancelled.swap(true, Ordering::SeqCst) {
+        self.cancel_with(CancelCause::OwnerStop);
+    }
+
+    pub fn cancel_with(&self, cause: CancelCause) {
+        if self
+            .state
+            .cause
+            .compare_exchange(0, cause as u8, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
             let waiters = std::mem::take(&mut *self.state.waiters.lock_recover());
             for waiter in waiters {
                 waiter.wake();
@@ -47,7 +70,32 @@ impl CancelSignal {
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.state.cancelled.load(Ordering::SeqCst)
+        self.cause().is_some()
+    }
+
+    pub fn cause(&self) -> Option<CancelCause> {
+        match self.state.cause.load(Ordering::SeqCst) {
+            1 => Some(CancelCause::OwnerStop),
+            2 => Some(CancelCause::HelperDeadline),
+            3 => Some(CancelCause::DaemonShutdown),
+            _ => None,
+        }
+    }
+
+    pub fn tool_result(&self) -> &'static str {
+        match self.cause() {
+            Some(CancelCause::HelperDeadline) => HELPER_DEADLINE_TOOL_RESULT,
+            Some(CancelCause::DaemonShutdown) => DAEMON_SHUTDOWN_TOOL_RESULT,
+            _ => CANCELLED_TOOL_RESULT,
+        }
+    }
+
+    pub fn run_error(&self) -> &'static str {
+        match self.cause() {
+            Some(CancelCause::HelperDeadline) => HELPER_DEADLINE_ERROR,
+            Some(CancelCause::DaemonShutdown) => DAEMON_SHUTDOWN_ERROR,
+            _ => RUN_STOPPED_ERROR,
+        }
     }
 
     /// Resolves once the signal is cancelled (at once if it already is).
@@ -150,5 +198,52 @@ pub struct RunControl {
 impl RunControl {
     pub fn new() -> Self {
         Self::default()
+    }
+}
+
+#[cfg(test)]
+mod cancellation_cause_tests {
+    use super::*;
+    #[test]
+    fn first_cause_wins_and_owner_wrapper_keeps_its_text() {
+        for cause in [
+            CancelCause::OwnerStop,
+            CancelCause::HelperDeadline,
+            CancelCause::DaemonShutdown,
+        ] {
+            let signal = CancelSignal::new();
+            signal.cancel_with(cause);
+            signal.cancel();
+            signal.cancel_with(CancelCause::DaemonShutdown);
+            assert!(signal.is_cancelled());
+            assert_eq!(signal.cause(), Some(cause));
+        }
+        let owner = CancelSignal::new();
+        owner.cancel();
+        assert_eq!(owner.tool_result(), CANCELLED_TOOL_RESULT);
+        assert_eq!(owner.run_error(), RUN_STOPPED_ERROR);
+        let helper = CancelSignal::new();
+        helper.cancel_with(CancelCause::HelperDeadline);
+        assert_eq!(helper.tool_result(), HELPER_DEADLINE_TOOL_RESULT);
+        assert_eq!(helper.run_error(), HELPER_DEADLINE_ERROR);
+    }
+    #[test]
+    fn competing_causes_publish_one_complete_value() {
+        let signal = CancelSignal::new();
+        std::thread::scope(|scope| {
+            for cause in [
+                CancelCause::OwnerStop,
+                CancelCause::HelperDeadline,
+                CancelCause::DaemonShutdown,
+            ] {
+                let signal = signal.clone();
+                scope.spawn(move || signal.cancel_with(cause));
+            }
+        });
+        assert!(signal.is_cancelled());
+        assert!(signal.cause().is_some());
+        let winner = signal.cause();
+        signal.cancel();
+        assert_eq!(signal.cause(), winner);
     }
 }

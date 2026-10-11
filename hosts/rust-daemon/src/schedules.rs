@@ -40,6 +40,7 @@ const CHECKIN_SENTINEL: &str = "CHECKIN_OK";
 const CHECKIN_SUFFIX: &str = "(This is a scheduled check-in. If you have nothing worth saying right now, reply with exactly CHECKIN_OK and nothing else.)";
 const MAX_PROMPT_BYTES: usize = 32 * 1024;
 const WORKER_TICK: Duration = Duration::from_millis(250);
+const SCHEDULE_PRODUCER_SHUTTING_DOWN: &str = "Schedule producer is shutting down";
 const MAX_ACTIVE_SCHEDULES: usize = 8;
 static NEXT_SCHEDULE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -215,6 +216,9 @@ struct SchedulerInner {
     // transaction; nothing may take `jobs` while holding the transaction, or
     // the two would deadlock.
     jobs: Mutex<BTreeMap<String, JoinHandle<()>>>,
+    closing: std::sync::Mutex<bool>,
+    #[cfg(test)]
+    claim_gate: std::sync::Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
 }
 
 struct SchedulerWorker {
@@ -234,12 +238,23 @@ impl SchedulerService {
                 runs,
                 connectors,
                 jobs: Mutex::new(BTreeMap::new()),
+                closing: std::sync::Mutex::new(false),
+                #[cfg(test)]
+                claim_gate: std::sync::Mutex::new(None),
             }),
             worker: Arc::new(Mutex::new(None)),
         }
     }
 
     pub(crate) async fn start(&self) {
+        if *self
+            .inner
+            .closing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        {
+            return;
+        }
         let mut worker = self.worker.lock().await;
         if worker.is_some() {
             return;
@@ -264,9 +279,21 @@ impl SchedulerService {
         *worker = Some(SchedulerWorker { cancel, join });
     }
 
+    pub(crate) async fn request_shutdown(&self) {
+        *self
+            .inner
+            .closing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+        if let Some(worker) = self.worker.lock().await.as_ref() {
+            let _ = worker.cancel.send(true);
+        }
+    }
+
     pub(crate) async fn shutdown(&self) {
-        let mut slot = self.worker.lock().await;
-        if let Some(worker) = slot.take() {
+        self.request_shutdown().await;
+        let worker = self.worker.lock().await.take();
+        if let Some(worker) = worker {
             let _ = worker.cancel.send(true);
             let _ = worker.join.await;
         }
@@ -366,6 +393,13 @@ impl SchedulerService {
     }
 
     async fn tick_inner(inner: &Arc<SchedulerInner>, now: u64) -> Result<usize, ScheduleError> {
+        if *inner
+            .closing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        {
+            return Ok(0);
+        }
         let mut jobs = inner.jobs.lock().await;
         reap_finished(&mut jobs).await;
         // Reconcile only jobs with no live owner, including failures after startup.
@@ -398,6 +432,18 @@ impl SchedulerService {
             // are both claimed and one may wait on the room lock; a restart in
             // that window auto-disables the waiting occurrence under the
             // interrupted-schedule rule. Accepted for M1.
+            #[cfg(test)]
+            {
+                let gate = inner
+                    .claim_gate
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone();
+                if let Some((entered, release)) = gate {
+                    entered.notify_one();
+                    release.notified().await;
+                }
+            }
             if let Some(record) = claim_due(inner, &id, now).await? {
                 claimed += 1;
                 let inner = inner.clone();
@@ -485,6 +531,14 @@ async fn claim_manual(
     let _transaction = inner.runs.control_plane_transaction().await;
     let (claimed, previous, persist) = {
         let mut state = inner.state.write().await;
+        // Hold the leaf only through this synchronous claim, never across save/execute.
+        let closing = inner
+            .closing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if *closing {
+            return Err(ScheduleError::Conflict(SCHEDULE_PRODUCER_SHUTTING_DOWN));
+        }
         let previous = state
             .schedules
             .get(schedule_id)
@@ -635,6 +689,14 @@ async fn claim_due(
     let _transaction = inner.runs.control_plane_transaction().await;
     let (claim, claimed, previous, persist) = {
         let mut state = inner.state.write().await;
+        // Hold the leaf only through this synchronous claim, never across save/execute.
+        let closing = inner
+            .closing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if *closing {
+            return Ok(None);
+        }
         let Some(previous) = state
             .schedules
             .get(id)
@@ -2025,3 +2087,7 @@ mod tests {
 
 #[cfg(test)]
 mod run_now_tests;
+
+#[cfg(test)]
+#[path = "schedules/shutdown_tests.rs"]
+mod shutdown_tests;
