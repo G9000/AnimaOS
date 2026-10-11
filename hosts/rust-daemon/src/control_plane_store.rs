@@ -24,8 +24,10 @@ use crate::schedules::ScheduledPromptRecord;
 /// overrides (M8); version 11 adds attachment inputs on steers (M9). Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 11;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 12;
 /// Version 10 pricing snapshots are backed up as `.pre-attachments.bak`.
+pub(crate) const ATTACHMENTS_STORE_VERSION: u32 = 11;
+pub(crate) const PRE_DISCORD_BACKUP_SUFFIX: &str = ".pre-discord.bak";
 pub(crate) const USAGE_STORE_VERSION: u32 = 10;
 /// Version 9 automation snapshots are backed up as `.pre-usage.bak`.
 pub(crate) const AUTOMATIONS_STORE_VERSION: u32 = 9;
@@ -115,6 +117,14 @@ pub(crate) struct ControlPlaneSnapshot {
     pub(crate) inbound: Vec<TelegramInboundRecord>,
     #[serde(default)]
     pub(crate) outbound: Vec<TelegramOutboundRecord>,
+    #[serde(default)]
+    pub(crate) discord_connectors: Vec<crate::connectors::discord::DiscordConnectorRecord>,
+    #[serde(default)]
+    pub(crate) discord_credential_intents: Vec<crate::connectors::discord::DiscordCredentialIntent>,
+    #[serde(default)]
+    pub(crate) discord_inbound: Vec<crate::connectors::discord::DiscordInboundRecord>,
+    #[serde(default)]
+    pub(crate) discord_outbound: Vec<crate::connectors::discord::DiscordOutboundRecord>,
     #[serde(default)]
     pub(crate) schedules: Vec<ScheduledPromptRecord>,
     #[serde(default)]
@@ -332,9 +342,20 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
         pre_automations_backup_path(path)
     } else if loaded_version < USAGE_STORE_VERSION {
         pre_usage_backup_path(path)
-    } else {
+    } else if loaded_version < ATTACHMENTS_STORE_VERSION {
         pre_attachments_backup_path(path)
+    } else {
+        pre_discord_backup_path(path)
     }
+}
+
+pub(crate) fn pre_discord_backup_path(path: &Path) -> PathBuf {
+    let mut name = path
+        .file_name()
+        .map(|name| name.to_os_string())
+        .unwrap_or_default();
+    name.push(PRE_DISCORD_BACKUP_SUFFIX);
+    path.with_file_name(name)
 }
 
 /// The `host_snapshots` key of the Postgres backup of a `version` snapshot.
@@ -531,6 +552,10 @@ impl ControlPlaneSnapshot {
             credential_cleanup,
             inbound,
             outbound,
+            discord_connectors: vec![],
+            discord_credential_intents: vec![],
+            discord_inbound: vec![],
+            discord_outbound: vec![],
             schedules,
             mail_records: vec![],
             jobs: vec![],
@@ -677,7 +702,10 @@ mod tests {
         let snapshot = ControlPlaneSnapshot::new(vec![], vec![]);
         let payload = serde_json::to_value(snapshot).expect("snapshot should serialize");
 
-        assert_eq!(payload["version"], 11);
+        assert_eq!(
+            payload["version"],
+            crate::control_plane_store::CONTROL_PLANE_STORE_VERSION
+        );
         assert_eq!(payload["scheduleFires"], serde_json::json!([]));
         assert_eq!(payload["connectors"], serde_json::json!([]));
         assert_eq!(payload["credentialCleanup"], serde_json::json!([]));
@@ -814,7 +842,7 @@ mod tests {
 
     #[test]
     fn the_version_constants() {
-        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 11);
+        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 12);
         assert_eq!(super::USAGE_STORE_VERSION, 10);
         assert_eq!(super::PRE_ATTACHMENTS_BACKUP_SUFFIX, ".pre-attachments.bak");
         assert_eq!(super::postgres_backup_key(10), "control_plane.backup.10");
@@ -1104,5 +1132,36 @@ mod tests {
             .to_string()
             .contains("unsupported control plane store version"));
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+}
+
+#[cfg(test)]
+mod discord_upgrade_tests {
+    use super::*;
+    #[tokio::test]
+    async fn version_eleven_gets_independent_discord_backup_and_empty_native_journals() {
+        let path = std::env::temp_dir().join(format!(
+            "anima-discord-upgrade-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let original = "{\"version\":11,\"agents\":[],\"swarms\":[]}";
+        std::fs::write(&path, original).unwrap();
+        let config = ControlPlaneStoreConfig::Json(path.clone());
+        let loaded = load_control_plane_snapshot(&config).await.unwrap().unwrap();
+        assert!(loaded.discord_connectors.is_empty());
+        assert!(loaded.discord_inbound.is_empty());
+        assert!(loaded.discord_outbound.is_empty());
+        assert_eq!(CONTROL_PLANE_STORE_VERSION, 12);
+        write_pre_upgrade_backup(&config, 11).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(pre_discord_backup_path(&path)).unwrap(),
+            original
+        );
+        assert_ne!(
+            pre_discord_backup_path(&path),
+            pre_attachments_backup_path(&path)
+        );
+        std::fs::remove_file(pre_discord_backup_path(&path)).unwrap();
+        std::fs::remove_file(path).unwrap();
     }
 }

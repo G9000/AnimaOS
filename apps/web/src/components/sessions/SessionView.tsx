@@ -84,6 +84,7 @@ export interface SessionViewProps {
   /** The session was deleted elsewhere. */
   missing: boolean;
   telegramAvailable: boolean;
+  discordAvailable?: boolean;
   scrollerRef: RefObject<HTMLDivElement | null>;
   onSuggestion: (text: string) => void;
   composer: SessionComposerState;
@@ -107,6 +108,7 @@ export type SessionFooter =
 export function sessionFooter(
   session: Session | null,
   telegramAvailable: boolean,
+  discordAvailable = false,
 ): SessionFooter {
   if (!session) return { kind: 'composer' };
   switch (session.kind) {
@@ -121,6 +123,13 @@ export function sessionFooter(
           };
     case 'checkin':
       return { kind: 'composer', label: 'Reply to this check-in' };
+    case 'discord':
+      return discordAvailable
+        ? { kind: 'composer', label: 'Reply on Discord' }
+        : {
+            kind: 'note',
+            text: 'This Discord connection cannot deliver right now. Check its status in Connectors before replying.',
+          };
     case 'job':
       return {
         kind: 'note',
@@ -262,6 +271,7 @@ export function SessionView({
   onLoadOlder,
   missing,
   telegramAvailable,
+  discordAvailable = false,
   scrollerRef,
   onSuggestion,
   composer,
@@ -343,7 +353,7 @@ export function SessionView({
     composer.sending ||
     ((session?.activeRuns ?? 0) > 0 &&
       !runs.some((item) => !isTerminalRunStatus(item.run.status)));
-  const footer = sessionFooter(session, telegramAvailable);
+  const footer = sessionFooter(session, telegramAvailable, discordAvailable);
   return (
     <section
       className="flex h-full min-h-0 flex-col"
@@ -405,18 +415,35 @@ export function SessionView({
           error={composer.error}
           onDismissError={composer.onDismissError}
           recovery={composer.recovery}
-          commands={composer.commands}
+          commands={
+            session?.kind === 'discord'
+              ? composer.commands?.filter((command) => !command.skill)
+              : composer.commands
+          }
           runActive={composer.runActive}
           onStop={composer.onStop}
           onSteer={composer.onSteer}
           conversationKey={voiceKey}
           voiceDisabled={composer.voiceDisabled}
-          attachments={composer.attachments}
+          attachments={
+            session?.kind === 'discord' ? undefined : composer.attachments
+          }
           savedAttachmentCount={composer.savedAttachmentCount}
         />
       ) : (
         <div className="session-footer-note" role="note">
           <p>{footer.text}</p>
+          {session?.kind === 'discord' &&
+            session.capabilities.stop &&
+            composer.onStop && (
+              <button
+                type="button"
+                className={ghostBtnCls}
+                onClick={composer.onStop}
+              >
+                Stop
+              </button>
+            )}
           {footer.action === 'work' && (
             <button type="button" className={ghostBtnCls} onClick={onOpenWork}>
               Open Work

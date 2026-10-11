@@ -1,3 +1,4 @@
+pub(crate) mod discord;
 use serde::{Deserialize, Serialize};
 
 pub(crate) mod adapters;

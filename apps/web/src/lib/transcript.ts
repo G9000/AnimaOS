@@ -325,6 +325,7 @@ const WRITTEN_INPUT: ReadonlySet<Run['source']> = new Set([
   'web',
   'api',
   'telegram',
+  'discord',
 ]);
 
 export function hasWrittenInput(run: Pick<Run, 'source'>): boolean {
@@ -362,6 +363,10 @@ export function isOwnerWritten(
       return (
         run.sourceRef !== null && !TELEGRAM_INBOUND_REF.test(run.sourceRef)
       );
+    case 'discord':
+      // Native inbound refs append the provider message snowflake; owner
+      // turns from the web carry the bare connector id.
+      return run.sourceRef !== null && !/:[1-9]\d*$/.test(run.sourceRef);
     default:
       return false;
   }

@@ -1277,7 +1277,10 @@ mod tests {
         }
 
         let snapshot = source.control_plane_snapshot();
-        assert_eq!(snapshot.version, 11);
+        assert_eq!(
+            snapshot.version,
+            crate::control_plane_store::CONTROL_PLANE_STORE_VERSION
+        );
         assert_eq!(
             snapshot.runs.len(),
             3,
@@ -1459,7 +1462,6 @@ mod tests {
             snapshot.version,
             crate::control_plane_store::CONTROL_PLANE_STORE_VERSION
         );
-        assert_eq!(snapshot.version, 11);
 
         let payload = serde_json::to_value(&snapshot).unwrap();
         assert_eq!(payload["inbound"][0]["processingState"], "stopped");
@@ -1481,7 +1483,10 @@ mod tests {
             .await
             .unwrap()
             .expect("the saved snapshot should load");
-        assert_eq!(loaded.version, 11);
+        assert_eq!(
+            loaded.version,
+            crate::control_plane_store::CONTROL_PLANE_STORE_VERSION
+        );
         assert_eq!(
             loaded.inbound[0].processing_state,
             InboundProcessingState::Stopped
@@ -1600,6 +1605,13 @@ pub(crate) struct DaemonState {
     pub(crate) credential_cleanup: HashMap<String, TelegramCredentialCleanupIntent>,
     pub(crate) inbound: HashMap<(String, i64), TelegramInboundRecord>,
     pub(crate) outbound: HashMap<String, TelegramOutboundRecord>,
+    pub(crate) discord_connectors:
+        HashMap<String, crate::connectors::discord::DiscordConnectorRecord>,
+    pub(crate) discord_credential_intents:
+        HashMap<(String, u64), crate::connectors::discord::DiscordCredentialIntent>,
+    pub(crate) discord_inbound:
+        HashMap<(String, String), crate::connectors::discord::DiscordInboundRecord>,
+    pub(crate) discord_outbound: HashMap<String, crate::connectors::discord::DiscordOutboundRecord>,
     pub(crate) schedules: HashMap<String, ScheduledPromptRecord>,
     pub(crate) jobs: HashMap<String, crate::jobs::AgentJobRecord>,
     pub(crate) goals: HashMap<String, crate::jobs::GoalRecord>,
@@ -1769,6 +1781,10 @@ impl DaemonState {
             credential_cleanup: HashMap::new(),
             inbound: HashMap::new(),
             outbound: HashMap::new(),
+            discord_connectors: HashMap::new(),
+            discord_credential_intents: HashMap::new(),
+            discord_inbound: HashMap::new(),
+            discord_outbound: HashMap::new(),
             schedules: HashMap::new(),
             jobs: HashMap::new(),
             goals: HashMap::new(),
@@ -1963,6 +1979,19 @@ impl DaemonState {
         snapshot.mail_records = self.mail_records.values().cloned().collect();
         snapshot.mail_drafts = self.mail_drafts.values().cloned().collect();
         snapshot.workspace = self.workspace.clone();
+        snapshot.discord_connectors = self.discord_connectors.values().cloned().collect();
+        snapshot.discord_connectors.sort_by(|a, b| a.id.cmp(&b.id));
+        snapshot.discord_credential_intents =
+            self.discord_credential_intents.values().cloned().collect();
+        snapshot
+            .discord_credential_intents
+            .sort_by(|a, b| (&a.connector_id, a.generation).cmp(&(&b.connector_id, b.generation)));
+        snapshot.discord_inbound = self.discord_inbound.values().cloned().collect();
+        snapshot.discord_inbound.sort_by(|a, b| {
+            (&a.connector_id, &a.message_id).cmp(&(&b.connector_id, &b.message_id))
+        });
+        snapshot.discord_outbound = self.discord_outbound.values().cloned().collect();
+        snapshot.discord_outbound.sort_by(|a, b| a.id.cmp(&b.id));
         snapshot.jobs = self.jobs.values().cloned().collect();
         snapshot.jobs.sort_by(|left, right| left.id.cmp(&right.id));
         snapshot.goals = self.goals.values().cloned().collect();
@@ -2007,6 +2036,7 @@ impl DaemonState {
         mut snapshot: ControlPlaneSnapshot,
     ) -> Result<(usize, usize), String> {
         self.validate_control_plane_snapshot(&snapshot)?;
+        crate::connectors::discord::validate_snapshot(&snapshot)?;
         // Spec §13.3 step 2: legacy per-tick check-in rooms become their
         // automation's session. Only a snapshot older than the sessions
         // version can still hold a pre-M2 room-* check-in; relabeling a room a
@@ -2058,6 +2088,38 @@ impl DaemonState {
             .outbound
             .into_iter()
             .map(|record| (record.id.clone(), record))
+            .collect();
+        self.discord_connectors = snapshot
+            .discord_connectors
+            .into_iter()
+            .map(|r| (r.id.clone(), r))
+            .collect();
+        self.discord_credential_intents = snapshot
+            .discord_credential_intents
+            .into_iter()
+            .map(|r| ((r.connector_id.clone(), r.generation), r))
+            .collect();
+        self.discord_inbound = snapshot
+            .discord_inbound
+            .into_iter()
+            .map(|mut r| {
+                // An interrupted tool-bearing turn requires review; never execute it again.
+                if r.processing_state
+                    == crate::connectors::discord::DiscordProcessingState::Processing
+                {
+                    r.processing_state =
+                        crate::connectors::discord::DiscordProcessingState::Stopped;
+                }
+                ((r.connector_id.clone(), r.message_id.clone()), r)
+            })
+            .collect();
+        self.discord_outbound = snapshot
+            .discord_outbound
+            .into_iter()
+            .map(|mut r| {
+                crate::connectors::discord::recover_outbound(&mut r);
+                (r.id.clone(), r)
+            })
             .collect();
         self.schedules = snapshot
             .schedules

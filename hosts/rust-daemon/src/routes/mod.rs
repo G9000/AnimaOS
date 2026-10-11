@@ -8,6 +8,7 @@ mod capabilities;
 mod chatgpt;
 mod connectors;
 mod contracts;
+mod discord;
 mod events;
 mod folder_picker;
 mod gcalendar;
@@ -146,6 +147,7 @@ use crate::runtime_model::provider_summaries;
         workspace_file_entry,
         folder_picker::pick_folder,
         resume_workspace_entry,
+        discord::list, discord::create, discord::activate, discord::replace, discord::set_enabled, discord::restart, discord::retry, discord::suppress, discord::delete,
         connectors::list_connectors,
         connectors::create_telegram_connector,
         connectors::replace_telegram_credential,
@@ -239,6 +241,7 @@ struct AppState {
     run_limiter: Arc<Semaphore>,
     agent_runs: AgentRunCoordinator,
     connector_manager: ConnectorManager,
+    discord: crate::connectors::discord::DiscordManager,
     calendar: crate::connectors::gcalendar::CalendarManager,
     scheduler: SchedulerService,
     jobs: crate::jobs::JobService,
@@ -470,7 +473,45 @@ pub(crate) fn router_with_all_services(
     logs: Arc<crate::logs::LogBuffer>,
     bind_is_loopback: bool,
 ) -> Router {
-    router_with_services_with_policies(
+    let discord = crate::connectors::discord::DiscordManager::unconfigured(
+        Arc::clone(&state),
+        agent_runs.clone(),
+    );
+    router_with_all_services_and_discord(
+        state,
+        config,
+        run_limiter,
+        agent_runs,
+        connector_manager,
+        calendar,
+        mail,
+        oauth_apps,
+        scheduler,
+        jobs,
+        history_owner,
+        logs,
+        bind_is_loopback,
+        discord,
+    )
+}
+
+pub(crate) fn router_with_all_services_and_discord(
+    state: SharedDaemonState,
+    config: DaemonConfig,
+    run_limiter: Arc<Semaphore>,
+    agent_runs: AgentRunCoordinator,
+    connector_manager: ConnectorManager,
+    calendar: crate::connectors::gcalendar::CalendarManager,
+    mail: crate::connectors::mail::MailManager,
+    oauth_apps: crate::connectors::oauth_apps::OAuthAppService,
+    scheduler: SchedulerService,
+    jobs: crate::jobs::JobService,
+    history_owner: crate::history::HistoryWorkerOwner,
+    logs: Arc<crate::logs::LogBuffer>,
+    bind_is_loopback: bool,
+    discord: crate::connectors::discord::DiscordManager,
+) -> Router {
+    router_with_services_with_policies_and_discord(
         state,
         config,
         run_limiter,
@@ -485,6 +526,7 @@ pub(crate) fn router_with_all_services(
         logs,
         self::http::LocalOwnerPolicy::from_env(bind_is_loopback),
         self::http::ApiKeyPolicy::from_env(),
+        discord,
     )
 }
 
@@ -504,6 +546,46 @@ fn router_with_services_with_policies(
     local_owner: self::http::LocalOwnerPolicy,
     api_key: self::http::ApiKeyPolicy,
 ) -> Router {
+    let discord = crate::connectors::discord::DiscordManager::unconfigured(
+        Arc::clone(&state),
+        agent_runs.clone(),
+    );
+    router_with_services_with_policies_and_discord(
+        state,
+        config,
+        run_limiter,
+        agent_runs,
+        connector_manager,
+        calendar,
+        mail,
+        oauth_apps,
+        scheduler,
+        jobs,
+        history_owner,
+        logs,
+        local_owner,
+        api_key,
+        discord,
+    )
+}
+
+fn router_with_services_with_policies_and_discord(
+    state: SharedDaemonState,
+    config: DaemonConfig,
+    run_limiter: Arc<Semaphore>,
+    agent_runs: AgentRunCoordinator,
+    connector_manager: ConnectorManager,
+    calendar: crate::connectors::gcalendar::CalendarManager,
+    mail: crate::connectors::mail::MailManager,
+    oauth_apps: crate::connectors::oauth_apps::OAuthAppService,
+    scheduler: SchedulerService,
+    jobs: crate::jobs::JobService,
+    history_owner: crate::history::HistoryWorkerOwner,
+    logs: Arc<crate::logs::LogBuffer>,
+    local_owner: self::http::LocalOwnerPolicy,
+    api_key: self::http::ApiKeyPolicy,
+    discord: crate::connectors::discord::DiscordManager,
+) -> Router {
     if let Ok(mut guard) = state.try_write() {
         guard.mail_manager = Some(mail.clone());
     }
@@ -516,6 +598,7 @@ fn router_with_services_with_policies(
         run_limiter: Arc::clone(&run_limiter),
         agent_runs,
         connector_manager,
+        discord,
         calendar,
         scheduler,
         jobs,
@@ -537,6 +620,34 @@ fn router_with_services_with_policies(
                 ),
         );
     let timed_routes = Router::new()
+        .route(
+            "/api/agents/{agent_id}/connectors/discord",
+            get(discord::list).post(discord::create),
+        )
+        .route(
+            "/api/agents/{agent_id}/connectors/discord/{connector_id}",
+            axum::routing::patch(discord::set_enabled).delete(discord::delete),
+        )
+        .route(
+            "/api/agents/{agent_id}/connectors/discord/{connector_id}/activate",
+            axum::routing::post(discord::activate),
+        )
+        .route(
+            "/api/agents/{agent_id}/connectors/discord/{connector_id}/credential",
+            axum::routing::put(discord::replace),
+        )
+        .route(
+            "/api/agents/{agent_id}/connectors/discord/{connector_id}/restart",
+            axum::routing::post(discord::restart),
+        )
+        .route(
+            "/api/agents/{agent_id}/connectors/discord/{connector_id}/retry",
+            axum::routing::post(discord::retry),
+        )
+        .route(
+            "/api/agents/{agent_id}/connectors/discord/{connector_id}/outbound/suppress",
+            axum::routing::post(discord::suppress),
+        )
         .route("/openapi.json", get(openapi_entry))
         .route("/docs", get(docs_entry))
         .route("/docs/", get(docs_entry))
@@ -935,6 +1046,7 @@ fn router_with_services_with_policies(
             self::http::enforce_api_key,
         ))
         .fallback(not_found_entry)
+        .layer(axum::middleware::from_fn(discord::protect_cache))
         .layer(request_middleware)
         .with_state(app_state)
 }
@@ -1553,6 +1665,24 @@ async fn delete_agent_entry(
                 error: message.to_string(),
             },
         );
+    }
+    let _deleting = state.agent_runs.begin_agent_deletion(&agent_id);
+    if state.daemon.read().await.in_flight_runs(&agent_id) > 0 {
+        return delete_agent_error(ConnectorManagerError::AgentBusy);
+    }
+    let native = state
+        .daemon
+        .read()
+        .await
+        .discord_connectors
+        .values()
+        .filter(|c| c.agent_id == agent_id && c.deleted_at_ms.is_none())
+        .map(|c| c.id.clone())
+        .collect::<Vec<_>>();
+    for id in native {
+        if let Err(e) = state.discord.delete(agent_id.clone(), id).await {
+            return discord::manager_error(e);
+        }
     }
     match state.connector_manager.delete_agent(agent_id).await {
         Ok(()) => json_response(StatusCode::OK, &DeleteResponse { deleted: true }),

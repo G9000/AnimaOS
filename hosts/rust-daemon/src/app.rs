@@ -39,6 +39,7 @@ struct DaemonRuntime {
     run_limiter: Arc<Semaphore>,
     agent_runs: AgentRunCoordinator,
     connectors: ConnectorManager,
+    discord: crate::connectors::discord::DiscordManager,
     calendar: crate::connectors::gcalendar::CalendarManager,
     mail: crate::connectors::mail::MailManager,
     oauth_apps: crate::connectors::oauth_apps::OAuthAppService,
@@ -197,6 +198,7 @@ pub async fn app_with_configured_persistence(config: DaemonConfig) -> io::Result
         )
     })?;
     runtime.connectors.start_restored().await;
+    runtime.discord.start_restored().await;
     runtime.scheduler.start().await;
     Ok(router_with_runtime(state, config, runtime, false))
 }
@@ -244,11 +246,13 @@ pub(crate) async fn serve_with_state(
         )
     })?;
     runtime.connectors.start_restored().await;
+    runtime.discord.start_restored().await;
     runtime.scheduler.start().await;
     // Spec §8.1: the startup rescan, then one every 60 seconds.
     let skills = crate::skills::SkillScanner::new(runtime.agent_runs.skills());
     skills.start();
     let connectors = runtime.connectors.clone();
+    let discord = runtime.discord.clone();
     let scheduler = runtime.scheduler.clone();
     let agent_runs = runtime.agent_runs.clone();
     let jobs = runtime.jobs.clone();
@@ -273,6 +277,7 @@ pub(crate) async fn serve_with_state(
                     scheduler.request_shutdown().await;
                     skills.request_shutdown();
                     connectors.request_shutdown().await;
+                    discord.request_shutdown().await;
                 },
                 async {
                     agent_runs.shutdown().await;
@@ -280,6 +285,7 @@ pub(crate) async fn serve_with_state(
                     scheduler.shutdown().await;
                     skills.shutdown().await;
                     connectors.shutdown().await;
+                    discord.shutdown().await;
                     history.shutdown().await;
                 },
             ),
@@ -321,11 +327,30 @@ fn daemon_runtime(state: SharedDaemonState, config: &DaemonConfig) -> io::Result
         .with_max_runs_per_agent(config.max_runs_per_agent);
     let transport = TelegramClient::new()
         .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string()))?;
+    let transport: Arc<dyn TelegramTransport> = Arc::new(transport);
     let connectors = ConnectorManager::new(
         Arc::clone(&state),
         agent_runs.clone(),
         Arc::new(OsKeyringCredentialStore::new()),
-        Arc::new(transport),
+        Arc::clone(&transport),
+    );
+    let discord_transport =
+        crate::connectors::discord::client::DiscordClient::new().map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                "Discord transport configuration failed",
+            )
+        })?;
+    let discord = crate::connectors::discord::DiscordManager::new(
+        Arc::clone(&state),
+        agent_runs.clone(),
+        Arc::new(crate::connectors::discord::credentials::OsKeyringDiscordCredentialStore::new()),
+        Arc::new(
+            crate::connectors::registry::ConnectorRegistry::with_discord(
+                transport,
+                Arc::new(discord_transport),
+            ),
+        ),
     );
     let google_transport = crate::connectors::gcalendar::client::GoogleCalendarClient::new()
         .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string()))?;
@@ -353,6 +378,7 @@ fn daemon_runtime(state: SharedDaemonState, config: &DaemonConfig) -> io::Result
         run_limiter,
         agent_runs,
         connectors,
+        discord,
         calendar,
         mail,
         oauth_apps,
@@ -384,6 +410,10 @@ fn deterministic_daemon_runtime_with_mail_transport(
         Arc::new(InMemoryCredentialStore::default()),
         Arc::new(DeterministicTelegramTransport),
     );
+    let discord = crate::connectors::discord::DiscordManager::unconfigured(
+        Arc::clone(&state),
+        agent_runs.clone(),
+    );
     let oauth_apps = crate::connectors::oauth_apps::OAuthAppService::in_memory();
     let calendar = crate::connectors::gcalendar::CalendarManager::new(
         &state,
@@ -409,6 +439,7 @@ fn deterministic_daemon_runtime_with_mail_transport(
         run_limiter,
         agent_runs,
         connectors,
+        discord,
         calendar,
         mail,
         oauth_apps,
@@ -430,7 +461,7 @@ fn router_with_runtime(
 ) -> Router {
     let history = runtime.history;
     let history_owner = crate::history::HistoryWorkerOwner::new();
-    let router = routes::router_with_all_services(
+    let router = routes::router_with_all_services_and_discord(
         state,
         config,
         runtime.run_limiter,
@@ -444,6 +475,7 @@ fn router_with_runtime(
         history_owner.clone(),
         crate::logs::global(),
         bind_is_loopback,
+        runtime.discord,
     );
     if tokio::runtime::Handle::try_current().is_ok() {
         history.start(&history_owner);
@@ -454,7 +486,7 @@ fn router_with_runtime(
 /// Deterministic Telegram boundary paired with the deterministic model in the
 /// public test/embedding router helpers. Production `serve` always uses the
 /// fixed-origin `TelegramClient` and OS credential vault.
-struct DeterministicTelegramTransport;
+pub(crate) struct DeterministicTelegramTransport;
 
 pub(crate) struct DeterministicMailTransport;
 

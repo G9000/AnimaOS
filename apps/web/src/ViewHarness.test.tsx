@@ -42,6 +42,7 @@ import {
 import { automationFixture } from './test/automations';
 import { memoryFixture } from './test/memory';
 import { sessionFixture } from './test/sessions';
+import { discordFixture } from './test/discord';
 import { skillFixture } from './test/skills';
 import { logLineFixture, statusFixture } from './test/system';
 import { groupFixture, summaryFixture, totalsFixture } from './test/usage';
@@ -460,6 +461,7 @@ beforeEach(() => {
     revision: '1',
   });
   vi.spyOn(daemon, 'listConnectors').mockResolvedValue({ connectors: [] });
+  vi.spyOn(daemon, 'discordConnectors').mockResolvedValue([]);
   vi.spyOn(daemon, 'listSchedules').mockResolvedValue({ schedules: [] });
   vi.spyOn(daemon, 'importLegacySchedules').mockResolvedValue({
     schedules: [],
@@ -2677,6 +2679,41 @@ it('replies to a Telegram session through the runs route', async () => {
     'agent-main',
     'telegram:tg-1',
     { text: 'On my way', mode: 'queue' },
+    expect.any(String),
+  );
+});
+
+it('opens a selected Discord conversation from Connectors and sends a native text run', async () => {
+  const user = userEvent.setup();
+  vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+  vi.spyOn(daemon, 'listAgents').mockResolvedValue({
+    agents: [snapshot('agent-main', 'Nova', 1)],
+  });
+  mockProviders();
+  vi.mocked(daemon.discordConnectors).mockResolvedValue([
+    discordFixture({ agentId: 'agent-main', enabled: true, status: 'ready' }),
+  ]);
+  routes.sessions.push(
+    sessionFixture('discord:dc-1', {
+      kind: 'discord',
+      origin: 'discord',
+      title: 'Discord · private-chat',
+      lastActivityAtMs: Date.now(),
+    }),
+  );
+  window.history.replaceState(null, '', '/#/connectors');
+  render(<ViewHarness />);
+  await user.click(
+    await screen.findByRole('button', { name: 'Open conversation' }),
+  );
+  const input = await screen.findByPlaceholderText('Reply on Discord…');
+  await waitFor(() => expect(input).toBeEnabled());
+  await user.type(input, 'Hello Discord');
+  await user.click(screen.getByRole('button', { name: 'Send' }));
+  expect(daemon.startRun).toHaveBeenCalledWith(
+    'agent-main',
+    'discord:dc-1',
+    { text: 'Hello Discord', mode: 'queue' },
     expect.any(String),
   );
 });

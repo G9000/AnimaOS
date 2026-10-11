@@ -31,6 +31,7 @@ import {
   type AgentJobRetryInput,
   type AgentJobReviewInput,
   type CreateMemoryInput,
+  type CreateDiscordConnectorInput,
   type GoalInput,
   type GoalStatus,
   type Session,
@@ -43,6 +44,12 @@ import {
   type StartRunInput,
   type UsageQuery,
   type UsageRecordsQuery,
+} from '@animaOS-SWARM/sdk';
+
+export type {
+  DiscordConnector,
+  DiscordConnectorStatus,
+  CreateDiscordConnectorInput,
 } from '@animaOS-SWARM/sdk';
 
 /** Shared owner transport policy. The current console uses same-origin cookies;
@@ -580,6 +587,34 @@ export const daemon = {
     request<{ connectors: TelegramConnector[] }>(
       `/agents/${encodeURIComponent(agentId)}/connectors`,
     ),
+  discordConnectors: (agentId: string) =>
+    setupClient.connectors.discordConnectors(agentId),
+  createDiscordConnector: (
+    agentId: string,
+    input: CreateDiscordConnectorInput,
+  ) => setupClient.connectors.createDiscordConnector(agentId, input),
+  activateDiscordConnector: (agentId: string, connectorId: string) =>
+    setupClient.connectors.activateDiscordConnector(agentId, connectorId),
+  replaceDiscordCredential: (
+    agentId: string,
+    connectorId: string,
+    botToken: string,
+  ) =>
+    setupClient.connectors.replaceDiscordCredential(
+      agentId,
+      connectorId,
+      botToken,
+    ),
+  setDiscordEnabled: (agentId: string, connectorId: string, enabled: boolean) =>
+    setupClient.connectors.setDiscordEnabled(agentId, connectorId, enabled),
+  restartDiscordConnector: (agentId: string, connectorId: string) =>
+    setupClient.connectors.restartDiscordConnector(agentId, connectorId),
+  retryDiscordDelivery: (agentId: string, connectorId: string) =>
+    setupClient.connectors.retryDiscordDelivery(agentId, connectorId),
+  suppressDiscordUnknownDelivery: (agentId: string, connectorId: string) =>
+    setupClient.connectors.suppressDiscordUnknownDelivery(agentId, connectorId),
+  deleteDiscordConnector: (agentId: string, connectorId: string) =>
+    setupClient.connectors.deleteDiscordConnector(agentId, connectorId),
   createTelegramConnector: (agentId: string, botToken: string) =>
     request<{ connector: TelegramConnector }>(
       `/agents/${encodeURIComponent(agentId)}/connectors/telegram`,

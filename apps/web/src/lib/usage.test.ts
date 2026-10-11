@@ -103,6 +103,7 @@ describe('formatting', () => {
   it('labels sources', () => {
     expect(sourceLabel('chat')).toBe('Chat');
     expect(sourceLabel('api')).toBe('API');
+    expect(sourceLabel('discord')).toBe('Discord');
     expect(sourceLabel('mystery')).toBe('mystery');
   });
 

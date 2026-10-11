@@ -160,7 +160,14 @@ impl DaemonState {
                 .map(|job| job.title.as_str()),
             bot_username: connector_id_of_room(request.room_id)
                 .and_then(|id| self.connectors.get(id))
-                .and_then(|connector| connector.bot.username.as_deref()),
+                .and_then(|connector| connector.bot.username.as_deref())
+                .or_else(|| {
+                    request
+                        .room_id
+                        .strip_prefix("discord:")
+                        .and_then(|id| self.discord_connectors.get(id))
+                        .and_then(|c| c.channel.name.as_deref())
+                }),
             peer_sender_name: peer_sender_name.as_deref(),
         };
         let (title, title_source) = if is_calendar_write_followup(request.source_ref) {

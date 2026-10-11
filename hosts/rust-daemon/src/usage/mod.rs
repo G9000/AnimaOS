@@ -29,6 +29,7 @@ pub(crate) const HISTORY_USAGE_BATCH: usize = 500;
 pub(crate) enum UsageSource {
     Chat,
     Telegram,
+    Discord,
     Automation,
     Job,
     Helper,
@@ -44,6 +45,7 @@ impl UsageSource {
         match self {
             Self::Chat => "chat",
             Self::Telegram => "telegram",
+            Self::Discord => "discord",
             Self::Automation => "automation",
             Self::Job => "job",
             Self::Helper => "helper",
@@ -62,6 +64,7 @@ impl From<RunSource> for UsageSource {
             RunSource::Web => Self::Chat,
             RunSource::Api => Self::Api,
             RunSource::Telegram => Self::Telegram,
+            RunSource::Discord => Self::Discord,
             RunSource::Schedule => Self::Automation,
             RunSource::Job => Self::Job,
             RunSource::Delegation | RunSource::Peer => Self::Helper,

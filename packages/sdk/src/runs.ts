@@ -13,6 +13,7 @@ export type RunSource =
   | 'web'
   | 'api'
   | 'telegram'
+  | 'discord'
   | 'schedule'
   | 'job'
   | 'delegation'

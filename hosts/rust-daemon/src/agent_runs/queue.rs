@@ -582,6 +582,24 @@ impl AgentRunCoordinator {
             let retitle = session.kind == SessionKind::Chat
                 && session.title_source == TitleSource::FirstMessage
                 && session.title == DEFAULT_CHAT_TITLE;
+            if session.kind == SessionKind::Discord {
+                let valid = request.source == RunSource::Discord
+                    && request.source_ref.as_ref().is_some_and(|source_ref| {
+                        guard.discord_connectors.values().any(|c| {
+                            c.is_active()
+                                && c.agent_id == request.agent_id
+                                && c.room_id == session.room_id()
+                                && (source_ref == &c.id
+                                    || source_ref.starts_with(&format!("{}:", c.id)))
+                        })
+                    });
+                if !valid {
+                    return Err(ApiError::conflict(SESSION_CANNOT_SEND));
+                }
+                if request.skill.is_some() || !request.attachment_ids.is_empty() {
+                    return Err(ApiError::bad_request_static("Discord sessions support text only; skills and attachments are unavailable"));
+                }
+            }
             if !capabilities.send {
                 return Err(ApiError::conflict(SESSION_CANNOT_SEND));
             }

@@ -363,3 +363,47 @@ Controller appends accepted binding section here; no additional audit/confirmati
 - Retry accepts safely Failed/Pending only; Unknown remains409. A failed chunk has a static error category and durable deadline; runtime response reports actionable warning. Conservatively split provider text at at most2000 UTF-16 units as well as2000 Unicode scalars (never bytes), cap8 with plain truncation notice; full history remains. Cost: emoji-heavy replies use more chunks; valid scalar boundaries preserved.
 - Do not migrate functional Gmail/Calendar merely for registry parity. After M13 merge, selected Drive read/search is M14 unless inspection identifies a real blocking daily-use defect; final cross-surface deterministic acceptance follows. Actual account consent/live delivery/hosting remain outside the standing no-services constraint.
 - Planner draft stays concise rather than expanding into code-heavy filler. Its source-grounded interfaces/rules/commands and test lists are executable; retain the user-requested cheap batch review/fix protocol.
+
+## Execution outcome (2026-10-12)
+
+Selected Discord REST setup and native durable conversation path are implemented.
+The exact selected channel/user authority, private generation-specific credentials,
+first-activation baseline, anchored catch-up, coordinator/session source, owner
+Stop and per-chunk receipts/uncertainty are wired through registered transport.
+Source adaptation scope and full MIT notice are in discord/HERMES-NOTICE; the
+credited files are unchanged from the verified source revision.
+
+One final SDK/web review and one daemon batch review are complete. Combined fixes
+cover status reconciliation and Stop availability; tombstone+vault intent atomicity,
+activation cursor checks, independent long-input bounds, prompt rate deferral,
+Stop during Sending, terminal poll pause, whole-batch identity rejection and
+snapshot delivery consistency. Thirty-six focused native/registry/route cases
+pass, supplemented by startup migration/backup and existing host regressions.
+
+Fresh current-tree gates: Rust **2,268 passed, 8 ignored** (core dependency630,
+host1,638); SDK **125 passed, 3 service-skipped**; web **1,158 passed /107files**.
+SDK/web test/typecheck/build, Rust lint and explicit owned Markdown/TypeScript
+formatting pass. Eight Rust opt-in cases are five Postgres, one live subscription,
+one model download and one inventory printer. Initial Rust gate failures were
+15 obsolete current-version fixture expectations; current assertions now use the
+store constant while legacy inputs/backup cases are preserved. Full rerun passes.
+Web warning origins match the existing baseline; no new focused act warnings.
+Rust retains existing unused-code warnings plus the three fixture entry wrappers.
+
+Snapshot12 backs up version11 as .pre-discord.bak; native fields are default-empty
+for earlier formats, future versions refused. README inventory covers154 owner
+operations. Manifests/features/lockfiles are unchanged. No real services, accounts,
+provider delivery, databases, containers, user profiles or credentials were used.
+
+Ruling: Native user input is bounded separately at65,536 Unicode scalars, with
+streamed1MiB limits — a bot's 2000-character reply ceiling must not reject valid
+user messages — cost if wrong: oversized unsupported input consumes no cursor.
+Ruling: Provider pacing returns RateLimited without dispatch while its deadline
+is future — a long rate delay cannot retain a delivery claim indefinitely — cost
+if wrong: native host persists remaining delay and resumes only after it expires.
+Ruling: Persist stop_requested and suppress unsent chunks while preserving an
+in-flight receipt — Stop cannot undo a remote effect but must prevent the tail —
+cost if wrong: uncertain in-flight effects remain visible for owner review.
+
+Publish and merge the verified branch under standing owner continuation, then cut
+M14 from updated main. The prepared selected Drive plan is ignored until activated.

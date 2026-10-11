@@ -1,3 +1,5 @@
+mod discord;
+pub(crate) use discord::*;
 mod agencies;
 pub(crate) mod agent_files;
 mod agents;

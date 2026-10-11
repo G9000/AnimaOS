@@ -20,10 +20,12 @@ import { ConnectorsView } from './components/ConnectorsView';
 import { SessionSidebar } from './components/sessions/SessionSidebar';
 import { SessionView } from './components/sessions/SessionView';
 import { TelegramSettings } from './components/TelegramSettings';
+import { DiscordSettings } from './components/DiscordSettings';
 import { WorkspaceShell, availablePage } from './components/WorkspaceShell';
 import { useConversationLifecycle } from './hooks/useConversationLifecycle';
 import { useDaemonCompatibility } from './hooks/useDaemonCompatibility';
 import { useAgentIntegrations } from './hooks/useAgentIntegrations';
+import { useDiscordIntegrations } from './hooks/useDiscordIntegrations';
 import { useCompanionSessions } from './hooks/useCompanionSessions';
 import { useDaemonBootstrap } from './hooks/useDaemonBootstrap';
 import { useLiveSession } from './hooks/useLiveSession';
@@ -60,6 +62,7 @@ import { useHashRoute, type HashRoute } from './lib/hash-route';
 import { exportFileName, sessionKey } from './lib/session-groups';
 import { loadDraft, storeDraft } from './lib/drafts';
 import { safeIntegrationError } from './lib/telegram';
+import { discordCanReply, safeDiscordError } from './lib/discord';
 import { useAttachmentSession } from './hooks/useAttachmentSession';
 import { useAttachments } from './hooks/useAttachments';
 import { recoveredDraft } from './lib/attachments';
@@ -442,7 +445,9 @@ export function ViewHarness() {
           failedDrafts: [...current.failedDrafts, recoveredDraft(item)],
           error: item.telegram
             ? safeIntegrationError(caught)
-            : errorMessage(caught),
+            : item.discord
+              ? safeDiscordError(caught)
+              : errorMessage(caught),
         }));
       if (httpStatus(caught) !== 404) {
         recover();
@@ -568,6 +573,11 @@ export function ViewHarness() {
   const previousSelectedMainIdRef = useRef<string | null>(null);
 
   const integrations = useAgentIntegrations(agentId);
+  const discordIntegrations = useDiscordIntegrations(
+    agentId,
+    (route.kind === 'page' && route.page === 'connectors') ||
+      activeSession?.kind === 'discord',
+  );
   const telegramConnector = integrations.connectors[0] ?? null;
   const activeConnector =
     activeSession?.kind === 'telegram'
@@ -575,6 +585,21 @@ export function ViewHarness() {
           (item) => item.roomId === activeSession.roomId,
         ) ?? null)
       : null;
+  const activeDiscord =
+    activeSession?.kind === 'discord'
+      ? (discordIntegrations.connectors.find(
+          (item) => item.roomId === activeSession.roomId,
+        ) ?? null)
+      : null;
+  const discordReady =
+    discordIntegrations.available &&
+    !discordIntegrations.loading &&
+    discordIntegrations.busy === null &&
+    discordCanReply(activeDiscord);
+  const connectorReplyAvailable =
+    activeSession?.kind === 'discord'
+      ? discordReady
+      : activeSession?.kind !== 'telegram' || activeConnector !== null;
   // The connector queues a Telegram reply for delivery when its run
   // completes while it has an approved chat. How the run ended comes from
   // its lifecycle event or the ledger, which is read once its messages
@@ -816,6 +841,7 @@ export function ViewHarness() {
       ...(skill ? { skill } : {}),
       ...(attachmentInput ?? {}),
       telegram: target.kind === 'telegram',
+      discord: target.kind === 'discord',
     });
   };
 
@@ -836,8 +862,9 @@ export function ViewHarness() {
       !resetting &&
       !sessionLoading &&
       !daemonTooOld &&
+      activeSession?.kind !== 'discord' &&
       (activeSession?.capabilities.send ?? true) &&
-      (activeSession?.kind !== 'telegram' || activeConnector !== null),
+      connectorReplyAvailable,
   });
   const savedAttachmentIds = attachments.readyAttachmentIds;
 
@@ -988,6 +1015,7 @@ export function ViewHarness() {
     ),
     clearAttachments: attachments.clear,
     telegramReady: activeConnector !== null,
+    discordReady,
     activeRun,
     updateChat,
     startChat: (text, skill, attachmentInput) => {
@@ -1015,7 +1043,7 @@ export function ViewHarness() {
   const transcriptActions = useTranscriptActions({
     session: activeSession,
     // A Telegram session's messages need its connector.
-    resendable: activeSession?.kind !== 'telegram' || activeConnector !== null,
+    resendable: connectorReplyAvailable,
     liveRuns: live.state.runs,
     sessions: sessions.sessions,
     stopRun: (run) => void stopRun(run),
@@ -1143,6 +1171,7 @@ export function ViewHarness() {
       onLoadOlder={loadOlder}
       missing={routeSessionId !== null && history.missing && !daemonTooOld}
       telegramAvailable={activeConnector !== null}
+      discordAvailable={discordReady}
       scrollerRef={scrollerRef}
       onSuggestion={setDraft}
       composer={{
@@ -1326,6 +1355,18 @@ export function ViewHarness() {
                   restart={integrations.restartTelegram}
                   disconnect={integrations.disconnectTelegram}
                   refresh={integrations.refresh}
+                />
+              }
+              discord={
+                <DiscordSettings
+                  agentId={agent.id}
+                  {...discordIntegrations}
+                  openConversation={(connector) =>
+                    commands.openTarget({
+                      agentId: connector.agentId,
+                      sessionId: connector.roomId,
+                    })
+                  }
                 />
               }
             />

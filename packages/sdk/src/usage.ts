@@ -3,6 +3,7 @@ import type { DaemonClient } from './client.js';
 export type UsageSource =
   | 'chat'
   | 'telegram'
+  | 'discord'
   | 'automation'
   | 'job'
   | 'helper'

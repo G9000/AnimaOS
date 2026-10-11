@@ -1,0 +1,62 @@
+Anima native Discord adaptation notice
+
+Source: https://github.com/NousResearch/hermes-agent
+Revision: f3ef9db68332063a3625661f3a9b259f60abdb4e
+Read-only local source: C:/Users/leoca/AppData/Local/hermes/hermes-agent
+
+Actual source paths and scope:
+- plugins/platforms/discord/adapter.py: DiscordAdapter.MAX_MESSAGE_LENGTH,
+  MAX_SPLIT_MESSAGES, _cap_split_chunks, send. text.rs adapts the small eight
+  chunk cap algorithm: retain seven chunks and replace the remainder with a
+  plain Anima truncation notice; complete reply remains in native session
+  history. Splitting is rewritten in Rust, preserving Unicode scalar
+  boundaries and additionally bounding each message to 2000 UTF-16 units.
+  This conservative difference makes emoji-heavy replies use more chunks.
+- plugins/platforms/discord/adapter.py: _build_allowed_mentions. client.rs
+  adapts explicit mention suppression. Anima intentionally disables every
+  ping class, including user/replied-user pings enabled by upstream defaults.
+  There are no profile, config or environment override paths.
+- plugins/platforms/discord/adapter.py: _discord_message_admission,
+  _dispatch_recovered_message, _iter_missed_message_backfill_candidates,
+  _advance_discord_recovery_cursor. Native client/inbound code adapts behavior
+  and identities, selected-channel/sender checks, completed receipts and
+  recovery cursor sequencing. Anima rejects bots/self/webhooks, uses an exact
+  owner allowlist and proves a bounded backward REST scan before cursor
+  movement. This is architectural/behavior reuse, not copied Python code.
+- plugins/platforms/discord/recovery.py: DiscordRecoveryStore and messages/
+  cursors schema. model.rs and Anima snapshots reuse recovery behavior only;
+  SQLite schema, WAL/profile fallback and logging are not copied.
+- plugins/platforms/discord/plugin.yaml: protocol/display metadata only.
+- tests/gateway/test_discord_allowed_mentions.py,
+  test_discord_bot_auth_bypass.py, test_discord_missed_message_backfill.py,
+  test_discord_split_cap.py: relevant edge-case behavior informs native fake
+  fixtures. No upstream tests or Python modules are executed.
+
+Anima's adapter is a selected guild text-channel REST polling implementation.
+It does not port upstream Gateway, threads, roles, multiplex profiles, voice,
+formatting, config, installation or slash-command machinery; no adapter parity
+is claimed. Credentials remain in Anima's independent generation-bound vault.
+
+Upstream license (retained in full):
+
+MIT License
+
+Copyright (c) 2025 Nous Research
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

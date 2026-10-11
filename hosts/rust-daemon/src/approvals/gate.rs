@@ -41,7 +41,7 @@ impl Default for ApprovalTimeouts {
 
 impl ApprovalTimeouts {
     pub(crate) fn for_source(self, source: RunSource) -> Duration {
-        if source == RunSource::Telegram {
+        if matches!(source, RunSource::Telegram | RunSource::Discord) {
             self.telegram
         } else {
             self.default

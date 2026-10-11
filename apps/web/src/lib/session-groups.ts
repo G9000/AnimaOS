@@ -3,6 +3,7 @@ import type { Session, SessionKind } from '@animaOS-SWARM/sdk';
 export const SESSION_KIND_ORDER: readonly SessionKind[] = [
   'chat',
   'telegram',
+  'discord',
   'checkin',
   'job',
   'helper',
@@ -11,6 +12,7 @@ export const SESSION_KIND_ORDER: readonly SessionKind[] = [
 export const SESSION_KIND_LABELS: Record<SessionKind, string> = {
   chat: 'Chat',
   telegram: 'Telegram',
+  discord: 'Discord',
   checkin: 'Check-in',
   job: 'Job',
   helper: 'Helper',
@@ -19,6 +21,7 @@ export const SESSION_KIND_LABELS: Record<SessionKind, string> = {
 export const SESSION_KIND_FILTER_LABELS: Record<SessionKind, string> = {
   chat: 'Chats',
   telegram: 'Telegram',
+  discord: 'Discord',
   checkin: 'Check-ins',
   job: 'Jobs',
   helper: 'Helpers',

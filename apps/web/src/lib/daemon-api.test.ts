@@ -884,3 +884,27 @@ describe('daemon logs and status requests', () => {
     expect(events.map((event) => event.kind)).toEqual(['line', 'resync']);
   });
 });
+
+it('uses the SDK same-origin Discord transport and explicit uncertainty acknowledgement', async () => {
+  const connector = { id: 'c /?', type: 'discord' };
+  const fetchMock = vi
+    .fn<typeof fetch>()
+    .mockImplementation(async () =>
+      Response.json({ connector, connectors: [connector] }),
+    );
+  vi.stubGlobal('fetch', fetchMock);
+  expect(await daemon.discordConnectors('a /?')).toEqual([connector]);
+  expect(await daemon.suppressDiscordUnknownDelivery('a /?', 'c /?')).toEqual(
+    connector,
+  );
+  expect(fetchMock.mock.calls[0][0]).toBe(
+    '/api/agents/a%20%2F%3F/connectors/discord',
+  );
+  expect(fetchMock.mock.calls[1][0]).toBe(
+    '/api/agents/a%20%2F%3F/connectors/discord/c%20%2F%3F/outbound/suppress',
+  );
+  expect(fetchMock.mock.calls[1][1]?.method).toBe('POST');
+  expect(JSON.parse(fetchMock.mock.calls[1][1]!.body as string)).toEqual({
+    acknowledgeUncertainty: true,
+  });
+});

@@ -196,28 +196,76 @@ pub(super) async fn start_session_run(
     let target = {
         let guard = state.daemon.read().await;
         guard.sessions.get(&agent_id, &session_id).map(|record| {
-            let connector = (record.kind == SessionKind::Telegram).then(|| {
-                guard
-                    .connectors
-                    .values()
-                    .find(|connector| {
-                        connector.is_active()
-                            && connector.agent_id == agent_id
-                            && connector.room_id == record.room_id()
-                    })
-                    .map(|connector| connector.id.clone())
-            });
-            (record.room_id().to_string(), connector)
+            let connector = matches!(record.kind, SessionKind::Telegram | SessionKind::Discord)
+                .then(|| {
+                    if record.kind == SessionKind::Discord {
+                        return guard
+                            .discord_connectors
+                            .values()
+                            .find(|c| {
+                                c.is_active()
+                                    && c.agent_id == agent_id
+                                    && c.room_id == record.room_id()
+                            })
+                            .map(|c| c.id.clone());
+                    }
+                    guard
+                        .connectors
+                        .values()
+                        .find(|connector| {
+                            connector.is_active()
+                                && connector.agent_id == agent_id
+                                && connector.room_id == record.room_id()
+                        })
+                        .map(|connector| connector.id.clone())
+                });
+            (
+                record.room_id().to_string(),
+                connector,
+                record.kind == SessionKind::Discord,
+            )
         })
     };
-    let Some((room_id, connector)) = target else {
+    let Some((room_id, connector, is_discord)) = target else {
         return rejected(ApiError::not_found());
     };
+    if is_discord && (input.skill.is_some() || !input.attachment_ids.is_empty()) {
+        return rejected(ApiError::bad_request_static(
+            "Discord sessions support text only; skills and attachments are unavailable",
+        ));
+    }
     if input.skill.is_some() && connector.is_some() {
         return rejected(ApiError::bad_request_static(SKILL_NOT_IN_TELEGRAM));
     }
     let (source, source_ref, start): (RunSource, Option<String>, QueuedRunStart) = match connector {
         // A Telegram session's message is the connector's owner turn (spec §4.2).
+        Some(Some(connector_id)) if is_discord => {
+            let manager = state.discord.clone();
+            let runs = state.agent_runs.clone();
+            let (agent, text, key, connector) = (
+                agent_id.clone(),
+                input.text.clone(),
+                idempotency_key.clone(),
+                connector_id.clone(),
+            );
+            let start = QueuedRunStart::new(
+                move |run_id| -> BoxFuture<'static, Result<(), QueuedStartError>> {
+                    Box::pin(async move {
+                        match manager
+                            .send_from_owner_accepted(agent, connector, text, key, run_id)
+                            .await
+                        {
+                            Ok(()) => Ok(()),
+                            Err(_) if manager.is_closing() || runs.is_shutting_down() => {
+                                Err(QueuedStartError::ShuttingDown)
+                            }
+                            Err(e) => Err(QueuedStartError::Failed(e.to_string())),
+                        }
+                    })
+                },
+            );
+            (RunSource::Discord, Some(connector_id), start)
+        }
         Some(Some(connector_id)) => {
             let manager = state.connector_manager.clone();
             let runs = state.agent_runs.clone();
