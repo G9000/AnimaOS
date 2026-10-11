@@ -251,6 +251,7 @@ mod tests {
             attachment_type: AttachmentType::Image,
             name: name.into(),
             data: format!("uploads/{name}"),
+            mime_type: Some("image/png".into()),
         }
     }
 

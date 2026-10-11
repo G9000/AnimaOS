@@ -81,6 +81,8 @@ pub struct Attachment {
     pub attachment_type: AttachmentType,
     pub name: String,
     pub data: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

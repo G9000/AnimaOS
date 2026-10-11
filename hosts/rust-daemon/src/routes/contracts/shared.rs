@@ -158,6 +158,7 @@ impl AttachmentRequest {
             attachment_type,
             name,
             data,
+            mime_type: None,
         })
     }
 }
