@@ -321,6 +321,7 @@ fn missing_candidates_error(payload: &Value) -> String {
 /// metadata as a non-streamed one.
 #[derive(Default)]
 pub(crate) struct GoogleStreamAccumulator {
+    image_request: bool,
     parts: Vec<Value>,
     finish_reason: Option<String>,
     usage: Option<Value>,
@@ -333,11 +334,20 @@ pub(crate) struct GoogleStreamAccumulator {
 const MAX_GOOGLE_STREAM_PARTS: usize = 4_096;
 
 impl GoogleStreamAccumulator {
+    pub(crate) fn with_image_request(image_request: bool) -> Self {
+        Self {
+            image_request,
+            ..Self::default()
+        }
+    }
     /// Takes one SSE payload; returns the text it adds. A `thought: true` part
     /// (spec §12.4) never contributes to the visible delta, though it is still
     /// kept in the raw parts below for replay.
     pub(crate) fn push(&mut self, payload: &Value) -> Result<Option<String>, String> {
         if let Some(error) = payload.get("error") {
+            if self.image_request {
+                return Err(crate::attachments::IMAGE_REQUEST_FAILED.into());
+            }
             return Err(google_stream_error(error));
         }
         if let Some(usage) = payload.get("usageMetadata") {

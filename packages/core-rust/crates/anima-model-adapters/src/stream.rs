@@ -72,8 +72,9 @@ pub(crate) async fn consume_openai_sse(
     response: reqwest::Response,
     sink: &dyn ModelStreamSink,
     provider: &ProviderDefinition,
+    image_request: bool,
 ) -> Result<(), String> {
-    let mut accumulator = StreamAccumulator::new(provider.id, provider.label);
+    let mut accumulator = StreamAccumulator::new(provider.id, provider.label, image_request);
     let saw_done = consume_sse_events(
         response,
         |payload| {
@@ -93,8 +94,9 @@ pub(crate) async fn consume_openai_sse(
 pub(crate) async fn consume_anthropic_sse(
     response: reqwest::Response,
     sink: &dyn ModelStreamSink,
+    image_request: bool,
 ) -> Result<(), String> {
-    let mut accumulator = StreamAccumulator::new("anthropic", "Anthropic");
+    let mut accumulator = StreamAccumulator::new("anthropic", "Anthropic", image_request);
     consume_sse_events(
         response,
         |payload| {
@@ -113,8 +115,9 @@ pub(crate) async fn consume_google_sse(
     response: reqwest::Response,
     sink: &dyn ModelStreamSink,
     api_key: &str,
+    image_request: bool,
 ) -> Result<(), String> {
-    let mut accumulator = crate::google::GoogleStreamAccumulator::default();
+    let mut accumulator = crate::google::GoogleStreamAccumulator::with_image_request(image_request);
     // A Google error payload's message is upstream text, redacted like an error body.
     consume_sse_events(
         response,
@@ -134,8 +137,9 @@ pub(crate) async fn consume_google_sse(
 pub(crate) async fn consume_ollama_ndjson(
     response: reqwest::Response,
     sink: &dyn ModelStreamSink,
+    image_request: bool,
 ) -> Result<(), String> {
-    let mut accumulator = crate::ollama::OllamaStreamAccumulator::default();
+    let mut accumulator = crate::ollama::OllamaStreamAccumulator::with_image_request(image_request);
     let mut body = response.bytes_stream();
     let mut reader = BoundedFrameReader::new();
     while let Some(chunk) = body.next().await {
@@ -182,6 +186,7 @@ const MAX_STREAM_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_STREAM_TOOL_CALLS: usize = 32;
 
 struct StreamAccumulator {
+    image_request: bool,
     /// The provider's catalog id and label, for provider-specific stop reasons.
     provider_id: &'static str,
     provider_label: &'static str,
@@ -215,8 +220,9 @@ struct ToolCallAccumulator {
 }
 
 impl StreamAccumulator {
-    fn new(provider_id: &'static str, provider_label: &'static str) -> Self {
+    fn new(provider_id: &'static str, provider_label: &'static str, image_request: bool) -> Self {
         Self {
+            image_request,
             provider_id,
             provider_label,
             terminal: false,
@@ -437,7 +443,11 @@ impl StreamAccumulator {
                 ));
             }
             _ => {
-                let raw = reason.to_string();
+                let raw = if self.image_request {
+                    "[upstream detail omitted for image request]".into()
+                } else {
+                    reason.to_string()
+                };
                 tracing::debug!(
                     provider = self.provider_id,
                     reason = %raw.chars().take(100).collect::<String>(),

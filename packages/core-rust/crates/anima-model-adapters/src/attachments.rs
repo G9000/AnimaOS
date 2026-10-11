@@ -1,8 +1,30 @@
 //! Request-only image serialization. Filesystem authority and byte validation belong to the host.
+//! Native image formats and routing use Hermes as a porting reference; see ../HERMES-NOTICE.
 use anima_core::{Attachment, AttachmentType, Content, MessageRole, ModelGenerateRequest};
 
 const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 const MAX_ENCODED_IMAGE_BYTES: usize = 4 * MAX_IMAGE_BYTES.div_ceil(3);
+pub(crate) const IMAGE_REQUEST_FAILED: &str = "Image request failed; upstream details omitted";
+
+pub(crate) fn request_contains_images(request: &ModelGenerateRequest) -> bool {
+    request.messages.iter().any(|message| {
+        message.role == MessageRole::User
+            && message
+                .content
+                .attachments
+                .iter()
+                .flatten()
+                .any(|attachment| attachment.attachment_type == AttachmentType::Image)
+    })
+}
+
+pub(crate) fn request_error(error: String, image_request: bool) -> String {
+    if image_request {
+        IMAGE_REQUEST_FAILED.into()
+    } else {
+        error
+    }
+}
 
 /// Missing model metadata is deliberately treated as no image support.
 pub fn model_supports_images(provider: &str, model: &str) -> bool {

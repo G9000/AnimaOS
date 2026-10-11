@@ -118,14 +118,24 @@ pub(super) fn parse_ollama_response(payload: &Value) -> Result<ModelGenerateResp
 /// One streamed native Ollama response (NDJSON lines, spec §12.4).
 #[derive(Default)]
 pub(crate) struct OllamaStreamAccumulator {
+    image_request: bool,
     text: String,
     done: Option<Value>,
 }
 
 impl OllamaStreamAccumulator {
+    pub(crate) fn with_image_request(image_request: bool) -> Self {
+        Self {
+            image_request,
+            ..Self::default()
+        }
+    }
     /// Takes one NDJSON line; returns the text it adds.
     pub(crate) fn push(&mut self, payload: &Value) -> Result<Option<String>, String> {
         if let Some(error) = payload.get("error").and_then(Value::as_str) {
+            if self.image_request {
+                return Err(crate::attachments::IMAGE_REQUEST_FAILED.into());
+            }
             return Err(format!(
                 "Ollama stream failed: {}",
                 crate::adapter::sanitize_upstream_body(error, None)

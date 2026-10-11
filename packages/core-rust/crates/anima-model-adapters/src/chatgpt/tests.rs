@@ -3,6 +3,48 @@ use anima_core::{Content, DataValue, Message, MessageRole, ModelStopReason, Tool
 use serde_json::json;
 use std::collections::BTreeMap;
 
+#[tokio::test]
+async fn attachment_error_subscription_http_and_frames_keep_static_diagnostics() {
+    for (status, body) in [
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            "aGVsbG8= bare upstream fragment".to_owned(),
+        ),
+        (
+            axum::http::StatusCode::OK,
+            "data: {\"type\":\"error\",\"message\":\"aGVsbG8=\"}\n\n".to_owned(),
+        ),
+    ] {
+        let (endpoint, task) = server(axum::Router::new().route(
+            "/responses",
+            axum::routing::post(move || {
+                let body = body.clone();
+                async move { (status, body) }
+            }),
+        ))
+        .await;
+        let mut adapter = ChatGptResponsesAdapter::new("fake".into(), "account".into()).unwrap();
+        adapter.endpoint = endpoint;
+        let mut image = request();
+        image.messages[0].content.attachments = Some(vec![anima_core::Attachment {
+            attachment_type: anima_core::AttachmentType::Image,
+            name: "photo.png".into(),
+            data: "data:image/png;base64,aGVsbG8=".into(),
+            mime_type: Some("image/png".into()),
+        }]);
+        for request in [&image, &request()] {
+            let error = adapter.generate(&config(), request).await.unwrap_err();
+            assert!(!error.contains("aGVsbG8="));
+            let error = adapter
+                .stream(&config(), request, &FinalSink(Mutex::new(None)))
+                .await
+                .unwrap_err();
+            assert!(!error.contains("aGVsbG8="));
+        }
+        task.abort();
+    }
+}
+
 #[test]
 fn attachment_subscription_request_keeps_images_and_tool_history() {
     let mut request = ModelGenerateRequest {
