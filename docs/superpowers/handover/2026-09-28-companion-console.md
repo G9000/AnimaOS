@@ -1,3 +1,17 @@
+# Handover: companion console build (M0-M13 merged; M14 active)
+
+## Start here (2026-10-12): selected Drive, then daily-assistant readiness
+
+- Owner standing instruction remains: merge and continue until usable like the reference assistant, reuse/copy actual upstream code into Rust, keep Anima naming. Gated selected-use milestones may merge without another approval question. No dependencies/features, real daemons/services/providers/keyring/profile reads/databases/containers/port55432, destructive Git operations or worktrees. Explicit staging never nx.json/anima.yaml; unsigned per-command override is already authorized.
+- PR #19 merged at `7f42df8334af7e0afdb71f83a5d52aeaa48e6d67` with verified source `0a5c74c`. M0-M13 are on main. M13 fresh gates: Rust2268/8ignored(core630/host1638), SDK125/3service-skipped, web1158/107files; SDK/webtypechecks/builds, Rustlint and ownedformat pass. Thirty-six native cases +startupbackup regressions pass; combined review fixes complete. Never repeat finished M13 work/gates absent new changes.
+- Active branch `g9000/companion-drive-m14` is cut from that updated main; only unrelated nx.json dirty at activation. Plan `docs/superpowers/plans/2026-10-12-companion-drive-m14.md` contains interfaces, source/protocol verification, five binding risks and controller freeze. Ledger/rules under `.superpowers/sdd/2026-10-12-companion-drive-m14/`.
+- M14 implements immutable selected1-16 Drive file IDs, selected filename search via exact metadata GET and bounded GoogleDocs/plaintext reads. Use existing Google app/PKCE/native authority patterns; no global Drive enumeration, writes/share/delete, auto-ingestion, document engine or Picker. Google drive.readonly consent is broader than Anima's allowlist and must be disclosed honestly. Local disconnect must never remotely revoke all project OAuth scopes (Gmail/Calendar impact).
+- Actual reusable upstream code: `skills/productivity/google-workspace/scripts/google_api.py::drive_get/drive_download` at read-only local source C:/Users/leoca/AppData/Local/hermes/hermes-agent, pinned pristine revision f3ef9db68332063a3625661f3a9b259f60abdb4e, MIT Nous Research2025. Adapt selected HTTP/format behavior, retain full notice. drive_preview is desktop browser control, not Google Drive. No Python/gws execution, profiles/config/token files or user secrets.
+- Native Drive tokens/generations stay separate from working Gmail/Calendar. Source IDs never grant permissions; every read rechecks current agent, connector, selected IDs/account/generation/tool access after waits. Callbacks/refreshes cannot resurrect a disconnect. Managers retain weak daemon references to avoid cycles. Snapshot13 needs native records and v12 pre-Drive backup; old fixtures use current-version constants already updated in M13.
+- Next: delegated A nativeclient/model/store/provenance, B manager/state/schema/routes/tools/runtime, C SDK/web selected-file card. Root owns docs/master/handover; one daemon batch and final web/SDK review, one combined fix wave, relevant fresh local gates, explicit commit/push/PR attach/verified merge; then final deterministic daily-flow acceptance/setup. Live account/provider/hosting tests remain unexecuted under no-services constraint; no broad reference-parity claim.
+
+## Historical M13 publication and standing continuation
+
 # Handover: companion console build (M0–M12 merged; M13 active)
 
 ## Start here (2026-10-12): continue through the usable assistant target
