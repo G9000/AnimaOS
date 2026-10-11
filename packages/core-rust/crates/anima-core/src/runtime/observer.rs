@@ -56,7 +56,12 @@ pub enum RunFrame {
         recovered: bool,
     },
     /// A steered owner message joined the conversation (spec §4.7).
-    Steered { message_id: String, text: String },
+    Steered {
+        message_id: String,
+        text: String,
+        /// The recorded steer, including attachment references and generic metadata.
+        content: Content,
+    },
 }
 
 /// Receives a run's live frames. The runtime calls it inline, so an

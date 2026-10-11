@@ -1,12 +1,17 @@
 pub(crate) mod files;
+pub(crate) mod metadata;
+pub(crate) mod model;
 pub(crate) mod validation;
 // Private durable upload identity. HTTP callers project the public metadata only.
 use serde::{Deserialize, Serialize};
 
+pub(crate) const ATTACHMENT_RECORDS_KEY: &str = "attachmentRecords";
+pub(crate) const ATTACHMENT_INPUT_TEXT_KEY: &str = "attachmentInputText";
+
 pub(crate) const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 pub(crate) const MAX_TEXT_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_DOCUMENT_BYTES: usize = 25 * 1024 * 1024;
-pub(crate) const MAX_UPLOAD_HEADER_BYTES: usize = 2 * 1024;
+pub(crate) const MAX_UPLOAD_HEADER_BYTES: usize = crate::routes::MAX_FORM_HEADER_BYTES;
 pub(crate) const MAX_UPLOAD_PARTS: usize = 1;
 pub(crate) const MAX_UPLOAD_MULTIPART_OVERHEAD: usize = MAX_UPLOAD_HEADER_BYTES + 512;
 pub(crate) const MAX_UPLOAD_FORM_BYTES: usize = MAX_DOCUMENT_BYTES + MAX_UPLOAD_MULTIPART_OVERHEAD;

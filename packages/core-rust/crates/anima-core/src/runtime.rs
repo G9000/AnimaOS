@@ -1080,6 +1080,7 @@ impl AgentRuntime {
             self.emit_frame(RunFrame::Steered {
                 message_id: message.id.clone(),
                 text,
+                content: message.content.clone(),
             });
             conversation.push(message);
         }

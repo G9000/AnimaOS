@@ -64,21 +64,24 @@ fn accepted_at_ms(content: &Content) -> Option<u64> {
 
 /// A steer as its run's inbox carries it: the text with its key and when it
 /// was accepted, which the runtime keeps on the message it records.
-fn steer_content(steer: &RunSteer) -> Content {
-    Content {
-        text: steer.text.clone(),
-        attachments: None,
-        metadata: Some(BTreeMap::from([
-            (
-                CLIENT_REQUEST_ID_METADATA_KEY.to_string(),
-                DataValue::String(steer.idempotency_key.clone()),
-            ),
-            (
-                ACCEPTED_AT_METADATA_KEY.to_string(),
-                DataValue::Number(steer.accepted_at_ms as f64),
-            ),
-        ])),
+fn steer_content(steer: &RunSteer, records: &[crate::attachments::AttachmentRecord]) -> Content {
+    let mut metadata = BTreeMap::from([
+        (
+            CLIENT_REQUEST_ID_METADATA_KEY.into(),
+            DataValue::String(steer.idempotency_key.clone()),
+        ),
+        (
+            ACCEPTED_AT_METADATA_KEY.into(),
+            DataValue::Number(steer.accepted_at_ms as f64),
+        ),
+    ]);
+    if let Some(skill) = &steer.skill {
+        metadata.insert(
+            crate::skills::SKILL_METADATA_KEY.into(),
+            DataValue::String(skill.clone()),
+        );
     }
+    super::attachments::attachment_content(&steer.text, records, Some(metadata))
 }
 
 fn is_steer_message(message: &Message) -> bool {
@@ -97,10 +100,13 @@ pub(crate) fn steers_taken_in(messages: &[Message]) -> Vec<RunSteer> {
         .iter()
         .filter(|message| is_steer_message(message))
         .filter_map(|message| {
+            let input = super::attachments::input_from_content(&message.content);
             Some(RunSteer {
                 idempotency_key: metadata_text(&message.content, CLIENT_REQUEST_ID_METADATA_KEY)?
                     .to_string(),
-                text: message.content.text.clone(),
+                text: input.text,
+                attachment_ids: input.attachment_ids,
+                skill: input.skill,
                 accepted_at_ms: accepted_at_ms(&message.content).unwrap_or(message.created_at_ms),
             })
         })
@@ -165,6 +171,7 @@ pub(crate) struct AcceptRun {
     pub(crate) agent_id: String,
     pub(crate) session_id: String,
     pub(crate) text: String,
+    pub(crate) attachment_ids: Vec<String>,
     pub(crate) idempotency_key: String,
     pub(crate) mode: SessionRunMode,
     /// `Web`, or `Telegram` for a Telegram session's owner turn.
@@ -261,6 +268,8 @@ fn replayed(
     session_id: &str,
     text: &str,
     idempotency_key: &str,
+    attachment_ids: &[String],
+    skill: Option<&str>,
     now_ms: u64,
 ) -> Option<Result<AcceptedRun, ApiError>> {
     let original = state.runs.find_by_idempotency_key(
@@ -269,7 +278,11 @@ fn replayed(
         now_ms.saturating_sub(IDEMPOTENCY_WINDOW_MS),
     )?;
     Some(
-        if original.session_id == session_id && original.input.text == text {
+        if original.session_id == session_id
+            && original.input.text == text
+            && original.input.attachment_ids == attachment_ids
+            && original.input.skill.as_deref() == skill
+        {
             Ok(AcceptedRun::Replayed(
                 state.with_live_tools(original.clone()),
             ))
@@ -296,13 +309,24 @@ fn steer_replay(
     ) else {
         return Ok(None);
     };
+    let original = pending
+        .map(RunSteer::input)
+        .or_else(|| {
+            run.steered_keys
+                .iter()
+                .find(|key| key.idempotency_key == request.idempotency_key)
+                .and_then(|key| key.input.clone())
+        })
+        .or_else(|| {
+            recorded_steer_content(state, run, &request.idempotency_key)
+                .map(super::attachments::input_from_content)
+        });
     let same = run.session_id == request.session_id
-        && match pending {
-            Some(steer) => steer.text == request.text,
-            // Its message may have left the hot tail; the key still names the run.
-            None => recorded_steer_text(state, run, &request.idempotency_key)
-                .is_none_or(|text| text == request.text),
-        };
+        && original.is_some_and(|input| {
+            input.text == request.text
+                && input.attachment_ids == request.attachment_ids
+                && input.skill == request.skill
+        });
     if !same {
         return Err(ApiError::conflict(IDEMPOTENCY_KEY_REUSED));
     }
@@ -317,7 +341,11 @@ fn steer_replay(
 }
 
 /// The text of the steer `run` took in with `key`, from its session's room.
-fn recorded_steer_text<'a>(state: &'a DaemonState, run: &RunRecord, key: &str) -> Option<&'a str> {
+fn recorded_steer_content<'a>(
+    state: &'a DaemonState,
+    run: &RunRecord,
+    key: &str,
+) -> Option<&'a Content> {
     let room_id = state
         .sessions
         .get(&run.agent_id, &run.session_id)?
@@ -334,7 +362,7 @@ fn recorded_steer_text<'a>(state: &'a DaemonState, run: &RunRecord, key: &str) -
                 && metadata_text(&message.content, CLIENT_REQUEST_ID_METADATA_KEY) == Some(key)
                 && metadata_text(&message.content, RUN_ID_METADATA_KEY) == Some(run.id.as_str())
         })
-        .map(|message| message.content.text.as_str())
+        .map(|message| &message.content)
 }
 
 /// The session's running run a steer can join (spec §4.7): one whose stop
@@ -421,7 +449,7 @@ fn take_leftover_steers(
                     == Some(steer.idempotency_key.as_str())
             });
             if !unread {
-                leftovers.push(steer_content(&steer));
+                leftovers.push(steer_content(&steer, &[]));
             }
         }
     }
@@ -444,8 +472,76 @@ impl AgentRunCoordinator {
         request: AcceptRun,
         start: QueuedRunStart,
     ) -> Result<AcceptedRun, ApiError> {
+        let coordinator = self.clone();
+        tokio::spawn(async move { coordinator.accept_run_owned(request, start).await })
+            .await
+            .map_err(|_| ApiError::service_unavailable("Run acceptance worker stopped"))?
+    }
+
+    async fn accept_run_owned(
+        &self,
+        request: AcceptRun,
+        start: QueuedRunStart,
+    ) -> Result<AcceptedRun, ApiError> {
         let transaction = self.control_plane_transaction().await;
         let now_ms = now_millis();
+        // Resolve exact retries first. No state/std guard crosses scoped history
+        // or sequential bounded file validation; the owned transaction stays held.
+        let (store, root) = {
+            let guard = self.state.read().await;
+            if !guard.agents.contains_key(&request.agent_id)
+                || guard
+                    .sessions
+                    .get(&request.agent_id, &request.session_id)
+                    .is_none()
+            {
+                return Err(ApiError::not_found());
+            }
+            if let Some(answer) = replayed(
+                &guard,
+                &request.agent_id,
+                &request.session_id,
+                &request.text,
+                &request.idempotency_key,
+                &request.attachment_ids,
+                request.skill.as_deref(),
+                now_ms,
+            ) {
+                return answer;
+            }
+            if let Some(answer) = steer_replay(&guard, &request, now_ms)? {
+                return Ok(answer);
+            }
+            (
+                guard.history.store(),
+                guard
+                    .workspace
+                    .as_ref()
+                    .map(|workspace| workspace.root_path.clone()),
+            )
+        };
+        super::attachments::validate_attachment_ids(&request.attachment_ids)?;
+        if request.text.trim().is_empty() && request.attachment_ids.is_empty() {
+            return Err(ApiError::bad_request_static(
+                "text or attachments are required",
+            ));
+        }
+        if request.text.len() > crate::runs::MAX_RUN_INPUT_TEXT_BYTES {
+            return Err(ApiError::bad_request_static("text must be at most 32 KiB"));
+        }
+        let attachments = super::attachments::resolve_run_attachments(
+            store.as_ref(),
+            &request.agent_id,
+            &request.session_id,
+            &request.attachment_ids,
+        )
+        .await?;
+        if !attachments.is_empty() {
+            let root = root.ok_or_else(|| {
+                ApiError::conflict("Configure a workspace before using attachments")
+            })?;
+            super::attachments::validate_available(root, attachments.clone()).await?;
+        }
         let (record, previous_title, persist) = {
             let mut guard = self.state.write().await;
             let Some(runtime) = guard.agents.get(&request.agent_id) else {
@@ -468,6 +564,8 @@ impl AgentRunCoordinator {
                 &request.session_id,
                 &request.text,
                 &request.idempotency_key,
+                &request.attachment_ids,
+                request.skill.as_deref(),
                 now_ms,
             ) {
                 return answer;
@@ -501,6 +599,8 @@ impl AgentRunCoordinator {
                     let steer = RunSteer {
                         idempotency_key: request.idempotency_key.clone(),
                         text: request.text.clone(),
+                        attachment_ids: request.attachment_ids.clone(),
+                        skill: request.skill.clone(),
                         accepted_at_ms: self.acceptance_clock.next(),
                     };
                     guard
@@ -511,7 +611,9 @@ impl AgentRunCoordinator {
                         .push(steer.clone());
                     let persist = guard.control_plane_persist_request();
                     drop(guard);
-                    return self.join_steer(transaction, &run_id, steer, persist).await;
+                    return self
+                        .join_steer(transaction, &run_id, steer, attachments, persist)
+                        .await;
                 }
                 // Nothing to join, or the run is ending: the steer waits its
                 // turn as a message.
@@ -534,6 +636,7 @@ impl AgentRunCoordinator {
                 self.acceptance_clock.next(),
             );
             record.input.skill = request.skill.clone();
+            record.input.attachment_ids = request.attachment_ids.clone();
             // A new chat shows its first message's title from the moment it is
             // accepted, and keeps it if the run fails (M2 T17 Minor 14).
             let previous_title = retitle
@@ -617,6 +720,7 @@ impl AgentRunCoordinator {
         transaction: OwnedMutexGuard<()>,
         run_id: &str,
         steer: RunSteer,
+        attachments: Vec<crate::attachments::AttachmentRecord>,
         persist: ControlPlanePersistRequest,
     ) -> Result<AcceptedRun, ApiError> {
         if let Err(error) = persist.save().await {
@@ -631,7 +735,7 @@ impl AgentRunCoordinator {
         let joined = {
             let guard = self.state.read().await;
             if let Some(control) = guard.live.runs().control(run_id) {
-                let _ = control.steering.push(steer_content(&steer));
+                let _ = control.steering.push(steer_content(&steer, &attachments));
             }
             guard
                 .runs
@@ -663,6 +767,17 @@ impl AgentRunCoordinator {
                     .runs
                     .get(&left.run_id)
                     .is_some_and(|record| record.stop.is_some());
+            let bindings = guard
+                .runs
+                .get(&left.run_id)
+                .map(|record| {
+                    record
+                        .pending_steers
+                        .iter()
+                        .map(|steer| (steer.idempotency_key.clone(), steer.input()))
+                        .collect::<HashMap<_, _>>()
+                })
+                .unwrap_or_default();
             let steers = take_leftover_steers(&mut guard, &left.run_id, left.unread, &left.taken);
             if steers.is_empty() {
                 return;
@@ -685,6 +800,11 @@ impl AgentRunCoordinator {
                     let accepted_at_ms = accepted_at_ms(&content).unwrap_or(now_ms);
                     let idempotency_key =
                         metadata_text(&content, CLIENT_REQUEST_ID_METADATA_KEY).map(str::to_string);
+                    let input = idempotency_key
+                        .as_ref()
+                        .and_then(|key| bindings.get(key))
+                        .cloned()
+                        .unwrap_or_else(|| super::attachments::input_from_content(&content));
                     let mut record = RunRecord::queued(
                         RunStart {
                             agent_id: left.agent_id.clone(),
@@ -692,13 +812,14 @@ impl AgentRunCoordinator {
                             source: RunSource::Web,
                             source_ref: None,
                             idempotency_key,
-                            text: content.text,
+                            text: input.text.clone(),
                             model: model.clone(),
                             provider: provider.clone(),
                             parent_run_id: None,
                         },
                         accepted_at_ms,
                     );
+                    record.input = input;
                     let refused = if stopped {
                         Some((STOPPED_BEFORE_START, STOPPED_BEFORE_START_MESSAGE))
                     } else if open_slots == 0 {
@@ -753,11 +874,13 @@ impl AgentRunCoordinator {
                     .idempotency_key
                     .clone()
                     .unwrap_or_else(|| record.id.clone());
-                let start = self.web_start(
+                let start = self.web_start_with_attachments(
                     left.agent_id.clone(),
                     left.room_id.clone(),
                     record.input.text.clone(),
                     key,
+                    record.input.skill.clone(),
+                    record.input.attachment_ids.clone(),
                 );
                 self.enqueue(record, start);
             }
@@ -785,15 +908,49 @@ impl AgentRunCoordinator {
         text: &str,
         idempotency_key: &str,
     ) -> Option<Result<AcceptedRun, ApiError>> {
+        self.replayed_run_with_attachments(agent_id, session_id, text, idempotency_key, &[], None)
+            .await
+    }
+    pub(crate) async fn replayed_run_with_attachments(
+        &self,
+        agent_id: &str,
+        session_id: &str,
+        text: &str,
+        idempotency_key: &str,
+        attachment_ids: &[String],
+        skill: Option<&str>,
+    ) -> Option<Result<AcceptedRun, ApiError>> {
+        // A replay observes only committed acceptance, including when its save is in flight.
+        let _transaction = self.control_plane_transaction().await;
         let guard = self.state.read().await;
-        replayed(
+        if let Some(answer) = replayed(
             &guard,
             agent_id,
             session_id,
             text,
             idempotency_key,
+            attachment_ids,
+            skill,
             now_millis(),
-        )
+        ) {
+            return Some(answer);
+        }
+        let request = AcceptRun {
+            agent_id: agent_id.into(),
+            session_id: session_id.into(),
+            text: text.into(),
+            attachment_ids: attachment_ids.to_vec(),
+            idempotency_key: idempotency_key.into(),
+            mode: SessionRunMode::Queue,
+            source: RunSource::Web,
+            source_ref: None,
+            skill: skill.map(str::to_string),
+        };
+        match steer_replay(&guard, &request, now_millis()) {
+            Ok(Some(answer)) => Some(Ok(answer)),
+            Ok(None) => None,
+            Err(error) => Some(Err(error)),
+        }
     }
 
     /// The start of an accepted web message: the owner's turn in the
@@ -819,28 +976,38 @@ impl AgentRunCoordinator {
         idempotency_key: String,
         skill: Option<String>,
     ) -> QueuedRunStart {
+        self.web_start_with_attachments(agent_id, room_id, text, idempotency_key, skill, Vec::new())
+    }
+    pub(crate) fn web_start_with_attachments(
+        &self,
+        agent_id: String,
+        room_id: String,
+        _text: String,
+        idempotency_key: String,
+        _skill: Option<String>,
+        _attachment_ids: Vec<String>,
+    ) -> QueuedRunStart {
         let coordinator = self.clone();
         let room = room_id.clone();
         let start: StartFn = Box::new(
             move |run_id: String| -> BoxFuture<'static, Result<(), QueuedStartError>> {
                 Box::pin(async move {
-                    let mut metadata = BTreeMap::from([(
+                    let metadata = BTreeMap::from([(
                         CLIENT_REQUEST_ID_METADATA_KEY.to_string(),
                         DataValue::String(idempotency_key.clone()),
                     )]);
-                    if let Some(skill) = skill {
-                        metadata.insert(
-                            crate::skills::SKILL_METADATA_KEY.to_string(),
-                            DataValue::String(skill),
-                        );
-                    }
+                    let content = super::attachments::accepted_content(
+                        &coordinator.state,
+                        &agent_id,
+                        &room_id,
+                        &run_id,
+                        metadata,
+                    )
+                    .await
+                    .map_err(|error| QueuedStartError::Failed(error.message().to_string()))?;
                     let request = AgentRunRequest {
                         agent_id,
-                        content: Content {
-                            text,
-                            attachments: None,
-                            metadata: Some(metadata),
-                        },
+                        content,
                         room: RunRoom::Stable(room_id),
                         idempotency_key: Some(idempotency_key),
                         source: RunSource::Web,

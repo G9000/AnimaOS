@@ -2,6 +2,7 @@ mod agencies;
 mod agent_avatar;
 mod agents;
 mod approvals;
+mod attachments;
 mod capabilities;
 mod chatgpt;
 mod connectors;
@@ -18,6 +19,7 @@ mod mail;
 mod memories;
 mod memory_edits;
 mod multipart;
+pub(crate) use multipart::MAX_FORM_HEADER_BYTES;
 mod oauth_apps;
 mod profile;
 mod runs;
@@ -196,9 +198,11 @@ use crate::runtime_model::provider_summaries;
         usage::usage_summary, usage::usage_records, usage::usage_export,
         usage::get_pricing, usage::put_pricing,
         status::get_status,
+        attachments::upload, attachments::serve,
     ),
-    components(schemas(self::contracts::AgentSummariesEnvelope)),
+    components(schemas(self::contracts::AgentSummariesEnvelope, self::contracts::AttachmentEnvelope, self::contracts::AttachmentResponse)),
     tags(
+        (name = "attachments", description = "Owner-authorized session uploads and downloads"),
         (name = "health", description = "Daemon health endpoints"),
         (name = "agencies", description = "Agency generation and team drafting"),
         (name = "agents", description = "Agent management and execution"),
@@ -568,6 +572,14 @@ fn router_with_services_with_policies(
         .route(
             "/api/agents/{agent_id}/sessions/{session_id}/runs",
             get(runs::list_session_runs).post(runs::start_session_run),
+        )
+        .route(
+            "/api/agents/{agent_id}/sessions/{session_id}/attachments",
+            axum::routing::post(attachments::upload),
+        )
+        .route(
+            "/api/agents/{agent_id}/attachments/{attachment_id}",
+            get(attachments::serve),
         )
         .route("/api/agents/{agent_id}/runs/{run_id}", get(runs::get_run))
         .route(
@@ -2084,6 +2096,7 @@ async fn handle_memory_search(uri: Uri, state: &SharedDaemonState) -> AxumRespon
 #[cfg(test)]
 mod tests {
     mod approvals;
+    mod attachments;
     mod automations;
     mod capabilities;
     mod events;

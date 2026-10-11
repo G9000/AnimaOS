@@ -1,3 +1,5 @@
+mod attachments;
+
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -987,17 +989,21 @@ impl ConnectorManager {
         let commit_workers = Arc::clone(&self.workers);
         let request = AgentRunRequest {
             agent_id: connector.agent_id.clone(),
-            content: Content {
+            content: attachments::owner_content(
+                &self.state,
+                &connector.agent_id,
+                &connector.room_id,
+                accepted.as_deref(),
                 text,
-                metadata: Some(BTreeMap::from([
+                BTreeMap::from([
                     ("source".into(), DataValue::String("telegramThread".into())),
                     (
                         "connectorId".into(),
                         DataValue::String(connector.id.clone()),
                     ),
-                ])),
-                attachments: None,
-            },
+                ]),
+            )
+            .await?,
             room: RunRoom::Stable(connector.room_id.clone()),
             idempotency_key: Some(idempotency_key),
             source: RunSource::Telegram,
@@ -7628,4 +7634,5 @@ mod tests {
             settings: Some(AgentSettings::default()),
         }
     }
+    include!("runtime/attachment_tests.rs");
 }

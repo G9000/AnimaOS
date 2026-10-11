@@ -1277,7 +1277,7 @@ mod tests {
         }
 
         let snapshot = source.control_plane_snapshot();
-        assert_eq!(snapshot.version, 10);
+        assert_eq!(snapshot.version, 11);
         assert_eq!(
             snapshot.runs.len(),
             3,
@@ -1459,7 +1459,7 @@ mod tests {
             snapshot.version,
             crate::control_plane_store::CONTROL_PLANE_STORE_VERSION
         );
-        assert_eq!(snapshot.version, 10);
+        assert_eq!(snapshot.version, 11);
 
         let payload = serde_json::to_value(&snapshot).unwrap();
         assert_eq!(payload["inbound"][0]["processingState"], "stopped");
@@ -1481,7 +1481,7 @@ mod tests {
             .await
             .unwrap()
             .expect("the saved snapshot should load");
-        assert_eq!(loaded.version, 10);
+        assert_eq!(loaded.version, 11);
         assert_eq!(
             loaded.inbound[0].processing_state,
             InboundProcessingState::Stopped
@@ -2888,6 +2888,19 @@ impl DaemonState {
         if let Some(db) = &self.db {
             runtime.set_database(Arc::clone(db));
         }
+    }
+
+    /// The run copy owns this session/workspace binding; secondary calls keep the base adapter.
+    fn session_model_adapter(&self, agent_id: &str, room_id: &str) -> Arc<dyn ModelAdapter> {
+        Arc::new(crate::attachments::model::AttachmentModelAdapter::new(
+            Arc::clone(&self.model_adapter),
+            self.history.store(),
+            self.workspace
+                .as_ref()
+                .map(|workspace| workspace.root_path.clone()),
+            agent_id.to_string(),
+            crate::sessions::session_id_for_room(room_id),
+        ))
     }
 
     fn restore_agent_snapshot(&mut self, mut snapshot: AgentRuntimeSnapshot) -> Result<(), String> {

@@ -114,12 +114,7 @@ pub(crate) fn validate_upload(
                 && bytes.get(7).is_some_and(u8::is_ascii_digit)
                 && bytes.get(8).is_some_and(u8::is_ascii_whitespace)
         }
-        "doc" | "xls" | "ppt" => {
-            bytes.len() >= 512
-                && bytes.starts_with(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")
-                && bytes.get(28..30) == Some(&[0xfe, 0xff][..])
-                && matches!(le16(bytes, 30), Some(9 | 12))
-        }
+        "doc" | "xls" | "ppt" => valid_cfb_envelope(bytes),
         "docx" => valid_office_zip(bytes, b"word/document.xml"),
         "xlsx" => valid_office_zip(bytes, b"xl/workbook.xml"),
         "pptx" => valid_office_zip(bytes, b"ppt/presentation.xml"),
@@ -137,6 +132,80 @@ pub(crate) fn validate_upload(
         name: sanitize_upload_name(filename, &extension),
         mime: mime.into(),
         kind,
+    })
+}
+
+// Legacy Office is saved, not parsed: validate only a plausible CFB envelope.
+// The extension selects its public family MIME; these checks make no family claim.
+fn valid_cfb_envelope(bytes: &[u8]) -> bool {
+    if bytes.len() < 512
+        || !bytes.starts_with(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")
+        || le16(bytes, 28) != Some(0xfffe)
+        || le16(bytes, 32) != Some(6)
+    {
+        return false;
+    }
+    let sector = match (le16(bytes, 26), le16(bytes, 30)) {
+        (Some(3), Some(9)) => 512usize,
+        (Some(4), Some(12)) => 4096usize,
+        _ => return false,
+    };
+    if bytes.len() % sector != 0
+        || bytes.len() < sector * 3
+        || (sector == 512 && le32(bytes, 40) != Some(0))
+    {
+        return false;
+    }
+    let count = bytes.len() / sector - 1;
+    let Some(fats) = le32(bytes, 44)
+        .map(|value| value as usize)
+        .filter(|value| *value > 0 && *value < count)
+    else {
+        return false;
+    };
+    if le32(bytes, 56) != Some(4096) {
+        return false;
+    }
+    let valid_sector = |id: u32| (id as usize) < count;
+    let Some(directory) = le32(bytes, 48).filter(|id| valid_sector(*id)) else {
+        return false;
+    };
+    let Some(first_fat) = le32(bytes, 76).filter(|id| valid_sector(*id) && *id != directory) else {
+        return false;
+    };
+    for index in 0..fats.min(109) {
+        if !le32(bytes, 76 + index * 4).is_some_and(valid_sector) {
+            return false;
+        }
+    }
+    if fats > 109
+        && (!le32(bytes, 68).is_some_and(valid_sector)
+            || !le32(bytes, 72).is_some_and(|value| value > 0 && (value as usize) < count))
+    {
+        return false;
+    }
+    let dir = (directory as usize + 1) * sector;
+    let Some(name_len) = le16(bytes, dir + 64)
+        .map(|value| value as usize)
+        .filter(|value| (2..=64).contains(value) && *value % 2 == 0)
+    else {
+        return false;
+    };
+    if name_len != 22
+        || bytes.get(dir + 66) != Some(&5)
+        || le16(bytes, dir + name_len - 2) != Some(0)
+        || bytes.get(dir..dir + 20) != Some(&b"R\0o\0o\0t\0 \0E\0n\0t\0r\0y\0"[..])
+    {
+        return false;
+    }
+    if !le32(bytes, dir + 116).is_some_and(|id| id == 0xfffffffe || valid_sector(id)) {
+        return false;
+    }
+    let fat = (first_fat as usize + 1) * sector;
+    (fat..fat + sector).step_by(4).all(|offset| {
+        le32(bytes, offset).is_some_and(|id| {
+            valid_sector(id) || matches!(id, 0xffffffff | 0xfffffffe | 0xfffffffd | 0xfffffffc)
+        })
     })
 }
 
@@ -445,9 +514,7 @@ mod tests {
             "application/pdf"
         );
         assert!(validate_upload("file.pdf", b"%PDF-").is_err());
-        let mut cfb = vec![0; 512];
-        cfb[..8].copy_from_slice(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1");
-        cfb[28..32].copy_from_slice(&[0xfe, 0xff, 9, 0]);
+        let cfb = cfb_envelope();
         for ext in ["doc", "xls", "ppt"] {
             assert_eq!(
                 validate_upload(&format!("file.{ext}"), &cfb).unwrap().kind,
@@ -538,5 +605,80 @@ mod tests {
         assert!(name.ends_with(".txt"));
         assert!(!name.starts_with('.'));
         assert_eq!(sanitize_upload_name("notes.txt... ", "txt"), "notes.txt");
+    }
+    #[test]
+    fn attachment_cfb_rejects_header_only_and_accepts_plausible_envelope() {
+        let mut header = vec![0u8; 512];
+        header[..8].copy_from_slice(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1");
+        header[26..28].copy_from_slice(&3u16.to_le_bytes());
+        header[28..30].copy_from_slice(&0xfffeu16.to_le_bytes());
+        header[30..32].copy_from_slice(&9u16.to_le_bytes());
+        header[32..34].copy_from_slice(&6u16.to_le_bytes());
+        for extension in ["doc", "xls", "ppt"] {
+            assert!(
+                validate_upload(&format!("legacy.{extension}"), &header).is_err(),
+                "header-only CFB stub"
+            );
+        }
+        let plausible = cfb_envelope();
+        for extension in ["doc", "xls", "ppt"] {
+            assert_eq!(
+                validate_upload(&format!("legacy.{extension}"), &plausible)
+                    .unwrap()
+                    .kind,
+                AttachmentKind::Document
+            );
+        }
+        let mut version4 = vec![0u8; 12288];
+        version4[..512].copy_from_slice(&plausible[..512]);
+        version4[26..28].copy_from_slice(&4u16.to_le_bytes());
+        version4[30..32].copy_from_slice(&12u16.to_le_bytes());
+        version4[40..44].copy_from_slice(&1u32.to_le_bytes());
+        version4[4096..4608].copy_from_slice(&plausible[512..1024]);
+        version4[8192..].fill(0xff);
+        version4[8192..8704].copy_from_slice(&plausible[1024..1536]);
+        assert!(validate_upload("version4.doc", &version4).is_ok());
+        for truncated in [&plausible[..1024], &plausible[..plausible.len() - 1]] {
+            assert!(validate_upload("legacy.doc", truncated).is_err());
+        }
+        let mut bad = plausible.clone();
+        bad[48..52].copy_from_slice(&99u32.to_le_bytes());
+        assert!(validate_upload("legacy.doc", &bad).is_err());
+        let mut bad = plausible.clone();
+        bad[512 + 66] = 0;
+        assert!(validate_upload("legacy.doc", &bad).is_err());
+    }
+    fn cfb_envelope() -> Vec<u8> {
+        let mut bytes = vec![0u8; 1536];
+        bytes[..8].copy_from_slice(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1");
+        bytes[26..28].copy_from_slice(&3u16.to_le_bytes());
+        bytes[28..30].copy_from_slice(&0xfffeu16.to_le_bytes());
+        bytes[30..32].copy_from_slice(&9u16.to_le_bytes());
+        bytes[32..34].copy_from_slice(&6u16.to_le_bytes());
+        bytes[44..48].copy_from_slice(&1u32.to_le_bytes());
+        bytes[48..52].copy_from_slice(&0u32.to_le_bytes());
+        bytes[56..60].copy_from_slice(&4096u32.to_le_bytes());
+        bytes[60..64].copy_from_slice(&0xfffffffeu32.to_le_bytes());
+        bytes[68..72].copy_from_slice(&0xfffffffeu32.to_le_bytes());
+        for offset in (76..512).step_by(4) {
+            bytes[offset..offset + 4].copy_from_slice(&0xffffffffu32.to_le_bytes());
+        }
+        bytes[76..80].copy_from_slice(&1u32.to_le_bytes());
+        for (index, unit) in "Root Entry\0".encode_utf16().enumerate() {
+            bytes[512 + index * 2..514 + index * 2].copy_from_slice(&unit.to_le_bytes());
+        }
+        bytes[512 + 64..512 + 66].copy_from_slice(&22u16.to_le_bytes());
+        bytes[512 + 66] = 5;
+        bytes[512 + 67] = 1;
+        for offset in [68, 72, 76] {
+            bytes[512 + offset..516 + offset].copy_from_slice(&0xffffffffu32.to_le_bytes());
+        }
+        bytes[512 + 116..512 + 120].copy_from_slice(&0xfffffffeu32.to_le_bytes());
+        for offset in (1024..1536).step_by(4) {
+            bytes[offset..offset + 4].copy_from_slice(&0xffffffffu32.to_le_bytes());
+        }
+        bytes[1024..1028].copy_from_slice(&0xfffffffeu32.to_le_bytes());
+        bytes[1028..1032].copy_from_slice(&0xfffffffdu32.to_le_bytes());
+        bytes
     }
 }

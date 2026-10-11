@@ -45,14 +45,38 @@ pub(crate) struct WorkspaceBytes {
 impl WorkspaceBytes {
     /// Canonical binding and capability are captured once per operation.
     pub(crate) fn open(root: &Path) -> io::Result<Self> {
-        let canonical_root = root.canonicalize()?;
-        let directory = if let (Some(parent), Some(name)) =
-            (canonical_root.parent(), canonical_root.file_name())
-        {
-            Dir::open_ambient_dir(parent, cap_std::ambient_authority())?.open_dir_nofollow(name)?
-        } else {
-            Dir::open_ambient_dir(&canonical_root, cap_std::ambient_authority())?
-        };
+        Self::open_canonical(root.canonicalize()?)
+    }
+    fn open_canonical(canonical_root: PathBuf) -> io::Result<Self> {
+        // Only the filesystem/volume anchor is ambient authority. Every
+        // canonical normal component is opened relative to a held directory,
+        // so replacing any ancestor with a link cannot redirect root capture.
+        let mut anchor = PathBuf::new();
+        let mut names = Vec::new();
+        for component in canonical_root.components() {
+            match component {
+                std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                    anchor.push(component.as_os_str())
+                }
+                std::path::Component::Normal(name) => names.push(name.to_os_string()),
+                _ => return Err(unavailable()),
+            }
+        }
+        if !anchor.is_absolute() {
+            return Err(unavailable());
+        }
+        let mut directory = Dir::open_ambient_dir(&anchor, cap_std::ambient_authority())?;
+        for name in names {
+            let metadata = directory.symlink_metadata(&name)?;
+            if !metadata.is_dir() || linked(&metadata) {
+                return Err(unavailable());
+            }
+            directory = directory.open_dir_nofollow(&name)?;
+            let metadata = directory.dir_metadata()?;
+            if !metadata.is_dir() || linked(&metadata) {
+                return Err(unavailable());
+            }
+        }
         let metadata = directory.dir_metadata()?;
         if !metadata.is_dir() || linked(&metadata) {
             return Err(unavailable());
@@ -231,5 +255,39 @@ mod tests {
         drop(held);
         std::fs::remove_dir(&root).unwrap();
         std::fs::remove_dir_all(&base).unwrap();
+    }
+    #[cfg(windows)]
+    #[test]
+    fn workspace_bytes_initial_capture_refuses_replaced_ancestor() {
+        let base =
+            std::env::temp_dir().join(format!("anima-capture-root-{}", uuid::Uuid::new_v4()));
+        let ancestor = base.join("ancestor");
+        let root = ancestor.join("workspace");
+        let retained = base.join("retained");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(outside.join("workspace")).unwrap();
+        let canonical = root.canonicalize().unwrap();
+        std::fs::rename(&ancestor, &retained).unwrap();
+        let result = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(ancestor.to_string_lossy().replace('/', r"\"))
+            .arg(outside.to_string_lossy().replace('/', r"\"))
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "junction fixture: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let opened = WorkspaceBytes::open_canonical(canonical);
+        let refused = opened.is_err();
+        drop(opened);
+        std::fs::remove_dir(&ancestor).unwrap();
+        std::fs::remove_dir_all(&base).unwrap();
+        assert!(
+            refused,
+            "a swapped ancestor cannot grant authority over another workspace"
+        );
     }
 }

@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use super::registry::LiveRunView;
 use super::MAX_PREVIEW_BYTES;
 use crate::approvals::ApprovalRequest;
+use crate::attachments::AttachmentMetadata;
 use crate::history::role_name;
 use crate::routes::{ApprovalResponse, RunResponse};
 use crate::runs::{RunRecord, RunStatus};
@@ -25,6 +26,8 @@ pub(crate) enum LiveEventBody {
     RunSteered {
         message_id: String,
         text: String,
+        attachment_ids: Vec<String>,
+        attachments: Vec<AttachmentMetadata>,
     },
     RunCompleted(RunRecord),
     RunFailed(RunRecord),
@@ -168,9 +171,18 @@ impl LiveEvent {
                 value["run"] = run_json(record);
             }
             LiveEventBody::RunProgress { phase } => value["phase"] = json!(phase),
-            LiveEventBody::RunSteered { message_id, text } => {
+            LiveEventBody::RunSteered {
+                message_id,
+                text,
+                attachment_ids,
+                attachments,
+            } => {
                 value["messageId"] = json!(message_id);
                 value["text"] = json!(text);
+                if !attachment_ids.is_empty() {
+                    value["attachmentIds"] = json!(attachment_ids);
+                    value["attachments"] = json!(attachments);
+                }
             }
             LiveEventBody::StepDelta {
                 step_id,

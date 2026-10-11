@@ -260,10 +260,44 @@ impl RunObserver for RunEvents {
                     recovered,
                 })));
             }
-            RunFrame::Steered { message_id, text } => {
-                inner.publish_after_flush(Some(
-                    inner.event(LiveEventBody::RunSteered { message_id, text }),
-                ));
+            RunFrame::Steered {
+                message_id,
+                text,
+                content,
+            } => {
+                let attachments = content
+                    .attachments
+                    .iter()
+                    .flatten()
+                    .filter_map(|reference| {
+                        crate::attachments::metadata::matching_metadata(&content, reference)
+                    })
+                    .collect::<Vec<_>>();
+                let attachment_ids = attachments
+                    .iter()
+                    .map(|record| record.id.clone())
+                    .collect::<Vec<_>>();
+                let text = if attachments.is_empty() {
+                    text
+                } else {
+                    content
+                        .metadata
+                        .as_ref()
+                        .and_then(|metadata| {
+                            metadata.get(crate::attachments::ATTACHMENT_INPUT_TEXT_KEY)
+                        })
+                        .and_then(|value| match value {
+                            anima_core::DataValue::String(value) => Some(value.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or(text)
+                };
+                inner.publish_after_flush(Some(inner.event(LiveEventBody::RunSteered {
+                    message_id,
+                    text,
+                    attachment_ids,
+                    attachments,
+                })));
             }
         }
     }

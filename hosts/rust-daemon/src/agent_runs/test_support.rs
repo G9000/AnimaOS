@@ -370,6 +370,7 @@ pub(crate) async fn add_chat(coordinator: &AgentRunCoordinator, agent_id: &str, 
 /// A web message to queue whose text is its key.
 pub(crate) fn accept(agent_id: &str, session_id: &str, key: &str) -> AcceptRun {
     AcceptRun {
+        attachment_ids: Vec::new(),
         agent_id: agent_id.into(),
         session_id: session_id.into(),
         text: key.into(),

@@ -21,11 +21,13 @@ use crate::schedules::ScheduledPromptRecord;
 /// rules, and session allowances (M4); version 8 adds the skills registry and
 /// skill drafts (M5); version 9 adds the automation fields, the `cron` and
 /// `once` triggers, and the fire log (M6); version 10 adds the owner's pricing
-/// overrides (M8). Older daemons refuse a newer version, so the first start of
+/// overrides (M8); version 11 adds attachment inputs on steers (M9). Older
+/// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 10;
-/// The version that added automations: older snapshots are backed up as
-/// `.pre-automations.bak` at the latest, this one as `.pre-usage.bak`.
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 11;
+/// Version 10 pricing snapshots are backed up as `.pre-attachments.bak`.
+pub(crate) const USAGE_STORE_VERSION: u32 = 10;
+/// Version 9 automation snapshots are backed up as `.pre-usage.bak`.
 pub(crate) const AUTOMATIONS_STORE_VERSION: u32 = 9;
 /// The version that added skills: older snapshots are backed up as
 /// `.pre-skills.bak` at the latest, this one as `.pre-automations.bak`.
@@ -54,6 +56,7 @@ pub(crate) const PRE_AUTOMATIONS_BACKUP_SUFFIX: &str = ".pre-automations.bak";
 /// Suffix of the JSON backup taken before the usage (pricing overrides)
 /// upgrade.
 pub(crate) const PRE_USAGE_BACKUP_SUFFIX: &str = ".pre-usage.bak";
+pub(crate) const PRE_ATTACHMENTS_BACKUP_SUFFIX: &str = ".pre-attachments.bak";
 const CONTROL_PLANE_SNAPSHOT_KEY: &str = "control_plane";
 
 #[derive(Clone, Debug)]
@@ -303,6 +306,16 @@ pub(crate) fn pre_usage_backup_path(path: &Path) -> PathBuf {
     path.with_file_name(name)
 }
 
+/// Where a version 10 snapshot is backed up before attachment steer inputs.
+pub(crate) fn pre_attachments_backup_path(path: &Path) -> PathBuf {
+    let mut name = path
+        .file_name()
+        .map(|name| name.to_os_string())
+        .unwrap_or_default();
+    name.push(PRE_ATTACHMENTS_BACKUP_SUFFIX);
+    path.with_file_name(name)
+}
+
 /// Where the JSON snapshot of `loaded_version` is backed up before it is
 /// upgraded: each upgrade keeps its own file, so a later upgrade never
 /// overwrites an earlier one's backup.
@@ -317,10 +330,10 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
         pre_skills_backup_path(path)
     } else if loaded_version < AUTOMATIONS_STORE_VERSION {
         pre_automations_backup_path(path)
-    } else {
-        // A future version 11 must add its own branch above, or its upgrade
-        // would overwrite `.pre-usage.bak`.
+    } else if loaded_version < USAGE_STORE_VERSION {
         pre_usage_backup_path(path)
+    } else {
+        pre_attachments_backup_path(path)
     }
 }
 
@@ -664,7 +677,7 @@ mod tests {
         let snapshot = ControlPlaneSnapshot::new(vec![], vec![]);
         let payload = serde_json::to_value(snapshot).expect("snapshot should serialize");
 
-        assert_eq!(payload["version"], 10);
+        assert_eq!(payload["version"], 11);
         assert_eq!(payload["scheduleFires"], serde_json::json!([]));
         assert_eq!(payload["connectors"], serde_json::json!([]));
         assert_eq!(payload["credentialCleanup"], serde_json::json!([]));
@@ -801,7 +814,10 @@ mod tests {
 
     #[test]
     fn the_version_constants() {
-        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 10);
+        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 11);
+        assert_eq!(super::USAGE_STORE_VERSION, 10);
+        assert_eq!(super::PRE_ATTACHMENTS_BACKUP_SUFFIX, ".pre-attachments.bak");
+        assert_eq!(super::postgres_backup_key(10), "control_plane.backup.10");
         assert_eq!(super::AUTOMATIONS_STORE_VERSION, 9);
         assert_eq!(super::PRE_USAGE_BACKUP_SUFFIX, ".pre-usage.bak");
     }
@@ -870,6 +886,7 @@ mod tests {
             (7, ".pre-skills.bak"),
             (8, ".pre-automations.bak"),
             (9, ".pre-usage.bak"),
+            (10, ".pre-attachments.bak"),
         ] {
             assert_eq!(
                 super::pre_upgrade_backup_path(path, loaded),
@@ -1050,5 +1067,42 @@ mod tests {
             row.get::<serde_json::Value, _>("payload"),
             serde_json::json!({"version": 4, "agents": []})
         );
+    }
+    #[tokio::test]
+    async fn version_ten_attachment_backup_preserves_usage_backup_and_exact_bytes() {
+        let path = test_snapshot_path("attachments-backup");
+        let prior = "usage backup";
+        std::fs::write(super::pre_usage_backup_path(&path), prior).unwrap();
+        let original = "{\n  \"version\": 10, \"agents\": [], \"swarms\": []\n}\n";
+        std::fs::write(&path, original).unwrap();
+        let config = super::ControlPlaneStoreConfig::Json(path.clone());
+        let backup = super::write_pre_upgrade_backup(&config, 10).await.unwrap();
+        assert_eq!(
+            backup,
+            super::pre_attachments_backup_path(&path)
+                .display()
+                .to_string()
+        );
+        assert_eq!(
+            std::fs::read_to_string(super::pre_attachments_backup_path(&path)).unwrap(),
+            original
+        );
+        assert_eq!(
+            std::fs::read_to_string(super::pre_usage_backup_path(&path)).unwrap(),
+            prior
+        );
+        assert_eq!(super::postgres_backup_key(10), "control_plane.backup.10");
+        assert_no_temp_residue(&path);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+    #[test]
+    fn future_attachment_snapshot_is_refused() {
+        let path = test_snapshot_path("future-attachments");
+        std::fs::write(&path,serde_json::json!({"version":super::CONTROL_PLANE_STORE_VERSION+1,"agents":[],"swarms":[]}).to_string()).unwrap();
+        assert!(super::load_json_snapshot(&path)
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported control plane store version"));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }
