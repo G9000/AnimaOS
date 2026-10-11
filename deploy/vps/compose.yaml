@@ -54,6 +54,7 @@ services:
       ANIMAOS_RS_PERSISTENCE_MODE: memory
       ANIMAOS_RS_CONTROL_PLANE_FILE: /state/control-plane.json
       ANIMAOS_RS_MEMORY_SQLITE_FILE: /state/memory.sqlite
+      ANIMAOS_RS_HISTORY_SQLITE_FILE: /state/history.sqlite
       ANIMAOS_RS_MEMORY_EMBEDDINGS: local
       ANIMAOS_WORKSPACE_ROOT: /workspace
       ANIMA_KEYRING_PASSWORD: ${ANIMA_KEYRING_PASSWORD:?Generate and retain a keyring password}

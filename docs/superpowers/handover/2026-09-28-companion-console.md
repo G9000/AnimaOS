@@ -1,8 +1,37 @@
-# Handover: companion console build (M0–M8 merged; M9 PR open)
+# Handover: companion console build (M0–M9 merged; M10 active)
 
 This document is for the next agent picking up the companion console upgrade. Read it first; it tells you where everything is and what to do next.
 
-## Start here (2026-10-11): M9 PR #15 open; M10 plan prepared
+## Start here (2026-10-12): M9 merged; M10 implementation active
+
+- Owner explicitly authorized **merge PR #15 and begin M10**. PR #15 is merged at
+  `647d606`, including final handover commit `c9909df`. M0–M9 are now on main.
+- Current branch is `feat/companion-console-m10`, cut from that merged main.
+  Published lean plan: `docs/superpowers/plans/2026-09-23-companion-console-m10.md`
+  (controller's top-five binding risks already appended). Plan commit: `483a891`.
+- Owner authorized **unsigned commits** to avoid GPG while absent. This overrides
+  all historical signing/pinentry instructions below. Controller uses per-command
+  `git -c commit.gpgsign=false commit`, without changing global configuration.
+- Continue Task 2 transport/shutdown, Task 3 fenced Telegram delivery, Task 4
+  snapshot/module extraction, Tasks 5–7 offline browser/compatibility and Tasks
+  8–9 API/deployment docs; then batch reviews, one fix wave and local gates.
+  Working ledger/rules: `.superpowers/sdd/2026-09-23-companion-console-m10/`.
+- Explicit history deployment path and four offline contracts/parser checks pass.
+  Implementation remains under review and full M10 gates have not run yet.
+- Preserve unrelated `nx.json`; never stage it or `anima.yaml`. All no-service,
+  no-dependency, explicit-path and no-worktree/stash/reset/restore rules still apply.
+- Snapshot remains v11; ephemeral delivery claims need no schema/version bump.
+  M9 passing local evidence is preserved below; it is not a substitute for M10 gates.
+- Hermes reuse remains focused code/behavior, with retained MIT provenance. Small
+  connector priorities are Telegram, Discord, Gmail, Calendar and Drive; future
+  community lifecycle connectors remain follow-up work rather than M10 scope.
+- Push completed M10 and open a PR to main after gates. **Do not merge M10 until
+  a new explicit owner merge instruction.** Runtime/container/TLS/provider manual
+  acceptance remains unexecuted under the no-service constraint.
+
+The following 2026-10-11 section is historical M9 evidence.
+
+## Historical state (2026-10-11): M9 PR #15 open; M10 plan prepared
 
 **State**
 
