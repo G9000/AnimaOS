@@ -61,6 +61,11 @@ impl DaemonState {
             self.calendar_manager.clone(),
         )
         .with_mail(self.mail_manager.clone())
+        .with_drive(
+            self.drive_manager
+                .as_ref()
+                .and_then(|manager| manager.upgrade()),
+        )
     }
 
     /// The room's hot messages the model may see, oldest first

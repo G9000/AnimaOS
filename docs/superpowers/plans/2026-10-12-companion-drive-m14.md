@@ -8,9 +8,9 @@
 
 **Tech stack:** Existing Rust axum/reqwest/tokio/serde/base64/sha2/uuid/zeroize/keyring; existing SDK/React web; Bun/Nx. No dependency, feature, package, service or database additions.
 
-**Activation:** M12 is merged at `f7a58084bc6a36273f528882463b4f516ef96bb1`; M13 is in progress on `g9000/companion-discord-m13`. This draft deliberately makes no claim about its final merge SHA or validation. Root activates `g9000/companion-drive-m14` from merged M13 main, updates base/source facts, freezes five risks, then dispatches bounded workers.
+**Activation:** M13 merged at `7f42df8334af7e0afdb71f83a5d52aeaa48e6d67`; M14 runs on `g9000/companion-drive-m14` cut from that updated main. Plan/activation commit `3cc4b78` preceded implementation. The final binding controller section records the accepted interfaces and source/protocol choices.
 
-## Read first and current evidence
+## Read first and preparation evidence (historical baseline)
 
 - `AGENTS.md`.
 - Start-here section of `docs/superpowers/handover/2026-09-28-companion-console.md`.
@@ -265,50 +265,50 @@ Worker A: native models/client/store, source provenance. Worker B: manager/state
 
 Files: create `connectors/drive/{model,client,store}.rs`, corresponding focused tests, `HERMES-NOTICE`. B registers module/tests. Do not edit manifests, gcalendar token serialization or host registry.
 
-- [ ] Write meaningful fake HTTP/store regressions first; provide exact focused test names to root for serialized red/green.
-- [ ] Implement model bounds/typed static errors, required scope/account identity and deterministic source URLs.
-- [ ] Adapt upstream `drive_get` metadata projection and `drive_download` metadata-first export/media branch; exact attribution.
-- [ ] Implement fixed-host no-redirect client, bounded JSON/stream, per-request deadlines, supported MIME and no external links.
-- [ ] Implement generation-specific private keyring/in-memory store with zeroizing token/scopes payload and static errors; no actual vault calls in fixtures.
-- [ ] Verify fake tests: path-ID rejection, wrong metadata ID, oversized/chunked response, invalid UTF-8, redirect rejected, unsupported format no content request, Docs text export, stored-text media, denied download, scope missing/reduced, refresh token retention, account missing/mismatch and secret redaction.
+- [x] Write meaningful fake HTTP/store regressions first; provide exact focused test names to root for serialized red/green.
+- [x] Implement model bounds/typed static errors, required scope/account identity and deterministic source URLs.
+- [x] Adapt upstream `drive_get` metadata projection and `drive_download` metadata-first export/media branch; exact attribution.
+- [x] Implement fixed-host no-redirect client, bounded JSON/stream, per-request deadlines, supported MIME and no external links.
+- [x] Implement generation-specific private keyring/in-memory store with zeroizing token/scopes payload and static errors; no actual vault calls in fixtures.
+- [x] Verify fake tests: path-ID rejection, wrong metadata ID, oversized/chunked response, invalid UTF-8, redirect rejected, unsupported format no content request, Docs text export, stored-text media, denied download, scope missing/reduced, refresh token retention, account missing/mismatch and secret redaction.
 
 ### B — Native authority, persistence, owner routes and tools
 
 Files: create `connectors/drive/mod.rs`, `routes/gdrive.rs`, `routes/contracts/gdrive.rs`, `tools/drive.rs`, manager/route regressions. Modify `connectors/mod.rs`, `app.rs`, `state.rs`, `state/{run_commit,swarm_runtime}.rs`, `control_plane_store.rs`, `routes/{mod,contracts/mod}.rs`, `routes/tests/{docs_contracts,...}.rs`, `tools.rs`, affected existing test fixtures.
 
-- [ ] Freeze consumption of A interfaces with root before source edits.
-- [ ] Implement manager with weak ownership, per-agent locks, private pending PKCE, app lifecycle lease and atomic persistence rollback.
-- [ ] Implement immutable selection, generation-aware credentials, callback single-use/expiry/config/account checks, local revoke then cleanup; no global provider revoke.
-- [ ] Wire native manager to runtime/AppState and weak state handle; add Drive dependency checks to both Google app update/remove flows.
-- [ ] Add persisted Drive records version 13/serde defaults, validation, pre-Drive backup for v12 and future-version rejection. Preserve M13 Discord/Telegram fields.
-- [ ] Wire `drive_search`/`drive_read` descriptors, tool grants and current-agent dispatch through both run and swarm contexts; integrate existing delegation permission checks.
-- [ ] Add four guarded routes/contracts plus Drive callback status; callback authorizes state/PKCE rather than owner headers.
-- [ ] Meaningful manager tests: unselected read before token/network, other-agent denial, removed tool denial, literal selected-name search/no files.list, stale callback, callback replay, reconnect exact-selection conflict, wrong account, provider revision changed, refreshed generation disconnected during await, fetched content revoked before return.
-- [ ] Failure tests: Pairing save rollback/no consent link, Active save failure/no leaked grant, credential put failure, local disconnect save failure remains reviewable, vault cleanup failure leaves revoked tombstone, agent deletion, revoked/missing key, pending restart invalidation, version12 defaults/backup/version14 refusal, secret-free snapshots.
-- [ ] Tool result tests: full/returned-byte provenance digests, scalar truncation, post-read changed metadata discarded, unsupported binary only metadata, cancellation/timeouts, untrusted contents never auto memory/action.
-- [ ] Route tests: all owner guards before state/transport, no-store on all statuses/callback, strict/bounded body/query, owner agent/connector binding, callback generation/replay, static errors and OpenAPI operation/schema registration.
+- [x] Freeze consumption of A interfaces with root before source edits.
+- [x] Implement manager with weak ownership, per-agent locks, private pending PKCE, app lifecycle lease and atomic persistence rollback.
+- [x] Implement immutable selection, generation-aware credentials, callback single-use/expiry/config/account checks, local revoke then cleanup; no global provider revoke.
+- [x] Wire native manager to runtime/AppState and weak state handle; add Drive dependency checks to both Google app update/remove flows.
+- [x] Add persisted Drive records version 13/serde defaults, validation, pre-Drive backup for v12 and future-version rejection. Preserve M13 Discord/Telegram fields.
+- [x] Wire `drive_search`/`drive_read` descriptors, tool grants and current-agent dispatch through both run and swarm contexts; integrate existing delegation permission checks.
+- [x] Add four guarded routes/contracts plus Drive callback status; callback authorizes state/PKCE rather than owner headers.
+- [x] Meaningful manager tests: unselected read before token/network, other-agent denial, removed tool denial, literal selected-name search/no files.list, stale callback, callback replay, reconnect exact-selection conflict, wrong account, provider revision changed, refreshed generation disconnected during await, fetched content revoked before return.
+- [x] Failure tests: Pairing save rollback/no consent link, Active save failure/no leaked grant, credential put failure, local disconnect save failure remains reviewable, vault cleanup failure leaves revoked tombstone, agent deletion, revoked/missing key, pending restart invalidation, version12 defaults/backup/version14 refusal, secret-free snapshots.
+- [x] Tool result tests: full/returned-byte provenance digests, scalar truncation, post-read changed metadata discarded, unsupported binary only metadata, cancellation/timeouts, untrusted contents never auto memory/action.
+- [x] Route tests: all owner guards before state/transport, no-store on all statuses/callback, strict/bounded body/query, owner agent/connector binding, callback generation/replay, static errors and OpenAPI operation/schema registration.
 
 ### C — SDK and native web card
 
 Files: `packages/sdk/src/{connectors,connectors.spec,index}.ts`; create `apps/web/src/hooks/useDriveIntegrations.ts`/test and `components/GoogleDriveCard.tsx`/test; modify `components/ConnectorsView.tsx`/test; minimal daemon API re-export if the existing SDK surface requires it.
 
-- [ ] Consume frozen public contracts only; source from SDK, no browser-created grants or provider tokens.
-- [ ] Add encoded Drive status/connect/disconnect methods and tests for exact input/envelopes/errors/paths.
-- [ ] Implement stale-response-safe hook and card with selected IDs, consent disclosure, supported-format/search limits, reconnect/disconnect and provider-wide revocation warning/link.
-- [ ] Verify setup ID bounds/duplicates, no empty selection, disabled busy actions, pairing to Active explicit refresh, missing Google app setup, unsupported daemon, reauth, cleanup pending and safe consent URLs.
-- [ ] Verify rapid agent switch/mutation response cannot leak prior agent IDs/status/account; unmount does not mutate data; other connector cards preserve working flows.
+- [x] Consume frozen public contracts only; source from SDK, no browser-created grants or provider tokens.
+- [x] Add encoded Drive status/connect/disconnect methods and tests for exact input/envelopes/errors/paths.
+- [x] Implement stale-response-safe hook and card with selected IDs, consent disclosure, supported-format/search limits, reconnect/disconnect and provider-wide revocation warning/link.
+- [x] Verify setup ID bounds/duplicates, no empty selection, disabled busy actions, pairing to Active explicit refresh, missing Google app setup, unsupported daemon, reauth, cleanup pending and safe consent URLs.
+- [x] Verify rapid agent switch/mutation response cannot leak prior agent IDs/status/account; unmount does not mutate data; other connector cards preserve working flows.
 
 ## Controller review, validation and publication
 
-- [ ] Root rechecks final M13 source/version/controller seams after merge; publishes this plan and five binding risks before implementation.
-- [ ] Root runs focused red/green checks requested by workers; no new target directory or parallel Rust compilation.
-- [ ] One daemon batch review plus final SDK/web review; one combined fix wave only unless new meaningful failure warrants another.
-- [ ] Root uses already-resolved project names `rust-daemon`, `@animaOS-SWARM/sdk`, `@animaOS-SWARM/web`; refresh project metadata with read-only Nx command if merged M13 changes target contracts.
-- [ ] Required current-tree Rust gate in PowerShell: `$env:CARGO_INCREMENTAL='0'; $env:CI='1'; bun x nx run rust-daemon:test --skipNxCache`. Expected all required tests pass; ignored live/Postgres tests remain reported separately.
-- [ ] Rust formatting gate: `bun x nx run rust-daemon:lint --skipNxCache` with same serialized environment and existing target directory.
-- [ ] SDK/web: `bun x nx run-many --targets=test,typecheck,build --projects=@animaOS-SWARM/sdk,@animaOS-SWARM/web --skipNxCache` with `CI=1`; use bounded tests, no daemon/service launch. Root checks flags if final workspace target setup differs.
-- [ ] No workspace-dev/Astro gate unless those sources are actually changed; no launcher change is in this scope. Markdown consistency/formatting only for owned docs.
-- [ ] Root updates daemon README, existing Google OAuth setup docs, connector contribution guidance and handover for selected Drive scope, provider consent/setup/API enablement, unsupported formats, local disconnect and v13/pre-Drive backup. No hosted/live readiness claim.
+- [x] Root rechecks final M13 source/version/controller seams after merge; publishes this plan and five binding risks before implementation.
+- [x] Root runs focused red/green checks requested by workers; no new target directory or parallel Rust compilation.
+- [x] One daemon batch review plus final SDK/web review; one combined fix wave only unless new meaningful failure warrants another.
+- [x] Root uses already-resolved project names `rust-daemon`, `@animaOS-SWARM/sdk`, `@animaOS-SWARM/web`; refresh project metadata with read-only Nx command if merged M13 changes target contracts.
+- [x] Required current-tree Rust gate in PowerShell: `$env:CARGO_INCREMENTAL='0'; $env:CI='1'; bun x nx run rust-daemon:test --skipNxCache`. Expected all required tests pass; ignored live/Postgres tests remain reported separately.
+- [x] Rust formatting gate: `bun x nx run rust-daemon:lint --skipNxCache` with same serialized environment and existing target directory.
+- [x] SDK/web: `bun x nx run-many --targets=test,typecheck,build --projects=@animaOS-SWARM/sdk,@animaOS-SWARM/web --skipNxCache` with `CI=1`; use bounded tests, no daemon/service launch. Root checks flags if final workspace target setup differs.
+- [x] No workspace-dev/Astro gate unless those sources are actually changed; no launcher change is in this scope. Markdown consistency/formatting only for owned docs.
+- [x] Root updates daemon README, existing Google OAuth setup docs, connector contribution guidance and handover for selected Drive scope, provider consent/setup/API enablement, unsupported formats, local disconnect and v13/pre-Drive backup. No hosted/live readiness claim.
 - [ ] Verify no manifest/lock/dependency features changed; preserve unrelated paths and exact staging list. Root explicitly commits/pushes/creates and attaches PR, merges verified head under standing authorization, updates main/handover, and resumes final selected daily-flow readiness assessment.
 
 ## Completion evidence and limits
@@ -341,3 +341,26 @@ Additional freeze:
 - UI supports pasting selected Google Drive/Docs links as well as IDs, extracts only the recognized Google host's exact file ID locally, previews selection before consent and sends canonical IDs. This is parsing, not network discovery or a new grant; server still validates every ID and immutable allowlist. New resource/format access is not implied by a link.
 - Search/query is literal selected filename matching only; no files.list/raw provider q. Whole search/read deadline20s, callback45s; metadata64KiB, content1MiB streamed, result32768scalars, toolJSON256KiB and explicit digests/truncation. No unbounded provider retry sleeps; M13 pacing fixes remain intact.
 - Existing Gmail/Calendar are not migrated merely for parity. A narrow verified defect affecting the selected daily flow can be fixed with evidence, but no unrelated broad audit. After M14 gates/merge, perform deterministic daily-assistant readiness checks and useful setup documentation under the no-services rule; do not represent it as live account/hosting verification.
+
+## Controller review and gate corrections (binding)
+
+- One final SDK/web review found expired-consent restart unavailable while a cached link remained. Pairing now always offers restart with exact saved IDs; regression replaces the stale URL and verifies the40-poll cap.
+- One daemon batch found atomic deletion gap, uncertain token-write cleanup, callback deadline/TTL, searchJSON32KiB and pending-capacity mutation. The combined fix wave tombstones/queues generations with actual agent removal and exact rollback; refuses full cleanup queues unchanged; saves cleanup intent before vault effects; compensates exact keys even if the compensation save fails; budgets callback45s from entry and rechecks TTL after lock waits; enforces search serialization bound; reserves pending admission before modifying current grants.
+- Ruling: Fix two confirmed existing Calendar owner read guards in this wave — status/write-list details lacked authorize_read, unlike mail/new Drive — cost if wrong: unauthorized reads now get static403; no Calendar runtime/credential migration or added integration breadth.
+- Ruling: Add the deployment gateway's exact GET Drive callback exception — hosted consent otherwise stops before native PKCE — cost if wrong: only that exact callback gains the existing cross-site exception and owner login remains mandatory. Static assertion passes; existing gateway fixture includes Drive, but its listener suite remains unexecuted under the no-services constraint.
+- Gate corrections preserve production Weak ownership: fixture state owners are retained explicitly; expiry uses a per-manager test clock and deterministic barrier; two new Drive schemas are included in tool inventory. Initial compile/fixture failures remain in the ignored logs, not publication evidence. All26 focused Drive regressions pass.
+- SDK/web full gate passed127SDK/3service-skipped and1187web/110files, both typechecks/builds. One new test-only agent-switch act warning was corrected; its6 focused card tests pass without that warning. Runtime JS sources did not change after the full gate.
+- Setup Markdown local links resolve; the new notice matches the upstream MIT text exactly. No manifests/features/dependencies changed, no user secrets or real services were accessed. Root serializes final Rust gate/lint and explicit owned formatting before publication.
+
+## Verified execution outcome (2026-10-12)
+
+Implemented native selected-file Drive and owner setup without new dependencies
+or features. All required current-tree local Nx gates pass: Rust2,298/8ignored
+(core630,host1,668); SDK127/3service-skipped; web1,187/110files; SDK/webtypechecks
+and builds. All26 focused native Drive cases pass; separate owner routes,
+Calendar guards, snapshotbackup and tool-schema regressions also pass. Initial
+fixture/compile failures are superseded by gate-rust-publish.log; exact counts,
+ignored live cases and test-only warning cleanup are in the ledger. Root finishes
+ownedformat/lint/publication; merged PR/source facts are recorded in the next
+handover activation. This establishes local implementation behavior, not live
+Google consent/account access, microphone or always-on hosted operation.

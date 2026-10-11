@@ -33,7 +33,7 @@ http://127.0.0.1:9090 {
 			@notCallback {
 				not {
 					method GET
-					path /api/connectors/gcalendar/callback /api/connectors/mail/gmail/callback /api/connectors/mail/outlook/callback
+					path /api/connectors/gcalendar/callback /api/connectors/gdrive/callback /api/connectors/mail/gmail/callback /api/connectors/mail/outlook/callback
 				}
 			}
 			invoke @notCallback check_browser_origin

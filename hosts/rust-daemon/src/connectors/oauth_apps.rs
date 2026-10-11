@@ -11,6 +11,7 @@ use zeroize::Zeroizing;
 const SERVICE: &str = "animaos.oauth.apps";
 const VERSION: u64 = 1;
 const GOOGLE_MAIL: &str = "http://127.0.0.1:8080/api/connectors/mail/gmail/callback";
+const GOOGLE_DRIVE: &str = "http://127.0.0.1:8080/api/connectors/gdrive/callback";
 const GOOGLE_CALENDAR: &str = "http://127.0.0.1:8080/api/connectors/gcalendar/callback";
 const MICROSOFT_MAIL: &str = "http://127.0.0.1:8080/api/connectors/mail/outlook/callback";
 
@@ -49,7 +50,7 @@ impl OAuthProvider {
     pub(crate) const ALL: [Self; 2] = [Self::Google, Self::Microsoft];
     pub(crate) fn redirect_uris(self) -> &'static [&'static str] {
         match self {
-            Self::Google => &[GOOGLE_MAIL, GOOGLE_CALENDAR],
+            Self::Google => &[GOOGLE_MAIL, GOOGLE_CALENDAR, GOOGLE_DRIVE],
             Self::Microsoft => &[MICROSOFT_MAIL],
         }
     }
@@ -973,7 +974,8 @@ mod tests {
             status.redirect_uris,
             vec![
                 "https://companion.example.com/api/connectors/mail/gmail/callback",
-                "https://companion.example.com/api/connectors/gcalendar/callback"
+                "https://companion.example.com/api/connectors/gcalendar/callback",
+                "https://companion.example.com/api/connectors/gdrive/callback"
             ]
         );
         service
@@ -999,7 +1001,7 @@ mod tests {
     fn validation_defaults_and_redirects() {
         assert_eq!(
             OAuthProvider::Google.redirect_uris(),
-            &[GOOGLE_MAIL, GOOGLE_CALENDAR]
+            &[GOOGLE_MAIL, GOOGLE_CALENDAR, GOOGLE_DRIVE]
         );
         assert_eq!(OAuthProvider::Microsoft.redirect_uris(), &[MICROSOFT_MAIL]);
         let c =

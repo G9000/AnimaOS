@@ -1,0 +1,53 @@
+Anima selected Google Drive adaptation notice
+
+Source: https://github.com/NousResearch/hermes-agent
+Revision: f3ef9db68332063a3625661f3a9b259f60abdb4e
+Read-only source: C:/Users/leoca/AppData/Local/hermes/hermes-agent
+
+Exact source: skills/productivity/google-workspace/scripts/google_api.py
+- drive_get: client.rs adapts the one-file-ID metadata GET and explicit field
+  projection. Anima replaces parent/owner/provider-link fields with version,
+  trashed and canDownload, validates the returned exact ID, and constructs a
+  stable source link itself. No arbitrary provider URLs are followed.
+- drive_download: client.rs adapts the metadata-first export/download branch.
+  Google Documents use text/plain export; stored text/plain uses alt=media.
+  Anima rewrites this useful endpoint/format behavior in Rust, reads capped
+  bytes in memory, and does not copy the upstream default PDF/CSV/PNG map,
+  local-path creation or unbounded MediaIoBaseDownload loop.
+- drive_search: only the selected metadata result shape informs native search.
+  Anima does not copy files.list, raw q or fullText-query interpolation. Search
+  performs exact selected-ID metadata GETs and literal filename matching.
+
+This is selected code/behavior adaptation, not full Google workspace parity.
+Python clients, optional gws subprocesses, token JSON files, configuration and
+profiles are neither read nor executed. tools/drive_preview_tool.py is desktop
+browser control and is not credited as Google Drive integration.
+
+Anima uses its independent generation-bound credential vault and owner-selected
+1-16-ID authority. Provider drive.readonly consent is broader than that native
+selection. No Drive writes, sharing, deletion, sync or whole-account enumeration
+is provided. Existing Gmail and Calendar credentials remain separate.
+
+Upstream license (retained in full):
+
+MIT License
+
+Copyright (c) 2025 Nous Research
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

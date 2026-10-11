@@ -1635,6 +1635,8 @@ pub(crate) struct DaemonState {
     pub(crate) calendar_writes: HashMap<String, CalendarPendingWriteRecord>,
     calendar_manager: Option<CalendarManager>,
     pub(crate) mail_manager: Option<crate::connectors::mail::MailManager>,
+    pub(crate) drive_records: HashMap<String, crate::connectors::drive::DriveRecord>,
+    pub(crate) drive_manager: Option<crate::connectors::drive::WeakDriveManager>,
     pub(crate) mail_records: HashMap<String, crate::connectors::mail::MailRecord>,
     pub(crate) mail_drafts: HashMap<String, crate::connectors::mail::MailDraft>,
     pub(crate) workspace: Option<WorkspaceConfig>,
@@ -1802,6 +1804,8 @@ impl DaemonState {
             calendar_writes: HashMap::new(),
             calendar_manager: None,
             mail_manager: None,
+            drive_records: HashMap::new(),
+            drive_manager: None,
             mail_records: HashMap::new(),
             mail_drafts: HashMap::new(),
             workspace: None,
@@ -1979,6 +1983,8 @@ impl DaemonState {
         snapshot.mail_records = self.mail_records.values().cloned().collect();
         snapshot.mail_drafts = self.mail_drafts.values().cloned().collect();
         snapshot.workspace = self.workspace.clone();
+        snapshot.drive_records = self.drive_records.values().cloned().collect();
+        snapshot.drive_records.sort_by(|a, b| a.id.cmp(&b.id));
         snapshot.discord_connectors = self.discord_connectors.values().cloned().collect();
         snapshot.discord_connectors.sort_by(|a, b| a.id.cmp(&b.id));
         snapshot.discord_credential_intents =
@@ -2037,6 +2043,7 @@ impl DaemonState {
     ) -> Result<(usize, usize), String> {
         self.validate_control_plane_snapshot(&snapshot)?;
         crate::connectors::discord::validate_snapshot(&snapshot)?;
+        crate::connectors::drive::validate_snapshot(&snapshot)?;
         // Spec §13.3 step 2: legacy per-tick check-in rooms become their
         // automation's session. Only a snapshot older than the sessions
         // version can still hold a pre-M2 room-* check-in; relabeling a room a
@@ -2088,6 +2095,16 @@ impl DaemonState {
             .outbound
             .into_iter()
             .map(|record| (record.id.clone(), record))
+            .collect();
+        self.drive_records = snapshot
+            .drive_records
+            .into_iter()
+            .map(|mut r| {
+                if r.status == crate::connectors::drive::DriveStatus::Pairing {
+                    r.status = crate::connectors::drive::DriveStatus::ReauthRequired;
+                }
+                (r.id.clone(), r)
+            })
             .collect();
         self.discord_connectors = snapshot
             .discord_connectors

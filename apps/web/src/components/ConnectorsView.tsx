@@ -6,6 +6,7 @@ import {
   type OAuthAppProvider,
 } from '@animaOS-SWARM/sdk';
 import { primaryBtnCls } from './ui-bits';
+import { GoogleDriveCard } from './GoogleDriveCard';
 
 const client = createDaemonClient({ baseUrl: '' }).connectors;
 const button =
@@ -549,7 +550,7 @@ function OAuthAppCard({
         <h3 className="text-sm font-semibold text-ink">{name} OAuth app</h3>
         <p className="mt-1 text-xs leading-relaxed text-ink-3">
           {provider === 'google'
-            ? 'One OAuth app enables Gmail and Google Calendar.'
+            ? 'One OAuth app enables Gmail, Google Calendar, and selected Google Drive files.'
             : 'Enables Outlook.'}
         </p>
       </div>
@@ -880,6 +881,10 @@ export function ConnectorsView({
           )}
           <CalendarCard
             key={`${agentId}:calendar:${oauthGeneration.google}`}
+            agentId={agentId}
+          />
+          <GoogleDriveCard
+            key={`${agentId}:drive:${oauthGeneration.google}`}
             agentId={agentId}
           />
           <MailCard

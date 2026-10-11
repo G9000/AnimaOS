@@ -40,6 +40,7 @@ struct DaemonRuntime {
     agent_runs: AgentRunCoordinator,
     connectors: ConnectorManager,
     discord: crate::connectors::discord::DiscordManager,
+    drive: crate::connectors::drive::DriveManager,
     calendar: crate::connectors::gcalendar::CalendarManager,
     mail: crate::connectors::mail::MailManager,
     oauth_apps: crate::connectors::oauth_apps::OAuthAppService,
@@ -170,6 +171,7 @@ fn app_with_runtime(
     // practice; calendar tools simply report "unconfigured" otherwise.
     if let Ok(mut guard) = state.try_write() {
         guard.set_calendar_manager(Some(runtime.calendar.clone()));
+        guard.drive_manager = Some(runtime.drive.weak());
     }
     router_with_runtime(
         state,
@@ -199,6 +201,7 @@ pub async fn app_with_configured_persistence(config: DaemonConfig) -> io::Result
     })?;
     runtime.connectors.start_restored().await;
     runtime.discord.start_restored().await;
+    runtime.drive.start_restored().await;
     runtime.scheduler.start().await;
     Ok(router_with_runtime(state, config, runtime, false))
 }
@@ -247,6 +250,7 @@ pub(crate) async fn serve_with_state(
     })?;
     runtime.connectors.start_restored().await;
     runtime.discord.start_restored().await;
+    runtime.drive.start_restored().await;
     runtime.scheduler.start().await;
     // Spec §8.1: the startup rescan, then one every 60 seconds.
     let skills = crate::skills::SkillScanner::new(runtime.agent_runs.skills());
@@ -368,6 +372,16 @@ fn daemon_runtime(state: SharedDaemonState, config: &DaemonConfig) -> io::Result
         Arc::new(crate::connectors::mail::client::MailClient::new()),
         oauth_apps.clone(),
     );
+    let drive = crate::connectors::drive::DriveManager::new(
+        &state,
+        agent_runs.control_plane_transactions(),
+        Arc::new(crate::connectors::drive::store::OsKeyringDriveCredentialStore::new()),
+        Arc::new(
+            crate::connectors::drive::client::DriveClient::new()
+                .map_err(|_| io::Error::other("Drive configuration failed"))?,
+        ),
+        oauth_apps.clone(),
+    );
     let jobs = JobService::new(Arc::clone(&state), agent_runs.clone());
     let history = crate::history::HistoryWorker::new(
         Arc::clone(&state),
@@ -379,6 +393,7 @@ fn daemon_runtime(state: SharedDaemonState, config: &DaemonConfig) -> io::Result
         agent_runs,
         connectors,
         discord,
+        drive,
         calendar,
         mail,
         oauth_apps,
@@ -429,6 +444,11 @@ fn deterministic_daemon_runtime_with_mail_transport(
         mail_transport,
         oauth_apps.clone(),
     );
+    let drive = crate::connectors::drive::DriveManager::unconfigured(
+        &state,
+        agent_runs.control_plane_transactions(),
+        oauth_apps.clone(),
+    );
     let jobs = JobService::new(Arc::clone(&state), agent_runs.clone());
     let history = crate::history::HistoryWorker::new(
         Arc::clone(&state),
@@ -440,6 +460,7 @@ fn deterministic_daemon_runtime_with_mail_transport(
         agent_runs,
         connectors,
         discord,
+        drive,
         calendar,
         mail,
         oauth_apps,
@@ -461,7 +482,7 @@ fn router_with_runtime(
 ) -> Router {
     let history = runtime.history;
     let history_owner = crate::history::HistoryWorkerOwner::new();
-    let router = routes::router_with_all_services_and_discord(
+    let router = routes::router_with_all_integrations(
         state,
         config,
         runtime.run_limiter,
@@ -476,6 +497,7 @@ fn router_with_runtime(
         crate::logs::global(),
         bind_is_loopback,
         runtime.discord,
+        runtime.drive,
     );
     if tokio::runtime::Handle::try_current().is_ok() {
         history.start(&history_owner);

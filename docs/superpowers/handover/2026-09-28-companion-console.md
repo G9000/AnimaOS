@@ -1,3 +1,17 @@
+# Handover: companion console build (M0-M13 merged; M14 verified)
+
+## Start here (2026-10-12): publish selected Drive, then final daily-use guide
+
+- Owner standing merge-and-continue instruction remains in force. Do not repeat approval/GPG questions. Use Anima naming; exact upstream MIT notices/source evidence remain. No services/daemons/providers/accounts/keyring/profile secrets/databases/containers/port55432, dependencies/features or destructive Git/worktrees. Explicit paths never nx.json/anima.yaml; per-command unsigned commits authorized.
+- M0-M13 are merged, latest PR19 main7f42df8. Active g9000/companion-drive-m14 has plan activation3cc4b78 and complete selected Drive code, review fixes and gates. Native Google consent/PKCE, immutable1-16selectedIDs, selected-name search and bounded Docs/plaintext read use separate private generation keys and agent tool authority. Provider readonly consent is broader and disclosed; local disconnect never remotely revokes Gmail/Calendar scopes.
+- Final fresh Rust gate:2298passed/8ignored(core630,host1668), including26focused Drive cases plusroutes/schema/startupbackup. SDK127/3service-skipped, web1187/110files; both typechecks/builds pass. Initialcompile and fixturefailures corrected without changing productionWeakownership; deterministic testclock replacesTTLsleep. Logs .superpowers/sdd/2026-10-12-companion-drive-m14/{gate-rust-publish,gate-web-sdk,gate-web-fixture}.log. Final lint/ownedformat precede publication.
+- Combined daemon fixes: atomicagentdelete Drive tombstones/cleanup and scopedrollback; boundcleanupqueue refusal; intentbeforevault and exactuncertain-write compensation; callbackwhole45s and expiryafterwait; serializedsearch32KiB; boundedpendingadmissionbeforegrantmutation. Finalwebfix preserves explicitrestartwithcachedexpiredconsentURL. Two confirmed Calendar readguards added with403regression, no runtime migration.
+- Snapshot13/v12.pre-drive.bak and secret-freependingrestart. READMEOpenAPI158operations; exactGETDrivecallback gatewayexception added and staticallychecked; existinglistenerfixture updated but neverlaunched. No manifest/lockfeatureschanged; originalnx.json remainsunstaged.
+- Next: explicitownedsource/docscommit/push/create+attach+verifiedmerge M14 understandingauthority. Fastforwardmain/cut final readiness branch fromthatmerge. Prepared docs-only assessment/drafts in .superpowers/sdd/2026-10-12-companion-drive-m14/{final-readiness-draft,daily-use-guide-draft}.md. No other selecteddaily-flow implementation blocker found. Finish actual setup/evidence guide, ownedMarkdownchecks, commit/push/PRmerge and precisehandover. Do not repeat fullsourcegates for docs-only milestone.
+- Liveaccount/provider/channel/microphone/currentimage/TLS/reboot/restore acceptance remains unexecuted under no-servicesconstraint. Implemented capability is not liveparity proof. Upstream readonlysource f3ef9db at C:/Users/leoca/AppData/Local/hermes/hermes-agent; exact selected google_api.py behavior and MIT retained in nativeDrive notice. No Python/profile/tokenJSON runtime.
+
+## Historical M14 activation
+
 # Handover: companion console build (M0-M13 merged; M14 active)
 
 ## Start here (2026-10-12): selected Drive, then daily-assistant readiness

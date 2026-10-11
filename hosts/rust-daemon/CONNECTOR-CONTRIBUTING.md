@@ -151,3 +151,29 @@ the exact source revision and scope, retain applicable copyright/license notices
 and distinguish reused behavior from copied code. Existing upstream Markdown
 instruction attribution remains in the repository's notices; it does not imply
 these connector modules were copied from an upstream implementation.
+
+## Selected Drive service
+
+Drive is an on-demand native tool service, not a messaging transport. It uses the
+existing Google app lease and PKCE flow with separate generation-specific token
+keys. Broad provider `drive.readonly` authorization must be disclosed alongside
+Anima's immutable 1–16-ID allowlist. Never turn a browser ID, fetched document or
+model argument into authority. Every asynchronous read rechecks the current agent,
+connector generation, selected IDs, pinned account, app revision and tool grant.
+Managers retain weak daemon-state references; state locks never span network or
+persistence waits. Callback and refresh completion cannot resurrect disconnect.
+
+Only exact-ID metadata GETs, selected filename matching, Docs text exports and
+stored UTF-8 plain text are supported. No files.list, raw provider query, folder or
+shortcut traversal, arbitrary URL fetch, write/share/delete, indexing or automatic
+memory ingestion. Read bounds/provenance and unsupported formats are documented
+in the [daemon setup guide](README.md#selected-drive-files). Adapted source scope
+and full MIT terms are in [Drive attribution](src/connectors/drive/HERMES-NOTICE).
+
+Local disconnect durably removes tool authority before private key cleanup; failed
+cleanup remains a tombstone/intention and cannot restore access. Do not remotely
+revoke Google project scopes as a Drive-only operation: Gmail and Calendar can be
+invalidated too. Native records and cleanup intentions use snapshot version 13;
+v12 JSON input gets `.pre-drive.bak` before upgrade. Pending nonce/verifier and
+credentials are not snapshot data. Tests use fake transports/vaults, deterministic
+race barriers and temporary stores, never an owner's real credentials or files.

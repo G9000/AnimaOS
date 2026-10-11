@@ -19,13 +19,18 @@ use super::AppState;
     params(("agent_id" = String, Path, description = "Agent identifier")),
     responses(
         (status = 200, description = "Google Calendar connection status", body = CalendarStatusEnvelope),
+        (status = 403, description = "Local owner authorization required", body = ConnectorErrorBody),
         (status = 404, description = "Agent not found", body = ConnectorErrorBody)
     )
 )]
 pub(super) async fn get_gcalendar_connector(
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
+    request: axum::extract::Request,
 ) -> AxumResponse {
+    if let Err(rejection) = state.local_owner.authorize_read(request.headers()) {
+        return local_owner_error(rejection);
+    }
     {
         let daemon = state.daemon.read().await;
         if daemon.get_agent(&agent_id).is_none() {
@@ -161,6 +166,7 @@ pub(super) async fn delete_gcalendar_connector(
         ("connector_id" = String, Path, description = "Connector identifier")
     ),
     responses(
+        (status = 403, description = "Local owner authorization required", body = ConnectorErrorBody),
         (status = 200, description = "Pending and resolved calendar writes", body = CalendarWritesEnvelope),
         (status = 404, description = "Connector not found for agent", body = ConnectorErrorBody)
     )
@@ -168,7 +174,11 @@ pub(super) async fn delete_gcalendar_connector(
 pub(super) async fn list_calendar_writes(
     State(state): State<AppState>,
     Path((agent_id, connector_id)): Path<(String, String)>,
+    request: axum::extract::Request,
 ) -> AxumResponse {
+    if let Err(rejection) = state.local_owner.authorize_read(request.headers()) {
+        return local_owner_error(rejection);
+    }
     match state.calendar.list_writes(&agent_id, &connector_id).await {
         Ok(writes) => no_store(json_response(
             StatusCode::OK,
@@ -377,4 +387,35 @@ fn no_store(mut response: AxumResponse) -> AxumResponse {
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
+}
+
+#[cfg(test)]
+mod read_owner_guard_tests {
+    use super::*;
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt;
+    #[tokio::test]
+    async fn calendar_status_and_writes_authorize_read_before_missing_agent_or_connector_lookup() {
+        let state = std::sync::Arc::new(tokio::sync::RwLock::new(crate::state::DaemonState::new()));
+        let app = crate::app::app_with_state(state, crate::app::DaemonConfig::default());
+        for path in [
+            "/api/agents/missing/connectors/gcalendar",
+            "/api/agents/missing/connectors/gcalendar/missing/writes",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .header("host", "127.0.0.1:8080")
+                        .header("origin", "https://unapproved.example")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        }
+    }
 }

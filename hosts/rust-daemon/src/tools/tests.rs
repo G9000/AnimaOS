@@ -365,6 +365,8 @@ fn registry_defines_every_registered_tool_schema() {
             &["event_id"][..],
             &["calendar_id"][..],
         ),
+        ("drive_search", &[][..], &["query"][..]),
+        ("drive_read", &["file_id"][..], &[][..]),
     ];
 
     assert_eq!(registry.tool_names().len(), expectations.len());
