@@ -648,3 +648,6 @@ include!("supervision_tests.rs");
 
 #[path = "goal_tests.rs"]
 mod goal_tests;
+
+#[path = "shutdown_tests.rs"]
+mod shutdown_tests;

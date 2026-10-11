@@ -5,6 +5,7 @@
 
 pub(crate) mod compaction;
 pub(crate) mod context;
+mod list_snapshot;
 pub(crate) mod migration;
 pub(crate) mod pruning;
 #[cfg(test)]

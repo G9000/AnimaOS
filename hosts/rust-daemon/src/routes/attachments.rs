@@ -42,6 +42,7 @@ const UPLOAD_LIMITS: FormLimits = FormLimits {
 fn invalid(error: AttachmentError) -> ApiError {
     match error {
         AttachmentError::TooLarge => ApiError {
+            kind: crate::routes::ApiErrorKind::General,
             status: StatusCode::PAYLOAD_TOO_LARGE,
             message: ATTACHMENT_TOO_LARGE.into(),
         },

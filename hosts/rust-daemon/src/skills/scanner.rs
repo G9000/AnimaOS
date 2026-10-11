@@ -66,7 +66,19 @@ impl SkillScanner {
 
     /// Stops the loop after the scan in progress, if any (each is bounded by
     /// `SKILL_IO_TIMEOUT_MS`).
+    pub(crate) fn request_shutdown(&self) {
+        if let Some((stop, _)) = self
+            .running
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+        {
+            let _ = stop.send(true);
+        }
+    }
+
     pub(crate) async fn shutdown(&self) {
+        self.request_shutdown();
         let handle = self
             .running
             .lock()

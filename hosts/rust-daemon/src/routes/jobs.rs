@@ -69,6 +69,7 @@ pub(super) fn authorize(state: &AppState, request: &Request, read: bool) -> Resu
     result.map_err(|_| {
         no_store(
             ApiError {
+                kind: crate::routes::ApiErrorKind::General,
                 status: StatusCode::FORBIDDEN,
                 message: "local owner authorization required".into(),
             }

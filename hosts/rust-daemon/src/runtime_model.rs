@@ -81,11 +81,21 @@ pub(crate) struct RuntimeModelAdapter {
 }
 
 impl RuntimeModelAdapter {
+    #[cfg(test)]
     pub(crate) fn from_env(chatgpt_auth: crate::chatgpt_auth::ChatGptAuth) -> Self {
         Self {
             providers: ProviderModelAdapter::new(provider_config_from_env()),
             chatgpt_auth,
         }
+    }
+
+    pub(crate) fn try_from_env(
+        chatgpt_auth: crate::chatgpt_auth::ChatGptAuth,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            providers: ProviderModelAdapter::try_new(provider_config_from_env())?,
+            chatgpt_auth,
+        })
     }
 
     #[cfg(test)]

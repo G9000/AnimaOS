@@ -10,7 +10,6 @@ use std::time::Duration;
 
 use anima_core::{
     tool_not_configured_error, AgentState, CancelSignal, Content, TaskResult, ToolCall,
-    CANCELLED_TOOL_RESULT,
 };
 use tokio::sync::oneshot;
 
@@ -337,7 +336,7 @@ impl ApprovalGate {
             )),
             // Allowed, but the run is being stopped: nothing new starts.
             ApprovalStatus::Allowed | ApprovalStatus::Stopped => {
-                GateOutcome::Refuse(TaskResult::error(CANCELLED_TOOL_RESULT, 0))
+                GateOutcome::Refuse(TaskResult::error(self.cancel.tool_result(), 0))
             }
             ApprovalStatus::Pending | ApprovalStatus::Expired => {
                 GateOutcome::Refuse(TaskResult::error(APPROVAL_LOST, 0))

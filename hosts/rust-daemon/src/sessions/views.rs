@@ -11,15 +11,15 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use tracing::warn;
 
+use super::list_snapshot::{capture_list_snapshot, derive_candidates, Candidate};
 use super::{
     hidden_message_ids, is_checkin_message, is_inbound_message, preview_text, schedule_id_of_room,
     SessionCapabilities, SessionKind, SessionRecord,
 };
-use crate::agent_runs::config_helper_parent;
 use crate::app::SharedDaemonState;
 use crate::history::{
-    display_text, search_snippet, search_tokens, searchable_text, snippet_text, text_matches,
-    HistoryMessage, HistoryStore, MessageOrder, MessagePageQuery,
+    display_text, search_snippet, search_tokens, snippet_text, text_matches, HistoryMessage,
+    HistoryStore, MessageOrder, MessagePageQuery,
 };
 use crate::state::DaemonState;
 
@@ -173,135 +173,12 @@ pub(crate) enum MessagePageError {
     Unavailable,
 }
 
-/// What the state lock yields for one session; the rest is added without it.
-struct Candidate {
-    record: SessionRecord,
-    /// Visible hot messages the store is not known to hold.
-    unmirrored_visible: usize,
-    /// Every visible hot message (the count when the store cannot be read).
-    hot_visible: usize,
-    preview: Option<String>,
-    unread: bool,
-    active_runs: usize,
-    pending_approvals: usize,
-    capabilities: SessionCapabilities,
-    matched: Option<SessionMatch>,
-}
-
-fn preview_from_newest<'a>(newest_first: impl Iterator<Item = &'a Message>) -> Option<String> {
+pub(super) fn preview_from_newest<'a>(
+    newest_first: impl Iterator<Item = &'a Message>,
+) -> Option<String> {
     newest_first
         .filter(|message| matches!(message.role, MessageRole::User | MessageRole::Assistant))
         .find_map(|message| preview_text(display_text(message)))
-}
-
-fn hot_rooms<'a>(state: &'a DaemonState, agent_id: &str) -> HashMap<&'a str, Vec<&'a Message>> {
-    let mut rooms: HashMap<&str, Vec<&Message>> = HashMap::new();
-    if let Some(runtime) = state.agents.get(agent_id) {
-        for message in runtime.messages() {
-            rooms
-                .entry(message.room_id.as_str())
-                .or_default()
-                .push(message);
-        }
-    }
-    rooms
-}
-
-fn candidate(
-    state: &DaemonState,
-    record: &SessionRecord,
-    hot: &[&Message],
-    tokens: &[String],
-) -> Candidate {
-    let hidden_ids = hidden_message_ids(hot.iter().copied());
-    let visible = hot
-        .iter()
-        .copied()
-        .filter(|message| !hidden_ids.contains(&message.id))
-        .collect::<Vec<_>>();
-    let read_through = record.last_read_at_ms.unwrap_or(0);
-    let schedule_exists = automation_exists(state, record);
-    let matched = if tokens.is_empty() {
-        None
-    } else {
-        visible
-            .iter()
-            .rev()
-            .find(|message| text_matches(searchable_text(message), tokens))
-            .map(|message| SessionMatch {
-                message_id: Some(message.id.clone()),
-                snippet: search_snippet(snippet_text(message), tokens),
-            })
-    };
-    Candidate {
-        record: record.clone(),
-        unmirrored_visible: visible
-            .iter()
-            .filter(|message| !state.history.is_mirrored(&message.id))
-            .count(),
-        hot_visible: visible.len(),
-        preview: preview_from_newest(visible.iter().rev().copied()),
-        unread: visible.iter().any(|message| {
-            (message.role == MessageRole::Assistant || is_inbound_message(message))
-                && message.created_at_ms > read_through
-        }),
-        active_runs: state
-            .runs
-            .active_count_for_session(&record.agent_id, &record.id),
-        pending_approvals: state
-            .approvals
-            .pending_count_for_session(&record.agent_id, &record.id),
-        capabilities: record.capabilities(schedule_exists),
-        matched,
-    }
-}
-
-fn collect_candidates(
-    state: &DaemonState,
-    agent_id: &str,
-    include_helpers: bool,
-    select: impl Fn(&SessionRecord) -> bool,
-    tokens: &[String],
-) -> Vec<Candidate> {
-    let helpers = if include_helpers {
-        state
-            .agents
-            .iter()
-            .filter(|(_, runtime)| config_helper_parent(runtime.config()) == Some(agent_id))
-            .map(|(id, _)| id.as_str())
-            .collect::<HashSet<_>>()
-    } else {
-        HashSet::new()
-    };
-    let records = state
-        .sessions
-        .records()
-        .filter(|record| {
-            state.agents.contains_key(&record.agent_id)
-                && (record.agent_id == agent_id
-                    || (include_helpers
-                        && (record.parent_agent_id.as_deref() == Some(agent_id)
-                            || helpers.contains(record.agent_id.as_str()))))
-                && select(record)
-        })
-        .collect::<Vec<_>>();
-    let mut rooms_by_agent: HashMap<&str, HashMap<&str, Vec<&Message>>> = HashMap::new();
-    for record in &records {
-        rooms_by_agent
-            .entry(record.agent_id.as_str())
-            .or_insert_with(|| hot_rooms(state, &record.agent_id));
-    }
-    records
-        .into_iter()
-        .map(|record| {
-            let hot = rooms_by_agent
-                .get(record.agent_id.as_str())
-                .and_then(|rooms| rooms.get(record.room_id()))
-                .map(Vec::as_slice)
-                .unwrap_or_default();
-            candidate(state, record, hot, tokens)
-        })
-        .collect()
 }
 
 /// The newest history match per session, keyed by `(agentId, sessionId)`.
@@ -416,19 +293,14 @@ pub(crate) async fn list_sessions(
     query: &SessionListQuery,
 ) -> Option<SessionPage> {
     let tokens = query.q.as_deref().map(search_tokens).unwrap_or_default();
-    let (mut candidates, store) = {
+    let snapshot = {
         let guard = state.read().await;
-        if !guard.agents.contains_key(agent_id) {
-            return None;
-        }
-        let select = |record: &SessionRecord| {
+        capture_list_snapshot(&guard, agent_id, query.include_helpers, |record| {
             record.archived == query.archived && query.kind.map_or(true, |kind| record.kind == kind)
-        };
-        (
-            collect_candidates(&guard, agent_id, query.include_helpers, select, &tokens),
-            guard.history.store(),
-        )
+        })?
     };
+    let store = snapshot.store.clone();
+    let mut candidates = derive_candidates(snapshot, &tokens);
     if let Some(q) = query.q.as_deref() {
         let mut stored = if tokens.is_empty() {
             HashMap::new()
@@ -516,18 +388,14 @@ pub(crate) async fn session_view(
     agent_id: &str,
     session_id: &str,
 ) -> Option<SessionView> {
-    let (candidate, store) = {
+    let snapshot = {
         let guard = state.read().await;
-        let runtime = guard.agents.get(agent_id)?;
-        let record = guard.sessions.get(agent_id, session_id)?;
-        let hot = runtime
-            .messages()
-            .iter()
-            .filter(|message| message.room_id == record.room_id())
-            .collect::<Vec<_>>();
-        (candidate(&guard, record, &hot, &[]), guard.history.store())
+        capture_list_snapshot(&guard, agent_id, false, |record| record.id == session_id)?
     };
-    complete(&*store, vec![candidate]).await.pop()
+    let store = snapshot.store.clone();
+    complete(&*store, derive_candidates(snapshot, &[]))
+        .await
+        .pop()
 }
 
 /// `GET …/sessions/{sid}/messages`: the history store's page merged with the
