@@ -41,8 +41,11 @@
   Portable text bounds are 1,048,576 Unicode scalars; excessive requests fail
   before transport, with a static native error. `attempt_id` is host correlation,
   not a provider deduplication promise. No new lifecycle or durable schema.
-- Resume: finish M12 commit/push/PR publication, then await explicit owner M12
-  merge authorization. After that merge, the next bounded connector scope is
+- Source is committed and pushed at `76011cd`; [PR #18](https://github.com/G9000/animaOS-SWARM/pull/18)
+  is open against main and attached to the chat. Final publication documentation
+  follows that source commit. Only unrelated `nx.json` remains dirty.
+- Resume: await explicit owner PR #18 merge authorization. After that merge,
+  cut the next milestone branch from updated main. The next bounded scope is
   Discord REST chat; Gmail/Calendar contract migration and selected Drive read/search
   follow separately. Do not create another milestone branch from unmerged M12.
 - No new dependencies/features, services/daemons/providers/keyring reads/databases/
