@@ -1,3 +1,40 @@
+# Handover: companion console build (M0–M11 merged; M12 active)
+
+## Start here (2026-10-12): M12 modular connector foundation active
+
+- Owner explicitly instructed merge and continue. PR #17 merged at
+  `37218944488001caa4e34ae7f6fa13cde1f36d6b`, including Anima naming correction
+  `21120aa`. M0–M11 are on main; no repeated M11 review/gates needed.
+- Active branch `g9000/companion-connectors-m12` was cut from that updated main.
+  Unrelated `nx.json` remains untouched/unstaged; never stage it or `anima.yaml`.
+- Product naming remains Anima/AnimaOS. ANIMA.md/.anima.md and anima source kinds
+  are merged; upstream names only belong in accurate attribution/source evidence
+  and retained historical identifiers.
+- Executable lean plan: `docs/superpowers/plans/2026-10-12-companion-connectors-m12.md`.
+  Five binding controller risk rulings are supplemented by post-merge interface
+  decisions. Ledger/rules: `.superpowers/sdd/2026-10-12-companion-connectors-m12/`.
+- M12 implements pure Rust connector descriptors/metadata registry and async
+  transport contract, then the existing Telegram adapter/registry pilot. Associated
+  native payload/error types preserve Telegram metadata and uncertainty. Private
+  per-dispatch adapters borrow the exact already-captured token; core requests and
+  metadata contain no secrets, agent/session/provider authority or prompt paths.
+- Preserve existing pairing, vault generations, durable admission/outbox, lifecycle,
+  delivery attempt claims, recovery and stop behavior. Registry discovery is passive;
+  community contributions are trusted compile-in source with host privileges.
+  Installable ABI/sidecars/WASM and new Discord/Drive providers remain deferred.
+  Existing owner API/SDK/UI do not gain installer or activation claims.
+- Core and host implementers are active. Controller owns contribution docs/status.
+  Next: finish bounded source integration, one daemon batch and final API/UI review,
+  one fix wave, required Rust Nx dependency gate plus lint/format; update evidence,
+  commit unsigned/push/open PR. A new M12 merge still requires explicit owner action.
+- No new dependencies/features, services/daemons/providers/keyring reads/databases/
+  containers or Docker Postgres55432 actions. Prefix cargo with CARGO_INCREMENTAL=0;
+  serialize compilation, keep existing target dirs. Explicit file staging only;
+  no worktree/stash/reset/restore/checkout-path. Unsigned per-command commit override
+  persists; do not ask for GPG unlock or change global signing config.
+
+## Historical M11 publication before the authorized merge
+
 # Handover: companion console build (M0–M10 merged; M11 ready)
 
 This document is for the next agent picking up the companion console upgrade.

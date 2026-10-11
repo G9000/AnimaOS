@@ -1,9 +1,6 @@
 # Companion Connectors M12 — Prepared Lean Plan
 
-> Preparation only. M11 now ports Hermes agent instruction files.
-> M12 depends on M11 merge and explicit implementation authorization.
-> No source changes, dependencies, services, commits, or branch operations
-> are authorized by this draft. Binding five-risk rulings are appended below.
+> Execution authorized by the owner on 2026-10-12: merge PR #17 and continue. M11 merged at `3721894`, including naming correction `21120aa`. Active branch `g9000/companion-connectors-m12` is cut from that main. Binding five-risk rulings and post-merge interfaces appear below.
 
 ## Outcome
 
@@ -13,7 +10,7 @@ proven durable daemon lifecycle. Make community source contributions possible
 through documented traits and host registration. Describe installable modules
 as future work requiring a genuine isolation, process, and dependency policy.
 
-Proposed future branch: `g9000/companion-connectors-m12`.
+Active branch: `g9000/companion-connectors-m12`.
 Create it from updated main only after M11 merges. Do not create it during
 preparation. M10 was merged at `f80e653`; reverify M11's actual merge before
 implementation because this draft cannot predict the post-M11 tree.
@@ -1261,3 +1258,21 @@ Preparation adds documentation only; no connector source, dependency metadata or
 3. Ruling: Default to no durable schema change; any demonstrated new persistent field requires a concrete version/backup/upgrade/downgrade decision before implementation — ephemeral registry metadata cannot justify a speculative snapshot bump — cost if wrong: preserve existing at-least-once and uncertainty classifications rather than fabricate exactly-once or silently replay effects.
 4. Ruling: Keep roadmap bounded to Telegram, Discord, Gmail, Calendar and Drive with separately verified protocols/scopes — current manifests lack Discord Gateway/process/WASM dependencies and Drive consent surfaces, and the owner does not want broad integration parity — cost if wrong: delivery is phased; never hide dependency additions or promise unverified REST/Gateway equivalence. Existing Gmail/Calendar services are reused; Drive starts with selected read/search access.
 5. Ruling: M11 owns Markdown identity/instruction loading and must merge before M12 implementation branch creation; focused Hermes code/behavior reuse retains MIT provenance — avoid duplicate precedence/memory/authority models and copying Python orchestration wholesale — cost if wrong: integration starts later but has one established Rust prompt/lifecycle authority. Prefer current regression reuse over mechanically adding every listed scenario as a new test.
+
+## Controller interface freeze after M11 merge (binding)
+
+Ruling: Use a portable async transport trait with associated identity, inbound-batch, receipt and classified-error types — Telegram has vetted host-native metadata and retry/uncertainty semantics that must survive this pilot; a fabricated universal JSON envelope adds unnecessary conversion and authority fields — cost if wrong: future adapters provide their own typed payload validators and a later shared normalization contract; source modularity is real but not a dynamic binary ABI.
+
+Core names: ConnectorDescriptor, ConnectorOperation (Identify/Receive/Send), ConnectorTransportKind (Polling), ConnectorRegistry, ConnectorReceiveRequest {cursor:String}, ConnectorSendRequest {destination:String,text:String,attempt_id:String}, ConnectorErrorKind and ConnectorFailure (standard Error+Send+Sync with kind()). ConnectorTransport is async_trait Send+Sync; associated Identity, InboundBatch, SendReceipt:Send and Error:ConnectorFailure. Methods identify(), receive(request), send(request). Immutable core registry holds bounded descriptors in stable protocol-ID order; no registration executes transport code.
+
+Ruling: Bind Telegram credentials privately inside a short-lived host adapter at the existing verified-token dispatch point — the host already loads/fences the precise token before polling or claiming delivery; a second vault lookup could substitute a newer credential after the claim — cost if wrong: the adapter is host-created per dispatch and cannot be persisted/serialized; reviewed compile-in code retains host privileges. Core DTOs and descriptors contain no token, agent/session, provider/model, permissions or instruction paths.
+
+Host registry owns registered native transport plus core metadata. Preserve ConnectorManager::new(...Arc<dyn TelegramTransport>) injection and its existing fake tests; this constructor builds the immutable Telegram pilot registry. Every identify/receive/send (including pairing notice) dispatch goes through the registered adapter/portable trait, using the already captured token. Core-associated Telegram error is the existing error type with a redacted portable category; retain native status/timeout semantics. Delivery attempt_id uses the existing durable outbound/claim identity; notices use an explicit host-selected non-durable identity. No new idempotency promise or lifecycle/schema change.
+
+Ruling: Freeze registration at bootstrap with trusted source contributions, no public discovery/API/schema changes in M12 — existing Telegram owner surfaces already provide activation; capabilities must keep installable plugins unavailable — cost if wrong: community contribution requires reviewed host registration/rebuild until a later lifecycle/transport integration is implemented. No SDK/web production changes are needed unless concrete drift is found; final API/UI review verifies preserved contracts and docs.
+
+Ruling: Run required rust-daemon:test once with its core-rust:test dependency, plus lint/format — resolved Nx already runs the core task; separate standalone full core execution duplicates work — cost if wrong: inspect both task outcomes/counts instead of assume dependency success. Serialize cargo; no new target directories, dependencies/features, real services/providers/databases/containers, GPG prompts, or automatic PR merge. Existing unsigned per-command commits and explicit paths persist.
+
+Bounds: registry/descriptor/request constants and meaningful tests are owned by the portable-contract implementer; preserve valid Telegram cursor/send behavior and existing splitting. New validation errors must be before any transport effect, and no raw payload/credential appears in generic public errors. Document any new upper bound and its cost explicitly in the ledger before wiring.
+
+Anima/AnimaOS is our product naming. Upstream names appear only in attribution or source-reference evidence. The 77 acceptance scenarios guide consolidated behavioral coverage and regression reuse, not 77 mandatory new tests.
