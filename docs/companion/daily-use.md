@@ -112,6 +112,12 @@ explain the blocker. The hint adds no turn or tool action and preserves the real
 error records. Changed attempts, successful calls and parallel batches reset the
 streak. It is advisory; it does not prove that no partial effects occurred.
 
+Three identical fresh single-call plain-text successes can also produce one
+factual hint per streak. Changed, structured, recovered and parallel results
+reset it. Tools keep executing normally and their results remain intact;
+identical output does not prove a lack of progress or effects. Necessary polling
+is still allowed within the existing budget and Stop controls.
+
 If the model requests a tool that is not configured, one valid single request
 can receive a paired refusal and a chance to correct its approach within the
 same round budget. The refused request executes nothing and creates no action
