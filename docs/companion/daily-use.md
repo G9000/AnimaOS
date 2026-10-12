@@ -123,6 +123,12 @@ reset it. Tools keep executing normally and their results remain intact;
 identical output does not prove a lack of progress or effects. Necessary polling
 is still allowed within the existing budget and Stop controls.
 
+Anima can also notice a repeating sequence of two to four single-call results
+after three complete repetitions. It gives at most one cycle hint per run and
+leaves every call and result intact, including necessary polling. The default
+eight-round limit can reach the two-call threshold; longer sequences need an
+already-configured higher limit. The advice adds no request or budget extension
+and does not prove that work stopped making progress.
 If the model requests a tool that is not configured, one valid single request
 can receive a paired refusal and a chance to correct its approach within the
 same round budget. The refused request executes nothing and creates no action

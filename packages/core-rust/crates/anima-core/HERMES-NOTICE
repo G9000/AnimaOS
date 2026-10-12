@@ -47,6 +47,14 @@ with factual guidance that permits necessary polling. It does not infer progress
 or effect absence, copy tool-name taxonomy, block calls, stub results or detect
 multi-call cycles. Original results and existing budget/authority remain intact.
 
+M29 adapts the same public revision's trailing period/lap comparison from
+agent/tool_guardrails.py::ToolCallGuardrailController._detect_identical_cycle.
+Native policy observes only fresh single-call bounded plain-text successes,
+compares three laps of periods 2–4, and gives one fixed factual cycle advisory
+per invocation. It retains at most twelve digests and permits necessary polling.
+Period 1 remains M27's policy; larger periods require an existing configured
+round budget. No upstream tool taxonomy, stop/block, stubs or result replacement
+is copied. Original actions, results, budgets and authority remain intact.
 MIT License
 
 Copyright (c) 2025 Nous Research

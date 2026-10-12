@@ -12,6 +12,64 @@ use crate::primitives::{Content, DataValue, TaskResult, TaskStatus};
 
 pub(super) const EXACT_FAILURE_HINT: &str = "This same tool call has returned the same error three times. Inspect the latest error, change the inputs or approach, or explain the blocker.";
 pub(super) const REPEATED_SUCCESS_HINT: &str = "This same tool call has returned the same result three times. If that result is sufficient, use it; otherwise change the inputs or approach, or continue necessary polling.";
+pub(super) const REPEATED_TOOL_CYCLE_HINT: &str = "The same sequence of tool calls has returned the same results three times. If those results are sufficient, use them; otherwise change the inputs or approach, or continue necessary polling.";
+
+#[derive(Default)]
+pub(super) struct SuccessfulToolCycle {
+    history: Vec<[u8; 32]>,
+    warned: bool,
+}
+
+impl SuccessfulToolCycle {
+    pub(super) fn reset_history(&mut self) {
+        self.history.clear();
+    }
+
+    pub(super) fn observe(
+        &mut self,
+        call: &ToolCall,
+        result: &TaskResult<Content>,
+        recovered: bool,
+    ) -> bool {
+        let Some(signature) = (!recovered)
+            .then(|| success_fingerprint(call, result))
+            .flatten()
+        else {
+            self.reset_history();
+            return false;
+        };
+        if self.history.len() == 12 {
+            self.history.remove(0);
+        }
+        self.history.push(signature);
+        if !self.warned && repeated_period(&self.history).is_some() {
+            self.warned = true;
+            return true;
+        }
+        false
+    }
+}
+
+fn repeated_period(history: &[[u8; 32]]) -> Option<usize> {
+    for period in 2..=4 {
+        let Some(start) = history.len().checked_sub(period * 3) else {
+            continue;
+        };
+        let candidate = &history[start..];
+        // A constant sequence belongs to M27, regardless of its length.
+        if candidate[..period].iter().all(|item| item == &candidate[0]) {
+            continue;
+        }
+        if candidate[period..]
+            .iter()
+            .enumerate()
+            .all(|(index, item)| item == &candidate[index % period])
+        {
+            return Some(period);
+        }
+    }
+    None
+}
 
 #[derive(Default)]
 pub(super) struct SuccessfulResultStreak {
@@ -220,6 +278,116 @@ mod tests {
             },
             1,
         )
+    }
+
+    #[test]
+    fn repeated_tool_cycle_matches_three_complete_laps_in_either_phase_and_smallest_period() {
+        for period in 2..=4 {
+            for rotation in 0..period {
+                let history: Vec<_> = (0..period * 3)
+                    .map(|index| [((index + rotation) % period) as u8; 32])
+                    .collect();
+                for length in 0..history.len() {
+                    assert_eq!(repeated_period(&history[..length]), None);
+                }
+                assert_eq!(repeated_period(&history), Some(period));
+            }
+        }
+        assert_eq!(
+            repeated_period(&[[7; 32]; 12]),
+            None,
+            "constant evidence belongs to M27"
+        );
+        let repeated: Vec<_> = (0..12).map(|index| [(index % 2) as u8; 32]).collect();
+        assert_eq!(
+            repeated_period(&repeated),
+            Some(2),
+            "choose the smallest matching period"
+        );
+        assert_eq!(
+            repeated_period(&[[0; 32], [1; 32], [0; 32], [1; 32], [1; 32], [0; 32]]),
+            None
+        );
+    }
+
+    #[test]
+    fn repeated_tool_cycle_bounds_history_and_warns_once_even_after_reset_or_changed_cycle() {
+        let mut guard = SuccessfulToolCycle::default();
+        for index in 0..30 {
+            let mut call = call();
+            call.id = format!("fresh-{index}");
+            let mut result = success(&format!("result-{}", index % 2));
+            result.duration_ms = index;
+            assert_eq!(guard.observe(&call, &result, false), index == 5);
+            assert!(guard.history.len() <= 12);
+        }
+        assert_eq!(guard.history.len(), 12);
+        assert!(!guard.observe(&call(), &error(), false));
+        assert!(guard.history.is_empty());
+        assert!(guard.warned);
+        for index in 0..12 {
+            assert!(!guard.observe(
+                &call(),
+                &success(&format!("different-{}", index % 3)),
+                false
+            ));
+        }
+        let mut fresh = SuccessfulToolCycle::default();
+        for index in 0..6 {
+            assert_eq!(
+                fresh.observe(&call(), &success(&format!("result-{}", index % 2)), false),
+                index == 5
+            );
+        }
+    }
+
+    #[test]
+    fn repeated_tool_cycle_reuses_success_identity_and_resets_ineligible_or_recovered_evidence() {
+        let mut metadata = success("result-0");
+        metadata.data.as_mut().unwrap().metadata =
+            Some(BTreeMap::from([("hidden".into(), DataValue::Null)]));
+        let mut invalid_args = call();
+        invalid_args
+            .args
+            .insert("offset".into(), DataValue::Number(f64::NAN));
+        for (boundary_call, boundary_result, recovered) in [
+            (call(), error(), false),
+            (call(), metadata, false),
+            (invalid_args, success("result-0"), false),
+            (call(), success("result-0"), true),
+        ] {
+            let mut guard = SuccessfulToolCycle::default();
+            for index in 0..5 {
+                assert!(!guard.observe(&call(), &success(&format!("result-{}", index % 2)), false));
+            }
+            assert!(!guard.observe(&boundary_call, &boundary_result, recovered));
+            assert!(guard.history.is_empty());
+            for index in 0..6 {
+                assert_eq!(
+                    guard.observe(&call(), &success(&format!("result-{}", index % 2)), false),
+                    index == 5
+                );
+            }
+        }
+        // M27's full fingerprint defines identity here too; changed arguments,
+        // names and text are not allowed to fill an earlier partial lap.
+        let mut renamed = call();
+        renamed.name = "other_tool".into();
+        let mut changed_args = call();
+        changed_args
+            .args
+            .insert("offset".into(), DataValue::Number(1.0));
+        for (changed_call, changed_result) in [
+            (renamed, success("result-1")),
+            (changed_args, success("result-1")),
+            (call(), success("result-X")),
+        ] {
+            let mut guard = SuccessfulToolCycle::default();
+            for index in 0..5 {
+                assert!(!guard.observe(&call(), &success(&format!("result-{}", index % 2)), false));
+            }
+            assert!(!guard.observe(&changed_call, &changed_result, false));
+        }
     }
 
     #[test]
