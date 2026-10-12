@@ -13,7 +13,10 @@ Memory context now selects relevant own facts ahead of recent reflections, with
 quoted, bounded excerpts. One real fresh-chat check recalled the corrected
 preference after twenty newer reflections and eight matching foreign facts,
 without using a search tool. Selection is lexical; semantic recall and automatic
-memory consolidation remain unverified.
+memory consolidation remain unverified. A real one-shot scheduled file task also
+restored before due, fired without a manual trigger and retained one completed
+write after another restart. Exact bytes and modification time stayed unchanged;
+the schedule was left disabled and the isolated daemon stopped.
 
 ## Start with one companion
 
