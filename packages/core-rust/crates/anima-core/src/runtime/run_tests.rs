@@ -1122,6 +1122,327 @@ fn budget_wrapup_counts_a_parallel_last_batch_as_one_round_and_keeps_paired_resu
 }
 
 const EXACT_FAILURE_HINT: &str = "This same tool call has returned the same error three times. Inspect the latest error, change the inputs or approach, or explain the blocker.";
+const REPEATED_SUCCESS_HINT: &str = "This same tool call has returned the same result three times. If that result is sufficient, use it; otherwise change the inputs or approach, or continue necessary polling.";
+
+#[test]
+fn repeated_success_result_adds_one_factual_hint_without_changing_requests_or_results() {
+    let model = BudgetBoundaryModel::new(vec![
+        Ok(exact_failure_round("fresh-1")),
+        Ok(exact_failure_round("fresh-2")),
+        Ok(exact_failure_round("fresh-3")),
+        Ok(exact_failure_round("fresh-4")),
+        Ok(budget_reply(
+            ModelStopReason::End,
+            "Use the confirmed result",
+            false,
+        )),
+    ]);
+    let original_config = budget_config(8);
+    let mut runtime = AgentRuntime::new(original_config.clone(), model.clone());
+    let db = Arc::new(InMemoryAdapter::new());
+    runtime.set_database(db.clone());
+    let frames = Arc::new(RefusalFrames::default());
+    runtime.set_run_observer(frames.clone());
+    let mut input = text("Read the input");
+    input.metadata = Some(BTreeMap::from([(
+        "retryKey".into(),
+        DataValue::String("success-replay".into()),
+    )]));
+    let originals = std::sync::Mutex::new(Vec::new());
+    let result =
+        block_on(
+            runtime.run_with_context_and_tools(Vec::new(), input.clone(), |_, _, call| {
+                let duration = originals.lock().unwrap().len() as u64 + 10;
+                let success = TaskResult::success(text("private-result-sentinel"), duration);
+                originals.lock().unwrap().push((call.id, success.clone()));
+                async move { success }
+            }),
+        );
+    assert_eq!(result.status, TaskStatus::Success);
+    let requests = model.requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        5,
+        "the advice uses the already-next request"
+    );
+    assert!(requests
+        .iter()
+        .all(|(config, _)| config == &original_config));
+    assert!(requests[..3]
+        .iter()
+        .all(|(_, request)| !request.system.contains(REPEATED_SUCCESS_HINT)));
+    let originals = originals.lock().unwrap();
+    assert_eq!(originals.len(), 4);
+    let messages: Vec<_> = runtime
+        .messages()
+        .iter()
+        .filter(|message| message.role == MessageRole::Tool)
+        .collect();
+    assert_eq!(messages.len(), 4);
+    for (message, (id, original)) in messages.iter().zip(originals.iter()) {
+        let metadata = message.content.metadata.as_ref().unwrap();
+        assert_eq!(
+            metadata.get("toolCallId"),
+            Some(&DataValue::String(id.clone()))
+        );
+        assert_eq!(
+            metadata.get("taskResult"),
+            Some(&crate::runtime_serde::task_result_data_value(original))
+        );
+    }
+    assert_eq!(
+        requests[3].1.system.matches(REPEATED_SUCCESS_HINT).count(),
+        1,
+        "M27: three fresh identical successes must add one fixed factual hint"
+    );
+    assert!(requests[3].1.system.ends_with(REPEATED_SUCCESS_HINT));
+    assert!(
+        !requests[4].1.system.contains(REPEATED_SUCCESS_HINT),
+        "one hint is consumed once per exact streak"
+    );
+    for private in [
+        "private-result-sentinel",
+        "private-argument-sentinel",
+        "fresh-3",
+    ] {
+        assert!(!requests[3].1.system.contains(private));
+    }
+    assert!(runtime
+        .messages()
+        .iter()
+        .all(|message| message.role != MessageRole::System
+            && !message.content.text.contains(REPEATED_SUCCESS_HINT)));
+    assert_eq!(db.recorded_steps().len(), 4);
+    let physical = frames.0.lock().unwrap();
+    assert_eq!(
+        physical
+            .iter()
+            .filter(|frame| matches!(frame, super::RunFrame::ToolStarted { .. }))
+            .count(),
+        4
+    );
+    assert_eq!(
+        physical
+            .iter()
+            .filter(|frame| matches!(
+                frame,
+                super::RunFrame::ToolFinished {
+                    recovered: false,
+                    ..
+                }
+            ))
+            .count(),
+        4
+    );
+    let snapshot = runtime.snapshot();
+    assert!(!serde_json::to_string(&snapshot)
+        .unwrap()
+        .contains(REPEATED_SUCCESS_HINT));
+    // The same durable retry key recovers four results; only the following two
+    // are fresh. Cached evidence must not carry the streak into a restored run.
+    let restored_model = BudgetBoundaryModel::new(
+        (1..=6)
+            .map(|index| Ok(exact_failure_round(&format!("restored-{index}"))))
+            .chain([Ok(budget_reply(
+                ModelStopReason::End,
+                "recovered confirmed results",
+                false,
+            ))])
+            .collect(),
+    );
+    let mut restored = AgentRuntime::from_snapshot(snapshot, restored_model.clone());
+    restored.set_database(db);
+    let fresh = std::sync::atomic::AtomicUsize::new(0);
+    let result = block_on(
+        restored.run_with_context_and_tools(Vec::new(), input, |_, _, _| {
+            fresh.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async { TaskResult::success(text("private-result-sentinel"), 99) }
+        }),
+    );
+    assert_eq!(result.status, TaskStatus::Success);
+    assert_eq!(fresh.load(std::sync::atomic::Ordering::SeqCst), 2);
+    let requests = restored_model.requests.lock().unwrap();
+    assert_eq!(requests.len(), 7);
+    assert!(requests
+        .iter()
+        .all(|(_, request)| !request.system.contains(REPEATED_SUCCESS_HINT)));
+}
+
+#[test]
+fn repeated_success_result_refusal_parallel_and_evaluator_revision_reset_the_streak() {
+    let mut parallel = exact_failure_round("parallel-a");
+    parallel.tool_calls.as_mut().unwrap().push(
+        exact_failure_round("parallel-b")
+            .tool_calls
+            .unwrap()
+            .remove(0),
+    );
+    for (middle, evaluator_revision) in [
+        (unconfigured_round("refusal"), false),
+        (parallel, false),
+        (
+            budget_reply(ModelStopReason::End, "draft to revise", false),
+            true,
+        ),
+    ] {
+        let expected_ids: Vec<_> = [
+            exact_failure_round("before-1"),
+            exact_failure_round("before-2"),
+            middle.clone(),
+            exact_failure_round("after-1"),
+            exact_failure_round("after-2"),
+        ]
+        .into_iter()
+        .flat_map(|response| {
+            response
+                .tool_calls
+                .unwrap_or_default()
+                .into_iter()
+                .map(|call| DataValue::String(call.id))
+        })
+        .collect();
+        let physical_calls = expected_ids.len()
+            - usize::from(
+                middle
+                    .tool_calls
+                    .as_ref()
+                    .is_some_and(|calls| calls[0].name == "private-unknown-name"),
+            );
+        let model = BudgetBoundaryModel::new(vec![
+            Ok(exact_failure_round("before-1")),
+            Ok(exact_failure_round("before-2")),
+            Ok(middle),
+            Ok(exact_failure_round("after-1")),
+            Ok(exact_failure_round("after-2")),
+            if evaluator_revision {
+                Err("terminal provider failure after revision".into())
+            } else {
+                Ok(budget_reply(ModelStopReason::End, "use the results", false))
+            },
+        ]);
+        let mut runtime = AgentRuntime::new(budget_config(8), model.clone());
+        if evaluator_revision {
+            runtime.register_evaluator(Arc::new(BudgetRetryEvaluator));
+        }
+        let frames = Arc::new(RefusalFrames::default());
+        runtime.set_run_observer(frames.clone());
+        let callbacks = std::sync::atomic::AtomicUsize::new(0);
+        let result =
+            block_on(
+                runtime.run_with_context_and_tools(Vec::new(), text("Read"), |_, _, _| {
+                    callbacks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    async { TaskResult::success(text("unchanged polling result"), 1) }
+                }),
+            );
+        assert_eq!(
+            result.status,
+            if evaluator_revision {
+                TaskStatus::Error
+            } else {
+                TaskStatus::Success
+            }
+        );
+        assert_eq!(
+            callbacks.load(std::sync::atomic::Ordering::SeqCst),
+            physical_calls
+        );
+        let requests = model.requests.lock().unwrap();
+        assert_eq!(requests.len(), 6);
+        assert!(requests
+            .iter()
+            .all(|(_, request)| !request.system.contains(REPEATED_SUCCESS_HINT)));
+        let pairs: Vec<_> = runtime
+            .messages()
+            .iter()
+            .filter(|message| message.role == MessageRole::Tool)
+            .map(|message| message.content.metadata.as_ref().unwrap()["toolCallId"].clone())
+            .collect();
+        assert_eq!(pairs, expected_ids);
+        let frames = frames.0.lock().unwrap();
+        assert_eq!(
+            frames
+                .iter()
+                .filter(|frame| matches!(frame, super::RunFrame::ToolStarted { .. }))
+                .count(),
+            physical_calls
+        );
+        assert_eq!(
+            frames
+                .iter()
+                .filter(|frame| matches!(frame, super::RunFrame::ToolFinished { .. }))
+                .count(),
+            physical_calls
+        );
+    }
+}
+
+#[test]
+fn repeated_success_result_respects_zero_budget_wrapup_and_stop_before_continuation() {
+    for (cap, stop) in [(0, false), (3, false), (3, true)] {
+        let model = BudgetBoundaryModel::new(
+            (1..=cap)
+                .map(|index| Ok(exact_failure_round(&format!("call-{index}"))))
+                .chain([Ok(budget_reply(
+                    ModelStopReason::End,
+                    "remaining work honestly reported",
+                    false,
+                ))])
+                .collect(),
+        );
+        let original = budget_config(cap);
+        let control = super::RunControl::new();
+        let mut runtime = AgentRuntime::new(original.clone(), model.clone());
+        runtime.set_run_control(control.clone());
+        let callbacks = std::sync::atomic::AtomicUsize::new(0);
+        let result =
+            block_on(
+                runtime.run_with_context_and_tools(Vec::new(), text("Read"), |_, _, _| {
+                    let completed = callbacks.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                    if stop && completed == cap {
+                        control.cancel.cancel();
+                    }
+                    async { TaskResult::success(text("same result"), 1) }
+                }),
+            );
+        assert_eq!(callbacks.load(std::sync::atomic::Ordering::SeqCst), cap);
+        assert_eq!(
+            runtime
+                .messages()
+                .iter()
+                .filter(|message| message.role == MessageRole::Tool)
+                .count(),
+            cap
+        );
+        assert_eq!(runtime.config(), &original);
+        let requests = model.requests.lock().unwrap();
+        if stop {
+            assert_eq!(result.error.as_deref(), Some(super::RUN_STOPPED_ERROR));
+            assert_eq!(
+                requests.len(),
+                cap,
+                "Stop prevents any advice or wrap-up request"
+            );
+            assert!(requests
+                .iter()
+                .all(|(_, request)| !request.system.contains(REPEATED_SUCCESS_HINT)));
+        } else {
+            assert_eq!(result.status, TaskStatus::Success);
+            assert_eq!(requests.len(), cap + 1);
+            let (shadow, request) = requests.last().unwrap();
+            assert_eq!(shadow.tools, Some(Vec::new()));
+            assert_eq!(shadow.settings.as_ref().unwrap().max_retries, Some(0));
+            assert_eq!(
+                request.system.matches(REPEATED_SUCCESS_HINT).count(),
+                usize::from(cap == 3)
+            );
+            assert!(request.system.contains("Tool-round budget exhausted"));
+            assert_eq!(
+                result.data.as_ref().unwrap().metadata.as_ref().unwrap()["budgetWrapup"],
+                DataValue::Bool(true)
+            );
+        }
+    }
+}
 
 fn exact_failure_round(id: &str) -> ModelGenerateResponse {
     let mut response = budget_reply(ModelStopReason::ToolCall, "attempting the read", false);

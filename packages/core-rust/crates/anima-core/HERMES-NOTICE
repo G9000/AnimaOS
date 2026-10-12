@@ -40,6 +40,13 @@ an explicit zero-retry shadow setting; saved settings remain unchanged. Its
 generic executor-neutral delay uses an existing native dependency. No upstream
 credential refresh, fallback, payload-repair or outer-loop framework is copied.
 
+M27 adapts the same public revision's consecutive exact string-result observation
+from agent/tool_guardrails.py::ToolCallGuardrailController.observe_call. Native
+policy advises once after three fresh bounded single-call plain-text successes,
+with factual guidance that permits necessary polling. It does not infer progress
+or effect absence, copy tool-name taxonomy, block calls, stub results or detect
+multi-call cycles. Original results and existing budget/authority remain intact.
+
 MIT License
 
 Copyright (c) 2025 Nous Research

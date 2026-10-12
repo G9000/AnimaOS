@@ -1,5 +1,5 @@
-//! Advisory for one bounded streak of fresh, exact, typed tool failures.
-//! No raw failure evidence or state survives the current invocation.
+//! Advisories for bounded streaks of fresh, exact, typed tool results.
+//! No raw evidence or streak state survives the current invocation.
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
@@ -11,6 +11,83 @@ use crate::model::ToolCall;
 use crate::primitives::{Content, DataValue, TaskResult, TaskStatus};
 
 pub(super) const EXACT_FAILURE_HINT: &str = "This same tool call has returned the same error three times. Inspect the latest error, change the inputs or approach, or explain the blocker.";
+pub(super) const REPEATED_SUCCESS_HINT: &str = "This same tool call has returned the same result three times. If that result is sufficient, use it; otherwise change the inputs or approach, or continue necessary polling.";
+
+#[derive(Default)]
+pub(super) struct SuccessfulResultStreak {
+    signature: Option<[u8; 32]>,
+    count: u8,
+    warned: bool,
+}
+
+impl SuccessfulResultStreak {
+    pub(super) fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(super) fn observe(
+        &mut self,
+        call: &ToolCall,
+        result: &TaskResult<Content>,
+        recovered: bool,
+    ) -> bool {
+        let Some(signature) = (!recovered)
+            .then(|| success_fingerprint(call, result))
+            .flatten()
+        else {
+            self.reset();
+            return false;
+        };
+        if self.signature == Some(signature) {
+            self.count = self.count.saturating_add(1).min(3);
+        } else {
+            self.signature = Some(signature);
+            self.count = 1;
+            self.warned = false;
+        }
+        if self.count == 3 && !self.warned {
+            self.warned = true;
+            return true;
+        }
+        false
+    }
+}
+
+fn success_fingerprint(call: &ToolCall, result: &TaskResult<Content>) -> Option<[u8; 32]> {
+    if result.status != TaskStatus::Success || result.error.is_some() {
+        return None;
+    }
+    let content = result.data.as_ref()?;
+    // Check byte bounds before scanning or allocating; never serialize Content
+    // or infer stable hidden evidence from its visible text.
+    if call.name.len() > MAX_CAPABILITY_ID_BYTES
+        || content.text.len() > MAX_CAPABILITY_ARGUMENT_BYTES
+        || call.name.trim().is_empty()
+        || content.text.trim().is_empty()
+        || content
+            .attachments
+            .as_ref()
+            .is_some_and(|items| !items.is_empty())
+        || content
+            .metadata
+            .as_ref()
+            .is_some_and(|items| !items.is_empty())
+    {
+        return None;
+    }
+    let arguments = bounded_arguments(&call.args)?;
+    let mut digest = Sha256::new();
+    digest.update(b"anima/repeated-success/v1\0");
+    for bytes in [
+        call.name.as_bytes(),
+        arguments.as_slice(),
+        content.text.as_bytes(),
+    ] {
+        digest.update((bytes.len() as u64).to_be_bytes());
+        digest.update(bytes);
+    }
+    Some(digest.finalize().into())
+}
 
 #[derive(Default)]
 pub(super) struct ExactFailureStreak {
@@ -133,6 +210,138 @@ mod tests {
     }
     fn error() -> TaskResult<Content> {
         TaskResult::error("still unavailable", 1)
+    }
+
+    fn success(text: &str) -> TaskResult<Content> {
+        TaskResult::success(
+            Content {
+                text: text.into(),
+                ..Default::default()
+            },
+            1,
+        )
+    }
+
+    #[test]
+    fn repeated_success_result_streak_warns_once_with_canonical_args_and_empty_containers() {
+        let mut guard = SuccessfulResultStreak::default();
+        for index in 0..10 {
+            let mut call = call();
+            call.id = format!("fresh-{index}");
+            call.args.insert(
+                "offset".into(),
+                DataValue::Number(if index % 2 == 0 { -0.0 } else { 0.0 }),
+            );
+            let mut result = success("polling unchanged");
+            result.duration_ms = index;
+            if index % 2 == 0 {
+                result.data.as_mut().unwrap().metadata = Some(BTreeMap::new());
+                result.data.as_mut().unwrap().attachments = Some(Vec::new());
+            }
+            assert_eq!(guard.observe(&call, &result, false), index == 2);
+        }
+        assert_eq!(guard.count, 3);
+        guard.reset();
+        assert!(!guard.observe(&call(), &success("polling unchanged"), false));
+        assert!(!guard.observe(&call(), &success("polling unchanged"), false));
+        assert!(guard.observe(&call(), &success("polling unchanged"), false));
+    }
+
+    #[test]
+    fn repeated_success_result_streak_compares_full_text_name_and_arguments() {
+        let original = format!("{}a{}", "x".repeat(1024), "y".repeat(1024));
+        let changed_middle = format!("{}b{}", "x".repeat(1024), "y".repeat(1024));
+        let mut changed_name = call();
+        changed_name.name = "another_poll".into();
+        let mut changed_args = call();
+        changed_args
+            .args
+            .insert("offset".into(), DataValue::Number(1.0));
+        for (next_call, next_result) in [
+            (call(), success(&changed_middle)),
+            (changed_name, success(&original)),
+            (changed_args, success(&original)),
+        ] {
+            let mut guard = SuccessfulResultStreak::default();
+            for index in 0..3 {
+                assert_eq!(
+                    guard.observe(&call(), &success(&original), false),
+                    index == 2
+                );
+            }
+            assert!(!guard.observe(&next_call, &next_result, false));
+            assert!(!guard.observe(&next_call, &next_result, false));
+            assert!(
+                guard.observe(&next_call, &next_result, false),
+                "changed evidence starts a new exact streak"
+            );
+        }
+    }
+
+    #[test]
+    fn repeated_success_result_streak_resets_for_ineligible_and_recovered_evidence() {
+        let good = success("unchanged");
+        let mut inconsistent = good.clone();
+        inconsistent.error = Some(String::new());
+        let mut missing = good.clone();
+        missing.data = None;
+        let mut metadata = good.clone();
+        metadata.data.as_mut().unwrap().metadata =
+            Some(BTreeMap::from([("hidden".into(), DataValue::Null)]));
+        let mut attached = good.clone();
+        attached.data.as_mut().unwrap().attachments = Some(vec![crate::primitives::Attachment {
+            attachment_type: crate::primitives::AttachmentType::File,
+            name: "evidence".into(),
+            data: "private".into(),
+            mime_type: None,
+        }]);
+        let mut invalid_args = call();
+        invalid_args
+            .args
+            .insert("offset".into(), DataValue::Number(f64::INFINITY));
+        let mut huge_args = call();
+        huge_args.args.insert(
+            "payload".into(),
+            DataValue::String("x".repeat(MAX_CAPABILITY_ARGUMENT_BYTES + 1)),
+        );
+        let mut deep_args = call();
+        let mut nested = DataValue::Null;
+        for _ in 0..=MAX_CAPABILITY_ARGUMENT_DEPTH {
+            nested = DataValue::Array(vec![nested]);
+        }
+        deep_args.args.insert("deep".into(), nested);
+        let mut huge_name = call();
+        huge_name.name = "x".repeat(MAX_CAPABILITY_ID_BYTES + 1);
+        let mut empty_name = call();
+        empty_name.name = " \t".into();
+        for (invalid_call, invalid_result, recovered) in [
+            (call(), error(), false),
+            (call(), inconsistent, false),
+            (call(), missing, false),
+            (call(), success(""), false),
+            (call(), success(" \n\t"), false),
+            (call(), metadata, false),
+            (call(), attached, false),
+            (
+                call(),
+                success(&"x".repeat(MAX_CAPABILITY_ARGUMENT_BYTES + 1)),
+                false,
+            ),
+            (invalid_args, good.clone(), false),
+            (huge_args, good.clone(), false),
+            (deep_args, good.clone(), false),
+            (huge_name, good.clone(), false),
+            (empty_name, good.clone(), false),
+            (call(), good.clone(), true),
+        ] {
+            let mut guard = SuccessfulResultStreak::default();
+            assert!(!guard.observe(&call(), &good, false));
+            assert!(!guard.observe(&call(), &good, false));
+            assert!(!guard.observe(&invalid_call, &invalid_result, recovered));
+            assert!(!guard.observe(&call(), &good, false));
+            assert!(!guard.observe(&call(), &good, false));
+            assert!(guard.observe(&call(), &good, false));
+        }
     }
 
     #[test]
