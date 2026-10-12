@@ -1309,3 +1309,476 @@ fn exact_failure_warning_parallel_round_resets_the_streak_and_preserves_every_pa
         .map(|id| DataValue::String(id.into()))
     );
 }
+
+const UNCONFIGURED_REFUSAL: &str = "This tool is not configured for this agent. Continue only with configured tools, or explain the limitation.";
+
+#[derive(Default)]
+struct RefusalFrames(std::sync::Mutex<Vec<super::RunFrame>>);
+impl super::RunObserver for RefusalFrames {
+    fn on_frame(&self, frame: super::RunFrame) {
+        self.0.lock().unwrap().push(frame);
+    }
+}
+
+fn unconfigured_round(id: &str) -> ModelGenerateResponse {
+    let mut response = exact_failure_round(id);
+    response.tool_calls.as_mut().unwrap()[0].name = "private-unknown-name".into();
+    response
+}
+
+#[test]
+fn unconfigured_tool_recovery_pairs_one_refusal_then_dispatches_only_the_configured_correction() {
+    let model = BudgetBoundaryModel::new(vec![
+        Ok(unconfigured_round("unknown-once")),
+        Ok(exact_failure_round("configured-once")),
+        Ok(budget_reply(
+            ModelStopReason::End,
+            "The configured read completed; other work remains.",
+            false,
+        )),
+    ]);
+    let original = budget_config(2);
+    let mut runtime = AgentRuntime::new(original.clone(), model.clone());
+    let frames = Arc::new(RefusalFrames::default());
+    runtime.set_run_observer(frames.clone());
+    runtime.set_run_id("run_refusal");
+    let db = Arc::new(InMemoryAdapter::new());
+    runtime.set_database(db.clone());
+    let callbacks = std::sync::Mutex::new(Vec::new());
+    let result = block_on(runtime.run_with_context_and_tools(
+        Vec::new(),
+        text("Read the input"),
+        |_, _, call| {
+            callbacks.lock().unwrap().push((call.id, call.name));
+            async { TaskResult::success(text("confirmed actual read"), 1) }
+        },
+    ));
+    assert_eq!(result.status, TaskStatus::Success, "M25: one valid unconfigured request should receive a paired refusal and one ordinary correction opportunity");
+    let requests = model.requests.lock().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(
+        requests[1].0, original,
+        "the correction receives only the original grants"
+    );
+    assert_eq!(
+        requests[2].0.tools,
+        Some(Vec::new()),
+        "both validation and execution consumed their existing rounds"
+    );
+    assert_eq!(runtime.config(), &original);
+    assert_eq!(
+        callbacks.lock().unwrap().as_slice(),
+        &[("configured-once".into(), "read".into())]
+    );
+    let tool_messages: Vec<_> = runtime
+        .messages()
+        .iter()
+        .filter(|message| message.role == MessageRole::Tool)
+        .collect();
+    assert_eq!(tool_messages.len(), 2);
+    let refusal = tool_messages[0].content.metadata.as_ref().unwrap();
+    assert_eq!(
+        refusal.get("toolCallId"),
+        Some(&DataValue::String("unknown-once".into()))
+    );
+    assert_eq!(
+        refusal.get("taskResult"),
+        Some(&crate::runtime_serde::task_result_data_value(
+            &TaskResult::<Content>::error(UNCONFIGURED_REFUSAL, 0)
+        ))
+    );
+    assert!(!tool_messages[0]
+        .content
+        .text
+        .contains("private-unknown-name"));
+    assert!(!tool_messages[0]
+        .content
+        .text
+        .contains("private-argument-sentinel"));
+    assert!(tool_messages[1]
+        .content
+        .text
+        .contains("confirmed actual read"));
+    let frames = frames.0.lock().unwrap();
+    let started: Vec<_> = frames
+        .iter()
+        .filter_map(|frame| {
+            if let super::RunFrame::ToolStarted { tool_call, .. } = frame {
+                Some(tool_call.id.as_str())
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(
+        started,
+        ["configured-once"],
+        "the refused action has no start/receipt opportunity"
+    );
+    assert_eq!(
+        frames
+            .iter()
+            .filter(|frame| matches!(frame, super::RunFrame::ToolFinished { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(
+        db.recorded_steps().len(),
+        1,
+        "the refusal never enters native tool-step persistence"
+    );
+    assert_eq!(
+        db.recorded_steps()[0].input.as_ref().unwrap()["name"],
+        "read"
+    );
+    assert_eq!(runtime.state().token_usage.total_tokens, 36);
+}
+
+#[test]
+fn unconfigured_tool_recovery_second_denial_is_terminal_and_fresh_runs_reset() {
+    let model = BudgetBoundaryModel::new(vec![
+        Ok(unconfigured_round("first")),
+        Ok(unconfigured_round("second")),
+        Ok(budget_reply(
+            ModelStopReason::End,
+            "forbidden third turn",
+            false,
+        )),
+    ]);
+    let mut runtime = AgentRuntime::new(budget_config(8), model.clone());
+    let result = block_on(runtime.run_with_context_and_tools(
+        Vec::new(),
+        text("Read"),
+        |_, _, _| async { panic!("an unknown call must not execute") },
+    ));
+    assert_eq!(result.status, TaskStatus::Error);
+    assert_eq!(model.requests.lock().unwrap().len(), 2);
+    assert_eq!(
+        runtime
+            .messages()
+            .iter()
+            .filter(|message| message.role == MessageRole::Tool)
+            .count(),
+        1
+    );
+    assert_eq!(
+        runtime
+            .messages()
+            .iter()
+            .filter(|message| message
+                .content
+                .metadata
+                .as_ref()
+                .is_some_and(|metadata| metadata.contains_key("toolCalls")))
+            .count(),
+        1,
+        "the second denial has no unmatched call row"
+    );
+    let next = BudgetBoundaryModel::new(vec![
+        Ok(unconfigured_round("fresh")),
+        Ok(budget_reply(
+            ModelStopReason::End,
+            "The action was refused; no effect occurred.",
+            false,
+        )),
+    ]);
+    let mut restored = AgentRuntime::from_snapshot(runtime.snapshot(), next.clone());
+    let result = block_on(restored.run_with_context_and_tools(
+        Vec::new(),
+        text("New task"),
+        |_, _, _| async { panic!("recovery cannot grant the unknown tool") },
+    ));
+    assert_eq!(result.status, TaskStatus::Success);
+    assert_eq!(next.requests.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn unconfigured_tool_recovery_zero_and_one_round_budgets_keep_no_tools_priority() {
+    for limit in [0, 1] {
+        let model = BudgetBoundaryModel::new(vec![
+            Ok(unconfigured_round("unknown")),
+            Ok(budget_reply(
+                ModelStopReason::End,
+                "The tool was refused; the task remains unfinished.",
+                false,
+            )),
+        ]);
+        let mut runtime = AgentRuntime::new(budget_config(limit), model.clone());
+        let result = block_on(runtime.run_with_context_and_tools(
+            Vec::new(),
+            text("Read"),
+            |_, _, _| async { panic!("there is no admitted effect") },
+        ));
+        let requests = model.requests.lock().unwrap();
+        assert_eq!(requests.len(), limit + 1);
+        assert_eq!(requests.last().unwrap().0.tools, Some(Vec::new()));
+        assert_eq!(
+            runtime
+                .messages()
+                .iter()
+                .filter(|message| message.role == MessageRole::Tool)
+                .count(),
+            limit
+        );
+        if limit == 0 {
+            assert_eq!(
+                result.error.as_deref(),
+                Some("tool iteration limit exceeded")
+            );
+        } else {
+            assert_eq!(result.status, TaskStatus::Success);
+            assert_eq!(
+                result
+                    .data
+                    .as_ref()
+                    .unwrap()
+                    .metadata
+                    .as_ref()
+                    .unwrap()
+                    .get("budgetWrapup"),
+                Some(&DataValue::Bool(true))
+            );
+        }
+    }
+}
+
+#[test]
+fn unconfigured_tool_recovery_malformed_and_mixed_batches_never_dispatch_or_pair() {
+    let mut empty_name = unconfigured_round("empty-name");
+    empty_name.tool_calls.as_mut().unwrap()[0].name.clear();
+    let mut empty_id = unconfigured_round("");
+    empty_id.tool_calls.as_mut().unwrap()[0].id = "  ".into();
+    let mut long_id =
+        unconfigured_round(&"i".repeat(crate::capability::MAX_CAPABILITY_ID_BYTES + 1));
+    long_id.content.text = "long id".into();
+    let mut nonfinite = unconfigured_round("invalid-number");
+    nonfinite.tool_calls.as_mut().unwrap()[0]
+        .args
+        .insert("n".into(), DataValue::Number(f64::INFINITY));
+    let mut oversized = unconfigured_round("large-args");
+    oversized.tool_calls.as_mut().unwrap()[0].args.insert(
+        "payload".into(),
+        DataValue::String("x".repeat(crate::capability::MAX_CAPABILITY_ARGUMENT_BYTES + 1)),
+    );
+    let mut long_name = unconfigured_round("long-name");
+    long_name.tool_calls.as_mut().unwrap()[0].name =
+        "n".repeat(crate::capability::MAX_CAPABILITY_ID_BYTES + 1);
+    let mut deep = unconfigured_round("deep-args");
+    let mut nested = DataValue::Null;
+    for _ in 0..=crate::capability::MAX_CAPABILITY_ARGUMENT_DEPTH {
+        nested = DataValue::Array(vec![nested]);
+    }
+    deep.tool_calls.as_mut().unwrap()[0]
+        .args
+        .insert("deep".into(), nested);
+    let mut mixed = unconfigured_round("unknown");
+    mixed.tool_calls.as_mut().unwrap().push(
+        exact_failure_round("allowed-sibling")
+            .tool_calls
+            .unwrap()
+            .remove(0),
+    );
+    let mut empty_batch = unconfigured_round("empty");
+    empty_batch.tool_calls = Some(Vec::new());
+    for invalid in [
+        empty_name,
+        empty_id,
+        long_id,
+        long_name,
+        nonfinite,
+        oversized,
+        deep,
+        mixed,
+        empty_batch,
+    ] {
+        let model = BudgetBoundaryModel::new(vec![
+            Ok(invalid),
+            Ok(budget_reply(
+                ModelStopReason::End,
+                "forbidden continuation",
+                false,
+            )),
+        ]);
+        let mut runtime = AgentRuntime::new(budget_config(8), model.clone());
+        let frames = Arc::new(RefusalFrames::default());
+        runtime.set_run_observer(frames.clone());
+        let db = Arc::new(InMemoryAdapter::new());
+        runtime.set_database(db.clone());
+        let result = block_on(runtime.run_with_context_and_tools(
+            Vec::new(),
+            text("Read"),
+            |_, _, _| async { panic!("invalid/mixed requests may not admit effects") },
+        ));
+        assert_eq!(result.status, TaskStatus::Error);
+        assert_eq!(model.requests.lock().unwrap().len(), 1);
+        assert!(db.recorded_steps().is_empty());
+        assert!(frames.0.lock().unwrap().iter().all(|frame| !matches!(
+            frame,
+            super::RunFrame::ToolStarted { .. } | super::RunFrame::ToolFinished { .. }
+        )));
+        assert!(runtime
+            .messages()
+            .iter()
+            .all(|message| message.role != MessageRole::Tool));
+    }
+}
+
+#[test]
+fn unconfigured_tool_recovery_reused_ids_and_ambiguous_history_stay_terminal() {
+    let mut denied = unconfigured_round("read-once");
+    denied.content.text = "refused duplicate identity".into();
+    let model = BudgetBoundaryModel::new(vec![Ok(exact_failure_round("read-once")), Ok(denied)]);
+    let mut runtime = AgentRuntime::new(budget_config(8), model.clone());
+    let callbacks = std::sync::atomic::AtomicUsize::new(0);
+    let result =
+        block_on(
+            runtime.run_with_context_and_tools(Vec::new(), text("Read"), |_, _, _| {
+                callbacks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async { TaskResult::success(text("the legitimate read finished"), 1) }
+            }),
+        );
+    assert_eq!(result.status, TaskStatus::Error);
+    assert_eq!(callbacks.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(model.requests.lock().unwrap().len(), 2);
+    assert_eq!(
+        runtime
+            .messages()
+            .iter()
+            .filter(|message| message.role == MessageRole::Tool)
+            .count(),
+        1
+    );
+
+    let model = BudgetBoundaryModel::new(vec![Ok(unconfigured_round("new-id"))]);
+    let mut runtime = AgentRuntime::new(budget_config(8), model.clone());
+    let ambiguous = Message {
+        id: "legacy-result".into(),
+        agent_id: runtime.state().id.clone(),
+        room_id: "old-room".into(),
+        content: text("unpaired result"),
+        role: MessageRole::Tool,
+        created_at_ms: 1,
+    };
+    let result = block_on(runtime.run_with_context_and_tools(
+        vec![ambiguous],
+        text("Read"),
+        |_, _, _| async { panic!("ambiguous history cannot gain recovery") },
+    ));
+    assert_eq!(result.status, TaskStatus::Error);
+    assert_eq!(model.requests.lock().unwrap().len(), 1);
+}
+
+struct StopAfterRefusal(super::CancelSignal);
+impl super::RunObserver for StopAfterRefusal {
+    fn on_frame(&self, frame: super::RunFrame) {
+        if matches!(frame, super::RunFrame::StepFinished { .. }) {
+            self.0.cancel();
+        }
+    }
+}
+
+#[test]
+fn unconfigured_tool_recovery_preserves_paired_refusal_but_stop_prevents_continuation() {
+    let model = BudgetBoundaryModel::new(vec![
+        Ok(unconfigured_round("unknown")),
+        Ok(budget_reply(
+            ModelStopReason::End,
+            "forbidden continuation",
+            false,
+        )),
+    ]);
+    let control = super::RunControl::new();
+    let mut runtime = AgentRuntime::new(budget_config(8), model.clone());
+    runtime.set_run_control(control.clone());
+    runtime.set_run_observer(Arc::new(StopAfterRefusal(control.cancel)));
+    let result = block_on(runtime.run_with_context_and_tools(
+        Vec::new(),
+        text("Read"),
+        |_, _, _| async { panic!("a refusal is not execution") },
+    ));
+    assert_eq!(result.error.as_deref(), Some(super::RUN_STOPPED_ERROR));
+    assert_eq!(model.requests.lock().unwrap().len(), 1);
+    let results: Vec<_> = runtime
+        .messages()
+        .iter()
+        .filter(|message| message.role == MessageRole::Tool)
+        .collect();
+    assert_eq!(results.len(), 1);
+    assert!(results[0].content.text.contains(UNCONFIGURED_REFUSAL));
+}
+
+#[test]
+fn unconfigured_tool_recovery_resets_the_exact_failure_advisory_without_extra_turns() {
+    let model = BudgetBoundaryModel::new(vec![
+        Ok(exact_failure_round("before-1")),
+        Ok(exact_failure_round("before-2")),
+        Ok(unconfigured_round("refused")),
+        Ok(exact_failure_round("after-1")),
+        Ok(exact_failure_round("after-2")),
+        Ok(budget_reply(
+            ModelStopReason::End,
+            "The reads failed and the unknown action was refused.",
+            false,
+        )),
+    ]);
+    let mut runtime = AgentRuntime::new(budget_config(8), model.clone());
+    let callbacks = std::sync::atomic::AtomicUsize::new(0);
+    let result =
+        block_on(
+            runtime.run_with_context_and_tools(Vec::new(), text("Read"), |_, _, _| {
+                callbacks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async { TaskResult::error("same exact error", 1) }
+            }),
+        );
+    assert_eq!(result.status, TaskStatus::Success);
+    assert_eq!(callbacks.load(std::sync::atomic::Ordering::SeqCst), 4);
+    let requests = model.requests.lock().unwrap();
+    assert_eq!(requests.len(), 6);
+    assert!(requests
+        .iter()
+        .all(|(_, request)| !request.system.contains(EXACT_FAILURE_HINT)));
+    assert_eq!(
+        runtime
+            .messages()
+            .iter()
+            .filter(|message| message.role == MessageRole::Tool)
+            .count(),
+        5
+    );
+}
+
+#[test]
+fn unconfigured_tool_recovery_never_reinterprets_a_configured_host_refusal_or_cancellation() {
+    let model = BudgetBoundaryModel::new(vec![
+        Ok(exact_failure_round("configured")),
+        Ok(budget_reply(
+            ModelStopReason::End,
+            "forbidden continuation",
+            false,
+        )),
+    ]);
+    let control = super::RunControl::new();
+    let mut runtime = AgentRuntime::new(budget_config(1), model.clone());
+    runtime.set_run_control(control.clone());
+    let result =
+        block_on(
+            runtime.run_with_context_and_tools(Vec::new(), text("Read"), |_, _, _| {
+                control.cancel.cancel();
+                async { TaskResult::error("tool 'read' is not configured for this agent", 23) }
+            }),
+        );
+    assert_eq!(result.error.as_deref(), Some(super::RUN_STOPPED_ERROR));
+    assert_eq!(model.requests.lock().unwrap().len(), 1);
+    let actual = runtime
+        .messages()
+        .iter()
+        .find(|message| message.role == MessageRole::Tool)
+        .unwrap();
+    assert_eq!(
+        actual.content.metadata.as_ref().unwrap().get("taskResult"),
+        Some(&crate::runtime_serde::task_result_data_value(
+            &TaskResult::<Content>::error("tool 'read' is not configured for this agent", 23)
+        ))
+    );
+    assert!(!actual.content.text.contains(UNCONFIGURED_REFUSAL));
+}

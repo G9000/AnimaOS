@@ -3217,7 +3217,7 @@ it('offers to send an interrupted message again, warning when tools had started'
   ).toBeVisible();
   expect(
     screen.getByText(
-      'Tools had started (bash). Check their effects before sending again.',
+      'Tools were requested (bash). Check their effects before sending again.',
     ),
   ).toBeVisible();
   expect(screen.getByText('Clean the logs')).toBeVisible();

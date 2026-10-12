@@ -364,7 +364,19 @@ impl ModelAdapter for HostileToolCallingModelAdapter {
         if !trailing_tool_messages(&request.messages).is_empty() {
             return Ok(ModelGenerateResponse {
                 content: Content {
-                    text: "hostile tool result consumed".into(),
+                    text: if trailing_tool_messages(&request.messages)
+                        .iter()
+                        .any(|message| {
+                            message
+                                .content
+                                .text
+                                .contains(super::UNCONFIGURED_TOOL_REFUSAL)
+                        }) {
+                        "The unconfigured request was refused; no effect was performed."
+                    } else {
+                        "hostile tool result consumed"
+                    }
+                    .into(),
                     ..Content::default()
                 },
                 tool_calls: None,
@@ -1262,14 +1274,14 @@ fn runtime_run_executes_tool_round_trip() {
 }
 
 #[test]
-fn runtime_rejects_unconfigured_hostile_tools_before_execution_or_step_preparation() {
+fn runtime_pairs_one_unconfigured_hostile_refusal_without_execution_or_step_preparation() {
     for (tool_name, tools) in [("bash", None), ("write_file", Some(Vec::new()))] {
         let mut denied_config = config();
         denied_config.tools = tools;
         let db = Arc::new(InMemoryAdapter::new());
         let executed = Arc::new(AtomicBool::new(false));
         let mut runtime = AgentRuntime::new(
-            denied_config,
+            denied_config.clone(),
             Arc::new(HostileToolCallingModelAdapter { tool_name }),
         );
         runtime.set_database(db.clone());
@@ -1288,16 +1300,34 @@ fn runtime_rejects_unconfigured_hostile_tools_before_execution_or_step_preparati
             },
         ));
 
-        assert_eq!(result.status, TaskStatus::Error);
-        assert_eq!(
-            result.error.as_deref(),
-            Some(format!("tool '{tool_name}' is not configured for this agent").as_str())
-        );
+        assert_eq!(result.status, TaskStatus::Success);
+        assert!(result.error.is_none());
+        assert!(result
+            .data
+            .as_ref()
+            .unwrap()
+            .text
+            .contains("refused; no effect"));
+        assert_eq!(runtime.config(), &denied_config);
         assert!(!executed.load(Ordering::SeqCst));
         assert!(
             db.recorded_steps().is_empty(),
             "denied tools must be rejected before persisted step preparation"
         );
+        let refused: Vec<_> = runtime
+            .messages()
+            .iter()
+            .filter(|message| message.role == MessageRole::Tool)
+            .collect();
+        assert_eq!(refused.len(), 1);
+        assert!(refused[0]
+            .content
+            .text
+            .contains(super::UNCONFIGURED_TOOL_REFUSAL));
+        assert!(runtime.snapshot().events.iter().all(|event| !matches!(
+            event.event_type,
+            EventType::ToolBefore | EventType::ToolAfter
+        )));
     }
 }
 

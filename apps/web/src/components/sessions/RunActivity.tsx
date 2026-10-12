@@ -57,8 +57,8 @@ function stepKeys(steps: readonly ToolStep[]): string[] {
   });
 }
 
-/** Tool steps as cards (spec §15.2): open while the run works, then
- *  collapsed to "Used N tools · Ns". */
+/** Tool requests as cards (spec §15.2): open while the run works, then
+ *  collapsed to "N tool requests · Ns". */
 export function ToolBlock({
   steps,
   active,
@@ -78,7 +78,7 @@ export function ToolBlock({
     ? count === 0
       ? `Working · ${formatElapsed(total)}`
       : `Working · ${count} ${count === 1 ? 'step' : 'steps'} · ${formatElapsed(total)}`
-    : `Used ${count} ${count === 1 ? 'tool' : 'tools'} · ${formatElapsed(total)}`;
+    : `${count} ${count === 1 ? 'tool request' : 'tool requests'} · ${formatElapsed(total)}`;
   const expanded = active || open;
   const keys = stepKeys(steps);
   // Spec §15.2: an automation the companion created stays visible with

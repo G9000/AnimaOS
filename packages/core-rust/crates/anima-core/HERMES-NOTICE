@@ -24,6 +24,15 @@ digest-only per-run state. Successful/malformed/recovered/parallel rounds reset;
 no name-based effect inference, result rewriting, hard stop or added model turn.
 Upstream defaults its exact-failure warning threshold to two; Anima uses three.
 
+M25 adapts paired validation-refusal continuation from the same public revision:
+agent/turn_tool_validation.py::validate_tool_calls.
+Anima differences: one fresh bounded single unconfigured call can receive a
+static paired error within the existing tool-round budget; a second refusal,
+malformed/batched request or reused ID remains terminal. No name correction,
+grant changes, executor/action witness, independent repair request or effect
+replay. The refusal state is per invocation; native host authorization remains
+authoritative for configured calls.
+
 MIT License
 
 Copyright (c) 2025 Nous Research

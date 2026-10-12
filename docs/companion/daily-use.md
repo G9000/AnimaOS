@@ -112,6 +112,13 @@ explain the blocker. The hint adds no turn or tool action and preserves the real
 error records. Changed attempts, successful calls and parallel batches reset the
 streak. It is advisory; it does not prove that no partial effects occurred.
 
+If the model requests a tool that is not configured, one valid single request
+can receive a paired refusal and a chance to correct its approach within the
+same round budget. The refused request executes nothing and creates no action
+receipt. A second refusal, malformed request, reused call ID or mixed unknown
+batch ends the run. Permissions remain unchanged. Collapsed chat cards count
+tool requests; inspect their status and Recorded actions for execution evidence.
+
 ## Connect only what you use
 
 - Telegram: configure and pair through Connectors. The native daemon handles
