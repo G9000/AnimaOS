@@ -1,4 +1,4 @@
-Hermes Agent attribution for agent_files/{disk,selection,scan}.rs
+Hermes Agent attribution for agent_files/{disk,selection,scan}.rs and tools/memory.rs
 Source: https://github.com/NousResearch/hermes-agent
 Revision: f3ef9db68332063a3625661f3a9b259f60abdb4e
 
@@ -25,6 +25,17 @@ An OS-stuck blocking read cannot be killed. The five-second caller deadline
 includes admission; two process-wide permits remain held until actual worker
 completion. Later loads fall back if both workers are stuck. Cancellation never
 publishes a late result. No claim of physical thread termination is made.
+
+M17 memory correction adaptation (revision 1fd18277267152893a8a24792b79213e7ca3f899):
+tools/memory_tool.py::_pin_matched_entries and tools/memory_tool_store.py::_find_unique_match,
+_locate pin replacement to the full reviewed entry and refuse stale or ambiguous
+targets. Anima ports that replacement boundary into native Rust: exact record ID
+plus exact expected content, checked under a same-agent memory write lock through
+durable save with MemoryMutation rollback. It preserves unrelated record fields
+and evidence links. No fuzzy matching, profile-file imports, Python execution,
+global memory authority, removal, batch edits, or upstream fail-open gate behavior
+are imported. Existing Anima tool grants and write approvals still apply.
+
 MIT License
 
 Copyright (c) 2025 Nous Research

@@ -65,26 +65,26 @@ graph TD
 
 ## Module Map
 
-| Module | Responsibility |
-|---|---|
-| `hosts/rust-daemon/src/main.rs` | Reads env vars, validates config, binds the TCP listener, initializes tracing, and starts the daemon. |
-| `hosts/rust-daemon/src/app.rs` | Defines `DaemonConfig`, builds shared state, wires persistence, and serves the Axum app with graceful shutdown. |
-| `hosts/rust-daemon/src/app/persistence.rs` | Handles `memory` vs `postgres` persistence startup, injects the `SqlxPostgresAdapter`, and chooses host snapshot stores. |
-| `hosts/rust-daemon/src/control_plane_store.rs` | Host-owned JSON or Postgres snapshot store for registered agents, registered swarms, and latest runtime states. |
-| `hosts/rust-daemon/src/memory_store.rs` | Host-owned JSON, SQLite, or Postgres snapshot store for `anima-memory` state. |
-| `hosts/rust-daemon/src/routes/mod.rs` | Owns the router, request middleware, timeout policy, run admission semaphore, OpenAPI, and Scalar docs wiring. |
-| `hosts/rust-daemon/src/routes/agents.rs` | Create, list, fetch, delete, recent-memory, and run handlers for agents. |
-| `hosts/rust-daemon/src/routes/connectors.rs` | Local-owner API for agent-scoped Telegram connector setup, pairing, restart, messages, and removal. |
-| `hosts/rust-daemon/src/connectors/` | Persisted Telegram connector records, OS credential storage, Bot API transport, and supervised polling/delivery workers. |
-| `hosts/rust-daemon/src/schedules.rs` | Daemon-backed schedules, including optional Telegram delivery targets. |
-| `hosts/rust-daemon/src/routes/memories.rs` | HTTP surface for memory create, recent, and search operations. |
-| `hosts/rust-daemon/src/routes/swarms.rs` | Create, list, fetch, run, and SSE subscription handlers for swarms. |
-| `hosts/rust-daemon/src/routes/health.rs` | Liveness, readiness, and metrics computation. |
-| `hosts/rust-daemon/src/state.rs` | Shared daemon control-plane state: memory, runtimes, swarms, snapshots, event fanout, tool registry, process manager, and optional database adapter. |
-| `hosts/rust-daemon/src/runtime_model.rs` | Provider routing layer that turns core model requests into real HTTP requests for supported providers. |
-| `hosts/rust-daemon/src/components.rs` | Default providers and evaluators attached to new runtimes. |
-| `hosts/rust-daemon/src/tools.rs` | Tool registry and shared execution context for memory, web, filesystem, todo, utility, and process tools. |
-| `hosts/rust-daemon/src/events.rs` | Lightweight broadcast fanout used for internal event publishing and SSE subscribers. |
+| Module                                         | Responsibility                                                                                                                                       |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hosts/rust-daemon/src/main.rs`                | Reads env vars, validates config, binds the TCP listener, initializes tracing, and starts the daemon.                                                |
+| `hosts/rust-daemon/src/app.rs`                 | Defines `DaemonConfig`, builds shared state, wires persistence, and serves the Axum app with graceful shutdown.                                      |
+| `hosts/rust-daemon/src/app/persistence.rs`     | Handles `memory` vs `postgres` persistence startup, injects the `SqlxPostgresAdapter`, and chooses host snapshot stores.                             |
+| `hosts/rust-daemon/src/control_plane_store.rs` | Host-owned JSON or Postgres snapshot store for registered agents, registered swarms, and latest runtime states.                                      |
+| `hosts/rust-daemon/src/memory_store.rs`        | Host-owned JSON, SQLite, or Postgres snapshot store for `anima-memory` state.                                                                        |
+| `hosts/rust-daemon/src/routes/mod.rs`          | Owns the router, request middleware, timeout policy, run admission semaphore, OpenAPI, and Scalar docs wiring.                                       |
+| `hosts/rust-daemon/src/routes/agents.rs`       | Create, list, fetch, delete, recent-memory, and run handlers for agents.                                                                             |
+| `hosts/rust-daemon/src/routes/connectors.rs`   | Local-owner API for agent-scoped Telegram connector setup, pairing, restart, messages, and removal.                                                  |
+| `hosts/rust-daemon/src/connectors/`            | Persisted Telegram connector records, OS credential storage, Bot API transport, and supervised polling/delivery workers.                             |
+| `hosts/rust-daemon/src/schedules.rs`           | Daemon-backed schedules, including optional Telegram delivery targets.                                                                               |
+| `hosts/rust-daemon/src/routes/memories.rs`     | HTTP surface for memory create, recent, and search operations.                                                                                       |
+| `hosts/rust-daemon/src/routes/swarms.rs`       | Create, list, fetch, run, and SSE subscription handlers for swarms.                                                                                  |
+| `hosts/rust-daemon/src/routes/health.rs`       | Liveness, readiness, and metrics computation.                                                                                                        |
+| `hosts/rust-daemon/src/state.rs`               | Shared daemon control-plane state: memory, runtimes, swarms, snapshots, event fanout, tool registry, process manager, and optional database adapter. |
+| `hosts/rust-daemon/src/runtime_model.rs`       | Provider routing layer that turns core model requests into real HTTP requests for supported providers.                                               |
+| `hosts/rust-daemon/src/components.rs`          | Default providers and evaluators attached to new runtimes.                                                                                           |
+| `hosts/rust-daemon/src/tools.rs`               | Tool registry and shared execution context for memory, web, filesystem, todo, utility, and process tools.                                            |
+| `hosts/rust-daemon/src/events.rs`              | Lightweight broadcast fanout used for internal event publishing and SSE subscribers.                                                                 |
 
 ## Startup Flow
 
@@ -141,21 +141,21 @@ Telegram token environment variable.
 
 `DaemonState` currently owns:
 
-| Field | Purpose |
-|---|---|
-| `memory` | Shared `MemoryManager` used by routes, providers, evaluators, and tools. |
-| `agents` | Live `AgentRuntime` instances keyed by daemon-visible id. |
-| `agent_snapshots` | Last known serializable runtime snapshots, including in-flight markers. |
-| `swarms` | Live `SwarmCoordinator` instances keyed by swarm id. |
-| `swarm_configs` | Serializable swarm configs used to rebuild coordinators after restart. |
-| `swarm_events` | Per-swarm event fanout used for SSE subscribers. |
-| `swarm_snapshots` | Last known swarm state, so reads still have something to return after execution updates. |
-| `control_plane_store` | Optional JSON or Postgres sink/source for daemon-owned agent and swarm snapshots. |
-| `model_adapter` | Shared adapter for external model providers. |
-| `tool_registry` | Validates declared tools and resolves tool handlers during runtime execution. |
-| `process_manager` | Tracks daemon-launched background processes and enforces the background-process cap. |
-| `event_fanout` | Global event fanout for daemon-wide publishing. |
-| `db` | Optional injected database adapter for step-log persistence. |
+| Field                 | Purpose                                                                                  |
+| --------------------- | ---------------------------------------------------------------------------------------- |
+| `memory`              | Shared `MemoryManager` used by routes, providers, evaluators, and tools.                 |
+| `agents`              | Live `AgentRuntime` instances keyed by daemon-visible id.                                |
+| `agent_snapshots`     | Last known serializable runtime snapshots, including in-flight markers.                  |
+| `swarms`              | Live `SwarmCoordinator` instances keyed by swarm id.                                     |
+| `swarm_configs`       | Serializable swarm configs used to rebuild coordinators after restart.                   |
+| `swarm_events`        | Per-swarm event fanout used for SSE subscribers.                                         |
+| `swarm_snapshots`     | Last known swarm state, so reads still have something to return after execution updates. |
+| `control_plane_store` | Optional JSON or Postgres sink/source for daemon-owned agent and swarm snapshots.        |
+| `model_adapter`       | Shared adapter for external model providers.                                             |
+| `tool_registry`       | Validates declared tools and resolves tool handlers during runtime execution.            |
+| `process_manager`     | Tracks daemon-launched background processes and enforces the background-process cap.     |
+| `event_fanout`        | Global event fanout for daemon-wide publishing.                                          |
+| `db`                  | Optional injected database adapter for step-log persistence.                             |
 
 Two design details matter here:
 
@@ -170,14 +170,14 @@ The router in `routes/mod.rs` is where HTTP behavior becomes operational policy.
 
 It adds:
 
-| Concern | Behavior |
-|---|---|
-| Request ids | `SetRequestIdLayer` and `PropagateRequestIdLayer` add and forward `x-request-id`. |
-| Tracing | `TraceLayer` logs method, URI, latency, and request id. |
-| JSON helpers | `routes/http.rs` parses bodies, serializes JSON, and falls back to logged `500` responses instead of panicking. |
+| Concern                | Behavior                                                                                                        |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Request ids            | `SetRequestIdLayer` and `PropagateRequestIdLayer` add and forward `x-request-id`.                               |
+| Tracing                | `TraceLayer` logs method, URI, latency, and request id.                                                         |
+| JSON helpers           | `routes/http.rs` parses bodies, serializes JSON, and falls back to logged `500` responses instead of panicking. |
 | Standard route timeout | `TimeoutLayer` applies `config.request_timeout` to docs, health, memory, list, get, create, and similar routes. |
-| Run route timeout | The same timeout policy also applies to `/api/agents/{id}/run` and `/api/swarms/{id}/run`. |
-| Run admission control | An `Arc<Semaphore>` enforces `config.max_concurrent_runs` and returns `503` when the daemon is saturated. |
+| Run route timeout      | The same timeout policy also applies to `/api/agents/{id}/run` and `/api/swarms/{id}/run`.                      |
+| Run admission control  | An `Arc<Semaphore>` enforces `config.max_concurrent_runs` and returns `503` when the daemon is saturated.       |
 
 The operational routes are:
 
@@ -272,14 +272,14 @@ The daemon tool surface is defined in `hosts/rust-daemon/src/tools.rs`.
 
 `ToolRegistry::new()` registers handlers for these families:
 
-| Family | Examples |
-|---|---|
-| Memory | `memory_search`, `memory_add`, `recent_memories` |
-| Web | `web_fetch`, `exa_search` |
-| Utility | `get_current_time`, `calculate` |
+| Family     | Examples                                                                         |
+| ---------- | -------------------------------------------------------------------------------- |
+| Memory     | `memory_search`, `memory_add`, `memory_update`, `recent_memories`                |
+| Web        | `web_fetch`, `exa_search`                                                        |
+| Utility    | `get_current_time`, `calculate`                                                  |
 | Filesystem | `read_file`, `list_dir`, `glob`, `grep`, `write_file`, `edit_file`, `multi_edit` |
-| Todo | `todo_write`, `todo_read` |
-| Process | `bash`, `bg_start`, `bg_output`, `bg_stop`, `bg_list` |
+| Todo       | `todo_write`, `todo_read`                                                        |
+| Process    | `bash`, `bg_start`, `bg_output`, `bg_stop`, `bg_list`                            |
 
 Tool execution happens through `ToolExecutionContext`, which carries three shared resources:
 
@@ -317,12 +317,12 @@ Every daemon instance creates one shared `MemoryManager`.
 
 That memory store is used by:
 
-| Consumer | Why it needs memory |
-|---|---|
-| Memory HTTP routes | Create, search, and recent-memory APIs. |
-| `RecentMemoriesProvider` | Injects recent memory context into runtime execution. |
+| Consumer                    | Why it needs memory                                        |
+| --------------------------- | ---------------------------------------------------------- |
+| Memory HTTP routes          | Create, search, and recent-memory APIs.                    |
+| `RecentMemoriesProvider`    | Injects recent memory context into runtime execution.      |
 | `ReflectionMemoryEvaluator` | Persists reflection-style memory after runtime evaluation. |
-| Agent run handler | Persists final `task_result` memory on successful runs. |
+| Agent run handler           | Persists final `task_result` memory on successful runs.    |
 
 This means HTTP memory APIs and runtime memory behavior are operating on the same in-process store.
 

@@ -30,6 +30,7 @@ const OBSERVE_TOOLS = [
 
 const COLLABORATE_TOOLS = [
   ...OBSERVE_TOOLS,
+  'memory_update',
   'write_file',
   'edit_file',
   'multi_edit',
@@ -66,6 +67,16 @@ function agent(id: string, createdAtMs: number): AgentDetail {
 }
 
 describe('workspace access profiles', () => {
+  it('grants correction only to write profiles and keeps existing tool sets custom', () => {
+    expect(toolNamesForProfile('observe')).not.toContain('memory_update');
+    expect(toolNamesForProfile('collaborate')).toContain('memory_update');
+    expect(toolNamesForProfile('operate')).toContain('memory_update');
+    expect(
+      deriveAccessProfile(
+        COLLABORATE_TOOLS.filter((tool) => tool !== 'memory_update'),
+      ),
+    ).toBe('custom');
+  });
   it('defines presentation metadata for every profile', () => {
     expect(Object.keys(ACCESS_PROFILES)).toEqual([
       'observe',

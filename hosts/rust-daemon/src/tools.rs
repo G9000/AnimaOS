@@ -324,7 +324,7 @@ impl ToolRegistry {
         registry.register(
             tool_descriptor(
                 "memory_search",
-                "Search durable agent memories by semantic similarity",
+                "Search your durable memories. Returns each visible record's ID, type and full content. To correct a current fact, use memory_update with its exact ID and content; search with an adequate limit and update every obsolete duplicate fact. Historical reflections need not be rewritten.",
                 object_parameters(vec![
                     required_parameter(
                         "query",
@@ -341,7 +341,7 @@ impl ToolRegistry {
         registry.register(
             tool_descriptor(
                 "memory_add",
-                "Store a durable memory for future agent runs",
+                "Store a new durable memory for future agent runs. Adding a memory does not replace an existing fact. For corrections, search and use memory_update on every obsolete current fact; do not claim replacement after memory_add alone.",
                 object_parameters(vec![
                     required_parameter(
                         "content",
@@ -364,8 +364,20 @@ impl ToolRegistry {
         );
         registry.register(
             tool_descriptor(
+                "memory_update",
+                "Replace one of your own visible durable memories only if its full content still exactly matches expected_content. Obtain the ID and exact text from memory_search or recent_memories. Update every obsolete duplicate current fact separately, preserving unrelated notes; historical reflections need not change. A stale result requires a new search, not a guessed overwrite. This changes content only, not classification, importance, tags or evidence links.",
+                object_parameters(vec![
+                    required_parameter("id", non_blank_string_parameter("Exact memory ID returned by memory_search or recent_memories")),
+                    required_parameter("expected_content", non_empty_string_parameter("Exact full current content of that single record; no paraphrasing or trimming")),
+                    required_parameter("content", non_blank_string_parameter("Replacement memory content, at most 8000 characters")),
+                ]),
+            ),
+            memory::execute_memory_update,
+        );
+        registry.register(
+            tool_descriptor(
                 "recent_memories",
-                "Read the most recently stored durable memories",
+                "Read your most recently stored visible durable memories, including each record's ID, type and full content. Use those exact values with memory_update to correct current facts; memory_add does not replace them.",
                 object_parameters(vec![optional_parameter(
                     "limit",
                     integer_parameter("Maximum number of memories to return", 1),

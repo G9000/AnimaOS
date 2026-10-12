@@ -285,6 +285,11 @@ fn registry_defines_every_registered_tool_schema() {
         ("spawn_helper", &["name", "task"][..], &[][..]),
         ("memory_search", &["query"][..], &["limit"][..]),
         ("memory_add", &["content"][..], &["type", "importance"][..]),
+        (
+            "memory_update",
+            &["id", "expected_content", "content"][..],
+            &[][..],
+        ),
         ("recent_memories", &[][..], &["limit"][..]),
         ("web_fetch", &["url"][..], &["max_length"][..]),
         (
@@ -1732,6 +1737,287 @@ fn create_temp_workspace(prefix: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!("anima-daemon-{prefix}-{unique}"));
     fs::create_dir_all(&path).expect("create temp workspace");
     path
+}
+
+fn memory_correction_fixture(
+    store: Option<crate::memory_store::MemoryStoreConfig>,
+) -> (ToolExecutionContext, AgentState, Message) {
+    let context = ToolExecutionContext::new(
+        Arc::new(AsyncRwLock::new(MemoryManager::new())),
+        Arc::new(AsyncRwLock::new(MemoryEmbeddingRuntime::disabled())),
+        store,
+        ToolRegistry::new(),
+        new_shared_process_manager_with_limit(DEFAULT_MAX_BACKGROUND_PROCESSES),
+        None,
+        None,
+    );
+    let agent = AgentState {
+        id: "memory-correction-owner".into(),
+        name: "memory correction".into(),
+        status: AgentStatus::Running,
+        config: AgentConfig {
+            name: "memory correction".into(),
+            model: "deterministic".into(),
+            bio: None,
+            lore: None,
+            knowledge: None,
+            topics: None,
+            adjectives: None,
+            style: None,
+            provider: None,
+            system: None,
+            plugins: None,
+            settings: None,
+            tools: Some(vec![ToolDescriptor {
+                name: "memory_update".into(),
+                description: "correct memory".into(),
+                parameters_schema: BTreeMap::new(),
+                examples: None,
+            }]),
+        },
+        created_at_ms: 1,
+        token_usage: Default::default(),
+    };
+    let message = Message {
+        id: "correction-input".into(),
+        agent_id: agent.id.clone(),
+        room_id: "test".into(),
+        content: Content::default(),
+        role: MessageRole::User,
+        created_at_ms: 1,
+    };
+    (context, agent, message)
+}
+
+async fn seed_correction_memory(
+    context: &ToolExecutionContext,
+    agent_id: &str,
+    content: &str,
+) -> anima_memory::Memory {
+    context
+        .memory
+        .write()
+        .await
+        .add(anima_memory::NewMemory {
+            agent_id: agent_id.into(),
+            agent_name: "memory correction".into(),
+            memory_type: anima_memory::MemoryType::Fact,
+            content: content.into(),
+            importance: 0.9,
+            tags: Some(vec!["independent-evidence".into()]),
+            scope: None,
+            room_id: None,
+            world_id: None,
+            session_id: None,
+        })
+        .unwrap()
+}
+
+fn memory_correction_call(id: &str, expected: &str, content: &str) -> ToolCall {
+    ToolCall {
+        id: "correction-call".into(),
+        name: "memory_update".into(),
+        args: BTreeMap::from([
+            ("id".into(), DataValue::String(id.into())),
+            (
+                "expected_content".into(),
+                DataValue::String(expected.into()),
+            ),
+            ("content".into(), DataValue::String(content.into())),
+        ]),
+    }
+}
+
+#[tokio::test]
+async fn memory_correction_updates_exact_owned_record_and_preserves_independent_fields() {
+    let root = create_temp_workspace("memory-correction");
+    let store = crate::memory_store::MemoryStoreConfig::Json(root.join("memory.json"));
+    let (context, agent, message) = memory_correction_fixture(Some(store.clone()));
+    let original = seed_correction_memory(&context, &agent.id, "Preferred tea: plum-286").await;
+    let independent =
+        seed_correction_memory(&context, &agent.id, "Independent fact: amber-913").await;
+    let result = context
+        .clone()
+        .execute_tool(
+            agent,
+            message,
+            memory_correction_call(&original.id, &original.content, "Preferred tea: mint-419"),
+        )
+        .await;
+    assert_eq!(result.status, TaskStatus::Success, "{:?}", result.error);
+    let mut expected = original.clone();
+    expected.content = "Preferred tea: mint-419".into();
+    assert_eq!(
+        context.memory.read().await.get(&original.id),
+        Some(expected)
+    );
+    assert_eq!(
+        context.memory.read().await.get(&independent.id),
+        Some(independent)
+    );
+    let snapshot = crate::memory_store::load_memory_snapshot(&store)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(snapshot
+        .memories
+        .iter()
+        .any(|memory| memory.id == original.id && memory.content == "Preferred tea: mint-419"));
+    fs::remove_file(root.join("memory.json")).unwrap();
+    fs::remove_dir(root).unwrap();
+}
+
+#[tokio::test]
+async fn memory_correction_unrelated_and_missing_ids_share_generic_not_found() {
+    let (context, agent, message) = memory_correction_fixture(None);
+    let unrelated =
+        seed_correction_memory(&context, "different-owner", "Private unrelated fact").await;
+    let mut errors = Vec::new();
+    for id in [&unrelated.id, "missing-memory"] {
+        let result = context
+            .clone()
+            .execute_tool(
+                agent.clone(),
+                message.clone(),
+                memory_correction_call(id, "Private unrelated fact", "must not write"),
+            )
+            .await;
+        assert_eq!(result.status, TaskStatus::Error);
+        errors.push(result.error);
+    }
+    assert_eq!(errors[0].as_deref(), Some("memory not found"));
+    assert_eq!(errors[0], errors[1]);
+    assert_eq!(
+        context.memory.read().await.get(&unrelated.id),
+        Some(unrelated)
+    );
+}
+
+#[tokio::test]
+async fn memory_correction_stale_or_paraphrased_expected_text_cannot_overwrite() {
+    let (context, agent, message) = memory_correction_fixture(None);
+    let original = seed_correction_memory(&context, &agent.id, "Preferred tea: mint-419").await;
+    for stale in ["Preferred tea: plum-286", " Preferred tea: mint-419 "] {
+        let result = context
+            .clone()
+            .execute_tool(
+                agent.clone(),
+                message.clone(),
+                memory_correction_call(&original.id, stale, "stale overwrite"),
+            )
+            .await;
+        assert_eq!(
+            result.error.as_deref(),
+            Some("memory changed; search again and use its exact current content")
+        );
+        assert_eq!(
+            context.memory.read().await.get(&original.id),
+            Some(original.clone())
+        );
+    }
+}
+
+#[tokio::test]
+async fn memory_correction_failed_persistence_rolls_back_record_and_search_index() {
+    let root = create_temp_workspace("memory-correction-failure");
+    let (context, agent, message) = memory_correction_fixture(Some(
+        crate::memory_store::MemoryStoreConfig::Json(root.clone()),
+    ));
+    let original = seed_correction_memory(&context, &agent.id, "plum-286 original fact").await;
+    let result = context
+        .clone()
+        .execute_tool(
+            agent,
+            message,
+            memory_correction_call(&original.id, &original.content, "mint-419 rejected fact"),
+        )
+        .await;
+    assert_eq!(result.status, TaskStatus::Error);
+    assert!(result
+        .error
+        .as_deref()
+        .unwrap()
+        .starts_with("failed to persist memory:"));
+    let manager = context.memory.read().await;
+    assert_eq!(manager.get(&original.id), Some(original));
+    assert!(manager.search("mint-419", Default::default()).is_empty());
+    assert!(!manager.search("plum-286", Default::default()).is_empty());
+    drop(manager);
+    fs::remove_dir(root).unwrap();
+}
+
+#[tokio::test]
+async fn memory_correction_hidden_existing_and_new_content_are_refused() {
+    let (context, agent, message) = memory_correction_fixture(None);
+    let visible = seed_correction_memory(&context, &agent.id, "visible fact").await;
+    let hidden = seed_correction_memory(&context, &agent.id, "hidden\u{E0041} restored fact").await;
+    for (record, new_content) in [
+        (&visible, "bad\u{202E} text"),
+        (&hidden, "visible replacement"),
+    ] {
+        let result = context
+            .clone()
+            .execute_tool(
+                agent.clone(),
+                message.clone(),
+                memory_correction_call(&record.id, &record.content, new_content),
+            )
+            .await;
+        assert_eq!(
+            result.error.as_deref(),
+            Some(crate::memory_text::MEMORY_TEXT_HIDDEN)
+        );
+        assert_eq!(
+            context.memory.read().await.get(&record.id),
+            Some(record.clone())
+        );
+    }
+}
+
+#[tokio::test]
+async fn memory_correction_search_and_recent_expose_exact_ids_types_without_hidden_records() {
+    let (context, agent, message) = memory_correction_fixture(None);
+    let visible =
+        seed_correction_memory(&context, &agent.id, "needle visible\nfull exact content").await;
+    let hidden =
+        seed_correction_memory(&context, &agent.id, "needle hidden\u{E0041} restored fact").await;
+    let unrelated =
+        seed_correction_memory(&context, "another-owner", "needle unrelated fact").await;
+    for name in ["memory_search", "recent_memories"] {
+        let call = ToolCall {
+            id: "read-memories".into(),
+            name: name.into(),
+            args: BTreeMap::from([
+                ("query".into(), DataValue::String("needle".into())),
+                ("limit".into(), DataValue::Number(10.0)),
+            ]),
+        };
+        let result = if name == "memory_search" {
+            super::memory::execute_memory_search(
+                context.clone(),
+                agent.clone(),
+                message.clone(),
+                call,
+            )
+            .await
+        } else {
+            super::memory::execute_recent_memories(
+                context.clone(),
+                agent.clone(),
+                message.clone(),
+                call,
+            )
+            .await
+        };
+        let text = &result.data.unwrap().text;
+        assert!(text.contains(&visible.id));
+        assert!(text.contains("fact"));
+        assert!(text.contains(&visible.content));
+        assert!(!text.contains(&hidden.id));
+        assert!(!text.contains(&hidden.content));
+        assert!(!text.contains(&unrelated.id));
+        assert!(!text.contains(&unrelated.content));
+    }
 }
 
 #[tokio::test]
