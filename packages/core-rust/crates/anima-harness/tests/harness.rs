@@ -156,26 +156,52 @@ async fn run_dispatches_tool_calls_then_returns_final_text() {
 }
 
 #[tokio::test]
-async fn unknown_tool_is_rejected_before_dispatch() {
+async fn one_unknown_tool_is_refused_without_dispatch_and_can_finish_honestly() {
     let adapter = ScriptedAdapter::with_responses(vec![
         tool_call_response("missing", BTreeMap::new()),
-        text_response("recovered"),
+        text_response("The requested tool was refused; no action was performed."),
     ]);
+    let requests = adapter.requests.clone();
     let mut harness = harness_with(adapter);
+    let original = harness.config().clone();
 
     let result = harness.run("use an unknown tool").await;
 
-    assert_eq!(result.status, TaskStatus::Error);
+    assert_eq!(result.status, TaskStatus::Success);
+    assert!(result
+        .data
+        .as_ref()
+        .unwrap()
+        .text
+        .contains("refused; no action"));
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    assert_eq!(harness.config(), &original);
+    let refused: Vec<_> = harness
+        .messages()
+        .iter()
+        .filter(|message| message.role == anima_core::MessageRole::Tool)
+        .collect();
+    assert_eq!(refused.len(), 1);
+    let result = refused[0]
+        .content
+        .metadata
+        .as_ref()
+        .unwrap()
+        .get("taskResult")
+        .unwrap();
+    let DataValue::Object(result) = result else {
+        panic!("the refusal is a typed error");
+    };
     assert_eq!(
-        result.error.as_deref(),
-        Some("tool 'missing' is not configured for this agent")
+        result.get("status"),
+        Some(&DataValue::String("error".into()))
     );
     assert!(
-        harness
-            .messages()
-            .iter()
-            .all(|message| message.role != anima_core::MessageRole::Tool),
-        "denied tools must not reach harness dispatch"
+        harness.snapshot().events.iter().all(|event| !matches!(
+            event.event_type,
+            EventType::ToolBefore | EventType::ToolAfter
+        )),
+        "the refusal never enters ToolSet dispatch"
     );
 }
 

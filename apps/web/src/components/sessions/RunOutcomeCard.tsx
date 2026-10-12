@@ -104,8 +104,8 @@ export function RunOutcomeCard({
       <p>{interruptedReason(run)}</p>
       {run.toolsStarted.length > 0 && (
         <p className="run-outcome-warning">
-          Tools had started ({run.toolsStarted.join(', ')}). Check their effects
-          before sending again.
+          Tools were requested ({run.toolsStarted.join(', ')}). Check their
+          effects before sending again.
         </p>
       )}
       {actionReceipts(run)}

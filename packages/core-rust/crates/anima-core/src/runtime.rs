@@ -37,7 +37,7 @@ use observer::{tool_result_text, StepSink};
 
 #[path = "runtime/failure_guard.rs"]
 mod failure_guard;
-use failure_guard::{ExactFailureStreak, EXACT_FAILURE_HINT};
+use failure_guard::{bounded_arguments, ExactFailureStreak, EXACT_FAILURE_HINT};
 
 #[path = "runtime/control.rs"]
 mod control;
@@ -57,6 +57,7 @@ pub const MAX_RETAINED_EVENTS: usize = 500;
 const EVENT_TRIM_SLACK: usize = 64;
 const MAX_EVALUATOR_RETRIES: usize = 2;
 const BUDGET_WRAPUP_METADATA_KEY: &str = "budgetWrapup";
+const UNCONFIGURED_TOOL_REFUSAL: &str = "This tool is not configured for this agent. Continue only with configured tools, or explain the limitation.";
 const BUDGET_WRAPUP_GUIDANCE: &str = "Tool-round budget exhausted. No more tools are available. Give one final answer using the actual settled tool results: state confirmed completed work, remaining work and limitations honestly. Do not claim unfinished actions completed.";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -479,6 +480,7 @@ impl AgentRuntime {
         let mut model_calls = 0u64;
         let mut exact_failures = ExactFailureStreak::default();
         let mut failure_hint_pending = false;
+        let mut unconfigured_tool_refusal_used = false;
         let max_tool_iterations = self
             .state
             .config
@@ -753,6 +755,53 @@ impl AgentRuntime {
                                 .iter()
                                 .find(|tool_call| !self.state.config.allows_tool(&tool_call.name))
                             {
+                                if !unconfigured_tool_refusal_used
+                                    && tool_calls.len() == 1
+                                    && recoverable_unconfigured_call(
+                                        denied,
+                                        &conversation,
+                                        &self.messages,
+                                    )
+                                {
+                                    unconfigured_tool_refusal_used = true;
+                                    iterations += 1;
+                                    exact_failures.reset();
+                                    failure_hint_pending = false;
+                                    // This is validation, not execution. Pair
+                                    // the original request without entering
+                                    // tool events, callbacks or step storage.
+                                    let assistant = self.tag_for_run(
+                                        content_with_tool_calls(response.content, &tool_calls),
+                                        Some(&step_id),
+                                        Vec::new(),
+                                    );
+                                    let assistant = self.record_message_in_room(
+                                        room_id.clone(),
+                                        MessageRole::Assistant,
+                                        assistant,
+                                    );
+                                    self.emit_frame(RunFrame::StepFinished {
+                                        step_id: step_id.clone(),
+                                        message_id: Some(assistant.id.clone()),
+                                    });
+                                    conversation.push(assistant);
+                                    let refusal = self.tag_for_run(
+                                        content_from_tool_result(
+                                            denied,
+                                            TaskResult::error(UNCONFIGURED_TOOL_REFUSAL, 0),
+                                            false,
+                                        ),
+                                        Some(&step_id),
+                                        Vec::new(),
+                                    );
+                                    conversation.push(self.record_message_in_room(
+                                        room_id.clone(),
+                                        MessageRole::Tool,
+                                        refusal,
+                                    ));
+                                    self.record_token_event();
+                                    continue;
+                                }
                                 let error = tool_not_configured_error(&denied.name);
                                 return self.fail_step(
                                     &room_id,
@@ -1499,6 +1548,55 @@ fn content_with_tool_calls(mut content: Content, tool_calls: &[ToolCall]) -> Con
     );
     content.metadata = Some(metadata);
     content
+}
+
+fn recoverable_unconfigured_call(
+    call: &ToolCall,
+    conversation: &[Message],
+    retained: &[Message],
+) -> bool {
+    let bounded_id = |value: &str| {
+        value.len() <= crate::capability::MAX_CAPABILITY_ID_BYTES && !value.trim().is_empty()
+    };
+    if !bounded_id(&call.id) || !bounded_id(&call.name) || bounded_arguments(&call.args).is_none() {
+        return false;
+    }
+    // Retained history also protects direct run_with_tools invocations that
+    // omit prior model history while keeping cached/native call records.
+    for message in conversation.iter().chain(retained) {
+        let metadata = message.content.metadata.as_ref();
+        if message.role == MessageRole::Tool {
+            let Some(DataValue::String(id)) =
+                metadata.and_then(|metadata| metadata.get("toolCallId"))
+            else {
+                return false;
+            };
+            if !bounded_id(id) || id == &call.id {
+                return false;
+            }
+        } else if message.role == MessageRole::Assistant {
+            if let Some(calls) = metadata.and_then(|metadata| metadata.get("toolCalls")) {
+                let DataValue::Array(calls) = calls else {
+                    return false;
+                };
+                if calls.is_empty() {
+                    return false;
+                }
+                for previous in calls {
+                    let DataValue::Object(previous) = previous else {
+                        return false;
+                    };
+                    let Some(DataValue::String(id)) = previous.get("id") else {
+                        return false;
+                    };
+                    if !bounded_id(id) || id == &call.id {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    true
 }
 
 fn content_from_tool_result(

@@ -1,6 +1,7 @@
 //! Advisory for one bounded streak of fresh, exact, typed tool failures.
 //! No raw failure evidence or state survives the current invocation.
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 
 use crate::capability::{
     MAX_CAPABILITY_ARGUMENT_BYTES, MAX_CAPABILITY_ARGUMENT_DEPTH, MAX_CAPABILITY_ARGUMENT_NODES,
@@ -59,21 +60,7 @@ fn fingerprint(call: &ToolCall, result: &TaskResult<Content>) -> Option<[u8; 32]
     if call.name.trim().is_empty() || error.trim().is_empty() {
         return None;
     }
-    // Bound traversal before serialization, including depth/nodes, finite
-    // numbers and a conservative encoded-size estimate. Uncertainty only
-    // misses the advisory; it never changes the real call or result.
-    let mut nodes = 0usize;
-    let mut bytes = 0usize;
-    for (key, value) in &call.args {
-        bytes = bytes.saturating_add(key.len().saturating_mul(6));
-        if !bounded_value(value, 1, &mut nodes, &mut bytes) {
-            return None;
-        }
-    }
-    let arguments = serde_jcs::to_vec(&call.args).ok()?;
-    if arguments.len() > MAX_CAPABILITY_ARGUMENT_BYTES {
-        return None;
-    }
+    let arguments = bounded_arguments(&call.args)?;
     // A typed result must also be representable. Its duration is deliberately
     // excluded from identity, while the exact error remains part of it.
     let encoded_result = serde_jcs::to_vec(result).ok()?;
@@ -86,6 +73,24 @@ fn fingerprint(call: &ToolCall, result: &TaskResult<Content>) -> Option<[u8; 32]
         digest.update(bytes);
     }
     Some(digest.finalize().into())
+}
+
+/// Shared private validation: bounded finite canonical arguments. Uncertainty
+/// suppresses optional guidance/recovery, never changes the original arguments.
+pub(super) fn bounded_arguments(args: &BTreeMap<String, DataValue>) -> Option<Vec<u8>> {
+    let mut nodes = 0usize;
+    let mut bytes = 0usize;
+    for (key, value) in args {
+        bytes = bytes.saturating_add(key.len().saturating_mul(6));
+        if !bounded_value(value, 1, &mut nodes, &mut bytes) {
+            return None;
+        }
+    }
+    let arguments = serde_jcs::to_vec(args).ok()?;
+    if arguments.len() > MAX_CAPABILITY_ARGUMENT_BYTES {
+        return None;
+    }
+    Some(arguments)
 }
 
 fn bounded_value(value: &DataValue, depth: usize, nodes: &mut usize, bytes: &mut usize) -> bool {

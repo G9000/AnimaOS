@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { automationNoticeFor } from '../../lib/automations';
 import { emptyLiveRun } from '../../lib/session-events';
-import type { ToolStep } from '../../lib/transcript';
+import { buildTranscript, type ToolStep } from '../../lib/transcript';
 import type { ChatMessage } from '../../lib/types';
 import { automationFixture } from '../../test/automations';
 import { approvalFixture, runFixture } from '../../test/live';
@@ -87,6 +87,95 @@ describe('RunActivity', () => {
     await user.click(card);
     expect(card).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('4')).toBeVisible();
+  });
+
+  it('does not summarize a refused tool request as a completed action', async () => {
+    const user = userEvent.setup();
+    const refusal =
+      'This tool is not configured for this agent. Continue only with configured tools, or explain the limitation.';
+    const transcript = buildTranscript({
+      messages: [
+        {
+          id: 'assistant-call',
+          role: 'Assistant',
+          content: {
+            text: '',
+            metadata: {
+              runId: 'run_refused',
+              stepId: 'run_refused:1',
+              toolCalls: [
+                {
+                  id: 'call-refused',
+                  name: 'send_email',
+                  args: { recipient: 'owner@example.test' },
+                },
+              ],
+            },
+          },
+          created_at_ms: 1,
+        },
+        {
+          id: 'tool-refusal',
+          role: 'Tool',
+          content: {
+            text: JSON.stringify({
+              status: 'error',
+              data: null,
+              error: refusal,
+              durationMs: 0,
+            }),
+            metadata: {
+              runId: 'run_refused',
+              stepId: 'run_refused:1',
+              toolCallId: 'call-refused',
+            },
+          },
+          created_at_ms: 2,
+        },
+      ],
+    });
+    const toolBlock = transcript.find((item) => item.kind === 'tools');
+    expect(toolBlock?.kind).toBe('tools');
+    if (!toolBlock || toolBlock.kind !== 'tools')
+      throw new Error(
+        'The recorded refusal should form one transcript tool block',
+      );
+    const run = runFixture('run_refused', {
+      status: 'interrupted',
+      startedAtMs: 1,
+      finishedAtMs: 40,
+      toolsStarted: ['send_email'],
+      actionReceipts: [],
+      error: { code: 'restart_during_run', message: 'The daemon restarted' },
+    });
+
+    render(
+      <>
+        <ToolBlock steps={toolBlock.steps} active={false} elapsedMs={40} />
+        <RunOutcomeCard run={run} />
+      </>,
+    );
+
+    const summary = screen.getByRole('button', {
+      name: '1 tool request · <1s',
+    });
+    expect(
+      screen.getByText(
+        'Tools were requested (send_email). Check their effects before sending again.',
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('region', { name: 'Recorded actions' }),
+    ).not.toBeInTheDocument();
+    await user.click(summary);
+    expect(
+      screen.getByRole('button', { name: /send_email.*failed/ }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole('button', { name: /send_email.*failed/ }),
+    );
+    expect(screen.getByText(refusal)).toBeVisible();
+    expect(screen.queryByText(/Reported success/)).not.toBeInTheDocument();
   });
 
   it('offers to cancel a queued message', async () => {
@@ -263,7 +352,9 @@ describe('ToolBlock', () => {
       />,
     );
 
-    const toggle = screen.getByRole('button', { name: 'Used 2 tools · <1s' });
+    const toggle = screen.getByRole('button', {
+      name: '2 tool requests · <1s',
+    });
     expect(
       screen.queryByRole('button', { name: /calculate/ }),
     ).not.toBeInTheDocument();
@@ -603,7 +694,7 @@ describe('RunOutcomeCard', () => {
     ).toBeVisible();
     expect(
       screen.getByText(
-        'Tools had started (bash, write_file). Check their effects before sending again.',
+        'Tools were requested (bash, write_file). Check their effects before sending again.',
       ),
     ).toBeVisible();
     expect(screen.getByRole('button', { name: 'Send again' })).toBeVisible();

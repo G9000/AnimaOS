@@ -259,7 +259,9 @@ describe('MessageList', () => {
     expect(screen.getByText('system · **system marker**').tagName).toBe('SPAN');
     // Tool messages are no longer grey pills (spec §15.1).
     expect(screen.queryByText(/^tool · /)).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Used 1 tool · <1s' }));
+    await user.click(
+      screen.getByRole('button', { name: '1 tool request · <1s' }),
+    );
     await user.click(screen.getByRole('button', { name: /^tool\b/ }));
     expect(screen.getByText('## tool marker').tagName).toBe('PRE');
     expect(
@@ -356,7 +358,7 @@ describe('MessageList', () => {
         .getByText('Let me check.')
         .closest('.studio-message-anchor');
       const toolAnchor = screen
-        .getByRole('button', { name: /Used 1 tool/ })
+        .getByRole('button', { name: /1 tool request/ })
         .closest('.studio-message-anchor');
       expect(bubbleAnchor).not.toBeNull();
       expect(bubbleAnchor).not.toBe(toolAnchor);

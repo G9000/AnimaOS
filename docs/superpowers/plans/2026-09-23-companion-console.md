@@ -59,6 +59,8 @@
 | M23 Native budget wrap-up         | `2026-10-12-companion-agent-loop-m23.md`           | one already-next tool-free wrap-up, terminal boundaries and owner-visible accepted provenance; real read/unfinished write2steps/3692reportedtokens/no output, same-run quiet restart pass; Rust2367/8ignored/lint; publication in milestone ledger                                  |
 | M24 Exact-failure advisory        | `2026-10-12-companion-agent-loop-m24.md`           | bounded per-run fingerprint/three consecutive typed failures/one transient next-request hint, original results retained; changed/success/malformed/recovered/parallel/Stop reset tests pass; focused6/Rust2373/8ignored/lint; no new provider call; publication in milestone ledger |
 
+| M25 Unconfigured-call recovery | `2026-10-12-companion-agent-loop-m25.md` | one fresh bounded single paired refusal/no dispatch or receipt/one correction within round budget; second/malformed/mixed/reused denial terminal; requests-versus-actions UI fixed; focused8core/1harness, Rust2381/8ignored/lint, SDK130/web1192/typecheck/build pass; publication in milestone ledger |
+
 Dependencies: M0 → M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9 → M10. M4–M9 depend on M3's ledger, runs, and event stream; their internal order follows the spec's milestone list.
 
 ---
