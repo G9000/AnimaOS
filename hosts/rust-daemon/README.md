@@ -390,6 +390,29 @@ A steer (spec §4.7) is saved with the run it joined before that run can read it
 
 Each open console tab holds one event-stream connection for as long as it is open. Through the dev proxy (HTTP/1.1), browsers allow about 6 connections per origin, so with many tabs open a tab's other requests can wait behind the streams; close the tabs you are not using. On shutdown the daemon ends every open stream first, so an open tab never blocks a graceful exit.
 
+### Action receipts and interrupted work
+
+Run reads include an optional `actionReceipts` array with each native tool call's
+`toolCallId`, `name`, `status` (`started`, `succeeded`, `failed`), timestamps and
+duration, bounded argument/result previews and their truncation flags, and
+`durability` (`persistent` or `memory`). Existing snapshots without the array
+remain valid. Owner authorization and run/history retention stay the same.
+
+With a configured control-plane store, intent is saved before handler dispatch
+and outcome before returning the tool result or streaming success. A receipt save
+failure aborts continuation. Embedded runtimes without a store are supported, but their
+receipts do not survive restart and are explicitly labelled temporary. This is
+determined by the configured store, not by the memory persistence mode.
+
+Receipts are separate from the final conversation commit. An interrupted run can
+retain a reported tool outcome without committed messages. Started means outcome
+unknown; the handler may never have run, or its effect may precede a crash that
+prevented result storage. Failed handlers can leave partial effects. Succeeded
+means handler-reported success, not whole-run completion or an exactly-once
+guarantee. Previews are UTF-8-safe, capped at 2048 bytes each; runs admit at most
+50 unique recorded calls. Inspect effects before explicitly retrying. No automatic
+replay or historical backfill is added. See [daily use](../../docs/companion/daily-use.md).
+
 ### Approvals
 
 Every approval route requires local-owner authorization and answers `Cache-Control: no-store`, errors included. A coordinator run's tool call is judged by its agent's policy (`write`, `exec`, `network`, and `delegate` each `allow`, `ask`, or `deny`; by default only `exec` asks), then its rules and the session's allowances; read-class tools never ask, and a helper answers to its companion's policy and rules. A call that needs the owner waits up to 30 minutes (15 for a Telegram-started run) with its run `awaiting_approval`, announced as `run.awaiting_approval` and `approval.requested`. A decision or the timeout (a denial noted `Approval timed out`) settles it once, announced as `approval.resolved` and, when the run waits on nothing else, `run.started`. A Stop (and any other `stopped` settlement) is announced as `approval.resolved` and followed by the run's end instead, not `run.started`. Helpers never wait: a call that would ask is denied (`Needs owner approval; not available to helpers`). A restart expires every pending approval. Decided approvals move to the history store.

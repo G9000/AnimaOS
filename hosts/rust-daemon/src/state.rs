@@ -1659,12 +1659,26 @@ pub(crate) struct ControlPlanePersistRequest {
     snapshot: ControlPlaneSnapshot,
     revision: u64,
     order: Arc<ControlPlanePersistOrder>,
+    action_candidate: Option<String>,
 }
 
 struct ControlPlanePersistOrder {
-    latest_successful_revision: AsyncMutex<u64>,
+    acknowledged: AsyncMutex<ControlPlaneAcknowledged>,
     #[cfg(test)]
     test_save_gate: StdMutex<Option<TestControlPlaneSaveGate>>,
+}
+
+#[derive(Default)]
+struct ControlPlaneAcknowledged {
+    revision: u64,
+    /// Action-only patches from the last acknowledged snapshot, bounded by
+    /// its retained ledger. Never restore a row a later snapshot removed.
+    run_actions: HashMap<String, AcknowledgedRunActions>,
+}
+
+struct AcknowledgedRunActions {
+    receipts: Vec<crate::runs::ActionReceipt>,
+    tools_started: Vec<String>,
 }
 
 #[cfg(test)]
@@ -1677,9 +1691,63 @@ pub(crate) struct TestControlPlaneSaveGate {
 
 impl ControlPlanePersistRequest {
     pub(crate) async fn save(self) -> std::io::Result<()> {
-        let mut latest_successful_revision = self.order.latest_successful_revision.lock().await;
-        if self.revision <= *latest_successful_revision {
+        self.save_ordered(false).await
+    }
+
+    /// Prepare an unpublished run-action patch. An ordered save that was
+    /// superseded cannot acknowledge this patch: newer ordinary snapshots
+    /// cannot contain an action that has not been published yet.
+    pub(crate) fn with_run_actions(
+        mut self,
+        run_id: &str,
+        receipts: Vec<crate::runs::ActionReceipt>,
+        tools_started: Vec<String>,
+    ) -> Option<Self> {
+        let record = self.snapshot.runs.iter_mut().find(|run| run.id == run_id)?;
+        record.action_receipts = receipts;
+        for name in tools_started {
+            record.note_tool_started(&name);
+        }
+        record.mirrored = false;
+        self.action_candidate = Some(run_id.to_string());
+        Some(self)
+    }
+
+    pub(crate) async fn save_action_candidate(self) -> std::io::Result<()> {
+        self.save_ordered(true).await
+    }
+
+    async fn save_ordered(mut self, require_current: bool) -> std::io::Result<()> {
+        let mut acknowledged = self.order.acknowledged.lock().await;
+        if self.revision <= acknowledged.revision {
+            if require_current {
+                return Err(std::io::Error::other(
+                    "action receipt snapshot was superseded",
+                ));
+            }
             return Ok(());
+        }
+        // Ordinary writers may prepare newer snapshots while the candidate
+        // saves and before its public patch acquires the state write lock.
+        // Merge acknowledged actions under the same persistence ordering,
+        // preserving all unrelated run fields and never inserting rows.
+        for record in &mut self.snapshot.runs {
+            if self.action_candidate.as_deref() == Some(record.id.as_str()) {
+                continue;
+            }
+            if let Some(actions) = acknowledged.run_actions.get(&record.id) {
+                if record.action_receipts != actions.receipts {
+                    record.action_receipts = actions.receipts.clone();
+                    record.mirrored = false;
+                }
+                let prior_names = record.tools_started.clone();
+                for name in &actions.tools_started {
+                    record.note_tool_started(name);
+                }
+                if record.tools_started != prior_names {
+                    record.mirrored = false;
+                }
+            }
         }
         #[cfg(test)]
         let test_save_gate = {
@@ -1702,7 +1770,22 @@ impl ControlPlanePersistRequest {
             }
         }
         save_control_plane_snapshot(self.config.as_ref(), &self.snapshot).await?;
-        *latest_successful_revision = self.revision;
+        acknowledged.revision = self.revision;
+        acknowledged.run_actions = self
+            .snapshot
+            .runs
+            .iter()
+            .filter(|record| !record.action_receipts.is_empty())
+            .map(|record| {
+                (
+                    record.id.clone(),
+                    AcknowledgedRunActions {
+                        receipts: record.action_receipts.clone(),
+                        tools_started: record.tools_started.clone(),
+                    },
+                )
+            })
+            .collect();
         Ok(())
     }
 }
@@ -1769,7 +1852,7 @@ impl DaemonState {
             control_plane_store: None,
             control_plane_revision: 0,
             control_plane_persist_order: Arc::new(ControlPlanePersistOrder {
-                latest_successful_revision: AsyncMutex::new(0),
+                acknowledged: AsyncMutex::new(ControlPlaneAcknowledged::default()),
                 #[cfg(test)]
                 test_save_gate: StdMutex::new(None),
             }),
@@ -1896,6 +1979,7 @@ impl DaemonState {
             snapshot: self.control_plane_snapshot(),
             revision: self.control_plane_revision,
             order: Arc::clone(&self.control_plane_persist_order),
+            action_candidate: None,
         }
     }
 

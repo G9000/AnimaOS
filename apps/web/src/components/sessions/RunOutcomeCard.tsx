@@ -16,6 +16,48 @@ function interruptedReason(run: Run): string {
   }
 }
 
+function actionReceipts(run: Run) {
+  if (!run.actionReceipts?.length) return null;
+
+  return (
+    <section aria-label="Recorded actions">
+      <p>Recorded actions</p>
+      <ul>
+        {run.actionReceipts.map((receipt) => {
+          const statusLabel =
+            receipt.status === 'succeeded'
+              ? 'Reported success'
+              : receipt.status === 'failed'
+                ? 'Reported failure'
+                : 'Outcome unknown';
+          return (
+            <li key={receipt.toolCallId}>
+              <p>
+                <span>{receipt.name}</span> · <span>{statusLabel}</span>
+              </p>
+              {receipt.durability === 'memory' && (
+                <p>Temporary (memory only)</p>
+              )}
+              {receipt.argumentsPreview && (
+                <p>
+                  Arguments: <span>{receipt.argumentsPreview}</span>
+                  {receipt.argumentsTruncated && ' (shortened)'}
+                </p>
+              )}
+              {receipt.resultPreview !== null && (
+                <p>
+                  Result: <span>{receipt.resultPreview}</span>
+                  {receipt.resultTruncated && ' (shortened)'}
+                </p>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 /** How a run ended when it did not simply reply (spec §15.2). */
 export function RunOutcomeCard({
   run,
@@ -31,9 +73,10 @@ export function RunOutcomeCard({
   const sendAgain = isOwnerWritten(run) ? onSendAgain : undefined;
   if (run.status === 'cancelled')
     return (
-      <p className="run-outcome" data-outcome="stopped">
-        Stopped
-      </p>
+      <div className="run-outcome" data-outcome="stopped">
+        <p>Stopped</p>
+        {actionReceipts(run)}
+      </div>
     );
   if (run.status === 'failed')
     return (
@@ -43,6 +86,7 @@ export function RunOutcomeCard({
             ? `This reply failed: ${run.error.message}`
             : 'This reply failed.'}
         </p>
+        {actionReceipts(run)}
         {sendAgain && (
           <button
             type="button"
@@ -64,6 +108,7 @@ export function RunOutcomeCard({
           before sending again.
         </p>
       )}
+      {actionReceipts(run)}
       {sendAgain && (
         <button
           type="button"

@@ -50,6 +50,17 @@ execution, private profile/config/environment/keyring/token read, or broad memor
 lifecycle behavior is imported. Lexical selection does not claim semantic recall
 quality or Hermes parity.
 
+M21 native action-witness adaptation (revision 1fd18277267152893a8a24792b79213e7ca3f899):
+
+hermes_state_messages.py::append_message (lines389-423) informs preparation outside
+the critical writer transaction, guarded stable tool-call correlation, awaited
+write acknowledgement and aborting the turn on critical write failure. Native
+Rust bounded run action receipts use Anima's control-plane persistence and owner
+authority; they are separate from the final committed chat transcript. No Python,
+upstream SQLite schema, compression/turn leases, private profile/config/keyring or
+token bridge is imported. Anima adds fail-closed parallel admission and conservative
+started/unknown-effect recovery; receipts do not establish exactly-once effects.
+
 MIT License
 
 Copyright (c) 2025 Nous Research

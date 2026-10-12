@@ -234,6 +234,9 @@ pub(crate) struct RunRecord {
     pub(crate) stop: Option<RunStopRequest>,
     #[serde(default)]
     pub(crate) tools_started: Vec<String>,
+    /// Native handler witnesses; never intermediate committed chat messages.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) action_receipts: Vec<super::ActionReceipt>,
     #[serde(default)]
     pub(crate) steps: Vec<RunStepUsage>,
     #[serde(default)]
@@ -303,6 +306,7 @@ impl RunRecord {
             error: None,
             stop: None,
             tools_started: Vec::new(),
+            action_receipts: Vec::new(),
             steps: Vec::new(),
             usage: TokenUsage::default(),
             model: start.model,
@@ -893,6 +897,7 @@ impl RunLedger {
     pub(crate) fn validate(records: &[RunRecord]) -> Result<(), String> {
         let mut ids = HashSet::new();
         for record in records {
+            super::validate_receipts(&record.action_receipts)?;
             if record.id.trim().is_empty() || !ids.insert(record.id.as_str()) {
                 return Err(format!(
                     "duplicate or empty run id in snapshot: {}",

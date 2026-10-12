@@ -58,6 +58,7 @@ pub(crate) struct RunResponse {
     pub(crate) error: Option<RunErrorResponse>,
     pub(crate) stop: Option<RunStopResponse>,
     pub(crate) tools_started: Vec<String>,
+    pub(crate) action_receipts: Vec<crate::runs::ActionReceipt>,
     pub(crate) steps: Vec<RunStepResponse>,
     pub(crate) usage: TokenUsageResponse,
     pub(crate) model: String,
@@ -93,6 +94,7 @@ impl From<&RunRecord> for RunResponse {
                 requested_at_ms: stop.requested_at_ms,
             }),
             tools_started: record.tools_started.clone(),
+            action_receipts: record.action_receipts.clone(),
             steps: record
                 .steps
                 .iter()

@@ -343,6 +343,155 @@ describe('ToolBlock', () => {
 });
 
 describe('RunOutcomeCard', () => {
+  it('shows recorded actions on interrupted, failed, and stopped outcomes', () => {
+    const receipt = {
+      toolCallId: 'call_write',
+      name: 'write_file',
+      status: 'succeeded' as const,
+      startedAtMs: 1,
+      finishedAtMs: 2,
+      durationMs: 1,
+      argumentsPreview: 'path: notes.txt',
+      argumentsTruncated: false,
+      resultPreview: 'Saved 12 bytes',
+      resultTruncated: false,
+      durability: 'persistent' as const,
+    };
+    render(
+      <>
+        <RunOutcomeCard
+          run={{
+            ...runFixture('run_i', { status: 'interrupted' }),
+            actionReceipts: [receipt],
+          }}
+        />
+        <RunOutcomeCard
+          run={{
+            ...runFixture('run_f', { status: 'failed' }),
+            actionReceipts: [{ ...receipt, toolCallId: 'call_fail' }],
+          }}
+        />
+        <RunOutcomeCard
+          run={{
+            ...runFixture('run_s', { status: 'cancelled' }),
+            actionReceipts: [{ ...receipt, toolCallId: 'call_stop' }],
+          }}
+        />
+      </>,
+    );
+
+    expect(screen.getAllByText('write_file')).toHaveLength(3);
+    expect(screen.getAllByText('path: notes.txt')).toHaveLength(3);
+    expect(screen.getAllByText('Saved 12 bytes')).toHaveLength(3);
+  });
+
+  it('distinguishes handler outcomes, shows partial previews, and labels memory receipts', () => {
+    const base = {
+      toolCallId: 'call_1',
+      name: 'write_file',
+      startedAtMs: 1,
+      finishedAtMs: 2,
+      durationMs: 1,
+      argumentsPreview: 'path: <script>notes.txt</script>',
+      argumentsTruncated: true,
+      resultPreview: 'Wrote file',
+      resultTruncated: true,
+      durability: 'memory' as const,
+    };
+    const run = {
+      ...runFixture('run_i', { status: 'interrupted' }),
+      actionReceipts: [
+        { ...base, status: 'succeeded' as const },
+        { ...base, toolCallId: 'call_2', status: 'failed' as const },
+        {
+          ...base,
+          toolCallId: 'call_3',
+          status: 'started' as const,
+          finishedAtMs: null,
+          durationMs: null,
+          resultPreview: null,
+          resultTruncated: false,
+        },
+      ],
+    };
+    render(<RunOutcomeCard run={run} />);
+
+    expect(screen.getByText('Reported success')).toBeVisible();
+    expect(screen.getByText('Reported failure')).toBeVisible();
+    expect(screen.getByText('Outcome unknown')).toBeVisible();
+    expect(screen.getAllByText('Temporary (memory only)')).toHaveLength(3);
+    const recordedActions = screen.getByRole('region', {
+      name: 'Recorded actions',
+    });
+    expect(within(recordedActions).getAllByText('Wrote file')).toHaveLength(2);
+    expect(
+      within(recordedActions).getAllByText('path: <script>notes.txt</script>'),
+    ).toHaveLength(3);
+    expect(document.querySelector('script')).not.toBeInTheDocument();
+    expect(screen.getAllByText(/shortened|truncated/i).length).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it('keeps legacy runs without receipts valid and offers no resend for scheduled runs', () => {
+    const legacy = runFixture('run_legacy', { status: 'interrupted' });
+    const scheduled = {
+      ...runFixture('run_schedule', {
+        status: 'interrupted',
+        source: 'schedule',
+        sourceRef: 'schedule-1',
+      }),
+      actionReceipts: [
+        {
+          toolCallId: 'call_started',
+          name: 'write_file',
+          status: 'started' as const,
+          startedAtMs: 1,
+          finishedAtMs: null,
+          durationMs: null,
+          argumentsPreview: 'path: notes.txt',
+          argumentsTruncated: false,
+          resultPreview: null,
+          resultTruncated: false,
+          durability: 'persistent' as const,
+        },
+      ],
+    };
+    const { container } = render(
+      <>
+        <RunOutcomeCard run={legacy} onSendAgain={vi.fn()} />
+        <RunOutcomeCard run={scheduled} onSendAgain={vi.fn()} />
+      </>,
+    );
+
+    expect(screen.getAllByText('This message wasn’t sent.')).toHaveLength(2);
+    expect(screen.getByText('Outcome unknown')).toBeVisible();
+    const [legacyCard, scheduledCard] =
+      container.querySelectorAll('.run-outcome');
+    expect(legacyCard).toBeInTheDocument();
+    expect(scheduledCard).toBeInTheDocument();
+    expect(
+      within(legacyCard as HTMLElement).getByRole('button', {
+        name: 'Send again',
+      }),
+    ).toBeVisible();
+    expect(
+      within(legacyCard as HTMLElement).queryByRole('region', {
+        name: 'Recorded actions',
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(scheduledCard as HTMLElement).queryByRole('button', {
+        name: 'Retry',
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(scheduledCard as HTMLElement).queryByRole('button', {
+        name: 'Send again',
+      }),
+    ).not.toBeInTheDocument();
+  });
+
   it('offers Retry for a failed reply', async () => {
     const onSendAgain = vi.fn();
     const run = runFixture('run_f', {

@@ -1,6 +1,8 @@
 //! Coordinator runs: the durable run ledger (spec §4.1, §4.8).
 
+mod action_receipt;
 mod ledger;
+pub(crate) use action_receipt::{validate_receipts, ActionDurability, ActionReceipt, ActionStatus};
 
 #[allow(unused_imports)] // Later M1 tasks consume the remaining names.
 pub(crate) use ledger::{
