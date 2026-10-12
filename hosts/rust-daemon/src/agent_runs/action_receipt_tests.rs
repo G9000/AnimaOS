@@ -692,6 +692,20 @@ async fn acknowledged_action_patches_never_resurrect_removed_run_rows() {
 #[tokio::test]
 async fn coordinator_receipt_failure_stops_model_continuation_and_finishes_failed() {
     let fixture = ActionFixture::new("m21-coordinator-fail-closed", true).await;
+    let mut config = fixture.agent.config.clone();
+    config
+        .settings
+        .get_or_insert_with(Default::default)
+        .max_tool_iterations = Some(1);
+    fixture
+        .coordinator
+        .state
+        .write()
+        .await
+        .agents
+        .get_mut(&fixture.run.agent_id)
+        .unwrap()
+        .replace_config(config);
     let gate = Gate::new();
     let model = ScriptedModel::gated(
         vec![

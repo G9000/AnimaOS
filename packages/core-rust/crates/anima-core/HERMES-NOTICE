@@ -6,6 +6,16 @@ Anima differences: pure host-agnostic rendering, Unicode scalar 70/30 head/tail
 allocation including markers and framing, aggregate caps, transient identity and
 separate immutable host guidance. No filesystem discovery or threat scanner here.
 Fixtures are invented test strings; no upstream private configuration used.
+M23 adapts budget-exhaustion wrap-up behavior from Hermes Agent at public tracked
+revision 1fd18277267152893a8a24792b79213e7ca3f899:
+agent/chat_completion_helpers.py::handle_max_iterations and
+agent/turn_finalizer.py::_resolve_budget_fallback.
+Anima differences: existing tool-round budget/default retained; one already-next
+model turn with explicit empty tools, hard rejection of returned tool calls,
+system guidance rather than a synthetic user message, evaluator acceptance and
+budgetWrapup provenance. No summary retry or fallback after a terminal failure.
+No upstream Python runtime, personal profile or credentials are imported.
+
 MIT License
 
 Copyright (c) 2025 Nous Research

@@ -18,6 +18,13 @@ provider messages. Request/auth/endpoints remain unchanged; no Python runtime,
 profiles or token files are imported. Official structured recovery categories
 were checked against OpenAI Docs.
 
+M23 source revision: 1fd18277267152893a8a24792b79213e7ca3f899.
+M23 adapts the grouped removal of tools/tool_choice/parallel_tool_calls from
+agent/chat_completion_helpers.py::_codex_summary_attempt. Anima applies this
+request-shape rule whenever its ChatGPT adapter has no configured tools; prior
+function-call/result input and ordinary toolful requests are preserved. This
+does not copy Hermes' Chat Completions cache-prefix policy or introduce retries.
+
 MIT License
 
 Copyright (c) 2025 Nous Research

@@ -466,6 +466,109 @@ async fn message_pages_expose_tool_status_duration_and_incomplete_but_not_task_r
     assert_eq!(partial["metadata"]["incomplete"], true);
 }
 
+#[tokio::test]
+async fn owner_message_page_exposes_budget_wrapup_provenance_without_extra_actions() {
+    use crate::agent_runs::test_support::{
+        calculate_call, chat_request, companion_config, ScriptedModel, Step,
+    };
+
+    const SESSION_ID: &str = "chat:budget-wrapup";
+    const FINAL_TEXT: &str =
+        "The calculation returned 42. I have not verified the rest of the request.";
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![calculate_call("call-wrapup", "6*7")]),
+        Step::Text(vec![FINAL_TEXT]),
+    ]);
+    let state = Arc::new(RwLock::new(DaemonState::with_model_adapter(model)));
+    let mut config = companion_config("companion");
+    config.settings.as_mut().unwrap().max_tool_iterations = Some(1);
+    let agent = state.write().await.create_agent(config).unwrap().state.id;
+    let coordinator =
+        crate::agent_runs::AgentRunCoordinator::new(state.clone(), Arc::new(Semaphore::new(8)));
+    coordinator
+        .run(chat_request(
+            &agent,
+            SESSION_ID,
+            "Calculate 6*7 and complete my task",
+        ))
+        .await
+        .unwrap();
+
+    let guard = state.read().await;
+    let runtime = guard.agents.get(&agent).unwrap();
+    let stored_messages = runtime.messages();
+    assert_eq!(
+        stored_messages.len(),
+        4,
+        "one user, one call/result pair, and one final reply"
+    );
+    assert_eq!(
+        stored_messages
+            .iter()
+            .filter(|message| message.role == MessageRole::Tool)
+            .count(),
+        1,
+        "the wrap-up must not fabricate another tool result"
+    );
+    let final_message = stored_messages.last().unwrap();
+    assert_eq!(final_message.role, MessageRole::Assistant);
+    assert_eq!(final_message.content.text, FINAL_TEXT);
+    let final_metadata = final_message.content.metadata.as_ref().unwrap();
+    assert_eq!(
+        final_metadata.get("budgetWrapup"),
+        Some(&DataValue::Bool(true))
+    );
+    assert!(final_metadata.get("runId").is_some());
+    assert!(final_metadata.get("stepId").is_some());
+    let DataValue::String(final_run_id) = &final_metadata["runId"] else {
+        panic!("run provenance is a string");
+    };
+    let DataValue::String(final_step_id) = &final_metadata["stepId"] else {
+        panic!("step provenance is a string");
+    };
+    let final_run_id = final_run_id.clone();
+    let final_step_id = final_step_id.clone();
+
+    let run = guard
+        .runs
+        .get(&final_run_id)
+        .expect("the coordinator saved the run");
+    assert_eq!(run.status, crate::runs::RunStatus::Completed);
+    assert_eq!(run.tools_started, ["calculate"]);
+    assert_eq!(run.action_receipts.len(), 1);
+    drop(guard);
+
+    let app = router(state, DaemonConfig::default());
+    let page = json(
+        app.oneshot(get(
+            &format!("/api/agents/{agent}/sessions/chat%3Abudget-wrapup/messages"),
+            OWNER_ORIGIN,
+        ))
+        .await
+        .unwrap(),
+    )
+    .await;
+    let messages = page["messages"].as_array().unwrap();
+    assert_eq!(
+        messages.len(),
+        4,
+        "the owner page must preserve the same four rows"
+    );
+    let final_row = messages.last().unwrap();
+    assert_eq!(final_row["role"], "assistant");
+    assert_eq!(final_row["text"], FINAL_TEXT);
+    assert_eq!(final_row["metadata"]["budgetWrapup"], true);
+    assert_eq!(final_row["metadata"]["runId"], final_run_id);
+    assert_eq!(final_row["metadata"]["stepId"], final_step_id);
+    let tool_row = messages
+        .iter()
+        .find(|message| message["role"] == "tool")
+        .unwrap();
+    assert_eq!(tool_row["metadata"]["toolCallId"], "call-wrapup");
+    assert!(tool_row["metadata"].get("taskResult").is_none());
+    assert!(tool_row["metadata"].get("budgetWrapup").is_none());
+}
+
 #[test]
 fn the_openapi_document_lists_the_session_read_routes() {
     use utoipa::OpenApi;
@@ -481,7 +584,7 @@ fn the_openapi_document_lists_the_session_read_routes() {
     let schema = serde_json::to_value(crate::routes::ApiDoc::openapi()).unwrap()["components"]
         ["schemas"]["SessionMessageResponse"]["properties"]["metadata"]["description"]
         .clone();
-    for key in ["toolStatus", "toolDurationMs", "incomplete"] {
+    for key in ["toolStatus", "toolDurationMs", "incomplete", "budgetWrapup"] {
         assert!(
             schema.as_str().unwrap_or_default().contains(key),
             "the metadata description names {key}: {schema}"

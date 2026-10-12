@@ -203,6 +203,93 @@ async fn tool_iteration_limit_is_enforced() {
     );
 }
 
+#[derive(Clone, Default)]
+struct BudgetAwareAdapter {
+    requests: Arc<Mutex<Vec<(AgentConfig, ModelGenerateRequest)>>>,
+}
+
+#[async_trait]
+impl ModelAdapter for BudgetAwareAdapter {
+    fn provider(&self) -> &str {
+        "budget-aware"
+    }
+
+    async fn generate(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+    ) -> Result<ModelGenerateResponse, String> {
+        self.requests
+            .lock()
+            .unwrap()
+            .push((config.clone(), request.clone()));
+        if config.tools.as_ref().is_some_and(Vec::is_empty) {
+            Ok(text_response(
+                "Echo confirmed. The remaining requested action is unfinished.",
+            ))
+        } else {
+            Ok(tool_call_response(
+                "echo",
+                BTreeMap::from([("text".into(), DataValue::String("confirmed echo".into()))]),
+            ))
+        }
+    }
+}
+
+#[tokio::test]
+async fn budget_wrapup_uses_one_tool_free_next_call_without_mutating_harness_grants() {
+    let adapter = BudgetAwareAdapter::default();
+    let requests = adapter.requests.clone();
+    let echo = EchoTool::default();
+    let calls = echo.calls.clone();
+    let mut harness = Harness::builder()
+        .model("test-model")
+        .adapter(Arc::new(adapter))
+        .tool(echo)
+        .max_tool_iterations(1)
+        .build()
+        .unwrap();
+    let original = harness.config().clone();
+    let result = harness.run("Echo then do the remaining action").await;
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        requests[1].0.tools,
+        Some(Vec::new()),
+        "M23: the existing next call must receive an explicit empty tool configuration"
+    );
+    assert!(requests[1].1.system.contains("Tool-round budget exhausted"));
+    assert_eq!(
+        requests[1]
+            .1
+            .messages
+            .iter()
+            .filter(|message| message.role == anima_core::MessageRole::User)
+            .count(),
+        1
+    );
+    assert!(requests[1]
+        .1
+        .messages
+        .iter()
+        .any(|message| message.role == anima_core::MessageRole::Tool
+            && message.content.text.contains("confirmed echo")));
+    assert_eq!(calls.lock().unwrap().len(), 1);
+    assert_eq!(result.status, TaskStatus::Success);
+    assert_eq!(
+        result
+            .data
+            .as_ref()
+            .unwrap()
+            .metadata
+            .as_ref()
+            .unwrap()
+            .get("budgetWrapup"),
+        Some(&DataValue::Bool(true))
+    );
+    assert_eq!(harness.config(), &original);
+}
+
 #[tokio::test]
 async fn events_are_emitted_to_listener() {
     let events: Arc<Mutex<Vec<EventType>>> = Arc::new(Mutex::new(Vec::new()));

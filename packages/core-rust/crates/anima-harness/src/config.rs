@@ -127,8 +127,9 @@ impl HarnessBuilder {
         self
     }
 
-    /// Cap on tool-calling turns inside a single run. Defaults to the core
-    /// runtime default when unset.
+    /// Cap on tool-calling turns inside a single run, followed by at most one
+    /// tool-free wrap-up turn. Zero allows only that text response. Defaults
+    /// to the core runtime default when unset.
     pub fn max_tool_iterations(mut self, max_tool_iterations: usize) -> Self {
         self.max_tool_iterations = Some(max_tool_iterations);
         self
