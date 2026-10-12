@@ -420,6 +420,14 @@ pub struct RecentMemoryOptions {
     pub limit: Option<usize>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct MemoryContextOptions {
+    pub agent_id: String,
+    pub room_id: Option<String>,
+    pub query: String,
+    pub limit: usize,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MemoryEvaluationDecision {
     Store,

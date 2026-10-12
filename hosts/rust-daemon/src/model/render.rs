@@ -1,20 +1,23 @@
 use anima_core::{DataValue, Message, MessageRole};
 
 pub(super) fn recent_memory_context(system: &str) -> Option<String> {
-    context_line(system, "recent_memories", "no recent memories")
+    context_block(system, "recent_memories", "no recent memories")
+        .filter(|value| value != "no relevant memories")
 }
 
 pub(super) fn swarm_inbox_context(system: &str) -> Option<String> {
-    context_line(system, "swarm_inbox", "no swarm messages")
+    context_block(system, "swarm_inbox", "no swarm messages")
 }
 
-fn context_line(system: &str, name: &str, empty_value: &str) -> Option<String> {
+fn context_block(system: &str, name: &str, empty_value: &str) -> Option<String> {
     let prefix = format!("[{name}]: ");
-    system
-        .lines()
-        .find_map(|line| line.strip_prefix(&prefix))
-        .filter(|value| !value.is_empty() && *value != empty_value)
-        .map(ToString::to_string)
+    let mut lines = system.lines();
+    let first = lines.find_map(|line| line.strip_prefix(&prefix))?;
+    let value = std::iter::once(first)
+        .chain(lines.take_while(|line| !line.starts_with('[') || !line.contains("]: ")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!value.is_empty() && value != empty_value).then_some(value)
 }
 
 pub(super) fn trailing_tool_messages(messages: &[Message]) -> Vec<&Message> {

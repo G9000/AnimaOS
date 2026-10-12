@@ -9,6 +9,11 @@ Harness acceptance also verified a real multi-step report with a helper and save
 tasks, correction of existing memories, approved skill reuse, automatic context
 compaction, and explicit continuation after an in-flight restart. Completed effects
 were preserved; interrupted work was flagged for review before continuation.
+Memory context now selects relevant own facts ahead of recent reflections, with
+quoted, bounded excerpts. One real fresh-chat check recalled the corrected
+preference after twenty newer reflections and eight matching foreign facts,
+without using a search tool. Selection is lexical; semantic recall and automatic
+memory consolidation remain unverified.
 
 ## Start with one companion
 
@@ -37,6 +42,9 @@ Use Stop when needed. Save a useful fact to memory; review and edit it in Memory
 With Collaborate or Operate access, the agent can correct its own visible memories
 using their exact IDs and current content. Existing tool selections need an explicit
 permission update to enable this new tool; saving unrelated settings does not add it.
+For corrections, search for the complete current record before updating it; a
+context excerpt is not the full text. Save compact durable facts and preferences,
+use Tasks for temporary progress, and review reusable procedures as skills.
 Use Files to inspect the chosen workspace. Attach text or an image when useful;
 vision requires a compatible model. PDF/Office attachments can be stored and
 retrieved, but their contents are not parsed by this feature set.

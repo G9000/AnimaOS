@@ -270,6 +270,24 @@ SSE subscribers connect through `/api/swarms/{swarm_id}/events`. That route subs
 
 The daemon tool surface is defined in `hosts/rust-daemon/src/tools.rs`.
 
+The existing `recent_memories` context provider uses deterministic lexical fact
+selection from `anima-memory`. It filters to the current agent's visible Fact
+records before ranking: Shared/Private records or the exact current Room, with
+unprovided world/session provenance excluded. Distinct query-term coverage ranks
+before importance, creation time and stable ID; unrelated queries add no automatic
+facts. Query normalization is capped at 512 Unicode characters and 32 distinct
+terms. Duplicate normalized content is omitted only from prompt context; canonical
+records and evaluator history remain unchanged.
+
+The provider emits at most six records and 4,800 Unicode characters including
+guidance and labels, with quoted content excerpts capped at 800 characters. IDs
+remain intact or the entry is omitted. Stored facts are evidence under current
+instructions and tool approvals; use `memory_search` for full current content and
+IDs before an exact `memory_update`. Static curation guidance borrows compact
+durable-fact habits from public Hermes source, attributed with its full MIT notice
+in `hosts/rust-daemon/HERMES-NOTICE`. Selection adds no model/embedding call or
+automatic skill write and does not establish semantic retrieval or Hermes parity.
+
 `ToolRegistry::new()` registers handlers for these families:
 
 | Family     | Examples                                                                         |

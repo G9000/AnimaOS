@@ -2,11 +2,11 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use super::{
-    AgentRelationshipOptions, MemoryEntityOptions, MemoryError, MemoryEvaluationDecision,
-    MemoryEvaluationOptions, MemoryManager, MemoryRecallOptions, MemoryRetentionPolicy,
-    MemoryScope, MemorySearchOptions, MemoryType, MemoryVectorIndex, NewAgentRelationship,
-    NewMemory, NewMemoryEntity, NewTemporalFact, NewTemporalRelationship, RecentMemoryOptions,
-    RelationshipEndpointKind, TemporalFactOptions, TemporalRecordStatus,
+    AgentRelationshipOptions, MemoryContextOptions, MemoryEntityOptions, MemoryError,
+    MemoryEvaluationDecision, MemoryEvaluationOptions, MemoryManager, MemoryRecallOptions,
+    MemoryRetentionPolicy, MemoryScope, MemorySearchOptions, MemoryType, MemoryVectorIndex,
+    NewAgentRelationship, NewMemory, NewMemoryEntity, NewTemporalFact, NewTemporalRelationship,
+    RecentMemoryOptions, RelationshipEndpointKind, TemporalFactOptions, TemporalRecordStatus,
     TemporalRelationshipOptions, VectorMemoryHit,
 };
 
@@ -29,6 +29,280 @@ fn base(overrides: impl FnOnce(&mut NewMemory)) -> NewMemory {
 
 fn add_memory(manager: &mut MemoryManager, memory: NewMemory) -> super::Memory {
     manager.add(memory).expect("memory should be added")
+}
+
+fn context_options(query: &str, limit: usize) -> MemoryContextOptions {
+    MemoryContextOptions {
+        agent_id: "agent-1".into(),
+        room_id: Some("room-current".into()),
+        query: query.into(),
+        limit,
+    }
+}
+
+#[test]
+fn context_keeps_old_topic_fact_after_twenty_irrelevant_reflections() {
+    let mut manager = MemoryManager::new();
+    let fact = add_memory(
+        &mut manager,
+        base(|memory| {
+            memory.content = "The citron tea preference is unsweetened.".into();
+            memory.importance = 0.1;
+        }),
+    );
+    for index in 0..20 {
+        add_memory(
+            &mut manager,
+            base(|memory| {
+                memory.memory_type = MemoryType::Reflection;
+                memory.content = format!("Completed unrelated spreadsheet task {index}.");
+                memory.importance = 1.0;
+            }),
+        );
+    }
+
+    let selected = manager.select_context(
+        context_options("What is my citron tea preference?", 6),
+        |_| true,
+    );
+    assert_eq!(
+        selected.iter().map(|memory| &memory.id).collect::<Vec<_>>(),
+        vec![&fact.id]
+    );
+}
+
+#[test]
+fn context_filters_owner_type_and_visibility_before_limits() {
+    let mut manager = MemoryManager::new();
+    for index in 0..40 {
+        add_memory(
+            &mut manager,
+            base(|memory| {
+                memory.agent_id = "foreign-owner".into();
+                memory.content = format!("citron tea foreign preference {index}");
+                memory.importance = 1.0;
+            }),
+        );
+    }
+    for index in 0..12 {
+        add_memory(
+            &mut manager,
+            base(|memory| {
+                memory.content = format!("citron tea hidden preference {index}");
+                memory.tags = Some(vec!["hidden".into()]);
+                memory.importance = 1.0;
+            }),
+        );
+        add_memory(
+            &mut manager,
+            base(|memory| {
+                memory.content = format!("citron tea reflection {index}");
+                memory.memory_type = MemoryType::Reflection;
+                memory.importance = 1.0;
+            }),
+        );
+    }
+    let own = add_memory(
+        &mut manager,
+        base(|memory| {
+            memory.content = "citron tea own preference unsweetened".into();
+            memory.importance = 0.1;
+        }),
+    );
+
+    let selected = manager.select_context(context_options("citron tea preference", 1), |memory| {
+        !memory
+            .tags
+            .as_ref()
+            .is_some_and(|tags| tags.iter().any(|tag| tag == "hidden"))
+    });
+    assert_eq!(selected, vec![own]);
+}
+
+#[test]
+fn context_requires_positive_distinct_term_relevance_without_recent_fallback() {
+    let mut manager = MemoryManager::new();
+    add_memory(
+        &mut manager,
+        base(|memory| {
+            memory.content = "The user's pineapple preferences are known.".into();
+            memory.importance = 1.0;
+        }),
+    );
+    for query in ["", "what is my preference", "citron", "apple"] {
+        assert!(
+            manager
+                .select_context(context_options(query, 6), |_| true)
+                .is_empty(),
+            "unexpected context for {query:?}"
+        );
+    }
+}
+
+#[test]
+fn context_preserves_short_and_non_english_query_terms() {
+    let mut manager = MemoryManager::new();
+    let fact = add_memory(
+        &mut manager,
+        base(|memory| memory.content = "茶 x daily ritual".into()),
+    );
+    assert_eq!(
+        manager.select_context(context_options("茶 x", 1), |_| true),
+        vec![fact]
+    );
+}
+
+#[test]
+fn context_allows_owner_shared_private_and_exact_room_without_unprovided_provenance() {
+    let mut manager = MemoryManager::new();
+    let mut permitted = Vec::new();
+    for scope in [MemoryScope::Shared, MemoryScope::Private, MemoryScope::Room] {
+        let memory = add_memory(
+            &mut manager,
+            base(|memory| {
+                memory.content = format!("citron tea allowed {}", scope.as_str());
+                memory.scope = Some(scope);
+                memory.room_id = (scope == MemoryScope::Room).then(|| "room-current".into());
+            }),
+        );
+        permitted.push(memory.id);
+        for provenance in ["world", "session"] {
+            add_memory(
+                &mut manager,
+                base(|memory| {
+                    memory.content = format!("citron tea excluded {} {provenance}", scope.as_str());
+                    memory.scope = Some(scope);
+                    memory.room_id = (scope == MemoryScope::Room).then(|| "room-current".into());
+                    memory.world_id = (provenance == "world").then(|| "world-1".into());
+                    memory.session_id = (provenance == "session").then(|| "session-1".into());
+                    memory.importance = 1.0;
+                }),
+            );
+        }
+    }
+    for room in [Some("room-other"), None] {
+        add_memory(
+            &mut manager,
+            base(|memory| {
+                memory.content = format!("citron tea excluded room {room:?}");
+                memory.scope = Some(MemoryScope::Room);
+                memory.room_id = room.map(String::from);
+                memory.importance = 1.0;
+            }),
+        );
+    }
+
+    let mut selected = manager
+        .select_context(context_options("citron tea", 6), |_| true)
+        .into_iter()
+        .map(|memory| memory.id)
+        .collect::<Vec<_>>();
+    selected.sort();
+    permitted.sort();
+    assert_eq!(selected, permitted);
+    let mut options = context_options("citron tea", 6);
+    options.room_id = None;
+    let selected = manager.select_context(options, |_| true);
+    assert_eq!(selected.len(), 2);
+    assert!(selected
+        .iter()
+        .all(|memory| memory.scope != MemoryScope::Room));
+}
+
+#[test]
+fn context_ranks_coverage_before_importance_then_recency_and_stable_id() {
+    let mut manager = MemoryManager::new();
+    for (id, content, importance, created_at) in [
+        ("partial", "citron breakfast", 1.0, 100),
+        ("less-important", "citron tea outside", 0.1, 100),
+        ("tie-b", "citron tea evening", 0.7, 5),
+        ("tie-a", "citron tea morning", 0.7, 5),
+        ("newer", "citron tea desk", 0.7, 6),
+    ] {
+        let original = add_memory(
+            &mut manager,
+            base(|memory| {
+                memory.content = content.into();
+                memory.importance = importance;
+            }),
+        );
+        let mut memory = manager.memories.remove(&original.id).unwrap();
+        memory.id = id.into();
+        memory.created_at = created_at;
+        manager.memories.insert(memory.id.clone(), memory);
+    }
+
+    let selected = manager.select_context(context_options("citron citron tea", 6), |_| true);
+    let ids: Vec<_> = selected.iter().map(|memory| memory.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["newer", "tie-a", "tie-b", "less-important", "partial"]
+    );
+    assert_eq!(
+        manager.select_context(context_options("citron tea", 3), |_| true),
+        selected[..3]
+    );
+}
+
+#[test]
+fn context_deduplicates_normalized_prompt_content_without_mutating_storage() {
+    let mut manager = MemoryManager::new();
+    add_memory(
+        &mut manager,
+        base(|memory| {
+            memory.content = "  CITRON   tea preference.  ".into();
+            memory.importance = 0.3;
+        }),
+    );
+    let best = add_memory(
+        &mut manager,
+        base(|memory| {
+            memory.content = "citron TEA preference.".into();
+            memory.importance = 0.9;
+        }),
+    );
+    let distinct = add_memory(
+        &mut manager,
+        base(|memory| {
+            memory.content = "citron tea serving temperature".into();
+            memory.importance = 0.5;
+        }),
+    );
+    let before = manager.snapshot();
+    let selected = manager.select_context(context_options("citron tea", 2), |_| true);
+    assert_eq!(selected, vec![best, distinct]);
+    assert_eq!(manager.snapshot(), before);
+    assert!(manager
+        .select_context(context_options("citron tea", 0), |_| true)
+        .is_empty());
+}
+
+#[test]
+fn context_bounds_query_characters_and_distinct_terms() {
+    let mut manager = MemoryManager::new();
+    add_memory(
+        &mut manager,
+        base(|memory| memory.content = "citron q32".into()),
+    );
+    let past_character_bound = format!("{}citron", "what ".repeat(110));
+    assert!(manager
+        .select_context(context_options(&past_character_bound, 6), |_| true)
+        .is_empty());
+    let past_term_bound = (0..33)
+        .map(|index| format!("q{index:02}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(manager
+        .select_context(context_options(&past_term_bound, 6), |_| true)
+        .is_empty());
+    let short = add_memory(
+        &mut manager,
+        base(|memory| memory.content = "q31 brief fact".into()),
+    );
+    assert_eq!(
+        manager.select_context(context_options(&past_term_bound, 6), |_| true),
+        vec![short]
+    );
 }
 
 fn base_relationship(overrides: impl FnOnce(&mut NewAgentRelationship)) -> NewAgentRelationship {
