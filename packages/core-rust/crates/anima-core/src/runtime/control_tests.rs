@@ -99,6 +99,172 @@ struct ScriptedModel {
     usage_before_stall: Option<TokenUsage>,
 }
 
+struct BudgetWrapupStreamModel {
+    requests: Mutex<Vec<(AgentConfig, ModelGenerateRequest)>>,
+    cancel: CancelSignal,
+    fail_stream: bool,
+}
+
+#[async_trait]
+impl ModelAdapter for BudgetWrapupStreamModel {
+    fn provider(&self) -> &str {
+        "budget-wrapup-stream"
+    }
+    async fn generate(
+        &self,
+        _: &AgentConfig,
+        _: &ModelGenerateRequest,
+    ) -> Result<ModelGenerateResponse, String> {
+        Err("this regression exercises streaming".into())
+    }
+    async fn stream(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        sink: &dyn ModelStreamSink,
+    ) -> Result<(), String> {
+        let first = {
+            let mut requests = self.requests.lock_recover();
+            requests.push((config.clone(), request.clone()));
+            requests.len() == 1
+        };
+        if first {
+            return sink
+                .emit(ModelStreamFrame::Final(tool_request(&["budget-search"])))
+                .await;
+        }
+        assert_eq!(
+            config.tools,
+            Some(Vec::new()),
+            "wrap-up streaming receives no tool capability"
+        );
+        sink.emit(ModelStreamFrame::Usage(TokenUsage {
+            prompt_tokens: 2,
+            completion_tokens: 3,
+            total_tokens: 5,
+            ..Default::default()
+        }))
+        .await?;
+        sink.emit(ModelStreamFrame::TextDelta("Partial wrap-up".into()))
+            .await?;
+        if self.fail_stream {
+            return Err("wrap-up stream disconnected".into());
+        }
+        self.cancel.cancel();
+        std::future::pending().await
+    }
+}
+
+#[test]
+fn budget_wrapup_stops_before_request_after_the_last_tool_round_is_cancelled() {
+    for cause in [
+        super::CancelCause::OwnerStop,
+        super::CancelCause::HelperDeadline,
+        super::CancelCause::DaemonShutdown,
+    ] {
+        let control = RunControl::new();
+        let model = Arc::new(ScriptedModel::new(&["last-search"]));
+        let (mut runtime, _) = controlled(model.clone(), &control);
+        let mut config = runtime.config().clone();
+        let mut settings = config.settings.clone().unwrap_or_default();
+        settings.max_tool_iterations = Some(1);
+        config.settings = Some(settings);
+        runtime.replace_config(config);
+        let dispatched = AtomicUsize::new(0);
+        let cancel = control.cancel.clone();
+        let result = block_on(runtime.run_with_context_and_tools(
+            Vec::new(),
+            text("Search once"),
+            |_, _, _| {
+                dispatched.fetch_add(1, Ordering::SeqCst);
+                cancel.cancel_with(cause);
+                async { TaskResult::error("terminal host cancellation", 1) }
+            },
+        ));
+        assert_eq!(result.error.as_deref(), Some(control.cancel.run_error()));
+        assert_eq!(
+            model.requests.lock_recover().len(),
+            1,
+            "cancellation must win before the budget wrap-up request"
+        );
+        assert_eq!(dispatched.load(Ordering::SeqCst), 1);
+        assert!(runtime
+            .messages()
+            .iter()
+            .all(|message| metadata(message, "budgetWrapup").is_none()));
+    }
+}
+
+#[test]
+fn budget_wrapup_stream_stop_and_error_keep_partial_text_usage_and_never_retry() {
+    for fail_stream in [false, true] {
+        let control = RunControl::new();
+        let model = Arc::new(BudgetWrapupStreamModel {
+            requests: Mutex::new(Vec::new()),
+            cancel: control.cancel.clone(),
+            fail_stream,
+        });
+        let mut config = config();
+        config.settings = Some(crate::agent::AgentSettings {
+            max_tool_iterations: Some(1),
+            ..Default::default()
+        });
+        let mut runtime = AgentRuntime::new(config, model.clone());
+        let frames = Arc::new(Frames::default());
+        runtime.set_run_id("run_budget_stop");
+        runtime.set_run_control(control.clone());
+        runtime.set_run_observer(frames.clone());
+        let dispatched = AtomicUsize::new(0);
+        let result =
+            block_on(
+                runtime.run_with_context_and_tools(Vec::new(), text("Search"), |_, _, _| {
+                    dispatched.fetch_add(1, Ordering::SeqCst);
+                    async { TaskResult::success(text("search complete"), 1) }
+                }),
+            );
+        assert_eq!(
+            result.error.as_deref(),
+            Some(if fail_stream {
+                "wrap-up stream disconnected"
+            } else {
+                RUN_STOPPED_ERROR
+            })
+        );
+        assert_eq!(model.requests.lock_recover().len(), 2);
+        assert_eq!(dispatched.load(Ordering::SeqCst), 1);
+        assert_eq!(runtime.state().token_usage.total_tokens, 5);
+        let partial = runtime.messages().last().unwrap();
+        assert_eq!(partial.content.text, "Partial wrap-up");
+        assert_eq!(
+            metadata(partial, if fail_stream { "incomplete" } else { "stopped" }),
+            Some(&DataValue::Bool(true))
+        );
+        assert!(metadata(partial, "budgetWrapup").is_none());
+        let frames = frames.0.lock_recover();
+        assert_eq!(
+            frames
+                .iter()
+                .filter(|frame| matches!(frame, RunFrame::ToolStarted { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            frames
+                .iter()
+                .filter(|frame| matches!(frame, RunFrame::ToolFinished { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            frames
+                .iter()
+                .filter(|frame| matches!(frame, RunFrame::StepStarted { .. }))
+                .count(),
+            2
+        );
+    }
+}
+
 impl ScriptedModel {
     fn new(ids: &[&'static str]) -> Self {
         Self {

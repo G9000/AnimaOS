@@ -468,8 +468,83 @@ fn subscription_request_keeps_anima_tool_history_and_disables_storage() {
     assert_eq!(body["input"][2]["type"], "function_call_output");
     assert_eq!(body["input"][2]["call_id"], "call_1");
     assert_eq!(body["tools"][0]["name"], "lookup");
+    assert_eq!(body["tool_choice"], "auto");
+    assert_eq!(body["parallel_tool_calls"], true);
     assert!(body.get("temperature").is_none());
     assert!(body.get("max_tokens").is_none());
+}
+
+#[test]
+fn subscription_request_omits_all_tool_controls_when_tools_are_absent_or_empty() {
+    let request = request();
+    for tools in [None, Some(Vec::new())] {
+        let mut config = config();
+        config.tools = tools;
+
+        let body = request_body(&config, &request).unwrap();
+        assert!(body.get("tools").is_none(), "body: {body}");
+        assert!(body.get("tool_choice").is_none(), "body: {body}");
+        assert!(body.get("parallel_tool_calls").is_none(), "body: {body}");
+    }
+}
+
+#[test]
+fn subscription_no_tools_request_preserves_historical_function_call_and_result() {
+    let request = ModelGenerateRequest {
+        system: "Finish using the recorded result".into(),
+        temperature: None,
+        max_tokens: None,
+        messages: vec![
+            message(MessageRole::User, "Look up record 7", None),
+            message(
+                MessageRole::Assistant,
+                "",
+                Some(BTreeMap::from([(
+                    "toolCalls".into(),
+                    DataValue::Array(vec![DataValue::Object(BTreeMap::from([
+                        ("id".into(), DataValue::String("call_historical".into())),
+                        ("name".into(), DataValue::String("lookup".into())),
+                        (
+                            "args".into(),
+                            DataValue::Object(BTreeMap::from([(
+                                "id".into(),
+                                DataValue::Number(7.0),
+                            )])),
+                        ),
+                    ]))]),
+                )])),
+            ),
+            message(
+                MessageRole::Tool,
+                "Found record seven",
+                Some(BTreeMap::from([(
+                    "toolCallId".into(),
+                    DataValue::String("call_historical".into()),
+                )])),
+            ),
+        ],
+    };
+    let mut config = config();
+    config.tools = None;
+
+    let body = request_body(&config, &request).unwrap();
+    assert_eq!(
+        body["input"][1],
+        json!({
+            "type":"function_call",
+            "call_id":"call_historical",
+            "name":"lookup",
+            "arguments":"{\"id\":7.0}"
+        })
+    );
+    assert_eq!(
+        body["input"][2],
+        json!({
+            "type":"function_call_output",
+            "call_id":"call_historical",
+            "output":"Found record seven"
+        })
+    );
 }
 
 #[test]

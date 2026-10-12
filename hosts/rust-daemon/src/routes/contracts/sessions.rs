@@ -15,9 +15,10 @@ use crate::sessions::SessionCapabilities;
 /// Message metadata the session routes expose: spec §3.3's list plus `kind`
 /// (check-in prompts) and `source` (Telegram turns), and what a historical
 /// tool card or step label shows: a tool result's `toolStatus` and
-/// `toolDurationMs`, and `incomplete` on a model call's unfinished text.
+/// `toolDurationMs`, `incomplete` on a model call's unfinished text, and
+/// `budgetWrapup` on its accepted tool-free budget reply.
 /// `taskResult` stays hidden: it repeats the whole tool result.
-pub(crate) const EXPOSED_MESSAGE_METADATA: [&str; 15] = [
+pub(crate) const EXPOSED_MESSAGE_METADATA: [&str; 16] = [
     "toolCalls",
     "toolCallId",
     "stepId",
@@ -33,6 +34,7 @@ pub(crate) const EXPOSED_MESSAGE_METADATA: [&str; 15] = [
     "communication",
     "kind",
     "source",
+    "budgetWrapup",
 ];
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -238,7 +240,7 @@ pub(crate) struct SessionMessageResponse {
     /// Only `toolCalls`, `toolCallId`, `stepId`, `runId`, `toolStatus`
     /// (`success` or `error`), `toolDurationMs`, `incomplete`, `stopped`,
     /// `revised`, `steer`, `skill`, `clientRequestId`, `communication`,
-    /// `kind`, and `source`; other keys are not exposed.
+    /// `kind`, `source`, and `budgetWrapup`; other keys are not exposed.
     pub(crate) metadata: BTreeMap<String, Value>,
     pub(crate) created_at_ms: u64,
     /// Present (true) only on silent check-in messages, with `includeHidden=true`.

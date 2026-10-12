@@ -153,10 +153,14 @@ fn request_body(config: &AgentConfig, request: &ModelGenerateRequest) -> Result<
         .collect();
     // ChatGPT subscription transport requires streaming and store=false. API-only
     // temperature / max_tokens controls are deliberately not sent to reasoning models.
-    Ok(
-        json!({"model":config.model, "instructions":request.system, "input":input,
-        "tools":tools, "tool_choice":"auto", "parallel_tool_calls":true, "stream":true, "store":false}),
-    )
+    let mut body = json!({"model":config.model, "instructions":request.system, "input":input,
+        "stream":true, "store":false});
+    if !tools.is_empty() {
+        body["tools"] = json!(tools);
+        body["tool_choice"] = json!("auto");
+        body["parallel_tool_calls"] = json!(true);
+    }
+    Ok(body)
 }
 
 fn malformed() -> String {

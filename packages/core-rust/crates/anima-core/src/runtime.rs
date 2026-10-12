@@ -52,6 +52,8 @@ pub const MAX_RETAINED_EVENTS: usize = 500;
 /// Extra events tolerated before trimming, so trimming is amortized.
 const EVENT_TRIM_SLACK: usize = 64;
 const MAX_EVALUATOR_RETRIES: usize = 2;
+const BUDGET_WRAPUP_METADATA_KEY: &str = "budgetWrapup";
+const BUDGET_WRAPUP_GUIDANCE: &str = "Tool-round budget exhausted. No more tools are available. Give one final answer using the actual settled tool results: state confirmed completed work, remaining work and limitations honestly. Do not claim unfinished actions completed.";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AgentRuntimeSnapshot {
@@ -486,13 +488,29 @@ impl AgentRuntime {
             }
             // Steering joins before each model call (spec §4.7).
             self.drain_steering(&room_id, &mut conversation);
+            if self.stop_requested() {
+                return self.finish_stopped(start);
+            }
+            // The already-next call is the sole wrap-up attempt. Every
+            // wrap-up rejection below is terminal, including evaluator Retry.
+            let budget_wrapup = iterations >= max_tool_iterations;
+            let call_config = budget_wrapup.then(|| {
+                let mut config = self.state.config.clone();
+                config.tools = Some(Vec::new());
+                config
+            });
+            let mut system = self.build_system_prompt(&context_parts);
+            if budget_wrapup {
+                system.push_str("\n\n");
+                system.push_str(BUDGET_WRAPUP_GUIDANCE);
+            }
             model_calls += 1;
             let step_id = self.step_id_for(model_calls);
             self.emit_frame(RunFrame::StepStarted {
                 step_id: step_id.clone(),
             });
             let request = ModelGenerateRequest {
-                system: self.build_system_prompt(&context_parts),
+                system,
                 messages: conversation.clone(),
                 temperature: self
                     .state
@@ -512,9 +530,11 @@ impl AgentRuntime {
             let sink = StepSink::new(self.observer.clone(), step_id.clone());
             let cancel = self.control.as_ref().map(|control| control.cancel.clone());
             let streamed = {
-                let call = self
-                    .model_adapter
-                    .stream(&self.state.config, &request, &sink);
+                let call = self.model_adapter.stream(
+                    call_config.as_ref().unwrap_or(&self.state.config),
+                    &request,
+                    &sink,
+                );
                 match cancel {
                     // Stop checkpoint while streaming: dropping the call drops
                     // the in-flight request (spec §4.6).
@@ -546,12 +566,44 @@ impl AgentRuntime {
             };
 
             match outcome {
-                Ok(response) => {
+                Ok(mut response) => {
+                    // Provenance is host-generated only after acceptance;
+                    // a provider cannot claim that an earlier answer wrapped up.
+                    if let Some(metadata) = response.content.metadata.as_mut() {
+                        metadata.remove(BUDGET_WRAPUP_METADATA_KEY);
+                    }
                     self.apply_token_usage(&response.usage);
                     self.emit_frame(RunFrame::StepUsage {
                         step_id: step_id.clone(),
                         usage: response.usage.clone(),
                     });
+
+                    if budget_wrapup {
+                        let rejection = if response.stop_reason == ModelStopReason::ToolCall
+                            || response
+                                .tool_calls
+                                .as_ref()
+                                .is_some_and(|calls| !calls.is_empty())
+                        {
+                            Some("tool iteration limit exceeded")
+                        } else if response.stop_reason == ModelStopReason::MaxTokens {
+                            Some("budget wrap-up was truncated")
+                        } else if response.content.text.trim().is_empty() {
+                            Some("budget wrap-up returned empty text")
+                        } else {
+                            None
+                        };
+                        if let Some(error) = rejection {
+                            return self.fail_step(
+                                &room_id,
+                                &step_id,
+                                &response.content.text,
+                                INCOMPLETE_METADATA_KEY,
+                                error,
+                                start,
+                            );
+                        }
+                    }
 
                     match response.stop_reason {
                         ModelStopReason::End | ModelStopReason::MaxTokens => {
@@ -572,6 +624,16 @@ impl AgentRuntime {
 
                             match evaluation {
                                 EvaluatorDecision::Accept => {
+                                    if budget_wrapup {
+                                        response
+                                            .content
+                                            .metadata
+                                            .get_or_insert_with(BTreeMap::new)
+                                            .insert(
+                                                BUDGET_WRAPUP_METADATA_KEY.into(),
+                                                DataValue::Bool(true),
+                                            );
+                                    }
                                     let duration_ms = now_millis().saturating_sub(start);
                                     let message_id = self.mark_completed_in_room(
                                         room_id.clone(),
@@ -589,7 +651,7 @@ impl AgentRuntime {
                                     });
                                 }
                                 EvaluatorDecision::Retry { feedback } => {
-                                    if evaluator_retries >= MAX_EVALUATOR_RETRIES {
+                                    if budget_wrapup || evaluator_retries >= MAX_EVALUATOR_RETRIES {
                                         return self.fail_step(
                                             &room_id,
                                             &step_id,

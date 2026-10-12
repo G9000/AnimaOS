@@ -483,3 +483,582 @@ fn retain_messages_leaves_no_room_for_the_removed_messages() {
         canonical.messages.capacity()
     );
 }
+
+/// Advertises another action until the supplied call configuration
+/// explicitly removes capability; absent tools intentionally mean defaults.
+#[derive(Default)]
+struct BudgetWrapupModel {
+    requests: std::sync::Mutex<Vec<(AgentConfig, ModelGenerateRequest)>>,
+}
+
+#[async_trait]
+impl ModelAdapter for BudgetWrapupModel {
+    fn provider(&self) -> &str {
+        "budget-wrapup-test"
+    }
+
+    async fn generate(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+    ) -> Result<ModelGenerateResponse, String> {
+        self.requests
+            .lock()
+            .unwrap()
+            .push((config.clone(), request.clone()));
+        let no_tools = config.tools.as_ref().is_some_and(Vec::is_empty);
+        Ok(ModelGenerateResponse {
+            content: text(if no_tools {
+                "Confirmed: the read finished. The requested write remains undone."
+            } else {
+                "Reading"
+            }),
+            tool_calls: if no_tools {
+                None
+            } else {
+                Some(vec![ToolCall {
+                    id: "budget-read".into(),
+                    name: "read".into(),
+                    args: BTreeMap::new(),
+                }])
+            },
+            usage: usage(),
+            stop_reason: if no_tools {
+                ModelStopReason::End
+            } else {
+                ModelStopReason::ToolCall
+            },
+        })
+    }
+}
+
+fn budget_config(limit: usize) -> AgentConfig {
+    let mut config = config();
+    config.system = Some("Preserve the owner's identity guidance.".into());
+    config.tools = Some(vec![ToolDescriptor {
+        name: "read".into(),
+        description: "Read the local input".into(),
+        parameters_schema: BTreeMap::new(),
+        examples: None,
+    }]);
+    config.settings = Some(crate::agent::AgentSettings {
+        max_tool_iterations: Some(limit),
+        temperature: Some(0.2),
+        max_tokens: Some(128),
+        ..Default::default()
+    });
+    config
+}
+
+#[test]
+fn budget_wrapup_restricts_the_already_next_call_and_preserves_grants_on_reset() {
+    let model = Arc::new(BudgetWrapupModel::default());
+    let original = budget_config(1);
+    let mut runtime = AgentRuntime::new(original.clone(), model.clone());
+    runtime.init();
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    let first = block_on(runtime.run_with_context_and_tools(
+        Vec::new(),
+        text("Read then write"),
+        |_, _, _| {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async { TaskResult::success(text("Read completed; no write performed."), 1) }
+        },
+    ));
+    let requests = model.requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        2,
+        "one ordinary call and its existing next call"
+    );
+    assert_eq!(requests[1].0.tools, Some(Vec::new()), "M23: budget boundary must explicitly remove advertised tools before asking for the final answer");
+    assert_eq!(requests[0].0, original);
+    assert_eq!(requests[1].0.model, original.model);
+    assert_eq!(requests[1].1.temperature, Some(0.2));
+    assert_eq!(requests[1].1.max_tokens, Some(128));
+    assert!(requests[1]
+        .1
+        .system
+        .contains("Preserve the owner's identity guidance."));
+    assert!(requests[1].1.system.contains("Tool-round budget exhausted"));
+    assert!(requests[1].1.system.contains("remaining"));
+    assert_eq!(
+        requests[1]
+            .1
+            .messages
+            .iter()
+            .filter(|message| message.role == MessageRole::User)
+            .count(),
+        1,
+        "wrap-up must not invent an owner instruction"
+    );
+    assert!(requests[1]
+        .1
+        .messages
+        .iter()
+        .any(|message| message.role == MessageRole::Tool
+            && message.content.text.contains("Read completed")));
+    drop(requests);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(first.status, TaskStatus::Success);
+    assert_eq!(
+        first
+            .data
+            .as_ref()
+            .unwrap()
+            .metadata
+            .as_ref()
+            .unwrap()
+            .get("budgetWrapup"),
+        Some(&DataValue::Bool(true))
+    );
+    assert_eq!(runtime.config(), &original);
+    assert_eq!(runtime.snapshot().state.config, original);
+    assert_eq!(runtime.state().token_usage.total_tokens, 24);
+    let mut restored = AgentRuntime::from_snapshot(runtime.snapshot(), model.clone());
+    let second = block_on(restored.run_with_context_and_tools(
+        Vec::new(),
+        text("Next independent task"),
+        |_, _, _| {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async { TaskResult::success(text("Read completed again"), 1) }
+        },
+    ));
+    assert_eq!(second.status, TaskStatus::Success);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert_eq!(
+        model.requests.lock().unwrap()[2].0,
+        original,
+        "the next run resets its one-shot state and capability"
+    );
+    assert_eq!(restored.config(), &original);
+}
+
+#[test]
+fn budget_wrapup_zero_shadows_absent_tools_and_dispatches_nothing() {
+    let model = Arc::new(BudgetWrapupModel::default());
+    let mut original = budget_config(0);
+    original.tools = None;
+    let mut runtime = AgentRuntime::new(original.clone(), model.clone());
+    let result = block_on(runtime.run_with_context_and_tools(
+        Vec::new(),
+        text("Explain remaining work"),
+        |_, _, _| async { panic!("zero tool-round budget must never dispatch a tool") },
+    ));
+    let requests = model.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].0.tools,
+        Some(Vec::new()),
+        "M23: tools=None must not allow adapter defaults during wrap-up"
+    );
+    assert_eq!(result.status, TaskStatus::Success);
+    assert_eq!(
+        result
+            .data
+            .as_ref()
+            .unwrap()
+            .metadata
+            .as_ref()
+            .unwrap()
+            .get("budgetWrapup"),
+        Some(&DataValue::Bool(true))
+    );
+    assert_eq!(runtime.config(), &original);
+}
+
+struct BudgetBoundaryModel {
+    responses: std::sync::Mutex<std::collections::VecDeque<Result<ModelGenerateResponse, String>>>,
+    requests: std::sync::Mutex<Vec<(AgentConfig, ModelGenerateRequest)>>,
+}
+
+impl BudgetBoundaryModel {
+    fn new(responses: Vec<Result<ModelGenerateResponse, String>>) -> Arc<Self> {
+        Arc::new(Self {
+            responses: std::sync::Mutex::new(responses.into()),
+            requests: std::sync::Mutex::new(Vec::new()),
+        })
+    }
+}
+
+#[async_trait]
+impl ModelAdapter for BudgetBoundaryModel {
+    fn provider(&self) -> &str {
+        "budget-boundary"
+    }
+    async fn generate(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+    ) -> Result<ModelGenerateResponse, String> {
+        self.requests
+            .lock()
+            .unwrap()
+            .push((config.clone(), request.clone()));
+        self.responses
+            .lock()
+            .unwrap()
+            .pop_front()
+            .expect("no unplanned model request")
+    }
+}
+
+fn budget_reply(stop_reason: ModelStopReason, value: &str, calls: bool) -> ModelGenerateResponse {
+    ModelGenerateResponse {
+        content: Content {
+            text: value.into(),
+            metadata: Some(BTreeMap::from([(
+                "budgetWrapup".into(),
+                DataValue::Bool(true),
+            )])),
+            ..Content::default()
+        },
+        tool_calls: calls.then(|| {
+            vec![ToolCall {
+                id: "boundary-read".into(),
+                name: "read".into(),
+                args: BTreeMap::new(),
+            }]
+        }),
+        usage: usage(),
+        stop_reason,
+    }
+}
+
+#[test]
+fn budget_wrapup_rejects_tools_empty_and_truncated_replies_without_retry_or_unpaired_calls() {
+    for (reason, value, tool_calls, expected) in [
+        (
+            ModelStopReason::ToolCall,
+            "need another action",
+            true,
+            "tool iteration limit exceeded",
+        ),
+        (
+            ModelStopReason::End,
+            "pretend this is final",
+            true,
+            "tool iteration limit exceeded",
+        ),
+        (
+            ModelStopReason::End,
+            "  \n\t",
+            false,
+            "budget wrap-up returned empty text",
+        ),
+        (
+            ModelStopReason::MaxTokens,
+            "partial wrap-up",
+            false,
+            "budget wrap-up was truncated",
+        ),
+    ] {
+        let model = BudgetBoundaryModel::new(vec![
+            Ok(budget_reply(ModelStopReason::ToolCall, "read first", true)),
+            Ok(budget_reply(reason, value, tool_calls)),
+            Ok(budget_reply(ModelStopReason::End, "forbidden retry", false)),
+        ]);
+        let mut runtime = AgentRuntime::new(budget_config(1), model.clone());
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let result = block_on(runtime.run_with_context_and_tools(
+            Vec::new(),
+            text("Read then write"),
+            |_, _, _| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async { TaskResult::success(text("read complete"), 1) }
+            },
+        ));
+        assert_eq!(result.status, TaskStatus::Error, "{reason:?}");
+        assert_eq!(result.error.as_deref(), Some(expected));
+        assert_eq!(model.requests.lock().unwrap().len(), 2);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(runtime.state().token_usage.total_tokens, 24);
+        assert_eq!(
+            runtime
+                .messages()
+                .iter()
+                .filter(|message| message.role == MessageRole::Tool)
+                .count(),
+            1
+        );
+        assert_eq!(
+            runtime
+                .messages()
+                .iter()
+                .filter(|message| message
+                    .content
+                    .metadata
+                    .as_ref()
+                    .is_some_and(|metadata| metadata.contains_key("toolCalls")))
+                .count(),
+            1,
+            "rejected wrap-up must not record unpaired assistant calls"
+        );
+        assert!(
+            runtime.messages().iter().all(|message| !message
+                .content
+                .metadata
+                .as_ref()
+                .is_some_and(|metadata| metadata.contains_key("budgetWrapup"))),
+            "provider metadata cannot fabricate accepted wrap-up provenance"
+        );
+        assert!(runtime
+            .messages()
+            .last()
+            .unwrap()
+            .content
+            .metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.get("incomplete") == Some(&DataValue::Bool(true))));
+    }
+}
+
+struct BudgetRetryEvaluator;
+
+#[async_trait]
+impl crate::components::Evaluator for BudgetRetryEvaluator {
+    fn name(&self) -> &str {
+        "budget-retry"
+    }
+    fn description(&self) -> &str {
+        "Reject the one-shot wrap-up draft"
+    }
+    async fn validate(&self, _: &AgentRuntime, _: &Message) -> Result<bool, String> {
+        Ok(true)
+    }
+    async fn evaluate(
+        &self,
+        _: &AgentRuntime,
+        _: &Message,
+        _: &Content,
+    ) -> Result<crate::components::EvaluatorResult, String> {
+        Ok(crate::components::EvaluatorResult::retry(
+            "correct the draft",
+        ))
+    }
+}
+
+#[test]
+fn budget_wrapup_evaluator_retry_is_terminal_and_never_tagged_accepted() {
+    let model = BudgetBoundaryModel::new(vec![
+        Ok(budget_reply(ModelStopReason::ToolCall, "read first", true)),
+        Ok(budget_reply(
+            ModelStopReason::End,
+            "a rejected final draft",
+            false,
+        )),
+        Ok(budget_reply(
+            ModelStopReason::End,
+            "forbidden evaluator retry",
+            false,
+        )),
+    ]);
+    let mut runtime = AgentRuntime::new(budget_config(1), model.clone());
+    runtime.register_evaluator(Arc::new(BudgetRetryEvaluator));
+    let result = block_on(runtime.run_with_context_and_tools(
+        Vec::new(),
+        text("Read"),
+        |_, _, _| async { TaskResult::success(text("read complete"), 1) },
+    ));
+    assert_eq!(
+        result.error.as_deref(),
+        Some("evaluator retry limit exceeded")
+    );
+    assert_eq!(model.requests.lock().unwrap().len(), 2);
+    assert!(runtime.messages().iter().all(|message| !message
+        .content
+        .metadata
+        .as_ref()
+        .is_some_and(|metadata| metadata.contains_key("budgetWrapup"))));
+    assert_eq!(
+        runtime
+            .messages()
+            .iter()
+            .filter(|message| message.role == MessageRole::System)
+            .count(),
+        0,
+        "there is no evaluator retry turn"
+    );
+}
+
+#[test]
+fn budget_wrapup_can_report_an_ordinary_tool_error_but_never_recovers_provider_failure() {
+    let model = BudgetBoundaryModel::new(vec![
+        Ok(budget_reply(ModelStopReason::ToolCall, "read first", true)),
+        Ok(budget_reply(
+            ModelStopReason::End,
+            "The read failed; the requested work remains unfinished.",
+            false,
+        )),
+    ]);
+    let mut runtime = AgentRuntime::new(budget_config(1), model.clone());
+    let result = block_on(runtime.run_with_context_and_tools(
+        Vec::new(),
+        text("Read"),
+        |_, _, _| async { TaskResult::error("file unavailable", 1) },
+    ));
+    assert_eq!(result.status, TaskStatus::Success);
+    assert!(model.requests.lock().unwrap()[1]
+        .1
+        .messages
+        .iter()
+        .any(|message| message.role == MessageRole::Tool
+            && message.content.text.contains("file unavailable")));
+    assert_eq!(
+        result
+            .data
+            .as_ref()
+            .unwrap()
+            .metadata
+            .as_ref()
+            .unwrap()
+            .get("budgetWrapup"),
+        Some(&DataValue::Bool(true))
+    );
+
+    for failure_on_wrapup in [false, true] {
+        let mut responses = Vec::new();
+        if failure_on_wrapup {
+            responses.push(Ok(budget_reply(
+                ModelStopReason::ToolCall,
+                "read first",
+                true,
+            )));
+        }
+        responses.push(Err("provider disconnected".into()));
+        responses.push(Ok(budget_reply(
+            ModelStopReason::End,
+            "forbidden recovery",
+            false,
+        )));
+        let model = BudgetBoundaryModel::new(responses);
+        let mut runtime = AgentRuntime::new(budget_config(1), model.clone());
+        let result = block_on(runtime.run_with_context_and_tools(
+            Vec::new(),
+            text("Read"),
+            |_, _, _| async { TaskResult::success(text("read complete"), 1) },
+        ));
+        assert_eq!(result.error.as_deref(), Some("provider disconnected"));
+        assert_eq!(
+            model.requests.lock().unwrap().len(),
+            if failure_on_wrapup { 2 } else { 1 }
+        );
+    }
+}
+
+#[test]
+fn budget_wrapup_is_not_claimed_for_natural_answers_and_default_budget_is_eight_rounds() {
+    let model = BudgetBoundaryModel::new(vec![Ok(budget_reply(
+        ModelStopReason::End,
+        "natural completion",
+        false,
+    ))]);
+    let mut runtime = AgentRuntime::new(budget_config(1), model.clone());
+    let result = block_on(runtime.run_with_context_and_tools(
+        Vec::new(),
+        text("Explain"),
+        |_, _, _| async { panic!("natural answer needs no tool") },
+    ));
+    assert_eq!(result.status, TaskStatus::Success);
+    assert!(!result
+        .data
+        .as_ref()
+        .unwrap()
+        .metadata
+        .as_ref()
+        .unwrap()
+        .contains_key("budgetWrapup"));
+    assert_eq!(model.requests.lock().unwrap()[0].0, budget_config(1));
+
+    let model = Arc::new(BudgetWrapupModel::default());
+    let mut config = budget_config(1);
+    config.settings.as_mut().unwrap().max_tool_iterations = None;
+    let mut runtime = AgentRuntime::new(config.clone(), model.clone());
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    let result =
+        block_on(
+            runtime.run_with_context_and_tools(Vec::new(), text("Read"), |_, _, _| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async { TaskResult::success(text("read complete"), 1) }
+            }),
+        );
+    assert_eq!(result.status, TaskStatus::Success);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 8);
+    assert_eq!(model.requests.lock().unwrap().len(), 9);
+    assert_eq!(runtime.config(), &config);
+}
+
+#[test]
+fn budget_wrapup_counts_a_parallel_last_batch_as_one_round_and_keeps_paired_results() {
+    let mut batch = budget_reply(ModelStopReason::ToolCall, "two reads", false);
+    batch.tool_calls = Some(
+        ["read-a", "read-b"]
+            .into_iter()
+            .map(|id| ToolCall {
+                id: id.into(),
+                name: "read".into(),
+                args: BTreeMap::new(),
+            })
+            .collect(),
+    );
+    let model = BudgetBoundaryModel::new(vec![
+        Ok(batch),
+        Ok(budget_reply(
+            ModelStopReason::End,
+            "Both reads completed; the write remains undone.",
+            false,
+        )),
+    ]);
+    let mut runtime = AgentRuntime::new(budget_config(1), model.clone());
+    let dispatched = std::sync::atomic::AtomicUsize::new(0);
+    let result = block_on(runtime.run_with_context_and_tools(
+        Vec::new(),
+        text("Read two files then write"),
+        |_, _, call| {
+            dispatched.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async move { TaskResult::success(text(&format!("{} completed", call.id)), 1) }
+        },
+    ));
+    assert_eq!(result.status, TaskStatus::Success);
+    assert_eq!(dispatched.load(std::sync::atomic::Ordering::SeqCst), 2);
+    let requests = model.requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        2,
+        "two parallel tools still consume only one tool round"
+    );
+    assert_eq!(requests[1].0.tools, Some(Vec::new()));
+    let tool_results: Vec<_> = requests[1]
+        .1
+        .messages
+        .iter()
+        .filter(|message| message.role == MessageRole::Tool)
+        .collect();
+    assert_eq!(tool_results.len(), 2);
+    for (message, id) in tool_results.iter().zip(["read-a", "read-b"]) {
+        assert_eq!(
+            message.content.metadata.as_ref().unwrap().get("toolCallId"),
+            Some(&DataValue::String(id.into()))
+        );
+        assert!(message.content.text.contains(id));
+    }
+    assert_eq!(
+        runtime
+            .messages()
+            .iter()
+            .filter(|message| message.role == MessageRole::Tool)
+            .count(),
+        2
+    );
+    assert_eq!(
+        result
+            .data
+            .as_ref()
+            .unwrap()
+            .metadata
+            .as_ref()
+            .unwrap()
+            .get("budgetWrapup"),
+        Some(&DataValue::Bool(true))
+    );
+}

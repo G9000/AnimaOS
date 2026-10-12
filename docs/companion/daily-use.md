@@ -95,6 +95,17 @@ provide interactive browser or desktop control. Preserve custom connector/web
 permissions when changing access profiles: a standard profile replaces custom
 tool selections, as the settings warning explains.
 
+## When the tool budget runs out
+
+The tool budget counts rounds, so a parallel batch uses one round. The default
+is eight. After the limit, Anima gets one final model turn with tools disabled to
+report confirmed results and unfinished work. A zero-round setting allows only
+that text reply. Stop, provider errors and failed action-record saves still end
+the run; an empty, truncated or rejected wrap-up does not retry. A completed
+wrap-up means its reply was saved, not that every requested action succeeded.
+Accepted wrap-ups carry `budgetWrapup: true` in message metadata. The original
+tool permissions remain available for the next independent run.
+
 ## Connect only what you use
 
 - Telegram: configure and pair through Connectors. The native daemon handles
