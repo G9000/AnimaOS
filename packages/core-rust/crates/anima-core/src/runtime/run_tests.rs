@@ -1123,6 +1123,432 @@ fn budget_wrapup_counts_a_parallel_last_batch_as_one_round_and_keeps_paired_resu
 
 const EXACT_FAILURE_HINT: &str = "This same tool call has returned the same error three times. Inspect the latest error, change the inputs or approach, or explain the blocker.";
 const REPEATED_SUCCESS_HINT: &str = "This same tool call has returned the same result three times. If that result is sufficient, use it; otherwise change the inputs or approach, or continue necessary polling.";
+const REPEATED_TOOL_CYCLE_HINT: &str = "The same sequence of tool calls has returned the same results three times. If those results are sufficient, use them; otherwise change the inputs or approach, or continue necessary polling.";
+
+fn cycle_round(id: &str, position: usize) -> ModelGenerateResponse {
+    let mut response = exact_failure_round(id);
+    response.tool_calls.as_mut().unwrap()[0]
+        .args
+        .insert("position".into(), DataValue::Number(position as f64));
+    response
+}
+
+fn cycle_success(call: &ToolCall) -> TaskResult<Content> {
+    TaskResult::success(text(&format!("poll result {:?}", call.args["position"])), 1)
+}
+
+#[test]
+fn repeated_tool_cycle_adds_one_hint_after_six_fresh_successes_and_preserves_effect_witnesses() {
+    let rounds = (0..7).map(|index| Ok(cycle_round(&format!("cycle-{index}"), index % 2)));
+    let model = BudgetBoundaryModel::new(
+        rounds
+            .chain([Ok(budget_reply(
+                ModelStopReason::End,
+                "Use the actual settled results",
+                false,
+            ))])
+            .collect(),
+    );
+    let original_config = budget_config(8);
+    let mut runtime = AgentRuntime::new(original_config.clone(), model.clone());
+    runtime.set_run_id("run_cycle_red");
+    let db = Arc::new(InMemoryAdapter::new());
+    runtime.set_database(db.clone());
+    let frames = Arc::new(RefusalFrames::default());
+    runtime.set_run_observer(frames.clone());
+    let effects = std::sync::Mutex::new(Vec::new());
+    let result = block_on(runtime.run_with_context_and_tools(
+        Vec::new(),
+        text("Read both inputs"),
+        |_, _, call| {
+            let position = &call.args["position"];
+            let content = if position == &DataValue::Number(0.0) {
+                "private-cycle-A"
+            } else {
+                "private-cycle-B"
+            };
+            let duration = effects.lock().unwrap().len() as u64 + 10;
+            let success = TaskResult::success(text(content), duration);
+            effects.lock().unwrap().push((call.id, success.clone()));
+            async move { success }
+        },
+    ));
+    assert_eq!(result.status, TaskStatus::Success);
+    assert_eq!(runtime.config(), &original_config);
+    let effects = effects.lock().unwrap();
+    assert_eq!(
+        effects.len(),
+        7,
+        "all requested physical callbacks still execute, including after advice"
+    );
+    let messages: Vec<_> = runtime
+        .messages()
+        .iter()
+        .filter(|message| message.role == MessageRole::Tool)
+        .collect();
+    assert_eq!(messages.len(), 7);
+    for (message, (id, success)) in messages.iter().zip(effects.iter()) {
+        let metadata = message.content.metadata.as_ref().unwrap();
+        assert_eq!(
+            metadata.get("toolCallId"),
+            Some(&DataValue::String(id.clone()))
+        );
+        assert_eq!(
+            metadata.get("taskResult"),
+            Some(&crate::runtime_serde::task_result_data_value(success))
+        );
+    }
+    let steps = db.recorded_steps();
+    assert_eq!(steps.len(), 7);
+    assert!(steps.iter().all(|step| step.status == StepStatus::Done));
+    let frames = frames.0.lock().unwrap();
+    assert_eq!(
+        frames
+            .iter()
+            .filter(|frame| matches!(frame, super::RunFrame::ToolStarted { .. }))
+            .count(),
+        7
+    );
+    let finished: Vec<_> = frames
+        .iter()
+        .filter_map(|frame| match frame {
+            super::RunFrame::ToolFinished {
+                tool_call_id,
+                duration_ms,
+                recovered,
+                result,
+                ..
+            } => Some((tool_call_id, duration_ms, recovered, result)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(finished.len(), 7);
+    for (((id, duration, recovered, rendered), (actual_id, success)), message) in
+        finished.iter().zip(effects.iter()).zip(messages.iter())
+    {
+        assert_eq!(*id, actual_id);
+        assert_eq!(
+            message.content.metadata.as_ref().unwrap()[super::TOOL_DURATION_METADATA_KEY],
+            DataValue::Number(**duration as f64)
+        );
+        assert!(!**recovered);
+        assert_eq!(*rendered, &success.data.as_ref().unwrap().text);
+    }
+    let requests = model.requests.lock().unwrap();
+    assert_eq!(requests.len(), 8, "the advisory adds no model request");
+    assert!(requests
+        .iter()
+        .all(|(config, _)| config == &original_config));
+    assert!(requests[..6]
+        .iter()
+        .all(|(_, request)| !request.system.contains(REPEATED_TOOL_CYCLE_HINT)));
+    assert_eq!(
+        requests[6]
+            .1
+            .system
+            .matches(REPEATED_TOOL_CYCLE_HINT)
+            .count(),
+        1,
+        "M29: three complete alternating laps must add the fixed hint on the already-next request"
+    );
+    assert!(!requests[7].1.system.contains(REPEATED_TOOL_CYCLE_HINT));
+    for private in [
+        "private-cycle-A",
+        "private-cycle-B",
+        "private-argument-sentinel",
+        "cycle-5",
+    ] {
+        assert!(!requests[6].1.system.contains(private));
+    }
+    assert!(runtime
+        .messages()
+        .iter()
+        .all(|message| !message.content.text.contains(REPEATED_TOOL_CYCLE_HINT)));
+}
+
+#[test]
+fn repeated_tool_cycle_explicit_period_caps_zero_and_stop_keep_wrapup_accounting() {
+    for (period, cap, stop) in [
+        (2, 0, false),
+        (1, 6, false),
+        (2, 6, false),
+        (3, 9, false),
+        (4, 12, false),
+        (2, 6, true),
+    ] {
+        let model = BudgetBoundaryModel::new(
+            (0..cap)
+                .map(|index| Ok(cycle_round(&format!("cap-{index}"), index % period)))
+                .chain([Ok(budget_reply(
+                    ModelStopReason::End,
+                    "actual results and remaining work",
+                    false,
+                ))])
+                .collect(),
+        );
+        let original = budget_config(cap);
+        let control = super::RunControl::new();
+        let mut runtime = AgentRuntime::new(original.clone(), model.clone());
+        runtime.set_run_control(control.clone());
+        let callbacks = std::sync::atomic::AtomicUsize::new(0);
+        let result =
+            block_on(
+                runtime.run_with_context_and_tools(Vec::new(), text("Read"), |_, _, call| {
+                    let count = callbacks.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                    if stop && count == cap {
+                        control.cancel.cancel();
+                    }
+                    let success = cycle_success(&call);
+                    async move { success }
+                }),
+            );
+        assert_eq!(callbacks.load(std::sync::atomic::Ordering::SeqCst), cap);
+        assert_eq!(
+            runtime
+                .messages()
+                .iter()
+                .filter(|message| message.role == MessageRole::Tool)
+                .count(),
+            cap
+        );
+        assert_eq!(runtime.config(), &original);
+        let requests = model.requests.lock().unwrap();
+        assert!(requests[..cap]
+            .iter()
+            .all(|(config, request)| config == &original
+                && !request.system.contains(REPEATED_TOOL_CYCLE_HINT)));
+        if stop {
+            assert_eq!(result.error.as_deref(), Some(super::RUN_STOPPED_ERROR));
+            assert_eq!(requests.len(), cap, "Stop prevents the already-next call");
+        } else {
+            assert_eq!(result.status, TaskStatus::Success);
+            assert_eq!(requests.len(), cap + 1);
+            let (shadow, request) = requests.last().unwrap();
+            assert_eq!(shadow.tools, Some(Vec::new()));
+            assert_eq!(shadow.settings.as_ref().unwrap().max_retries, Some(0));
+            assert_eq!(
+                request.system.matches(REPEATED_TOOL_CYCLE_HINT).count(),
+                usize::from(cap > 0 && period > 1)
+            );
+            if period == 1 {
+                assert_eq!(
+                    requests
+                        .iter()
+                        .filter(|(_, request)| request.system.contains(REPEATED_SUCCESS_HINT))
+                        .count(),
+                    1,
+                    "constant results receive only M27's distinct advisory"
+                );
+            }
+            assert!(request.system.contains("Tool-round budget exhausted"));
+            assert_eq!(
+                result.data.as_ref().unwrap().metadata.as_ref().unwrap()["budgetWrapup"],
+                DataValue::Bool(true)
+            );
+        }
+    }
+}
+
+#[test]
+fn repeated_tool_cycle_refusal_parallel_error_and_evaluator_boundaries_clear_candidates() {
+    let mut parallel = cycle_round("parallel-B", 1);
+    parallel
+        .tool_calls
+        .as_mut()
+        .unwrap()
+        .push(cycle_round("parallel-A", 0).tool_calls.unwrap().remove(0));
+    for (middle, revision) in [
+        (unconfigured_round("refused"), false),
+        (parallel, false),
+        (cycle_round("error-reset", 1), false),
+        (
+            budget_reply(ModelStopReason::End, "revise this draft", false),
+            true,
+        ),
+    ] {
+        let before = (0..5).map(|index| cycle_round(&format!("before-{index}"), index % 2));
+        let after = (0..3).map(|index| cycle_round(&format!("after-{index}"), (index + 1) % 2));
+        let rounds: Vec<_> = before.chain([middle]).chain(after).collect();
+        let expected_calls: Vec<_> = rounds
+            .iter()
+            .flat_map(|round| round.tool_calls.clone().unwrap_or_default())
+            .collect();
+        let physical_count = expected_calls
+            .iter()
+            .filter(|call| call.name == "read")
+            .count();
+        let model = BudgetBoundaryModel::new(
+            rounds
+                .into_iter()
+                .map(Ok)
+                .chain([if revision {
+                    Err("terminal provider failure after revision".into())
+                } else {
+                    Ok(budget_reply(ModelStopReason::End, "settled results", false))
+                }])
+                .collect(),
+        );
+        let mut runtime = AgentRuntime::new(budget_config(10), model.clone());
+        if revision {
+            runtime.register_evaluator(Arc::new(BudgetRetryEvaluator));
+        }
+        let callbacks = std::sync::atomic::AtomicUsize::new(0);
+        let result =
+            block_on(
+                runtime.run_with_context_and_tools(Vec::new(), text("Read"), |_, _, call| {
+                    callbacks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let result = if call.id == "error-reset" {
+                        TaskResult::error("ordinary read error", 1)
+                    } else {
+                        cycle_success(&call)
+                    };
+                    async move { result }
+                }),
+            );
+        assert_eq!(
+            result.status,
+            if revision {
+                TaskStatus::Error
+            } else {
+                TaskStatus::Success
+            }
+        );
+        assert_eq!(
+            callbacks.load(std::sync::atomic::Ordering::SeqCst),
+            physical_count
+        );
+        let pairs: Vec<_> = runtime
+            .messages()
+            .iter()
+            .filter(|message| message.role == MessageRole::Tool)
+            .map(|message| message.content.metadata.as_ref().unwrap()["toolCallId"].clone())
+            .collect();
+        assert_eq!(
+            pairs,
+            expected_calls
+                .into_iter()
+                .map(|call| DataValue::String(call.id))
+                .collect::<Vec<_>>()
+        );
+        let requests = model.requests.lock().unwrap();
+        assert_eq!(requests.len(), 10);
+        assert!(requests
+            .iter()
+            .all(|(_, request)| !request.system.contains(REPEATED_TOOL_CYCLE_HINT)));
+    }
+}
+
+#[test]
+fn repeated_tool_cycle_restored_recovery_does_not_fill_laps_and_fresh_invocations_reset() {
+    let mut input = text("Read both inputs");
+    input.metadata = Some(BTreeMap::from([(
+        "retryKey".into(),
+        DataValue::String("cycle-recovery".into()),
+    )]));
+    let model = BudgetBoundaryModel::new(
+        (0..5)
+            .map(|index| Ok(cycle_round(&format!("seed-{index}"), index % 2)))
+            .chain([Ok(budget_reply(
+                ModelStopReason::End,
+                "five fresh calls",
+                false,
+            ))])
+            .collect(),
+    );
+    let db = Arc::new(InMemoryAdapter::new());
+    let mut runtime = AgentRuntime::new(budget_config(8), model);
+    runtime.set_database(db.clone());
+    let first = block_on(runtime.run_with_context_and_tools(
+        Vec::new(),
+        input.clone(),
+        |_, _, call| async move { cycle_success(&call) },
+    ));
+    assert_eq!(first.status, TaskStatus::Success);
+    assert_eq!(db.recorded_steps().len(), 5);
+    let snapshot = runtime.snapshot();
+    assert!(!serde_json::to_string(&snapshot)
+        .unwrap()
+        .contains(REPEATED_TOOL_CYCLE_HINT));
+    let restored_model = BudgetBoundaryModel::new(
+        (0..6)
+            .map(|index| Ok(cycle_round(&format!("recover-{index}"), index % 2)))
+            .chain([Ok(budget_reply(
+                ModelStopReason::End,
+                "five recovered and one fresh",
+                false,
+            ))])
+            .collect(),
+    );
+    let mut restored = AgentRuntime::from_snapshot(snapshot, restored_model.clone());
+    restored.set_database(db);
+    let frames = Arc::new(RefusalFrames::default());
+    restored.set_run_observer(frames.clone());
+    let callbacks = std::sync::atomic::AtomicUsize::new(0);
+    let result = block_on(
+        restored.run_with_context_and_tools(Vec::new(), input, |_, _, call| {
+            callbacks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async move { cycle_success(&call) }
+        }),
+    );
+    assert_eq!(result.status, TaskStatus::Success);
+    assert_eq!(callbacks.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(
+        frames
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|frame| matches!(
+                frame,
+                super::RunFrame::ToolFinished {
+                    recovered: true,
+                    ..
+                }
+            ))
+            .count(),
+        5
+    );
+    let requests = restored_model.requests.lock().unwrap();
+    assert_eq!(requests.len(), 7);
+    assert!(requests
+        .iter()
+        .all(|(_, request)| !request.system.contains(REPEATED_TOOL_CYCLE_HINT)));
+    drop(requests);
+    // New invocations, including a restored warned run, may each advise once.
+    let fresh_model = BudgetBoundaryModel::new(
+        (0..3)
+            .flat_map(|run| {
+                (0..6)
+                    .map(move |index| Ok(cycle_round(&format!("fresh-{run}-{index}"), index % 2)))
+                    .chain([Ok(budget_reply(
+                        ModelStopReason::End,
+                        "fresh cycle settled",
+                        false,
+                    ))])
+            })
+            .collect(),
+    );
+    let mut fresh = AgentRuntime::new(budget_config(8), fresh_model.clone());
+    for run in 0..3 {
+        if run == 2 {
+            fresh = AgentRuntime::from_snapshot(fresh.snapshot(), fresh_model.clone());
+        }
+        let result = block_on(fresh.run_with_context_and_tools(
+            Vec::new(),
+            text("Fresh task"),
+            |_, _, call| async move { cycle_success(&call) },
+        ));
+        assert_eq!(result.status, TaskStatus::Success);
+    }
+    let requests = fresh_model.requests.lock().unwrap();
+    assert_eq!(requests.len(), 21);
+    for (index, (_, request)) in requests.iter().enumerate() {
+        assert_eq!(
+            request.system.matches(REPEATED_TOOL_CYCLE_HINT).count(),
+            usize::from(index == 6 || index == 13 || index == 20)
+        );
+    }
+}
 
 #[test]
 fn repeated_success_result_adds_one_factual_hint_without_changing_requests_or_results() {

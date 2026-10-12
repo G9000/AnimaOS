@@ -38,8 +38,8 @@ use observer::{tool_result_text, StepSink};
 #[path = "runtime/failure_guard.rs"]
 mod failure_guard;
 use failure_guard::{
-    bounded_arguments, ExactFailureStreak, SuccessfulResultStreak, EXACT_FAILURE_HINT,
-    REPEATED_SUCCESS_HINT,
+    bounded_arguments, ExactFailureStreak, SuccessfulResultStreak, SuccessfulToolCycle,
+    EXACT_FAILURE_HINT, REPEATED_SUCCESS_HINT, REPEATED_TOOL_CYCLE_HINT,
 };
 
 #[path = "runtime/control.rs"]
@@ -485,6 +485,8 @@ impl AgentRuntime {
         let mut failure_hint_pending = false;
         let mut successful_results = SuccessfulResultStreak::default();
         let mut success_hint_pending = false;
+        let mut successful_cycle = SuccessfulToolCycle::default();
+        let mut cycle_hint_pending = false;
         let mut unconfigured_tool_refusal_used = false;
         let max_tool_iterations = self
             .state
@@ -530,6 +532,11 @@ impl AgentRuntime {
                 system.push_str("\n\n");
                 system.push_str(REPEATED_SUCCESS_HINT);
                 success_hint_pending = false;
+            }
+            if cycle_hint_pending {
+                system.push_str("\n\n");
+                system.push_str(REPEATED_TOOL_CYCLE_HINT);
+                cycle_hint_pending = false;
             }
             model_calls += 1;
             let step_id = self.step_id_for(model_calls);
@@ -636,6 +643,7 @@ impl AgentRuntime {
                         ModelStopReason::End | ModelStopReason::MaxTokens => {
                             exact_failures.reset();
                             successful_results.reset();
+                            successful_cycle.reset_history();
                             let evaluation =
                                 match self.run_evaluators(&user_message, &response.content).await {
                                     Ok(decision) => decision,
@@ -784,6 +792,8 @@ impl AgentRuntime {
                                     failure_hint_pending = false;
                                     successful_results.reset();
                                     success_hint_pending = false;
+                                    successful_cycle.reset_history();
+                                    cycle_hint_pending = false;
                                     // This is validation, not execution. Pair
                                     // the original request without entering
                                     // tool events, callbacks or step storage.
@@ -995,11 +1005,15 @@ impl AgentRuntime {
                                     exact_failures.observe(call, result, *recovered);
                                 success_hint_pending =
                                     successful_results.observe(call, result, *recovered);
+                                cycle_hint_pending =
+                                    successful_cycle.observe(call, result, *recovered);
                             } else {
                                 exact_failures.reset();
                                 failure_hint_pending = false;
                                 successful_results.reset();
                                 success_hint_pending = false;
+                                successful_cycle.reset_history();
+                                cycle_hint_pending = false;
                             }
 
                             // Write done/failed steps to database
