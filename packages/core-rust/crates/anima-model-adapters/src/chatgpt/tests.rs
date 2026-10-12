@@ -3,6 +3,276 @@ use anima_core::{Content, DataValue, Message, MessageRole, ModelStopReason, Tool
 use serde_json::json;
 use std::collections::BTreeMap;
 
+fn wire_tool_schema(schema: Value) -> Value {
+    let mut config = config();
+    config.tools.as_mut().unwrap()[0].parameters_schema =
+        crate::common::json_value_to_data_map(&schema).unwrap();
+    request_body(&config, &request()).unwrap()["tools"][0]["parameters"].clone()
+}
+
+#[test]
+fn tool_schema_integer_bounds_are_canonical_through_structural_schema_fields() {
+    let bounds = json!({"minLength":1.0,"maxLength":2.0,"minItems":3.0,"maxItems":4.0,"minProperties":5.0,"maxProperties":6.0,"minContains":7.0,"maxContains":8.0});
+    let mut schema = json!({"type":"object","properties":{"query":{"type":"string","minLength":1.0},"list":{"type":"array","minItems":1.0,"items":{"minLength":1.0}}}});
+    for field in [
+        "properties",
+        "patternProperties",
+        "$defs",
+        "definitions",
+        "dependentSchemas",
+        "dependencies",
+    ] {
+        schema[field]["nested"] = bounds.clone();
+    }
+    for field in [
+        "contains",
+        "additionalProperties",
+        "additionalItems",
+        "propertyNames",
+        "not",
+        "if",
+        "then",
+        "else",
+        "unevaluatedProperties",
+        "unevaluatedItems",
+        "contentSchema",
+    ] {
+        schema[field] = bounds.clone();
+    }
+    for field in ["allOf", "anyOf", "oneOf", "prefixItems"] {
+        schema[field] = json!([bounds.clone(), true, false]);
+    }
+    let wire = wire_tool_schema(schema);
+    for field in [
+        "properties",
+        "patternProperties",
+        "$defs",
+        "definitions",
+        "dependentSchemas",
+        "dependencies",
+    ] {
+        for (keyword, number) in bounds.as_object().unwrap() {
+            assert_eq!(
+                wire[field]["nested"][keyword].as_u64(),
+                Some(number.as_f64().unwrap() as u64),
+                "{field}.{keyword}"
+            );
+        }
+    }
+    for field in [
+        "contains",
+        "additionalProperties",
+        "additionalItems",
+        "propertyNames",
+        "not",
+        "if",
+        "then",
+        "else",
+        "unevaluatedProperties",
+        "unevaluatedItems",
+        "contentSchema",
+    ] {
+        assert_eq!(wire[field]["minItems"].as_u64(), Some(3), "{field}");
+    }
+    for field in ["allOf", "anyOf", "oneOf", "prefixItems"] {
+        assert_eq!(wire[field][0]["maxLength"].as_u64(), Some(2));
+        assert_eq!(wire[field][1], true);
+        assert_eq!(wire[field][2], false);
+    }
+    assert_eq!(wire["properties"]["query"]["minLength"].as_u64(), Some(1));
+    assert_eq!(
+        wire["properties"]["list"]["items"]["minLength"].as_u64(),
+        Some(1)
+    );
+    let tuple = wire_tool_schema(json!({"type":"array","items":[{"minLength":1.0},false]}));
+    assert_eq!(tuple["items"][0]["minLength"].as_u64(), Some(1));
+    assert_eq!(tuple["items"][1], false);
+    let legacy =
+        wire_tool_schema(json!({"query":{"type":"string","minLength":1.0},"opaque":false}));
+    assert_eq!(legacy["type"], "object");
+    assert_eq!(legacy["properties"]["query"]["minLength"].as_u64(), Some(1));
+    assert_eq!(legacy["properties"]["opaque"], false);
+}
+
+#[test]
+fn tool_schema_canonicalization_preserves_instance_numbers_and_noninteger_numeric_constraints() {
+    let instance = json!({"minLength":1.0,"properties":{"nested":{"maxItems":2.0}}});
+    let wire = wire_tool_schema(
+        json!({"type":"object","minLength":1.5,"maxLength":-1.0,"minItems":9007199254740992.0,"maxItems":9007199254740991.0,"minimum":0.25,"maximum":3.75,"exclusiveMinimum":1.0,"multipleOf":0.5,"enum":[instance.clone()],"const":instance.clone(),"default":instance.clone(),"example":instance.clone(),"examples":[instance.clone()],"x-metadata":instance.clone()}),
+    );
+    assert_eq!(wire["minLength"].as_f64(), Some(1.5));
+    assert!(wire["minLength"].is_f64());
+    assert!(wire["maxLength"].is_f64());
+    assert!(wire["minItems"].is_f64());
+    assert_eq!(wire["maxItems"].as_u64(), Some(9007199254740991));
+    for (keyword, number) in [
+        ("minimum", 0.25),
+        ("maximum", 3.75),
+        ("exclusiveMinimum", 1.0),
+        ("multipleOf", 0.5),
+    ] {
+        assert!(wire[keyword].is_f64());
+        assert_eq!(wire[keyword].as_f64(), Some(number));
+    }
+    for keyword in ["const", "default", "example", "x-metadata"] {
+        assert_eq!(wire[keyword], instance);
+        assert!(wire[keyword]["minLength"].is_f64());
+    }
+    for keyword in ["enum", "examples"] {
+        assert_eq!(wire[keyword][0], instance);
+        assert!(wire[keyword][0]["minLength"].is_f64());
+    }
+    // Tool-call arguments and generic DataValue JSON retain their established representation.
+    let data = DataValue::Object(BTreeMap::from([(
+        "minLength".into(),
+        DataValue::Number(1.0),
+    )]));
+    assert!(crate::common::data_value_to_json(&data)["minLength"].is_f64());
+}
+
+#[test]
+fn subscription_schema_error_only_maps_bounded_indexed_tool_parameters_to_static_tools_label() {
+    for parameter in [
+        "tools",
+        "tools[0].parameters",
+        "tools[31].function.parameters.properties.query.minLength",
+        "tools.2.parameters.properties.ids.items",
+    ] {
+        let error=structured_failure(&json!({"error":{"code":"invalid_function_parameters","param":parameter,"message":"secret-sentinel"}})).unwrap();
+        assert!(error.contains("tool parameter schema"));
+        assert!(error.contains("parameter: tools"));
+        assert!(!error.contains("secret-sentinel"));
+    }
+    for parameter in [
+        "tools[0].parameters.secret-sentinel",
+        "tools[0].parameters\nsecret",
+        "tools[0].parameters'https://secret'",
+        "tools[0].parameters[secret]",
+        &format!("tools[0].parameters.{}", "a".repeat(257)),
+    ] {
+        let error=structured_failure(&json!({"error":{"code":"invalid_function_parameters","param":parameter,"message":"secret-sentinel"}})).unwrap();
+        assert!(!error.contains("parameter:"));
+        assert!(!error.contains("secret-sentinel"));
+    }
+}
+
+#[test]
+fn subscription_failure_classifier_only_exposes_whitelisted_codes_and_parameters() {
+    for (code, expected) in [
+        ("invalid_prompt", "request was rejected"),
+        ("model_not_found", "selected model"),
+        ("unsupported_model", "selected model"),
+        ("invalid_request_error", "request is invalid"),
+        ("invalid_api_key", "authorization"),
+        ("permission_denied", "permission"),
+        ("rate_limit_exceeded", "rate limit"),
+        ("insufficient_quota", "usage limit"),
+        ("server_error", "temporarily unavailable"),
+        ("context_length_exceeded", "context limit"),
+        ("subscription_sharing_user_not_eligible", "not eligible"),
+        ("subscription_sharing_usage_limit_exceeded", "usage limit"),
+        (
+            "subscription_sharing_usage_unavailable",
+            "usage availability",
+        ),
+        (
+            "subscription_sharing_unsupported_capability",
+            "unsupported capability",
+        ),
+        (
+            "subscription_sharing_route_not_supported",
+            "route is unsupported",
+        ),
+        ("subscription_sharing_invalid_user", "subscriber context"),
+        (
+            "subscription_sharing_user_unavailable",
+            "account availability",
+        ),
+        ("chatpass_v2_scope_not_authorized", "permission context"),
+        (
+            "chatpass_v2_invalid_authorization_context",
+            "permission context",
+        ),
+    ] {
+        let payload = json!({"response":{"error":{"code":code,"param":"model","message":"secret-sentinel account details"}}});
+        let error = structured_failure(&payload).expect("known code");
+        assert!(error.contains(expected), "{code}: {error}");
+        assert!(error.contains(code));
+        assert!(error.contains("parameter: model"));
+        assert!(!error.contains("secret-sentinel"));
+        assert!(!error.contains("resets"));
+        assert!(!error.contains("at 20"));
+    }
+    for payload in [
+        json!({"error":{"code":"secret-sentinel","param":"model","message":"model_not_found"}}),
+        json!({"error":{"code":42,"param":"model"}}),
+        json!({"error":"model_not_found"}),
+        json!({"detail":"secret-sentinel model_not_found"}),
+        json!({"code":"secret-sentinel","param":"model"}),
+        json!({"type":"error","code":"secret-sentinel","error":{"code":"model_not_found"}}),
+    ] {
+        assert!(structured_failure(&payload).is_none());
+    }
+    let error=structured_failure(&json!({"error":{"code":"invalid_request_error","param":"secret-sentinel","message":"secret-sentinel"}})).unwrap();
+    assert!(!error.contains("secret-sentinel"));
+    assert!(!error.contains("parameter:"));
+}
+
+#[tokio::test]
+async fn subscription_failed_stream_uses_response_error_and_top_level_code_without_final_tools() {
+    for payload in [
+        json!({"type":"response.failed","response":{"status":"failed","error":{"code":"invalid_prompt","message":"secret-sentinel"}}}),
+        json!({"type":"response.failed","response":{"status":"failed","error":{"code":"model_not_found","param":"model","message":"secret-sentinel"}}}),
+        json!({"type":"error","code":"subscription_sharing_unsupported_capability","param":"tools","message":"secret-sentinel"}),
+        json!({"type":"error","code":"subscription_sharing_unsupported_capability","param":"tools","error":{"code":"secret-sentinel","message":"secret-sentinel"}}),
+    ] {
+        let body = format!("data: {payload}\n\n");
+        let expected_code = payload["response"]["error"]["code"]
+            .as_str()
+            .or_else(|| payload["code"].as_str())
+            .unwrap()
+            .to_owned();
+        let (endpoint, task) = server(axum::Router::new().route(
+            "/responses",
+            axum::routing::post(move || {
+                let body = body.clone();
+                async move { body }
+            }),
+        ))
+        .await;
+        let mut adapter = ChatGptResponsesAdapter::new("fake".into(), "account".into()).unwrap();
+        adapter.endpoint = endpoint;
+        let sink = FinalSink(Mutex::new(None));
+        let error = adapter
+            .stream(&config(), &request(), &sink)
+            .await
+            .unwrap_err();
+        assert!(error.contains(&expected_code), "{error}");
+        assert!(!error.contains("secret-sentinel"));
+        assert!(sink.0.lock().unwrap().is_none());
+        task.abort();
+    }
+}
+
+#[tokio::test]
+async fn subscription_http_errors_classify_bounded_chunked_json_and_preserve_status_fallbacks() {
+    use axum::{http::StatusCode, routing::post};
+    for (status,body,expected) in [
+        (StatusCode::BAD_REQUEST,json!({"error":{"code":"subscription_sharing_unsupported_capability","param":"model","message":"secret-sentinel"}}).to_string(),"unsupported capability"),
+        (StatusCode::SERVICE_UNAVAILABLE,json!({"error":{"code":"subscription_sharing_usage_unavailable","message":"secret-sentinel"}}).to_string(),"usage availability"),
+        (StatusCode::SERVICE_UNAVAILABLE,json!({"detail":"secret-sentinel"}).to_string(),"HTTP 503"),
+        (StatusCode::UNAUTHORIZED,"secret-sentinel".repeat(MAX_ERROR_BODY),"authorization expired"),
+        (StatusCode::TOO_MANY_REQUESTS,"secret-sentinel malformed".into(),"usage limit reached"),
+    ] {
+        let (endpoint,task)=server(axum::Router::new().route("/responses",post(move||{let body=body.clone();async move {
+            let chunks=body.as_bytes().chunks(8192).map(|bytes|Ok::<_,std::io::Error>(bytes.to_vec())).collect::<Vec<_>>();
+            (status,axum::body::Body::from_stream(futures::stream::iter(chunks)))
+        }}))).await;
+        let mut adapter=ChatGptResponsesAdapter::new("fake".into(),"account".into()).unwrap();adapter.endpoint=endpoint;
+        let error=adapter.generate(&config(),&request()).await.unwrap_err();assert!(error.contains(expected),"{error}");assert!(!error.contains("secret-sentinel"));assert!(!error.contains("resets"));task.abort();
+    }
+}
+
 #[tokio::test]
 async fn attachment_error_subscription_http_and_frames_keep_static_diagnostics() {
     for (status, body) in [

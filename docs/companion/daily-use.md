@@ -1,14 +1,17 @@
 # Anima daily-use setup
 
 Anima is a Rust companion with persistent context and work that can run while the
-console is closed. The selected feature set is implemented and fixture-tested;
-real account, microphone and always-on deployment acceptance remains to be done.
+console is closed. The selected feature set is implemented and fixture-tested.
+Isolated local testing on 2026-10-12 also verified real ChatGPT replies, identity,
+workspace file reading, memory recall, Stop, and persistence across daemon restart.
+Messaging accounts, microphone and always-on deployment acceptance remain to be done.
 
 ## Start with one companion
 
 Use the existing [local workflow](../../AGENTS.md#dev-workflow) or
 [single-owner VPS installation](../../deploy/vps/README.md#first-installation).
-Those are operator instructions; no services were started for this build.
+Those are operator instructions. Live acceptance used only an approved isolated
+local web console and Rust daemon with synthetic data and no messaging connectors.
 Choose a real configured model during onboarding, create the companion and select
 its workspace. Confirm a real reply before relying on tools or schedules.
 
