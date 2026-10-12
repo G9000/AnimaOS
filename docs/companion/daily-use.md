@@ -5,6 +5,10 @@ console is closed. The selected feature set is implemented and fixture-tested.
 Isolated local testing on 2026-10-12 also verified real ChatGPT replies, identity,
 workspace file reading, memory recall, Stop, and persistence across daemon restart.
 Messaging accounts, microphone and always-on deployment acceptance remain to be done.
+Harness acceptance also verified a real multi-step report with a helper and saved
+tasks, correction of existing memories, approved skill reuse, automatic context
+compaction, and explicit continuation after an in-flight restart. Completed effects
+were preserved; interrupted work was flagged for review before continuation.
 
 ## Start with one companion
 
@@ -30,6 +34,9 @@ permissions. Upstream profile/token files are never required.
 
 Start a chat, give it a concrete task, and watch the tool cards and run status.
 Use Stop when needed. Save a useful fact to memory; review and edit it in Memory.
+With Collaborate or Operate access, the agent can correct its own visible memories
+using their exact IDs and current content. Existing tool selections need an explicit
+permission update to enable this new tool; saving unrelated settings does not add it.
 Use Files to inspect the chosen workspace. Attach text or an image when useful;
 vision requires a compatible model. PDF/Office attachments can be stored and
 retrieved, but their contents are not parsed by this feature set.

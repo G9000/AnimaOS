@@ -25,6 +25,7 @@ const OBSERVE_TOOLS = [
 
 const COLLABORATE_TOOLS = [
   ...OBSERVE_TOOLS,
+  'memory_update',
   'write_file',
   'edit_file',
   'multi_edit',
