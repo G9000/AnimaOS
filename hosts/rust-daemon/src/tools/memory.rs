@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use anima_core::{AgentState, Content, DataValue, Message, TaskResult, ToolCall};
+use anima_core::{
+    AgentState, Content, DataValue, Message, TaskResult, ToolCall, MAX_CAPABILITY_ID_BYTES,
+};
 use anima_memory::{
     Memory, MemoryPatch, MemoryRecallOptions, MemorySearchOptions, MemoryType, NewMemory,
 };
@@ -107,6 +109,83 @@ fn render_memory(memory: &Memory) -> String {
         memory.memory_type.as_str(),
         memory.content
     )
+}
+
+pub(super) fn execute_memory_remove(
+    context: ToolExecutionContext,
+    agent: AgentState,
+    _user_message: Message,
+    tool_call: ToolCall,
+) -> BoxFuture<'static, TaskResult<Content>> {
+    Box::pin(async move {
+        if tool_call
+            .args
+            .keys()
+            .any(|key| key != "id" && key != "expected_content")
+        {
+            return TaskResult::error("memory_remove accepts only id and expected_content", 0);
+        }
+        let id = match tool_call.args.get("id") {
+            Some(DataValue::String(value))
+                if value.len() <= MAX_CAPABILITY_ID_BYTES && !value.trim().is_empty() =>
+            {
+                value.clone()
+            }
+            _ => {
+                return TaskResult::error(
+                    "memory_remove id must be a non-blank string of at most 256 bytes",
+                    0,
+                )
+            }
+        };
+        let expected = match tool_call.args.get("expected_content") {
+            Some(DataValue::String(value)) if !value.is_empty()
+                && value.len() <= MAX_MEMORY_EDIT_CHARS * 4
+                && value.chars().count() <= MAX_MEMORY_EDIT_CHARS => value.clone(),
+            _ => return TaskResult::error("memory_remove expected_content must be the exact current text, 1 to 8000 characters", 0),
+        };
+        {
+            let mut guard = context.memory.write().await;
+            let Some(current) = guard.get(&id).filter(|memory| {
+                memory.agent_id == agent.id
+                    && memory.memory_type == MemoryType::Fact
+                    && visible_memory(memory)
+            }) else {
+                return TaskResult::error("memory not found or not eligible for removal", 0);
+            };
+            if current.content != expected {
+                return TaskResult::error(
+                    "memory changed; search again and use its exact current content",
+                    0,
+                );
+            }
+            let mut mutation = MemoryMutation::new(&mut guard);
+            let _ = mutation.delete_memory(&id);
+            if let Err(error) = mutation.persist(context.memory_store.as_ref()).await {
+                return TaskResult::error(format!("failed to persist memory removal: {error}"), 0);
+            }
+        }
+        // Recheck canonical absence after persistence. Keep the read lock while
+        // taking the embedding write lock so a replacement cannot lose its index.
+        let guard = context.memory.read().await;
+        if guard.get(&id).is_none() {
+            if let Err(error) = context
+                .memory_embeddings
+                .write()
+                .await
+                .remove_memories(std::slice::from_ref(&id))
+            {
+                warn!(memory_id = %id, error = %error, "failed to remove memory_remove embedding");
+            }
+        }
+        TaskResult::success(
+            Content {
+                text: "removed one Fact memory".into(),
+                ..Content::default()
+            },
+            0,
+        )
+    })
 }
 
 pub(super) fn execute_memory_update(

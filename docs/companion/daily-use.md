@@ -60,6 +60,16 @@ permission update to enable this new tool; saving unrelated settings does not ad
 For corrections, search for the complete current record before updating it; a
 context excerpt is not the full text. Save compact durable facts and preferences,
 use Tasks for temporary progress, and review reusable procedures as skills.
+To let the companion remove an obsolete saved fact, explicitly enable **Allow
+removing saved facts** in its settings. This grants the optional `memory_remove`
+tool; it does not remove anything when enabled. Other custom permissions stay
+intact when you toggle this option, and unrelated settings saves preserve it.
+Switching to a standard access profile clears the option until you enable it again.
+The agent must search for the exact current record first. It can remove only one
+of its own visible Fact records, and a changed or partial match is refused.
+Existing tool approval rules apply. This removes the active saved record;
+old chats, reflections, derived historical knowledge, receipts and backups may
+still retain its content. It is not complete erasure or automatic consolidation.
 Explicit search now filters eligible records before its lexical result limit, so
 stronger foreign matches cannot hide your matching facts. Search and recent reads
 exclude hidden text in record IDs, content and tags before limiting results;

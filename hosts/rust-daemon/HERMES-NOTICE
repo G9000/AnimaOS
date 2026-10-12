@@ -61,6 +61,16 @@ upstream SQLite schema, compression/turn leases, private profile/config/keyring 
 token bridge is imported. Anima adds fail-closed parallel admission and conservative
 started/unknown-effect recovery; receipts do not establish exactly-once effects.
 
+M30 memory removal adaptation (revision 1fd18277267152893a8a24792b79213e7ca3f899):
+tools/memory_tool.py remove dispatch and tools/memory_tool_store.py::remove/_locate
+support removing a selected entry while pinned full reviewed text rejects stale
+writes. Anima applies that intent to one explicitly granted own visible Fact:
+exact ID and complete expected content under the existing native write lock,
+MemoryMutation persistence and established delete_memory citation cleanup. This
+is hard removal from active legacy memory, not revisioned tombstones, complete
+erasure or automatic consolidation. No fuzzy substring/batch matching, Python
+runtime, upstream profiles or credentials are copied. Existing Write policy
+and per-agent grants remain authoritative; no automatic grant is added.
 MIT License
 
 Copyright (c) 2025 Nous Research
