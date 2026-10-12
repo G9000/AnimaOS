@@ -25,6 +25,21 @@ export interface RunTokenUsage {
   totalTokens: number;
 }
 
+/** A bounded tool intent/outcome record. Started does not prove dispatch or effects. */
+export interface ActionReceipt {
+  toolCallId: string;
+  name: string;
+  status: 'started' | 'succeeded' | 'failed';
+  startedAtMs: number;
+  finishedAtMs: number | null;
+  durationMs: number | null;
+  argumentsPreview: string;
+  argumentsTruncated: boolean;
+  resultPreview: string | null;
+  resultTruncated: boolean;
+  durability: 'persistent' | 'memory';
+}
+
 /** A ledger run (spec §4.1). */
 export interface Run {
   id: string;
@@ -50,6 +65,8 @@ export interface Run {
   parentRunId: string | null;
   /** The committed final reply once the run completed. */
   replyMessageId: string | null;
+  /** Native action witnesses, absent on runs saved before receipt support. */
+  actionReceipts?: ActionReceipt[];
 }
 
 /** `queue` waits behind the session's earlier messages; `steer` joins its

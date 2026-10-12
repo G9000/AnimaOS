@@ -88,6 +88,7 @@ pub(crate) struct ToolExecutionContext {
     /// The run's approval gate (spec §7.3); `None` for swarm runs and direct
     /// tool calls, which have no session or owner to ask.
     pub(super) approvals: Option<crate::approvals::ApprovalGate>,
+    action_journal: Option<crate::agent_runs::action_receipts::RunActionJournal>,
 }
 
 impl ToolExecutionContext {
@@ -121,6 +122,7 @@ impl ToolExecutionContext {
             todo_revision: Arc::new(std::sync::Mutex::new(None)),
             cancel: None,
             approvals: None,
+            action_journal: None,
         }
     }
 
@@ -185,6 +187,14 @@ impl ToolExecutionContext {
         self
     }
 
+    pub(crate) fn with_action_journal(
+        mut self,
+        journal: crate::agent_runs::action_receipts::RunActionJournal,
+    ) -> Self {
+        self.action_journal = Some(journal);
+        self
+    }
+
     pub(crate) async fn execute_tool(
         self,
         agent: AgentState,
@@ -208,6 +218,16 @@ impl ToolExecutionContext {
         if protected.is_some() && self.approvals.is_none() {
             return TaskResult::error(crate::agent_files::write_policy::REFUSED, 0);
         }
+        let mut approved = false;
+        let configured = if let Some(gate) = self
+            .approvals
+            .as_ref()
+            .filter(|_| self.action_journal.is_some())
+        {
+            gate.configured_baseline(&agent, &tool_call).await
+        } else {
+            None
+        };
         if let Some(gate) = &self.approvals {
             let outcome = match &protected {
                 Some(target) => {
@@ -219,6 +239,7 @@ impl ToolExecutionContext {
             match outcome {
                 crate::approvals::GateOutcome::Proceed => {}
                 crate::approvals::GateOutcome::Approved => {
+                    approved = true;
                     if let Err(refused) = self.live_checks(&agent, &tool_call).await {
                         return refused;
                     }
@@ -234,7 +255,55 @@ impl ToolExecutionContext {
                 );
             }
         }
-        handler(self, agent, user_message, tool_call).await
+        let journal = self.action_journal.clone();
+        if let Some(journal) = &journal {
+            if !journal.owns_caller(&agent.id, &user_message.agent_id) {
+                return TaskResult::error("Native action caller does not own this run", 0);
+            }
+            if let Err(error) = journal.begin(&tool_call).await {
+                return TaskResult::error(error, 0);
+            }
+            let revalidated = async {
+                journal
+                    .revalidate()
+                    .await
+                    .map_err(|error| TaskResult::error(error, 0))?;
+                self.live_checks(&agent, &tool_call).await?;
+                if let Some(gate) = &self.approvals {
+                    gate.revalidate_after_receipt(&agent, &tool_call, configured, approved)
+                        .await?;
+                }
+                if protected.as_ref().is_some_and(|target| {
+                    !target.revalidate(self.workspace_root.as_deref(), &tool_call)
+                }) {
+                    return Err(TaskResult::error(
+                        "Instruction file target changed while saving action evidence",
+                        0,
+                    ));
+                }
+                journal
+                    .revalidate()
+                    .await
+                    .map_err(|error| TaskResult::error(error, 0))
+            }
+            .await;
+            if let Err(refused) = revalidated {
+                if let Err(error) = journal.finish(&tool_call, &refused, 0).await {
+                    return TaskResult::error(error, 0);
+                }
+                return refused;
+            }
+        }
+        let call = tool_call.clone();
+        let started = std::time::Instant::now();
+        let result = handler(self, agent, user_message, tool_call).await;
+        if let Some(journal) = journal {
+            let duration = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+            if let Err(error) = journal.finish(&call, &result, duration).await {
+                return TaskResult::error(error, duration);
+            }
+        }
+        result
     }
 
     /// The checks every call passes before it may run, and again after an

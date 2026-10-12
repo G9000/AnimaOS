@@ -347,7 +347,7 @@ async fn a_second_run_in_a_session_announces_no_new_session() {
 }
 
 #[tokio::test]
-async fn the_observer_publishes_text_and_tool_cards_while_the_state_lock_is_held() {
+async fn observer_frames_ignore_the_state_lock_while_native_tool_finish_waits_for_evidence() {
     let gate = Gate::new();
     let model = ScriptedModel::gated(
         vec![
@@ -365,14 +365,22 @@ async fn the_observer_publishes_text_and_tool_cards_while_the_state_lock_is_held
         tokio::spawn(async move { coordinator.run(request).await })
     };
 
-    // Held from inside the first model call until the second one streamed:
-    // the tool, its cards, and the text never wait for the state lock.
+    // A model's tool-start frame remains independent of daemon state, but
+    // native execution and its success frame wait for action evidence.
     gate.entered().await;
     let guard = coordinator.state.write().await;
     gate.release();
-    let tools = events_until(&mut subscription, "tool.finished").await;
+    let tools = events_until(&mut subscription, "tool.started").await;
     assert!(types(&tools).contains(&"tool.started"));
+    let held = quiet_for(&mut subscription).await;
+    assert!(!types(&held).contains(&"tool.finished"));
+    drop(guard);
+    let finished = events_until(&mut subscription, "tool.finished").await;
+    assert_eq!(finished.last().unwrap()["status"], "success");
     gate.entered().await;
+    // The next model reply can still stream while the state lock is held;
+    // its terminal transcript commit waits until the lock is released.
+    let guard = coordinator.state.write().await;
     gate.release();
     let text = events_until(&mut subscription, "step.delta").await;
     assert_eq!(text.last().unwrap()["text"], "It is 42.");

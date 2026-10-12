@@ -16,7 +16,11 @@ without using a search tool. Selection is lexical; semantic recall and automatic
 memory consolidation remain unverified. A real one-shot scheduled file task also
 restored before due, fired without a manual trigger and retained one completed
 write after another restart. Exact bytes and modification time stayed unchanged;
-the schedule was left disabled and the isolated daemon stopped.
+the schedule was left disabled and the isolated daemon stopped. A separate real
+scheduled run was then crashed after a successful file write and saved native
+action record, before its final conversation committed. Both subsequent restarts
+retained the same action evidence and unchanged file; the interrupted schedule
+stayed disabled and did not replay.
 
 ## Start with one companion
 
@@ -62,6 +66,21 @@ Calendar changes in Connectors before sending or applying them. Check the exact
 request before allowing it. Configure a small schedule in Automations and inspect its
 history. Schedules belong to the daemon, so they need that process running; a
 closed browser is fine. An interrupted action needs review before retry.
+
+For an interrupted, failed or stopped run, inspect its Recorded actions alongside
+the actual files or external service. Each action records a bounded argument and
+result preview. Reported success means the tool handler reported success; it does
+not mean the whole run completed. Reported failure can still leave partial effects.
+Outcome unknown means an intent was recorded without a settled result: the action
+may have happened, or may never have started. Previews marked shortened are partial.
+
+With a configured control-plane store, the daemon saves the action intent before
+dispatch and the reported result before model continuation. A storage failure
+stops continuation. Without that store, receipts are temporary and explicitly
+marked memory only. Receipts do not commit an interrupted conversation or resume
+an action. A crash between the effect and saving its result can still leave an
+unknown outcome. Inspect the effect before an explicit retry; scheduled work is
+not automatically replayed. Older runs without receipts cannot be backfilled.
 
 Browser dictation/read-aloud depends on browser speech support and permissions.
 An unavailable microphone or speech API does not prevent typed chat. Web fetch

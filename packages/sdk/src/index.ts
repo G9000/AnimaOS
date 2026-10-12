@@ -48,6 +48,7 @@ export type {
 } from './sessions.js';
 export { RunsClient, isTerminalRunStatus } from './runs.js';
 export type {
+  ActionReceipt,
   Run,
   RunMode,
   RunSource,

@@ -232,6 +232,52 @@ impl ApprovalGate {
         }
     }
 
+    /// The additional receipt save is an authorization wait, not another
+    /// approval prompt or a reusable grant for an exact approved call.
+    pub(crate) async fn configured_baseline(
+        &self,
+        agent: &AgentState,
+        call: &ToolCall,
+    ) -> Option<bool> {
+        self.coordinator
+            .configured_tool(&agent.id, &call.name)
+            .await
+    }
+
+    pub(crate) async fn revalidate_after_receipt(
+        &self,
+        agent: &AgentState,
+        call: &ToolCall,
+        configured: Option<bool>,
+        approved: bool,
+    ) -> Result<(), TaskResult<Content>> {
+        if self.cancel.is_cancelled() {
+            return Err(TaskResult::error(self.cancel.tool_result(), 0));
+        }
+        if self.coordinator.is_being_deleted(&agent.id)
+            || lost_during_wait(
+                configured,
+                self.coordinator
+                    .configured_tool(&agent.id, &call.name)
+                    .await,
+            )
+        {
+            return Err(TaskResult::error(tool_not_configured_error(&call.name), 0));
+        }
+        if risk_class(&call.name) != RiskClass::Read {
+            match self
+                .coordinator
+                .approval_verdict(agent, &self.run.session_id, call)
+                .await
+            {
+                Verdict::Allow => {}
+                Verdict::Ask if approved => {}
+                _ => return Err(TaskResult::error(DENIED_BY_POLICY, 0)),
+            }
+        }
+        Ok(())
+    }
+
     /// Protected instructions ignore reusable allows, while preserving policy deny.
     pub(crate) async fn check_exact(
         &self,

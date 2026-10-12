@@ -21,6 +21,7 @@ use crate::runs::{
 };
 use crate::state::DaemonState;
 
+pub(crate) mod action_receipts;
 mod approvals;
 pub(crate) mod attachments;
 mod automations;
@@ -1620,7 +1621,19 @@ impl AgentRunCoordinator {
         } else {
             None
         };
+        let action_journal = action_receipts::RunActionJournal::new(
+            &self.state,
+            self.control_plane_transactions(),
+            crate::runs::RunLink {
+                run_id: run_id.clone(),
+                session_id: session_id.clone(),
+                agent_id: agent_id.clone(),
+            },
+            live_run.control().cancel,
+            helper_deadline.map(|(_, deadline)| deadline),
+        );
         let tool_context = tool_context
+            .with_action_journal(action_journal.clone())
             .with_team(self.clone(), can_delegate)
             .with_delegated_parent(delegated_parent)
             .with_peer_route(peer_route, peer_sources)
@@ -1650,12 +1663,10 @@ impl AgentRunCoordinator {
                     history,
                     content,
                     |agent, user_message, tool_call| {
-                        // The observer notes the tool in the live registry
-                        // before it runs and every save merges that list into
-                        // the ledger record, so a run a restart interrupts
-                        // still reports the tools it started (spec §4.8)
-                        // without a state write lock per tool call. The commit
-                        // fills the final list.
+                        // The synchronous observer announces tool intent.
+                        // Native dispatch awaits its durable action witness;
+                        // ToolFinished follows the acknowledged outcome save.
+                        // Final transcript commit remains a separate step.
                         let tool_context = tool_context.clone();
                         async move {
                             tool_context
@@ -1697,6 +1708,23 @@ impl AgentRunCoordinator {
             }
         } else {
             execution.await
+        };
+        action_journal.settle().await;
+        let result = if let Some(error) = action_journal.failure() {
+            let owner_stopped = self
+                .state
+                .read()
+                .await
+                .runs
+                .get(&run_id)
+                .is_some_and(|record| record.stop.is_some());
+            if owner_stopped {
+                result
+            } else {
+                TaskResult::error(error, result.duration_ms)
+            }
+        } else {
+            result
         };
         live_run.flush();
         // The run's steering ends with its execution (spec §4.7): a steer
@@ -1758,7 +1786,12 @@ impl AgentRunCoordinator {
                 runtime.run_delta_since(&base),
             );
             // A run its owner stopped ends `cancelled`, never `failed` (spec §4.6).
-            let stopped = live_run.control().cancel.is_cancelled()
+            let stopped = (action_journal.failure().is_none()
+                || guard
+                    .runs
+                    .get(&run_id)
+                    .is_some_and(|record| record.stop.is_some()))
+                && live_run.control().cancel.is_cancelled()
                 && result.error.as_deref() == Some(anima_core::RUN_STOPPED_ERROR);
             let outcome = RunOutcome::new(&change_set, result.clone()).with_stop(stopped);
             if !guard.commit_run(&mut change_set, &outcome) {
@@ -2192,6 +2225,8 @@ async fn persist_task_result_memory(
     }
 }
 
+#[cfg(test)]
+mod action_receipt_tests;
 #[cfg(test)]
 mod approval_stop_tests;
 #[cfg(test)]

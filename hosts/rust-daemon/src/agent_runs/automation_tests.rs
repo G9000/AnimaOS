@@ -20,6 +20,12 @@ use crate::tools::automations::{
     TELEGRAM_NOT_READY,
 };
 
+fn independent_call(id: &str, name: &str, args: &[(&str, &str)]) -> ToolCall {
+    let mut tool = call(name, args);
+    tool.id = id.into();
+    tool
+}
+
 /// A coordinator whose one companion may use `tools`.
 async fn automating(model: Arc<ScriptedModel>, tools: &[&str]) -> (AgentRunCoordinator, String) {
     let mut config = companion_config("companion");
@@ -97,7 +103,8 @@ async fn too_frequent_automations_and_a_missing_telegram_are_refused() {
             "create_automation",
             &[("prompt", "Ping"), ("schedule", "every 4 minutes")],
         )]),
-        Step::Tools(vec![call(
+        Step::Tools(vec![independent_call(
+            "create_automation-2",
             "create_automation",
             &[
                 ("prompt", "Ping"),
@@ -181,7 +188,11 @@ async fn list_and_pause_reach_only_the_agents_own_automations() {
     let model = ScriptedModel::new(vec![
         Step::Tools(vec![call("list_automations", &[])]),
         Step::Tools(vec![call("pause_automation", &[("id", "mine")])]),
-        Step::Tools(vec![call("pause_automation", &[("id", "theirs")])]),
+        Step::Tools(vec![independent_call(
+            "pause_automation-2",
+            "pause_automation",
+            &[("id", "theirs")],
+        )]),
         Step::Text(vec!["done"]),
     ]);
     let (coordinator, agent_id) =

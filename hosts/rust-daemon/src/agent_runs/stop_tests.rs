@@ -454,14 +454,25 @@ async fn a_helper_started_after_its_companions_stop_never_calls_its_model() {
         .unwrap()
         .id
         .clone();
-    // Holds spawn_helper's save of the helper it creates, inside its
-    // control-plane transaction, so the stop lands before the helper run.
-    let save_gate = coordinator
+    // First admit the native spawn action durably, then hold the separate
+    // helper-creation save so the stop still lands before the helper run.
+    let intent_gate = coordinator
         .state
         .write()
         .await
         .install_test_control_plane_save_gate(false);
     gate.release();
+    tokio::time::timeout(Duration::from_secs(5), intent_gate.entered.acquire())
+        .await
+        .expect("spawn_helper saves its native action intent")
+        .unwrap()
+        .forget();
+    let save_gate = coordinator
+        .state
+        .write()
+        .await
+        .install_test_control_plane_save_gate(false);
+    intent_gate.release.add_permits(1);
     tokio::time::timeout(Duration::from_secs(5), save_gate.entered.acquire())
         .await
         .expect("spawn_helper saves its helper")
