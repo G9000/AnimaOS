@@ -119,6 +119,13 @@ receipt. A second refusal, malformed request, reused call ID or mixed unknown
 batch ends the run. Permissions remain unchanged. Collapsed chat cards count
 tool requests; inspect their status and Recorded actions for execution evidence.
 
+ChatGPT subscription requests can retry once after a classified transient gateway
+error, before streaming begins. The retry keeps the same request and account;
+auth, quota, schema, ambiguous transport and partial-stream failures do not retry.
+An explicit `max_retries: 0` disables transport retries. Final budget wrap-ups
+disable them too, including existing API-provider stream retries. A failed
+attempt may still consume usage; the limit does not guarantee a billing ceiling.
+
 ## Connect only what you use
 
 - Telegram: configure and pair through Connectors. The native daemon handles

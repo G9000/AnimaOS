@@ -231,6 +231,61 @@ async fn openai_stream_retries_one_retryable_response_with_normalized_error_cont
 }
 
 #[tokio::test]
+async fn prestream_retry_explicit_zero_disables_existing_anthropic_google_and_openai_stream_retries(
+) {
+    for (provider, path) in [
+        ("anthropic", "/v1/messages".to_owned()),
+        (
+            "google",
+            "/v1beta/models/gemini-2.0-flash:streamGenerateContent".to_owned(),
+        ),
+        ("openai", "/v1/chat/completions".to_owned()),
+    ] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let app = Router::new().route(
+            &path,
+            post({
+                let calls = calls.clone();
+                move || {
+                    let calls = calls.clone();
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        (
+                            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                            "temporary gateway failure",
+                        )
+                    }
+                }
+            }),
+        );
+        let base_url = spawn_server(app).await;
+        let credential_url = if provider == "openai" {
+            format!("{base_url}/v1")
+        } else {
+            base_url
+        };
+        let adapter = adapter_with(&[(provider, Some("key"), &credential_url)]);
+        let mut config = if provider == "google" {
+            google_config(false)
+        } else {
+            agent_config(provider, false)
+        };
+        config.settings = Some(AgentSettings {
+            max_retries: Some(0),
+            ..AgentSettings::default()
+        });
+
+        let error = adapter
+            .stream(&config, &request(), &FrameSink(Mutex::new(Vec::new())))
+            .await
+            .unwrap_err();
+
+        assert!(error.contains("503"), "{provider}: {error}");
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "{provider}");
+    }
+}
+
+#[tokio::test]
 async fn deterministic_stream_continues_when_consumer_is_dropped() {
     let adapter = DeterministicModelAdapter::new("one two");
     let sink = DroppedSink(AtomicUsize::new(0));

@@ -318,7 +318,8 @@ impl ProviderModelAdapter {
                 return consume_anthropic_sse(response, sink, request_contains_images(request))
                     .await;
             }
-            let retry = !retried && retryable(response.status());
+            let retry =
+                transport_retries_enabled(config) && !retried && retryable(response.status());
             let error = response_payload(
                 response,
                 "Anthropic",
@@ -390,7 +391,8 @@ impl ProviderModelAdapter {
                 )
                 .await;
             }
-            let retry = !retried && retryable(response.status());
+            let retry =
+                transport_retries_enabled(config) && !retried && retryable(response.status());
             let error = response_payload(
                 response,
                 provider_name,
@@ -451,7 +453,8 @@ impl ProviderModelAdapter {
                 )
                 .await;
             }
-            let retry = !retried && retryable(response.status());
+            let retry =
+                transport_retries_enabled(config) && !retried && retryable(response.status());
             let error = response_payload(
                 response,
                 "Google",
@@ -652,6 +655,14 @@ impl ModelAdapter for ProviderModelAdapter {
 
 fn retryable(status: reqwest::StatusCode) -> bool {
     status.as_u16() == 429 || status.is_server_error()
+}
+
+fn transport_retries_enabled(config: &AgentConfig) -> bool {
+    config
+        .settings
+        .as_ref()
+        .and_then(|settings| settings.max_retries)
+        != Some(0)
 }
 
 /// A stream request retries a 429 or 5xx answer once. When that one retry also

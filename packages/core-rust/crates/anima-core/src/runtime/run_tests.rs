@@ -550,6 +550,54 @@ fn budget_config(limit: usize) -> AgentConfig {
     config
 }
 
+fn assert_budget_wrapup_retry_config(limit: usize) {
+    for original_retries in [None, Some(0), Some(3)] {
+        let model = Arc::new(BudgetWrapupModel::default());
+        let mut original = budget_config(limit);
+        original.settings.as_mut().unwrap().max_retries = original_retries;
+        let mut runtime = AgentRuntime::new(original.clone(), model.clone());
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let result = block_on(runtime.run_with_context_and_tools(
+            Vec::new(),
+            text("Read then report the remaining work"),
+            |_, _, _| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async { TaskResult::success(text("Read completed"), 1) }
+            },
+        ));
+        let requests = model.requests.lock().unwrap();
+        assert_eq!(requests.len(), limit + 1);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), limit);
+        assert_eq!(result.status, TaskStatus::Success);
+        assert_eq!(runtime.config(), &original);
+        assert_eq!(runtime.snapshot().state.config, original);
+        if limit > 0 {
+            assert_eq!(
+                requests[0].0, original,
+                "ordinary calls retain retry policy"
+            );
+        }
+        let mut expected_shadow = original.clone();
+        expected_shadow.tools = Some(Vec::new());
+        expected_shadow.settings.as_mut().unwrap().max_retries = Some(0);
+        assert_eq!(
+            requests.last().unwrap().0,
+            expected_shadow,
+            "M26: the one tool-free wrap-up disables transport retries for cap {limit}, original retries {original_retries:?}"
+        );
+    }
+}
+
+#[test]
+fn budget_wrapup_retry_config_zero_disables_transport_retries_without_mutation() {
+    assert_budget_wrapup_retry_config(0);
+}
+
+#[test]
+fn budget_wrapup_retry_config_one_preserves_ordinary_policy_and_disables_final_retries() {
+    assert_budget_wrapup_retry_config(1);
+}
+
 #[test]
 fn budget_wrapup_restricts_the_already_next_call_and_preserves_grants_on_reset() {
     let model = Arc::new(BudgetWrapupModel::default());
@@ -972,7 +1020,7 @@ fn budget_wrapup_is_not_claimed_for_natural_answers_and_default_budget_is_eight_
 
     let model = Arc::new(BudgetWrapupModel::default());
     let mut config = budget_config(1);
-    config.settings.as_mut().unwrap().max_tool_iterations = None;
+    config.settings = None;
     let mut runtime = AgentRuntime::new(config.clone(), model.clone());
     let calls = std::sync::atomic::AtomicUsize::new(0);
     let result =
@@ -984,8 +1032,18 @@ fn budget_wrapup_is_not_claimed_for_natural_answers_and_default_budget_is_eight_
         );
     assert_eq!(result.status, TaskStatus::Success);
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 8);
-    assert_eq!(model.requests.lock().unwrap().len(), 9);
+    let requests = model.requests.lock().unwrap();
+    assert_eq!(requests.len(), 9);
+    assert!(requests[..8]
+        .iter()
+        .all(|(ordinary, _)| ordinary == &config));
+    assert_eq!(
+        requests[8].0.settings.as_ref().unwrap().max_retries,
+        Some(0),
+        "absent settings get a temporary retry limit only for wrap-up"
+    );
     assert_eq!(runtime.config(), &config);
+    assert_eq!(runtime.snapshot().state.config, config);
 }
 
 #[test]

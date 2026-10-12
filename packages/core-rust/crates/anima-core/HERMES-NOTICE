@@ -33,6 +33,13 @@ grant changes, executor/action witness, independent repair request or effect
 replay. The refusal state is per invocation; native host authorization remains
 authoritative for configured calls.
 
+M26 uses the same public revision's bounded phase-aware recovery architecture
+references agent/turn_loop_errors.py::handle_outer_loop_error/OuterErrorVerdict
+and agent/turn_retry_state.py::TurnRetryState. Anima's sole budget wrap-up passes
+an explicit zero-retry shadow setting; saved settings remain unchanged. Its
+generic executor-neutral delay uses an existing native dependency. No upstream
+credential refresh, fallback, payload-repair or outer-loop framework is copied.
+
 MIT License
 
 Copyright (c) 2025 Nous Research

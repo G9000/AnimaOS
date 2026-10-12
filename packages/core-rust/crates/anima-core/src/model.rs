@@ -1,9 +1,17 @@
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use async_trait::async_trait;
 
 use crate::agent::{AgentConfig, TokenUsage};
 use crate::primitives::{Content, DataValue, Message};
+
+/// Wait without requiring a host executor or blocking the calling thread.
+/// Dropping the enclosing future cancels this wait; adapters choose the delay
+/// and any retry policy.
+pub async fn model_transport_delay(duration: Duration) {
+    futures_timer::Delay::new(duration).await;
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModelStopReason {

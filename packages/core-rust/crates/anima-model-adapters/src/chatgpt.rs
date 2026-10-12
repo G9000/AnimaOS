@@ -4,9 +4,9 @@ use crate::common::{
     assistant_tool_calls_json, tool_call_args, tool_call_id, tool_parameters_schema_json,
 };
 use anima_core::{
-    AgentConfig, Content, MessageRole, ModelAdapter, ModelGenerateRequest, ModelGenerateResponse,
-    ModelStopReason, ModelStreamFrame, ModelStreamSink, TokenUsage, ToolCall,
-    MAX_CAPABILITY_ARGUMENT_BYTES, MAX_CAPABILITY_ID_BYTES,
+    model_transport_delay, AgentConfig, Content, MessageRole, ModelAdapter, ModelGenerateRequest,
+    ModelGenerateResponse, ModelStopReason, ModelStreamFrame, ModelStreamSink, TokenUsage,
+    ToolCall, MAX_CAPABILITY_ARGUMENT_BYTES, MAX_CAPABILITY_ID_BYTES,
 };
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -52,23 +52,38 @@ impl ChatGptResponsesAdapter {
         if self.token.is_empty() || self.account_id.is_empty() {
             return Err("Connect your ChatGPT subscription in settings".into());
         }
-        let response = self
-            .client
-            .post(&self.endpoint)
-            .bearer_auth(self.token.as_str())
-            .header("chatgpt-account-id", &self.account_id)
-            .header("originator", "anima")
-            .header("User-Agent", "anima/0.1.0")
-            .header("OpenAI-Beta", "responses=experimental")
-            .header("accept", "text/event-stream")
-            .json(&request_body(config, request)?)
-            .send()
-            .await
-            .map_err(|_| "ChatGPT request failed or timed out".to_owned())?;
-        if !response.status().is_success() {
-            return Err(http_failure(response).await);
+        let body = request_body(config, request)?;
+        let retry_count = config
+            .settings
+            .as_ref()
+            .and_then(|settings| settings.max_retries)
+            .map(|value| value.min(1))
+            .unwrap_or(1);
+        let mut attempt = 0;
+        loop {
+            let response = self
+                .client
+                .post(&self.endpoint)
+                .bearer_auth(self.token.as_str())
+                .header("chatgpt-account-id", &self.account_id)
+                .header("originator", "anima")
+                .header("User-Agent", "anima/0.1.0")
+                .header("OpenAI-Beta", "responses=experimental")
+                .header("accept", "text/event-stream")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|_| "ChatGPT request failed or timed out".to_owned())?;
+            if response.status().is_success() {
+                return Ok(response);
+            }
+            let failure = http_failure(response).await;
+            if attempt >= retry_count || !failure.retryable {
+                return Err(failure.diagnostic);
+            }
+            attempt += 1;
+            model_transport_delay(Duration::from_millis(250)).await;
         }
-        Ok(response)
     }
 }
 
@@ -269,14 +284,7 @@ fn structured_failure(payload: &Value) -> Option<String> {
     // Responses error events carry top-level fields; response.failed carries
     // response.error. Upstream agent/codex_runtime.py::_raise_stream_error also
     // prefers top-level error fields. Here only whitelisted constants escape.
-    let error = if payload["type"].as_str() == Some("error") && payload.get("code").is_some() {
-        payload
-    } else {
-        payload
-            .pointer("/response/error")
-            .or_else(|| payload.get("error"))
-            .unwrap_or(payload)
-    };
+    let error = failure_payload(payload);
     let code = error.get("code")?.as_str()?;
     let &(safe_code, message) = KNOWN_FAILURES.iter().find(|(known, _)| *known == code)?;
     let mut diagnostic = format!("{message} (code: {safe_code}");
@@ -304,29 +312,91 @@ fn http_status_failure(status: u16) -> String {
     }
 }
 
-async fn http_failure(response: reqwest::Response) -> String {
-    let fallback = http_status_failure(response.status().as_u16());
+struct HttpFailure {
+    diagnostic: String,
+    retryable: bool,
+}
+
+async fn http_failure(response: reqwest::Response) -> HttpFailure {
+    let status = response.status();
+    let fallback = http_status_failure(status.as_u16());
+    let retryable_status = matches!(status.as_u16(), 502 | 503 | 504);
+    let media_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| {
+            value
+                .split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase()
+        });
+    let event_stream = media_type.as_deref() == Some("text/event-stream");
     if response
         .content_length()
         .is_some_and(|size| size > MAX_ERROR_BODY as u64)
     {
-        return fallback;
+        return HttpFailure {
+            diagnostic: fallback,
+            retryable: false,
+        };
     }
     let mut bytes = Zeroizing::new(Vec::new());
     let mut chunks = response.bytes_stream();
     while let Some(chunk) = chunks.next().await {
         let Ok(chunk) = chunk else {
-            return fallback;
+            return HttpFailure {
+                diagnostic: fallback,
+                retryable: false,
+            };
         };
         if bytes.len().saturating_add(chunk.len()) > MAX_ERROR_BODY {
-            return fallback;
+            return HttpFailure {
+                diagnostic: fallback,
+                retryable: false,
+            };
         }
         bytes.extend_from_slice(&chunk);
     }
-    serde_json::from_slice::<Value>(&bytes)
-        .ok()
-        .and_then(|payload| structured_failure(&payload))
-        .unwrap_or(fallback)
+    let parsed = serde_json::from_slice::<Value>(&bytes).ok();
+    let structured = parsed.as_ref().and_then(structured_failure);
+    let diagnostic = structured.clone().unwrap_or(fallback);
+    let structured_retryable = parsed.as_ref().and_then(failure_code).map(|code| {
+        matches!(
+            code,
+            "server_error"
+                | "internal_server_error"
+                | "service_unavailable"
+                | "subscription_sharing_usage_unavailable"
+                | "subscription_sharing_user_unavailable"
+        )
+    });
+    let plain_gateway_body = matches!(media_type.as_deref(), Some("text/plain" | "text/html"))
+        && std::str::from_utf8(&bytes).is_ok();
+    let retryable = retryable_status
+        && !event_stream
+        && (structured_retryable == Some(true) || (parsed.is_none() && plain_gateway_body));
+    HttpFailure {
+        diagnostic,
+        retryable,
+    }
+}
+
+fn failure_payload(payload: &Value) -> &Value {
+    if payload["type"].as_str() == Some("error") && payload.get("code").is_some() {
+        payload
+    } else {
+        payload
+            .pointer("/response/error")
+            .or_else(|| payload.get("error"))
+            .unwrap_or(payload)
+    }
+}
+
+fn failure_code(payload: &Value) -> Option<&str> {
+    failure_payload(payload).get("code")?.as_str()
 }
 
 fn completed_response(response: &Value) -> Result<ModelGenerateResponse, String> {

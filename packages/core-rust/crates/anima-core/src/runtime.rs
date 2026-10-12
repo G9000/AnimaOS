@@ -506,6 +506,10 @@ impl AgentRuntime {
                 let mut config = self.state.config.clone();
                 config.tools = Some(Vec::new());
                 config
+                    .settings
+                    .get_or_insert_with(Default::default)
+                    .max_retries = Some(0);
+                config
             });
             let mut system = self.build_system_prompt(&context_parts);
             if budget_wrapup {
