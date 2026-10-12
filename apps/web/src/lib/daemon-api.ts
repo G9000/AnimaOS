@@ -450,7 +450,8 @@ export const daemon = {
   traceMemory: (id: string) => setupClient.memories.trace(id),
   updateMemory: (id: string, patch: MemoryPatch) =>
     setupClient.memories.update(id, patch),
-  deleteMemory: (id: string) => setupClient.memories.delete(id),
+  deleteMemory: (id: string, expectedContent?: string) =>
+    setupClient.memories.delete(id, expectedContent),
   saveMemory: (input: CreateMemoryInput) => setupClient.memories.create(input),
   listFacts: (options: MemoryFactOptions) =>
     setupClient.memories.facts(options),

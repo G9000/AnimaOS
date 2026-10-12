@@ -71,6 +71,14 @@ is hard removal from active legacy memory, not revisioned tombstones, complete
 erasure or automatic consolidation. No fuzzy substring/batch matching, Python
 runtime, upstream profiles or credentials are copied. Existing Write policy
 and per-agent grants remain authoritative; no automatic grant is added.
+M31 owner reviewed-delete adaptation (revision 1fd18277267152893a8a24792b79213e7ca3f899):
+The same public pinned-entry remove intent used in M30 now applies to owner
+memory-record DELETE when complete expectedContent is supplied. Compare the
+exact reviewed text under the native memory write lock before mutation/save;
+stale text returns a content-free conflict. Empty-body legacy owner deletion
+remains. No fuzzy matching, revision/ABA guarantee, complete erasure, upstream
+Python runtime or private profiles are imported.
+
 MIT License
 
 Copyright (c) 2025 Nous Research

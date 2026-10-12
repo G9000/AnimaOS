@@ -45,7 +45,7 @@ web permission cases. Removal is from active saved Fact records; old chats,
 reflections, historical derived knowledge, receipts and backups may retain text.
 No real memories or model removal task were used. M29 passed seven new
 deterministic cycle cases. It added no real
-provider task; M28 remains the latest ordinary live acceptance. Current native source passed **2,419 Rust tests / eight ignored**, plus formatting.
+provider task; M28 remains the latest ordinary live acceptance. M30 native source passed **2,419 Rust tests / eight ignored**, plus formatting.
 M30's web surface passed **1,197 tests**, type checks and build, including the opt-in permission regressions. Its transitive SDK type/build checks also passed. The unchanged SDK's **130 unit tests** remain M25 historical evidence. These are local checks; hosted CI's known Nx Cloud failure is not a
 substitute for their evidence.
 
@@ -56,6 +56,17 @@ The loop adaptations use specific public Hermes helpers at pinned revision
 it does not import the Python runtime, private profiles or credentials. Full MIT
 attribution remains with the adapted core and adapter code. The comparison is
 limited to those public helpers, rather than the entire current upstream product.
+
+M31 extends the same pinned-entry intent to reviewed owner deletion. The console
+pins the click-time record, and the daemon compares full text under its memory
+write lock. Empty-body legacy API deletion stays available; text equality does
+not detect content ABA or metadata changes. Fresh M31 native source passed **2,423 Rust tests / eight ignored / 40 suites** and
+formatting; web **1,201** tests and SDK **128** unit tests, type checks and builds
+passed. Three SDK service tests were explicitly skipped. Four new native, four
+web and one SDK case cover strict parsing, locked stale comparison, legacy
+records, persistence and explicit re-review. One native batch/final SDKweb review
+found no defects. No real record, service or model task was used. Failed initial
+SDK integration-build setup and its corrected safe rerun remain in the ledger.
 
 The next useful step is personal use through the [daily-use setup](daily-use.md).
 Real Telegram/Discord/Google account delivery, microphone/vision, browser

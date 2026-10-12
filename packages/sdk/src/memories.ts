@@ -360,10 +360,15 @@ export class MemoriesClient {
     );
   }
 
-  async delete(memoryId: string): Promise<MemoryDeleteResult> {
+  async delete(
+    memoryId: string,
+    expectedContent?: string,
+  ): Promise<MemoryDeleteResult> {
     return this.client.requestJson<MemoryDeleteResult>(
       `/api/memories/${encodeURIComponent(memoryId)}`,
-      { method: 'DELETE' },
+      expectedContent === undefined
+        ? { method: 'DELETE' }
+        : { method: 'DELETE', body: { expectedContent } },
     );
   }
 

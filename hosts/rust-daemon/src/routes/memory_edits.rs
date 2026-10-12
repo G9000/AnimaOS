@@ -22,8 +22,8 @@ use tracing::warn;
 
 use super::contracts::{
     EntityDeleteResponse, ErrorBody, FactDeleteResponse, FactPatchRequest, FactReplacedResponse,
-    MemoryDeleteResponse, MemoryFactResponse, MemoryFactsEnvelope, MemoryPatchRequest,
-    MemoryResponse,
+    MemoryDeleteRequest, MemoryDeleteResponse, MemoryFactResponse, MemoryFactsEnvelope,
+    MemoryPatchRequest, MemoryResponse,
 };
 use super::http::{json_response, read_limited_body, request_query};
 use super::jobs::{authorize, no_store};
@@ -42,6 +42,7 @@ use crate::state::SharedMemoryStore;
 pub(super) const MEMORY_PATCH_EMPTY: &str = "provide content, importance, or tags to change";
 pub(super) const MEMORY_TASK_FAILED: &str =
     "The memory change did not finish; check Memory and try again";
+pub(super) const MEMORY_DELETE_STALE: &str = "This memory changed; review it again before deleting";
 pub(super) const FACT_NOT_EDITABLE: &str = "Only an active fact with a value can be edited";
 pub(super) const ENTITY_KIND_REQUIRED: &str =
     "kind query parameter must be one of agent, user, system, external";
@@ -93,11 +94,15 @@ pub(super) async fn patch_memory(
 
 #[utoipa::path(delete, path = "/api/memories/{memory_id}", tag = "memories",
     params(("memory_id" = String, Path)),
+    request_body(content = ref("#/components/schemas/MemoryDeleteRequest"),
+        description = "Optional body: omit all HTTP body bytes for legacy ID-only deletion; any nonempty body requires exact string expectedContent and rejects null or unknown fields"),
     responses(
         (status = 200, description = "The memory, its embedding, and its citations are gone", body = MemoryDeleteResponse),
+        (status = 400, description = "Nonempty request body is invalid or exceeds the request byte limit", body = ErrorBody),
         (status = 403, description = "Local owner required", body = ErrorBody),
         (status = 404, description = "No such memory", body = ErrorBody),
-        (status = 503, description = "The deletion could not be saved and was undone, or did not finish", body = ErrorBody)
+        (status = 409, description = "Reviewed content no longer matches; review again before deleting", body = ErrorBody),
+        (status = 503, description = "Deletion could not be saved or did not finish; check Memory before retrying", body = ErrorBody)
     ))]
 pub(super) async fn delete_memory(
     State(state): State<AppState>,
@@ -107,8 +112,21 @@ pub(super) async fn delete_memory(
     if let Err(response) = authorize(&state, &request, false) {
         return response;
     }
+    let bytes = match read_limited_body(request, state.config.max_request_bytes).await {
+        Ok(bytes) => bytes,
+        Err(response) => return no_store(response),
+    };
+    let expected_content = if bytes.is_empty() {
+        None
+    } else {
+        let input: MemoryDeleteRequest = match parse_json_body(bytes) {
+            Ok(input) => input,
+            Err(error) => return rejected(error),
+        };
+        Some(input.expected_content)
+    };
     let daemon = state.daemon.clone();
-    match locked(apply_delete(daemon, memory_id)).await {
+    match locked(apply_delete(daemon, memory_id, expected_content)).await {
         Ok(deleted) => answer(&deleted),
         Err(error) => rejected(error),
     }
@@ -401,11 +419,18 @@ async fn apply_patch(
 async fn apply_delete(
     daemon: SharedDaemonState,
     memory_id: String,
+    expected_content: Option<String>,
 ) -> Result<MemoryDeleteResponse, ApiError> {
     let (memory_handle, embeddings_handle, memory_store) = memory_handles(&daemon).await;
     let mut memory_guard = memory_handle.write().await;
-    if memory_guard.get(&memory_id).is_none() {
-        return Err(ApiError::not_found());
+    let current = memory_guard
+        .get(&memory_id)
+        .ok_or_else(ApiError::not_found)?;
+    if expected_content
+        .as_ref()
+        .is_some_and(|expected| expected != &current.content)
+    {
+        return Err(ApiError::conflict(MEMORY_DELETE_STALE));
     }
     let deletion = {
         let mut mutation = MemoryMutation::new(&mut memory_guard);

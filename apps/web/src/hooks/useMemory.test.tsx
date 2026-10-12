@@ -216,6 +216,30 @@ describe('useMemory', () => {
     expect(daemon.recentMemories).toHaveBeenCalledTimes(2);
   });
 
+  it('a stale memory deletion sends reviewed text and reloads on conflict', async () => {
+    const { result } = await loaded();
+    const reviewed = memoryFixture('m1', { content: 'Reviewed wording 🫖' });
+    vi.mocked(daemon.deleteMemory).mockRejectedValue(
+      new DaemonHttpError(409, {
+        error: 'Memory text changed; review it again',
+      }),
+    );
+
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.remove(reviewed);
+    });
+
+    expect(ok).toBe(false);
+    expect(daemon.deleteMemory).toHaveBeenCalledWith(
+      'm1',
+      'Reviewed wording 🫖',
+    );
+    expect(result.current.error).toBe('Memory text changed; review it again');
+    expect(result.current.errorStatus).toBe(409);
+    expect(daemon.recentMemories).toHaveBeenCalledTimes(2);
+  });
+
   it('remove, replaceFact, removeFact, and removeEntity call the daemon and reload', async () => {
     const { result } = await loaded();
     const reads = () => vi.mocked(daemon.recentMemories).mock.calls.length;
@@ -223,7 +247,7 @@ describe('useMemory', () => {
     await act(async () => {
       expect(await result.current.remove(memoryFixture('m1'))).toBe(true);
     });
-    expect(daemon.deleteMemory).toHaveBeenCalledWith('m1');
+    expect(daemon.deleteMemory).toHaveBeenCalledWith('m1', 'Memory m1');
     expect(reads()).toBe(2);
 
     await act(async () => {

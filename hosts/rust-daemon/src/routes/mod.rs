@@ -207,6 +207,7 @@ use crate::runtime_model::provider_summaries;
         attachments::upload, attachments::serve,
     ),
     components(schemas(self::contracts::AgentSummariesEnvelope, self::contracts::AttachmentEnvelope, self::contracts::AttachmentResponse,
+        self::contracts::MemoryDeleteRequest,
         self::contracts::agent_files::AgentFilesPreview, self::contracts::agent_files::PreviewMode,
         crate::agent_files::AgentFilesManifest, crate::agent_files::AgentFileManifestEntry,
         crate::agent_files::Availability, crate::agent_files::IdentitySource, crate::agent_files::ProjectSourceKind,

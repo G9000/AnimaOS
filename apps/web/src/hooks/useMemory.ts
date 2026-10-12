@@ -210,7 +210,8 @@ export function useMemory({
     [act],
   );
   const remove = useCallback(
-    (memory: Memory) => act(() => daemon.deleteMemory(memory.id), MEMORY_GONE),
+    (memory: Memory) =>
+      act(() => daemon.deleteMemory(memory.id, memory.content), MEMORY_GONE),
     [act],
   );
   const replaceFact = useCallback(

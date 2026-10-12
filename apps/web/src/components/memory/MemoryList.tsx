@@ -79,10 +79,15 @@ function MemoryRow({
   onDone,
 }: { memory: MemoryEntry } & Omit<MemoryListProps, 'memories'>) {
   const [mode, setMode] = useState<Mode>('view');
+  const [deleteSnapshot, setDeleteSnapshot] = useState<MemoryEntry | null>(
+    null,
+  );
   const [trail, setTrail] = useState<Trail | null>(null);
   const [busy, setBusy] = useState(false);
   // Closing the trail while it loads must not let the late answer reopen it.
   const trailRequest = useRef(0);
+  const displayedMemory =
+    mode === 'delete' && deleteSnapshot ? deleteSnapshot : memory;
 
   const toggleTrail = async () => {
     if (trail) {
@@ -116,19 +121,21 @@ function MemoryRow({
         <div className="memory-item-body">
           <div className="memory-meta">
             <span className="memory-label">
-              {MEMORY_TYPE_LABELS[memory.type]}
+              {MEMORY_TYPE_LABELS[displayedMemory.type]}
             </span>
-            <span>{importanceLabel(memory.importance)} importance</span>
-            <time dateTime={new Date(memory.createdAt).toISOString()}>
-              {formatWhen(memory.createdAt)}
+            <span>
+              {importanceLabel(displayedMemory.importance)} importance
+            </span>
+            <time dateTime={new Date(displayedMemory.createdAt).toISOString()}>
+              {formatWhen(displayedMemory.createdAt)}
             </time>
           </div>
           <p className="memory-content">
-            <RevealedText text={memory.content} />
+            <RevealedText text={displayedMemory.content} />
           </p>
-          {memory.tags && memory.tags.length > 0 && (
+          {displayedMemory.tags && displayedMemory.tags.length > 0 && (
             <ul className="memory-tags" aria-label="Tags">
-              {memory.tags.map((tag) => (
+              {displayedMemory.tags.map((tag) => (
                 <li key={tag} className="memory-chip">
                   <RevealedText text={tag} />
                 </li>
@@ -144,12 +151,21 @@ function MemoryRow({
           onConfirm={async () => {
             if (busy) return;
             setBusy(true);
-            const gone = await onDelete(memory);
+            const gone = await onDelete(deleteSnapshot ?? memory);
             setBusy(false);
-            if (gone) onDone();
-            else setMode('view');
+            if (gone) {
+              setDeleteSnapshot(null);
+              setMode('view');
+              onDone();
+            } else {
+              setDeleteSnapshot(null);
+              setMode('view');
+            }
           }}
-          onKeep={() => setMode('view')}
+          onKeep={() => {
+            setDeleteSnapshot(null);
+            setMode('view');
+          }}
         />
       )}
       {mode === 'view' && (
@@ -164,7 +180,10 @@ function MemoryRow({
           <button
             type="button"
             className="studio-tool-button"
-            onClick={() => setMode('delete')}
+            onClick={() => {
+              setDeleteSnapshot(memory);
+              setMode('delete');
+            }}
           >
             Delete
           </button>
