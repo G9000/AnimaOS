@@ -42,6 +42,7 @@ const WRITE_TOOLS: &[&str] = &[
     "todo_write",
     "memory_add",
     "memory_update",
+    "memory_remove",
     "propose_skill",
     "create_automation",
     "pause_automation",
@@ -637,6 +638,34 @@ mod tests {
             policy,
             "read-class tools have no policy entry"
         );
+    }
+
+    #[test]
+    fn memory_remove_is_write_and_obeys_existing_allow_ask_deny_policy() {
+        let remove = call(
+            "memory_remove",
+            &[("id", "fact-1"), ("expected_content", "exact fact")],
+        );
+        assert_eq!(risk_class(&remove.name), RiskClass::Write);
+        assert_eq!(
+            evaluate(&ApprovalPolicy::default(), &[], &[], &remove),
+            Verdict::Allow
+        );
+        for (action, expected) in [
+            (PolicyAction::Allow, Verdict::Allow),
+            (PolicyAction::Ask, Verdict::Ask),
+            (PolicyAction::Deny, Verdict::Deny),
+        ] {
+            assert_eq!(
+                evaluate(
+                    &ApprovalPolicy::default().with(RiskClass::Write, action),
+                    &[],
+                    &[],
+                    &remove
+                ),
+                expected
+            );
+        }
     }
 
     #[test]

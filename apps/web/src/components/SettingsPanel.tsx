@@ -100,7 +100,10 @@ export function SettingsPanel({
     return options.includes(agent.model) ? agent.model : '__custom__';
   }, [agent.provider, agent.model]);
   const agentToolsKey = JSON.stringify([...agent.toolNames].sort());
-  const derivedAccess = deriveAccessProfile(agent.toolNames);
+  const hasMemoryRemove = agent.toolNames.includes('memory_remove');
+  const derivedAccess = deriveAccessProfile(
+    agent.toolNames.filter((tool) => tool !== 'memory_remove'),
+  );
 
   const [name, setName] = useState(agent.name);
   const [profileTab, setProfileTab] = useState<
@@ -116,6 +119,7 @@ export function SettingsPanel({
     derivedAccess === 'custom' ? null : derivedAccess,
   );
   const [accessChanged, setAccessChanged] = useState(false);
+  const [allowMemoryRemove, setAllowMemoryRemove] = useState(hasMemoryRemove);
   const [savedFlash, setSavedFlash] = useState(false);
   const saveErrorRef = useRef<HTMLDivElement>(null);
   const resetErrorRef = useRef<HTMLDivElement>(null);
@@ -141,6 +145,7 @@ export function SettingsPanel({
     setSystem(agent.system ?? '');
     setAccessSelection(derivedAccess === 'custom' ? null : derivedAccess);
     setAccessChanged(false);
+    setAllowMemoryRemove(hasMemoryRemove);
   }, [
     agent.id,
     agent.name,
@@ -148,6 +153,7 @@ export function SettingsPanel({
     agent.model,
     agent.system,
     agentToolsKey,
+    hasMemoryRemove,
     derivedAccess,
   ]);
 
@@ -216,12 +222,13 @@ export function SettingsPanel({
     accessChanged &&
     accessSelection !== null &&
     accessSelection !== derivedAccess;
+  const toolsDirty = accessDirty || allowMemoryRemove !== hasMemoryRemove;
   const dirty =
     name.trim() !== agent.name ||
     provider !== agent.provider ||
     resolvedModel !== agent.model ||
     system !== (agent.system ?? '') ||
-    accessDirty;
+    toolsDirty;
 
   const save = async () => {
     const patch: AgentUpdateInput = {};
@@ -231,8 +238,18 @@ export function SettingsPanel({
       patch.model = resolvedModel;
     // Empty string clears the prompt back to the daemon default.
     if (system !== (agent.system ?? '')) patch.system = system;
-    if (accessDirty && accessSelection) {
-      patch.tools = toolNamesForProfile(accessSelection);
+    if (toolsDirty) {
+      const selectedTools =
+        accessDirty && accessSelection
+          ? toolNamesForProfile(accessSelection)
+          : agent.toolNames;
+      if (allowMemoryRemove) {
+        patch.tools = selectedTools.includes('memory_remove')
+          ? selectedTools
+          : [...selectedTools, 'memory_remove'];
+      } else {
+        patch.tools = selectedTools.filter((tool) => tool !== 'memory_remove');
+      }
     }
     if (Object.keys(patch).length === 0) return;
     if (await saveSettings(patch)) {
@@ -601,6 +618,7 @@ export function SettingsPanel({
                           onChange={() => {
                             setAccessSelection(profileName);
                             setAccessChanged(true);
+                            setAllowMemoryRemove(false);
                           }}
                           className="mr-3 h-4 w-4 align-top"
                         />
@@ -621,6 +639,34 @@ export function SettingsPanel({
                       </div>
                     );
                   })}
+                  <div className="rounded-xl border border-line bg-white/[0.015] p-3.5">
+                    <div className="flex items-start gap-3">
+                      <input
+                        id="settings-memory-remove"
+                        type="checkbox"
+                        aria-describedby="settings-memory-remove-help"
+                        checked={allowMemoryRemove}
+                        onChange={(event) =>
+                          setAllowMemoryRemove(event.target.checked)
+                        }
+                        className="mt-0.5 h-4 w-4 shrink-0"
+                      />
+                      <label
+                        htmlFor="settings-memory-remove"
+                        className="cursor-pointer font-medium text-ink"
+                      >
+                        Allow removing saved facts
+                      </label>
+                    </div>
+                    <p
+                      id="settings-memory-remove-help"
+                      className="mt-1 pl-7 text-sm text-ink-2"
+                    >
+                      Allows permanent removal of one active Fact only with its
+                      exact current text. Chats and backups remain; existing
+                      approval rules still apply.
+                    </p>
+                  </div>
                 </fieldset>
               </section>
 

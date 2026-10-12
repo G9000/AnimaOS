@@ -225,6 +225,34 @@ run inside this daemon; there is no second connector process.
 
 For an implementation walkthrough, see [Rust Daemon Architecture](../../docs/rust-daemon-architecture.md).
 
+## Native memory removal
+
+The optional `memory_remove` tool removes one obsolete or explicitly withdrawn
+active Fact record belonging to the calling agent. The owner must grant it
+explicitly, including through **Allow removing saved facts** in web settings.
+Registration and capability inventory do not grant it; standard profiles and
+existing agent configurations stay unchanged. Existing Write Allow/Ask/Deny
+policy applies, so a grant does not always produce an approval prompt.
+
+Its only arguments are `id` (at most 256 UTF-8 bytes) and `expected_content`
+(the full current text, 1–8,000 characters). Search first; do not trim, paraphrase,
+use an excerpt, pass a query/batch, or force removal. Own-agent/Fact/visibility and
+exact text are rechecked under the same write lock as deletion and persistence.
+Foreign, hidden, non-Fact, missing and stale records are refused without mutation.
+
+The operation uses existing snapshot rollback and citation cleanup. Related
+citation references change under the established deletion policy; other memory
+records remain. A reported committed-but-durability-uncertain save keeps the
+committed canonical state while returning an error. Embedding cleanup is best
+effort with canonical absence rechecked before index removal. Inspect an error
+before retrying; it does not universally prove that removal did not occur.
+
+This is active-record hard removal. Chats, reflections, retained temporal facts,
+action receipts and backups may still contain the old text. It is not the core
+MemoryPort's revisioned tombstone/forget operation, complete erasure, semantic
+consolidation, or a cross-store transaction. Owner API/UI deletion remains a
+separate existing operation.
+
 ## Long-running work safeguards
 
 - The scheduler keeps scanning while jobs run, admits at most eight scheduled jobs,

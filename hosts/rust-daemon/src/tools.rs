@@ -443,6 +443,35 @@ impl ToolRegistry {
             ),
             memory::execute_memory_update,
         );
+        let mut remove_id = typed_parameter_schema(
+            "string",
+            "Exact memory ID from memory_search, at most 256 UTF-8 bytes",
+        );
+        remove_id.insert("minLength".into(), DataValue::Number(1.0));
+        remove_id.insert(
+            "maxLength".into(),
+            DataValue::Number(anima_core::MAX_CAPABILITY_ID_BYTES as f64),
+        );
+        remove_id.insert("pattern".into(), DataValue::String(r".*\S.*".into()));
+        let mut remove_text = typed_parameter_schema(
+            "string",
+            "Exact full current content from memory_search, including whitespace",
+        );
+        remove_text.insert("minLength".into(), DataValue::Number(1.0));
+        remove_text.insert(
+            "maxLength".into(),
+            DataValue::Number(crate::memory_text::MAX_MEMORY_EDIT_CHARS as f64),
+        );
+        let mut remove_parameters = object_parameters(vec![
+            required_parameter("id", DataValue::Object(remove_id)),
+            required_parameter("expected_content", DataValue::Object(remove_text)),
+        ]);
+        remove_parameters.insert("additionalProperties".into(), DataValue::Bool(false));
+        registry.register(tool_descriptor(
+            "memory_remove",
+            "Permanently remove one obsolete or explicitly withdrawn own visible Fact from active memory only if its full current text exactly matches expected_content. First use memory_search for its exact ID and full content; excerpts and partial matches are insufficient. If uncertain, keep the fact and ask the owner. Re-search after a stale or missing result. Preserves other records, including duplicates; this does not erase chats, backups or receipts.",
+            remove_parameters,
+        ), memory::execute_memory_remove);
         registry.register(
             tool_descriptor(
                 "recent_memories",

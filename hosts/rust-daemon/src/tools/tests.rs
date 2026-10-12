@@ -290,6 +290,7 @@ fn registry_defines_every_registered_tool_schema() {
             &["id", "expected_content", "content"][..],
             &[][..],
         ),
+        ("memory_remove", &["id", "expected_content"][..], &[][..]),
         ("recent_memories", &[][..], &["limit"][..]),
         ("web_fetch", &["url"][..], &["max_length"][..]),
         (
@@ -1826,6 +1827,425 @@ fn memory_correction_call(id: &str, expected: &str, content: &str) -> ToolCall {
             ("content".into(), DataValue::String(content.into())),
         ]),
     }
+}
+
+fn memory_remove_fixture(
+    store: Option<crate::memory_store::MemoryStoreConfig>,
+) -> (ToolExecutionContext, AgentState, Message) {
+    let (context, mut agent, message) = memory_correction_fixture(store);
+    agent.config.tools = Some(
+        context
+            .tool_registry
+            .resolve_descriptors(["memory_remove"])
+            .unwrap(),
+    );
+    (context, agent, message)
+}
+
+fn memory_remove_call(id: &str, expected: &str) -> ToolCall {
+    ToolCall {
+        id: "remove-call".into(),
+        name: "memory_remove".into(),
+        args: BTreeMap::from([
+            ("id".into(), DataValue::String(id.into())),
+            (
+                "expected_content".into(),
+                DataValue::String(expected.into()),
+            ),
+        ]),
+    }
+}
+
+#[tokio::test]
+async fn memory_remove_exact_owned_fact_preserves_neighbor_through_registered_tool() {
+    use anima_memory::MemoryVectorIndex;
+    let root = create_temp_workspace("memory-remove-success");
+    let store = crate::memory_store::MemoryStoreConfig::Json(root.join("memory.json"));
+    let (context, mut agent, message) = memory_correction_fixture(Some(store.clone()));
+    // An explicit synthetic grant must reach the registered handler. Discovery
+    // alone does not grant access, and the existing update grant is insufficient.
+    agent.config.tools.as_mut().unwrap()[0].name = "memory_remove".into();
+    let stale = seed_correction_memory(&context, &agent.id, "Stale preference: plum tea").await;
+    let neighbor =
+        seed_correction_memory(&context, &agent.id, "Independent fact: amber notebook").await;
+    let duplicate = seed_correction_memory(&context, &agent.id, &stale.content).await;
+    assert_ne!(stale.id, neighbor.id);
+    let (related, unrelated) = {
+        let mut memory = context.memory.write().await;
+        let relationship = |target: &str, evidence_memory_ids| anima_memory::NewAgentRelationship {
+            source_kind: None,
+            source_agent_id: agent.id.clone(),
+            source_agent_name: agent.name.clone(),
+            target_kind: None,
+            target_agent_id: target.into(),
+            target_agent_name: target.into(),
+            relationship_type: "knows".into(),
+            summary: None,
+            strength: 0.5,
+            confidence: 0.5,
+            evidence_memory_ids,
+            tags: None,
+            room_id: None,
+            world_id: None,
+            session_id: None,
+        };
+        (
+            memory
+                .upsert_agent_relationship(relationship(
+                    "related",
+                    vec![stale.id.clone(), neighbor.id.clone()],
+                ))
+                .unwrap(),
+            memory
+                .upsert_agent_relationship(relationship("unrelated", vec![neighbor.id.clone()]))
+                .unwrap(),
+        )
+    };
+    {
+        let mut embeddings = context.memory_embeddings.write().await;
+        *embeddings = MemoryEmbeddingRuntime::local_default();
+        for record in [&stale, &neighbor, &duplicate] {
+            embeddings.upsert_memory(record).unwrap();
+        }
+        assert!(embeddings
+            .search(&stale.content, 10)
+            .iter()
+            .any(|hit| hit.memory_id == stale.id));
+    }
+    let mut call = memory_correction_call(&stale.id, &stale.content, "");
+    call.name = "memory_remove".into();
+    call.args.remove("content");
+    let result = context.clone().execute_tool(agent, message, call).await;
+    assert_eq!(result.status, TaskStatus::Success, "M30: an explicitly granted registered memory_remove must remove the exact current own Fact: {:?}", result.error);
+    assert_eq!(
+        result.data.as_ref().unwrap().text,
+        "removed one Fact memory"
+    );
+    let memory = context.memory.read().await;
+    assert_eq!(memory.get(&stale.id), None);
+    assert_eq!(memory.get(&neighbor.id), Some(neighbor.clone()));
+    assert_eq!(
+        memory.get(&duplicate.id),
+        Some(duplicate.clone()),
+        "duplicates are never swept"
+    );
+    assert!(!memory
+        .search("plum", Default::default())
+        .iter()
+        .any(|hit| hit.id == stale.id));
+    let snapshot = memory.snapshot();
+    assert_eq!(
+        snapshot
+            .agent_relationships
+            .iter()
+            .find(|item| item.id == related.id)
+            .unwrap()
+            .evidence_memory_ids,
+        vec![neighbor.id.clone()]
+    );
+    assert_eq!(
+        snapshot
+            .agent_relationships
+            .iter()
+            .find(|item| item.id == unrelated.id),
+        Some(&unrelated)
+    );
+    drop(memory);
+    let embeddings = context.memory_embeddings.read().await;
+    assert!(!embeddings
+        .search(&stale.content, 10)
+        .iter()
+        .any(|hit| hit.memory_id == stale.id));
+    assert!(embeddings
+        .search(&duplicate.content, 10)
+        .iter()
+        .any(|hit| hit.memory_id == duplicate.id));
+    drop(embeddings);
+    assert_eq!(
+        crate::memory_store::load_memory_snapshot(&store)
+            .await
+            .unwrap()
+            .unwrap(),
+        snapshot
+    );
+    fs::remove_file(root.join("memory.json")).unwrap();
+    fs::remove_dir(root).unwrap();
+}
+
+#[tokio::test]
+async fn memory_remove_schema_and_explicit_grant_do_not_enable_existing_agents() {
+    let registry = ToolRegistry::new();
+    let descriptor = registry.descriptor("memory_remove").unwrap();
+    assert_eq!(
+        descriptor.parameters_schema["required"],
+        DataValue::Array(vec![
+            DataValue::String("id".into()),
+            DataValue::String("expected_content".into())
+        ])
+    );
+    assert_eq!(
+        descriptor.parameters_schema["additionalProperties"],
+        DataValue::Bool(false)
+    );
+    let DataValue::Object(properties) = &descriptor.parameters_schema["properties"] else {
+        panic!("object properties")
+    };
+    assert_eq!(properties.len(), 2);
+    for (name, maximum) in [
+        ("id", anima_core::MAX_CAPABILITY_ID_BYTES),
+        (
+            "expected_content",
+            crate::memory_text::MAX_MEMORY_EDIT_CHARS,
+        ),
+    ] {
+        let DataValue::Object(schema) = &properties[name] else {
+            panic!("string schema")
+        };
+        assert_eq!(schema["type"], DataValue::String("string".into()));
+        assert_eq!(schema["minLength"], DataValue::Number(1.0));
+        assert_eq!(schema["maxLength"], DataValue::Number(maximum as f64));
+    }
+    let (context, agent, message) = memory_correction_fixture(None);
+    let original_config = agent.config.clone();
+    let record = seed_correction_memory(&context, &agent.id, "current fact").await;
+    let result = context
+        .clone()
+        .execute_tool(
+            agent.clone(),
+            message,
+            memory_remove_call(&record.id, &record.content),
+        )
+        .await;
+    assert_eq!(result.status, TaskStatus::Error);
+    assert!(result.error.unwrap().contains("not configured"));
+    assert_eq!(context.memory.read().await.get(&record.id), Some(record));
+    assert_eq!(agent.config, original_config);
+    assert!(!agent.config.allows_tool("memory_remove"));
+}
+
+#[tokio::test]
+async fn memory_remove_invalid_partial_stale_and_whitespace_inputs_preserve_exact_record() {
+    let (context, agent, message) = memory_remove_fixture(None);
+    let original = seed_correction_memory(&context, &agent.id, "plum tea exact record").await;
+    let mut snapshot = context.memory.read().await.snapshot();
+    snapshot
+        .memories
+        .iter_mut()
+        .find(|record| record.id == original.id)
+        .unwrap()
+        .content = " \nplum tea exact record\n ".into();
+    context.memory.write().await.replace_snapshot(snapshot);
+    let original = context.memory.read().await.get(&original.id).unwrap();
+    let before = context.memory.read().await.snapshot();
+    let valid = memory_remove_call(&original.id, &original.content);
+    let mut invalid = Vec::new();
+    for (key, value) in [
+        ("id", None),
+        ("expected_content", None),
+        ("id", Some(DataValue::Bool(true))),
+        ("id", Some(DataValue::String(" \t".into()))),
+        (
+            "id",
+            Some(DataValue::String(
+                "x".repeat(anima_core::MAX_CAPABILITY_ID_BYTES + 1),
+            )),
+        ),
+        ("expected_content", Some(DataValue::Number(1.0))),
+        ("expected_content", Some(DataValue::String(String::new()))),
+        (
+            "expected_content",
+            Some(DataValue::String(
+                "x".repeat(crate::memory_text::MAX_MEMORY_EDIT_CHARS + 1),
+            )),
+        ),
+        ("force", Some(DataValue::Bool(true))),
+    ] {
+        let mut call = valid.clone();
+        if let Some(value) = value {
+            call.args.insert(key.into(), value);
+        } else {
+            call.args.remove(key);
+        }
+        invalid.push(call);
+    }
+    for call in invalid {
+        let result = context
+            .clone()
+            .execute_tool(agent.clone(), message.clone(), call)
+            .await;
+        assert_eq!(result.status, TaskStatus::Error);
+        assert_eq!(context.memory.read().await.snapshot(), before);
+    }
+    for expected in [
+        original.content.trim().to_string(),
+        "plum tea".into(),
+        "stale preference: mint tea".into(),
+        format!("{}\n", original.content),
+    ] {
+        let result = context
+            .clone()
+            .execute_tool(
+                agent.clone(),
+                message.clone(),
+                memory_remove_call(&original.id, &expected),
+            )
+            .await;
+        assert_eq!(
+            result.error.as_deref(),
+            Some("memory changed; search again and use its exact current content")
+        );
+        assert_eq!(context.memory.read().await.snapshot(), before);
+    }
+    let result = context.clone().execute_tool(agent, message, valid).await;
+    assert_eq!(
+        result.status,
+        TaskStatus::Success,
+        "matching whitespace must remain exact, not trimmed"
+    );
+    assert_eq!(context.memory.read().await.get(&original.id), None);
+}
+
+#[tokio::test]
+async fn memory_remove_foreign_missing_nonfact_and_hidden_records_share_generic_refusal() {
+    let (context, agent, message) = memory_remove_fixture(None);
+    let foreign = seed_correction_memory(&context, "another-agent", "private foreign fact").await;
+    let mut records = vec![foreign];
+    for kind in [
+        anima_memory::MemoryType::Observation,
+        anima_memory::MemoryType::TaskResult,
+        anima_memory::MemoryType::Reflection,
+    ] {
+        let mut record = seed_correction_memory(&context, &agent.id, kind.as_str()).await;
+        record.memory_type = kind;
+        records.push(record);
+    }
+    for kind in ["id", "content", "tag"] {
+        let mut record =
+            seed_correction_memory(&context, &agent.id, &format!("hidden fixture {kind}")).await;
+        match kind {
+            "id" => record.id.push('\u{202E}'),
+            "content" => record.content.push('\u{202E}'),
+            _ => record.tags = Some(vec!["private\u{202E}tag".into()]),
+        }
+        records.push(record);
+    }
+    let mut before = context.memory.read().await.snapshot();
+    before.memories = records.clone();
+    context
+        .memory
+        .write()
+        .await
+        .replace_snapshot(before.clone());
+    before = context.memory.read().await.snapshot();
+    for id in records
+        .iter()
+        .map(|record| record.id.as_str())
+        .chain(["missing-memory"])
+    {
+        let result = context
+            .clone()
+            .execute_tool(
+                agent.clone(),
+                message.clone(),
+                memory_remove_call(id, "wrong expected text must not disclose eligibility"),
+            )
+            .await;
+        assert_eq!(
+            result.error.as_deref(),
+            Some("memory not found or not eligible for removal")
+        );
+        assert_eq!(context.memory.read().await.snapshot(), before);
+    }
+}
+
+#[tokio::test]
+async fn memory_remove_precommit_failure_rolls_back_canonical_and_search_and_embeddings() {
+    use anima_memory::MemoryVectorIndex;
+    let root = create_temp_workspace("memory-remove-failure");
+    let (context, agent, message) = memory_remove_fixture(Some(
+        crate::memory_store::MemoryStoreConfig::Json(root.clone()),
+    ));
+    let record = seed_correction_memory(&context, &agent.id, "rollback plum fact").await;
+    let before = context.memory.read().await.snapshot();
+    {
+        let mut embeddings = context.memory_embeddings.write().await;
+        *embeddings = MemoryEmbeddingRuntime::local_default();
+        embeddings.upsert_memory(&record).unwrap();
+    }
+    let result = context
+        .clone()
+        .execute_tool(
+            agent,
+            message,
+            memory_remove_call(&record.id, &record.content),
+        )
+        .await;
+    assert_eq!(result.status, TaskStatus::Error);
+    assert!(result
+        .error
+        .unwrap()
+        .starts_with("failed to persist memory removal:"));
+    let memory = context.memory.read().await;
+    assert_eq!(memory.snapshot(), before);
+    assert!(memory
+        .search("plum", Default::default())
+        .iter()
+        .any(|hit| hit.id == record.id));
+    drop(memory);
+    assert!(context
+        .memory_embeddings
+        .read()
+        .await
+        .search(&record.content, 10)
+        .iter()
+        .any(|hit| hit.memory_id == record.id));
+    fs::remove_dir(root).unwrap();
+}
+
+#[tokio::test]
+async fn memory_remove_concurrent_exact_requests_delete_once_and_leave_neighbor() {
+    let (context, agent, message) = memory_remove_fixture(None);
+    let record = seed_correction_memory(&context, &agent.id, "remove this exact fact").await;
+    let neighbor = seed_correction_memory(&context, &agent.id, "keep this fact").await;
+    let first = memory_remove_call(&record.id, &record.content);
+    let mut second = first.clone();
+    second.id = "remove-call-2".into();
+    // Both calls first wait for the same mutation lock; release it only after
+    // join has polled both, so this exercises serialization rather than replay.
+    let guard = context.memory.write().await;
+    let release = async move {
+        tokio::task::yield_now().await;
+        drop(guard);
+    };
+    let (left, right, ()) = tokio::join!(
+        context
+            .clone()
+            .execute_tool(agent.clone(), message.clone(), first),
+        context.clone().execute_tool(agent, message, second),
+        release,
+    );
+    let results = [left, right];
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| result.status == TaskStatus::Success)
+            .count(),
+        1
+    );
+    assert_eq!(
+        results
+            .iter()
+            .find(|result| result.status == TaskStatus::Error)
+            .unwrap()
+            .error
+            .as_deref(),
+        Some("memory not found or not eligible for removal")
+    );
+    assert_eq!(context.memory.read().await.get(&record.id), None);
+    assert_eq!(
+        context.memory.read().await.get(&neighbor.id),
+        Some(neighbor)
+    );
 }
 
 async fn memory_retrieval_fixture(

@@ -155,6 +155,144 @@ describe('SettingsPanel workspace section', () => {
 });
 
 describe('SettingsPanel access', () => {
+  it('memory_removal explicitly adds only the opt-in to a custom tool set', async () => {
+    const user = userEvent.setup();
+    const currentTools = [
+      'read_file',
+      'legacy_workspace_tool',
+      'mail_list_messages',
+      'drive_read',
+      'web_fetch',
+    ];
+    const saveSettings = vi.fn(async () => true);
+    renderPanel(agent({ toolNames: currentTools }), { saveSettings });
+
+    const removeFacts = screen.getByRole('checkbox', {
+      name: 'Allow removing saved facts',
+    });
+    expect(removeFacts).not.toBeChecked();
+    await user.click(removeFacts);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(saveSettings).toHaveBeenCalledWith({
+      tools: [...currentTools, 'memory_remove'],
+    });
+  });
+
+  it('memory_removal opt-out preserves every other configured tool', async () => {
+    const user = userEvent.setup();
+    const currentTools = [
+      'read_file',
+      'memory_remove',
+      'legacy_workspace_tool',
+      'mail_list_messages',
+      'drive_read',
+      'web_fetch',
+    ];
+    const saveSettings = vi.fn(async () => true);
+    renderPanel(agent({ toolNames: currentTools }), { saveSettings });
+
+    const removeFacts = screen.getByRole('checkbox', {
+      name: 'Allow removing saved facts',
+    });
+    expect(removeFacts).toBeChecked();
+    await user.click(removeFacts);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(saveSettings).toHaveBeenCalledWith({
+      tools: currentTools.filter((tool) => tool !== 'memory_remove'),
+    });
+  });
+
+  it('memory_removal stays opt-in when a standard profile replaces custom access', async () => {
+    const user = userEvent.setup();
+    const saveSettings = vi.fn(async () => true);
+    renderPanel(
+      agent({
+        toolNames: ['read_file', 'legacy_workspace_tool', 'memory_remove'],
+      }),
+      { saveSettings },
+    );
+
+    expect(screen.getByText('Custom access')).toBeVisible();
+    const removeFacts = screen.getByRole('checkbox', {
+      name: 'Allow removing saved facts',
+    });
+    expect(removeFacts).toBeChecked();
+    await user.click(screen.getByRole('radio', { name: /^Collaborate/ }));
+    expect(removeFacts).not.toBeChecked();
+    expect(
+      screen.getByText(/permanent removal of one active Fact only/i),
+    ).toBeVisible();
+    await user.click(removeFacts);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(saveSettings).toHaveBeenCalledWith({
+      tools: [...toolNamesForProfile('collaborate'), 'memory_remove'],
+    });
+    expect(toolNamesForProfile('collaborate')).not.toContain('memory_remove');
+  });
+
+  it('memory_removal keeps an unsaved opt-in draft after a failed save', async () => {
+    const user = userEvent.setup();
+    const currentAgent = agent({
+      toolNames: ['read_file', 'legacy_workspace_tool'],
+    });
+    const saveSettings = vi.fn(async () => false);
+    const view = renderPanel(currentAgent, { saveSettings });
+
+    const removeFacts = screen.getByRole('checkbox', {
+      name: 'Allow removing saved facts',
+    });
+    await user.click(removeFacts);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    view.rerender(
+      <SettingsPanel {...view.props} saveError="Unsupported tool" />,
+    );
+
+    expect(saveSettings).toHaveBeenCalledWith({
+      tools: [...currentAgent.toolNames, 'memory_remove'],
+    });
+    expect(removeFacts).toBeChecked();
+    expect(currentAgent.toolNames).not.toContain('memory_remove');
+    expect(screen.getByRole('alert')).toHaveTextContent('Unsupported tool');
+  });
+
+  it('memory_removal selection reseeds from an accepted tool configuration change', async () => {
+    const user = userEvent.setup();
+    const currentAgent = agent({
+      toolNames: ['read_file', 'memory_remove'],
+    });
+    const view = renderPanel(currentAgent);
+    const removeFacts = screen.getByRole('checkbox', {
+      name: 'Allow removing saved facts',
+    });
+    expect(removeFacts).toBeChecked();
+    await user.click(removeFacts);
+
+    view.rerender(
+      <SettingsPanel
+        {...view.props}
+        agent={{ ...currentAgent, toolNames: ['read_file'] }}
+      />,
+    );
+
+    expect(removeFacts).not.toBeChecked();
+
+    view.rerender(
+      <SettingsPanel
+        {...view.props}
+        agent={{
+          ...currentAgent,
+          id: 'agent-next',
+          toolNames: ['read_file', 'memory_remove'],
+        }}
+      />,
+    );
+
+    expect(removeFacts).toBeChecked();
+  });
+
   it('opens as a labelled modal and keeps keyboard focus inside it', async () => {
     const user = userEvent.setup();
     renderPanel(agent());
@@ -203,7 +341,12 @@ describe('SettingsPanel access', () => {
 
   it('keeps an unmatched, duplicate, legacy tool set as explicit Custom access when saving other fields', async () => {
     const user = userEvent.setup();
-    const customTools = ['read_file', 'legacy_workspace_tool', 'read_file'];
+    const customTools = [
+      'read_file',
+      'legacy_workspace_tool',
+      'read_file',
+      'memory_remove',
+    ];
     const saveSettings = vi.fn(async () => true);
     renderPanel(agent({ toolNames: customTools }), { saveSettings });
 
@@ -213,8 +356,11 @@ describe('SettingsPanel access', () => {
         'This agent has a custom tool set. Choose a standard profile to replace it when you save.',
       ),
     ).toBeVisible();
-    expect(screen.getByText('3 tools configured')).toBeVisible();
+    expect(screen.getByText('4 tools configured')).toBeVisible();
     expect(screen.getByText(customTools.join(', '))).toBeVisible();
+    expect(
+      screen.getByRole('checkbox', { name: 'Allow removing saved facts' }),
+    ).toBeChecked();
     for (const radio of screen.getAllByRole('radio')) {
       expect(radio).not.toBeChecked();
     }
@@ -312,7 +458,7 @@ describe('SettingsPanel access', () => {
   it('does not clobber an unsaved draft when a known tool set is reordered', async () => {
     const user = userEvent.setup();
     const currentAgent = agent({
-      toolNames: toolNamesForProfile('collaborate'),
+      toolNames: [...toolNamesForProfile('collaborate'), 'memory_remove'],
     });
     const view = renderPanel(currentAgent);
 
@@ -331,6 +477,9 @@ describe('SettingsPanel access', () => {
 
     expect(screen.getByDisplayValue('Unsaved Nova')).toBeVisible();
     expect(screen.getByRole('radio', { name: /^Collaborate/ })).toBeChecked();
+    expect(
+      screen.getByRole('checkbox', { name: 'Allow removing saved facts' }),
+    ).toBeChecked();
   });
 
   it('locks every editable control and reset while saving or resetting', () => {
@@ -343,6 +492,7 @@ describe('SettingsPanel access', () => {
       ...screen.getAllByRole('textbox'),
       ...screen.getAllByRole('combobox'),
       ...screen.getAllByRole('radio'),
+      ...screen.getAllByRole('checkbox'),
     ]) {
       expect(control).toBeDisabled();
     }
@@ -355,6 +505,7 @@ describe('SettingsPanel access', () => {
       ...screen.getAllByRole('textbox'),
       ...screen.getAllByRole('combobox'),
       ...screen.getAllByRole('radio'),
+      ...screen.getAllByRole('checkbox'),
     ]) {
       expect(control).toBeDisabled();
     }
