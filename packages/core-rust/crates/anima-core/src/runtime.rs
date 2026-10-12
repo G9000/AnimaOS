@@ -35,6 +35,10 @@ pub use observer::{
 };
 use observer::{tool_result_text, StepSink};
 
+#[path = "runtime/failure_guard.rs"]
+mod failure_guard;
+use failure_guard::{ExactFailureStreak, EXACT_FAILURE_HINT};
+
 #[path = "runtime/control.rs"]
 mod control;
 pub use control::{
@@ -473,6 +477,8 @@ impl AgentRuntime {
         let mut iterations = 0;
         let mut evaluator_retries = 0;
         let mut model_calls = 0u64;
+        let mut exact_failures = ExactFailureStreak::default();
+        let mut failure_hint_pending = false;
         let max_tool_iterations = self
             .state
             .config
@@ -503,6 +509,11 @@ impl AgentRuntime {
             if budget_wrapup {
                 system.push_str("\n\n");
                 system.push_str(BUDGET_WRAPUP_GUIDANCE);
+            }
+            if failure_hint_pending {
+                system.push_str("\n\n");
+                system.push_str(EXACT_FAILURE_HINT);
+                failure_hint_pending = false;
             }
             model_calls += 1;
             let step_id = self.step_id_for(model_calls);
@@ -607,6 +618,7 @@ impl AgentRuntime {
 
                     match response.stop_reason {
                         ModelStopReason::End | ModelStopReason::MaxTokens => {
+                            exact_failures.reset();
                             let evaluation =
                                 match self.run_evaluators(&user_message, &response.content).await {
                                     Ok(decision) => decision,
@@ -910,6 +922,14 @@ impl AgentRuntime {
                                     }
                                 }))
                                 .await;
+
+                            failure_hint_pending = if tool_results.len() == 1 {
+                                let (call, _, _, recovered, result, _) = &tool_results[0];
+                                exact_failures.observe(call, result, *recovered)
+                            } else {
+                                exact_failures.reset();
+                                false
+                            };
 
                             // Write done/failed steps to database
                             if let Some(db) = self.db.clone() {

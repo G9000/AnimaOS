@@ -106,6 +106,12 @@ wrap-up means its reply was saved, not that every requested action succeeded.
 Accepted wrap-ups carry `budgetWrapup: true` in message metadata. The original
 tool permissions remain available for the next independent run.
 
+After three consecutive single calls fail with the same canonical arguments and
+error, Anima gives the model one internal hint to reconsider the approach or
+explain the blocker. The hint adds no turn or tool action and preserves the real
+error records. Changed attempts, successful calls and parallel batches reset the
+streak. It is advisory; it does not prove that no partial effects occurred.
+
 ## Connect only what you use
 
 - Telegram: configure and pair through Connectors. The native daemon handles

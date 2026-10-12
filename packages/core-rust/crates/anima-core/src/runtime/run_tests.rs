@@ -1062,3 +1062,250 @@ fn budget_wrapup_counts_a_parallel_last_batch_as_one_round_and_keeps_paired_resu
         Some(&DataValue::Bool(true))
     );
 }
+
+const EXACT_FAILURE_HINT: &str = "This same tool call has returned the same error three times. Inspect the latest error, change the inputs or approach, or explain the blocker.";
+
+fn exact_failure_round(id: &str) -> ModelGenerateResponse {
+    let mut response = budget_reply(ModelStopReason::ToolCall, "attempting the read", false);
+    response.tool_calls = Some(vec![ToolCall {
+        id: id.into(),
+        name: "read".into(),
+        args: BTreeMap::from([
+            (
+                "path".into(),
+                DataValue::String("private-argument-sentinel".into()),
+            ),
+            (
+                "options".into(),
+                DataValue::Object(BTreeMap::from([
+                    ("z".into(), DataValue::Number(1.0)),
+                    ("a".into(), DataValue::Bool(true)),
+                ])),
+            ),
+        ]),
+    }]);
+    response
+}
+
+#[test]
+fn exact_failure_warning_appears_once_on_the_existing_next_request_without_changing_results() {
+    let model = BudgetBoundaryModel::new(vec![
+        Ok(exact_failure_round("attempt-1")),
+        Ok(exact_failure_round("attempt-2")),
+        Ok(exact_failure_round("attempt-3")),
+        Ok(budget_reply(
+            ModelStopReason::End,
+            "The exact error remains a blocker.",
+            false,
+        )),
+    ]);
+    let mut runtime = AgentRuntime::new(budget_config(8), model.clone());
+    let actual_results = std::sync::Mutex::new(Vec::new());
+    let result = block_on(runtime.run_with_context_and_tools(
+        Vec::new(),
+        text("Read the input"),
+        |_, _, call| {
+            let duration = actual_results.lock().unwrap().len() as u64 + 10;
+            let failure =
+                TaskResult::<Content>::error("private-error-sentinel: unavailable", duration);
+            actual_results
+                .lock()
+                .unwrap()
+                .push((call.id, failure.clone()));
+            async move { failure }
+        },
+    ));
+    assert_eq!(
+        result.status,
+        TaskStatus::Success,
+        "the advisory does not fail the run"
+    );
+    let requests = model.requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        4,
+        "the advisory never adds a provider request"
+    );
+    assert!(requests[..3]
+        .iter()
+        .all(|(_, request)| !request.system.contains(EXACT_FAILURE_HINT)));
+    assert_eq!(
+        requests[3].1.system.matches(EXACT_FAILURE_HINT).count(),
+        1,
+        "M24: three exact typed failures must add one fixed hint to the existing next request"
+    );
+    assert!(requests[3].1.system.ends_with(EXACT_FAILURE_HINT));
+    assert!(!requests[3].1.system.contains("private-argument-sentinel"));
+    assert!(!requests[3].1.system.contains("private-error-sentinel"));
+    assert!(!requests[3].1.system.contains("attempt-3"));
+    assert_eq!(
+        requests[3]
+            .1
+            .messages
+            .iter()
+            .filter(|message| message.role == MessageRole::User)
+            .count(),
+        1
+    );
+    let actual_results = actual_results.lock().unwrap();
+    let tool_messages: Vec<_> = runtime
+        .messages()
+        .iter()
+        .filter(|message| message.role == MessageRole::Tool)
+        .collect();
+    assert_eq!(tool_messages.len(), 3);
+    for (message, (id, original)) in tool_messages.iter().zip(actual_results.iter()) {
+        let metadata = message.content.metadata.as_ref().unwrap();
+        assert_eq!(
+            metadata.get("toolCallId"),
+            Some(&DataValue::String(id.clone()))
+        );
+        assert_eq!(
+            metadata.get("taskResult"),
+            Some(&crate::runtime_serde::task_result_data_value(original)),
+            "the detector cannot replace or augment the real result"
+        );
+    }
+    assert!(
+        runtime
+            .messages()
+            .iter()
+            .all(|message| message.role != MessageRole::System
+                && !message.content.text.contains(EXACT_FAILURE_HINT)),
+        "the transient hint is never a transcript row"
+    );
+    drop(requests);
+    drop(actual_results);
+    let snapshot = runtime.snapshot();
+    assert!(!serde_json::to_string(&snapshot)
+        .unwrap()
+        .contains(EXACT_FAILURE_HINT));
+    let next_model = BudgetBoundaryModel::new(vec![
+        Ok(exact_failure_round("fresh-1")),
+        Ok(exact_failure_round("fresh-2")),
+        Ok(budget_reply(ModelStopReason::End, "Still blocked", false)),
+    ]);
+    let mut restored = AgentRuntime::from_snapshot(snapshot, next_model.clone());
+    block_on(restored.run_with_context_and_tools(
+        Vec::new(),
+        text("Try an independent task"),
+        |_, _, _| async { TaskResult::error("private-error-sentinel: unavailable", 99) },
+    ));
+    assert!(
+        next_model
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|(_, request)| !request.system.contains(EXACT_FAILURE_HINT)),
+        "restored independent runs start a new streak"
+    );
+}
+
+#[test]
+fn exact_failure_warning_never_adds_a_request_after_stop_at_the_budget_boundary() {
+    let model = BudgetBoundaryModel::new(vec![
+        Ok(exact_failure_round("one")),
+        Ok(exact_failure_round("two")),
+        Ok(exact_failure_round("three")),
+        Ok(budget_reply(
+            ModelStopReason::End,
+            "forbidden wrap-up",
+            false,
+        )),
+    ]);
+    let control = super::RunControl::new();
+    let mut runtime = AgentRuntime::new(budget_config(3), model.clone());
+    runtime.set_run_control(control.clone());
+    let callbacks = std::sync::atomic::AtomicUsize::new(0);
+    let result =
+        block_on(
+            runtime.run_with_context_and_tools(Vec::new(), text("Read"), |_, _, _| {
+                if callbacks.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 2 {
+                    control.cancel.cancel();
+                }
+                async { TaskResult::error("same exact failure", 1) }
+            }),
+        );
+    assert_eq!(result.error.as_deref(), Some(super::RUN_STOPPED_ERROR));
+    assert_eq!(callbacks.load(std::sync::atomic::Ordering::SeqCst), 3);
+    assert_eq!(
+        model.requests.lock().unwrap().len(),
+        3,
+        "a prepared advisory cannot request another turn or wrap-up after Stop"
+    );
+    assert_eq!(
+        runtime
+            .messages()
+            .iter()
+            .filter(|message| message.role == MessageRole::Tool)
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn exact_failure_warning_parallel_round_resets_the_streak_and_preserves_every_pair() {
+    let mut parallel = exact_failure_round("parallel-a");
+    parallel.tool_calls.as_mut().unwrap().push(
+        exact_failure_round("parallel-b")
+            .tool_calls
+            .unwrap()
+            .remove(0),
+    );
+    let model = BudgetBoundaryModel::new(vec![
+        Ok(exact_failure_round("one")),
+        Ok(exact_failure_round("two")),
+        Ok(parallel),
+        Ok(exact_failure_round("after-one")),
+        Ok(exact_failure_round("after-two")),
+        Ok(budget_reply(
+            ModelStopReason::End,
+            "The attempts remain blocked",
+            false,
+        )),
+    ]);
+    let mut runtime = AgentRuntime::new(budget_config(8), model.clone());
+    let callbacks = std::sync::atomic::AtomicUsize::new(0);
+    let result =
+        block_on(
+            runtime.run_with_context_and_tools(Vec::new(), text("Read"), |_, _, _| {
+                callbacks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async { TaskResult::error("same exact failure", 1) }
+            }),
+        );
+    assert_eq!(result.status, TaskStatus::Success);
+    assert_eq!(callbacks.load(std::sync::atomic::Ordering::SeqCst), 6);
+    let requests = model.requests.lock().unwrap();
+    assert_eq!(requests.len(), 6);
+    assert!(requests
+        .iter()
+        .all(|(_, request)| !request.system.contains(EXACT_FAILURE_HINT)));
+    let pairs: Vec<_> = runtime
+        .messages()
+        .iter()
+        .filter(|message| message.role == MessageRole::Tool)
+        .map(|message| {
+            message
+                .content
+                .metadata
+                .as_ref()
+                .unwrap()
+                .get("toolCallId")
+                .unwrap()
+                .clone()
+        })
+        .collect();
+    assert_eq!(
+        pairs,
+        [
+            "one",
+            "two",
+            "parallel-a",
+            "parallel-b",
+            "after-one",
+            "after-two"
+        ]
+        .map(|id| DataValue::String(id.into()))
+    );
+}
