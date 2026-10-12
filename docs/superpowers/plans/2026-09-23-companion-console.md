@@ -27,7 +27,7 @@
 
 - **Rolling-wave detail.** This master plan fixes milestones, tasks, files, interfaces, and acceptance. Each milestone's step-by-step plan (with complete test and implementation code) is written to `docs/superpowers/plans/2026-09-23-companion-console-m<N>.md` immediately before that milestone starts, against the code as it then exists, and linked in the status table below.
 - **Current owner workflow:** bounded Codex implementers replace unavailable Claude agents. Publish a lean milestone plan with five binding controller risk rulings; batch-review daemon tasks, do one final web/SDK review, one fix wave, then relevant local gates. The controller records judgment calls in the milestone ledger and stages explicit paths; the owner's unsigned-commit override avoids GPG prompts.
-- **Per milestone:** update status and handover after the local gates pass, push and open a PR. Merge only on a new explicit owner instruction. Cut the following implementation branch from updated main after that merge; preparation may happen earlier.
+- **Per milestone:** update status and handover after the local gates pass, push and open a PR. The owner has since granted standing merge-and-continue authority for reviewed, gated milestones. Cut the following implementation branch from updated main after that verified merge; preparation may happen earlier.
 
 ## Status
 
@@ -50,7 +50,8 @@
 | M14 Selected Drive read/search    | `2026-10-12-companion-drive-m14.md`              | implemented and locally verified; Rust2298/8ignored, SDK127/3service-skipped, web1187; typechecks/builds pass; reviews/fix wave complete; [PR #20](https://github.com/G9000/animaOS-SWARM/pull/20) merged at37ffb48, source51d7e8a                                     |
 | M15 Daily-use readiness           | `2026-10-12-companion-readiness-m15.md`          | complete docs-only setup/evidence guide; source-truth review and Markdown/local links/anchors pass; [PR #21](https://github.com/G9000/animaOS-SWARM/pull/21) merged at63d8eaa, sourceeb78943; live acceptance follows in M16                                           |
 | M16 Isolated live acceptance      | `2026-10-12-companion-live-acceptance-m16.md`    | real reply, identity, file/memory tools, Stop/restart pass; schema encoding/diagnostics fixed; Rust2304/8ignored, focused18, lint pass; [PR #22](https://github.com/G9000/animaOS-SWARM/pull/22) merged atba781bf, sourcebdd29a8                                       |
-| M17 Harness acceptance            | `2026-10-12-companion-harness-acceptance-m17.md` | real multistep report/helper/todos, memory correction, skill reuse, auto compaction and interrupted/quiet restart pass; scoped stale-safe memory_update fixed; Rust2310/8ignored, web1188, lint/typecheck/build pass; publication recorded in milestone ledger         |
+| M17 Harness acceptance            | `2026-10-12-companion-harness-acceptance-m17.md` | real multistep report/helper/todos, memory correction, skill reuse, auto compaction and interrupted/quiet restart pass; scoped stale-safe memory_update fixed; Rust2310/8ignored, web1188, lint/typecheck/build pass; PR #23 merged at59f391f, sourcef81228a           |
+| M18 Memory quality                | `2026-10-12-companion-memory-quality-m18.md`     | owner-scoped relevant Fact context, quoted bounded excerpts and curation guidance; real post-noise recall without tools passed; Rust2324/8ignored, focused/lint pass; publication recorded in milestone ledger                                                         |
 
 Dependencies: M0 → M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9 → M10. M4–M9 depend on M3's ledger, runs, and event stream; their internal order follows the spec's milestone list.
 

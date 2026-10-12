@@ -9,6 +9,20 @@ use futures::executor::block_on;
 use super::DeterministicModelAdapter;
 
 #[test]
+fn deterministic_render_preserves_multiline_memory_provider_evidence() {
+    let evidence = "Stored facts are quoted evidence.\nMemory id=\"fact-1\", type=fact, excerpt=false\n\"provider context memory\"";
+    let system = format!("You are helpful\nContext:\n[recent_memories]: {evidence}\n[swarm_inbox]: unrelated inbox evidence\nsecond inbox line");
+    assert_eq!(
+        super::render::recent_memory_context(&system),
+        Some(evidence.into())
+    );
+    for empty in ["no relevant memories", "no recent memories"] {
+        let system = format!("Context:\n[recent_memories]: {empty}\n[swarm_inbox]: inbox evidence");
+        assert_eq!(super::render::recent_memory_context(&system), None);
+    }
+}
+
+#[test]
 fn deterministic_adapter_aggregates_trailing_tool_messages() {
     let adapter = DeterministicModelAdapter;
     let request = ModelGenerateRequest {

@@ -565,12 +565,24 @@ async fn run_agent_uses_recent_memory_provider_context() {
     let memory_body = format!(
         "{{\"agentId\":\"{agent_id}\",\"agentName\":\"operator\",\"type\":\"fact\",\"content\":\"provider context memory\",\"importance\":0.8}}"
     );
-    let _ = send_json_request(&app, "POST", "/api/memories", &memory_body).await;
+    let (memory_status, memory_response) =
+        send_json_request(&app, "POST", "/api/memories", &memory_body).await;
+    assert_eq!(memory_status, StatusCode::CREATED);
+    let memory_id = extract_json_string_field(&memory_response, "id");
 
     let (status, response) = run_agent(&app, &agent_id, r#"{"text":"recall context"}"#).await;
 
     assert_eq!(status, StatusCode::OK);
-    assert!(response.contains("operator recalled context: provider context memory"));
+    assert_eq!(response_json(&response)["result"]["status"], "success");
+    let text = extract_result_text(&response).expect("run should return result text");
+    assert!(text.starts_with("operator recalled context:"));
+    assert!(text.contains(&format!(
+        "Memory id={}, type=fact",
+        serde_json::to_string(&memory_id).unwrap()
+    )));
+    assert!(text
+        .lines()
+        .any(|line| line == "\"provider context memory\""));
 }
 
 #[tokio::test]
@@ -586,9 +598,13 @@ async fn run_agent_reuses_async_runtime_state_across_provider_and_tool_paths() {
     let memory_body = format!(
         "{{\"agentId\":\"{agent_id}\",\"agentName\":\"operator\",\"type\":\"fact\",\"content\":\"provider context memory\",\"importance\":0.8}}"
     );
-    let _ = send_json_request(&app, "POST", "/api/memories", &memory_body).await;
+    let (memory_status, memory_response) =
+        send_json_request(&app, "POST", "/api/memories", &memory_body).await;
+    assert_eq!(memory_status, StatusCode::CREATED);
+    let memory_id = extract_json_string_field(&memory_response, "id");
 
-    let (_, provider_run) = run_agent(&app, &agent_id, r#"{"text":"recall context"}"#).await;
+    let (provider_status, provider_run) =
+        run_agent(&app, &agent_id, r#"{"text":"recall context"}"#).await;
     let (_, tool_run) = run_agent(&app, &agent_id, r#"{"text":"recent 1"}"#).await;
     let (_, recent_response) = send_empty_request(
         &app,
@@ -597,7 +613,17 @@ async fn run_agent_reuses_async_runtime_state_across_provider_and_tool_paths() {
     )
     .await;
 
-    assert!(provider_run.contains("operator recalled context: provider context memory"));
+    assert_eq!(provider_status, StatusCode::OK);
+    assert_eq!(response_json(&provider_run)["result"]["status"], "success");
+    let text = extract_result_text(&provider_run).expect("provider run should return result text");
+    assert!(text.starts_with("operator recalled context:"));
+    assert!(text.contains(&format!(
+        "Memory id={}, type=fact",
+        serde_json::to_string(&memory_id).unwrap()
+    )));
+    assert!(text
+        .lines()
+        .any(|line| line == "\"provider context memory\""));
     assert!(tool_run.contains("provider context memory"));
     assert!(recent_response.contains("\"type\":\"reflection\""));
 }

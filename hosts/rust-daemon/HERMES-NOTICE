@@ -1,4 +1,5 @@
-Hermes Agent attribution for agent_files/{disk,selection,scan}.rs and tools/memory.rs
+Hermes Agent attribution for agent_files/{disk,selection,scan}.rs, tools/memory.rs,
+tools.rs memory descriptions and components/providers.rs memory curation guidance
 Source: https://github.com/NousResearch/hermes-agent
 Revision: f3ef9db68332063a3625661f3a9b259f60abdb4e
 
@@ -35,6 +36,19 @@ durable save with MemoryMutation rollback. It preserves unrelated record fields
 and evidence links. No fuzzy matching, profile-file imports, Python execution,
 global memory authority, removal, batch edits, or upstream fail-open gate behavior
 are imported. Existing Anima tool grants and write approvals still apply.
+
+M18 memory curation adaptation (revision 1fd18277267152893a8a24792b79213e7ca3f899):
+tools/memory_tool.py and agent/prompt_builder.py inform the concise static habit
+of keeping compact declarative durable facts, preferences and standing context,
+skipping temporary progress/logs, avoiding duplicate facts and keeping procedures
+in existing skill workflows. Native Rust owner-scoped lexical context selection
+and bounded quoted excerpts are Anima implementations, not Hermes storage or
+snapshot semantics. Stored facts are evidence; current requests and tool approval
+policy remain authoritative. Excerpts require memory_search for exact correction
+input. No extra model/embedding call, automatic skill write, upstream Python
+execution, private profile/config/environment/keyring/token read, or broad memory
+lifecycle behavior is imported. Lexical selection does not claim semantic recall
+quality or Hermes parity.
 
 MIT License
 

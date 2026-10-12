@@ -12,13 +12,13 @@ use anima_core::primitives::now_millis;
 
 pub use self::edit::{EntityDeletion, MemoryDeletion, MemoryPatch};
 pub use self::types::{
-    AgentRelationship, AgentRelationshipOptions, Memory, MemoryEntity, MemoryEntityOptions,
-    MemoryError, MemoryEvaluation, MemoryEvaluationDecision, MemoryEvaluationOptions,
-    MemoryEvaluationOutcome, MemoryEvidenceTrace, MemoryImportanceAdjustment,
-    MemoryManagerSnapshot, MemoryRecallOptions, MemoryRecallResult, MemoryRecallWeights,
-    MemoryRetentionPolicy, MemoryRetentionReport, MemoryScope, MemorySearchOptions,
-    MemorySearchResult, MemoryType, MemoryVectorIndex, NewAgentRelationship, NewMemory,
-    NewMemoryEntity, NewTemporalFact, NewTemporalRelationship, RecentMemoryOptions,
+    AgentRelationship, AgentRelationshipOptions, Memory, MemoryContextOptions, MemoryEntity,
+    MemoryEntityOptions, MemoryError, MemoryEvaluation, MemoryEvaluationDecision,
+    MemoryEvaluationOptions, MemoryEvaluationOutcome, MemoryEvidenceTrace,
+    MemoryImportanceAdjustment, MemoryManagerSnapshot, MemoryRecallOptions, MemoryRecallResult,
+    MemoryRecallWeights, MemoryRetentionPolicy, MemoryRetentionReport, MemoryScope,
+    MemorySearchOptions, MemorySearchResult, MemoryType, MemoryVectorIndex, NewAgentRelationship,
+    NewMemory, NewMemoryEntity, NewTemporalFact, NewTemporalRelationship, RecentMemoryOptions,
     RelationshipEndpointKind, TemporalFact, TemporalFactOptions, TemporalRecordStatus,
     TemporalRelationship, TemporalRelationshipOptions, VectorMemoryHit,
 };
@@ -28,6 +28,62 @@ static NEXT_MEMORY_ID: AtomicU64 = AtomicU64::new(0);
 static NEXT_RELATIONSHIP_ID: AtomicU64 = AtomicU64::new(0);
 static NEXT_TEMPORAL_FACT_ID: AtomicU64 = AtomicU64::new(0);
 static NEXT_TEMPORAL_RELATIONSHIP_ID: AtomicU64 = AtomicU64::new(0);
+
+fn context_query_terms(query: &str) -> BTreeSet<String> {
+    // Small English grammar/question list only; short and non-English terms survive.
+    const STOP_WORDS: &[&str] = &[
+        "a", "an", "and", "are", "as", "at", "be", "can", "could", "do", "does", "for", "from",
+        "how", "i", "in", "is", "it", "me", "my", "of", "on", "or", "please", "tell", "that",
+        "the", "this", "to", "was", "what", "when", "where", "which", "who", "why", "will", "with",
+        "would", "you", "your",
+    ];
+    let bounded: String = query.chars().take(512).collect();
+    let mut terms = BTreeSet::new();
+    for term in bounded.split(|character: char| !character.is_alphanumeric()) {
+        let term = term.to_lowercase();
+        if !term.is_empty() && !STOP_WORDS.contains(&term.as_str()) {
+            terms.insert(term);
+            if terms.len() == 32 {
+                break;
+            }
+        }
+    }
+    terms
+}
+
+fn context_term_overlap(content: &str, query_terms: &BTreeSet<String>) -> usize {
+    let mut matches = BTreeSet::new();
+    for term in content.split(|character: char| !character.is_alphanumeric()) {
+        if let Some(matched) = query_terms.get(&term.to_lowercase()) {
+            matches.insert(matched);
+            if matches.len() == query_terms.len() {
+                break;
+            }
+        }
+    }
+    matches.len()
+}
+
+fn normalized_context_content(content: &str) -> impl Iterator<Item = char> + '_ {
+    content.split_whitespace().flat_map(|word| {
+        word.chars()
+            .flat_map(char::to_lowercase)
+            .chain(std::iter::once(' '))
+    })
+}
+
+fn compare_context_candidates(
+    left: &(&Memory, usize),
+    right: &(&Memory, usize),
+) -> std::cmp::Ordering {
+    // The query denominator is constant, so distinct overlap orders coverage exactly.
+    right
+        .1
+        .cmp(&left.1)
+        .then_with(|| right.0.importance.total_cmp(&left.0.importance))
+        .then_with(|| right.0.created_at.cmp(&left.0.created_at))
+        .then_with(|| left.0.id.cmp(&right.0.id))
+}
 
 #[derive(Default)]
 pub struct MemoryManager {
@@ -40,6 +96,63 @@ pub struct MemoryManager {
 }
 
 impl MemoryManager {
+    pub fn select_context(
+        &self,
+        opts: MemoryContextOptions,
+        visible: impl Fn(&Memory) -> bool,
+    ) -> Vec<Memory> {
+        if opts.limit == 0 {
+            return Vec::new();
+        }
+        let terms = context_query_terms(&opts.query);
+        if terms.is_empty() {
+            return Vec::new();
+        }
+        let mut selected: Vec<(&Memory, usize)> = Vec::new();
+        for memory in self.memories.values() {
+            if memory.agent_id != opts.agent_id
+                || memory.memory_type != MemoryType::Fact
+                || memory.world_id.is_some()
+                || memory.session_id.is_some()
+                || (memory.scope == MemoryScope::Room
+                    && !opts.room_id.as_ref().is_some_and(|room| {
+                        !room.is_empty() && memory.room_id.as_ref() == Some(room)
+                    }))
+                || !visible(memory)
+            {
+                continue;
+            }
+            let overlap = context_term_overlap(&memory.content, &terms);
+            if overlap == 0 {
+                continue;
+            }
+            let candidate = (memory, overlap);
+            if let Some(index) = selected.iter().position(|(existing, _)| {
+                normalized_context_content(&existing.content)
+                    .eq(normalized_context_content(&memory.content))
+            }) {
+                if compare_context_candidates(&candidate, &selected[index]).is_ge() {
+                    continue;
+                }
+                selected.remove(index);
+            }
+            if selected.len() == opts.limit
+                && compare_context_candidates(&candidate, selected.last().unwrap()).is_ge()
+            {
+                continue;
+            }
+            selected.push(candidate);
+            selected.sort_by(compare_context_candidates);
+            if selected.len() > opts.limit {
+                selected.pop();
+            }
+        }
+        selected
+            .into_iter()
+            .map(|(memory, _)| memory.clone())
+            .collect()
+    }
+
     pub fn new() -> Self {
         Self::with_text_analyzer_and_query_expander(
             TextAnalyzer::default(),
