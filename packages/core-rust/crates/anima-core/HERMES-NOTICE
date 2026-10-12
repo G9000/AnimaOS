@@ -16,6 +16,14 @@ system guidance rather than a synthetic user message, evaluator acceptance and
 budgetWrapup provenance. No summary retry or fallback after a terminal failure.
 No upstream Python runtime, personal profile or credentials are imported.
 
+M24 adapts the advisory exact-failure pattern from the same public revision:
+agent/tool_guardrails.py::ToolCallGuardrailController.after_call.
+Anima differences: three consecutive fresh single-call typed failures with
+identical canonical arguments/error, one transient fixed system warning, bounded
+digest-only per-run state. Successful/malformed/recovered/parallel rounds reset;
+no name-based effect inference, result rewriting, hard stop or added model turn.
+Upstream defaults its exact-failure warning threshold to two; Anima uses three.
+
 MIT License
 
 Copyright (c) 2025 Nous Research
