@@ -65,6 +65,8 @@
 
 | M27 Repeated-result advice | `2026-10-12-companion-agent-loop-m27.md` | one factual per-streak hint after3fresh bounded identical plain-text successes; full results/callbacks/frames/DB/budget/Stop preserved; no progress/effect inference; meaningfulRED/6compactcases, Rust2404/8ignored/lint/review pass; no live provider task; publication in milestone ledger |
 
+| M28 Latest core-loop acceptance | `2026-10-12-companion-agent-loop-m28.md` | docs-only actual own-memory search/exact edit/18bytewrite/accepted budget wrap-up:4steps/12595reportedtokens/3persistent receipts; same-run8messages/effects/receipts/mtime afterquietrestart/no replay/restoredsettings/14ownedprocessesgone; M27source/gates unchanged; publication in milestone ledger |
+
 Dependencies: M0 → M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9 → M10. M4–M9 depend on M3's ledger, runs, and event stream; their internal order follows the spec's milestone list.
 
 ---

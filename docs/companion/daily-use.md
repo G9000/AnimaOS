@@ -25,6 +25,11 @@ unclaimed while its due time passed with the daemon off; it ran automatically
 after startup and remained completed without replay after a quiet restart. This
 was a short local outage, not a test of recurring catch-up or hosted uptime.
 
+The latest merged loop also passed one fresh memory-search/exact-edit/file task
+and its tool-free final reply, followed by a quiet restart retaining the original
+messages, action records and unchanged file. See the
+[harness acceptance evidence](harness-acceptance.md) for tested behavior and gaps.
+
 ## Start with one companion
 
 Use the existing [local workflow](../../AGENTS.md#dev-workflow) or
