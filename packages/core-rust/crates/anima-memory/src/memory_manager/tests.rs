@@ -31,6 +31,406 @@ fn add_memory(manager: &mut MemoryManager, memory: NewMemory) -> super::Memory {
     manager.add(memory).expect("memory should be added")
 }
 
+fn retrieval_crowdout_fixture(excluded: impl Fn(&mut NewMemory)) -> (MemoryManager, super::Memory) {
+    let mut manager = MemoryManager::new();
+    let own = add_memory(
+        &mut manager,
+        base(|memory| {
+            memory.content = format!(
+                "needle eligible fact {}",
+                "durable supporting detail ".repeat(80)
+            );
+            memory.importance = 0.8;
+            memory.scope = Some(MemoryScope::Room);
+            memory.room_id = Some("room-eligible".into());
+            memory.world_id = Some("world-eligible".into());
+            memory.session_id = Some("session-eligible".into());
+        }),
+    );
+    for index in 0..8 {
+        add_memory(
+            &mut manager,
+            base(|memory| {
+                memory.content = format!("needle needle stronger {index}");
+                memory.importance = 0.9;
+                memory.scope = Some(MemoryScope::Room);
+                memory.room_id = Some("room-eligible".into());
+                memory.world_id = Some("world-eligible".into());
+                memory.session_id = Some("session-eligible".into());
+                excluded(memory);
+            }),
+        );
+    }
+    assert!(
+        manager
+            .index
+            .search("needle", 3)
+            .iter()
+            .all(|result| result.id != own.id),
+        "fixture must crowd the eligible fact out of the old global candidate pool"
+    );
+    (manager, own)
+}
+
+fn assert_retrieval_returns_eligible(
+    manager: &MemoryManager,
+    own: &super::Memory,
+    options: MemorySearchOptions,
+) {
+    let results = manager.search("needle", options);
+    assert_eq!(
+        results.len(),
+        1,
+        "eligible records must not lose their slot to excluded matches"
+    );
+    assert_eq!(results[0].id, own.id);
+    assert_eq!(results[0].content, own.content);
+}
+
+#[test]
+fn retrieval_filter_owner_precedes_global_lexical_limit() {
+    let (manager, own) =
+        retrieval_crowdout_fixture(|memory| memory.agent_id = "foreign-owner".into());
+    assert_retrieval_returns_eligible(
+        &manager,
+        &own,
+        MemorySearchOptions {
+            agent_id: Some("agent-1".into()),
+            limit: Some(1),
+            ..MemorySearchOptions::default()
+        },
+    );
+}
+
+#[test]
+fn retrieval_filter_type_precedes_global_lexical_limit() {
+    let (manager, own) =
+        retrieval_crowdout_fixture(|memory| memory.memory_type = MemoryType::Reflection);
+    assert_retrieval_returns_eligible(
+        &manager,
+        &own,
+        MemorySearchOptions {
+            memory_type: Some(MemoryType::Fact),
+            limit: Some(1),
+            ..MemorySearchOptions::default()
+        },
+    );
+}
+
+#[test]
+fn retrieval_filter_scope_precedes_global_lexical_limit() {
+    let (manager, own) =
+        retrieval_crowdout_fixture(|memory| memory.scope = Some(MemoryScope::Private));
+    assert_retrieval_returns_eligible(
+        &manager,
+        &own,
+        MemorySearchOptions {
+            scope: Some(MemoryScope::Room),
+            room_id: Some("room-eligible".into()),
+            world_id: Some("world-eligible".into()),
+            session_id: Some("session-eligible".into()),
+            limit: Some(1),
+            ..MemorySearchOptions::default()
+        },
+    );
+}
+
+#[test]
+fn retrieval_filter_minimum_importance_precedes_global_lexical_limit() {
+    let (manager, own) = retrieval_crowdout_fixture(|memory| memory.importance = 0.1);
+    assert_retrieval_returns_eligible(
+        &manager,
+        &own,
+        MemorySearchOptions {
+            min_importance: Some(0.7),
+            limit: Some(1),
+            ..MemorySearchOptions::default()
+        },
+    );
+}
+
+#[test]
+fn retrieval_filter_existing_apis_return_no_records_at_zero_limit() {
+    let mut manager = MemoryManager::new();
+    add_memory(
+        &mut manager,
+        base(|memory| memory.content = "needle fact".into()),
+    );
+    assert!(manager.index.search("needle", 0).is_empty());
+    assert!(manager
+        .search(
+            "needle",
+            MemorySearchOptions {
+                limit: Some(0),
+                ..MemorySearchOptions::default()
+            }
+        )
+        .is_empty());
+    assert!(manager
+        .recall(
+            "needle",
+            MemoryRecallOptions {
+                limit: Some(0),
+                ..MemoryRecallOptions::default()
+            }
+        )
+        .is_empty());
+    assert!(manager
+        .get_recent(RecentMemoryOptions {
+            limit: Some(0),
+            ..RecentMemoryOptions::default()
+        })
+        .is_empty());
+}
+
+#[test]
+fn retrieval_filter_preserves_bm25_corpus_scores_and_weighted_recall() {
+    let (manager, own) =
+        retrieval_crowdout_fixture(|memory| memory.agent_id = "foreign-owner".into());
+    let before = manager.snapshot();
+    let baseline = manager.index.search("needle", 9);
+    let baseline_score = baseline
+        .iter()
+        .find(|result| result.id == own.id)
+        .unwrap()
+        .score;
+    let admitted = [baseline[0].id.clone(), own.id.clone()];
+    let expected_order: Vec<_> = baseline
+        .iter()
+        .filter(|result| admitted.contains(&result.id))
+        .map(|result| (result.id.clone(), result.score))
+        .collect();
+    let admitted_order: Vec<_> = manager
+        .index
+        .search_filtered("needle", 2, |id| {
+            admitted.iter().any(|allowed| allowed == id)
+        })
+        .into_iter()
+        .map(|result| (result.id, result.score))
+        .collect();
+    assert_eq!(
+        admitted_order, expected_order,
+        "retain existing BM25 score order among eligible documents"
+    );
+    let filtered = manager
+        .index
+        .search_filtered("needle", 1, |id| id == own.id);
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].id, own.id);
+    assert_eq!(
+        filtered[0].score, baseline_score,
+        "eligibility must not recompute corpus statistics"
+    );
+    let options = MemorySearchOptions {
+        agent_id: Some("agent-1".into()),
+        memory_type: Some(MemoryType::Fact),
+        scope: Some(MemoryScope::Room),
+        room_id: Some("room-eligible".into()),
+        world_id: Some("world-eligible".into()),
+        session_id: Some("session-eligible".into()),
+        min_importance: Some(0.7),
+        limit: Some(2),
+        ..MemorySearchOptions::default()
+    };
+    let search = manager.search_filtered("needle", options.clone(), |_| true);
+    assert_eq!(search.len(), 1);
+    assert_eq!(search[0].id, own.id);
+    assert_eq!(search[0].score, baseline_score);
+    let vector = StaticVectorIndex {
+        hits: vec![VectorMemoryHit {
+            memory_id: own.id.clone(),
+            score: 0.7,
+        }],
+    };
+    let recall = MemoryRecallOptions {
+        search: options,
+        limit: Some(2),
+        recent_limit: Some(0),
+        temporal_limit: Some(0),
+        ..MemoryRecallOptions::default()
+    };
+    let results =
+        manager.recall_with_vector_index_filtered("needle", recall, Some(&vector), |_| true);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].memory.id, own.id);
+    assert_eq!(results[0].lexical_score, 1.0);
+    assert_eq!(results[0].vector_score, 1.0);
+    let weights = super::MemoryRecallWeights::default();
+    let expected_score = weights.lexical + weights.importance * own.importance;
+    assert!(
+        (results[0].score - expected_score).abs() < 1e-12,
+        "retain the existing exact-lexical vector suppression and weighting"
+    );
+    assert_eq!(manager.snapshot(), before);
+}
+
+#[test]
+fn retrieval_filter_visibility_precedes_limits_on_each_recall_source() {
+    for source in [
+        "lexical",
+        "recent",
+        "vector",
+        "relationship",
+        "temporal",
+        "fallback",
+    ] {
+        let mut manager = MemoryManager::new();
+        let visible = add_memory(
+            &mut manager,
+            base(|memory| {
+                memory.content = "Leo prefers mint tea needle visible".into();
+                memory.importance = 0.1;
+            }),
+        );
+        let hidden = add_memory(
+            &mut manager,
+            base(|memory| {
+                memory.content = "Leo prefers mint tea needle hidden".into();
+                memory.importance = 1.0;
+            }),
+        );
+        manager.memories.get_mut(&visible.id).unwrap().created_at = 10;
+        manager.memories.get_mut(&hidden.id).unwrap().created_at = 20;
+        let mut options = MemoryRecallOptions {
+            search: MemorySearchOptions {
+                agent_id: Some("agent-1".into()),
+                ..MemorySearchOptions::default()
+            },
+            limit: Some(1),
+            lexical_limit: Some(0),
+            recent_limit: Some(0),
+            temporal_limit: Some(0),
+            ..MemoryRecallOptions::default()
+        };
+        let vector = StaticVectorIndex {
+            hits: vec![
+                VectorMemoryHit {
+                    memory_id: hidden.id.clone(),
+                    score: 1.0,
+                },
+                VectorMemoryHit {
+                    memory_id: visible.id.clone(),
+                    score: 0.5,
+                },
+            ],
+        };
+        let mut query = "nonmatching lookup";
+        match source {
+            "lexical" => {
+                options.lexical_limit = Some(1);
+                query = "needle";
+            }
+            "recent" => options.recent_limit = Some(1),
+            "vector" => options.lexical_limit = Some(2),
+            "relationship" => {
+                manager
+                    .upsert_agent_relationship(base_relationship(|relationship| {
+                        relationship.source_agent_id = "agent-1".into();
+                        relationship.evidence_memory_ids =
+                            vec![hidden.id.clone(), visible.id.clone()];
+                    }))
+                    .unwrap();
+            }
+            "temporal" | "fallback" => {
+                options.entity_id = Some("user-leo".into());
+                options.temporal_limit = Some(1);
+                query = "What drink does Leo prefer?";
+                manager
+                    .add_temporal_fact(base_temporal_fact(|fact| {
+                        if source == "temporal" {
+                            fact.evidence_memory_ids = vec![hidden.id.clone(), visible.id.clone()];
+                        }
+                    }))
+                    .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let before = manager.snapshot();
+        let results = manager.recall_with_vector_index_filtered(
+            query,
+            options,
+            (source == "vector").then_some(&vector as &dyn MemoryVectorIndex),
+            |memory| memory.id != hidden.id,
+        );
+        assert_eq!(results.len(), 1, "{source} must retain the eligible fact");
+        assert_eq!(
+            results[0].memory.id, visible.id,
+            "{source} must reject hidden candidates before final truncation"
+        );
+        match source {
+            "lexical" => assert!(results[0].lexical_score > 0.0),
+            "recent" => assert_eq!(results[0].recency_score, 1.0),
+            "vector" => assert_eq!(
+                results[0].vector_score, 0.5,
+                "existing vector normalization/top-k remain unchanged"
+            ),
+            "relationship" => assert!(results[0].relationship_score > 0.0),
+            "temporal" | "fallback" => assert!(results[0].temporal_score > 0.0),
+            _ => unreachable!(),
+        }
+        assert_eq!(manager.snapshot(), before);
+    }
+}
+
+#[test]
+fn retrieval_filter_filtered_apis_handle_zero_empty_and_rejected_results() {
+    let mut manager = MemoryManager::new();
+    add_memory(
+        &mut manager,
+        base(|memory| memory.content = "needle fact".into()),
+    );
+    assert!(manager
+        .index
+        .search_filtered("needle", 0, |_| true)
+        .is_empty());
+    assert!(manager
+        .search_filtered(
+            "needle",
+            MemorySearchOptions {
+                limit: Some(0),
+                ..MemorySearchOptions::default()
+            },
+            |_| true
+        )
+        .is_empty());
+    assert!(manager
+        .recall_with_vector_index_filtered(
+            "needle",
+            MemoryRecallOptions {
+                limit: Some(0),
+                ..MemoryRecallOptions::default()
+            },
+            None,
+            |_| true
+        )
+        .is_empty());
+    assert!(manager
+        .get_recent_filtered(
+            RecentMemoryOptions {
+                limit: Some(0),
+                ..RecentMemoryOptions::default()
+            },
+            |_| true
+        )
+        .is_empty());
+    for query in ["", "nonmatching"] {
+        assert!(manager
+            .search_filtered(query, MemorySearchOptions::default(), |_| true)
+            .is_empty());
+    }
+    assert!(manager
+        .search_filtered("needle", MemorySearchOptions::default(), |_| false)
+        .is_empty());
+    assert!(manager
+        .recall_with_vector_index_filtered("needle", MemoryRecallOptions::default(), None, |_| {
+            false
+        })
+        .is_empty());
+    assert!(manager
+        .get_recent_filtered(RecentMemoryOptions::default(), |_| false)
+        .is_empty());
+}
+
 fn context_options(query: &str, limit: usize) -> MemoryContextOptions {
     MemoryContextOptions {
         agent_id: "agent-1".into(),

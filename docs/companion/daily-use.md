@@ -48,6 +48,11 @@ permission update to enable this new tool; saving unrelated settings does not ad
 For corrections, search for the complete current record before updating it; a
 context excerpt is not the full text. Save compact durable facts and preferences,
 use Tasks for temporary progress, and review reusable procedures as skills.
+Explicit search now filters eligible records before its lexical result limit, so
+stronger foreign matches cannot hide your matching facts. Search and recent reads
+exclude hidden text in record IDs, content and tags before limiting results;
+corrections refuse those records too. Semantic vector candidate coverage remains
+unverified.
 Use Files to inspect the chosen workspace. Attach text or an image when useful;
 vision requires a compatible model. PDF/Office attachments can be stored and
 retrieved, but their contents are not parsed by this feature set.
