@@ -309,7 +309,7 @@ Files: `packages/sdk/src/{connectors,connectors.spec,index}.ts`; create `apps/we
 - [x] SDK/web: `bun x nx run-many --targets=test,typecheck,build --projects=@animaOS-SWARM/sdk,@animaOS-SWARM/web --skipNxCache` with `CI=1`; use bounded tests, no daemon/service launch. Root checks flags if final workspace target setup differs.
 - [x] No workspace-dev/Astro gate unless those sources are actually changed; no launcher change is in this scope. Markdown consistency/formatting only for owned docs.
 - [x] Root updates daemon README, existing Google OAuth setup docs, connector contribution guidance and handover for selected Drive scope, provider consent/setup/API enablement, unsupported formats, local disconnect and v13/pre-Drive backup. No hosted/live readiness claim.
-- [ ] Verify no manifest/lock/dependency features changed; preserve unrelated paths and exact staging list. Root explicitly commits/pushes/creates and attaches PR, merges verified head under standing authorization, updates main/handover, and resumes final selected daily-flow readiness assessment.
+- [x] Verify no manifest/lock/dependency features changed; preserve unrelated paths and exact staging list. Root explicitly commits/pushes/creates and attaches PR, merges verified head under standing authorization, updates main/handover, and resumes final selected daily-flow readiness assessment.
 
 ## Completion evidence and limits
 
@@ -364,3 +364,5 @@ ignored live cases and test-only warning cleanup are in the ledger. Root finishe
 ownedformat/lint/publication; merged PR/source facts are recorded in the next
 handover activation. This establishes local implementation behavior, not live
 Google consent/account access, microphone or always-on hosted operation.
+
+Publication complete: source51d7e8a pushed; PR #20 merged at37ffb48f936cba419ccae2a655537a128e31c568. Final Rust lint and explicit owned formatting passed. M15 docs-only readiness continues from that updated main.

@@ -822,7 +822,7 @@ provider or dynamic community loader is introduced here.
 
 ## Selected Drive files
 
-Configure the existing Google OAuth application in Settings, enable the Google
+Configure the existing Google OAuth application in Connectors → Google OAuth app, enable the Google
 Drive API for that project, and register the exact redirect URI displayed there:
 `/api/connectors/gdrive/callback` under the configured `ANIMA_PUBLIC_BASE_URL`.
 The local default is `http://127.0.0.1:8080`. In the agent's Connectors view, paste

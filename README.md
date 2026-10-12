@@ -16,6 +16,8 @@ Open [localhost:4200](http://localhost:4200), set up your companion, and connect
 
 For a persistent, single-owner companion on a Linux VPS, see the [Docker deployment guide](deploy/vps/README.md), including HTTPS/authentication, credential storage, backups, and current limitations.
 
+For identity files, memory, approvals, schedules and selected connectors, follow the [Anima daily-use setup](docs/companion/daily-use.md). It includes the live acceptance checklist and the limits of local fixture verification.
+
 ## Advanced / Legacy CLI and SDK Workflow
 
 Create and run an agency in 3 steps - **no code required**:
