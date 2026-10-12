@@ -105,8 +105,8 @@ pub use memory::{
     MAX_KNOWLEDGE_HITS, MAX_KNOWLEDGE_SCOPES,
 };
 pub use model::{
-    ModelAdapter, ModelGenerateRequest, ModelGenerateResponse, ModelStopReason, ModelStreamFrame,
-    ModelStreamSink, ToolCall,
+    model_transport_delay, ModelAdapter, ModelGenerateRequest, ModelGenerateResponse,
+    ModelStopReason, ModelStreamFrame, ModelStreamSink, ToolCall,
 };
 pub use persistence::{DatabaseAdapter, PersistenceError, PersistenceResult, Step, StepStatus};
 pub use policy::{

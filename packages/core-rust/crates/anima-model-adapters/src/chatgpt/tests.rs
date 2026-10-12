@@ -1,5 +1,7 @@
 use super::*;
-use anima_core::{Content, DataValue, Message, MessageRole, ModelStopReason, ToolDescriptor};
+use anima_core::{
+    AgentSettings, Content, DataValue, Message, MessageRole, ModelStopReason, ToolDescriptor,
+};
 use serde_json::json;
 use std::collections::BTreeMap;
 
@@ -744,4 +746,795 @@ fn completed_response_parses_cached_and_reasoning_usage() {
     assert_eq!(parsed.usage.cached_prompt_tokens, 5);
     assert_eq!(parsed.usage.reasoning_tokens, 3);
     assert_eq!(parsed.usage.total_tokens, 20);
+}
+
+fn retry_config(max_retries: Option<u32>) -> AgentConfig {
+    let mut config = config();
+    config.settings = Some(AgentSettings {
+        max_retries,
+        ..AgentSettings::default()
+    });
+    config
+}
+
+fn completed_sse() -> String {
+    concat!(
+        "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",",
+        "\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
+    )
+    .into()
+}
+
+#[tokio::test]
+async fn prestream_retry_none_reuses_the_same_request_after_503() {
+    use axum::{extract::Json, http::HeaderMap, response::Response, routing::post};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    };
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let received = Arc::new(Mutex::new(Vec::new()));
+    let (endpoint, task) = server(axum::Router::new().route(
+        "/responses",
+        post({
+            let calls = calls.clone();
+            let received = received.clone();
+            move |headers: HeaderMap, Json(body): Json<Value>| {
+                let calls = calls.clone();
+                let received = received.clone();
+                async move {
+                    received.lock().unwrap().push((
+                        headers["authorization"].to_str().unwrap().to_owned(),
+                        headers["chatgpt-account-id"].to_str().unwrap().to_owned(),
+                        body,
+                    ));
+                    let attempt = calls.fetch_add(1, Ordering::SeqCst);
+                    let (status, content_type, body) = if attempt == 0 {
+                        (502, "text/plain", "gateway unavailable".to_owned())
+                    } else {
+                        (200, "text/event-stream", completed_sse())
+                    };
+                    Response::builder()
+                        .status(status)
+                        .header("content-type", content_type)
+                        .body(axum::body::Body::from(body))
+                        .unwrap()
+                }
+            }
+        }),
+    ))
+    .await;
+    let mut adapter =
+        ChatGptResponsesAdapter::new("fake-subscription".into(), "test-account".into()).unwrap();
+    adapter.endpoint = endpoint;
+
+    let response = adapter
+        .generate(&retry_config(None), &request())
+        .await
+        .expect("an eligible pre-stream gateway failure gets one retry");
+
+    assert_eq!(response.content.text, "ok");
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    let received = received.lock().unwrap();
+    assert_eq!(received.len(), 2);
+    assert_eq!(received[0], received[1]);
+    assert_eq!(received[0].0, "Bearer fake-subscription");
+    assert_eq!(received[0].1, "test-account");
+    task.abort();
+}
+
+#[tokio::test]
+async fn prestream_retry_zero_opts_out_and_positive_values_clamp_at_one() {
+    use axum::{http::StatusCode, routing::post};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    for (configured, expected_calls) in [(Some(0), 1), (Some(9), 2)] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (endpoint, task) = server(axum::Router::new().route(
+            "/responses",
+            post({
+                let calls = calls.clone();
+                move || {
+                    let calls = calls.clone();
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        (StatusCode::SERVICE_UNAVAILABLE, "gateway unavailable")
+                    }
+                }
+            }),
+        ))
+        .await;
+        let mut adapter =
+            ChatGptResponsesAdapter::new("fake-subscription".into(), "test-account".into())
+                .unwrap();
+        adapter.endpoint = endpoint;
+        let error = adapter
+            .generate(&retry_config(configured), &request())
+            .await
+            .unwrap_err();
+        assert!(error.contains("HTTP 503"), "{error}");
+        assert_eq!(calls.load(Ordering::SeqCst), expected_calls);
+        task.abort();
+    }
+}
+
+#[tokio::test]
+async fn prestream_retry_never_makes_a_third_request_after_second_gateway_failure() {
+    use axum::{http::StatusCode, routing::post};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (endpoint, task) = server(axum::Router::new().route(
+        "/responses",
+        post({
+            let calls = calls.clone();
+            move || {
+                let calls = calls.clone();
+                async move {
+                    let attempt = calls.fetch_add(1, Ordering::SeqCst);
+                    let status = if attempt == 0 {
+                        StatusCode::BAD_GATEWAY
+                    } else {
+                        StatusCode::GATEWAY_TIMEOUT
+                    };
+                    (status, "gateway unavailable")
+                }
+            }
+        }),
+    ))
+    .await;
+    let mut adapter =
+        ChatGptResponsesAdapter::new("fake-subscription".into(), "test-account".into()).unwrap();
+    adapter.endpoint = endpoint;
+
+    let error = adapter
+        .generate(&retry_config(Some(20)), &request())
+        .await
+        .unwrap_err();
+
+    assert!(error.contains("HTTP 504"), "{error}");
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    task.abort();
+}
+
+#[tokio::test]
+async fn prestream_retry_covers_502_503_and_504_gateway_responses() {
+    use axum::{http::StatusCode, response::Response, routing::post};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    for status in [
+        StatusCode::BAD_GATEWAY,
+        StatusCode::SERVICE_UNAVAILABLE,
+        StatusCode::GATEWAY_TIMEOUT,
+    ] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (endpoint, task) = server(axum::Router::new().route(
+            "/responses",
+            post({
+                let calls = calls.clone();
+                move || {
+                    let calls = calls.clone();
+                    async move {
+                        let first = calls.fetch_add(1, Ordering::SeqCst) == 0;
+                        let (status, content_type, body) = if first {
+                            (status, "text/plain", "gateway unavailable".to_owned())
+                        } else {
+                            (StatusCode::OK, "text/event-stream", completed_sse())
+                        };
+                        Response::builder()
+                            .status(status)
+                            .header("content-type", content_type)
+                            .body(axum::body::Body::from(body))
+                            .unwrap()
+                    }
+                }
+            }),
+        ))
+        .await;
+        let mut adapter =
+            ChatGptResponsesAdapter::new("fake-subscription".into(), "test-account".into())
+                .unwrap();
+        adapter.endpoint = endpoint;
+
+        let response = adapter
+            .generate(&retry_config(None), &request())
+            .await
+            .unwrap_or_else(|error| panic!("{status} should retry once: {error}"));
+
+        assert_eq!(response.content.text, "ok");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        task.abort();
+    }
+}
+
+#[tokio::test]
+async fn prestream_retry_does_not_retry_other_http_statuses() {
+    use axum::{http::StatusCode, routing::post};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    for status in [
+        StatusCode::BAD_REQUEST,
+        StatusCode::UNAUTHORIZED,
+        StatusCode::FORBIDDEN,
+        StatusCode::TOO_MANY_REQUESTS,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        StatusCode::NOT_IMPLEMENTED,
+        StatusCode::HTTP_VERSION_NOT_SUPPORTED,
+    ] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (endpoint, task) = server(axum::Router::new().route(
+            "/responses",
+            post({
+                let calls = calls.clone();
+                move || {
+                    let calls = calls.clone();
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        (status, "static test diagnostic")
+                    }
+                }
+            }),
+        ))
+        .await;
+        let mut adapter =
+            ChatGptResponsesAdapter::new("fake-subscription".into(), "test-account".into())
+                .unwrap();
+        adapter.endpoint = endpoint;
+        let _ = adapter
+            .generate(&retry_config(None), &request())
+            .await
+            .unwrap_err();
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "{status}");
+        task.abort();
+    }
+}
+
+#[tokio::test]
+async fn prestream_retry_normalizes_plain_and_html_gateway_media_types() {
+    use axum::{http::StatusCode, response::Response, routing::post};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    for content_type in ["text/plain; charset=utf-8", "TEXT/HTML; Charset=UTF-8"] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (endpoint, task) = server(axum::Router::new().route(
+            "/responses",
+            post({
+                let calls = calls.clone();
+                move || {
+                    let calls = calls.clone();
+                    async move {
+                        let first = calls.fetch_add(1, Ordering::SeqCst) == 0;
+                        if first {
+                            Response::builder()
+                                .status(StatusCode::BAD_GATEWAY)
+                                .header("content-type", content_type)
+                                .body(axum::body::Body::from("static gateway response"))
+                                .unwrap()
+                        } else {
+                            Response::builder()
+                                .status(StatusCode::OK)
+                                .header("content-type", "text/event-stream")
+                                .body(axum::body::Body::from(completed_sse()))
+                                .unwrap()
+                        }
+                    }
+                }
+            }),
+        ))
+        .await;
+        let mut adapter =
+            ChatGptResponsesAdapter::new("fake-subscription".into(), "test-account".into())
+                .unwrap();
+        adapter.endpoint = endpoint;
+
+        adapter
+            .generate(&retry_config(None), &request())
+            .await
+            .unwrap_or_else(|error| panic!("{content_type} should be eligible: {error}"));
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "{content_type}");
+        task.abort();
+    }
+}
+
+#[tokio::test]
+async fn prestream_retry_plain_gateway_requires_exact_text_mime_and_utf8() {
+    use axum::{http::StatusCode, response::Response, routing::post};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    for case in [
+        "event-stream-suffix",
+        "plain-suffix",
+        "missing-content-type",
+        "invalid-utf8",
+    ] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (endpoint, task) = server(axum::Router::new().route(
+            "/responses",
+            post({
+                let calls = calls.clone();
+                move || {
+                    let calls = calls.clone();
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        let builder = Response::builder().status(StatusCode::BAD_GATEWAY);
+                        match case {
+                            "event-stream-suffix" => builder
+                                .header("content-type", "text/event-stream-extra")
+                                .body(axum::body::Body::from("gateway unavailable"))
+                                .unwrap(),
+                            "plain-suffix" => builder
+                                .header("content-type", "text/plain-other")
+                                .body(axum::body::Body::from("gateway unavailable"))
+                                .unwrap(),
+                            "missing-content-type" => builder
+                                .body(axum::body::Body::from("gateway unavailable"))
+                                .unwrap(),
+                            "invalid-utf8" => builder
+                                .header("content-type", "text/plain")
+                                .body(axum::body::Body::from(vec![0xff, 0xfe]))
+                                .unwrap(),
+                            _ => unreachable!(),
+                        }
+                    }
+                }
+            }),
+        ))
+        .await;
+        let mut adapter =
+            ChatGptResponsesAdapter::new("fake-subscription".into(), "test-account".into())
+                .unwrap();
+        adapter.endpoint = endpoint;
+
+        let _ = adapter
+            .generate(&retry_config(None), &request())
+            .await
+            .unwrap_err();
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "{case}");
+        task.abort();
+    }
+}
+
+#[tokio::test]
+async fn prestream_retry_recognized_transient_json_code_ignores_non_eventstream_mime() {
+    use axum::{http::StatusCode, response::Response, routing::post};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (endpoint, task) = server(axum::Router::new().route(
+        "/responses",
+        post({
+            let calls = calls.clone();
+            move || {
+                let calls = calls.clone();
+                async move {
+                    let first = calls.fetch_add(1, Ordering::SeqCst) == 0;
+                    if first {
+                        Response::builder()
+                            .status(StatusCode::SERVICE_UNAVAILABLE)
+                            .header("content-type", "text/plain")
+                            .body(axum::body::Body::from(
+                                r#"{"error":{"code":"service_unavailable"}}"#,
+                            ))
+                            .unwrap()
+                    } else {
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("content-type", "text/event-stream")
+                            .body(axum::body::Body::from(completed_sse()))
+                            .unwrap()
+                    }
+                }
+            }
+        }),
+    ))
+    .await;
+    let mut adapter =
+        ChatGptResponsesAdapter::new("fake-subscription".into(), "test-account".into()).unwrap();
+    adapter.endpoint = endpoint;
+
+    adapter
+        .generate(&retry_config(None), &request())
+        .await
+        .expect("a recognized transient JSON code retries despite a non-JSON media type");
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    task.abort();
+}
+
+#[tokio::test]
+async fn prestream_retry_allows_only_the_five_transient_structured_codes() {
+    use axum::{http::StatusCode, response::Response, routing::post};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    for code in [
+        "server_error",
+        "internal_server_error",
+        "service_unavailable",
+        "subscription_sharing_usage_unavailable",
+        "subscription_sharing_user_unavailable",
+    ] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (endpoint, task) = server(axum::Router::new().route(
+            "/responses",
+            post({
+                let calls = calls.clone();
+                move || {
+                    let calls = calls.clone();
+                    async move {
+                        let first = calls.fetch_add(1, Ordering::SeqCst) == 0;
+                        let (status, content_type, body) = if first {
+                            (
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                "application/json",
+                                json!({"error":{"code":code,"message":"private upstream detail"}})
+                                    .to_string(),
+                            )
+                        } else {
+                            (StatusCode::OK, "text/event-stream", completed_sse())
+                        };
+                        Response::builder()
+                            .status(status)
+                            .header("content-type", content_type)
+                            .body(axum::body::Body::from(body))
+                            .unwrap()
+                    }
+                }
+            }),
+        ))
+        .await;
+        let mut adapter =
+            ChatGptResponsesAdapter::new("fake-subscription".into(), "test-account".into())
+                .unwrap();
+        adapter.endpoint = endpoint;
+
+        let response = adapter
+            .generate(&retry_config(None), &request())
+            .await
+            .unwrap_or_else(|error| panic!("retryable code {code}: {error}"));
+
+        assert_eq!(response.content.text, "ok");
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "{code}");
+        task.abort();
+    }
+}
+
+#[tokio::test]
+async fn prestream_retry_known_terminal_codes_override_502() {
+    use axum::{http::StatusCode, routing::post};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    let terminal_codes = [
+        "invalid_function_parameters",
+        "invalid_prompt",
+        "model_not_found",
+        "unsupported_model",
+        "invalid_request_error",
+        "invalid_api_key",
+        "authentication_error",
+        "invalid_authentication",
+        "token_expired",
+        "permission_denied",
+        "permission_error",
+        "rate_limit_exceeded",
+        "insufficient_quota",
+        "usage_limit_exceeded",
+        "context_length_exceeded",
+        "subscription_sharing_user_not_eligible",
+        "subscription_sharing_usage_limit_exceeded",
+        "subscription_sharing_unsupported_capability",
+        "subscription_sharing_route_not_supported",
+        "subscription_sharing_invalid_user",
+        "chatpass_v2_scope_not_authorized",
+        "chatpass_v2_invalid_authorization_context",
+    ];
+    for code in terminal_codes {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (endpoint, task) = server(axum::Router::new().route(
+            "/responses",
+            post({
+                let calls = calls.clone();
+                move || {
+                    let calls = calls.clone();
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        (
+                            StatusCode::BAD_GATEWAY,
+                            axum::Json(json!({"error":{"code":code,"message":"secret-sentinel"}})),
+                        )
+                    }
+                }
+            }),
+        ))
+        .await;
+        let mut adapter =
+            ChatGptResponsesAdapter::new("fake-subscription".into(), "test-account".into())
+                .unwrap();
+        adapter.endpoint = endpoint;
+
+        let error = adapter
+            .generate(&retry_config(None), &request())
+            .await
+            .unwrap_err();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "{code}: {error}");
+        assert!(error.contains(code), "{code}: {error}");
+        assert!(!error.contains("secret-sentinel"));
+        task.abort();
+    }
+}
+
+#[tokio::test]
+async fn prestream_retry_fails_closed_for_unknown_json_event_stream_and_bounded_read_failures() {
+    use axum::{http::StatusCode, response::Response, routing::post};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    for case in [
+        "unknown-json-code",
+        "unstructured-json",
+        "event-stream-error",
+        "oversized-body",
+        "chunked-overflow",
+        "body-read-failure",
+    ] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (endpoint, task) = server(axum::Router::new().route(
+            "/responses",
+            post({
+                let calls = calls.clone();
+                move || {
+                    let calls = calls.clone();
+                    async move {
+                        let attempt = calls.fetch_add(1, Ordering::SeqCst);
+                        if attempt > 0 {
+                            return Response::builder()
+                                .status(StatusCode::OK)
+                                .header("content-type", "text/event-stream")
+                                .body(axum::body::Body::from(completed_sse()))
+                                .unwrap();
+                        }
+                        match case {
+                            "unknown-json-code" => Response::builder()
+                                .status(StatusCode::BAD_GATEWAY)
+                                .header("content-type", "application/json")
+                                .body(axum::body::Body::from(
+                                    r#"{"error":{"code":"future_gateway_code"}}"#,
+                                ))
+                                .unwrap(),
+                            "unstructured-json" => Response::builder()
+                                .status(StatusCode::BAD_GATEWAY)
+                                .header("content-type", "application/json")
+                                .body(axum::body::Body::from(r#"{"detail":"gateway"}"#))
+                                .unwrap(),
+                            "event-stream-error" => Response::builder()
+                                .status(StatusCode::SERVICE_UNAVAILABLE)
+                                .header("content-type", "text/event-stream")
+                                .body(axum::body::Body::from(
+                                    r#"data: {"type":"error","code":"service_unavailable"}"#,
+                                ))
+                                .unwrap(),
+                            "oversized-body" => Response::builder()
+                                .status(StatusCode::SERVICE_UNAVAILABLE)
+                                .header("content-type", "text/plain")
+                                .body(axum::body::Body::from("x".repeat(MAX_ERROR_BODY + 1)))
+                                .unwrap(),
+                            "chunked-overflow" => {
+                                let chunks: Vec<Result<Vec<u8>, std::io::Error>> =
+                                    vec![Ok(vec![b'x'; MAX_ERROR_BODY + 1])];
+                                Response::builder()
+                                    .status(StatusCode::SERVICE_UNAVAILABLE)
+                                    .header("content-type", "text/plain")
+                                    .body(axum::body::Body::from_stream(futures::stream::iter(
+                                        chunks,
+                                    )))
+                                    .unwrap()
+                            }
+                            "body-read-failure" => {
+                                let chunks: Vec<Result<Vec<u8>, std::io::Error>> = vec![
+                                    Ok(b"{\"error\":".to_vec()),
+                                    Err(std::io::Error::other("mock body read failed")),
+                                ];
+                                Response::builder()
+                                    .status(StatusCode::SERVICE_UNAVAILABLE)
+                                    .header("content-type", "application/json")
+                                    .body(axum::body::Body::from_stream(futures::stream::iter(
+                                        chunks,
+                                    )))
+                                    .unwrap()
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                }
+            }),
+        ))
+        .await;
+        let mut adapter =
+            ChatGptResponsesAdapter::new("fake-subscription".into(), "test-account".into())
+                .unwrap();
+        adapter.endpoint = endpoint;
+
+        let error = adapter
+            .generate(&retry_config(None), &request())
+            .await
+            .unwrap_err();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "{case}: {error}");
+        task.abort();
+    }
+}
+
+struct FailingStreamSink;
+
+#[async_trait::async_trait]
+impl ModelStreamSink for FailingStreamSink {
+    async fn emit(&self, _frame: ModelStreamFrame) -> Result<(), String> {
+        Err("mock sink closed".into())
+    }
+}
+
+#[tokio::test]
+async fn prestream_retry_never_replays_partial_sse_or_sink_failures() {
+    use axum::{http::StatusCode, response::Response, routing::post};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    let partial_failure = concat!(
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n",
+        "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_error\"}}}\n\n"
+    );
+    for (body, reject_sink) in [(partial_failure.to_owned(), false), (completed_sse(), true)] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (endpoint, task) = server(axum::Router::new().route(
+            "/responses",
+            post({
+                let calls = calls.clone();
+                let body = body.clone();
+                move || {
+                    let calls = calls.clone();
+                    let body = body.clone();
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("content-type", "text/event-stream")
+                            .body(axum::body::Body::from(body))
+                            .unwrap()
+                    }
+                }
+            }),
+        ))
+        .await;
+        let mut adapter =
+            ChatGptResponsesAdapter::new("fake-subscription".into(), "test-account".into())
+                .unwrap();
+        adapter.endpoint = endpoint;
+        let result = if reject_sink {
+            adapter
+                .stream(&retry_config(None), &request(), &FailingStreamSink)
+                .await
+        } else {
+            adapter
+                .generate(&retry_config(None), &request())
+                .await
+                .map(|_| ())
+        };
+
+        assert!(result.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        task.abort();
+    }
+}
+
+#[tokio::test]
+async fn prestream_retry_does_not_replay_request_send_failure() {
+    let (endpoint, task) = server(axum::Router::new()).await;
+    task.abort();
+    let mut adapter =
+        ChatGptResponsesAdapter::new("fake-subscription".into(), "test-account".into()).unwrap();
+    adapter.endpoint = endpoint;
+
+    let error = adapter
+        .generate(&retry_config(None), &request())
+        .await
+        .unwrap_err();
+
+    assert!(error.contains("request failed or timed out"), "{error}");
+}
+
+#[tokio::test]
+async fn prestream_retry_cancel_signal_drops_backoff_before_the_next_request() {
+    use anima_core::{AgentRuntime, CancelSignal, Content, RunControl, RUN_STOPPED_ERROR};
+    use axum::{http::StatusCode, routing::post};
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+        time::Duration,
+    };
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (endpoint, server_task) = server(axum::Router::new().route(
+        "/responses",
+        post({
+            let calls = calls.clone();
+            move || {
+                let calls = calls.clone();
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    (StatusCode::SERVICE_UNAVAILABLE, "gateway unavailable")
+                }
+            }
+        }),
+    ))
+    .await;
+    let mut adapter =
+        ChatGptResponsesAdapter::new("fake-subscription".into(), "test-account".into()).unwrap();
+    adapter.endpoint = endpoint;
+    let mut runtime = AgentRuntime::new(config(), Arc::new(adapter));
+    let cancel = CancelSignal::new();
+    runtime.set_run_control(RunControl {
+        cancel: cancel.clone(),
+        ..RunControl::new()
+    });
+    let run = tokio::spawn(async move {
+        runtime
+            .run(Content {
+                text: "Say hello".into(),
+                attachments: None,
+                metadata: None,
+            })
+            .await
+    });
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while calls.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the first HTTP response is in flight");
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    cancel.cancel();
+    let stopped = tokio::time::timeout(Duration::from_secs(2), run)
+        .await
+        .expect("cancellation stops the runtime")
+        .unwrap();
+    assert_eq!(stopped.error.as_deref(), Some(RUN_STOPPED_ERROR));
+    tokio::time::sleep(Duration::from_millis(320)).await;
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    server_task.abort();
 }
