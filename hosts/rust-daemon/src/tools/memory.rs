@@ -14,6 +14,15 @@ use crate::memory_text::{
 
 use super::ToolExecutionContext;
 
+fn visible_memory(memory: &Memory) -> bool {
+    !has_hidden_text(&memory.id)
+        && !has_hidden_text(&memory.content)
+        && !memory
+            .tags
+            .as_ref()
+            .is_some_and(|tags| tags.iter().any(|tag| has_hidden_text(tag)))
+}
+
 pub(super) fn execute_memory_search(
     context: ToolExecutionContext,
     agent: AgentState,
@@ -43,7 +52,7 @@ pub(super) fn execute_memory_search(
         let results = {
             let memory_guard = context.memory.read().await;
             let embeddings_guard = context.memory_embeddings.read().await;
-            memory_guard.recall_with_vector_index(
+            memory_guard.recall_with_vector_index_filtered(
                 &query,
                 MemoryRecallOptions {
                     search: MemorySearchOptions {
@@ -62,11 +71,9 @@ pub(super) fn execute_memory_search(
                     ..MemoryRecallOptions::default()
                 },
                 Some(&*embeddings_guard),
+                visible_memory,
             )
-        }
-        .into_iter()
-        .filter(|result| !has_hidden_text(&result.memory.content))
-        .collect::<Vec<_>>();
+        };
 
         let mut metadata = BTreeMap::new();
         metadata.insert("query".into(), DataValue::String(query));
@@ -142,7 +149,7 @@ pub(super) fn execute_memory_update(
             let Some(current) = guard.get(&id).filter(|memory| memory.agent_id == agent.id) else {
                 return TaskResult::error("memory not found", 0);
             };
-            if has_hidden_text(&current.content) {
+            if !visible_memory(&current) {
                 return TaskResult::error(MEMORY_TEXT_HIDDEN, 0);
             }
             if current.content != expected {
@@ -314,11 +321,8 @@ pub(super) fn execute_recent_memories(
             None => 3,
         };
 
-        let memories = context
-            .memory
-            .read()
-            .await
-            .get_recent(anima_memory::RecentMemoryOptions {
+        let memories = context.memory.read().await.get_recent_filtered(
+            anima_memory::RecentMemoryOptions {
                 agent_id: Some(agent.id.clone()),
                 agent_name: None,
                 scope: None,
@@ -326,10 +330,9 @@ pub(super) fn execute_recent_memories(
                 world_id: None,
                 session_id: None,
                 limit: Some(limit),
-            })
-            .into_iter()
-            .filter(|memory| !has_hidden_text(&memory.content))
-            .collect::<Vec<_>>();
+            },
+            visible_memory,
+        );
 
         let mut metadata = BTreeMap::new();
         metadata.insert("limit".into(), DataValue::Number(limit as f64));

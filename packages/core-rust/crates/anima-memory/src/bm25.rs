@@ -242,6 +242,15 @@ impl BM25 {
     }
 
     pub fn search(&self, query: &str, limit: usize) -> Vec<SearchResult> {
+        self.search_filtered(query, limit, |_| true)
+    }
+
+    pub fn search_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        eligible: impl Fn(&str) -> bool,
+    ) -> Vec<SearchResult> {
         let query_terms = tokenize_query(query, &self.query_expander, &self.text_analyzer);
         if query_terms.is_empty() || self.docs.is_empty() || limit == 0 {
             return Vec::new();
@@ -251,6 +260,9 @@ impl BM25 {
         let mut scores = Vec::new();
 
         for doc in self.docs.values() {
+            if !eligible(&doc.id) {
+                continue;
+            }
             let mut score = 0.0;
             let doc_len = doc.terms.len() as f64;
 

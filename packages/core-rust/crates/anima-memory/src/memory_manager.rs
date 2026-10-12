@@ -292,6 +292,16 @@ impl MemoryManager {
         opts: MemoryRecallOptions,
         vector_index: Option<&dyn MemoryVectorIndex>,
     ) -> Vec<MemoryRecallResult> {
+        self.recall_with_vector_index_filtered(query, opts, vector_index, |_| true)
+    }
+
+    pub fn recall_with_vector_index_filtered(
+        &self,
+        query: &str,
+        opts: MemoryRecallOptions,
+        vector_index: Option<&dyn MemoryVectorIndex>,
+        visible: impl Fn(&Memory) -> bool,
+    ) -> Vec<MemoryRecallResult> {
         let limit = opts.limit.unwrap_or(10);
         let lexical_limit = opts
             .lexical_limit
@@ -300,7 +310,7 @@ impl MemoryManager {
 
         let mut lexical_opts = opts.search.clone();
         lexical_opts.limit = Some(lexical_limit);
-        let lexical_results = self.search(query, lexical_opts);
+        let lexical_results = self.search_filtered(query, lexical_opts, &visible);
         let max_lexical_score = lexical_results
             .iter()
             .map(|result| result.score)
@@ -323,7 +333,7 @@ impl MemoryManager {
                 let Some(memory) = self.memories.get(&hit.memory_id) else {
                     continue;
                 };
-                if !memory_matches_search_options(memory, &opts.search) {
+                if !memory_matches_search_options(memory, &opts.search) || !visible(memory) {
                     continue;
                 }
                 if max_vector_score > 0.0 && hit.score.is_finite() && hit.score > 0.0 {
@@ -336,7 +346,10 @@ impl MemoryManager {
 
         let recent_limit = opts.recent_limit.unwrap_or(limit);
         if recent_limit > 0 {
-            let recent = self.get_recent(recent_options_from_search(&opts.search, recent_limit));
+            let recent = self.get_recent_filtered(
+                recent_options_from_search(&opts.search, recent_limit),
+                &visible,
+            );
             for (index, memory) in recent.iter().enumerate() {
                 let candidate = recall_candidate(&mut candidates, memory);
                 candidate.recency_score = candidate
@@ -363,7 +376,7 @@ impl MemoryManager {
                     let Some(memory) = self.memories.get(&memory_id) else {
                         continue;
                     };
-                    if !memory_matches_search_options(memory, &opts.search) {
+                    if !memory_matches_search_options(memory, &opts.search) || !visible(memory) {
                         continue;
                     }
                     let candidate = recall_candidate(&mut candidates, memory);
@@ -394,7 +407,7 @@ impl MemoryManager {
                     let Some(memory) = self.memories.get(memory_id) else {
                         continue;
                     };
-                    if !memory_matches_search_options(memory, &opts.search) {
+                    if !memory_matches_search_options(memory, &opts.search) || !visible(memory) {
                         continue;
                     }
                     let candidate = recall_candidate(&mut candidates, memory);
@@ -411,7 +424,8 @@ impl MemoryManager {
                     && self.memories.len() <= TEMPORAL_FALLBACK_MEMORY_LIMIT
                 {
                     for memory in self.memories.values() {
-                        if !memory_matches_search_options(memory, &opts.search) {
+                        if !memory_matches_search_options(memory, &opts.search) || !visible(memory)
+                        {
                             continue;
                         }
                         if !temporal_memory_mentions_fact(memory, fact) {
@@ -551,61 +565,44 @@ impl MemoryManager {
     }
 
     pub fn search(&self, query: &str, opts: MemorySearchOptions) -> Vec<MemorySearchResult> {
+        self.search_filtered(query, opts, |_| true)
+    }
+
+    pub fn search_filtered(
+        &self,
+        query: &str,
+        opts: MemorySearchOptions,
+        visible: impl Fn(&Memory) -> bool,
+    ) -> Vec<MemorySearchResult> {
         let limit = opts.limit.unwrap_or(10);
-        let min_importance = opts.min_importance.unwrap_or(0.0);
-        let raw = self.index.search(query, limit.saturating_mul(3));
-
-        let mut results = Vec::new();
-        for result in raw {
-            let Some(memory) = self.memories.get(&result.id) else {
-                continue;
-            };
-            if opts
-                .agent_id
-                .as_deref()
-                .is_some_and(|agent_id| memory.agent_id != agent_id)
-            {
-                continue;
-            }
-            if opts
-                .agent_name
-                .as_deref()
-                .is_some_and(|agent_name| memory.agent_name != agent_name)
-            {
-                continue;
-            }
-            if opts
-                .memory_type
-                .is_some_and(|memory_type| memory.memory_type != memory_type)
-            {
-                continue;
-            }
-            if opts.scope.is_some_and(|scope| memory.scope != scope) {
-                continue;
-            }
-            if option_filter_misses(opts.room_id.as_deref(), memory.room_id.as_deref()) {
-                continue;
-            }
-            if option_filter_misses(opts.world_id.as_deref(), memory.world_id.as_deref()) {
-                continue;
-            }
-            if option_filter_misses(opts.session_id.as_deref(), memory.session_id.as_deref()) {
-                continue;
-            }
-            if memory.importance < min_importance {
-                continue;
-            }
-
-            results.push(MemorySearchResult::from_memory(memory, result.score));
-            if results.len() >= limit {
-                break;
-            }
-        }
-
-        results
+        let opts = MemorySearchOptions {
+            min_importance: Some(opts.min_importance.unwrap_or(0.0)),
+            ..opts
+        };
+        self.index
+            .search_filtered(query, limit, |id| {
+                self.memories.get(id).is_some_and(|memory| {
+                    memory_matches_search_options(memory, &opts) && visible(memory)
+                })
+            })
+            .into_iter()
+            .filter_map(|result| {
+                self.memories
+                    .get(&result.id)
+                    .map(|memory| MemorySearchResult::from_memory(memory, result.score))
+            })
+            .collect()
     }
 
     pub fn get_recent(&self, opts: RecentMemoryOptions) -> Vec<Memory> {
+        self.get_recent_filtered(opts, |_| true)
+    }
+
+    pub fn get_recent_filtered(
+        &self,
+        opts: RecentMemoryOptions,
+        visible: impl Fn(&Memory) -> bool,
+    ) -> Vec<Memory> {
         let mut memories: Vec<_> = self
             .memories
             .values()
@@ -636,9 +633,8 @@ impl MemoryManager {
                 if option_filter_misses(opts.session_id.as_deref(), memory.session_id.as_deref()) {
                     return false;
                 }
-                true
+                visible(memory)
             })
-            .cloned()
             .collect();
 
         memories.sort_by(|left, right| {
@@ -649,7 +645,7 @@ impl MemoryManager {
             })
         });
         memories.truncate(opts.limit.unwrap_or(20));
-        memories
+        memories.into_iter().cloned().collect()
     }
 
     pub fn upsert_agent_relationship(

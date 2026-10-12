@@ -29,8 +29,8 @@ use super::{
 };
 use crate::memory_embeddings::MemoryEmbeddingRuntime;
 use anima_core::{
-    AgentConfig, AgentState, AgentStatus, Content, DataValue, Message, MessageRole, TaskStatus,
-    ToolCall, ToolDescriptor,
+    AgentConfig, AgentState, AgentStatus, Content, DataValue, Message, MessageRole, TaskResult,
+    TaskStatus, ToolCall, ToolDescriptor,
 };
 use anima_memory::MemoryManager;
 use chrono::DateTime;
@@ -1826,6 +1826,224 @@ fn memory_correction_call(id: &str, expected: &str, content: &str) -> ToolCall {
             ("content".into(), DataValue::String(content.into())),
         ]),
     }
+}
+
+async fn memory_retrieval_fixture(
+    kind: &str,
+) -> (
+    ToolExecutionContext,
+    AgentState,
+    Message,
+    anima_memory::Memory,
+    Vec<anima_memory::Memory>,
+) {
+    let (context, agent, message) = memory_correction_fixture(None);
+    let visible = seed_correction_memory(
+        &context,
+        &agent.id,
+        &format!(
+            "needle visible\nfull exact content {}",
+            "durable supporting detail ".repeat(80)
+        ),
+    )
+    .await;
+    let mut hidden = Vec::new();
+    for index in 0..6 {
+        let content = if kind == "content" {
+            format!("needle needle hidden\u{202E} {index}")
+        } else {
+            format!("needle needle stronger {index}")
+        };
+        hidden.push(seed_correction_memory(&context, &agent.id, &content).await);
+    }
+    let mut snapshot = context.memory.read().await.snapshot();
+    for (index, original) in hidden.iter_mut().enumerate() {
+        let record = snapshot
+            .memories
+            .iter_mut()
+            .find(|memory| memory.id == original.id)
+            .unwrap();
+        record.created_at = visible.created_at + 10 + index as u64;
+        match kind {
+            "content" => {}
+            "id" => record.id = format!("hidden-{index}\u{202E}"),
+            "tag" => record.tags = Some(vec!["hidden\u{202E}tag".into()]),
+            _ => panic!("unknown fixture kind"),
+        }
+        *original = record.clone();
+    }
+    context.memory.write().await.replace_snapshot(snapshot);
+    (context, agent, message, visible, hidden)
+}
+
+async fn memory_retrieval_read(
+    context: ToolExecutionContext,
+    agent: AgentState,
+    message: Message,
+    name: &str,
+) -> TaskResult<Content> {
+    let call = ToolCall {
+        id: "retrieval-read".into(),
+        name: name.into(),
+        args: BTreeMap::from([
+            ("query".into(), DataValue::String("needle".into())),
+            ("limit".into(), DataValue::Number(1.0)),
+        ]),
+    };
+    if name == "memory_search" {
+        super::memory::execute_memory_search(context, agent, message, call).await
+    } else {
+        super::memory::execute_recent_memories(context, agent, message, call).await
+    }
+}
+
+async fn assert_memory_retrieval_ignores_hidden_crowdout(kind: &str, name: &str) {
+    let (context, agent, message, visible, hidden) = memory_retrieval_fixture(kind).await;
+    let before = context.memory.read().await.snapshot();
+    let result = memory_retrieval_read(context.clone(), agent, message, name).await;
+    assert_eq!(result.status, TaskStatus::Success);
+    let data = result.data.unwrap();
+    assert_eq!(
+        data.metadata.as_ref().unwrap().get("matchCount"),
+        Some(&DataValue::Number(1.0))
+    );
+    assert_eq!(
+        data.text,
+        format!(
+            "Memory ID: {}\nType: fact\nContent:\n{}",
+            visible.id, visible.content
+        )
+    );
+    assert!(!crate::memory_text::has_hidden_text(&data.text));
+    for record in hidden {
+        assert!(!data.text.contains(&record.id));
+        assert!(!data.text.contains(&record.content));
+    }
+    assert_eq!(context.memory.read().await.snapshot(), before);
+}
+
+#[tokio::test]
+async fn memory_tool_retrieval_search_hidden_content_does_not_consume_limit() {
+    assert_memory_retrieval_ignores_hidden_crowdout("content", "memory_search").await;
+}
+#[tokio::test]
+async fn memory_tool_retrieval_search_hidden_id_does_not_consume_limit() {
+    assert_memory_retrieval_ignores_hidden_crowdout("id", "memory_search").await;
+}
+#[tokio::test]
+async fn memory_tool_retrieval_search_hidden_tag_does_not_consume_limit() {
+    assert_memory_retrieval_ignores_hidden_crowdout("tag", "memory_search").await;
+}
+#[tokio::test]
+async fn memory_tool_retrieval_recent_hidden_content_does_not_consume_limit() {
+    assert_memory_retrieval_ignores_hidden_crowdout("content", "recent_memories").await;
+}
+#[tokio::test]
+async fn memory_tool_retrieval_recent_hidden_id_does_not_consume_limit() {
+    assert_memory_retrieval_ignores_hidden_crowdout("id", "recent_memories").await;
+}
+#[tokio::test]
+async fn memory_tool_retrieval_recent_hidden_tag_does_not_consume_limit() {
+    assert_memory_retrieval_ignores_hidden_crowdout("tag", "recent_memories").await;
+}
+
+#[tokio::test]
+async fn memory_tool_retrieval_full_multiline_search_result_is_exact_correction_input() {
+    let (context, agent, message, visible, hidden) = memory_retrieval_fixture("content").await;
+    let result = memory_retrieval_read(
+        context.clone(),
+        agent.clone(),
+        message.clone(),
+        "memory_search",
+    )
+    .await;
+    let text = result.data.unwrap().text;
+    let (id, full_content) = text
+        .strip_prefix("Memory ID: ")
+        .expect("visible search record is required")
+        .split_once("\nType: fact\nContent:\n")
+        .expect("full correction fields are required");
+    assert_eq!(id, visible.id);
+    assert_eq!(full_content, visible.content);
+    let corrected = context
+        .clone()
+        .execute_tool(
+            agent,
+            message,
+            memory_correction_call(id, full_content, "needle corrected durable fact"),
+        )
+        .await;
+    assert_eq!(corrected.status, TaskStatus::Success);
+    assert_eq!(
+        context
+            .memory
+            .read()
+            .await
+            .get(&visible.id)
+            .unwrap()
+            .content,
+        "needle corrected durable fact"
+    );
+    for record in hidden {
+        assert_eq!(context.memory.read().await.get(&record.id), Some(record));
+    }
+}
+
+async fn assert_memory_retrieval_hidden_current_record_refused(kind: &str) {
+    let (context, agent, message, _, hidden) = memory_retrieval_fixture(kind).await;
+    let record = &hidden[0];
+    let before = context.memory.read().await.snapshot();
+    let result = context
+        .clone()
+        .execute_tool(
+            agent,
+            message,
+            memory_correction_call(&record.id, &record.content, "ordinary replacement"),
+        )
+        .await;
+    assert_eq!(result.status, TaskStatus::Error);
+    assert_eq!(
+        result.error.as_deref(),
+        Some(crate::memory_text::MEMORY_TEXT_HIDDEN)
+    );
+    assert_eq!(context.memory.read().await.snapshot(), before);
+}
+
+#[tokio::test]
+async fn memory_tool_retrieval_update_refuses_hidden_current_id() {
+    assert_memory_retrieval_hidden_current_record_refused("id").await;
+}
+#[tokio::test]
+async fn memory_tool_retrieval_update_refuses_hidden_current_tag() {
+    assert_memory_retrieval_hidden_current_record_refused("tag").await;
+}
+
+#[tokio::test]
+async fn memory_tool_retrieval_foreign_and_missing_hidden_ids_keep_not_found_ordering() {
+    let (context, agent, message, _, hidden) = memory_retrieval_fixture("id").await;
+    let record = &hidden[0];
+    let mut snapshot = context.memory.read().await.snapshot();
+    snapshot
+        .memories
+        .iter_mut()
+        .find(|memory| memory.id == record.id)
+        .unwrap()
+        .agent_id = "foreign-owner".into();
+    context.memory.write().await.replace_snapshot(snapshot);
+    let before = context.memory.read().await.snapshot();
+    for id in [record.id.as_str(), "missing\u{202E}id"] {
+        let result = context
+            .clone()
+            .execute_tool(
+                agent.clone(),
+                message.clone(),
+                memory_correction_call(id, &record.content, "ordinary replacement"),
+            )
+            .await;
+        assert_eq!(result.status, TaskStatus::Error);
+        assert_eq!(result.error.as_deref(), Some("memory not found"));
+    }
+    assert_eq!(context.memory.read().await.snapshot(), before);
 }
 
 #[tokio::test]

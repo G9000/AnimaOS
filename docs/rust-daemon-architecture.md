@@ -288,6 +288,16 @@ durable-fact habits from public Hermes source, attributed with its full MIT noti
 in `hosts/rust-daemon/HERMES-NOTICE`. Selection adds no model/embedding call or
 automatic skill write and does not establish semantic retrieval or Hermes parity.
 
+Explicit lexical search applies existing owner/type/scope/provenance/importance
+filters before the BM25 result limit. Additive predicate-aware search, recall and
+recent methods keep host visibility rules outside the reusable library. The daemon
+excludes hidden text in IDs, content and tags before results are limited; the same
+check refuses an exact update of a hidden current record after owner/not-found
+checks. Full canonical text, IDs, stale checks and durable rollback are unchanged.
+Recent retrieval sorts eligible borrowed records and clones only returned records.
+BM25 corpus statistics, recall weights and the vector adapter's top-k contract are
+unchanged; completeness of semantic-only vector candidates remains unverified.
+
 `ToolRegistry::new()` registers handlers for these families:
 
 | Family     | Examples                                                                         |
