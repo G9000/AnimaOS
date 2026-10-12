@@ -70,6 +70,10 @@ of its own visible Fact records, and a changed or partial match is refused.
 Existing tool approval rules apply. This removes the active saved record;
 old chats, reflections, derived historical knowledge, receipts and backups may
 still retain its content. It is not complete erasure or automatic consolidation.
+Console deletion stays tied to the complete text shown when you open its
+confirmation. If the agent changes that text, deletion is refused and Memory
+refreshes. Review the current record and explicitly open Delete again; the
+console does not retry or fall back to deleting by ID alone.
 Explicit search now filters eligible records before its lexical result limit, so
 stronger foreign matches cannot hide your matching facts. Search and recent reads
 exclude hidden text in record IDs, content and tags before limiting results;

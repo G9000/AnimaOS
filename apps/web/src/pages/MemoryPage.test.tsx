@@ -346,9 +346,104 @@ describe('MemoryPage: memories', () => {
       vi.mocked(daemon.recentMemories).mockResolvedValue([]);
       await user.click(screen.getByRole('button', { name: 'Delete memory' }));
       await waitFor(() =>
-        expect(daemon.deleteMemory).toHaveBeenCalledWith('m1'),
+        expect(daemon.deleteMemory).toHaveBeenCalledWith('m1', 'Likes tea'),
       );
       expect(await screen.findByText(MEMORY_EMPTY)).toBeVisible();
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'Memories' })).toHaveFocus(),
+      );
+    });
+
+    it('deletes only the memory text that was reviewed before a background refresh', async () => {
+      const user = userEvent.setup();
+      const reviewed = memoryFixture('m1', { content: 'Reviewed wording' });
+      const refreshed = memoryFixture('m1', { content: 'Changed wording' });
+      vi.mocked(daemon.recentMemories)
+        .mockResolvedValueOnce([reviewed])
+        .mockResolvedValue([refreshed]);
+      renderPage();
+
+      await screen.findByText('Reviewed wording');
+      await user.click(screen.getByRole('button', { name: 'Delete' }));
+      expect(screen.getByText(DELETE_MEMORY_PROMPT)).toBeVisible();
+
+      await user.click(screen.getByRole('button', { name: 'Refresh' }));
+      expect(await screen.findByText('Reviewed wording')).toBeVisible();
+      expect(screen.queryByText('Changed wording')).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Delete memory' }));
+      await waitFor(() =>
+        expect(daemon.deleteMemory).toHaveBeenCalledWith(
+          'm1',
+          'Reviewed wording',
+        ),
+      );
+    });
+
+    it('a stale deletion refreshes the row and requires a new confirmation', async () => {
+      const user = userEvent.setup();
+      const reviewed = memoryFixture('m1', { content: 'Reviewed wording' });
+      const refreshed = memoryFixture('m1', { content: 'Changed wording' });
+      vi.mocked(daemon.recentMemories)
+        .mockResolvedValueOnce([reviewed])
+        .mockResolvedValueOnce([refreshed])
+        .mockResolvedValue([]);
+      vi.mocked(daemon.deleteMemory)
+        .mockRejectedValueOnce(
+          new DaemonHttpError(409, {
+            error: 'Memory text changed; review it again',
+          }),
+        )
+        .mockResolvedValueOnce(deleted);
+      renderPage();
+
+      await screen.findByText('Reviewed wording');
+      await user.click(screen.getByRole('button', { name: 'Delete' }));
+      await user.click(screen.getByRole('button', { name: 'Delete memory' }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'Memory text changed; review it again',
+      );
+      expect(await screen.findByText('Changed wording')).toBeVisible();
+      expect(
+        screen.queryByRole('button', { name: 'Delete memory' }),
+      ).not.toBeInTheDocument();
+      expect(daemon.deleteMemory).toHaveBeenNthCalledWith(
+        1,
+        'm1',
+        'Reviewed wording',
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Delete' }));
+      await user.click(screen.getByRole('button', { name: 'Delete memory' }));
+
+      await waitFor(() =>
+        expect(daemon.deleteMemory).toHaveBeenNthCalledWith(
+          2,
+          'm1',
+          'Changed wording',
+        ),
+      );
+    });
+
+    it('does not send a second deletion while confirmation is in flight', async () => {
+      const user = userEvent.setup();
+      let finishDelete!: (result: typeof deleted) => void;
+      vi.mocked(daemon.deleteMemory).mockImplementation(
+        () => new Promise((resolve) => (finishDelete = resolve)),
+      );
+      renderPage();
+
+      await screen.findByText('Likes tea');
+      await user.click(screen.getByRole('button', { name: 'Delete' }));
+      const confirm = screen.getByRole('button', { name: 'Delete memory' });
+      await user.click(confirm);
+      await user.click(confirm);
+
+      expect(daemon.deleteMemory).toHaveBeenCalledTimes(1);
+      expect(daemon.deleteMemory).toHaveBeenCalledWith('m1', 'Likes tea');
+
+      finishDelete(deleted);
       await waitFor(() =>
         expect(screen.getByRole('heading', { name: 'Memories' })).toHaveFocus(),
       );

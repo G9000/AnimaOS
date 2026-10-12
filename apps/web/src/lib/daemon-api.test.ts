@@ -756,7 +756,7 @@ describe('daemon memory requests', () => {
     await daemon.searchMemories('tea', 'agent 1', 200);
     await daemon.traceMemory('m 1');
     await daemon.updateMemory('m 1', { content: 'New' });
-    await daemon.deleteMemory('m 1');
+    await daemon.deleteMemory('m 1', 'Reviewed 🫖');
     await daemon.saveMemory({
       agentId: 'agent 1',
       agentName: 'Anima',
@@ -793,6 +793,9 @@ describe('daemon memory requests', () => {
       'GET /api/memories/relationships?agentId=agent+1&limit=200',
       'DELETE /api/memories/entities/e%201?kind=user',
     ]);
+    expect(fetchMock.mock.calls[4][1]?.body).toBe(
+      JSON.stringify({ expectedContent: 'Reviewed 🫖' }),
+    );
   });
 });
 

@@ -22,6 +22,15 @@ pub(crate) struct MemoryPatchRequest {
     pub(crate) tags: Option<Option<Vec<String>>>,
 }
 
+/// Optional `DELETE /api/memories/{memory_id}` body. An absent HTTP body
+/// preserves legacy ID-only deletion; a present body requires the full exact
+/// reviewed text, including empty or hidden legacy content. No normalization.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct MemoryDeleteRequest {
+    pub(crate) expected_content: String,
+}
+
 /// A present `null` becomes `Some(None)`; an absent field stays `None`
 /// (through `#[serde(default)]`).
 fn double_option<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>

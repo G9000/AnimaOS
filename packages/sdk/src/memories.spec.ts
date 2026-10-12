@@ -86,6 +86,19 @@ describe('memories client: edits, facts, and entities', () => {
     expect(await memories.delete('a/b')).toEqual(counts);
     expect(requests[0].url).toBe('/api/memories/a%2Fb');
     expect(requests[0].init?.method).toBe('DELETE');
+    expect(requests[0].init?.body).toBeUndefined();
+  });
+
+  it('delete can send the exact expected content, including empty text', async () => {
+    const { memories, requests } = transport(() => Response.json({ id: 'm1' }));
+
+    await memories.delete('m1', '');
+    await memories.delete('m1', ' Reviewed 🫖 ');
+
+    expect(requests.map(({ init }) => JSON.parse(String(init?.body)))).toEqual([
+      { expectedContent: '' },
+      { expectedContent: ' Reviewed 🫖 ' },
+    ]);
   });
 
   it('facts sends only the options that are set', async () => {

@@ -443,75 +443,306 @@ fn a_failed_embedding_removes_the_stale_vector() {
 }
 
 #[tokio::test]
-async fn delete_removes_the_memory_its_embedding_and_citations() {
+async fn guarded_memory_delete_rejects_reviewed_text_after_patch_and_keeps_current_record() {
     let state = daemon();
     let app = router(Arc::clone(&state), DaemonConfig::default());
-    let deleted = seed(&app, "The heron nests by the quarry", None).await["id"]
+    let reviewed = "The heron nests by the quarry";
+    let current = "The kingfisher dives at dawn";
+    let id = seed(&app, reviewed, None).await["id"]
         .as_str()
         .unwrap()
         .to_string();
-    let kept = seed(&app, "Weekly budget review happens on Fridays", None).await["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let relationship = send(
+    let changed = send(
         &app,
-        "POST",
-        "/api/memories/relationships",
-        Some(json!({
-            "sourceAgentId": "companion",
-            "sourceAgentName": "Companion",
-            "targetKind": "user",
-            "targetAgentId": "user-1",
-            "targetAgentName": "Leo",
-            "relationshipType": "knows",
-            "evidenceMemoryIds": [deleted, kept],
-        })),
+        "PATCH",
+        &memory_uri(&id),
+        Some(json!({"content": current})),
     )
     .await;
-    assert_eq!(relationship.status(), StatusCode::CREATED);
-
-    let response = send(&app, "DELETE", &memory_uri(&deleted), None).await;
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(changed.status(), StatusCode::OK);
+    let record = stored(&state, &id).await.unwrap();
+    assert_eq!(record.content, current);
+    let response = send(
+        &app,
+        "DELETE",
+        &memory_uri(&id),
+        Some(json!({"expectedContent": reviewed})),
+    )
+    .await;
+    assert_eq!(
+        response.status(),
+        StatusCode::CONFLICT,
+        "M31: reviewed-text deletion must not remove a record changed after review"
+    );
     assert_eq!(response.headers()["cache-control"], "no-store");
     assert_eq!(
-        json_body(response).await,
-        json!({
-            "id": deleted,
-            "removedRelationships": 0,
-            "updatedRelationships": 1,
-            "updatedFacts": 0,
-        })
+        json_body(response).await["error"],
+        "This memory changed; review it again before deleting"
     );
-
-    let recent = json_body(send(&app, "GET", "/api/memories/recent", None).await).await;
-    let recent_ids: Vec<&str> = recent["memories"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|memory| memory["id"].as_str().unwrap())
-        .collect();
-    assert_eq!(recent_ids, vec![kept.as_str()]);
-    assert!(search_ids(&state, "heron quarry").await.is_empty());
+    assert_eq!(stored(&state, &id).await, Some(record));
+    assert_eq!(search_ids(&state, "kingfisher").await, vec![id]);
     assert_eq!(vector_count(&state).await, 1);
-    assert!(!vector_hits(&state, "heron nests quarry")
-        .await
-        .contains(&deleted));
+}
 
-    let relationships =
-        json_body(send(&app, "GET", "/api/memories/relationships", None).await).await;
-    assert_eq!(
-        relationships["relationships"][0]["evidenceMemoryIds"],
-        json!([kept])
+#[tokio::test]
+async fn guarded_memory_delete_accepts_exact_blank_unicode_hidden_and_long_legacy_text_and_types() {
+    let state = daemon();
+    let app = router(Arc::clone(&state), DaemonConfig::default());
+    let texts = [
+        String::new(),
+        " \n\t ".into(),
+        "e\u{301} café".into(),
+        "legacy\u{202E} hidden".into(),
+        "🧭".repeat(9_000),
+    ];
+    let types = [
+        MemoryType::Fact,
+        MemoryType::Observation,
+        MemoryType::TaskResult,
+        MemoryType::Reflection,
+    ];
+    for (index, content) in texts.into_iter().enumerate() {
+        let memory = state.read().await.memory_handle();
+        let mut input = new_memory(&content);
+        input.memory_type = types[index % types.len()];
+        let record = memory.write().await.add(input).unwrap();
+        let different = if index == 2 {
+            "é café"
+        } else {
+            "different reviewed content"
+        };
+        let mismatch = send(
+            &app,
+            "DELETE",
+            &memory_uri(&record.id),
+            Some(json!({"expectedContent": different})),
+        )
+        .await;
+        assert_eq!(mismatch.status(), StatusCode::CONFLICT);
+        assert_eq!(stored(&state, &record.id).await, Some(record.clone()));
+        let matching = send(
+            &app,
+            "DELETE",
+            &memory_uri(&record.id),
+            Some(json!({"expectedContent": content})),
+        )
+        .await;
+        assert_eq!(matching.status(), StatusCode::OK);
+        assert_eq!(matching.headers()["cache-control"], "no-store");
+        assert_eq!(stored(&state, &record.id).await, None);
+    }
+}
+
+#[tokio::test]
+async fn guarded_memory_delete_nonempty_invalid_bodies_never_downgrade_and_auth_precedes_parsing() {
+    let state = daemon();
+    let app = router(Arc::clone(&state), DaemonConfig::default());
+    let id = seed(&app, "The heron nests by the quarry", None).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let before = stored(&state, &id).await.unwrap();
+    for bytes in [
+        "{}",
+        "null",
+        "[]",
+        "{\"expectedContent\":null}",
+        "{\"expectedContent\":1}",
+        "{\"expectedContent\":\"text\",\"force\":true}",
+        "{\"expected_content\":\"text\"}",
+        "{",
+        " \n",
+    ] {
+        let mut raw = request("DELETE", &memory_uri(&id), OWNER_ORIGIN, None);
+        *raw.body_mut() = Body::from(bytes.to_string());
+        let response = app.clone().oneshot(raw).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "body {bytes:?}");
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        assert_eq!(stored(&state, &id).await, Some(before.clone()));
+    }
+    let limited = router(
+        Arc::clone(&state),
+        DaemonConfig {
+            max_request_bytes: 64,
+            ..DaemonConfig::default()
+        },
     );
+    for (origin, status) in [
+        (OWNER_ORIGIN, StatusCode::BAD_REQUEST),
+        (FOREIGN_ORIGIN, StatusCode::FORBIDDEN),
+    ] {
+        let response = limited
+            .clone()
+            .oneshot(request(
+                "DELETE",
+                &memory_uri(&id),
+                origin,
+                Some(json!({"expectedContent": "x".repeat(100)})),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+    }
+    let protected = app.layer(axum::middleware::from_fn_with_state(
+        crate::routes::http::ApiKeyPolicy::for_test(Some("synthetic-key")),
+        crate::routes::http::enforce_api_key,
+    ));
+    let unauthorized = protected
+        .oneshot(request(
+            "DELETE",
+            &memory_uri(&id),
+            OWNER_ORIGIN,
+            Some(json!(null)),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(stored(&state, &id).await, Some(before));
+    assert_eq!(vector_count(&state).await, 1);
+}
+
+#[tokio::test]
+async fn guarded_memory_delete_compares_after_a_queued_patch_wins_the_write_lock() {
+    let state = daemon();
+    let app = router(Arc::clone(&state), DaemonConfig::default());
+    let id = seed(&app, "reviewed heron", None).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let memory = state.read().await.memory_handle();
+    let reader = memory.read().await;
+    let mut patch = Box::pin(app.clone().oneshot(request(
+        "PATCH",
+        &memory_uri(&id),
+        OWNER_ORIGIN,
+        Some(json!({"content": "updated kingfisher"})),
+    )));
+    assert!(futures::poll!(patch.as_mut()).is_pending());
+    let mut queued = false;
+    for _ in 0..1_000 {
+        if memory.try_read().is_err() {
+            queued = true;
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(queued, "PATCH must queue before DELETE");
+    let mut delete = Box::pin(app.clone().oneshot(request(
+        "DELETE",
+        &memory_uri(&id),
+        OWNER_ORIGIN,
+        Some(json!({"expectedContent": "reviewed heron"})),
+    )));
+    assert!(futures::poll!(delete.as_mut()).is_pending());
+    drop(reader);
+    let (changed, refused) = tokio::join!(patch, delete);
+    assert_eq!(changed.unwrap().status(), StatusCode::OK);
+    let refused = refused.unwrap();
+    assert_eq!(refused.status(), StatusCode::CONFLICT);
+    assert_eq!(refused.headers()["cache-control"], "no-store");
+    assert_eq!(
+        stored(&state, &id).await.unwrap().content,
+        "updated kingfisher"
+    );
+    assert_eq!(search_ids(&state, "kingfisher").await, vec![id]);
+    assert_eq!(vector_count(&state).await, 1);
+}
+
+#[tokio::test]
+async fn delete_removes_the_memory_its_embedding_and_citations() {
+    for guarded in [false, true] {
+        let state = daemon();
+        let path = std::env::temp_dir().join(format!(
+            "anima-guarded-memory-delete-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let store = MemoryStoreConfig::Json(path.clone());
+        if guarded {
+            state.write().await.set_memory_store(Some(store.clone()));
+        }
+        let app = router(Arc::clone(&state), DaemonConfig::default());
+        let deleted = seed(&app, "The heron nests by the quarry", None).await["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let kept = seed(&app, "Weekly budget review happens on Fridays", None).await["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let relationship = send(
+            &app,
+            "POST",
+            "/api/memories/relationships",
+            Some(json!({
+                "sourceAgentId": "companion",
+                "sourceAgentName": "Companion",
+                "targetKind": "user",
+                "targetAgentId": "user-1",
+                "targetAgentName": "Leo",
+                "relationshipType": "knows",
+                "evidenceMemoryIds": [deleted, kept],
+            })),
+        )
+        .await;
+        assert_eq!(relationship.status(), StatusCode::CREATED);
+
+        let body = guarded.then(|| json!({"expectedContent": "The heron nests by the quarry"}));
+        let response = send(&app, "DELETE", &memory_uri(&deleted), body).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        assert_eq!(
+            json_body(response).await,
+            json!({
+                "id": deleted,
+                "removedRelationships": 0,
+                "updatedRelationships": 1,
+                "updatedFacts": 0,
+            })
+        );
+
+        let recent = json_body(send(&app, "GET", "/api/memories/recent", None).await).await;
+        let recent_ids: Vec<&str> = recent["memories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|memory| memory["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(recent_ids, vec![kept.as_str()]);
+        assert!(search_ids(&state, "heron quarry").await.is_empty());
+        assert_eq!(vector_count(&state).await, 1);
+        assert!(!vector_hits(&state, "heron nests quarry")
+            .await
+            .contains(&deleted));
+
+        let relationships =
+            json_body(send(&app, "GET", "/api/memories/relationships", None).await).await;
+        assert_eq!(
+            relationships["relationships"][0]["evidenceMemoryIds"],
+            json!([kept])
+        );
+        if guarded {
+            let memory = state.read().await.memory_handle();
+            assert_eq!(
+                crate::memory_store::load_memory_snapshot(&store)
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                memory.read().await.snapshot()
+            );
+            std::fs::remove_file(path).unwrap();
+        }
+    }
 }
 
 #[tokio::test]
 async fn delete_unknown_memory_is_404() {
     let app = router(daemon(), DaemonConfig::default());
-    let response = send(&app, "DELETE", "/api/memories/no-such-memory", None).await;
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    assert_eq!(response.headers()["cache-control"], "no-store");
+    for body in [None, Some(json!({"expectedContent": "reviewed text"}))] {
+        let response = send(&app, "DELETE", "/api/memories/no-such-memory", body).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+    }
 }
 
 #[tokio::test]
@@ -569,11 +800,13 @@ async fn a_failed_save_restores_the_memory_and_answers_503() {
         Some(&id)
     );
 
-    let deleted = send(&app, "DELETE", &memory_uri(&id), None).await;
-    assert_eq!(deleted.status(), StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(deleted.headers()["cache-control"], "no-store");
-    assert_eq!(stored(&state, &id).await, Some(before));
-    assert_eq!(vector_count(&state).await, 1);
+    for body in [None, Some(json!({"expectedContent": before.content}))] {
+        let deleted = send(&app, "DELETE", &memory_uri(&id), body).await;
+        assert_eq!(deleted.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(deleted.headers()["cache-control"], "no-store");
+        assert_eq!(stored(&state, &id).await, Some(before.clone()));
+        assert_eq!(vector_count(&state).await, 1);
+    }
 
     std::fs::remove_dir_all(&unwritable).unwrap();
 }
@@ -1272,6 +1505,19 @@ fn the_new_memory_routes_are_in_the_openapi_document() {
     let item = &paths["/api/memories/facts/{fact_id}"];
     assert!(item.patch.is_some() && item.delete.is_some());
     assert!(paths["/api/memories/entities/{entity_id}"].delete.is_some());
+    let value = serde_json::to_value(&document).unwrap();
+    let delete = &value["paths"]["/api/memories/{memory_id}"]["delete"];
+    assert_ne!(delete["requestBody"]["required"], json!(true));
+    assert_eq!(
+        delete["requestBody"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/MemoryDeleteRequest"
+    );
+    assert!(delete["responses"].get("400").is_some());
+    assert!(delete["responses"].get("409").is_some());
+    let schema = &value["components"]["schemas"]["MemoryDeleteRequest"];
+    assert_eq!(schema["required"], json!(["expectedContent"]));
+    assert_eq!(schema["properties"]["expectedContent"]["type"], "string");
+    assert_eq!(schema["additionalProperties"], json!(false));
 }
 
 #[tokio::test]

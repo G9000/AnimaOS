@@ -50,7 +50,8 @@ pub(crate) use memories::{
 };
 pub(crate) use memory_edits::{
     EntityDeleteResponse, FactDeleteResponse, FactPatchRequest, FactReplacedResponse,
-    MemoryDeleteResponse, MemoryFactResponse, MemoryFactsEnvelope, MemoryPatchRequest,
+    MemoryDeleteRequest, MemoryDeleteResponse, MemoryFactResponse, MemoryFactsEnvelope,
+    MemoryPatchRequest,
 };
 pub(crate) use providers::{ProviderResponse, ProvidersEnvelope};
 pub(crate) use runs::*;
