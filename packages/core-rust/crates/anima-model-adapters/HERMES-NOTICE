@@ -9,6 +9,15 @@ agent/gemini_native_adapter.py as implementation references. Anima applies its
 own scoped attachment records, bounded reads, model capability gating and
 request-only hydration. The original upstream notice is retained below.
 
+M16 source revision: 1fd18277267152893a8a24792b79213e7ca3f899 (verified clean files).
+M16 adapts terminal structured-error-code preservation from
+agent/codex_runtime.py::_on_terminal/_raise_stream_error and
+agent/codex_responses_adapter.py::_format_responses_error. Anima intentionally
+uses fixed whitelisted code/parameter diagnostics instead of reflecting raw
+provider messages. Request/auth/endpoints remain unchanged; no Python runtime,
+profiles or token files are imported. Official structured recovery categories
+were checked against OpenAI Docs.
+
 MIT License
 
 Copyright (c) 2025 Nous Research

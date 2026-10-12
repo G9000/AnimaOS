@@ -4,14 +4,91 @@ use anima_core::{DataValue, Message, TokenUsage, ToolDescriptor};
 use serde_json::{json, Map, Value};
 
 pub(super) fn tool_parameters_schema_json(tool: &ToolDescriptor) -> Value {
-    if tool_parameters_are_json_schema(&tool.parameters_schema) {
+    let mut schema = if tool_parameters_are_json_schema(&tool.parameters_schema) {
         data_value_to_json(&DataValue::Object(tool.parameters_schema.clone()))
     } else {
         json!({
             "type": "object",
             "properties": data_value_to_json(&DataValue::Object(tool.parameters_schema.clone())),
         })
+    };
+    canonicalize_schema_integer_keywords(&mut schema);
+    schema
+}
+
+/// DataValue stores numbers as f64. Keep integer schema bounds canonical on the
+/// provider wire without changing arbitrary argument or instance-data numbers.
+fn canonicalize_schema_integer_keywords(schema: &mut Value) {
+    let Some(object) = schema.as_object_mut() else {
+        return;
+    };
+    for keyword in [
+        "minLength",
+        "maxLength",
+        "minItems",
+        "maxItems",
+        "minProperties",
+        "maxProperties",
+        "minContains",
+        "maxContains",
+    ] {
+        if let Some(value) = object.get_mut(keyword) {
+            if let Some(number) = value.as_f64().filter(|number| {
+                number.is_finite()
+                    && *number >= 0.0
+                    && number.fract() == 0.0
+                    && *number <= 9_007_199_254_740_991.0
+            }) {
+                *value = Value::Number((number as u64).into());
+            }
+        }
     }
+    for keyword in [
+        "properties",
+        "patternProperties",
+        "$defs",
+        "definitions",
+        "dependentSchemas",
+        "dependencies",
+    ] {
+        if let Some(children) = object.get_mut(keyword).and_then(Value::as_object_mut) {
+            for child in children.values_mut() {
+                canonicalize_schema_integer_keywords(child);
+            }
+        }
+    }
+    for keyword in [
+        "items",
+        "contains",
+        "additionalProperties",
+        "additionalItems",
+        "propertyNames",
+        "not",
+        "if",
+        "then",
+        "else",
+        "unevaluatedProperties",
+        "unevaluatedItems",
+        "contentSchema",
+    ] {
+        if let Some(child) = object.get_mut(keyword) {
+            if let Some(children) = child.as_array_mut() {
+                for child in children {
+                    canonicalize_schema_integer_keywords(child);
+                }
+            } else {
+                canonicalize_schema_integer_keywords(child);
+            }
+        }
+    }
+    for keyword in ["allOf", "anyOf", "oneOf", "prefixItems"] {
+        if let Some(children) = object.get_mut(keyword).and_then(Value::as_array_mut) {
+            for child in children {
+                canonicalize_schema_integer_keywords(child);
+            }
+        }
+    }
+    // enum/const/default/example(s) and extension data are instances, not schemas.
 }
 
 fn tool_parameters_are_json_schema(parameters: &BTreeMap<String, DataValue>) -> bool {

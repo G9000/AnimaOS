@@ -18,6 +18,7 @@ const ENDPOINT: &str = "https://chatgpt.com/backend-api/codex/responses";
 const MAX_EVENT: usize = 4 * 1024 * 1024;
 const MAX_STREAM: usize = 16 * 1024 * 1024;
 const MAX_TEXT: usize = 1024 * 1024;
+const MAX_ERROR_BODY: usize = 64 * 1024;
 
 /// A host-supplied ChatGPT subscription credential; never falls back to API billing.
 pub struct ChatGptResponsesAdapter {
@@ -65,15 +66,7 @@ impl ChatGptResponsesAdapter {
             .await
             .map_err(|_| "ChatGPT request failed or timed out".to_owned())?;
         if !response.status().is_success() {
-            return Err(match response.status().as_u16() {
-                401 => "ChatGPT subscription authorization expired; reconnect in settings".into(),
-                403 => "ChatGPT subscription does not allow this request or model".into(),
-                429 => {
-                    "ChatGPT subscription usage limit reached; try again after your quota resets"
-                        .into()
-                }
-                status => format!("ChatGPT subscription request failed (HTTP {status})"),
-            });
+            return Err(http_failure(response).await);
         }
         Ok(response)
     }
@@ -168,6 +161,168 @@ fn request_body(config: &AgentConfig, request: &ModelGenerateRequest) -> Result<
 
 fn malformed() -> String {
     "Malformed ChatGPT subscription response".into()
+}
+
+const UNKNOWN_FAILURE: &str =
+    "ChatGPT subscription generation failed; retry or check account access";
+
+// These are protocol constants, never arbitrary provider diagnostic text. Official
+// recovery guidance: https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery
+const KNOWN_FAILURES: &[(&str, &str)] = &[
+    ("invalid_function_parameters", "ChatGPT subscription tool parameter schema is invalid; review the tool schema configuration"),
+    ("invalid_prompt", "ChatGPT subscription request was rejected; review the input and tool configuration"),
+    ("model_not_found", "ChatGPT subscription selected model is unavailable; review the model and account access"),
+    ("unsupported_model", "ChatGPT subscription selected model is unsupported; review the model selection"),
+    ("invalid_request_error", "ChatGPT subscription request is invalid; review the request configuration"),
+    ("invalid_api_key", "ChatGPT subscription authorization was rejected; check the selected account and sign-in"),
+    ("authentication_error", "ChatGPT subscription authorization was rejected; check the selected account and sign-in"),
+    ("invalid_authentication", "ChatGPT subscription authorization was rejected; check the selected account and sign-in"),
+    ("token_expired", "ChatGPT subscription authorization expired; reconnect in settings"),
+    ("permission_denied", "ChatGPT subscription permission was denied; check account and integration access"),
+    ("permission_error", "ChatGPT subscription permission was denied; check account and integration access"),
+    ("rate_limit_exceeded", "ChatGPT subscription rate limit reached; pause requests before retrying"),
+    ("insufficient_quota", "ChatGPT subscription usage limit reached; check ChatGPT settings Usage before retrying"),
+    ("usage_limit_exceeded", "ChatGPT subscription usage limit reached; check ChatGPT settings Usage before retrying"),
+    ("server_error", "ChatGPT subscription is temporarily unavailable; preserve the connection and try later"),
+    ("internal_server_error", "ChatGPT subscription is temporarily unavailable; preserve the connection and try later"),
+    ("service_unavailable", "ChatGPT subscription is temporarily unavailable; preserve the connection and try later"),
+    ("context_length_exceeded", "ChatGPT subscription context limit exceeded; reduce the conversation or input"),
+    ("subscription_sharing_user_not_eligible", "ChatGPT plan usage is not eligible for this account or policy; review account and integration access"),
+    ("subscription_sharing_usage_limit_exceeded", "ChatGPT plan usage limit reached; check ChatGPT settings Usage before retrying"),
+    ("subscription_sharing_usage_unavailable", "ChatGPT plan usage availability is temporarily unavailable; preserve the connection and try later"),
+    ("subscription_sharing_unsupported_capability", "ChatGPT plan request has an unsupported capability; review the indicated request setting"),
+    ("subscription_sharing_route_not_supported", "ChatGPT plan inference route is unsupported; review the integration endpoint"),
+    ("subscription_sharing_invalid_user", "ChatGPT subscriber context could not be validated; check account authorization"),
+    ("subscription_sharing_user_unavailable", "ChatGPT account availability could not be checked; preserve the connection and try later"),
+    ("chatpass_v2_scope_not_authorized", "ChatGPT plan permission context does not authorize this operation; review the client and granted scopes"),
+    ("chatpass_v2_invalid_authorization_context", "ChatGPT plan permission context is invalid; review the client and granted scopes"),
+];
+
+fn known_parameter(param: &str) -> Option<&'static str> {
+    if indexed_tool_parameter(param) {
+        return Some("tools");
+    }
+    [
+        "model",
+        "input",
+        "instructions",
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "service_tier",
+        "reasoning",
+        "reasoning.effort",
+        "max_output_tokens",
+        "temperature",
+        "top_p",
+        "store",
+        "stream",
+        "include",
+        "background",
+        "text",
+        "text.format",
+    ]
+    .into_iter()
+    .find(|known| *known == param)
+}
+
+fn indexed_tool_parameter(param: &str) -> bool {
+    if param.len() > 256 {
+        return false;
+    }
+    let Some(rest) = param.strip_prefix("tools") else {
+        return false;
+    };
+    let (index, suffix) = if let Some(rest) = rest.strip_prefix('[') {
+        let Some((index, suffix)) = rest.split_once(']') else {
+            return false;
+        };
+        let Some(suffix) = suffix.strip_prefix('.') else {
+            return false;
+        };
+        (index, suffix)
+    } else if let Some(rest) = rest.strip_prefix('.') {
+        let Some((index, suffix)) = rest.split_once('.') else {
+            return false;
+        };
+        (index, suffix)
+    } else {
+        return false;
+    };
+    if index.is_empty() || index.len() > 4 || !index.bytes().all(|b| b.is_ascii_digit()) {
+        return false;
+    }
+    let suffix = suffix.strip_prefix("function.").unwrap_or(suffix);
+    if suffix != "parameters" && !suffix.starts_with("parameters.") {
+        return false;
+    }
+    suffix.split('.').all(|part| {
+        !part.is_empty() && part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    })
+}
+
+fn structured_failure(payload: &Value) -> Option<String> {
+    // Responses error events carry top-level fields; response.failed carries
+    // response.error. Upstream agent/codex_runtime.py::_raise_stream_error also
+    // prefers top-level error fields. Here only whitelisted constants escape.
+    let error = if payload["type"].as_str() == Some("error") && payload.get("code").is_some() {
+        payload
+    } else {
+        payload
+            .pointer("/response/error")
+            .or_else(|| payload.get("error"))
+            .unwrap_or(payload)
+    };
+    let code = error.get("code")?.as_str()?;
+    let &(safe_code, message) = KNOWN_FAILURES.iter().find(|(known, _)| *known == code)?;
+    let mut diagnostic = format!("{message} (code: {safe_code}");
+    if let Some(param) = error
+        .get("param")
+        .and_then(Value::as_str)
+        .and_then(known_parameter)
+    {
+        diagnostic.push_str("; parameter: ");
+        diagnostic.push_str(param);
+    }
+    diagnostic.push(')');
+    Some(diagnostic)
+}
+
+fn http_status_failure(status: u16) -> String {
+    match status {
+        401 => "ChatGPT subscription authorization expired; reconnect in settings".into(),
+        403 => "ChatGPT subscription does not allow this request or model".into(),
+        429 => {
+            "ChatGPT subscription usage limit reached; check ChatGPT settings Usage before retrying"
+                .into()
+        }
+        status => format!("ChatGPT subscription request failed (HTTP {status})"),
+    }
+}
+
+async fn http_failure(response: reqwest::Response) -> String {
+    let fallback = http_status_failure(response.status().as_u16());
+    if response
+        .content_length()
+        .is_some_and(|size| size > MAX_ERROR_BODY as u64)
+    {
+        return fallback;
+    }
+    let mut bytes = Zeroizing::new(Vec::new());
+    let mut chunks = response.bytes_stream();
+    while let Some(chunk) = chunks.next().await {
+        let Ok(chunk) = chunk else {
+            return fallback;
+        };
+        if bytes.len().saturating_add(chunk.len()) > MAX_ERROR_BODY {
+            return fallback;
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice::<Value>(&bytes)
+        .ok()
+        .and_then(|payload| structured_failure(&payload))
+        .unwrap_or(fallback)
 }
 
 fn completed_response(response: &Value) -> Result<ModelGenerateResponse, String> {
@@ -337,10 +492,11 @@ async fn consume(response: reqwest::Response, sink: &dyn ModelStreamSink) -> Res
                             .await;
                     }
                     Some("error" | "response.failed") => {
-                        return Err(
-                            "ChatGPT subscription generation failed; retry or check account access"
-                                .into(),
-                        )
+                        return Err(if data.len() <= MAX_ERROR_BODY {
+                            structured_failure(&payload).unwrap_or_else(|| UNKNOWN_FAILURE.into())
+                        } else {
+                            UNKNOWN_FAILURE.into()
+                        });
                     }
                     Some(_) => {}
                     None => return Err(malformed()),
