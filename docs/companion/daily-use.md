@@ -20,7 +20,10 @@ the schedule was left disabled and the isolated daemon stopped. A separate real
 scheduled run was then crashed after a successful file write and saved native
 action record, before its final conversation committed. Both subsequent restarts
 retained the same action evidence and unchanged file; the interrupted schedule
-stayed disabled and did not replay.
+stayed disabled and did not replay. Another one-time task remained enabled and
+unclaimed while its due time passed with the daemon off; it ran automatically
+after startup and remained completed without replay after a quiet restart. This
+was a short local outage, not a test of recurring catch-up or hosted uptime.
 
 ## Start with one companion
 
@@ -65,7 +68,10 @@ Review tool permission requests in Approvals. Review saved mail drafts and
 Calendar changes in Connectors before sending or applying them. Check the exact
 request before allowing it. Configure a small schedule in Automations and inspect its
 history. Schedules belong to the daemon, so they need that process running; a
-closed browser is fine. An interrupted action needs review before retry.
+closed browser is fine. An enabled, unclaimed one-time task can run after startup
+if its due time passed while the daemon was off. Its original due time stays
+visible after completion even though the task is disabled. A previously claimed,
+interrupted action follows its recovery/review policy; inspect effects before retry.
 
 For an interrupted, failed or stopped run, inspect its Recorded actions alongside
 the actual files or external service. Each action records a bounded argument and
