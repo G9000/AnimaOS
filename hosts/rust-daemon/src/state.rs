@@ -2996,7 +2996,10 @@ impl DaemonState {
     ) -> Result<AgentRuntimeSnapshot, String> {
         config.tools = self.resolve_agent_tools(config.tools)?;
         let mut runtime = AgentRuntime::new(config, Arc::clone(&self.model_adapter));
-        runtime.set_providers(default_providers(Arc::clone(&self.memory)));
+        runtime.set_providers(default_providers(
+            Arc::clone(&self.memory),
+            Arc::clone(&self.memory_embeddings),
+        ));
         runtime.set_evaluators(default_evaluators(
             Arc::clone(&self.memory),
             Arc::clone(&self.memory_embeddings),
@@ -3042,7 +3045,10 @@ impl DaemonState {
     }
 
     fn wire_runtime(&self, runtime: &mut AgentRuntime) {
-        runtime.set_providers(default_providers(Arc::clone(&self.memory)));
+        runtime.set_providers(default_providers(
+            Arc::clone(&self.memory),
+            Arc::clone(&self.memory_embeddings),
+        ));
         runtime.set_evaluators(default_evaluators(
             Arc::clone(&self.memory),
             Arc::clone(&self.memory_embeddings),

@@ -21,6 +21,13 @@ entry returns empty at zero limit without an embedding request. Direct legacy
 Existing caller authorization remains authoritative. Persistent formats stay
 unchanged; embedding quality needs separate acceptance.
 
+Automatic context can use `select_context_with_vector_index` with a configured
+index. It preserves the lexical selector's order, then fills spare slots with
+finite positive vector matches. Canonical own Facts, caller visibility, the
+current room and absence of world/session scoping govern both paths. Context
+content is deduplicated; similarity is not a truth or confidence score. The
+existing `select_context` entry retains lexical behavior.
+
 ```rust
 use anima_memory::{MemoryManager, MemoryType, NewMemory, MemorySearchOptions};
 

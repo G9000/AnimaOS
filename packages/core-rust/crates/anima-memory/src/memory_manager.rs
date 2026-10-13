@@ -101,25 +101,38 @@ impl MemoryManager {
         opts: MemoryContextOptions,
         visible: impl Fn(&Memory) -> bool,
     ) -> Vec<Memory> {
+        self.select_context_with_vector_index(opts, None, visible)
+    }
+
+    /// Preserve lexical context, then fill spare slots with eligible semantic matches.
+    /// Positive vector similarity is retrieval evidence, not calibrated relevance or truth.
+    pub fn select_context_with_vector_index(
+        &self,
+        opts: MemoryContextOptions,
+        vector_index: Option<&dyn MemoryVectorIndex>,
+        visible: impl Fn(&Memory) -> bool,
+    ) -> Vec<Memory> {
         if opts.limit == 0 {
             return Vec::new();
         }
         let terms = context_query_terms(&opts.query);
-        if terms.is_empty() {
+        if terms.is_empty() && vector_index.is_none() {
             return Vec::new();
         }
-        let mut selected: Vec<(&Memory, usize)> = Vec::new();
-        for memory in self.memories.values() {
-            if memory.agent_id != opts.agent_id
-                || memory.memory_type != MemoryType::Fact
-                || memory.world_id.is_some()
-                || memory.session_id.is_some()
-                || (memory.scope == MemoryScope::Room
-                    && !opts.room_id.as_ref().is_some_and(|room| {
+        let eligible = |memory: &Memory| {
+            memory.agent_id == opts.agent_id
+                && memory.memory_type == MemoryType::Fact
+                && memory.world_id.is_none()
+                && memory.session_id.is_none()
+                && (memory.scope != MemoryScope::Room
+                    || opts.room_id.as_ref().is_some_and(|room| {
                         !room.is_empty() && memory.room_id.as_ref() == Some(room)
                     }))
-                || !visible(memory)
-            {
+                && visible(memory)
+        };
+        let mut selected: Vec<(&Memory, usize)> = Vec::new();
+        for memory in self.memories.values() {
+            if !eligible(memory) {
                 continue;
             }
             let overlap = context_term_overlap(&memory.content, &terms);
@@ -145,6 +158,54 @@ impl MemoryManager {
             selected.sort_by(compare_context_candidates);
             if selected.len() > opts.limit {
                 selected.pop();
+            }
+        }
+
+        if selected.len() < opts.limit {
+            let bounded_query: String = opts.query.chars().take(512).collect();
+            if let Some(vector_index) = vector_index.filter(|_| !bounded_query.trim().is_empty()) {
+                let eligible_id = |memory_id: &str| {
+                    self.memories.get(memory_id).is_some_and(|memory| {
+                        eligible(memory)
+                            && !selected.iter().any(|(existing, _)| {
+                                normalized_context_content(&existing.content)
+                                    .eq(normalized_context_content(&memory.content))
+                            })
+                    })
+                };
+                let mut semantic: Vec<_> = vector_index
+                    .search_filtered(&bounded_query, opts.limit, &eligible_id)
+                    .into_iter()
+                    .take(opts.limit)
+                    .filter(|hit| {
+                        hit.score.is_finite() && hit.score > 0.0 && eligible_id(&hit.memory_id)
+                    })
+                    .filter_map(|hit| {
+                        self.memories
+                            .get(&hit.memory_id)
+                            .map(|memory| (memory, hit.score))
+                    })
+                    .collect();
+                semantic.sort_by(|left, right| {
+                    right
+                        .1
+                        .total_cmp(&left.1)
+                        .then_with(|| right.0.importance.total_cmp(&left.0.importance))
+                        .then_with(|| right.0.created_at.cmp(&left.0.created_at))
+                        .then_with(|| left.0.id.cmp(&right.0.id))
+                });
+                for (memory, _) in semantic {
+                    if selected.iter().any(|(existing, _)| {
+                        normalized_context_content(&existing.content)
+                            .eq(normalized_context_content(&memory.content))
+                    }) {
+                        continue;
+                    }
+                    selected.push((memory, 0));
+                    if selected.len() == opts.limit {
+                        break;
+                    }
+                }
             }
         }
         selected

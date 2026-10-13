@@ -100,3 +100,12 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+M33 configured semantic context (same public pin 1fd18277267152893a8a24792b79213e7ca3f899):
+MemoryStore.load_from_disk/format_for_system_prompt informs the comparison with
+frozen memory evidence. Anima already freezes provider context once per run;
+portable lexical-first filtered semantic selection, configured backend wiring
+and bounded query offload are native implementations. The default local backend
+stays unchanged; declared multilingual E5 ranking/context fixtures do not prove
+whole-product parity or general semantic quality. No private upstream profile,
+Python runtime, file format or credentials are imported.

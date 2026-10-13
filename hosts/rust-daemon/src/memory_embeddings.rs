@@ -59,6 +59,25 @@ pub(crate) struct MemoryEmbeddingRuntime {
     store: Option<SqliteMemoryEmbeddingStore>,
 }
 
+/// Cloneable query-only view. Model inference can run without holding the live
+/// memory/index locks; search later revalidates its model identity against the
+/// current index before using the prepared vector.
+#[derive(Clone)]
+pub(crate) struct MemoryQueryEmbedder {
+    embedder: MemoryEmbeddingProvider,
+    model_key: String,
+}
+
+impl MemoryQueryEmbedder {
+    pub(crate) fn model_key(&self) -> &str {
+        &self.model_key
+    }
+
+    pub(crate) fn embed_query(&self, text: &str) -> Result<Vec<f32>, MemoryVectorError> {
+        self.embedder.embed_query(text)
+    }
+}
+
 impl MemoryEmbeddingRuntime {
     pub(crate) fn local_default() -> Self {
         Self::local(DEFAULT_EMBEDDING_DIMENSION)
@@ -211,6 +230,28 @@ impl MemoryEmbeddingRuntime {
             persisted: self.store.is_some(),
             storage_file: self.store.as_ref().map(|store| store.path.clone()),
         }
+    }
+
+    pub(crate) fn query_embedder(&self) -> Option<MemoryQueryEmbedder> {
+        self.enabled.then(|| MemoryQueryEmbedder {
+            embedder: self.embedder.clone(),
+            model_key: self.embedder.storage_model(),
+        })
+    }
+
+    pub(crate) fn search_precomputed_query(
+        &self,
+        model_key: &str,
+        query: &[f32],
+        limit: usize,
+        eligible: &dyn Fn(&str) -> bool,
+    ) -> Vec<VectorMemoryHit> {
+        if !self.enabled || self.embedder.storage_model() != model_key {
+            return Vec::new();
+        }
+        self.index
+            .search_embedding_filtered(query, limit, eligible)
+            .unwrap_or_default()
     }
 
     pub(crate) fn rebuild_from_memories(
@@ -1451,6 +1492,174 @@ mod tests {
         assert!(query.iter().all(|value| value.is_finite()));
         assert!(cosine(&memory, &query) > 0.0);
         drop(guards);
+    }
+
+    #[tokio::test]
+    #[ignore = "loads public multilingual E5 assets for isolated learned-context acceptance"]
+    async fn learned_context_acceptance_ranks_paraphrases_and_injects_the_actual_fact() {
+        use anima_core::{AgentConfig, AgentRuntime, Content, Message, MessageRole};
+        use anima_memory::{MemoryContextOptions, MemoryManager};
+        // Declare the corpus, expected record and queries before observing any
+        // learned scores; no local alias table or paid generation participates.
+        const FACT: &str = "Severe peanut allergy: peanuts trigger anaphylaxis.";
+        const QUERIES: [&str; 2] = [
+            "¿Qué alimento debemos excluir para prevenir una reacción alérgica grave?",
+            "Which ingredient is dangerous for this person to eat?",
+        ];
+        const DISTRACTORS: [&str; 8] = [
+            "Preferred calendar reminders arrive twenty minutes before meetings.",
+            "Vacation luggage should include a compact umbrella.",
+            "The bicycle has a red frame and needs chain lubrication.",
+            "Project archives belong on an encrypted external drive.",
+            "Weekend entertainment choices include detective novels.",
+            "Workspace lighting should be warm rather than fluorescent.",
+            "The next language lesson covers verb conjugation.",
+            "Monthly electricity bills are paid by bank transfer.",
+        ];
+        let mut learned = {
+            let _env_lock = ENV_LOCK.lock().expect("env lock should not poison");
+            let cache = std::env::temp_dir().join("anima-fastembed-real-model-test");
+            let guards = [
+                EnvGuard::set("ANIMAOS_RS_MEMORY_EMBEDDINGS", FASTEMBED_PROVIDER),
+                EnvGuard::set("ANIMAOS_RS_MEMORY_EMBEDDING_MODEL", DEFAULT_FASTEMBED_MODEL),
+                EnvGuard::unset("ANIMAOS_RS_MEMORY_EMBEDDING_DIMENSIONS"),
+                EnvGuard::unset("ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE"),
+                EnvGuard::set(
+                    "ANIMAOS_RS_MEMORY_EMBEDDINGS_CACHE_DIR",
+                    &cache.to_string_lossy(),
+                ),
+                EnvGuard::set(
+                    "ANIMAOS_RS_MEMORY_EMBEDDINGS_SHOW_DOWNLOAD_PROGRESS",
+                    "false",
+                ),
+            ];
+            let runtime = MemoryEmbeddingRuntime::from_env(None)
+                .expect("genuine cached E5 backend should load");
+            drop(guards);
+            runtime
+        };
+        assert_eq!(learned.status().provider, FASTEMBED_PROVIDER);
+        let runtime = AgentRuntime::new_with_id(
+            "learned-context-owner",
+            AgentConfig {
+                name: "Planner".into(),
+                model: "unused-deterministic".into(),
+                bio: None,
+                lore: None,
+                knowledge: None,
+                topics: None,
+                adjectives: None,
+                style: None,
+                provider: None,
+                system: None,
+                tools: None,
+                plugins: None,
+                settings: None,
+            },
+            Arc::new(crate::model::DeterministicModelAdapter),
+        );
+        let mut target = test_memory("learned-peanut-fact", FACT);
+        target.agent_id = runtime.id().into();
+        target.importance = 0.5;
+        let mut corpus = vec![target.clone()];
+        for (index, text) in DISTRACTORS.iter().enumerate() {
+            let mut memory = test_memory(&format!("unrelated-{index}"), text);
+            memory.agent_id = runtime.id().into();
+            memory.importance = 1.0;
+            memory.created_at = index as u64 + 10;
+            corpus.push(memory);
+        }
+        let mut excluded_ids = Vec::new();
+        for (index, query) in QUERIES.iter().enumerate() {
+            let foreign = test_memory(&format!("foreign-{index}"), query);
+            let mut hidden = test_memory(&format!("hidden-{index}"), query);
+            hidden.agent_id = runtime.id().into();
+            hidden.tags = Some(vec!["hidden\u{202E}tag".into()]);
+            excluded_ids.extend([foreign.id.clone(), hidden.id.clone()]);
+            corpus.extend([foreign, hidden]);
+        }
+        let mut manager = MemoryManager::new();
+        manager.replace_snapshot(anima_memory::MemoryManagerSnapshot {
+            memories: corpus.clone(),
+            ..Default::default()
+        });
+        for memory in &corpus {
+            learned
+                .upsert_memory(memory)
+                .expect("real E5 passage should index");
+        }
+        let memory = Arc::new(tokio::sync::RwLock::new(manager));
+        let embeddings = Arc::new(tokio::sync::RwLock::new(learned));
+        let before = memory.read().await.snapshot();
+        // Prove both predeclared ranking cases before testing the missing
+        // automatic-context wiring, so its RED cannot conceal quality failures.
+        for query in QUERIES {
+            let manager = memory.read().await;
+            let eligible = |id: &str| {
+                manager.get(id).is_some_and(|record| {
+                    record.agent_id == runtime.id()
+                        && record.memory_type == MemoryType::Fact
+                        && !record.tags.as_ref().is_some_and(|tags| {
+                            tags.iter()
+                                .any(|tag| crate::memory_text::has_hidden_text(tag))
+                        })
+                })
+            };
+            let index = embeddings.read().await;
+            let ranking = index.search_filtered(query, corpus.len(), &eligible);
+            assert_eq!(ranking.len(), DISTRACTORS.len() + 1);
+            assert_eq!(
+                ranking[0].memory_id, target.id,
+                "predeclared learned relevance must beat all unrelated facts for {query:?}"
+            );
+            assert!(ranking
+                .iter()
+                .all(|hit| hit.score.is_finite() && hit.score > 0.0));
+            assert!(ranking[1..].iter().all(|hit| hit.score < ranking[0].score));
+            let global = index.search(query, corpus.len());
+            assert!(
+                global.iter().any(
+                    |hit| excluded_ids.contains(&hit.memory_id) && hit.score > ranking[0].score
+                ),
+                "stronger ineligible vectors must not establish context authority"
+            );
+            let lexical = manager.select_context(
+                MemoryContextOptions {
+                    agent_id: runtime.id().into(),
+                    room_id: Some("learned-room".into()),
+                    query: query.into(),
+                    limit: 6,
+                },
+                |_| true,
+            );
+            assert!(
+                lexical.iter().all(|record| record.id != target.id),
+                "the expected fact must not be a literal lexical match"
+            );
+        }
+        let providers = crate::components::default_providers(memory.clone(), embeddings.clone());
+        for query in QUERIES {
+            let message = Message {
+                id: "learned-context-input".into(),
+                agent_id: runtime.id().into(),
+                room_id: "learned-room".into(),
+                role: MessageRole::User,
+                created_at_ms: 1,
+                content: Content {
+                    text: query.into(),
+                    ..Default::default()
+                },
+            };
+            let context = providers[0]
+                .get(&runtime, &message)
+                .await
+                .expect("existing provider should return context");
+            assert!(context.text.contains(&target.id), "M33: learned relevant Fact must reach automatic context for {query:?}; actual={:?}", context.text);
+            assert!(context.text.contains(&serde_json::to_string(FACT).unwrap()));
+            assert!(context.text.chars().count() <= 4_800);
+            assert!(excluded_ids.iter().all(|id| !context.text.contains(id)));
+        }
+        assert_eq!(memory.read().await.snapshot(), before);
     }
 
     fn test_memory(id: &str, content: &str) -> Memory {

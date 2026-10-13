@@ -313,7 +313,7 @@ fn build_swarm_runtime(
     let mut runtime = AgentRuntime::new(config, model_adapter);
     runtime.set_persistence_agent_id(persistence_agent_id);
     runtime.set_event_listener(event_listener);
-    let mut providers = default_providers(Arc::clone(&memory));
+    let mut providers = default_providers(Arc::clone(&memory), Arc::clone(&memory_embeddings));
     providers.push(Arc::new(SwarmInboxProvider { inbox }));
     providers.push(Arc::new(SwarmParticipantsProvider { participants }));
     runtime.set_providers(providers);

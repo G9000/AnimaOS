@@ -198,7 +198,10 @@ impl DaemonState {
         runtime.set_agent_files(files.clone());
         self.wire_runtime(&mut runtime);
         if let Some(summary) = summary {
-            let mut providers = crate::components::default_providers(Arc::clone(&self.memory));
+            let mut providers = crate::components::default_providers(
+                Arc::clone(&self.memory),
+                Arc::clone(&self.memory_embeddings),
+            );
             providers
                 .push(Arc::new(SessionSummaryProvider { text: summary.text }) as Arc<dyn Provider>);
             runtime.set_providers(providers);
