@@ -1,7 +1,13 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { LearningReview } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError } from '@animaOS-SWARM/sdk';
+import type {
+  LearningReview,
+  LearningSkillDraftInput,
+} from '@animaOS-SWARM/sdk';
+import { skillDraftFixture } from '../../test/skills';
+import { skillFixture } from '../../test/skills';
 import {
   LearningReviewPanel,
   type LearningReviewApi,
@@ -75,11 +81,293 @@ function apiMock(
         ],
       }),
     ),
+    listSkills: vi.fn(async () => []),
+    skill: vi.fn(async () => ({ skill: null, file: null })),
+    createSkillDraft: vi.fn(async () => {
+      throw new Error('No skill draft fixture');
+    }),
     ...overrides,
   };
 }
 
 describe('LearningReviewPanel', () => {
+  it('M39_offers_explicit_skill_draft_handoff_from_a_read_review', async () => {
+    const user = userEvent.setup();
+    const completed = review({ id: 'review-for-draft' });
+    const api = apiMock({
+      listReviews: vi.fn(async () => [completed]),
+      getReview: vi.fn(async () => completed),
+    });
+    render(<LearningReviewPanel agentId="agent-1" api={api} />);
+
+    const card = (await screen.findByText('completed · 1 suggestion')).closest(
+      'article',
+    );
+    await user.click(
+      within(card!).getByRole('button', { name: 'Read review' }),
+    );
+    expect(
+      await screen.findByRole('button', { name: 'Create skill draft' }),
+    ).toBeVisible();
+  });
+
+  it('creates only a pending draft with the exact edited bytes, source digest, version, and selected base hash', async () => {
+    const user = userEvent.setup();
+    const completed = review({ id: 'review-for-draft' });
+    const existing = skillFixture('source-checking', {
+      name: 'Source checking',
+      description: 'Check cited sources.',
+      approvedHash: 'approved-hash',
+    });
+    const draft = skillDraftFixture('skd-learning', {
+      slug: existing.slug,
+      name: 'Source checking',
+      description: 'Check cited sources.',
+      body: 'Verify the cited source before summarizing.',
+      learningSource: {
+        agentId: 'agent-1',
+        reviewId: completed.id,
+        proposalId: completed.proposals[0]!.id,
+        sourceRunId: completed.sourceRunId,
+        sessionId: completed.sessionId,
+        evidenceDigest: completed.evidenceDigest,
+        decisionVersion: 3,
+      },
+    });
+    const createSkillDraft = vi.fn(
+      async (
+        _agentId: string,
+        _reviewId: string,
+        _proposalId: string,
+        _input: LearningSkillDraftInput,
+      ) => draft,
+    );
+    const api = apiMock({
+      listReviews: vi.fn(async () => [completed]),
+      getReview: vi.fn(async () => completed),
+      listSkills: vi.fn(async () => [existing]),
+      skill: vi.fn(async () => ({
+        skill: existing,
+        file: {
+          hash: 'current-file-hash',
+          name: existing.name,
+          description: existing.description,
+          body: 'Existing instructions.',
+          problem: null,
+        },
+      })),
+      createSkillDraft,
+    });
+    const onOpenSkills = vi.fn();
+    render(
+      <LearningReviewPanel
+        agentId="agent-1"
+        api={api}
+        onOpenSkills={onOpenSkills}
+      />,
+    );
+    const card = (await screen.findByText('completed · 1 suggestion')).closest(
+      'article',
+    );
+    await user.click(
+      within(card!).getByRole('button', { name: 'Read review' }),
+    );
+    await user.click(
+      await screen.findByRole('button', { name: 'Create skill draft' }),
+    );
+    const base = await screen.findByLabelText('Base skill');
+    await waitFor(() => expect(base).toBeEnabled());
+    await user.selectOptions(base, 'source-checking');
+
+    const body = await screen.findByRole('textbox', {
+      name: 'Skill instructions',
+    });
+    await waitFor(() =>
+      expect(body).toHaveValue(
+        'Existing instructions.\n\nKeep a source citation with future summaries.',
+      ),
+    );
+    await user.clear(body);
+    await user.type(body, 'Verify the cited source before summarizing.');
+    await user.click(
+      screen.getByRole('button', { name: 'Create pending skill draft' }),
+    );
+
+    await waitFor(() =>
+      expect(createSkillDraft).toHaveBeenCalledWith(
+        'agent-1',
+        'review-for-draft',
+        'proposal-1',
+        {
+          expectedVersion: 3,
+          evidenceDigest: 'digest',
+          skill: {
+            slug: 'source-checking',
+            name: 'Source checking',
+            description: 'Check cited sources.',
+            body: 'Verify the cited source before summarizing.',
+            expectedHash: 'current-file-hash',
+          },
+        },
+      ),
+    );
+    expect(
+      await screen.findByText(/Pending skill draft created/),
+    ).toBeVisible();
+    expect(screen.getByText(/separate review and approval/)).toBeVisible();
+    await user.click(
+      screen.getByRole('button', { name: 'Open skill draft in Skills' }),
+    );
+    expect(onOpenSkills).toHaveBeenCalledOnce();
+  });
+
+  it('keeps every edited skill field visible when the source or base hash conflicts', async () => {
+    const user = userEvent.setup();
+    const api = apiMock({
+      listReviews: vi.fn(async () => [review()]),
+      createSkillDraft: vi.fn(async () => {
+        throw new DaemonHttpError(409, { error: 'Source evidence changed' });
+      }),
+    });
+    render(<LearningReviewPanel agentId="agent-1" api={api} />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Read review' }),
+    );
+    await user.click(
+      await screen.findByRole('button', { name: 'Create skill draft' }),
+    );
+    const slug = await screen.findByRole('textbox', { name: 'Skill slug' });
+    const name = screen.getByRole('textbox', { name: 'Skill name' });
+    const description = screen.getByRole('textbox', {
+      name: 'Skill description',
+    });
+    const body = screen.getByRole('textbox', { name: 'Skill instructions' });
+    await user.clear(slug);
+    await user.type(slug, 'reviewed-source-check');
+    await user.clear(name);
+    await user.type(name, 'Reviewed source check');
+    await user.clear(description);
+    await user.type(description, 'Check source material.');
+    await user.clear(body);
+    await user.type(body, 'Compare the cited source.');
+    await user.click(
+      screen.getByRole('button', { name: 'Create pending skill draft' }),
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /edits are kept/,
+    );
+    expect(slug).toHaveValue('reviewed-source-check');
+    expect(name).toHaveValue('Reviewed source check');
+    expect(description).toHaveValue('Check source material.');
+    expect(body).toHaveValue('Compare the cited source.');
+  });
+
+  it('clears a pending base-skill read when switching back to a new skill', async () => {
+    const user = userEvent.setup();
+    const existing = skillFixture('slow-skill');
+    let resolveSkill!: (
+      value: Awaited<ReturnType<LearningReviewApi['skill']>>,
+    ) => void;
+    const api = apiMock({
+      listReviews: vi.fn(async () => [review()]),
+      listSkills: vi.fn(async () => [existing]),
+      skill: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveSkill = resolve;
+          }),
+      ),
+    });
+    render(<LearningReviewPanel agentId="agent-1" api={api} />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Read review' }),
+    );
+    await user.click(
+      await screen.findByRole('button', { name: 'Create skill draft' }),
+    );
+    const base = await screen.findByLabelText('Base skill');
+    await waitFor(() => expect(base).toBeEnabled());
+    await user.selectOptions(base, 'slow-skill');
+    expect(await screen.findByText('Loading selected skill…')).toBeVisible();
+
+    await user.selectOptions(base, '');
+    expect(
+      screen.queryByText('Loading selected skill…'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Create pending skill draft' }),
+    ).toBeEnabled();
+
+    resolveSkill({
+      skill: existing,
+      file: {
+        hash: 'late-hash',
+        name: existing.name,
+        description: existing.description,
+        body: 'late body',
+        problem: null,
+      },
+    });
+    expect(
+      await screen.findByRole('textbox', { name: 'Skill instructions' }),
+    ).toHaveValue('Keep a source citation with future summaries.');
+    expect(
+      screen.queryByText(/Based on the selected skill version/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not attach a delayed old-agent skill draft to a new agent review', async () => {
+    const user = userEvent.setup();
+    let resolveDraft!: (value: ReturnType<typeof skillDraftFixture>) => void;
+    const oldReview = review({ agentId: 'agent-old', id: 'same-review' });
+    const newReview = review({ agentId: 'agent-new', id: 'same-review' });
+    const api = apiMock({
+      listReviews: vi.fn(async (agentId) => [
+        agentId === 'agent-old' ? oldReview : newReview,
+      ]),
+      getReview: vi.fn(async (agentId) =>
+        agentId === 'agent-old' ? oldReview : newReview,
+      ),
+      createSkillDraft: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveDraft = resolve;
+          }),
+      ),
+    });
+    const view = render(<LearningReviewPanel agentId="agent-old" api={api} />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Read review' }),
+    );
+    await user.click(
+      await screen.findByRole('button', { name: 'Create skill draft' }),
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Create pending skill draft' }),
+    );
+    await waitFor(() => expect(api.createSkillDraft).toHaveBeenCalledOnce());
+    expect(screen.getByRole('button', { name: 'Acknowledge' })).toBeDisabled();
+
+    view.rerender(<LearningReviewPanel agentId="agent-new" api={api} />);
+    const newAgentCard = (
+      await screen.findByText('completed · 1 suggestion')
+    ).closest('article');
+    await user.click(
+      within(newAgentCard!).getByRole('button', { name: 'Read review' }),
+    );
+    await screen.findByRole('button', { name: 'Create skill draft' });
+    resolveDraft(skillDraftFixture('old-agent-draft'));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Create skill draft' }),
+      ).toBeVisible(),
+    );
+    expect(
+      screen.queryByText(/A skill draft is linked to this advice/),
+    ).not.toBeInTheDocument();
+  });
+
   it('persists the optional automatic-review policy separately from settings save', async () => {
     const user = userEvent.setup();
     const api = apiMock();

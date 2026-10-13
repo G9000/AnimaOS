@@ -1111,6 +1111,10 @@ export function ViewHarness() {
       saveSettings={saveSettings}
       resetAgent={resetAgent}
       close={closeSettings}
+      onOpenSkills={() => {
+        closeSettings();
+        navigate({ kind: 'page', page: 'skills' });
+      }}
     />
   ) : null;
 

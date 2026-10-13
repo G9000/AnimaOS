@@ -63,6 +63,7 @@ export type {
   LearningPolicy,
   LearningProposal,
   LearningProposalDecision,
+  LearningSkillDraftInput,
   LearningReview,
   LearningReviewState,
   LearningReviewTrigger,

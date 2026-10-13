@@ -131,6 +131,7 @@ fn file_draft(slug: &str, file: &ScannedFile) -> SkillDraft {
         body,
         source: DraftSource::File,
         proposed_by: None,
+        learning_source: None,
         base_hash: None,
         file_hash: file.hash.clone(),
         created_at_ms: millis(file.modified),
@@ -472,6 +473,27 @@ impl SkillRegistry {
                     "skill draft {} has an invalid slug: {}",
                     draft.id, draft.slug
                 ));
+            }
+            if let Some(source) = &draft.learning_source {
+                if draft.source != DraftSource::Agent
+                    || !is_hex_hash(&source.evidence_digest)
+                    || [
+                        &source.agent_id,
+                        &source.review_id,
+                        &source.proposal_id,
+                        &source.source_run_id,
+                        &source.session_id,
+                    ]
+                    .iter()
+                    .any(|id| id.is_empty() || id.len() > 300)
+                    || !draft.proposed_by.as_ref().is_some_and(|by| {
+                        by.agent_id == source.agent_id
+                            && by.run_id == source.source_run_id
+                            && by.session_id == source.session_id
+                    })
+                {
+                    return Err("invalid learning skill source in snapshot".into());
+                }
             }
         }
         Ok(())

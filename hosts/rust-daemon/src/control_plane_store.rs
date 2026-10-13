@@ -22,10 +22,13 @@ use crate::schedules::ScheduledPromptRecord;
 /// skill drafts (M5); version 9 adds the automation fields, the `cron` and
 /// `once` triggers, and the fire log (M6); version 10 adds the owner's pricing
 /// overrides (M8); version 11 adds attachment inputs on steers (M9), version
-/// 14 adds bounded learning advice and separate opt-in policies (M38). Older
+/// 14 adds bounded learning advice and separate opt-in policies (M38), and
+/// 15 adds durable reviewed skill handoff lineage (M39). Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 14;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 15;
+pub(crate) const LEARNING_STORE_VERSION: u32 = 14;
+pub(crate) const PRE_LEARNING_ADOPTION_BACKUP_SUFFIX: &str = ".pre-learning-adoption.bak";
 pub(crate) const DRIVE_STORE_VERSION: u32 = 13;
 pub(crate) const PRE_LEARNING_BACKUP_SUFFIX: &str = ".pre-learning.bak";
 /// Version 10 pricing snapshots are backed up as `.pre-attachments.bak`.
@@ -364,7 +367,11 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
             .file_name()
             .map(|name| name.to_os_string())
             .unwrap_or_default();
-        name.push(PRE_LEARNING_BACKUP_SUFFIX);
+        name.push(if loaded_version < LEARNING_STORE_VERSION {
+            PRE_LEARNING_BACKUP_SUFFIX
+        } else {
+            PRE_LEARNING_ADOPTION_BACKUP_SUFFIX
+        });
         path.with_file_name(name)
     }
 }
@@ -874,7 +881,7 @@ mod tests {
 
     #[test]
     fn the_version_constants() {
-        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 14);
+        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 15);
         assert_eq!(super::USAGE_STORE_VERSION, 10);
         assert_eq!(super::PRE_ATTACHMENTS_BACKUP_SUFFIX, ".pre-attachments.bak");
         assert_eq!(super::postgres_backup_key(10), "control_plane.backup.10");
@@ -1183,7 +1190,7 @@ mod discord_upgrade_tests {
         assert!(loaded.discord_connectors.is_empty());
         assert!(loaded.discord_inbound.is_empty());
         assert!(loaded.discord_outbound.is_empty());
-        assert_eq!(CONTROL_PLANE_STORE_VERSION, 14);
+        assert_eq!(CONTROL_PLANE_STORE_VERSION, 15);
         write_pre_upgrade_backup(&config, 11).await.unwrap();
         assert_eq!(
             std::fs::read_to_string(pre_discord_backup_path(&path)).unwrap(),
@@ -1224,6 +1231,34 @@ mod drive_snapshot_tests {
 #[cfg(test)]
 mod learning_snapshot_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn m39_version_fourteen_has_an_independent_exact_adoption_backup() {
+        let path = std::env::temp_dir().join(format!(
+            "anima-learning-adoption-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let original = "{\"version\":14,\"agents\":[],\"swarms\":[]}";
+        std::fs::write(&path, original).unwrap();
+        let config = ControlPlaneStoreConfig::Json(path.clone());
+        let loaded = load_control_plane_snapshot(&config).await.unwrap().unwrap();
+        assert!(loaded.skill_drafts.is_empty());
+        assert!(loaded.learning_reviews.is_empty());
+        let old_backup = pre_upgrade_backup_path(&path, 13);
+        std::fs::write(&old_backup, "older backup").unwrap();
+        write_pre_upgrade_backup(&config, 14).await.unwrap();
+        let backup = pre_upgrade_backup_path(&path, 14);
+        assert_ne!(backup, old_backup);
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
+        assert_eq!(
+            std::fs::read_to_string(&old_backup).unwrap(),
+            "older backup"
+        );
+        assert_eq!(CONTROL_PLANE_STORE_VERSION, 15);
+        std::fs::remove_file(backup).unwrap();
+        std::fs::remove_file(old_backup).unwrap();
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[tokio::test]
     async fn m38_version_thirteen_defaults_off_and_has_an_independent_exact_backup() {

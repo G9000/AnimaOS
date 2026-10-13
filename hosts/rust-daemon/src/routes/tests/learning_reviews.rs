@@ -1194,3 +1194,608 @@ async fn an_unacknowledged_reservation_save_starts_no_model_and_keeps_its_attemp
     assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 0);
     fixture.assert_source_unchanged().await;
 }
+
+async fn learning_skill_fixture() -> (Fixture, Value) {
+    let fixture = Fixture::new(true, None).await;
+    let persist = {
+        let mut guard = fixture.state.write().await;
+        guard.workspace = Some(crate::control_plane_store::WorkspaceConfig {
+            root_path: fixture.root.clone(),
+            company_name: "Learning fixture".into(),
+            mission: "Inspect advice before adopting it".into(),
+            values: vec![],
+        });
+        guard.control_plane_persist_request()
+    };
+    persist.save().await.unwrap();
+    let review = fixture.completed(&fixture.admit().await).await;
+    (fixture, review)
+}
+
+fn learning_skill_uri(fixture: &Fixture, review: &Value) -> String {
+    format!(
+        "{}/proposals/{}/skill-draft",
+        fixture.review_uri(review),
+        review["proposals"][0]["id"].as_str().unwrap()
+    )
+}
+
+fn learning_skill_input(review: &Value) -> Value {
+    json!({
+        "expectedVersion": review["proposals"][0]["decisionVersion"],
+        "evidenceDigest": review["evidenceDigest"],
+        "skill": {
+            "slug": "arithmetic-check", "name": "Arithmetic check",
+            "description": "Check arithmetic before presenting a result",
+            "body": "Calculate the result, check it independently, and distinguish that check from broader task success.",
+            "expectedHash": null
+        }
+    })
+}
+
+/// M39 HTTP RED uses a settled real owner/source boundary and a valid existing
+/// SkillDraft contract. The owner creates a pending draft, never an active file.
+#[tokio::test]
+async fn m39_reviewed_advice_handoff_creates_a_pending_draft_without_writing_skill_file() {
+    let (fixture, review) = learning_skill_fixture().await;
+    let body = learning_skill_input(&review);
+    let path = fixture.root.join("skills/arithmetic-check/SKILL.md");
+    assert!(!path.exists());
+    let response = send(
+        &fixture.app,
+        "POST",
+        &learning_skill_uri(&fixture, &review),
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(
+        response.status(),
+        StatusCode::CREATED,
+        "a reviewed own proposal must create a pending skill draft"
+    );
+    assert_no_store(&response);
+    let draft = json_body(response).await["draft"].clone();
+    assert_eq!(draft["status"], "pending");
+    assert_eq!(draft["source"], "agent");
+    assert_eq!(draft["slug"], body["skill"]["slug"]);
+    assert_eq!(draft["body"], body["skill"]["body"]);
+    assert_eq!(draft["baseHash"], Value::Null);
+    assert_eq!(draft["proposedBy"]["runId"], fixture.source.id);
+    assert_eq!(
+        draft["learningSource"],
+        json!({
+            "agentId": fixture.agent, "reviewId": review["id"],
+            "proposalId": review["proposals"][0]["id"], "sourceRunId": fixture.source.id,
+            "sessionId": SESSION, "evidenceDigest": review["evidenceDigest"], "decisionVersion": 0
+        })
+    );
+    assert!(!path.exists(), "handoff must not write or approve SKILL.md");
+    let current = json_body(send(&fixture.app, "GET", &fixture.review_uri(&review), None).await)
+        .await["review"]
+        .clone();
+    assert_eq!(current["proposals"][0]["skillDraftId"], draft["id"]);
+    assert_eq!(current["proposals"][0]["decision"], "pending");
+    assert_eq!(current["proposals"][0]["decisionVersion"], 0);
+    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
+    fixture.assert_source_unchanged().await;
+}
+
+async fn learning_skill_draft(fixture: &Fixture, review: &Value, input: Value) -> Value {
+    let response = send(
+        &fixture.app,
+        "POST",
+        &learning_skill_uri(fixture, review),
+        Some(input),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_no_store(&response);
+    json_body(response).await["draft"].clone()
+}
+
+async fn change_learning_source_input(fixture: &Fixture) {
+    let persist = {
+        let mut guard = fixture.state.write().await;
+        let mut changed = guard
+            .runs
+            .get(&fixture.source.id)
+            .cloned()
+            .unwrap_or_else(|| fixture.source.clone());
+        changed
+            .input
+            .text
+            .push_str(" Source changed after its review.");
+        guard.runs.insert(changed);
+        guard.control_plane_persist_request()
+    };
+    persist.save().await.unwrap();
+}
+
+async fn pending_skill_drafts(app: &axum::Router) -> Vec<Value> {
+    let response = send(app, "GET", "/api/skill-drafts", None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_no_store(&response);
+    json_body(response).await["drafts"]
+        .as_array()
+        .unwrap()
+        .clone()
+}
+
+#[tokio::test]
+async fn m39_handoff_requires_write_authority_and_strict_explicit_nullable_input() {
+    let (fixture, review) = learning_skill_fixture().await;
+    let uri = learning_skill_uri(&fixture, &review);
+    let input = learning_skill_input(&review);
+    let foreign = fixture
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&uri)
+                .header("host", "127.0.0.1:8080")
+                .header("origin", "https://foreign.example.invalid")
+                .header("content-type", "application/json")
+                .body(Body::from("{invalid JSON"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(foreign.status(), StatusCode::FORBIDDEN);
+    assert_no_store(&foreign);
+    let read_only = fixture
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&uri)
+                .header("host", "127.0.0.1:8080")
+                .header("referer", format!("{OWNER_ORIGIN}/settings"))
+                .header("sec-fetch-site", "same-origin")
+                .header("content-type", "application/json")
+                .body(Body::from(input.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(read_only.status(), StatusCode::FORBIDDEN);
+    assert_no_store(&read_only);
+    let mut outer_unknown = input.clone();
+    outer_unknown["autoApprove"] = json!(true);
+    let mut skill_unknown = input.clone();
+    skill_unknown["skill"]["grants"] = json!(["memory_add"]);
+    let mut hash_missing = input.clone();
+    hash_missing["skill"]
+        .as_object_mut()
+        .unwrap()
+        .remove("expectedHash");
+    let mut version_null = input.clone();
+    version_null["expectedVersion"] = Value::Null;
+    let mut digest_null = input.clone();
+    digest_null["evidenceDigest"] = Value::Null;
+    for invalid in [
+        Value::Null,
+        outer_unknown,
+        skill_unknown,
+        hash_missing,
+        version_null,
+        digest_null,
+    ] {
+        let response = send(&fixture.app, "POST", &uri, Some(invalid)).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_no_store(&response);
+    }
+    assert!(pending_skill_drafts(&fixture.app).await.is_empty());
+    assert!(!fixture
+        .root
+        .join("skills/arithmetic-check/SKILL.md")
+        .exists());
+    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
+    fixture.assert_source_unchanged().await;
+}
+
+#[tokio::test]
+async fn m39_stale_foreign_dismissed_and_changed_source_handoffs_create_nothing() {
+    let (fixture, review) = learning_skill_fixture().await;
+    let uri = learning_skill_uri(&fixture, &review);
+    let input = learning_skill_input(&review);
+    let mut stale = input.clone();
+    stale["expectedVersion"] = json!(1);
+    let mut wrong_digest = input.clone();
+    wrong_digest["evidenceDigest"] = json!("0".repeat(64));
+    for invalid in [stale, wrong_digest] {
+        let response = send(&fixture.app, "POST", &uri, Some(invalid)).await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_no_store(&response);
+    }
+    let other = fixture
+        .state
+        .write()
+        .await
+        .create_agent(test_config("other learning owner"))
+        .unwrap()
+        .state
+        .id;
+    let foreign_uri = format!(
+        "/api/agents/{other}/learning-reviews/{}/proposals/{}/skill-draft",
+        review["id"].as_str().unwrap(),
+        review["proposals"][0]["id"].as_str().unwrap()
+    );
+    let foreign = send(&fixture.app, "POST", &foreign_uri, Some(input.clone())).await;
+    assert_eq!(foreign.status(), StatusCode::NOT_FOUND);
+    assert_no_store(&foreign);
+    let proposal_uri = uri.strip_suffix("/skill-draft").unwrap();
+    let dismissed = send(
+        &fixture.app,
+        "PATCH",
+        proposal_uri,
+        Some(json!({"decision":"dismissed","expectedVersion":0})),
+    )
+    .await;
+    assert_eq!(dismissed.status(), StatusCode::OK);
+    let dismissed_review = json_body(dismissed).await["review"].clone();
+    assert_eq!(
+        send(
+            &fixture.app,
+            "POST",
+            &uri,
+            Some(learning_skill_input(&dismissed_review))
+        )
+        .await
+        .status(),
+        StatusCode::CONFLICT
+    );
+    assert!(pending_skill_drafts(&fixture.app).await.is_empty());
+    assert!(!fixture
+        .root
+        .join("skills/arithmetic-check/SKILL.md")
+        .exists());
+    fixture.assert_source_unchanged().await;
+
+    let (changed_fixture, changed_review) = learning_skill_fixture().await;
+    change_learning_source_input(&changed_fixture).await;
+    let changed = send(
+        &changed_fixture.app,
+        "POST",
+        &learning_skill_uri(&changed_fixture, &changed_review),
+        Some(learning_skill_input(&changed_review)),
+    )
+    .await;
+    assert_eq!(changed.status(), StatusCode::CONFLICT);
+    assert_no_store(&changed);
+    assert!(pending_skill_drafts(&changed_fixture.app).await.is_empty());
+    assert!(!changed_fixture
+        .root
+        .join("skills/arithmetic-check/SKILL.md")
+        .exists());
+    assert_eq!(changed_fixture.model.calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn m39_concurrent_exact_handoffs_share_one_draft_and_never_recreate_a_pruned_link() {
+    let (fixture, review) = learning_skill_fixture().await;
+    let uri = learning_skill_uri(&fixture, &review);
+    let input = learning_skill_input(&review);
+    let (first, second) = tokio::join!(
+        send(&fixture.app, "POST", &uri, Some(input.clone())),
+        send(&fixture.app, "POST", &uri, Some(input.clone()))
+    );
+    let statuses = [first.status(), second.status()];
+    assert!(statuses.contains(&StatusCode::CREATED) && statuses.contains(&StatusCode::OK));
+    assert_no_store(&first);
+    assert_no_store(&second);
+    let first = json_body(first).await["draft"].clone();
+    let second = json_body(second).await["draft"].clone();
+    assert_eq!(first["id"], second["id"]);
+    assert_eq!(pending_skill_drafts(&fixture.app).await.len(), 1);
+    let mut different = input.clone();
+    different["skill"]["body"] = json!("Different owner-reviewed procedure.");
+    assert_eq!(
+        send(&fixture.app, "POST", &uri, Some(different))
+            .await
+            .status(),
+        StatusCode::CONFLICT
+    );
+    let proposal_uri = uri.strip_suffix("/skill-draft").unwrap();
+    let acknowledged = send(
+        &fixture.app,
+        "PATCH",
+        proposal_uri,
+        Some(json!({"decision":"acknowledged","expectedVersion":0})),
+    )
+    .await;
+    assert_eq!(acknowledged.status(), StatusCode::OK);
+    let acknowledged_review = json_body(acknowledged).await["review"].clone();
+    assert_eq!(
+        send(&fixture.app, "POST", &uri, Some(input.clone()))
+            .await
+            .status(),
+        StatusCode::CONFLICT,
+        "version validation precedes duplicate lookup"
+    );
+    let mut fresh = input;
+    fresh["expectedVersion"] = acknowledged_review["proposals"][0]["decisionVersion"].clone();
+    let replay = send(&fixture.app, "POST", &uri, Some(fresh.clone())).await;
+    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(json_body(replay).await["draft"]["id"], first["id"]);
+    let persist = {
+        let mut guard = fixture.state.write().await;
+        guard.skills.remove_draft(first["id"].as_str().unwrap());
+        guard.control_plane_persist_request()
+    };
+    persist.save().await.unwrap();
+    assert_eq!(
+        send(&fixture.app, "POST", &uri, Some(fresh)).await.status(),
+        StatusCode::CONFLICT
+    );
+    assert!(pending_skill_drafts(&fixture.app).await.is_empty());
+    assert!(!fixture
+        .root
+        .join("skills/arithmetic-check/SKILL.md")
+        .exists());
+    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
+    fixture.assert_source_unchanged().await;
+}
+
+#[tokio::test]
+async fn m39_handoff_save_failure_rolls_back_both_links_without_creating_a_skill_file() {
+    let (fixture, review) = learning_skill_fixture().await;
+    let blocked = fixture.root.join("handoff-blocked-parent");
+    std::fs::write(&blocked, b"not a directory").unwrap();
+    fixture
+        .state
+        .write()
+        .await
+        .set_control_plane_store(Some(ControlPlaneStoreConfig::Json(
+            blocked.join("control-plane.json"),
+        )));
+    let response = send(
+        &fixture.app,
+        "POST",
+        &learning_skill_uri(&fixture, &review),
+        Some(learning_skill_input(&review)),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_no_store(&response);
+    let current = json_body(send(&fixture.app, "GET", &fixture.review_uri(&review), None).await)
+        .await["review"]
+        .clone();
+    assert!(current["proposals"][0]["skillDraftId"].is_null());
+    assert!(pending_skill_drafts(&fixture.app).await.is_empty());
+    assert!(!fixture
+        .root
+        .join("skills/arithmetic-check/SKILL.md")
+        .exists());
+    fixture
+        .state
+        .write()
+        .await
+        .set_control_plane_store(Some(ControlPlaneStoreConfig::Json(
+            fixture.root.join("control-plane.json"),
+        )));
+    learning_skill_draft(&fixture, &review, learning_skill_input(&review)).await;
+    assert_eq!(pending_skill_drafts(&fixture.app).await.len(), 1);
+    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
+    fixture.assert_source_unchanged().await;
+}
+
+#[tokio::test]
+async fn m39_linked_approval_refuses_changed_deleted_or_dismissed_learning_sources() {
+    for invalidation in ["changed", "deleted", "dismissed"] {
+        let (fixture, review) = learning_skill_fixture().await;
+        let draft = learning_skill_draft(&fixture, &review, learning_skill_input(&review)).await;
+        match invalidation {
+            "changed" => change_learning_source_input(&fixture).await,
+            "deleted" => {
+                let response = send(
+                    &fixture.app,
+                    "DELETE",
+                    &format!("/api/agents/{}/sessions/chat%3Alearning", fixture.agent),
+                    None,
+                )
+                .await;
+                assert_eq!(response.status(), StatusCode::OK);
+            }
+            _ => {
+                let uri = learning_skill_uri(&fixture, &review);
+                let response = send(
+                    &fixture.app,
+                    "PATCH",
+                    uri.strip_suffix("/skill-draft").unwrap(),
+                    Some(json!({"decision":"dismissed","expectedVersion":0})),
+                )
+                .await;
+                assert_eq!(response.status(), StatusCode::OK);
+            }
+        }
+        let approval = send(
+            &fixture.app,
+            "POST",
+            &format!(
+                "/api/skill-drafts/{}/approve",
+                draft["id"].as_str().unwrap()
+            ),
+            Some(json!({"body":"An explicitly reviewed edit still needs valid linked sources."})),
+        )
+        .await;
+        assert_eq!(approval.status(), StatusCode::CONFLICT, "{invalidation}");
+        assert_no_store(&approval);
+        assert!(!fixture
+            .root
+            .join("skills/arithmetic-check/SKILL.md")
+            .exists());
+        assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[tokio::test]
+async fn m39_existing_skill_handoff_and_later_approval_require_the_actual_base_hash() {
+    for drift in ["registry", "file"] {
+        let (fixture, review) = learning_skill_fixture().await;
+        let put = send(&fixture.app, "PUT", "/api/skills/arithmetic-check", Some(json!({"name":"Arithmetic check","description":"Original procedure","body":"Use the original check."}))).await;
+        assert_eq!(put.status(), StatusCode::CREATED);
+        let original_hash = json_body(put).await["skill"]["approvedHash"].clone();
+        let path = fixture.root.join("skills/arithmetic-check/SKILL.md");
+        let original_bytes = std::fs::read(&path).unwrap();
+        let mut input = learning_skill_input(&review);
+        assert_eq!(
+            send(
+                &fixture.app,
+                "POST",
+                &learning_skill_uri(&fixture, &review),
+                Some(input.clone())
+            )
+            .await
+            .status(),
+            StatusCode::CONFLICT,
+            "explicit null cannot replace an existing approved base"
+        );
+        input["skill"]["expectedHash"] = json!("0".repeat(64));
+        assert_eq!(
+            send(
+                &fixture.app,
+                "POST",
+                &learning_skill_uri(&fixture, &review),
+                Some(input.clone())
+            )
+            .await
+            .status(),
+            StatusCode::CONFLICT
+        );
+        input["skill"]["expectedHash"] = original_hash.clone();
+        let draft = learning_skill_draft(&fixture, &review, input).await;
+        assert_eq!(draft["baseHash"], original_hash);
+        assert_eq!(std::fs::read(&path).unwrap(), original_bytes);
+        if drift == "registry" {
+            let updated = send(&fixture.app, "PUT", "/api/skills/arithmetic-check", Some(json!({"name":"Arithmetic check","description":"New procedure","body":"The owner changed the approved procedure."}))).await;
+            assert_eq!(updated.status(), StatusCode::OK);
+        } else {
+            crate::skills::test_support::write_skill(
+                &fixture.root,
+                "arithmetic-check",
+                &crate::skills::compose_skill_file(
+                    "Arithmetic check",
+                    "Unreviewed file change",
+                    "The file moved without a registry approval.",
+                ),
+            );
+        }
+        let moved_bytes = std::fs::read(&path).unwrap();
+        let rejected = send(
+            &fixture.app,
+            "POST",
+            &format!(
+                "/api/skill-drafts/{}/approve",
+                draft["id"].as_str().unwrap()
+            ),
+            None,
+        )
+        .await;
+        assert_eq!(rejected.status(), StatusCode::CONFLICT, "{drift}");
+        assert_no_store(&rejected);
+        assert_eq!(std::fs::read(&path).unwrap(), moved_bytes);
+        assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
+        fixture.assert_source_unchanged().await;
+    }
+}
+
+#[tokio::test]
+async fn m39_linked_draft_and_explicitly_edited_approval_survive_fresh_snapshot_loads() {
+    let (fixture, review) = learning_skill_fixture().await;
+    let input = learning_skill_input(&review);
+    let draft = learning_skill_draft(&fixture, &review, input.clone()).await;
+    let uri = learning_skill_uri(&fixture, &review);
+    let decision = send(
+        &fixture.app,
+        "PATCH",
+        uri.strip_suffix("/skill-draft").unwrap(),
+        Some(json!({"decision":"acknowledged","expectedVersion":0})),
+    )
+    .await;
+    assert_eq!(decision.status(), StatusCode::OK);
+    let acknowledged_review = json_body(decision).await["review"].clone();
+    let config = ControlPlaneStoreConfig::Json(fixture.root.join("control-plane.json"));
+    let before = serde_json::to_value(fixture.state.read().await.control_plane_snapshot()).unwrap();
+    let fresh_model = AdviceModel::new(None);
+    let mut restored = DaemonState::with_model_adapter(fresh_model.clone());
+    restored.set_history(fixture.state.read().await.history.clone());
+    restored
+        .restore_control_plane_snapshot(
+            load_control_plane_snapshot(&config).await.unwrap().unwrap(),
+        )
+        .unwrap();
+    restored.set_control_plane_store(Some(config.clone()));
+    let restored_state = Arc::new(RwLock::new(restored));
+    let restored_app = router(restored_state.clone(), DaemonConfig::default());
+    let pending = pending_skill_drafts(&restored_app).await;
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0]["learningSource"], draft["learningSource"]);
+    assert_eq!(pending[0]["body"], draft["body"]);
+    let mut replay_input = input;
+    replay_input["expectedVersion"] =
+        acknowledged_review["proposals"][0]["decisionVersion"].clone();
+    let replay = send(&restored_app, "POST", &uri, Some(replay_input.clone())).await;
+    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(json_body(replay).await["draft"]["id"], draft["id"]);
+    let edited_body =
+        "Calculate independently, record the checked result, and verify every new task separately.";
+    let approved = send(
+        &restored_app,
+        "POST",
+        &format!(
+            "/api/skill-drafts/{}/approve",
+            draft["id"].as_str().unwrap()
+        ),
+        Some(json!({"body":edited_body})),
+    )
+    .await;
+    assert_eq!(
+        approved.status(),
+        StatusCode::OK,
+        "acknowledgement preserves source validity"
+    );
+    assert_no_store(&approved);
+    let approved = json_body(approved).await;
+    assert_eq!(approved["draft"]["status"], "approved");
+    let expected = crate::skills::compose_skill_file(
+        "Arithmetic check",
+        "Check arithmetic before presenting a result",
+        edited_body,
+    );
+    let path = fixture.root.join("skills/arithmetic-check/SKILL.md");
+    assert_eq!(std::fs::read(&path).unwrap(), expected.as_bytes());
+    assert_eq!(
+        approved["skill"]["approvedHash"],
+        crate::skills::skill_hash(expected.as_bytes())
+    );
+    let decided_replay = send(&restored_app, "POST", &uri, Some(replay_input)).await;
+    assert_eq!(decided_replay.status(), StatusCode::OK);
+    assert_eq!(json_body(decided_replay).await["draft"]["id"], draft["id"]);
+    let mut loaded = DaemonState::with_model_adapter(fresh_model.clone());
+    loaded.set_history(fixture.state.read().await.history.clone());
+    loaded
+        .restore_control_plane_snapshot(
+            load_control_plane_snapshot(&config).await.unwrap().unwrap(),
+        )
+        .unwrap();
+    loaded.set_control_plane_store(Some(config));
+    let after = serde_json::to_value(loaded.control_plane_snapshot()).unwrap();
+    for key in ["agents", "approvalPolicies", "approvalRules"] {
+        assert_eq!(after[key], before[key], "skill adoption preserves {key}");
+    }
+    let loaded_app = router(Arc::new(RwLock::new(loaded)), DaemonConfig::default());
+    let read = send(&loaded_app, "GET", "/api/skills/arithmetic-check", None).await;
+    assert_eq!(read.status(), StatusCode::OK);
+    let read = json_body(read).await;
+    assert_eq!(read["skill"]["status"], "active");
+    assert_eq!(read["file"]["body"], edited_body);
+    assert_eq!(
+        read["skill"]["approvedHash"],
+        approved["skill"]["approvedHash"]
+    );
+    assert_eq!(fresh_model.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
+    fixture.assert_source_unchanged().await;
+}

@@ -36,6 +36,7 @@ import {
   type GoalInput,
   type GoalStatus,
   type LearningDecision,
+  type LearningSkillDraftInput,
   type Session,
   type SessionListOptions,
   type SessionMessage,
@@ -403,6 +404,13 @@ export const daemon = {
     input: { decision: LearningDecision; expectedVersion: number },
   ) =>
     setupClient.learning.decideProposal(agentId, reviewId, proposalId, input),
+  createLearningSkillDraft: (
+    agentId: string,
+    reviewId: string,
+    proposalId: string,
+    input: LearningSkillDraftInput,
+  ) =>
+    setupClient.learning.createSkillDraft(agentId, reviewId, proposalId, input),
   goalJobs: (id: string, options: { signal?: AbortSignal } = {}) =>
     setupClient.goals.jobs(id, options),
   listSessions: (agentId: string, options: SessionListOptions = {}) =>

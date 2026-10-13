@@ -3,8 +3,13 @@ import type {
   LearningDecision,
   LearningPolicy,
   LearningReview,
+  LearningSkillDraftInput,
+  Skill,
+  SkillDetail,
+  SkillDraft,
 } from '@animaOS-SWARM/sdk';
 import { SectionTitle } from '../ui-bits';
+import { LearningSkillDraftForm } from './LearningSkillDraftForm';
 
 export interface LearningReviewApi {
   policy(
@@ -31,16 +36,26 @@ export interface LearningReviewApi {
     proposalId: string,
     input: { decision: LearningDecision; expectedVersion: number },
   ): Promise<LearningReview>;
+  listSkills(options?: { signal?: AbortSignal }): Promise<Skill[]>;
+  skill(slug: string, options?: { signal?: AbortSignal }): Promise<SkillDetail>;
+  createSkillDraft(
+    agentId: string,
+    reviewId: string,
+    proposalId: string,
+    input: LearningSkillDraftInput,
+  ): Promise<SkillDraft>;
 }
 
 export function LearningReviewPanel({
   agentId,
   api,
   disabled = false,
+  onOpenSkills,
 }: {
   agentId: string;
   api?: LearningReviewApi;
   disabled?: boolean;
+  onOpenSkills?: () => void;
 }) {
   const [policy, setPolicy] = useState<LearningPolicy | null>(null);
   const [reviews, setReviews] = useState<LearningReview[]>([]);
@@ -250,6 +265,8 @@ export function LearningReviewPanel({
     });
   }
 
+  const panelGeneration = generation.current;
+
   return (
     <section aria-labelledby="learning-review-heading" className="space-y-3">
       <SectionTitle>Learning review</SectionTitle>
@@ -369,9 +386,51 @@ export function LearningReviewPanel({
                   </p>
                 ) : null}
                 {review.proposals.map((proposal) => (
-                  <section
+                  <LearningSkillDraftForm
                     key={proposal.id}
-                    className="rounded-lg border border-line bg-black/10 p-3"
+                    agentId={agentId}
+                    review={review}
+                    proposal={proposal}
+                    api={api}
+                    disabled={disabled || busy}
+                    onCreated={(draft) => {
+                      if (
+                        generation.current !== panelGeneration ||
+                        currentAgent.current !== agentId
+                      )
+                        return;
+                      setReviews((current) =>
+                        current.map((item) =>
+                          item.id !== review.id
+                            ? item
+                            : {
+                                ...item,
+                                proposals: item.proposals.map(
+                                  (currentProposal) =>
+                                    currentProposal.id === proposal.id
+                                      ? {
+                                          ...currentProposal,
+                                          skillDraftId: draft.id,
+                                        }
+                                      : currentProposal,
+                                ),
+                              },
+                        ),
+                      );
+                    }}
+                    onSavingChange={(saving) => {
+                      if (generation.current !== panelGeneration) return false;
+                      if (saving) {
+                        if (busyRef.current) return false;
+                        busyRef.current = true;
+                        setBusy(true);
+                        return true;
+                      }
+                      busyRef.current = false;
+                      setBusy(false);
+                      return true;
+                    }}
+                    onOpenSkills={onOpenSkills}
                   >
                     <p className="text-xs font-semibold uppercase tracking-wider text-amber-300">
                       Unverified advice · not a saved fact or approved skill
@@ -419,7 +478,7 @@ export function LearningReviewPanel({
                         {proposal.decision}
                       </p>
                     )}
-                  </section>
+                  </LearningSkillDraftForm>
                 ))}
               </div>
             ) : null}

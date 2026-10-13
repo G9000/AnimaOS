@@ -155,6 +155,59 @@ pub(super) async fn decide_proposal(
     )
 }
 
+#[utoipa::path(post, path = "/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}/skill-draft", tag="learning",
+    params(("agent_id"=String, Path),("review_id"=String, Path),("proposal_id"=String, Path)), request_body=LearningSkillDraftRequest,
+    responses((status=201, description="Pending reviewed skill draft; approval remains separate", body=super::contracts::SkillDraftEnvelope),
+    (status=200, description="Exact existing handoff; no new write", body=super::contracts::SkillDraftEnvelope),
+    (status=400, description="Invalid reviewed content", body=ErrorBody), (status=403, description="Local owner required", body=ErrorBody),
+    (status=404, description="Own source unavailable", body=ErrorBody), (status=409, description="Stale source, decision, skill base or different handoff", body=ErrorBody),
+    (status=503, description="Save unavailable or uncertain; inspect before retrying", body=ErrorBody)))]
+pub(super) async fn adopt_skill(
+    State(state): State<AppState>,
+    Path((agent_id, review_id, proposal_id)): Path<(String, String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, false) {
+        return response;
+    }
+    let bytes =
+        match read_limited_body(request, state.config.max_request_bytes.min(40 * 1024)).await {
+            Ok(bytes) => bytes,
+            Err(response) => return no_store(response),
+        };
+    let input: LearningSkillDraftRequest = match parse_json_body(bytes) {
+        Ok(input) => input,
+        Err(error) => return rejected(error),
+    };
+    match state
+        .agent_runs
+        .learning()
+        .adopt_skill(&agent_id, &review_id, &proposal_id, input)
+        .await
+    {
+        Ok((draft, created)) => {
+            let current_hash = state
+                .daemon
+                .read()
+                .await
+                .skills
+                .get(&draft.slug)
+                .map(|record| record.approved_hash.clone());
+            no_store(json_response(
+                if created {
+                    StatusCode::CREATED
+                } else {
+                    StatusCode::OK
+                },
+                &super::contracts::SkillDraftEnvelope {
+                    draft: super::contracts::SkillDraftResponse::of(&draft, current_hash),
+                },
+            ))
+        }
+        Err(error) => rejected(error),
+    }
+}
+
 #[utoipa::path(get, path = "/api/agents/{agent_id}/learning-policy", tag="learning", params(("agent_id"=String, Path)),
     responses((status=200, description="Default-off review policy and server bounds", body=LearningPolicyResponse),
     (status=403, description="Local owner required", body=ErrorBody), (status=404, description="Agent not found", body=ErrorBody)))]

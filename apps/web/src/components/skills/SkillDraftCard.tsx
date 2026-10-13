@@ -87,6 +87,14 @@ export function SkillDraftCard({
     body.count +
     (diff ? revealInvisible(current ?? '').count : 0);
   const note = invisibleNote(hidden);
+  const learningSource = draft.learningSource;
+  const sourceChat = learningSource
+    ? {
+        agentId: learningSource.agentId,
+        sessionId: learningSource.sessionId,
+        runId: learningSource.sourceRunId,
+      }
+    : draft.proposedBy;
 
   return (
     <section className="skill-draft" aria-label={`Skill draft: ${name.text}`}>
@@ -96,16 +104,24 @@ export function SkillDraftCard({
         <span className="skill-draft-source">
           {SOURCE_LABELS[draft.source]}
         </span>
-        {draft.proposedBy && onOpenSession && (
+        {sourceChat && onOpenSession && (
           <button
             type="button"
             className="studio-tool-button"
-            onClick={() => draft.proposedBy && onOpenSession(draft.proposedBy)}
+            onClick={() => onOpenSession(sourceChat)}
           >
-            Open the chat
+            {learningSource ? 'Open source task' : 'Open the chat'}
           </button>
         )}
       </header>
+      {learningSource && (
+        <p className="skill-draft-warning" role="note">
+          Created from unverified learning advice in review{' '}
+          {learningSource.reviewId}, source run {learningSource.sourceRunId},
+          evidence {learningSource.evidenceDigest.slice(0, 12)}. Review and
+          approve this draft separately.
+        </p>
+      )}
       {description.text && (
         <p className="skill-draft-description">{description.text}</p>
       )}

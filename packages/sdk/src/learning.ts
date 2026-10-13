@@ -1,4 +1,5 @@
 import type { DaemonClient } from './client.js';
+import type { SkillDraft } from './skills.js';
 import type { RunTokenUsage } from './runs.js';
 
 export type LearningReviewTrigger = 'manual' | 'automatic';
@@ -18,6 +19,19 @@ export interface LearningProposal {
   anchors: string[];
   decision: LearningProposalDecision;
   decisionVersion: number;
+  skillDraftId?: string | null;
+}
+
+export interface LearningSkillDraftInput {
+  expectedVersion: number;
+  evidenceDigest: string;
+  skill: {
+    slug: string;
+    name: string;
+    description: string;
+    body: string;
+    expectedHash: string | null;
+  };
 }
 
 export interface LearningReview {
@@ -131,6 +145,19 @@ export class LearningClient {
       { method: 'PATCH', body: input },
     );
     return response.review;
+  }
+
+  async createSkillDraft(
+    agentId: string,
+    reviewId: string,
+    proposalId: string,
+    input: LearningSkillDraftInput,
+  ): Promise<SkillDraft> {
+    const response = await this.client.requestJson<{ draft: SkillDraft }>(
+      `${agentPath(agentId)}/learning-reviews/${encodeURIComponent(reviewId)}/proposals/${encodeURIComponent(proposalId)}/skill-draft`,
+      { method: 'POST', body: input },
+    );
+    return response.draft;
   }
 }
 

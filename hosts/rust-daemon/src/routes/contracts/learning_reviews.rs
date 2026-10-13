@@ -28,3 +28,5 @@ pub(crate) struct LearningReviewEnvelope {
 pub(crate) struct LearningReviewsEnvelope {
     pub(crate) reviews: Vec<LearningReviewRecord>,
 }
+
+pub(crate) use crate::learning::LearningSkillDraftRequest;
