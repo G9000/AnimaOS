@@ -28,6 +28,16 @@ current room and absence of world/session scoping govern both paths. Context
 content is deduplicated; similarity is not a truth or confidence score. The
 existing `select_context` entry retains lexical behavior.
 
+`consolidate_facts` validates an exact reviewed cohort of two to eight own visible
+durable Facts before changing anything. It creates one new summary Fact and
+reclassifies the sources as historical Reflections, keeping their original IDs,
+text, citations and metadata and adding one shared group tag. Sources must have
+the same scope; Room records must match the supplied current room. Tags link
+discoverable records rather than an immutable audit trail or fidelity proof.
+The host owns permission checks and a single durable save with rollback.
+`find_exact_default_fact` supports byte-exact idempotent Fact saves in the default
+private scope, returning the oldest matching record without modifying it.
+
 ```rust
 use anima_memory::{MemoryManager, MemoryType, NewMemory, MemorySearchOptions};
 

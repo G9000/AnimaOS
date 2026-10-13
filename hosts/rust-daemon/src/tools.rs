@@ -472,6 +472,50 @@ impl ToolRegistry {
             "Permanently remove one obsolete or explicitly withdrawn own visible Fact from active memory only if its full current text exactly matches expected_content. First use memory_search for its exact ID and full content; excerpts and partial matches are insufficient. If uncertain, keep the fact and ask the owner. Re-search after a stale or missing result. Preserves other records, including duplicates; this does not erase chats, backups or receipts.",
             remove_parameters,
         ), memory::execute_memory_remove);
+        let mut consolidate_id = typed_parameter_schema(
+            "string",
+            "Exact source ID from memory_search, at most 256 UTF-8 bytes",
+        );
+        consolidate_id.insert("minLength".into(), DataValue::Number(1.0));
+        consolidate_id.insert(
+            "maxLength".into(),
+            DataValue::Number(anima_core::MAX_CAPABILITY_ID_BYTES as f64),
+        );
+        consolidate_id.insert("pattern".into(), DataValue::String(r".*\S.*".into()));
+        let mut consolidate_text =
+            typed_parameter_schema("string", "Full reviewed text, at most 8000 characters");
+        consolidate_text.insert("minLength".into(), DataValue::Number(1.0));
+        consolidate_text.insert(
+            "maxLength".into(),
+            DataValue::Number(crate::memory_text::MAX_MEMORY_EDIT_CHARS as f64),
+        );
+        let mut source = object_parameters(vec![
+            required_parameter("id", DataValue::Object(consolidate_id)),
+            required_parameter(
+                "expected_content",
+                DataValue::Object(consolidate_text.clone()),
+            ),
+        ]);
+        source.insert("additionalProperties".into(), DataValue::Bool(false));
+        let mut sources = typed_parameter_schema(
+            "array",
+            "2 to 8 distinct same-scope source Facts reviewed using memory_search",
+        );
+        sources.insert("minItems".into(), DataValue::Number(2.0));
+        sources.insert("maxItems".into(), DataValue::Number(8.0));
+        sources.insert("items".into(), DataValue::Object(source));
+        let mut summary_text = consolidate_text;
+        summary_text.insert("pattern".into(), DataValue::String(r".*\S.*".into()));
+        let mut consolidate = object_parameters(vec![
+            required_parameter("content", DataValue::Object(summary_text)),
+            required_parameter("sources", DataValue::Object(sources)),
+        ]);
+        consolidate.insert("additionalProperties".into(), DataValue::Bool(false));
+        registry.register(tool_descriptor(
+            "memory_consolidate",
+            "Save one concise proposed summary Fact and archive 2 to 8 explicitly reviewed own visible durable Facts as historical Reflections, preserving original IDs, full text and evidence links. First memory_search for exact IDs/full current text; only same-scope sources are eligible, and Room sources must belong to the current room. Do not select sources from similarity alone. If uncertain about summary fidelity or source selection, keep the Facts and ask the owner. Stale text requires a new search. The shared group tag links records but does not verify the summary; this reduces active Facts, not historical storage or chats.",
+            consolidate,
+        ), memory::execute_memory_consolidate);
         registry.register(
             tool_descriptor(
                 "recent_memories",

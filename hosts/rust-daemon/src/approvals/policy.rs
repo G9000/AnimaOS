@@ -43,6 +43,7 @@ const WRITE_TOOLS: &[&str] = &[
     "memory_add",
     "memory_update",
     "memory_remove",
+    "memory_consolidate",
     "propose_skill",
     "create_automation",
     "pause_automation",
@@ -662,6 +663,27 @@ mod tests {
                     &[],
                     &[],
                     &remove
+                ),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn memory_consolidate_is_write_and_obeys_existing_allow_ask_deny_policy() {
+        let consolidate = call("memory_consolidate", &[("content", "proposed summary")]);
+        assert_eq!(risk_class(&consolidate.name), RiskClass::Write);
+        for (action, expected) in [
+            (PolicyAction::Allow, Verdict::Allow),
+            (PolicyAction::Ask, Verdict::Ask),
+            (PolicyAction::Deny, Verdict::Deny),
+        ] {
+            assert_eq!(
+                evaluate(
+                    &ApprovalPolicy::default().with(RiskClass::Write, action),
+                    &[],
+                    &[],
+                    &consolidate
                 ),
                 expected
             );

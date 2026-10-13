@@ -713,6 +713,21 @@ docker build -f hosts/rust-daemon/Dockerfile -t anima-daemon:staging .
 
 For staging, set `ANIMAOS_RS_PERSISTENCE_MODE=postgres` and `DATABASE_URL`, leave `ANIMAOS_RS_CONTROL_PLANE_FILE`, `ANIMAOS_RS_MEMORY_FILE`, and `ANIMAOS_RS_MEMORY_SQLITE_FILE` unset, and run one daemon replica. In that profile, Postgres stores step logs plus control-plane and memory snapshots in `host_snapshots`.
 
+The optional `memory_consolidate` tool requires an explicit agent grant and the
+existing Write approval policy. Its strict request is `content` plus two to eight
+`sources` objects containing `id` and exact full `expected_content`. It validates
+the complete own visible durable Fact cohort, same scope/current room and tag
+capacity under one memory write lock, then saves one new summary Fact and archives
+sources as Reflection in one mutation. Source IDs/text/citations remain intact;
+a shared group tag associates them. Historical search may still return sources;
+this is active-Fact consolidation, not erasure or disk compaction. A stale source
+rejects the entire batch. Existing committed-durability-uncertain errors can still
+have effects; do not retry blindly. Embeddings are best effort after canonical
+save. The console exposes an opt-in **Allow consolidating saved facts** checkbox;
+standard profiles do not grant it. Exact duplicate default-scope Fact `memory_add`
+returns the existing record without changing metadata or writing the store/index.
+No extra model/summarizer request is introduced; summary accuracy is model/owner
+judgment, not inferred from embedding similarity.
 Automatic chat context uses the configured memory embedding backend once before
 its run loop. It keeps lexical matches first and fills spare slots with eligible
 semantic matches, using the same own-Fact and visibility rules. Context remains

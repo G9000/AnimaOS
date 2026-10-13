@@ -76,6 +76,16 @@ Console deletion stays tied to the complete text shown when you open its
 confirmation. If the agent changes that text, deletion is refused and Memory
 refreshes. Review the current record and explicitly open Delete again; the
 console does not retry or fall back to deleting by ID alone.
+To combine overlapping saved facts, explicitly enable **Allow consolidating saved
+facts** in Settings. The companion must search for the full current text of
+two to eight of its own facts, then propose a compact summary. One approved
+operation saves that new Fact and moves the originals to historical Reflections,
+preserving their original text, IDs and citations. A changed source refuses the
+whole batch; search again before proposing another batch. General memory search
+can still return those historical notes. This reduces active facts, not storage,
+and the summary still needs judgment about accuracy. Exact duplicate default-scope
+Fact saves reuse the existing record without changing its importance or tags;
+paraphrases and case differences remain separate.
 Explicit search now filters eligible records before its lexical result limit, so
 stronger foreign matches cannot hide your matching facts. Search and recent reads
 exclude hidden text in record IDs, content and tags before limiting results;

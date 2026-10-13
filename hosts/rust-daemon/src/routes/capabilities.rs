@@ -89,7 +89,7 @@ fn metadata(name: &str) -> (&'static str, Vec<&'static str>) {
             ("workspace", vec!["An agent-owned task list in the workspace. Creating a task does not enable a schedule."]),
         "bash" | "bg_start" | "bg_output" | "bg_stop" | "bg_list" =>
             ("terminal", vec!["Shell access. Programs run with the daemon user's operating-system permissions."]),
-        "memory_search" | "memory_add" | "memory_update" | "memory_remove" | "recent_memories" =>
+        "memory_search" | "memory_add" | "memory_update" | "memory_remove" | "memory_consolidate" | "recent_memories" =>
             ("memory", vec!["Agent memory access. Persistence depends on the configured memory storage."]),
         "spawn_helper" =>
             ("team", vec!["A direct companion run. Reuses idle helpers, up to four busy helpers, with current companion tool permissions except shell/background-process tools and no recursive communication. Execution deadlines do not roll back completed effects."]),
@@ -114,6 +114,10 @@ mod tests {
     fn memory_remove_inventory_is_memory_discovery() {
         assert_eq!(
             super::metadata("memory_remove"),
+            super::metadata("memory_update")
+        );
+        assert_eq!(
+            super::metadata("memory_consolidate"),
             super::metadata("memory_update")
         );
     }

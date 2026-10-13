@@ -155,6 +155,116 @@ describe('SettingsPanel workspace section', () => {
 });
 
 describe('SettingsPanel access', () => {
+  it('M34_opt_in_adds_only_memory_consolidate_and_preserves_existing_custom_grants', async () => {
+    const user = userEvent.setup();
+    const currentTools = [
+      'read_file',
+      'memory_remove',
+      'legacy_workspace_tool',
+      'mail_list_messages',
+      'drive_read',
+      'web_fetch',
+    ];
+    const saveSettings = vi.fn(async () => true);
+    renderPanel(agent({ toolNames: currentTools }), { saveSettings });
+
+    const consolidateFacts = screen.getByRole('checkbox', {
+      name: 'Allow consolidating saved facts',
+    });
+    expect(consolidateFacts).not.toBeChecked();
+    await user.click(consolidateFacts);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(saveSettings).toHaveBeenCalledWith({
+      tools: [...currentTools, 'memory_consolidate'],
+    });
+  });
+
+  it('M34_opt_out_removes_only_memory_consolidate_from_a_mixed_grant_set', async () => {
+    const user = userEvent.setup();
+    const currentTools = [
+      'read_file',
+      'memory_remove',
+      'memory_consolidate',
+      'legacy_workspace_tool',
+      'drive_read',
+    ];
+    const saveSettings = vi.fn(async () => true);
+    renderPanel(agent({ toolNames: currentTools }), { saveSettings });
+
+    const consolidateFacts = screen.getByRole('checkbox', {
+      name: 'Allow consolidating saved facts',
+    });
+    expect(consolidateFacts).toBeChecked();
+    await user.click(consolidateFacts);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(saveSettings).toHaveBeenCalledWith({
+      tools: currentTools.filter((tool) => tool !== 'memory_consolidate'),
+    });
+  });
+
+  it('M34_standard_profile_clears_both_optional_grants_but_allows_deliberate_reenable', async () => {
+    const user = userEvent.setup();
+    const saveSettings = vi.fn(async () => true);
+    renderPanel(
+      agent({
+        toolNames: [
+          'read_file',
+          'legacy_workspace_tool',
+          'memory_remove',
+          'memory_consolidate',
+        ],
+      }),
+      { saveSettings },
+    );
+
+    const removeFacts = screen.getByRole('checkbox', {
+      name: 'Allow removing saved facts',
+    });
+    const consolidateFacts = screen.getByRole('checkbox', {
+      name: 'Allow consolidating saved facts',
+    });
+    await user.click(screen.getByRole('radio', { name: /^Collaborate/ }));
+    expect(removeFacts).not.toBeChecked();
+    expect(consolidateFacts).not.toBeChecked();
+    expect(toolNamesForProfile('collaborate')).not.toContain('memory_remove');
+    expect(toolNamesForProfile('collaborate')).not.toContain(
+      'memory_consolidate',
+    );
+
+    await user.click(consolidateFacts);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(saveSettings).toHaveBeenCalledWith({
+      tools: [...toolNamesForProfile('collaborate'), 'memory_consolidate'],
+    });
+  });
+
+  it('M34_failed_save_keeps_the_consolidation_draft_without_changing_the_agent_grant', async () => {
+    const user = userEvent.setup();
+    const currentAgent = agent({
+      toolNames: ['read_file', 'legacy_workspace_tool'],
+    });
+    const saveSettings = vi.fn(async () => false);
+    const view = renderPanel(currentAgent, { saveSettings });
+
+    const consolidateFacts = screen.getByRole('checkbox', {
+      name: 'Allow consolidating saved facts',
+    });
+    await user.click(consolidateFacts);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    view.rerender(
+      <SettingsPanel {...view.props} saveError="Unsupported tool" />,
+    );
+
+    expect(saveSettings).toHaveBeenCalledWith({
+      tools: [...currentAgent.toolNames, 'memory_consolidate'],
+    });
+    expect(consolidateFacts).toBeChecked();
+    expect(currentAgent.toolNames).not.toContain('memory_consolidate');
+    expect(screen.getByRole('alert')).toHaveTextContent('Unsupported tool');
+  });
+
   it('memory_removal explicitly adds only the opt-in to a custom tool set', async () => {
     const user = userEvent.setup();
     const currentTools = [
@@ -346,6 +456,7 @@ describe('SettingsPanel access', () => {
       'legacy_workspace_tool',
       'read_file',
       'memory_remove',
+      'memory_consolidate',
     ];
     const saveSettings = vi.fn(async () => true);
     renderPanel(agent({ toolNames: customTools }), { saveSettings });
@@ -356,10 +467,15 @@ describe('SettingsPanel access', () => {
         'This agent has a custom tool set. Choose a standard profile to replace it when you save.',
       ),
     ).toBeVisible();
-    expect(screen.getByText('4 tools configured')).toBeVisible();
+    expect(screen.getByText('5 tools configured')).toBeVisible();
     expect(screen.getByText(customTools.join(', '))).toBeVisible();
     expect(
       screen.getByRole('checkbox', { name: 'Allow removing saved facts' }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole('checkbox', {
+        name: 'Allow consolidating saved facts',
+      }),
     ).toBeChecked();
     for (const radio of screen.getAllByRole('radio')) {
       expect(radio).not.toBeChecked();
@@ -458,7 +574,11 @@ describe('SettingsPanel access', () => {
   it('does not clobber an unsaved draft when a known tool set is reordered', async () => {
     const user = userEvent.setup();
     const currentAgent = agent({
-      toolNames: [...toolNamesForProfile('collaborate'), 'memory_remove'],
+      toolNames: [
+        ...toolNamesForProfile('collaborate'),
+        'memory_remove',
+        'memory_consolidate',
+      ],
     });
     const view = renderPanel(currentAgent);
 
@@ -479,6 +599,11 @@ describe('SettingsPanel access', () => {
     expect(screen.getByRole('radio', { name: /^Collaborate/ })).toBeChecked();
     expect(
       screen.getByRole('checkbox', { name: 'Allow removing saved facts' }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole('checkbox', {
+        name: 'Allow consolidating saved facts',
+      }),
     ).toBeChecked();
   });
 

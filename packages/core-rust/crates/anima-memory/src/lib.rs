@@ -26,15 +26,16 @@ pub use locomo_eval::{
     LocomoRelationshipSeed, LocomoRequiredSignal, LocomoVectorHitSeed,
 };
 pub use memory_manager::{
-    AgentRelationship, AgentRelationshipOptions, EntityDeletion, Memory, MemoryContextOptions,
-    MemoryDeletion, MemoryEntity, MemoryEntityOptions, MemoryError, MemoryEvaluation,
-    MemoryEvaluationDecision, MemoryEvaluationOptions, MemoryEvaluationOutcome,
-    MemoryEvidenceTrace, MemoryImportanceAdjustment, MemoryManager, MemoryManagerSnapshot,
-    MemoryPatch, MemoryRecallOptions, MemoryRecallResult, MemoryRecallWeights,
-    MemoryRetentionPolicy, MemoryRetentionReport, MemoryScope, MemorySearchOptions,
-    MemorySearchResult, MemoryType, MemoryVectorIndex, NewAgentRelationship, NewMemory,
-    NewMemoryEntity, NewTemporalFact, NewTemporalRelationship, RecentMemoryOptions,
-    RelationshipEndpointKind, TemporalFact, TemporalFactOptions, TemporalRecordStatus,
-    TemporalRelationship, TemporalRelationshipOptions, VectorMemoryHit,
+    AgentRelationship, AgentRelationshipOptions, EntityDeletion, Memory, MemoryConsolidation,
+    MemoryConsolidationError, MemoryConsolidationSource, MemoryContextOptions, MemoryDeletion,
+    MemoryEntity, MemoryEntityOptions, MemoryError, MemoryEvaluation, MemoryEvaluationDecision,
+    MemoryEvaluationOptions, MemoryEvaluationOutcome, MemoryEvidenceTrace,
+    MemoryImportanceAdjustment, MemoryManager, MemoryManagerSnapshot, MemoryPatch,
+    MemoryRecallOptions, MemoryRecallResult, MemoryRecallWeights, MemoryRetentionPolicy,
+    MemoryRetentionReport, MemoryScope, MemorySearchOptions, MemorySearchResult, MemoryType,
+    MemoryVectorIndex, NewAgentRelationship, NewMemory, NewMemoryEntity, NewTemporalFact,
+    NewTemporalRelationship, RecentMemoryOptions, RelationshipEndpointKind, TemporalFact,
+    TemporalFactOptions, TemporalRecordStatus, TemporalRelationship, TemporalRelationshipOptions,
+    VectorMemoryHit,
 };
 pub use vector_index::{InMemoryVectorIndex, MemoryTextEmbedder, MemoryVectorError};
