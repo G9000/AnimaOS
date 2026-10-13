@@ -14,7 +14,7 @@ use anima_swarm::coordinator::{
 use async_trait::async_trait;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::components::{default_evaluators, default_providers};
+use crate::components::{default_evaluators, default_providers_with_memory_views};
 use crate::events::EventFanout;
 use crate::memory_embeddings::SharedMemoryEmbeddings;
 use crate::tools::{ToolExecutionContext, ToolRegistry};
@@ -31,6 +31,7 @@ impl DaemonState {
         let memory = Arc::clone(&self.memory);
         let memory_embeddings = Arc::clone(&self.memory_embeddings);
         let memory_store = self.memory_store.clone();
+        let memory_views = Arc::clone(&self.memory_view_selections);
         let model_adapter = Arc::clone(&self.model_adapter);
         let tool_registry = self.tool_registry.clone();
         let process_manager = Arc::clone(&self.process_manager);
@@ -44,6 +45,7 @@ impl DaemonState {
             let memory = Arc::clone(&memory);
             let memory_embeddings = Arc::clone(&memory_embeddings);
             let memory_store = memory_store.clone();
+            let memory_views = Arc::clone(&memory_views);
             let model_adapter = Arc::clone(&model_adapter);
             let tool_registry = tool_registry.clone();
             let process_manager = Arc::clone(&process_manager);
@@ -91,6 +93,7 @@ impl DaemonState {
                     Arc::clone(&memory),
                     Arc::clone(&memory_embeddings),
                     memory_store.clone(),
+                    Arc::clone(&memory_views),
                     inbox.clone(),
                     participants.clone(),
                     Arc::clone(&runtime_events),
@@ -126,6 +129,7 @@ impl DaemonState {
                             let memory = Arc::clone(&memory);
                             let memory_embeddings = Arc::clone(&memory_embeddings);
                             let memory_store = memory_store.clone();
+                            let memory_views = Arc::clone(&memory_views);
                             let model_adapter = Arc::clone(&model_adapter);
                             let token_usage = Arc::clone(&token_usage);
                             let needs_reset = Arc::clone(&needs_reset);
@@ -148,6 +152,7 @@ impl DaemonState {
                                         Arc::clone(&memory),
                                         Arc::clone(&memory_embeddings),
                                         memory_store,
+                                        memory_views,
                                         inbox,
                                         participants.clone(),
                                         Arc::clone(&runtime_events),
@@ -306,6 +311,7 @@ fn build_swarm_runtime(
     memory: SharedMemoryStore,
     memory_embeddings: SharedMemoryEmbeddings,
     memory_store: Option<crate::memory_store::MemoryStoreConfig>,
+    memory_views: crate::memory_views::SharedMemoryViewSelections,
     inbox: Arc<CoordinatorInboxFn>,
     participants: Arc<CoordinatorParticipantsFn>,
     event_listener: Arc<dyn Fn(EngineEvent) + Send + Sync>,
@@ -313,7 +319,11 @@ fn build_swarm_runtime(
     let mut runtime = AgentRuntime::new(config, model_adapter);
     runtime.set_persistence_agent_id(persistence_agent_id);
     runtime.set_event_listener(event_listener);
-    let mut providers = default_providers(Arc::clone(&memory), Arc::clone(&memory_embeddings));
+    let mut providers = default_providers_with_memory_views(
+        Arc::clone(&memory),
+        Arc::clone(&memory_embeddings),
+        memory_views,
+    );
     providers.push(Arc::new(SwarmInboxProvider { inbox }));
     providers.push(Arc::new(SwarmParticipantsProvider { participants }));
     runtime.set_providers(providers);

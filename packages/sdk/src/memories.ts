@@ -103,6 +103,49 @@ export interface MemoryRecallResult {
   importanceScore: number;
 }
 
+/** Owner-selected views over current canonical private Fact records. */
+export interface MemoryViewSource {
+  id: string;
+  content: string;
+  sourceHash: string;
+}
+
+export interface MemoryViewUnavailable {
+  id: string;
+  reason: 'unavailable';
+}
+
+export interface MemoryViews {
+  version: number;
+  viewDigest: string;
+  userProfile: MemoryViewSource[];
+  agentNotes: MemoryViewSource[];
+  unavailable: MemoryViewUnavailable[];
+}
+
+export interface MemoryViewPick {
+  id: string;
+  sourceHash: string;
+}
+
+export interface MemoryViewsSelectionInput {
+  expectedVersion: number;
+  userProfile: MemoryViewPick[];
+  agentNotes: MemoryViewPick[];
+}
+
+export interface MemoryViewCandidates {
+  candidates: MemoryViewSource[];
+  hasMore: boolean;
+}
+
+export interface MemoryViewCorrectionInput {
+  expectedVersion: number;
+  expectedContent: string;
+  expectedSourceHash: string;
+  content: string;
+}
+
 export interface MemoryEvidenceTrace {
   memory: Memory;
   relationships: AgentRelationship[];
@@ -398,6 +441,51 @@ export class MemoriesClient {
     return response.facts;
   }
 
+  async getViews(
+    agentId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<MemoryViews> {
+    return this.client.requestJson<MemoryViews>(
+      `${agentPath(agentId)}/memory-views`,
+      { signal: options.signal },
+    );
+  }
+
+  async selectViews(
+    agentId: string,
+    input: MemoryViewsSelectionInput,
+  ): Promise<MemoryViews> {
+    return this.client.requestJson<MemoryViews>(
+      `${agentPath(agentId)}/memory-views`,
+      { method: 'PATCH', body: input },
+    );
+  }
+
+  async viewCandidates(
+    agentId: string,
+    query?: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<MemoryViewCandidates> {
+    const search = new URLSearchParams();
+    if (query !== undefined) search.set('q', query);
+    const suffix = search.size ? `?${search.toString()}` : '';
+    return this.client.requestJson<MemoryViewCandidates>(
+      `${agentPath(agentId)}/memory-views/candidates${suffix}`,
+      { signal: options.signal },
+    );
+  }
+
+  async correctViewSource(
+    agentId: string,
+    sourceId: string,
+    input: MemoryViewCorrectionInput,
+  ): Promise<MemoryViews> {
+    return this.client.requestJson<MemoryViews>(
+      `${agentPath(agentId)}/memory-views/sources/${encodeURIComponent(sourceId)}`,
+      { method: 'PATCH', body: input },
+    );
+  }
+
   async replaceFact(
     factId: string,
     value: string,
@@ -598,4 +686,8 @@ export class MemoriesClient {
 
     return response.relationships;
   }
+}
+
+function agentPath(agentId: string): string {
+  return `/api/agents/${encodeURIComponent(agentId)}`;
 }

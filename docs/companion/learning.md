@@ -1,6 +1,6 @@
 # Task reviews and learning advice
 
-M38 adds a bounded advice stage. It does not automatically save facts, edit skills or change instructions. Reviewed adoption and later reuse remain the next [PAR-02 milestone](parity-roadmap.md#par-02-close-the-learning-loop-through-reviewed-adoption).
+M38 adds a bounded advice stage. It does not automatically save facts, edit skills or change instructions. M39 adds owner-reviewed procedural adoption and later reuse under [PAR-02](parity-roadmap.md#par-02-close-the-learning-loop-through-reviewed-adoption).
 
 After an eligible completed task, use **Review this task** next to its accepted reply. Open the companion's settings to inspect **Task reviews**. You can refresh status, read the evidence, cancel a pending review, acknowledge advice or dismiss it. Generated advice is unverified. Acknowledgement records your decision; it does not create a Fact, approve a skill or execute its suggestion.
 
@@ -34,4 +34,18 @@ Control-plane version15 backs up version14 as `.pre-learning-adoption.bak`, sepa
 
 The additive owner route is POST `/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}/skill-draft`, exposed as `client.learning.createSkillDraft`. Required JSON fields are `expectedVersion`, `evidenceDigest` and `skill: {slug,name,description,body,expectedHash}`; `expectedHash` must explicitly be null for a new skill or the reviewed lowercase SHA-256 for an existing one. First creation returns201; an exact existing handoff returns200. Sources, draft IDs, approval and grants remain server-controlled. The standard skill loader rereads approved bytes before use, and instructions/reference files gain no new execution authority.
 
-M39 covers this procedural adoption wave. Source-backed preference/profile views, fresh generic preference recall and optional dialogue-only or unattended Fact curation remain separate [PAR-02 follow-ups](parity-roadmap.md). Two new task histories must demonstrate actual approved-skill use and independently checked results before claiming this selected learning cycle accepted. Saved advice, an installed file or a load receipt alone is insufficient.
+M39 covers the procedural adoption wave, including two fresh independently checked tasks using the approved skill. Saved advice, an installed file or a load receipt alone is insufficient. Optional dialogue-only or unattended Fact curation remains separate.
+
+## Selected profile facts and agent notes
+
+In **Memory → About you → Profile & agent notes**, select up to six current saved private Facts for this companion. Split them between **Your profile** and **Notes for this agent**. Search displays at most50 candidates; narrow the search when more match. These are owner-selected source records, not independently verified truths or new tool permissions. Temporal facts remain separate.
+
+The daemon saves ordered IDs and a selection version. Current canonical memory supplies the displayed text and source hash; no second profile text store exists. Every new run resolves the eligible records again, puts selected sources ahead of ordinary relevance and deduplicates them. All sources share the existing six-record/4800-character quoted context budget, with800-character excerpts. Long sources may be shortened or omitted by that budget. A running task keeps its initial context; the next task sees a correction.
+
+Save selection changes before correcting a selected saved fact. Correction pins the current selection version, full exact source text and all canonical metadata through its hash. It reuses the ordinary canonical memory save and search-index path. A changed source or selection returns a conflict: refresh, inspect the current source and explicitly save again. No automatic retry occurs. Selection and source correction are separate commits. Other memory editors retain their existing behavior.
+
+Missing, deleted, foreign, hidden or ineligible selected sources are unavailable; inaccessible text is never returned. Remove unavailable references explicitly before saving a replacement selection. Missing durable memory disables context selections while owner views retain their version and unavailable references. A failed save can have an uncertain durable outcome; inspect current records before trying again.
+
+Owner contracts are GET/PATCH `/api/agents/{agent_id}/memory-views`, GET its `/candidates?query=...` and PATCH its `/sources/{memory_id}`. SDK methods live on `client.memories`. Selection requires `expectedVersion`, ordered `userProfile` and `agentNotes` arrays of `{id,sourceHash}`. Correction requires `expectedVersion`, `expectedContent`, `expectedSourceHash` and `content`. All routes require owner access and use no-store responses. Version16 backs up version15 independently as `.pre-memory-views.bak`; older daemons refuse this format.
+
+This M40 slice follows pinned Hermes full-entry guarding and profile/notes behavior through Anima's existing canonical store. Standard Markdown synchronization, automatic profile inference and unattended curation are outside this wave. Exact local gates and the two fresh corrected-preference/restart trials are recorded in [harness acceptance](harness-acceptance.md) and the [M40 plan](../superpowers/plans/2026-10-13-companion-profile-memory-m40.md).

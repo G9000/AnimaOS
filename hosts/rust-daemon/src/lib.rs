@@ -15,6 +15,7 @@ mod logs;
 mod memory_embeddings;
 mod memory_store;
 mod memory_text;
+mod memory_views;
 mod model;
 mod routes;
 mod runs;

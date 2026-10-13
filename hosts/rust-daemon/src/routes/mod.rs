@@ -22,6 +22,7 @@ mod logs;
 mod mail;
 mod memories;
 mod memory_edits;
+mod memory_views;
 mod multipart;
 pub(crate) use multipart::MAX_FORM_HEADER_BYTES;
 mod oauth_apps;
@@ -202,6 +203,7 @@ use crate::runtime_model::provider_summaries;
         skills::list_skill_drafts, skills::approve_skill_draft, skills::reject_skill_draft,
         skills::import_skill,
         memory_edits::patch_memory, memory_edits::delete_memory,
+        memory_views::get_views, memory_views::candidates, memory_views::select_views, memory_views::correct_source,
         memory_edits::list_facts, memory_edits::patch_fact, memory_edits::delete_fact,
         memory_edits::delete_entity,
         logs::list_logs, logs::stream_logs,
@@ -878,6 +880,9 @@ fn router_with_services_with_policies_and_integrations(
             axum::routing::delete(approvals::delete_approval_rule),
         )
         .route("/api/skills", get(skills::list_skills))
+        .route("/api/agents/{agent_id}/memory-views", get(memory_views::get_views).patch(memory_views::select_views))
+        .route("/api/agents/{agent_id}/memory-views/candidates", get(memory_views::candidates))
+        .route("/api/agents/{agent_id}/memory-views/sources/{memory_id}", axum::routing::patch(memory_views::correct_source))
         .route(
             "/api/skills/import",
             axum::routing::post(skills::import_skill),
@@ -2409,6 +2414,7 @@ mod tests {
     mod learning_reviews;
     mod logs;
     mod memory_edits;
+    mod memory_views;
     mod runs;
     mod sessions;
     mod skills;

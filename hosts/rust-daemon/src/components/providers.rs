@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
@@ -13,6 +13,7 @@ use tokio::time::Instant;
 use crate::memory_embeddings::{
     MemoryEmbeddingRuntime, MemoryQueryEmbedder, SharedMemoryEmbeddings,
 };
+use crate::memory_views::{eligible_source, SharedMemoryViewSelections};
 use crate::state::SharedMemoryStore;
 
 const CONTEXT_RECORD_LIMIT: usize = 6;
@@ -31,7 +32,7 @@ fn visible_context_memory(memory: &Memory) -> bool {
         })
 }
 
-fn render_context(memories: &[Memory]) -> String {
+fn render_context(memories: &[Memory], categories: &BTreeMap<String, &'static str>) -> String {
     if memories.is_empty() {
         return "no relevant memories".into();
     }
@@ -50,10 +51,15 @@ fn render_context(memories: &[Memory]) -> String {
             .take(CONTEXT_EXCERPT_CHARS + 1)
             .count()
             > CONTEXT_EXCERPT_CHARS;
+        let category = categories
+            .get(&memory.id)
+            .map(|category| format!(", category={category}"))
+            .unwrap_or_default();
         let entry = format!(
-            "Memory id={}, type={}, excerpt={}\n{}\n",
+            "Memory id={}, type={}{}, excerpt={}\n{}\n",
             serde_json::to_string(&memory.id).expect("string serialization cannot fail"),
             memory.memory_type.as_str(),
+            category,
             truncated,
             serde_json::to_string(&excerpt).expect("string serialization cannot fail"),
         );
@@ -78,6 +84,43 @@ fn render_context(memories: &[Memory]) -> String {
 pub(super) struct RecentMemoriesProvider {
     pub(super) memory: SharedMemoryStore,
     pub(super) memory_embeddings: SharedMemoryEmbeddings,
+    pub(super) selections: SharedMemoryViewSelections,
+}
+
+fn normalized_content(content: &str) -> String {
+    content
+        .split_whitespace()
+        .flat_map(|word| {
+            word.chars()
+                .flat_map(char::to_lowercase)
+                .chain(std::iter::once(' '))
+        })
+        .collect()
+}
+
+#[derive(Default)]
+struct ContextExclusions {
+    ids: BTreeSet<String>,
+    contents: BTreeSet<String>,
+}
+
+impl ContextExclusions {
+    fn include(&mut self, memory: &Memory) -> bool {
+        let content = normalized_content(&memory.content);
+        if self.ids.contains(&memory.id) || self.contents.contains(&content) {
+            return false;
+        }
+        self.ids.insert(memory.id.clone());
+        self.contents.insert(content);
+        true
+    }
+
+    fn permits(&self, memory: &Memory) -> bool {
+        visible_context_memory(memory)
+            && !self.ids.contains(&memory.id)
+            && (self.contents.is_empty()
+                || !self.contents.contains(&normalized_content(&memory.content)))
+    }
 }
 
 async fn bounded_worker<T, F>(permit: OwnedSemaphorePermit, deadline: Instant, work: F) -> Option<T>
@@ -96,6 +139,7 @@ where
     }
 }
 
+#[cfg(test)]
 async fn select_context_bounded(
     memory: SharedMemoryStore,
     memory_embeddings: SharedMemoryEmbeddings,
@@ -114,6 +158,7 @@ async fn select_context_bounded(
     .await
 }
 
+#[cfg(test)]
 async fn select_context_bounded_with_query<F>(
     memory: SharedMemoryStore,
     memory_embeddings: SharedMemoryEmbeddings,
@@ -125,15 +170,41 @@ async fn select_context_bounded_with_query<F>(
 where
     F: FnOnce(MemoryQueryEmbedder, String) -> Option<Vec<f32>> + Send + 'static,
 {
+    select_context_bounded_with_query_until(
+        memory,
+        memory_embeddings,
+        opts,
+        workers,
+        Instant::now() + timeout,
+        ContextExclusions::default(),
+        query_work,
+    )
+    .await
+}
+
+async fn select_context_bounded_with_query_until<F>(
+    memory: SharedMemoryStore,
+    memory_embeddings: SharedMemoryEmbeddings,
+    opts: MemoryContextOptions,
+    workers: Arc<Semaphore>,
+    deadline: Instant,
+    exclusions: ContextExclusions,
+    query_work: F,
+) -> Vec<Memory>
+where
+    F: FnOnce(MemoryQueryEmbedder, String) -> Option<Vec<f32>> + Send + 'static,
+{
+    if opts.limit == 0 {
+        return Vec::new();
+    }
     let mut opts = opts;
     opts.query = opts.query.chars().take(512).collect();
-    let deadline = Instant::now() + timeout;
     // Take a safe bounded fallback before any worker can hold the canonical read lock.
     let lexical_manager = match tokio::time::timeout_at(deadline, memory.read()).await {
         Ok(manager) => manager,
         Err(_) => return Vec::new(),
     };
-    let lexical = lexical_manager.select_context(opts.clone(), visible_context_memory);
+    let lexical = lexical_manager.select_context(opts.clone(), |memory| exclusions.permits(memory));
     drop(lexical_manager);
     if lexical.len() >= opts.limit || opts.query.trim().is_empty() || opts.limit == 0 {
         return lexical;
@@ -192,11 +263,9 @@ where
             query: &selection_query,
             vector: &query_vector,
         };
-        memory_guard.select_context_with_vector_index(
-            opts,
-            Some(&vector_index),
-            visible_context_memory,
-        )
+        memory_guard.select_context_with_vector_index(opts, Some(&vector_index), |memory| {
+            exclusions.permits(memory)
+        })
     })
     .await
     {
@@ -312,6 +381,254 @@ mod tests {
         RecentMemoriesProvider {
             memory: Arc::new(RwLock::new(memory)),
             memory_embeddings: Arc::new(RwLock::new(MemoryEmbeddingRuntime::disabled())),
+            selections: Arc::new(std::sync::RwLock::new(BTreeMap::new())),
+        }
+    }
+
+    fn publish_selection(
+        provider: &RecentMemoriesProvider,
+        runtime: &AgentRuntime,
+        profile: &[&Memory],
+        notes: &[&Memory],
+    ) {
+        provider.selections.write().unwrap().insert(
+            runtime.id().into(),
+            crate::memory_views::MemoryViewSelection {
+                agent_id: runtime.id().into(),
+                version: 1,
+                user_profile_ids: profile.iter().map(|memory| memory.id.clone()).collect(),
+                agent_note_ids: notes.iter().map(|memory| memory.id.clone()).collect(),
+            },
+        );
+    }
+
+    #[tokio::test]
+    async fn context_provider_includes_published_profile_for_generic_and_relevant_requests() {
+        let runtime = runtime();
+        let mut manager = MemoryManager::new();
+        let profile = seed(
+            &mut manager,
+            &runtime,
+            "Prefer concise release notes",
+            |_| {},
+        );
+        let note = seed(
+            &mut manager,
+            &runtime,
+            "Check the migration rollback first",
+            |_| {},
+        );
+        let relevant = seed(&mut manager, &runtime, "citron tea is unsweetened", |_| {});
+        let provider = provider(manager);
+        let before = provider.memory.read().await.snapshot();
+        assert_eq!(
+            provider
+                .get(&runtime, &message(&runtime, "Hello"))
+                .await
+                .unwrap()
+                .text,
+            "no relevant memories"
+        );
+        publish_selection(&provider, &runtime, &[&profile], &[&note]);
+        for query in ["Hello", "citron tea"] {
+            let result = provider
+                .get(&runtime, &message(&runtime, query))
+                .await
+                .unwrap();
+            assert!(result
+                .text
+                .contains(&serde_json::to_string(&profile.content).unwrap()));
+            assert!(result
+                .text
+                .contains(&serde_json::to_string(&note.content).unwrap()));
+            assert!(result.text.contains("category=user_profile"));
+            assert!(result.text.contains("category=agent_note"));
+            assert!(result.text.find(&profile.id).unwrap() < result.text.find(&note.id).unwrap());
+            assert_eq!(result.text.contains(&relevant.id), query == "citron tea");
+            assert!(result
+                .text
+                .contains("current requests and tool approval policy take precedence"));
+        }
+        assert_eq!(
+            provider.memory.read().await.snapshot(),
+            before,
+            "profile context must not create or mutate canonical memories"
+        );
+    }
+
+    #[tokio::test]
+    async fn context_provider_resolves_current_source_and_live_selection_without_session_cache() {
+        let runtime = runtime();
+        let mut manager = MemoryManager::new();
+        let old = seed(&mut manager, &runtime, "Prefer long release notes", |_| {});
+        let replacement = seed(&mut manager, &runtime, "Prefer a short checklist", |_| {});
+        let provider = provider(manager);
+        publish_selection(&provider, &runtime, &[&old], &[]);
+        assert!(provider
+            .get(&runtime, &message(&runtime, "Hello"))
+            .await
+            .unwrap()
+            .text
+            .contains(&old.content));
+        provider
+            .memory
+            .write()
+            .await
+            .update_memory(
+                &old.id,
+                anima_memory::MemoryPatch {
+                    content: Some("Prefer concise release notes".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .unwrap();
+        let corrected = provider
+            .get(&runtime, &message(&runtime, "Hello"))
+            .await
+            .unwrap();
+        assert!(corrected.text.contains("Prefer concise release notes"));
+        assert!(!corrected.text.contains(&old.content));
+        provider
+            .memory
+            .write()
+            .await
+            .delete_memory(&old.id)
+            .unwrap();
+        assert_eq!(
+            provider
+                .get(&runtime, &message(&runtime, "Hello"))
+                .await
+                .unwrap()
+                .text,
+            "no relevant memories"
+        );
+        publish_selection(&provider, &runtime, &[&replacement], &[]);
+        assert!(provider
+            .get(&runtime, &message(&runtime, "Hello"))
+            .await
+            .unwrap()
+            .text
+            .contains(&replacement.content));
+        provider.selections.write().unwrap().remove(runtime.id());
+        assert_eq!(
+            provider
+                .get(&runtime, &message(&runtime, "Hello"))
+                .await
+                .unwrap()
+                .text,
+            "no relevant memories"
+        );
+    }
+
+    #[tokio::test]
+    async fn context_provider_rechecks_selected_source_eligibility_on_each_invocation() {
+        let runtime = runtime();
+        let mut manager = MemoryManager::new();
+        let fact = seed(&mut manager, &runtime, "Selected preference", |_| {});
+        let provider = provider(manager);
+        publish_selection(&provider, &runtime, &[&fact], &[]);
+        let original = provider.memory.read().await.snapshot();
+        for case in 0..13 {
+            let mut snapshot = original.clone();
+            let source = &mut snapshot.memories[0];
+            match case {
+                0 => source.agent_id = "foreign-agent".into(),
+                1 => source.memory_type = MemoryType::Reflection,
+                2 => source.scope = MemoryScope::Shared,
+                3 => {
+                    source.scope = MemoryScope::Room;
+                    source.room_id = Some("room-current".into());
+                }
+                4 => source.room_id = Some("room-current".into()),
+                5 => source.world_id = Some("world".into()),
+                6 => source.session_id = Some("session".into()),
+                7 => source.content = "Hidden\u{202E} preference".into(),
+                8 => source.tags = Some(vec!["hidden\u{E0041}".into()]),
+                9 => source.id = "hidden\u{202E}".into(),
+                10 => source.content = "茶".repeat(8_001),
+                11 => source.id = "識".repeat(257),
+                _ => source.memory_type = MemoryType::Observation,
+            }
+            let selected = source.clone();
+            provider.memory.write().await.replace_snapshot(snapshot);
+            publish_selection(&provider, &runtime, &[&selected], &[]);
+            assert_eq!(
+                provider
+                    .get(&runtime, &message(&runtime, "Hello"))
+                    .await
+                    .unwrap()
+                    .text,
+                "no relevant memories",
+                "selected source case {case} must be omitted"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn context_provider_deduplicates_selected_sources_before_filling_relevance_slots() {
+        let runtime = runtime();
+        let mut manager = MemoryManager::new();
+        let profile = seed(&mut manager, &runtime, "citron tea preference", |_| {});
+        let duplicate = seed(&mut manager, &runtime, " CITRON  tea PREFERENCE ", |m| {
+            m.importance = 1.0
+        });
+        let facts = (0..5)
+            .map(|index| {
+                seed(
+                    &mut manager,
+                    &runtime,
+                    &format!("citron useful fact {index}"),
+                    |_| {},
+                )
+            })
+            .collect::<Vec<_>>();
+        let provider = provider(manager);
+        publish_selection(&provider, &runtime, &[&profile], &[&profile, &duplicate]);
+        let result = provider
+            .get(&runtime, &message(&runtime, "citron tea preference"))
+            .await
+            .unwrap();
+        assert_eq!(result.text.matches(&profile.id).count(), 1);
+        assert!(!result.text.contains(&duplicate.id));
+        assert_eq!(result.text.matches("Memory id=").count(), 6);
+        for fact in facts {
+            assert!(
+                result.text.contains(&fact.id),
+                "relevance slot lost to selected duplicate"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn context_provider_uses_one_quoted_render_budget_for_selected_and_relevant_sources() {
+        let runtime = runtime();
+        let mut manager = MemoryManager::new();
+        let facts = (0..8)
+            .map(|index| {
+                seed(
+                    &mut manager,
+                    &runtime,
+                    &format!("citron {index} {} END_OF_FULL_FACT", "茶é🫖".repeat(900)),
+                    |_| {},
+                )
+            })
+            .collect::<Vec<_>>();
+        let provider = provider(manager);
+        publish_selection(&provider, &runtime, &[&facts[0], &facts[1]], &[&facts[2]]);
+        let result = provider
+            .get(&runtime, &message(&runtime, "citron"))
+            .await
+            .unwrap();
+        assert!(result.text.chars().count() <= CONTEXT_TEXT_CHARS);
+        assert!((1..=CONTEXT_RECORD_LIMIT).contains(&result.text.matches("Memory id=").count()));
+        for fact in &facts[..3] {
+            assert!(result.text.contains(&fact.id));
+        }
+        assert!(!result.text.contains("END_OF_FULL_FACT"));
+        for line in result.text.lines().filter(|line| line.starts_with('"')) {
+            let excerpt: String = serde_json::from_str(line).unwrap();
+            assert_eq!(excerpt.chars().count(), CONTEXT_EXCERPT_CHARS);
         }
     }
 
@@ -590,6 +907,7 @@ mod tests {
         let provider = RecentMemoriesProvider {
             memory: Arc::new(RwLock::new(manager)),
             memory_embeddings: Arc::new(RwLock::new(embeddings)),
+            selections: Arc::new(std::sync::RwLock::new(BTreeMap::new())),
         };
         let result = provider
             .get(&runtime, &message(&runtime, "release briefing style"))
@@ -675,6 +993,7 @@ mod tests {
         let provider = RecentMemoriesProvider {
             memory: Arc::new(RwLock::new(manager)),
             memory_embeddings: Arc::new(RwLock::new(embeddings)),
+            selections: Arc::new(std::sync::RwLock::new(BTreeMap::new())),
         };
         let result = provider
             .get(&runtime, &message(&runtime, query))
@@ -891,20 +1210,68 @@ impl Provider for RecentMemoriesProvider {
         runtime: &AgentRuntime,
         message: &Message,
     ) -> Result<ProviderResult, String> {
-        let memories = select_context_bounded(
+        let deadline = Instant::now() + CONTEXT_LOOKUP_TIMEOUT;
+        // This published leaf contains only references. Never hold its synchronous lock
+        // across an await or retain selected content between provider invocations.
+        let selected_ids = self
+            .selections
+            .read()
+            .ok()
+            .and_then(|selections| {
+                selections
+                    .get(runtime.id())
+                    .filter(|selection| selection.agent_id == runtime.id())
+                    .map(|selection| {
+                        selection
+                            .user_profile_ids
+                            .iter()
+                            .map(|id| (id.clone(), "user_profile"))
+                            .chain(
+                                selection
+                                    .agent_note_ids
+                                    .iter()
+                                    .map(|id| (id.clone(), "agent_note")),
+                            )
+                            .take(CONTEXT_RECORD_LIMIT)
+                            .collect::<Vec<_>>()
+                    })
+            })
+            .unwrap_or_default();
+        let mut memories = Vec::new();
+        let mut categories = BTreeMap::new();
+        let mut exclusions = ContextExclusions::default();
+        if !selected_ids.is_empty() {
+            if let Ok(manager) = tokio::time::timeout_at(deadline, self.memory.read()).await {
+                for (id, category) in selected_ids {
+                    if let Some(memory) = manager
+                        .get(&id)
+                        .filter(|memory| eligible_source(memory, runtime.id()))
+                    {
+                        if exclusions.include(&memory) {
+                            categories.insert(memory.id.clone(), category);
+                            memories.push(memory);
+                        }
+                    }
+                }
+            }
+        }
+        let relevant = select_context_bounded_with_query_until(
             Arc::clone(&self.memory),
             Arc::clone(&self.memory_embeddings),
             MemoryContextOptions {
                 agent_id: runtime.id().to_string(),
                 room_id: Some(message.room_id.clone()),
                 query: message.content.text.clone(),
-                limit: CONTEXT_RECORD_LIMIT,
+                limit: CONTEXT_RECORD_LIMIT.saturating_sub(memories.len()),
             },
             Arc::clone(&CONTEXT_WORKERS),
-            CONTEXT_LOOKUP_TIMEOUT,
+            deadline,
+            exclusions,
+            |embedder, query| embedder.embed_query(&query).ok(),
         )
         .await;
-        let text = render_context(&memories);
+        memories.extend(relevant);
+        let text = render_context(&memories, &categories);
 
         let mut metadata = BTreeMap::new();
         metadata.insert("kind".into(), DataValue::String("recent_memories".into()));

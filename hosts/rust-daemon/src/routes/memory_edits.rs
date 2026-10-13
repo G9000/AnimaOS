@@ -325,7 +325,7 @@ fn answer<T: Serialize>(body: &T) -> Response {
 }
 
 /// Validates the whole request before anything changes.
-fn memory_patch(input: MemoryPatchRequest) -> Result<MemoryPatch, ApiError> {
+pub(super) fn memory_patch(input: MemoryPatchRequest) -> Result<MemoryPatch, ApiError> {
     if input.content.is_none() && input.importance.is_none() && input.tags.is_none() {
         return Err(ApiError::bad_request_static(MEMORY_PATCH_EMPTY));
     }
@@ -385,12 +385,24 @@ async fn apply_patch(
     memory_id: String,
     patch: MemoryPatch,
 ) -> Result<Memory, ApiError> {
+    apply_patch_checked(daemon, memory_id, patch, |_| Ok(())).await
+}
+
+/// Reuse the sole canonical mutation/save/index path with an additional guard.
+/// The predicate observes the full current record under the same write lock.
+pub(super) async fn apply_patch_checked(
+    daemon: SharedDaemonState,
+    memory_id: String,
+    patch: MemoryPatch,
+    check: impl FnOnce(&Memory) -> Result<(), ApiError> + Send,
+) -> Result<Memory, ApiError> {
     let content_changed = patch.content.is_some();
     let (memory_handle, embeddings_handle, memory_store) = memory_handles(&daemon).await;
     let mut memory_guard = memory_handle.write().await;
-    if memory_guard.get(&memory_id).is_none() {
-        return Err(ApiError::not_found());
-    }
+    let current = memory_guard
+        .get(&memory_id)
+        .ok_or_else(ApiError::not_found)?;
+    check(&current)?;
     let memory = {
         let mut mutation = MemoryMutation::new(&mut memory_guard);
         let memory = mutation

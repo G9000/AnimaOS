@@ -23,10 +23,13 @@ use crate::schedules::ScheduledPromptRecord;
 /// `once` triggers, and the fire log (M6); version 10 adds the owner's pricing
 /// overrides (M8); version 11 adds attachment inputs on steers (M9), version
 /// 14 adds bounded learning advice and separate opt-in policies (M38), and
-/// 15 adds durable reviewed skill handoff lineage (M39). Older
+/// 15 adds durable reviewed skill handoff lineage (M39);16 adds selected
+/// canonical memory references (M40). Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 15;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 16;
+pub(crate) const LEARNING_ADOPTION_STORE_VERSION: u32 = 15;
+pub(crate) const PRE_MEMORY_VIEWS_BACKUP_SUFFIX: &str = ".pre-memory-views.bak";
 pub(crate) const LEARNING_STORE_VERSION: u32 = 14;
 pub(crate) const PRE_LEARNING_ADOPTION_BACKUP_SUFFIX: &str = ".pre-learning-adoption.bak";
 pub(crate) const DRIVE_STORE_VERSION: u32 = 13;
@@ -157,6 +160,8 @@ pub(crate) struct ControlPlaneSnapshot {
     pub(crate) learning_reviews: Vec<crate::learning::LearningReviewRecord>,
     #[serde(default)]
     pub(crate) learning_policies: Vec<crate::learning::LearningPolicy>,
+    #[serde(default)]
+    pub(crate) memory_views: Vec<crate::memory_views::MemoryViewSelection>,
     #[serde(default)]
     pub(crate) sessions: Vec<crate::sessions::SessionRecord>,
     /// Tool grant sets already applied (spec §13.3 step 5).
@@ -369,8 +374,10 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
             .unwrap_or_default();
         name.push(if loaded_version < LEARNING_STORE_VERSION {
             PRE_LEARNING_BACKUP_SUFFIX
-        } else {
+        } else if loaded_version < LEARNING_ADOPTION_STORE_VERSION {
             PRE_LEARNING_ADOPTION_BACKUP_SUFFIX
+        } else {
+            PRE_MEMORY_VIEWS_BACKUP_SUFFIX
         });
         path.with_file_name(name)
     }
@@ -614,6 +621,7 @@ impl ControlPlaneSnapshot {
             pricing_overrides: vec![],
             learning_reviews: vec![],
             learning_policies: vec![],
+            memory_views: vec![],
         }
     }
 }
@@ -881,7 +889,7 @@ mod tests {
 
     #[test]
     fn the_version_constants() {
-        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 15);
+        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 16);
         assert_eq!(super::USAGE_STORE_VERSION, 10);
         assert_eq!(super::PRE_ATTACHMENTS_BACKUP_SUFFIX, ".pre-attachments.bak");
         assert_eq!(super::postgres_backup_key(10), "control_plane.backup.10");
@@ -1190,7 +1198,7 @@ mod discord_upgrade_tests {
         assert!(loaded.discord_connectors.is_empty());
         assert!(loaded.discord_inbound.is_empty());
         assert!(loaded.discord_outbound.is_empty());
-        assert_eq!(CONTROL_PLANE_STORE_VERSION, 15);
+        assert_eq!(CONTROL_PLANE_STORE_VERSION, 16);
         write_pre_upgrade_backup(&config, 11).await.unwrap();
         assert_eq!(
             std::fs::read_to_string(pre_discord_backup_path(&path)).unwrap(),
@@ -1233,6 +1241,37 @@ mod learning_snapshot_tests {
     use super::*;
 
     #[tokio::test]
+    async fn m40_version_fifteen_defaults_empty_and_has_an_independent_exact_backup() {
+        let path = std::env::temp_dir().join(format!(
+            "anima-memory-views-upgrade-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let original = "{\"version\":15,\"agents\":[],\"swarms\":[]}";
+        std::fs::write(&path, original).unwrap();
+        let config = ControlPlaneStoreConfig::Json(path.clone());
+        let loaded = load_control_plane_snapshot(&config).await.unwrap().unwrap();
+        assert!(loaded.memory_views.is_empty());
+        let prior_backup = pre_upgrade_backup_path(&path, 14);
+        std::fs::write(&prior_backup, "prior adoption backup").unwrap();
+        write_pre_upgrade_backup(&config, 15).await.unwrap();
+        let backup = pre_upgrade_backup_path(&path, 15);
+        assert_ne!(backup, prior_backup);
+        assert!(backup
+            .to_string_lossy()
+            .ends_with(PRE_MEMORY_VIEWS_BACKUP_SUFFIX));
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
+        assert_eq!(
+            std::fs::read_to_string(&prior_backup).unwrap(),
+            "prior adoption backup"
+        );
+        write_pre_upgrade_backup(&config, 15).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
+        std::fs::remove_file(backup).unwrap();
+        std::fs::remove_file(prior_backup).unwrap();
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
     async fn m39_version_fourteen_has_an_independent_exact_adoption_backup() {
         let path = std::env::temp_dir().join(format!(
             "anima-learning-adoption-{}.json",
@@ -1254,7 +1293,7 @@ mod learning_snapshot_tests {
             std::fs::read_to_string(&old_backup).unwrap(),
             "older backup"
         );
-        assert_eq!(CONTROL_PLANE_STORE_VERSION, 15);
+        assert_eq!(CONTROL_PLANE_STORE_VERSION, 16);
         std::fs::remove_file(backup).unwrap();
         std::fs::remove_file(old_backup).unwrap();
         std::fs::remove_file(path).unwrap();
