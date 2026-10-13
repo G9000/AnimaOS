@@ -3,7 +3,9 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use anima_core::{AgentRuntime, DataValue, Message, Provider, ProviderResult};
-use anima_memory::{Memory, MemoryContextOptions, MemoryVectorIndex, VectorMemoryHit};
+use anima_memory::{
+    Memory, MemoryContextOptions, MemoryManager, MemoryVectorIndex, VectorMemoryHit,
+};
 use async_trait::async_trait;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
@@ -185,6 +187,7 @@ where
     match bounded_worker(ranking_permit, deadline, move || {
         let vector_index = PreparedVectorIndex {
             embeddings: &embeddings_guard,
+            memories: &memory_guard,
             model_key: &model_key,
             query: &selection_query,
             vector: &query_vector,
@@ -204,6 +207,7 @@ where
 
 struct PreparedVectorIndex<'a> {
     embeddings: &'a MemoryEmbeddingRuntime,
+    memories: &'a MemoryManager,
     model_key: &'a str,
     query: &'a str,
     vector: &'a [f32],
@@ -224,7 +228,13 @@ impl MemoryVectorIndex for PreparedVectorIndex<'_> {
             return Vec::new();
         }
         self.embeddings
-            .search_precomputed_query(self.model_key, self.vector, limit, eligible)
+            .search_precomputed_query(self.model_key, self.vector, limit, &|memory_id| {
+                eligible(memory_id)
+                    && self
+                        .memories
+                        .get(memory_id)
+                        .is_some_and(|memory| self.embeddings.matches_current(&memory))
+            })
     }
 }
 
@@ -587,6 +597,106 @@ mod tests {
             .unwrap();
         assert!(result.text.contains(&fact.id));
         assert!(result.text.contains(&fact.content));
+    }
+
+    #[tokio::test]
+    async fn memory_embedding_content_identity_provider_context_filters_stale_vectors_before_top_k()
+    {
+        use anima_memory::MemoryPatch;
+        let runtime = runtime();
+        let query = "release briefing style";
+        let mut manager = MemoryManager::new();
+        let fresh = seed(
+            &mut manager,
+            &runtime,
+            "Operator wants concise ship notes",
+            |_| {},
+        );
+        let neighbor = seed(
+            &mut manager,
+            &runtime,
+            "billing invoice ledger finance payment",
+            |_| {},
+        );
+        let stale: Vec<_> = (0..CONTEXT_RECORD_LIMIT)
+            .map(|_| seed(&mut manager, &runtime, query, |_| {}))
+            .collect();
+        let mut embeddings = MemoryEmbeddingRuntime::local_default();
+        for memory in std::iter::once(&fresh)
+            .chain(std::iter::once(&neighbor))
+            .chain(stale.iter())
+        {
+            embeddings.upsert_memory(memory).unwrap();
+        }
+        let raw = embeddings.search(query, CONTEXT_RECORD_LIMIT + 2);
+        let fresh_score = raw
+            .iter()
+            .find(|hit| hit.memory_id == fresh.id)
+            .unwrap()
+            .score;
+        assert!(fresh_score > 0.0);
+        assert!(
+            raw.iter().all(|hit| hit.memory_id != neighbor.id),
+            "the unrelated neighbor has no positive query vector"
+        );
+        let top = embeddings.search(query, CONTEXT_RECORD_LIMIT);
+        assert_eq!(top.len(), CONTEXT_RECORD_LIMIT);
+        assert!(top
+            .iter()
+            .all(|hit| stale.iter().any(|memory| memory.id == hit.memory_id)
+                && hit.score > fresh_score));
+        for (index, original) in stale.iter().enumerate() {
+            manager
+                .update_memory(
+                    &original.id,
+                    MemoryPatch {
+                        content: Some(format!("canonicalcorrection{index} billing invoice ledger")),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        }
+        assert!(
+            manager
+                .select_context(
+                    MemoryContextOptions {
+                        agent_id: runtime.id().into(),
+                        room_id: Some("room-current".into()),
+                        query: query.into(),
+                        limit: CONTEXT_RECORD_LIMIT
+                    },
+                    visible_context_memory
+                )
+                .is_empty(),
+            "semantic selection must not be rescued by lexical overlap"
+        );
+        embeddings.upsert_memory(&stale[0]).unwrap();
+        let before = manager.snapshot();
+        let provider = RecentMemoriesProvider {
+            memory: Arc::new(RwLock::new(manager)),
+            memory_embeddings: Arc::new(RwLock::new(embeddings)),
+        };
+        let result = provider
+            .get(&runtime, &message(&runtime, query))
+            .await
+            .unwrap();
+        assert!(result.text.contains(&fresh.id));
+        assert!(result.text.contains(&fresh.content));
+        assert!(stale.iter().all(|memory| !result.text.contains(&memory.id)));
+        assert!(!result.text.contains(&neighbor.id));
+        let lexical = provider
+            .get(&runtime, &message(&runtime, "canonicalcorrection0"))
+            .await
+            .unwrap();
+        assert!(lexical.text.contains(&stale[0].id));
+        assert!(lexical
+            .text
+            .contains("canonicalcorrection0 billing invoice ledger"));
+        assert_eq!(
+            provider.memory.read().await.get(&neighbor.id),
+            Some(neighbor)
+        );
+        assert_eq!(provider.memory.read().await.snapshot(), before);
     }
 
     #[tokio::test]

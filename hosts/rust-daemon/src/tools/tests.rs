@@ -3016,6 +3016,124 @@ async fn memory_search_vector_only_owned_fact_survives_higher_foreign_and_hidden
 }
 
 #[tokio::test]
+async fn memory_embedding_content_identity_tool_search_filters_stale_vectors_before_top_k() {
+    use anima_memory::{MemoryPatch, MemorySearchOptions, MemoryVectorIndex};
+    let (context, mut agent, message) = memory_correction_fixture(None);
+    agent.config.tools = Some(
+        context
+            .tool_registry
+            .resolve_descriptors(["memory_search"])
+            .unwrap(),
+    );
+    let query = "release briefing style";
+    let fresh =
+        seed_correction_memory(&context, &agent.id, "Operator wants concise ship notes").await;
+    let neighbor = seed_correction_memory(
+        &context,
+        &agent.id,
+        "billing invoice ledger finance payment",
+    )
+    .await;
+    let mut stale = Vec::new();
+    for _ in 0..4 {
+        stale.push(seed_correction_memory(&context, &agent.id, query).await);
+    }
+    {
+        let mut embeddings = context.memory_embeddings.write().await;
+        *embeddings = MemoryEmbeddingRuntime::local_default();
+        for memory in std::iter::once(&fresh)
+            .chain(std::iter::once(&neighbor))
+            .chain(stale.iter())
+        {
+            embeddings.upsert_memory(memory).unwrap();
+        }
+        let raw = embeddings.search(query, 6);
+        let fresh_score = raw
+            .iter()
+            .find(|hit| hit.memory_id == fresh.id)
+            .unwrap()
+            .score;
+        assert!(fresh_score > 0.0);
+        let top = embeddings.search(query, 4);
+        assert_eq!(top.len(), 4);
+        assert!(top
+            .iter()
+            .all(|hit| stale.iter().any(|memory| memory.id == hit.memory_id)
+                && hit.score > fresh_score));
+    }
+    {
+        let mut memory = context.memory.write().await;
+        for (index, original) in stale.iter().enumerate() {
+            memory
+                .update_memory(
+                    &original.id,
+                    MemoryPatch {
+                        content: Some(format!("canonicalcorrection{index} billing invoice ledger")),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        }
+        assert!(
+            memory
+                .search(
+                    query,
+                    MemorySearchOptions {
+                        agent_id: Some(agent.id.clone()),
+                        ..Default::default()
+                    }
+                )
+                .is_empty(),
+            "the fixture requires vector-only retrieval"
+        );
+    }
+    // A late old-text upsert remains truthful about A, but must not rank current B.
+    context
+        .memory_embeddings
+        .write()
+        .await
+        .upsert_memory(&stale[0])
+        .unwrap();
+    let before = context.memory.read().await.snapshot();
+    let search = |query: &str| ToolCall {
+        id: format!("content-identity-{query}"),
+        name: "memory_search".into(),
+        args: BTreeMap::from([
+            ("query".into(), DataValue::String(query.into())),
+            ("limit".into(), DataValue::Number(1.0)),
+        ]),
+    };
+    let result = context
+        .clone()
+        .execute_tool(agent.clone(), message.clone(), search(query))
+        .await;
+    assert_eq!(result.status, TaskStatus::Success);
+    let data = result.data.unwrap();
+    assert_eq!(
+        data.metadata.as_ref().unwrap()["matchCount"],
+        DataValue::Number(1.0)
+    );
+    assert!(data.text.contains(&fresh.id));
+    assert!(stale.iter().all(|memory| !data.text.contains(&memory.id)));
+    assert!(!data.text.contains(&neighbor.id));
+    let lexical = context
+        .clone()
+        .execute_tool(agent, message, search("canonicalcorrection0"))
+        .await;
+    assert_eq!(lexical.status, TaskStatus::Success);
+    let lexical = lexical.data.unwrap();
+    assert!(lexical.text.contains(&stale[0].id));
+    assert!(lexical
+        .text
+        .contains("canonicalcorrection0 billing invoice ledger"));
+    assert_eq!(
+        context.memory.read().await.get(&neighbor.id),
+        Some(neighbor)
+    );
+    assert_eq!(context.memory.read().await.snapshot(), before);
+}
+
+#[tokio::test]
 async fn native_vector_recall_uses_current_canonical_type_room_and_absence_before_top_k() {
     use anima_memory::{MemoryRecallOptions, MemoryScope, MemorySearchOptions, MemoryType};
     let (context, agent, _) = memory_correction_fixture(None);

@@ -123,6 +123,80 @@ fn new_memory(content: &str) -> NewMemory {
     }
 }
 
+#[tokio::test]
+async fn memory_embedding_content_identity_owner_recall_filters_stale_vectors_before_top_k() {
+    use anima_memory::MemoryPatch;
+    let state = daemon();
+    let app = router(Arc::clone(&state), DaemonConfig::default());
+    let stale_id = seed(&app, "release briefing style", None).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let fresh_id = seed(&app, "Operator wants concise ship notes", None).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let neighbor_id = seed(&app, "billing invoice ledger finance payment", None).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let stale = stored(&state, &stale_id).await.unwrap();
+    let fresh = stored(&state, &fresh_id).await.unwrap();
+    let neighbor = stored(&state, &neighbor_id).await.unwrap();
+    let memory = state.read().await.memory_handle();
+    let embeddings = state.read().await.memory_embeddings_handle();
+    {
+        let mut vectors = embeddings.write().await;
+        *vectors = MemoryEmbeddingRuntime::local_default();
+        for record in [&stale, &fresh, &neighbor] {
+            vectors.upsert_memory(record).unwrap();
+        }
+        let all = vectors.search("release briefing style", 3);
+        let fresh_score = all
+            .iter()
+            .find(|hit| hit.memory_id == fresh_id)
+            .unwrap()
+            .score;
+        assert!(fresh_score > 0.0);
+        let top = vectors.search("release briefing style", 1);
+        assert_eq!(top[0].memory_id, stale_id);
+        assert!(top[0].score > fresh_score);
+    }
+    memory
+        .write()
+        .await
+        .update_memory(
+            &stale_id,
+            MemoryPatch {
+                content: Some("canonicalcorrection billing invoice ledger".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    embeddings.write().await.upsert_memory(&stale).unwrap();
+    assert!(search_ids(&state, "release briefing style")
+        .await
+        .is_empty());
+    let before = memory.read().await.snapshot();
+    let response = send(&app, "GET", "/api/memories/recall?q=release%20briefing%20style&agentId=companion&type=fact&limit=1&lexicalLimit=1&recentLimit=0&temporalLimit=0", None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let result = json_body(response).await;
+    assert_eq!(result["results"].as_array().unwrap().len(), 1);
+    assert_eq!(result["results"][0]["memory"]["id"], fresh_id);
+    assert_eq!(result["results"][0]["vectorScore"], 1.0);
+    let response = send(&app, "GET", "/api/memories/recall?q=canonicalcorrection&agentId=companion&type=fact&limit=1&lexicalLimit=1&recentLimit=0&temporalLimit=0", None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let lexical = json_body(response).await;
+    assert_eq!(lexical["results"][0]["memory"]["id"], stale_id);
+    assert_eq!(
+        lexical["results"][0]["memory"]["content"],
+        "canonicalcorrection billing invoice ledger"
+    );
+    assert_eq!(lexical["results"][0]["vectorScore"], 0.0);
+    assert_eq!(stored(&state, &neighbor_id).await, Some(neighbor));
+    assert_eq!(memory.read().await.snapshot(), before);
+}
+
 #[test]
 fn the_route_messages_are_exact() {
     assert_eq!(
