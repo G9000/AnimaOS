@@ -7,8 +7,9 @@ use std::sync::{Mutex, MutexGuard};
 use async_trait::async_trait;
 
 use super::{
-    search_tokens, searchable_text, text_matches, ApprovalPageQuery, HistoryError, HistoryMessage,
-    HistoryStore, MessagePageQuery, UsagePageQuery, EPHEMERAL_HISTORY_MAX_ROWS,
+    search_tokens, searchable_text, text_matches, validate_after_query, validate_filtered_query,
+    ApprovalPageQuery, FilteredSessionSearchQuery, HistoryError, HistoryMessage, HistoryStore,
+    MessageAfterQuery, MessagePageQuery, UsagePageQuery, EPHEMERAL_HISTORY_MAX_ROWS,
 };
 use crate::approvals::ApprovalRequest;
 use crate::attachments::AttachmentRecord;
@@ -339,6 +340,37 @@ impl HistoryStore for MemoryHistoryStore {
         Ok(rows)
     }
 
+    async fn page_messages_after(
+        &self,
+        query: &MessageAfterQuery,
+    ) -> Result<Vec<HistoryMessage>, HistoryError> {
+        validate_after_query(query)?;
+        if query.limit == 0 {
+            return Ok(Vec::new());
+        }
+        let tables = self.tables();
+        let mut selected: Vec<&HistoryMessage> = Vec::with_capacity(query.limit);
+        for (_, row) in tables.messages.values() {
+            if row.agent_id != query.agent_id
+                || row.session_id != query.session_id
+                || (!query.include_hidden && row.hidden)
+                || row.order() <= query.after
+            {
+                continue;
+            }
+            let order = row.order();
+            let position = selected
+                .binary_search_by(|existing| existing.order().cmp(&order))
+                .unwrap_or_else(|position| position);
+            if position >= query.limit {
+                continue;
+            }
+            selected.insert(position, row);
+            selected.truncate(query.limit);
+        }
+        Ok(selected.into_iter().cloned().collect())
+    }
+
     async fn visible_message_counts(
         &self,
         agent_id: &str,
@@ -454,6 +486,56 @@ impl HistoryStore for MemoryHistoryStore {
         Ok(rows)
     }
 
+    async fn search_sessions_filtered(
+        &self,
+        query: &FilteredSessionSearchQuery,
+    ) -> Result<Vec<HistoryMessage>, HistoryError> {
+        validate_filtered_query(query)?;
+        let tokens = search_tokens(&query.query);
+        if tokens.is_empty() || query.session_ids.is_empty() || query.limit == 0 {
+            return Ok(Vec::new());
+        }
+        let allowed = query
+            .session_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+        let excluded = query
+            .excluded_message_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+        let tables = self.tables();
+        let mut newest: HashMap<&str, &HistoryMessage> = HashMap::new();
+        for (_, row) in tables.messages.values() {
+            if row.agent_id != query.agent_id
+                || !allowed.contains(row.session_id.as_str())
+                || excluded.contains(row.message.id.as_str())
+                || row.hidden
+                || row.message.role == anima_core::MessageRole::System
+                || query
+                    .after_ms
+                    .is_some_and(|after| row.message.created_at_ms < after)
+                || query
+                    .before_ms
+                    .is_some_and(|before| row.message.created_at_ms >= before)
+                || !text_matches(searchable_text(&row.message), &tokens)
+            {
+                continue;
+            }
+            match newest.get(row.session_id.as_str()) {
+                Some(existing) if existing.order() >= row.order() => {}
+                _ => {
+                    newest.insert(&row.session_id, row);
+                }
+            }
+        }
+        let mut rows = newest.into_values().collect::<Vec<_>>();
+        rows.sort_by(|left, right| right.order().cmp(&left.order()));
+        rows.truncate(query.limit);
+        Ok(rows.into_iter().cloned().collect())
+    }
+
     async fn delete_session(&self, agent_id: &str, session_id: &str) -> Result<(), HistoryError> {
         let mut guard = self.tables();
         let tables = &mut *guard;
@@ -523,6 +605,7 @@ mod tests {
         assert_history_store_conformance(&store).await;
         crate::history::conformance::assert_history_store_attachment_conformance(&store).await;
         assert_history_store_session_search_conformance(&store).await;
+        crate::history::conformance::assert_history_store_m41_conformance(&store).await;
         assert_history_store_checkin_text_conformance(&store).await;
         assert_history_store_indexed_text_cap_conformance(&store).await;
         assert_history_store_diacritics_conformance(&store).await;

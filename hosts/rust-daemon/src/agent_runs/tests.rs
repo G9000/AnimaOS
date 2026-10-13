@@ -1590,7 +1590,7 @@ async fn helper_agents_have_a_single_run_slot() {
 }
 
 #[test]
-fn helper_config_never_copies_search_conversations() {
+fn helper_config_never_copies_owner_history_tools() {
     // Ruling 1 (M3 Task 14 pre-flight audit): a helper never gets
     // search_conversations, even when the parent has it, alongside the
     // coordination and process tools it already withholds.
@@ -1598,7 +1598,11 @@ fn helper_config_never_copies_search_conversations() {
     let mut parent_config = test_config("Companion");
     parent_config.tools = Some(
         crate::tools::ToolRegistry::new()
-            .resolve_descriptors(["calculate", "search_conversations"])
+            .resolve_descriptors([
+                "calculate",
+                "search_conversations",
+                "read_conversation_window",
+            ])
             .unwrap(),
     );
     let parent = state.create_agent(parent_config).unwrap().state;
@@ -1614,7 +1618,7 @@ fn helper_config_never_copies_search_conversations() {
     assert_eq!(
         names,
         ["calculate"],
-        "search_conversations must not reach a helper's copied tools"
+        "owner history tools must not reach a helper's copied tools"
     );
 }
 

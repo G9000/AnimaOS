@@ -100,6 +100,94 @@ pub(crate) struct MessagePageQuery {
     pub(crate) include_hidden: bool,
 }
 
+/// One bounded forward page, oldest first and strictly after the exact order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MessageAfterQuery {
+    pub(crate) agent_id: String,
+    pub(crate) session_id: String,
+    pub(crate) after: MessageOrder,
+    pub(crate) limit: usize,
+    pub(crate) include_hidden: bool,
+}
+
+/// Newest visible non-system match per allowed own session. Message-time bounds
+/// are inclusive at `after_ms` and exclusive at `before_ms`, before grouping.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FilteredSessionSearchQuery {
+    pub(crate) agent_id: String,
+    pub(crate) session_ids: Vec<String>,
+    /// Server-captured hot identities whose cold copies cannot be authoritative.
+    pub(crate) excluded_message_ids: Vec<String>,
+    pub(crate) query: String,
+    pub(crate) after_ms: Option<u64>,
+    pub(crate) before_ms: Option<u64>,
+    pub(crate) limit: usize,
+}
+
+pub(crate) const MAX_HISTORY_WINDOW_PAGE: usize = 20;
+pub(crate) const MAX_FILTERED_HISTORY_SESSIONS: usize = 500;
+pub(crate) const MAX_FILTERED_HISTORY_EXCLUSIONS: usize = 5000;
+const MAX_HISTORY_SEARCH_QUERY_CHARS: usize = 200;
+const MAX_HISTORY_TIME_MS: u64 = 9_007_199_254_740_991;
+
+fn bounded_history_id(id: &str) -> bool {
+    !id.trim().is_empty()
+        && id.len() <= 256
+        && !id.chars().any(char::is_control)
+        && !crate::memory_text::has_hidden_text(id)
+}
+
+fn validate_after_query(query: &MessageAfterQuery) -> Result<(), HistoryError> {
+    if query.limit > MAX_HISTORY_WINDOW_PAGE
+        || !bounded_history_id(&query.agent_id)
+        || !bounded_history_id(&query.session_id)
+        || !bounded_history_id(&query.after.id)
+    {
+        return Err(HistoryError::new(
+            "forward history page arguments exceed their bounds",
+        ));
+    }
+    to_i64(query.after.created_at_ms)?;
+    to_i64(query.after.ordinal)?;
+    Ok(())
+}
+
+fn validate_filtered_query(query: &FilteredSessionSearchQuery) -> Result<(), HistoryError> {
+    if query.limit > MAX_FILTERED_HISTORY_SESSIONS
+        || query.session_ids.len() > MAX_FILTERED_HISTORY_SESSIONS
+        || query.excluded_message_ids.len() > MAX_FILTERED_HISTORY_EXCLUSIONS
+        || !bounded_history_id(&query.agent_id)
+        || query.session_ids.iter().any(|id| !bounded_history_id(id))
+        || query
+            .excluded_message_ids
+            .iter()
+            .any(|id| !bounded_history_id(id))
+        || query.query.trim().is_empty()
+        || query.query.len() > MAX_HISTORY_SEARCH_QUERY_CHARS * 4
+        || query.query.chars().count() > MAX_HISTORY_SEARCH_QUERY_CHARS
+        || crate::memory_text::has_hidden_text(&query.query)
+        || query
+            .query
+            .chars()
+            .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+        || query
+            .after_ms
+            .is_some_and(|time| time > MAX_HISTORY_TIME_MS)
+        || query
+            .before_ms
+            .is_some_and(|time| time > MAX_HISTORY_TIME_MS)
+        || query
+            .after_ms
+            .zip(query.before_ms)
+            .is_some_and(|(after, before)| after >= before)
+    {
+        return Err(HistoryError::new(
+            "filtered history search arguments exceed their bounds",
+        ));
+    }
+    Ok(())
+}
+
 /// One page of decided approvals, newest first by `(createdAtMs, id)`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ApprovalPageQuery {
@@ -272,6 +360,17 @@ pub(crate) trait HistoryStore: Send + Sync {
         query: &MessagePageQuery,
     ) -> Result<Vec<HistoryMessage>, HistoryError>;
 
+    /// At most20 messages, oldest first, under exact owner/session scope.
+    /// Legacy/custom stores must report unavailable rather than scan history.
+    async fn page_messages_after(
+        &self,
+        _query: &MessageAfterQuery,
+    ) -> Result<Vec<HistoryMessage>, HistoryError> {
+        Err(HistoryError::new(
+            "forward history paging is unsupported by this store",
+        ))
+    }
+
     /// Visible (non-hidden) messages per session.
     async fn visible_message_counts(
         &self,
@@ -300,6 +399,17 @@ pub(crate) trait HistoryStore: Send + Sync {
         query: &str,
         limit: usize,
     ) -> Result<Vec<HistoryMessage>, HistoryError>;
+
+    /// Allowed session IDs/time/visibility/role predicates precede grouping and
+    /// topN. No fallback to an unscoped or postfiltered legacy search.
+    async fn search_sessions_filtered(
+        &self,
+        _query: &FilteredSessionSearchQuery,
+    ) -> Result<Vec<HistoryMessage>, HistoryError> {
+        Err(HistoryError::new(
+            "filtered history search is unsupported by this store",
+        ))
+    }
 
     /// Removes a session's messages, runs, approvals, and attachment records; an automation's fire history stays.
     async fn delete_session(&self, agent_id: &str, session_id: &str) -> Result<(), HistoryError>;

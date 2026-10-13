@@ -249,6 +249,126 @@ describe('SettingsPanel access', () => {
     expect(checkbox).not.toBeChecked();
   });
 
+  it('M41_opt_in_adds_only_conversation_window_read_and_preserves_custom_grants', async () => {
+    const user = userEvent.setup();
+    const currentTools = [
+      'read_file',
+      'search_conversations',
+      'memory_remove',
+      'legacy_workspace_tool',
+      'mail_list_messages',
+    ];
+    const saveSettings = vi.fn(async () => true);
+    renderPanel(agent({ toolNames: currentTools }), { saveSettings });
+
+    const allowHistoryRead = screen.getByRole('checkbox', {
+      name: 'Allow reading conversation context',
+    });
+    expect(allowHistoryRead).not.toBeChecked();
+    await user.click(allowHistoryRead);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(saveSettings).toHaveBeenCalledWith({
+      tools: [...currentTools, 'read_conversation_window'],
+    });
+  });
+
+  it('M41_opt_out_removes_only_conversation_window_read_from_mixed_grants', async () => {
+    const user = userEvent.setup();
+    const currentTools = [
+      'read_file',
+      'search_conversations',
+      'read_conversation_window',
+      'memory_remove',
+      'legacy_workspace_tool',
+    ];
+    const saveSettings = vi.fn(async () => true);
+    renderPanel(agent({ toolNames: currentTools }), { saveSettings });
+
+    const allowHistoryRead = screen.getByRole('checkbox', {
+      name: 'Allow reading conversation context',
+    });
+    expect(allowHistoryRead).toBeChecked();
+    await user.click(allowHistoryRead);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(saveSettings).toHaveBeenCalledWith({
+      tools: currentTools.filter((tool) => tool !== 'read_conversation_window'),
+    });
+  });
+
+  it('M41_standard_profile_clears_conversation_read_but_allows_deliberate_reenable', async () => {
+    const user = userEvent.setup();
+    const saveSettings = vi.fn(async () => true);
+    renderPanel(
+      agent({
+        toolNames: [
+          ...toolNamesForProfile('observe'),
+          'read_conversation_window',
+        ],
+      }),
+      { saveSettings },
+    );
+
+    const allowHistoryRead = screen.getByRole('checkbox', {
+      name: 'Allow reading conversation context',
+    });
+    await user.click(screen.getByRole('radio', { name: /^Collaborate/ }));
+    expect(allowHistoryRead).not.toBeChecked();
+    expect(toolNamesForProfile('collaborate')).not.toContain(
+      'read_conversation_window',
+    );
+
+    await user.click(allowHistoryRead);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(saveSettings).toHaveBeenCalledWith({
+      tools: [
+        ...toolNamesForProfile('collaborate'),
+        'read_conversation_window',
+      ],
+    });
+  });
+
+  it('M41_failed_save_keeps_conversation_read_draft_without_changing_the_agent', async () => {
+    const user = userEvent.setup();
+    const currentAgent = agent({
+      toolNames: ['read_file', 'legacy_workspace_tool'],
+    });
+    const saveSettings = vi.fn(async () => false);
+    const view = renderPanel(currentAgent, { saveSettings });
+    const allowHistoryRead = screen.getByRole('checkbox', {
+      name: 'Allow reading conversation context',
+    });
+
+    await user.click(allowHistoryRead);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    view.rerender(
+      <SettingsPanel {...view.props} saveError="Unsupported tool" />,
+    );
+
+    expect(saveSettings).toHaveBeenCalledWith({
+      tools: [...currentAgent.toolNames, 'read_conversation_window'],
+    });
+    expect(allowHistoryRead).toBeChecked();
+    expect(currentAgent.toolNames).not.toContain('read_conversation_window');
+    expect(screen.getByRole('alert')).toHaveTextContent('Unsupported tool');
+  });
+
+  it('M41_helper_cannot_enable_conversation_history_read', () => {
+    renderPanel(
+      agent({
+        workspaceRole: 'helper',
+        toolNames: ['read_file'],
+      }),
+    );
+
+    const allowHistoryRead = screen.getByRole('checkbox', {
+      name: 'Allow reading conversation context',
+    });
+    expect(allowHistoryRead).not.toBeChecked();
+    expect(allowHistoryRead).toBeDisabled();
+  });
+
   it('M34_opt_in_adds_only_memory_consolidate_and_preserves_existing_custom_grants', async () => {
     const user = userEvent.setup();
     const currentTools = [

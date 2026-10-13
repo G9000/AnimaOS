@@ -9,8 +9,8 @@ use async_trait::async_trait;
 use tokio::sync::Semaphore;
 
 use super::{
-    ApprovalPageQuery, HistoryError, HistoryMessage, HistoryStore, MemoryHistoryStore,
-    MessagePageQuery, UsagePageQuery,
+    ApprovalPageQuery, FilteredSessionSearchQuery, HistoryError, HistoryMessage, HistoryStore,
+    MemoryHistoryStore, MessageAfterQuery, MessagePageQuery, UsagePageQuery,
 };
 use crate::approvals::{
     ApprovalDecisionKind, ApprovalRequest, ApprovalResolution, ApprovalStatus,
@@ -1106,12 +1106,361 @@ pub(crate) async fn assert_history_store_diacritics_conformance(store: &dyn Hist
     );
 }
 
+/// Additive M41 ports keep exact scope/order and filter before grouping/topN.
+/// UUID source identities permit the same fixture on a shared Postgres store.
+pub(crate) async fn assert_history_store_m41_conformance(store: &dyn HistoryStore) {
+    let agent = format!("agent-{}", uuid::Uuid::new_v4());
+    let other = format!("agent-{}", uuid::Uuid::new_v4());
+    let base = (uuid::Uuid::new_v4().as_u128() % 1_000_000_000) as u64 * 1000;
+    let id = |offset, ordinal| format!("msg-{}-{ordinal}", base + offset);
+    let row = |offset, ordinal, session: &str, role, text: &str| {
+        history_message(
+            &id(offset, ordinal),
+            &agent,
+            session,
+            role,
+            text,
+            base + offset,
+        )
+    };
+    let nine = row(0, 9, "window", MessageRole::User, "nine");
+    let ten = row(0, 10, "window", MessageRole::Assistant, "ten");
+    let hundred = row(0, 100, "window", MessageRole::Tool, "one hundred");
+    let mut hidden = row(0, 50, "window", MessageRole::User, "hidden");
+    hidden.hidden = true;
+    let mut rows = vec![
+        nine.clone(),
+        ten.clone(),
+        hundred.clone(),
+        hidden.clone(),
+        row(0, 101, "elsewhere", MessageRole::User, "wrong session"),
+        history_message(
+            &id(0, 102),
+            &other,
+            "window",
+            MessageRole::User,
+            "wrong owner",
+            base,
+        ),
+    ];
+    let letter = |name| {
+        history_message(
+            &format!("{name}-{base}"),
+            &agent,
+            "window",
+            MessageRole::User,
+            name,
+            base + 2,
+        )
+    };
+    let alpha = letter("A");
+    let zulu = letter("Z");
+    let lower = letter("a");
+    let unicode = letter("é");
+    rows.extend([alpha.clone(), zulu.clone(), lower.clone(), unicode.clone()]);
+    rows.extend((3..33).map(|offset| row(offset, 1, "window", MessageRole::User, "neighbor")));
+    let a = row(
+        200,
+        1,
+        "filtered:a",
+        MessageRole::User,
+        "deployment building plan",
+    );
+    let b = row(
+        360,
+        1,
+        "filtered:b",
+        MessageRole::Tool,
+        "deploy build result",
+    );
+    let shadowed = row(
+        370,
+        1,
+        "filtered:a",
+        MessageRole::User,
+        "deploy build stale cold copy",
+    );
+    let counter = row(
+        360,
+        100,
+        "filtered:counter",
+        MessageRole::Tool,
+        "deploy build newest counter",
+    );
+    let mut hidden_match = row(
+        380,
+        1,
+        "filtered:a",
+        MessageRole::Assistant,
+        "deploy build hidden",
+    );
+    hidden_match.hidden = true;
+    rows.extend([
+        a.clone(),
+        b.clone(),
+        hidden_match,
+        counter.clone(),
+        shadowed.clone(),
+        row(
+            360,
+            9,
+            "filtered:counter",
+            MessageRole::User,
+            "deploy build nine",
+        ),
+        row(
+            360,
+            10,
+            "filtered:counter",
+            MessageRole::Assistant,
+            "deploy build ten",
+        ),
+        row(
+            199,
+            1,
+            "filtered:a",
+            MessageRole::User,
+            "deploy build too early",
+        ),
+        row(
+            390,
+            1,
+            "filtered:a",
+            MessageRole::System,
+            "deploy build system instruction",
+        ),
+        row(
+            400,
+            1,
+            "filtered:a",
+            MessageRole::Assistant,
+            "deploy build exclusive boundary",
+        ),
+        row(
+            500,
+            1,
+            "filtered:a",
+            MessageRole::User,
+            "deploy build too late",
+        ),
+        history_message(
+            &id(398, 1),
+            &other,
+            "filtered:a",
+            MessageRole::User,
+            "deploy build foreign",
+            base + 398,
+        ),
+    ]);
+    rows.extend((0..25).map(|index| {
+        row(
+            600 + index,
+            1,
+            &format!("wrong-kind-{index}"),
+            MessageRole::User,
+            "deploy build distractor",
+        )
+    }));
+    store.upsert_messages(&rows).await.unwrap();
+    let ids = |rows: Vec<HistoryMessage>| {
+        rows.into_iter()
+            .map(|row| row.message.id)
+            .collect::<Vec<_>>()
+    };
+    let after = |anchor: &HistoryMessage, limit, include_hidden| MessageAfterQuery {
+        agent_id: agent.clone(),
+        session_id: "window".into(),
+        after: anchor.order(),
+        limit,
+        include_hidden,
+    };
+    assert!(store
+        .page_messages_after(&after(&ten, 0, false))
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        store
+            .page_messages_after(&after(&ten, 1, false))
+            .await
+            .unwrap(),
+        [hundred.clone()]
+    );
+    assert_eq!(
+        ids(store
+            .page_messages_after(&after(&ten, 2, true))
+            .await
+            .unwrap()),
+        [hidden.message.id.clone(), hundred.message.id.clone()]
+    );
+    let page = store
+        .page_messages_after(&after(&ten, 20, false))
+        .await
+        .unwrap();
+    assert_eq!(page.len(), 20);
+    assert!(page.iter().all(|row| row.agent_id == agent
+        && row.session_id == "window"
+        && !row.hidden
+        && row.order() > ten.order()));
+    assert!(page
+        .windows(2)
+        .all(|pair| pair[0].order() < pair[1].order()));
+    assert_eq!(
+        ids(store
+            .page_messages_after(&after(&alpha, 3, false))
+            .await
+            .unwrap()),
+        [zulu.message.id, lower.message.id, unicode.message.id]
+    );
+    assert_eq!(
+        ids(store
+            .page_messages(&MessagePageQuery {
+                agent_id: agent.clone(),
+                session_id: "window".into(),
+                before: Some(ten.order()),
+                limit: 20,
+                include_hidden: false
+            })
+            .await
+            .unwrap()),
+        [nine.message.id]
+    );
+    let mut query = FilteredSessionSearchQuery {
+        agent_id: agent.clone(),
+        session_ids: vec!["filtered:a".into(), "filtered:b".into()],
+        excluded_message_ids: vec![shadowed.message.id.clone()],
+        query: "deplo buil".into(),
+        after_ms: Some(base + 200),
+        before_ms: Some(base + 400),
+        limit: 2,
+    };
+    assert_eq!(
+        store.search_sessions_filtered(&query).await.unwrap(),
+        [b.clone(), a.clone()]
+    );
+    let mut cold_only = query.clone();
+    cold_only.excluded_message_ids.clear();
+    assert_eq!(
+        store.search_sessions_filtered(&cold_only).await.unwrap(),
+        [shadowed.clone(), b.clone()]
+    );
+    let mut tied = query.clone();
+    tied.session_ids = vec!["filtered:b".into(), "filtered:counter".into()];
+    tied.limit = 1;
+    assert_eq!(
+        store.search_sessions_filtered(&tied).await.unwrap(),
+        [counter],
+        "grouping and topN preserve numeric ordinal ties"
+    );
+    query.limit = 1;
+    assert_eq!(
+        store.search_sessions_filtered(&query).await.unwrap(),
+        [b.clone()]
+    );
+    query.session_ids = vec!["filtered:a".into()];
+    assert_eq!(
+        store.search_sessions_filtered(&query).await.unwrap(),
+        [a.clone()],
+        "scope, hidden, role and time filters must precede newest-per-session/topN"
+    );
+    query.after_ms = Some(base + 201);
+    assert!(store
+        .search_sessions_filtered(&query)
+        .await
+        .unwrap()
+        .is_empty());
+    query.after_ms = Some(base + 200);
+    query.session_ids.push("filtered:b".into());
+    query.before_ms = Some(base + 360);
+    assert_eq!(
+        store.search_sessions_filtered(&query).await.unwrap(),
+        [a.clone()],
+        "before is exclusive"
+    );
+    query.limit = 0;
+    assert!(store
+        .search_sessions_filtered(&query)
+        .await
+        .unwrap()
+        .is_empty());
+    query.limit = 2;
+    let valid = query.clone();
+    query.session_ids.clear();
+    assert!(store
+        .search_sessions_filtered(&query)
+        .await
+        .unwrap()
+        .is_empty());
+    query = valid.clone();
+    query.query = "!!!".into();
+    assert!(store
+        .search_sessions_filtered(&query)
+        .await
+        .unwrap()
+        .is_empty());
+    query = valid.clone();
+    query.session_ids = (0..499)
+        .map(|index| format!("absent-{index}"))
+        .chain(std::iter::once("filtered:a".into()))
+        .collect();
+    query.excluded_message_ids = (0..4999)
+        .map(|index| format!("absent-message-{index}"))
+        .chain(std::iter::once(shadowed.message.id))
+        .collect();
+    assert_eq!(
+        store.search_sessions_filtered(&query).await.unwrap(),
+        [a],
+        "the full500-session/5000-exclusion scope must work"
+    );
+    for case in 0..10 {
+        let mut invalid = valid.clone();
+        match case {
+            0 => invalid.session_ids = vec!["filtered:a".into(); 501],
+            1 => invalid.limit = usize::MAX,
+            2 => invalid.query = "茶".repeat(201),
+            3 => invalid.after_ms = Some(9_007_199_254_740_992),
+            4 => invalid.before_ms = invalid.after_ms,
+            5 => invalid.session_ids = vec!["s".repeat(257)],
+            6 => invalid.query = "deploy\u{202E}".into(),
+            7 => invalid.agent_id = "a".repeat(257),
+            8 => invalid.excluded_message_ids = vec!["m".into(); 5001],
+            _ => invalid.excluded_message_ids = vec!["m".repeat(257)],
+        }
+        assert!(
+            store.search_sessions_filtered(&invalid).await.is_err(),
+            "filtered argument case {case}"
+        );
+    }
+    for case in 0..4 {
+        let mut invalid = after(&ten, 1, false);
+        match case {
+            0 => invalid.limit = 21,
+            1 => invalid.after.created_at_ms = u64::MAX,
+            2 => invalid.after.ordinal = u64::MAX,
+            _ => invalid.after.id = "m".repeat(257),
+        }
+        assert!(
+            store.page_messages_after(&invalid).await.is_err(),
+            "forward argument case {case}"
+        );
+    }
+    assert_eq!(
+        store
+            .get_message(&agent, "window", &ten.message.id)
+            .await
+            .unwrap(),
+        Some(ten)
+    );
+    store.delete_agent(&agent).await.unwrap();
+    store.delete_agent(&other).await.unwrap();
+}
+
 /// A memory store whose every call fails while `failing` is set. Unlike the
 /// memory store it is not ephemeral, so pruning tests can use it.
 pub(crate) struct FlakyHistoryStore {
     inner: MemoryHistoryStore,
     failing: AtomicBool,
-    /// Fails only `page_messages`, independent of `failing`: lets a test put
+    /// Fails both message-page directions, independent of `failing`: lets a test put
     /// `get_message` (or the hot tail) through a `before` lookup and then
     /// fail just the page read that follows it.
     page_messages_failing: AtomicBool,
@@ -1159,7 +1508,7 @@ impl FlakyHistoryStore {
         self.failing.store(failing, Ordering::SeqCst);
     }
 
-    /// Fails only `page_messages` calls, leaving every other method healthy.
+    /// Fails message-page calls in either direction, leaving other methods healthy.
     pub(crate) fn set_page_messages_failing(&self, failing: bool) {
         self.page_messages_failing.store(failing, Ordering::SeqCst);
     }
@@ -1209,6 +1558,65 @@ impl FlakyHistoryStore {
             Ok(())
         }
     }
+}
+
+#[tokio::test]
+async fn m41_flaky_store_delegates_both_ports_and_preserves_read_failure_switches() {
+    let store = FlakyHistoryStore::new();
+    let first = history_message(
+        "msg-10-9",
+        "port-agent",
+        "port-session",
+        MessageRole::User,
+        "first",
+        10,
+    );
+    let next = history_message(
+        "msg-10-10",
+        "port-agent",
+        "port-session",
+        MessageRole::Tool,
+        "deploy build",
+        10,
+    );
+    store
+        .upsert_messages(&[first.clone(), next.clone()])
+        .await
+        .unwrap();
+    let page = MessageAfterQuery {
+        agent_id: "port-agent".into(),
+        session_id: "port-session".into(),
+        after: first.order(),
+        limit: 1,
+        include_hidden: false,
+    };
+    let search = FilteredSessionSearchQuery {
+        agent_id: "port-agent".into(),
+        session_ids: vec!["port-session".into()],
+        excluded_message_ids: Vec::new(),
+        query: "deploy".into(),
+        after_ms: None,
+        before_ms: None,
+        limit: 1,
+    };
+    assert_eq!(
+        store.page_messages_after(&page).await.unwrap(),
+        [next.clone()]
+    );
+    assert_eq!(
+        store.search_sessions_filtered(&search).await.unwrap(),
+        [next.clone()]
+    );
+    store.set_page_messages_failing(true);
+    assert!(store.page_messages_after(&page).await.is_err());
+    assert_eq!(
+        store.search_sessions_filtered(&search).await.unwrap(),
+        [next]
+    );
+    store.set_page_messages_failing(false);
+    store.set_failing(true);
+    assert!(store.page_messages_after(&page).await.is_err());
+    assert!(store.search_sessions_filtered(&search).await.is_err());
 }
 
 #[async_trait]
@@ -1348,6 +1756,17 @@ impl HistoryStore for FlakyHistoryStore {
         self.inner.page_messages(query).await
     }
 
+    async fn page_messages_after(
+        &self,
+        query: &MessageAfterQuery,
+    ) -> Result<Vec<HistoryMessage>, HistoryError> {
+        self.check()?;
+        if self.page_messages_failing.load(Ordering::SeqCst) {
+            return Err(HistoryError::new("injected page_messages failure"));
+        }
+        self.inner.page_messages_after(query).await
+    }
+
     async fn visible_message_counts(
         &self,
         agent_id: &str,
@@ -1377,6 +1796,14 @@ impl HistoryStore for FlakyHistoryStore {
     ) -> Result<Vec<HistoryMessage>, HistoryError> {
         self.check()?;
         self.inner.search_sessions(agent_ids, query, limit).await
+    }
+
+    async fn search_sessions_filtered(
+        &self,
+        query: &FilteredSessionSearchQuery,
+    ) -> Result<Vec<HistoryMessage>, HistoryError> {
+        self.check()?;
+        self.inner.search_sessions_filtered(query).await
     }
 
     async fn delete_session(&self, agent_id: &str, session_id: &str) -> Result<(), HistoryError> {
