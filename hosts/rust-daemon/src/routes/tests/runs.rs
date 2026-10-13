@@ -8,6 +8,78 @@ use crate::sessions::{SessionKind, SessionOrigin, SessionRecord, TitleSource, DE
 
 const OWNER_ORIGIN: &str = "http://localhost:4200";
 
+/// M38 RED: an existing owner-authorized, durably witnessed completed run
+/// can request advice without changing its source or creating a new run.
+#[tokio::test]
+async fn learning_review_of_a_completed_own_task_is_admitted() {
+    use crate::history::conformance::{history_message, terminal_run};
+    use crate::runs::{ActionDurability, ActionReceipt, ActionStatus};
+    let (app, state, agent) = app_with_chat(ScriptedModel::new(vec![])).await;
+    let path = std::env::temp_dir().join(format!("anima-m38-red-{}.json", uuid::Uuid::new_v4()));
+    let mut run = terminal_run(&agent, "chat:plans");
+    run.input.text = "Calculate twice and correct the arithmetic".into();
+    run.reply_message_id = Some("m38-final".into());
+    run.tools_started = vec!["calculate".into()];
+    run.action_receipts.push(ActionReceipt {
+        tool_call_id: "m38-calculate".into(),
+        name: "calculate".into(),
+        status: ActionStatus::Succeeded,
+        started_at_ms: 101,
+        finished_at_ms: Some(102),
+        duration_ms: Some(1),
+        arguments_preview: "{}".into(),
+        arguments_truncated: false,
+        result_preview: Some("4".into()),
+        result_truncated: false,
+        durability: ActionDurability::Persistent,
+    });
+    let baseline = run.clone();
+    let history = {
+        let mut guard = state.write().await;
+        guard.set_control_plane_store(Some(
+            crate::control_plane_store::ControlPlaneStoreConfig::Json(path.clone()),
+        ));
+        guard.runs.insert(run.clone());
+        guard.control_plane_persist_request().save().await.unwrap();
+        guard.history.clone()
+    };
+    let mut reply = history_message(
+        "m38-final",
+        &agent,
+        "chat:plans",
+        anima_core::MessageRole::Assistant,
+        "Corrected: 2 + 2 = 4",
+        110,
+    );
+    reply.message.content.metadata = Some(std::collections::BTreeMap::from([(
+        "runId".into(),
+        DataValue::String(run.id.clone()),
+    )]));
+    history.store().upsert_messages(&[reply]).await.unwrap();
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!(
+            "/api/agents/{agent}/runs/{}/learning-review",
+            run.id
+        ))
+        .header("host", "127.0.0.1:8080")
+        .header("origin", OWNER_ORIGIN)
+        .header("content-type", "application/json")
+        .body(Body::from("{}"))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
+    let _ = std::fs::remove_file(path);
+    assert_eq!(state.read().await.runs.get(&run.id), Some(&baseline));
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "the settled own task must expose a durable advice attempt"
+    );
+    let body = json_body(response).await;
+    assert_eq!(body["review"]["sourceRunId"], run.id);
+}
+
 fn start_request(
     agent: &str,
     session: &str,

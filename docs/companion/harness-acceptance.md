@@ -189,3 +189,31 @@ implementation, synthetic-local acceptance, account acceptance and host
 acceptance. The first M38 plan covers budgeted task-learning advice; reviewed
 adoption and fresh-task reuse are a separate step. Planning completion does not
 change the evidence above or establish full Hermes parity.
+
+## M38: one bounded task review and quiet recovery
+
+On 2026-10-13 the native review service inspected the previously accepted M35
+synthetic memory consolidation/correction task. No primary task was resubmitted.
+One configured no-tools generation produced three anchored advice items in 6.878 s,
+using 805 prompt / 394 completion/**1,199 reported total tokens**. The advice
+correctly treated succeeded search/consolidation receipts as evidence of call
+success and sequencing, while identifying omitted arguments/results as an
+independent verification gap. It did not invent a failed task. Items repeat a
+verification theme; they remain unverified, and a suggestion to log exact source
+content has not been adopted.
+
+One quiet same-store restart retained the exact completed review/proposals,
+source run and messages, canonical memory, agent snapshots/config/grants, skill
+records/draft, instruction/approved-skill bytes and default-off policy. There was
+one durable attempt and no observed replay. All 14 exact owned process identities
+were stopped and 8080/4200 released. This is quiet forced cleanup, not a graceful
+SIGTERM or production-host claim.
+
+Current gates passed: Rust 2,485 / nine ignored/40 suites and sequential lint;
+SDK 129 / three intentional service skips; web 1,225 / 111 files with bounded worker
+count; SDK/web typecheck/build. Twenty-four focused native regressions include
+real owner routing, task hooks, durable admission, panic/timeout/cancel behavior,
+unknown usage, strict output and failed-save controls. Native and final SDK/web
+batch reviews were fixed and checked. See the [M38 plan](../superpowers/plans/2026-10-13-companion-learning-m38.md)
+and [task review guide](learning.md). Reviewed adoption and fresh reuse remain
+PAR-02; this is not full autonomous learning or overall Hermes parity.

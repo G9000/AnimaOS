@@ -7,6 +7,7 @@ import {
 } from '../lib/agent-access';
 import type { AgentDetail } from '../lib/types';
 import {
+  daemon,
   MODEL_SUGGESTIONS,
   type AgentUpdateInput,
   type DaemonProvider,
@@ -17,6 +18,10 @@ import { ChatGptConnection } from './ChatGptConnection';
 import { AgentProfileDetails, AgentMemoryView } from './AgentProfileDetails';
 import { AgentFilesPanel } from './AgentFilesPanel';
 import { AgentTasksView, AgentProactiveView } from './AgentWork';
+import {
+  LearningReviewPanel,
+  type LearningReviewApi,
+} from './learning/LearningReviewPanel';
 import {
   ErrorBanner,
   SectionTitle,
@@ -63,6 +68,19 @@ const ACCESS_ORDER: readonly AccessProfile[] = [
   'operate',
 ];
 
+const DEFAULT_LEARNING_API: LearningReviewApi = {
+  policy: (agentId, options) => daemon.learningPolicy(agentId, options),
+  setPolicy: (agentId, input) => daemon.setLearningPolicy(agentId, input),
+  listReviews: (agentId, options) =>
+    daemon.listLearningReviews(agentId, options),
+  getReview: (agentId, reviewId, options) =>
+    daemon.getLearningReview(agentId, reviewId, options),
+  cancelReview: (agentId, reviewId) =>
+    daemon.cancelLearningReview(agentId, reviewId),
+  decideProposal: (agentId, reviewId, proposalId, input) =>
+    daemon.decideLearningProposal(agentId, reviewId, proposalId, input),
+};
+
 /**
  * Editable agent settings. Saves through the daemon's
  * PATCH /api/agents/:id endpoint — the conversation is preserved and the
@@ -81,6 +99,7 @@ export function SettingsPanel({
   close,
   integrations,
   refreshProviders,
+  learningApi,
 }: {
   agent: AgentDetail;
   providers: DaemonProvider[] | null;
@@ -94,6 +113,7 @@ export function SettingsPanel({
   close: () => void;
   integrations?: ReactNode;
   refreshProviders?: () => void | Promise<void>;
+  learningApi?: LearningReviewApi;
 }) {
   const seedModel = useMemo(() => {
     const options = MODEL_SUGGESTIONS[agent.provider] ?? [];
@@ -716,6 +736,12 @@ export function SettingsPanel({
                   </div>
                 </fieldset>
               </section>
+
+              <LearningReviewPanel
+                agentId={agent.id}
+                api={learningApi ?? DEFAULT_LEARNING_API}
+                disabled={controlsDisabled}
+              />
 
               {integrations}
 

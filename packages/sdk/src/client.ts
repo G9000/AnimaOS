@@ -10,6 +10,7 @@ import { MemoriesClient } from './memories.js';
 import { SwarmsClient } from './swarms.js';
 import { SessionsClient } from './sessions.js';
 import { RunsClient } from './runs.js';
+import { LearningClient } from './learning.js';
 import { ApprovalsClient } from './approvals.js';
 import { SkillsClient } from './skills.js';
 import { AutomationsClient } from './automations.js';
@@ -84,6 +85,7 @@ export class DaemonClient {
   readonly swarms: SwarmsClient;
   readonly sessions: SessionsClient;
   readonly runs: RunsClient;
+  readonly learning: LearningClient;
   readonly events: AgentEventsClient;
   readonly approvals: ApprovalsClient;
   readonly skills: SkillsClient;
@@ -116,6 +118,7 @@ export class DaemonClient {
     this.swarms = new SwarmsClient(this);
     this.sessions = new SessionsClient(this);
     this.runs = new RunsClient(this);
+    this.learning = new LearningClient(this);
     this.events = new AgentEventsClient(this);
     this.approvals = new ApprovalsClient(this);
     this.skills = new SkillsClient(this);

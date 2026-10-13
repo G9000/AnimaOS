@@ -912,6 +912,43 @@ it('uses the SDK same-origin Discord transport and explicit uncertainty acknowle
   });
 });
 
+it('routes M38 review and learning-policy calls through the same-origin SDK client', async () => {
+  const review = { id: 'review-1', sourceRunId: 'run:1' };
+  const policy = {
+    autoEnabled: false,
+    dailyLimit: 2,
+    pendingLimit: 10,
+    timeoutMs: 20_000,
+  };
+  const fetchMock = vi
+    .fn<typeof fetch>()
+    .mockImplementation(async (url) =>
+      String(url).endsWith('/learning-policy')
+        ? Response.json(policy)
+        : Response.json({ review }),
+    );
+  vi.stubGlobal('fetch', fetchMock);
+
+  expect(await daemon.learningPolicy('agent /?')).toEqual(policy);
+  await daemon.setLearningPolicy('agent /?', { autoEnabled: true });
+  expect(await daemon.requestLearningReview('agent /?', 'run:1')).toEqual(
+    review,
+  );
+
+  expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+    '/api/agents/agent%20%2F%3F/learning-policy',
+    '/api/agents/agent%20%2F%3F/learning-policy',
+    '/api/agents/agent%20%2F%3F/runs/run%3A1/learning-review',
+  ]);
+  expect(fetchMock.mock.calls.map(([, init]) => init?.method ?? 'GET')).toEqual(
+    ['GET', 'PATCH', 'POST'],
+  );
+  expect(JSON.parse(fetchMock.mock.calls[1][1]!.body as string)).toEqual({
+    autoEnabled: true,
+  });
+  expect(JSON.parse(fetchMock.mock.calls[2][1]!.body as string)).toEqual({});
+});
+
 it('uses same-origin selected Drive status, consent and local disconnect transport', async () => {
   const connector = { id: 'c /?', type: 'gdrive' };
   const payload = {

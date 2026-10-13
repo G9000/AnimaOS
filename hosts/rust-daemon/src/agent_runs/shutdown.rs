@@ -147,6 +147,7 @@ impl AgentRunCoordinator {
     /// Graceful shutdown's first step (`app::serve_with_state`): see the
     /// module documentation.
     pub(crate) async fn shutdown(&self) {
+        self.learning.shutdown().await;
         let left = self.accepted_runs.close_and_wait().await;
         if !left.is_empty() {
             warn!(

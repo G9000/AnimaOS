@@ -25,6 +25,7 @@ import {
 } from '../lib/transcript';
 import { PendingMessage, RunActivity, ToolBlock } from './sessions/RunActivity';
 import { RunOutcomeCard } from './sessions/RunOutcomeCard';
+import { TaskReviewAction } from './learning/TaskReviewAction';
 import { DelegatedTurn, TrimmedDivider } from './sessions/TranscriptNotes';
 import { slashSuggestions, type SlashCommand } from '../lib/slash-commands';
 import { SlashCommandMenu } from './sessions/SlashCommandMenu';
@@ -342,6 +343,14 @@ const TranscriptEntry = memo(function TranscriptEntry({
           run={item.run}
           onSendAgain={actions?.onSendAgain}
           resent={actions?.resentRunIds?.has(item.run.id) ?? false}
+        />
+      );
+    case 'learning-review':
+      return (
+        <TaskReviewAction
+          run={item.run}
+          agentId={agentId}
+          requestReview={actions?.onRequestLearningReview}
         />
       );
     case 'pending':

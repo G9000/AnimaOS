@@ -1,6 +1,6 @@
 # Companion capability parity roadmap
 
-Status: **scope locked; implementation and acceptance queued**. This roadmap covers the feature gaps identified against the locally installed Hermes source. It does not declare Anima at full parity.
+Status: **scope locked; PAR-01 implemented and locally accepted, remaining work queued**. This roadmap covers the feature gaps identified against the locally installed Hermes source. It does not declare Anima at full parity.
 
 Baseline: Anima M36, `7d3eb52d7b37b8993ab2351fed33b209dff59ab6`; installed Hermes, `1fd18277267152893a8a24792b79213e7ca3f899`. The comparison inspected public source without starting either installation or reading personal profiles, accounts or credentials. M36 has current Rust gates; earlier real chat/task/account evidence stays revision-specific. See [harness evidence](harness-acceptance.md) and [daily use](daily-use.md).
 
@@ -15,13 +15,23 @@ Baseline: Anima M36, `7d3eb52d7b37b8993ab2351fed33b209dff59ab6`; installed Herme
 
 Exact equality with every Hermes default is not the goal. Keep Anima's Rust engine/host separation, explicit owner control, bounded spending and retained source evidence. The initial integration scope stays Telegram, selected Discord text channels, Gmail, Calendar and Drive. Additional providers, seven terminal backends, unused channels and external user-modeling services are outside this program unless a concrete daily-use need adds them.
 
+## Reuse-first implementation policy
+
+Reusing appropriately licensed Hermes, OpenClaw and other open-source implementations is the default. Before each capability, inspect upstream and compare direct package/component reuse, a supported process/API adapter, and a narrow attributed port. Choose the lowest total integration, maintenance, compute and validation cost that preserves Anima's architecture and required behavior. Custom code needs a concrete recorded reason; originality or branding is not a reason to rewrite working code. This policy does not replace the working Rust engine.
+
+Every work-item brief and review records **Reuse decision/provenance**: alternatives considered, selected approach/reason, upstream repository and pinned commit, source paths, license, separately licensed components and local changes for substantial copies/ports. Retain notices and Anima product branding. Prefer adequate existing dependencies; new dependencies remain allowed with a cost/compatibility justification.
+
+Reuse receives focused integration/regression checks for owner authority, scope, budgets, cancellation and persistence/recovery. Upstream code alone does not prove local parity, semantic quality or exactly-once execution. Do not add model calls merely to compare implementations when deterministic checks suffice. Existing service/account/send/deployment permissions remain unchanged.
+
+All PAR-01–PAR-12 implementer and reviewer briefs inherit this policy; their detailed milestone plans record the concrete decision before implementation.
+
 ## Locked work inventory
 
 Each PAR ID is stable. Milestone numbers after M38 are assigned when its detailed plan is cut from then-current main. File/API names below are candidates; capability, authority, scope and evidence requirements are binding.
 
 | ID     | Deliverable                                                  | Current state                                                                              | Dependency / accountable lane                                  |
 | ------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
-| PAR-01 | Budgeted post-task learning and durable advice               | Rule-based reflection/preferences exist; model review missing                              | First implementation: M38; native learning + SDK/web           |
+| PAR-01 | Budgeted post-task learning and durable advice               | M38 implemented; one real anchored review and quiet restart accepted; advice only          | M38 native learning + SDK/web; PAR-02 closes adoption/reuse    |
 | PAR-02 | Apply reviewed lessons to memory/skills and prove reuse      | Skill proposal/update/approval/load exists; learning handoff and repeated reuse incomplete | PAR-01; native skills/memory + owner UI                        |
 | PAR-03 | Rich own-history discovery and anchored reading              | Bounded snippet search exists; model-visible window reading missing                        | Existing history; native history + tool contracts              |
 | PAR-04 | Dynamic MCP tools and installable community extensions       | Compiled connectors/approved skills exist; general MCP client/installer missing            | Existing tool policy; native protocol + SDK/web                |
@@ -36,11 +46,11 @@ Each PAR ID is stable. Milestone numbers after M38 are assigned when its detaile
 
 ### PAR-01: budgeted post-task learning (M38)
 
-- [ ] Add an explicit “review this completed task” action and an optional visible automatic mode, off by default.
-- [ ] Select bounded evidence from one settled own run. Preserve success/failure/unknown receipts and missing/shortened evidence; a completed response is not proof that the goal succeeded.
-- [ ] Admit a durable deduped attempt before one no-tools model request. No ordinary runtime fork, whole-transcript clone, evaluator writes or automatic retries.
-- [ ] Persist inspectable advice with supplied source anchors, review state, usage/unknown usage and decisions. Stop, opt-out and restart must not dispatch or publish an extra late/replayed result.
-- [ ] Keep canonical facts, skills, instructions and grants unchanged in M38. Proposed advice is not an enabled skill or verified Fact.
+- [x] Add an explicit “review this completed task” action and an optional visible automatic mode, off by default.
+- [x] Select bounded evidence from one settled own run. Preserve success/failure/unknown receipts and missing/shortened evidence; a completed response is not proof that the goal succeeded.
+- [x] Admit a durable deduped attempt before one no-tools model request. No ordinary runtime fork, whole-transcript clone, evaluator writes or automatic retries.
+- [x] Persist inspectable advice with supplied source anchors, review state, usage/unknown usage and decisions. Stop, opt-out and restart must not dispatch or publish an extra late/replayed result.
+- [x] Keep canonical facts, skills, instructions and grants unchanged in M38. Proposed advice is not an enabled skill or verified Fact.
 - Initial limits: two admitted reviews per workspace/UTC day, one physically active reviewer, ten pending records, 12KiB evidence brief, three advice items/6KiB output, one generation attempt, zero tools/retries and a 20-second returned-result deadline. These are execution/request bounds, not a hard provider billing cap; preserve reservations under uncertainty.
 - Interfaces: a reusable no-tools inference/cancellation seam only where needed under `packages/*`; daemon learning records/quota/coordinator/routes under `hosts/rust-daemon`; additive SDK types and simple task-review/settings UI. The [M38 lean plan](../superpowers/plans/2026-10-13-companion-learning-m38.md) fixes the first wave.
 - Acceptance: an eligible synthetic task yields anchored useful advice; repeated/concurrent manual/automatic requests make one attempt; foreign/failed/interrupted/helper/review sources refuse; malformed/oversized/tool-call output and cancelled/late results refuse; advice and quota survive reload without replay; memory/skill/instruction/primary-run snapshots stay unchanged.

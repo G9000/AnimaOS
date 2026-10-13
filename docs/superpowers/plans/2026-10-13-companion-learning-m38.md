@@ -2,13 +2,25 @@
 
 > **For agentic workers:** Follow this lean plan with root-owned RED/gates, disjoint source ownership and the binding rulings below.
 
-**Status:** ready to start after M37 is merged; no implementation or new tests yet. Refresh the source map against then-current main before RED.
+**Status:** implementation and one bounded real review/restart acceptance complete from merged M37 main `6626428`. Meaningful native owner-route RED (404 instead of 202) and two UI missing-control REDs preceded production. Exact tested source, publication/merge and resumption are in the private M38 ledger.
 **Goal:** review one settled task into inspectable, durable advice without silently changing memory, skills or grants.
 
 - This is the scout/advice stage only. The later explicit skill/memory handoff plus verified fresh reuse completes a bounded learning loop; M38 alone is not full self-learning.
   Baseline: M36 main `7d3eb52`; current ReflectionMemoryEvaluator and existing skill drafts stay intact.
 
+## Reuse decision/provenance
+
+Follow the canonical [reuse-first policy](../../companion/parity-roadmap.md#reuse-first-implementation-policy) in every worker brief and combined review. Inspected upstream: `NousResearch/hermes-agent`, pinned `1fd18277267152893a8a24792b79213e7ca3f899`, `agent/background_review.py`, MIT. Reuse its bounded admission/cancellation/request-completion design through a narrow attributed Rust port. Direct Python runtime integration would require a second runtime and its agent fork can write memory/skills; both conflict with M38's one-generation advice-only boundary. Existing Rust model streaming, owner routes and durable snapshot components provide the lower-cost integration. Preserve the host notice and record actual local adaptations; UI uses existing Anima components rather than importing an incompatible desktop stack.
+
 ## Proposed small contract
+
+Source refresh locks the candidate routes below. Add separate owner GET/PATCH `/api/agents/{id}/learning-policy`, PATCH `{autoEnabled:boolean}`, response `{autoEnabled,dailyLimit:2,pendingLimit:10,timeoutMs:20000}`. No AgentConfig or tool-grant changes. Admission POST `{}` returns 202 `{review}` for new and identical deduped attempts; list `{reviews}`, get/cancel/decision `{review}`. Decision PATCH `{decision:"dismissed"|"acknowledged",expectedVersion:number}`; stale version returns 409, unknown fields 400, foreign/missing source 404, quota/evidence conflict 409, unavailable persistence/record capacity 503.
+
+The policy response also exposes `physicalReviewerActive` (optional for older SDK peers). A terminal result timeout can precede actual transport exit; isolated restart/cleanup checks this diagnostic instead of treating a failed state as physical quiescence. Missing provider counts remain unknown; prior partial usage is not replaced by normalized default zero.
+
+Frozen review fields (camelCase): `id,agentId,sourceRunId,sessionId,trigger,policyVersion,evidenceDigest,evidenceBrief,evidenceAnchors,state,reservedAtMs,startedAtMs,finishedAtMs,model,provider,usage,usageComplete,error,proposals`. Optional values are nullable. Each proposal has `id,observation,suggestion,anchors,decision,decisionVersion` (initial 0). Model JSON is strictly `{proposals:[{observation,suggestion,anchors}]}`. HTTP/control-plane DTOs are host-owned; additive SDK types mirror them.
+
+`LearningRegistry` persists snapshot lists `learningReviews` and `learningPolicies` with version 14 and independent `.pre-learning.bak` for version 13. The registry retains reservation timestamps and attempt keys; after 1,000 records it refuses new admissions instead of forgetting keys. Physical transport permits are shared in `DaemonState` across coordinators. Existing direct `ModelAdapter::stream` supplies a bounded no-tools sink; its default fallback can ignore sink errors, so the service independently checks retained rejection and usage state. No core package change or new dependency is needed.
 
 - Owner API: request a review of an existing own run, list/get review status, dismiss/acknowledge a proposal, cancel pending/running review.
 - Candidate routes: POST `/api/agents/{id}/runs/{runId}/learning-review`, GET `/api/agents/{id}/learning-reviews`, GET `/api/agents/{id}/learning-reviews/{reviewId}`, POST `.../{reviewId}/cancel` and PATCH `.../{reviewId}/proposals/{proposalId}` for a versioned owner decision.
@@ -107,3 +119,11 @@ Task order: (1) source/contract refresh and meaningful route/runtime + UI RED; (
 3. Ruling: freeze a server-selected bounded brief and exact evidence digest, reject unknown anchors/oversized/malformed/tool-call output, and preserve missing/unknown status — one successful tool receipt is not whole-task proof — cost if wrong: advice is visibly failed/unverified rather than invented or silently repaired.
 4. Ruling: queued/running reviews become interrupted on restart; cancelled, opted-out or deleted-source results cannot publish, and no automatic replay occurs — review recovery must preserve primary task effects and authority — cost if wrong: owner must inspect the recorded outcome; no duplicate review to obtain a pass.
 5. Ruling: ordinary primary tasks and default settings remain unchanged; use meaningful fixture REDs, current relevant Nx gates and one already-authorized bounded synthetic acceptance — user wants cheap continuous progress — cost if wrong: general insight quality/full parity remains open; new accounts, private profiles or external actions require concrete scope, not a blanket renewed approval gate.
+
+## Implementation and acceptance evidence
+
+Current gates: Rust **2,485 passed / nine ignored / 40 suites**, sequential formatting lint, SDK 129 / three intentional service skips, web 1,225 / 111 files with verified two-worker limit, SDK/web typecheck/build. Twenty-four focused native cases include actual owner routes and completed-task hooks, quota/dedup/failed storage, cancellation/timeout physical-slot retention, interrupted recovery, panic successor progress and seven rejected-output variants through the core default stream. Independent native and final SDK/web reviews led to one fix wave. Full gates also caught a normal-build import and the README/OpenAPI inventory; both were corrected, with final gates passing.
+
+The real case reused the already accepted M35 synthetic multi-step consolidation/correction task instead of paying for another primary prompt. One manual review produced three supplied-anchor advice items in 6,878 ms, with 805 prompt / 394 completion/**1,199 total reported tokens**. It correctly distinguished actual tool-call success/order from unverified omitted arguments/results. Advice is repetitive and unverified; a suggestion to log exact source content is not automatically adopted. This case demonstrates supported workflow advice, not a newly induced procedural failure or broad insight quality.
+
+One quiet same-store restart retained the exact terminal review and proposal IDs without another attempt. Original primary run/messages, canonical memory hash, agent snapshots/config/grants, skill records/draft, SOUL.md and approved skill bytes and default-off policy stayed exact. All 14 freshly recorded daemon/runner/wrapper identities are gone; 8080/4200 free. No configuration restoration was needed because none was changed. No live accounts, databases, containers, ordinary profile import or extra generation/probe. Next is PAR-02 reviewed adoption and actual later reuse on a separate branch from merged main; M38 advice alone does not close that learning loop.

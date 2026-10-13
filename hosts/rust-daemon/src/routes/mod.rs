@@ -17,6 +17,7 @@ mod goals;
 mod health;
 mod http;
 mod jobs;
+mod learning_reviews;
 mod logs;
 mod mail;
 mod memories;
@@ -190,6 +191,9 @@ use crate::runtime_model::provider_summaries;
         sessions::compact_session,
         events::agent_events,
         runs::start_session_run, runs::list_session_runs, runs::get_run, runs::stop_run,
+        learning_reviews::request_review, learning_reviews::list_reviews,
+        learning_reviews::get_review, learning_reviews::cancel_review,
+        learning_reviews::decide_proposal, learning_reviews::get_policy, learning_reviews::set_policy,
         approvals::list_approvals, approvals::decide_approval, approvals::get_approval_policy,
         approvals::put_approval_policy, approvals::list_approval_rules, approvals::create_approval_rule,
         approvals::delete_approval_rule,
@@ -225,6 +229,7 @@ use crate::runtime_model::provider_summaries;
         (name = "schedules", description = "Automations: daemon-backed scheduled prompts, their history, Run now, and previews"),
         (name = "sessions", description = "Agent sessions and their transcripts"),
         (name = "runs", description = "Live runs: the agent event stream, session runs, and stop"),
+        (name = "learning", description = "Owner-controlled bounded task review and unverified advice"),
         (name = "approvals", description = "Tool approvals: pending requests, decisions, policies, and rules"),
         (name = "skills", description = "Owner-approved skills, drafts, and imports"),
         (name = "logs", description = "The redacted daemon log tail and its live stream"),
@@ -823,6 +828,30 @@ fn router_with_services_with_policies_and_integrations(
             get(attachments::serve),
         )
         .route("/api/agents/{agent_id}/runs/{run_id}", get(runs::get_run))
+        .route(
+            "/api/agents/{agent_id}/runs/{run_id}/learning-review",
+            axum::routing::post(learning_reviews::request_review),
+        )
+        .route(
+            "/api/agents/{agent_id}/learning-reviews",
+            get(learning_reviews::list_reviews),
+        )
+        .route(
+            "/api/agents/{agent_id}/learning-reviews/{review_id}",
+            get(learning_reviews::get_review),
+        )
+        .route(
+            "/api/agents/{agent_id}/learning-reviews/{review_id}/cancel",
+            axum::routing::post(learning_reviews::cancel_review),
+        )
+        .route(
+            "/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}",
+            axum::routing::patch(learning_reviews::decide_proposal),
+        )
+        .route(
+            "/api/agents/{agent_id}/learning-policy",
+            get(learning_reviews::get_policy).patch(learning_reviews::set_policy),
+        )
         .route(
             "/api/agents/{agent_id}/runs/{run_id}/stop",
             axum::routing::post(runs::stop_run),
@@ -2373,6 +2402,7 @@ mod tests {
     mod events;
     mod goals;
     mod jobs;
+    mod learning_reviews;
     mod logs;
     mod memory_edits;
     mod runs;

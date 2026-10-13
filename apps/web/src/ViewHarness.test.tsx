@@ -455,6 +455,16 @@ function capturePollTimer() {
 }
 
 beforeEach(() => {
+  vi.spyOn(daemon, 'learningPolicy').mockResolvedValue({
+    autoEnabled: false,
+    dailyLimit: 2,
+    pendingLimit: 10,
+    timeoutMs: 20_000,
+  });
+  vi.spyOn(daemon, 'listLearningReviews').mockResolvedValue([]);
+  vi.spyOn(daemon, 'requestLearningReview').mockRejectedValue(
+    new Error('No learning review fixture configured.'),
+  );
   vi.spyOn(daemon, 'status').mockResolvedValue(statusFixture());
   vi.spyOn(daemon, 'agentTasks').mockResolvedValue({
     tasks: [],
