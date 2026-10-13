@@ -9,6 +9,7 @@ mod control_plane_store;
 mod events;
 mod history;
 mod jobs;
+mod learning;
 mod live;
 mod logs;
 mod memory_embeddings;

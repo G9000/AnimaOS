@@ -1616,6 +1616,9 @@ pub(crate) struct DaemonState {
     pub(crate) jobs: HashMap<String, crate::jobs::AgentJobRecord>,
     pub(crate) goals: HashMap<String, crate::jobs::GoalRecord>,
     pub(crate) runs: crate::runs::RunLedger,
+    pub(crate) learning: crate::learning::LearningRegistry,
+    /// One actual learning transport worker, shared across coordinators.
+    pub(crate) learning_slots: Arc<tokio::sync::Semaphore>,
     pub(crate) sessions: crate::sessions::SessionRegistry,
     /// Pending and not-yet-mirrored approvals, policies, and rules (spec §7).
     pub(crate) approvals: crate::approvals::ApprovalRegistry,
@@ -1874,6 +1877,8 @@ impl DaemonState {
             jobs: HashMap::new(),
             goals: HashMap::new(),
             runs: crate::runs::RunLedger::default(),
+            learning: crate::learning::LearningRegistry::default(),
+            learning_slots: Arc::new(tokio::sync::Semaphore::new(1)),
             sessions: crate::sessions::SessionRegistry::default(),
             approvals: crate::approvals::ApprovalRegistry::default(),
             skills: crate::skills::SkillRegistry::default(),
@@ -2109,6 +2114,9 @@ impl DaemonState {
         snapshot.skill_drafts = skills.drafts;
         snapshot.schedule_fires = self.schedule_fires.snapshot();
         snapshot.pricing_overrides = self.pricing_overrides.clone();
+        let learning = self.learning.snapshot();
+        snapshot.learning_reviews = learning.reviews;
+        snapshot.learning_policies = learning.policies;
         snapshot
     }
 
@@ -2290,6 +2298,14 @@ impl DaemonState {
             &self.live_agent_ids(),
             anima_core::primitives::now_millis(),
         );
+        self.learning = crate::learning::LearningRegistry::restored(
+            crate::learning::LearningSnapshot {
+                reviews: snapshot.learning_reviews,
+                policies: snapshot.learning_policies,
+            },
+            &self.live_agent_ids(),
+            anima_core::primitives::now_millis(),
+        );
         // Spec §4.8: the runs that waited are interrupted above; the
         // approvals they waited on expire next to them.
         self.approvals = crate::approvals::ApprovalRegistry::restored(
@@ -2369,6 +2385,10 @@ impl DaemonState {
         }
 
         crate::jobs::validate_goals(&snapshot.goals, &snapshot.jobs)?;
+        crate::learning::LearningRegistry::validate(&crate::learning::LearningSnapshot {
+            reviews: snapshot.learning_reviews.clone(),
+            policies: snapshot.learning_policies.clone(),
+        })?;
         if snapshot.jobs.len() > 200 {
             return Err("job snapshot exceeds the record limit".into());
         }

@@ -21,10 +21,13 @@ use crate::schedules::ScheduledPromptRecord;
 /// rules, and session allowances (M4); version 8 adds the skills registry and
 /// skill drafts (M5); version 9 adds the automation fields, the `cron` and
 /// `once` triggers, and the fire log (M6); version 10 adds the owner's pricing
-/// overrides (M8); version 11 adds attachment inputs on steers (M9). Older
+/// overrides (M8); version 11 adds attachment inputs on steers (M9), version
+/// 14 adds bounded learning advice and separate opt-in policies (M38). Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 13;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 14;
+pub(crate) const DRIVE_STORE_VERSION: u32 = 13;
+pub(crate) const PRE_LEARNING_BACKUP_SUFFIX: &str = ".pre-learning.bak";
 /// Version 10 pricing snapshots are backed up as `.pre-attachments.bak`.
 pub(crate) const DISCORD_STORE_VERSION: u32 = 12;
 pub(crate) const PRE_DRIVE_BACKUP_SUFFIX: &str = ".pre-drive.bak";
@@ -147,6 +150,10 @@ pub(crate) struct ControlPlaneSnapshot {
     pub(crate) workspace: Option<WorkspaceConfig>,
     #[serde(default)]
     pub(crate) runs: Vec<crate::runs::RunRecord>,
+    #[serde(default)]
+    pub(crate) learning_reviews: Vec<crate::learning::LearningReviewRecord>,
+    #[serde(default)]
+    pub(crate) learning_policies: Vec<crate::learning::LearningPolicy>,
     #[serde(default)]
     pub(crate) sessions: Vec<crate::sessions::SessionRecord>,
     /// Tool grant sets already applied (spec §13.3 step 5).
@@ -350,8 +357,15 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
         pre_attachments_backup_path(path)
     } else if loaded_version < DISCORD_STORE_VERSION {
         pre_discord_backup_path(path)
-    } else {
+    } else if loaded_version < DRIVE_STORE_VERSION {
         pre_drive_backup_path(path)
+    } else {
+        let mut name = path
+            .file_name()
+            .map(|name| name.to_os_string())
+            .unwrap_or_default();
+        name.push(PRE_LEARNING_BACKUP_SUFFIX);
+        path.with_file_name(name)
     }
 }
 
@@ -591,6 +605,8 @@ impl ControlPlaneSnapshot {
             skill_drafts: vec![],
             schedule_fires: vec![],
             pricing_overrides: vec![],
+            learning_reviews: vec![],
+            learning_policies: vec![],
         }
     }
 }
@@ -858,7 +874,7 @@ mod tests {
 
     #[test]
     fn the_version_constants() {
-        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 13);
+        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 14);
         assert_eq!(super::USAGE_STORE_VERSION, 10);
         assert_eq!(super::PRE_ATTACHMENTS_BACKUP_SUFFIX, ".pre-attachments.bak");
         assert_eq!(super::postgres_backup_key(10), "control_plane.backup.10");
@@ -1167,7 +1183,7 @@ mod discord_upgrade_tests {
         assert!(loaded.discord_connectors.is_empty());
         assert!(loaded.discord_inbound.is_empty());
         assert!(loaded.discord_outbound.is_empty());
-        assert_eq!(CONTROL_PLANE_STORE_VERSION, 13);
+        assert_eq!(CONTROL_PLANE_STORE_VERSION, 14);
         write_pre_upgrade_backup(&config, 11).await.unwrap();
         assert_eq!(
             std::fs::read_to_string(pre_discord_backup_path(&path)).unwrap(),
@@ -1201,6 +1217,33 @@ mod drive_snapshot_tests {
         );
         assert_ne!(pre_drive_backup_path(&path), pre_discord_backup_path(&path));
         std::fs::remove_file(pre_drive_backup_path(&path)).unwrap();
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod learning_snapshot_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn m38_version_thirteen_defaults_off_and_has_an_independent_exact_backup() {
+        let path = std::env::temp_dir().join(format!(
+            "anima-learning-upgrade-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let original = "{\"version\":13,\"agents\":[],\"swarms\":[]}";
+        std::fs::write(&path, original).unwrap();
+        let config = ControlPlaneStoreConfig::Json(path.clone());
+        let loaded = load_control_plane_snapshot(&config).await.unwrap().unwrap();
+        assert!(loaded.learning_reviews.is_empty());
+        assert!(loaded.learning_policies.is_empty());
+        write_pre_upgrade_backup(&config, 13).await.unwrap();
+        let backup = pre_upgrade_backup_path(&path, 13);
+        assert_ne!(backup, pre_drive_backup_path(&path));
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
+        write_pre_upgrade_backup(&config, 13).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
+        std::fs::remove_file(backup).unwrap();
         std::fs::remove_file(path).unwrap();
     }
 }

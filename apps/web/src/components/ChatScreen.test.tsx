@@ -2,9 +2,13 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentDetail } from '../lib/types';
+import type { LearningReview, Run } from '@animaOS-SWARM/sdk';
 import { formatTime } from './ui-bits';
 import { Composer, MessageList } from './ChatScreen';
 import { SLASH_COMMANDS } from '../lib/slash-commands';
+import { emptyLiveRun } from '../lib/session-events';
+import { buildTranscript } from '../lib/transcript';
+import { runFixture } from '../test/live';
 
 const messages: AgentDetail['messages'] = [
   {
@@ -46,6 +50,185 @@ const agent: AgentDetail = {
 };
 
 describe('MessageList', () => {
+  it('M38_offers_review_for_a_completed_task_with_tool_activity', async () => {
+    const user = userEvent.setup();
+    const completedRun = runFixture('completed-task', {
+      status: 'completed',
+      startedAtMs: 1_725_000_030_000,
+      finishedAtMs: 1_725_000_090_000,
+      toolsStarted: ['memory_search'],
+      replyMessageId: 'task-reply',
+      actionReceipts: [
+        {
+          toolCallId: 'call-1',
+          name: 'memory_search',
+          status: 'succeeded',
+          startedAtMs: 1_725_000_040_000,
+          finishedAtMs: 1_725_000_041_000,
+          durationMs: 1_000,
+          argumentsPreview: '{}',
+          argumentsTruncated: false,
+          resultPreview: 'Found one note.',
+          resultTruncated: false,
+          durability: 'persistent',
+        },
+      ],
+    });
+    const taskMessages: AgentDetail['messages'] = [
+      {
+        id: 'task-request',
+        role: 'User',
+        content: { text: 'Find the relevant note.' },
+        created_at_ms: 1_725_000_020_000,
+      },
+      {
+        id: 'task-reply',
+        role: 'Assistant',
+        content: {
+          text: 'The note says to review the draft.',
+          metadata: { runId: completedRun.id },
+        },
+        created_at_ms: 1_725_000_090_000,
+      },
+    ];
+    const review = {
+      id: 'review-1',
+      agentId: 'agent-1',
+      sourceRunId: completedRun.id,
+      sessionId: completedRun.sessionId,
+      trigger: 'manual',
+      policyVersion: 1,
+      evidenceDigest: 'digest',
+      evidenceBrief: 'Task evidence.',
+      evidenceAnchors: [completedRun.id],
+      state: 'queued',
+      reservedAtMs: 1,
+      model: 'gpt-5.5',
+      usageComplete: false,
+      proposals: [],
+    } satisfies LearningReview;
+    const onRequestLearningReview = vi.fn(async () => review);
+
+    render(
+      <MessageList
+        agent={{ ...agent, messages: taskMessages }}
+        sending={false}
+        scrollerRef={{ current: null }}
+        onSuggestion={vi.fn()}
+        items={buildTranscript({
+          messages: taskMessages,
+          runs: [emptyLiveRun(completedRun)],
+        })}
+        actions={{ onRequestLearningReview }}
+      />,
+    );
+
+    const reviewTask = screen.getByRole('button', { name: 'Review this task' });
+    expect(reviewTask).toBeVisible();
+    await user.click(reviewTask);
+    expect(onRequestLearningReview).toHaveBeenCalledWith(completedRun);
+    expect(
+      await screen.findByRole('button', { name: 'Review requested' }),
+    ).toBeDisabled();
+  });
+
+  const ineligibleCompletedRuns: Array<[string, Partial<Run>]> = [
+    ['legacy missing receipt data', { actionReceipts: undefined }],
+    [
+      'started receipt',
+      {
+        actionReceipts: [
+          {
+            toolCallId: 'call-1',
+            name: 'memory_search',
+            status: 'started' as const,
+            startedAtMs: 1,
+            finishedAtMs: null,
+            durationMs: null,
+            argumentsPreview: '{}',
+            argumentsTruncated: false,
+            resultPreview: null,
+            resultTruncated: false,
+            durability: 'persistent' as const,
+          },
+        ],
+      },
+    ],
+    [
+      'temporary receipt',
+      {
+        actionReceipts: [
+          {
+            toolCallId: 'call-1',
+            name: 'memory_search',
+            status: 'succeeded' as const,
+            startedAtMs: 1,
+            finishedAtMs: 2,
+            durationMs: 1,
+            argumentsPreview: '{}',
+            argumentsTruncated: false,
+            resultPreview: 'ok',
+            resultTruncated: false,
+            durability: 'memory' as const,
+          },
+        ],
+      },
+    ],
+    ['failed run', { error: { code: 'failed', message: 'Failed' } }],
+    ['stopped run', { stop: { requestedAtMs: 2 } }],
+    ['scheduled run', { source: 'schedule' as const }],
+    [
+      'silent calendar follow-up',
+      { source: 'api' as const, sourceRef: 'calendar-write:task' },
+    ],
+    ['delegated run', { parentRunId: 'parent-run' }],
+  ];
+
+  it.each(ineligibleCompletedRuns)(
+    'does not offer review for a completed run with %s',
+    (_label, overrides) => {
+      const base = runFixture('completed-task', {
+        status: 'completed',
+        startedAtMs: 1,
+        finishedAtMs: 3,
+        toolsStarted: ['memory_search'],
+        replyMessageId: 'reply',
+        actionReceipts: [
+          {
+            toolCallId: 'call-1',
+            name: 'memory_search',
+            status: 'succeeded',
+            startedAtMs: 1,
+            finishedAtMs: 2,
+            durationMs: 1,
+            argumentsPreview: '{}',
+            argumentsTruncated: false,
+            resultPreview: 'ok',
+            resultTruncated: false,
+            durability: 'persistent',
+          },
+        ],
+      });
+      const messages: AgentDetail['messages'] = [
+        {
+          id: 'task-request',
+          role: 'User',
+          content: { text: 'Check the note.' },
+          created_at_ms: 1,
+        },
+        {
+          id: 'reply',
+          role: 'Assistant',
+          content: { text: 'Checked.', metadata: { runId: base.id } },
+          created_at_ms: 3,
+        },
+      ];
+      const run = { ...base, ...overrides };
+      const items = buildTranscript({ messages, runs: [emptyLiveRun(run)] });
+      expect(items.some((item) => item.kind === 'learning-review')).toBe(false);
+    },
+  );
+
   it('reveals hidden characters consistently with read-aloud text', () => {
     render(
       <MessageList

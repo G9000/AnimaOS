@@ -9,6 +9,7 @@ mod approvals;
 mod attachments;
 mod connectors;
 mod gcalendar;
+pub(crate) mod learning_reviews;
 mod logs;
 mod memories;
 mod memory_edits;

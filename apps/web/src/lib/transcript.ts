@@ -1,6 +1,7 @@
 import {
   isTerminalRunStatus,
   type Automation,
+  type LearningReview,
   type Run,
   type SessionMessageAttachment,
 } from '@animaOS-SWARM/sdk';
@@ -65,6 +66,7 @@ export type TranscriptItem =
   | { kind: 'tools'; key: string; steps: ToolStep[]; messageIds: string[] }
   | { kind: 'run'; key: string; live: LiveRun }
   | { kind: 'outcome'; key: string; run: Run }
+  | { kind: 'learning-review'; key: string; run: Run }
   | { kind: 'pending'; key: string; pending: PendingBubble }
   | { kind: 'trimmed'; key: string };
 
@@ -76,6 +78,8 @@ export interface TranscriptActions {
   /** Takes back a message the daemon has not accepted (S3b-I). */
   onCancelPending?: (key: string) => void;
   onSendAgain?: (run: Run) => void;
+  /** Starts one advice-only review of an eligible completed task. */
+  onRequestLearningReview?: (run: Run) => Promise<LearningReview>;
   /** Runs already sent again from this page: their Retry or Send again is
    *  used up. */
   resentRunIds?: ReadonlySet<string>;
@@ -381,6 +385,25 @@ function hasOutcome(run: Run): boolean {
   );
 }
 
+function canReviewCompletedRun(run: Run, hasLinkedReply: boolean): boolean {
+  const receipts = run.actionReceipts;
+  return (
+    run.status === 'completed' &&
+    run.parentRunId === null &&
+    run.error === null &&
+    run.stop === null &&
+    run.replyMessageId !== null &&
+    hasLinkedReply &&
+    isOwnerWritten(run) &&
+    receipts !== undefined &&
+    receipts.length > 0 &&
+    receipts.every(
+      (receipt) =>
+        receipt.status !== 'started' && receipt.durability === 'persistent',
+    )
+  );
+}
+
 function messageItem(
   message: ChatMessage,
   delegatedBy: string | null,
@@ -656,11 +679,27 @@ export function placeRuns(
     };
     const after = lastOfRun.get(run.id);
     if (after !== undefined) {
+      const itemsForRun: TranscriptItem[] = [];
       if (
         hasOutcome(run) &&
         !(run.status === 'cancelled' && stoppedRuns.has(run.id))
       )
-        inserts.push({ after, order, items: [outcome] });
+        itemsForRun.push(outcome);
+      const hasLinkedReply = history.items.some(
+        (item) =>
+          item.kind === 'message' &&
+          item.message.role === 'Assistant' &&
+          item.message.id === run.replyMessageId &&
+          messageRunId(item.message) === run.id,
+      );
+      if (canReviewCompletedRun(run, hasLinkedReply))
+        itemsForRun.push({
+          kind: 'learning-review',
+          key: `learning-review:${run.id}`,
+          run,
+        });
+      if (itemsForRun.length > 0)
+        inserts.push({ after, order, items: itemsForRun });
       continue;
     }
     // A queued message the owner cancelled leaves nothing behind.

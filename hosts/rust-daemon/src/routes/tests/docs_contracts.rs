@@ -71,6 +71,7 @@ fn owner_console_path(path: &str) -> bool {
                 "/approval-policy",
                 "/approval-rules",
                 "/agent-files",
+                "/learning",
             ]
             .iter()
             .any(|part| path.contains(part)))

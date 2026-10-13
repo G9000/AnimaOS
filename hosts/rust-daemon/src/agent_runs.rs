@@ -360,6 +360,7 @@ pub(crate) struct AgentRunCoordinator {
     handed_rooms: Arc<StdMutex<HashMap<String, SessionLease>>>,
     max_runs_per_agent: usize,
     control_plane_transactions: Arc<Mutex<()>>,
+    learning: crate::learning::LearningService,
     /// How long a compaction's store read and model call may take.
     compaction_timeout: std::time::Duration,
     /// How long a title call may take before it is treated like a failed
@@ -617,6 +618,11 @@ impl AgentRunCoordinator {
         })
     }
     pub(crate) fn new(state: SharedDaemonState, run_limiter: Arc<Semaphore>) -> Self {
+        let control_plane_transactions = Arc::new(Mutex::new(()));
+        let learning = crate::learning::LearningService::new(
+            Arc::clone(&state),
+            Arc::clone(&control_plane_transactions),
+        );
         Self {
             state,
             run_limiter,
@@ -629,7 +635,8 @@ impl AgentRunCoordinator {
             accepted_runs: self::shutdown::AcceptedRuns::default(),
             handed_rooms: Arc::new(StdMutex::new(HashMap::new())),
             max_runs_per_agent: DEFAULT_MAX_RUNS_PER_AGENT,
-            control_plane_transactions: Arc::new(Mutex::new(())),
+            control_plane_transactions,
+            learning,
             compaction_timeout: std::time::Duration::from_millis(
                 crate::sessions::compaction::COMPACTION_TIMEOUT_MS,
             ),
@@ -689,6 +696,10 @@ impl AgentRunCoordinator {
 
     pub(crate) fn control_plane_transactions(&self) -> Arc<Mutex<()>> {
         Arc::clone(&self.control_plane_transactions)
+    }
+
+    pub(crate) fn learning(&self) -> crate::learning::LearningService {
+        self.learning.clone()
     }
 
     /// Advisory: the agent has no free run slot (spec §4.4 item 7).
@@ -1919,6 +1930,23 @@ impl AgentRunCoordinator {
             .await;
         }
 
+        // Advice never enters the primary runtime, memory evaluator or tool
+        // registry. Its independent admission failure cannot fail this task.
+        if finished
+            .as_ref()
+            .is_some_and(|run| run.status == RunStatus::Completed)
+            && !silent_checkin
+        {
+            let learning = self.learning.clone();
+            let source_agent = agent_id.clone();
+            let source_run = run_id.clone();
+            tokio::spawn(async move {
+                learning
+                    .consider_completed_run(&source_agent, &source_run)
+                    .await;
+            });
+        }
+
         Ok(AgentRunEnvelope {
             agent: AgentRuntimeSnapshotResponse::from(&snapshot),
             result: TaskResultResponse::from(&result),
@@ -2241,6 +2269,8 @@ mod compaction_tests;
 mod context_tests;
 #[cfg(test)]
 mod conversation_tests;
+#[cfg(test)]
+mod learning_tests;
 #[cfg(test)]
 mod live_tests;
 #[cfg(test)]

@@ -57,6 +57,16 @@ export type {
   StartRunInput,
   StartRunResult,
 } from './runs.js';
+export { LearningClient } from './learning.js';
+export type {
+  LearningDecision,
+  LearningPolicy,
+  LearningProposal,
+  LearningProposalDecision,
+  LearningReview,
+  LearningReviewState,
+  LearningReviewTrigger,
+} from './learning.js';
 export {
   AgentEventsClient,
   isApprovalEvent,

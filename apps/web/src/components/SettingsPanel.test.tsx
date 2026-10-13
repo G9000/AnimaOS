@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -13,6 +19,7 @@ import type {
   DaemonWorkspaceState,
 } from '../lib/daemon-api';
 import type { AgentDetail } from '../lib/types';
+import type { LearningReviewApi } from './learning/LearningReviewPanel';
 import { SettingsPanel } from './SettingsPanel';
 
 // Preview transport/lifecycle are covered by AgentFilesPanel.test.tsx. Keep
@@ -68,6 +75,7 @@ function renderPanel(
     saveError: string | null;
     resetError: string | null;
     workspace: DaemonWorkspaceState | null;
+    learningApi: LearningReviewApi;
     saveSettings: (patch: AgentUpdateInput) => Promise<boolean>;
     resetAgent: () => void;
     close: () => void;
@@ -84,10 +92,41 @@ function renderPanel(
     saveSettings: vi.fn(async () => true),
     resetAgent: vi.fn(),
     close: vi.fn(),
+    learningApi: learningApiMock(),
     ...overrides,
   };
 
   return { ...render(<SettingsPanel {...props} />), props };
+}
+
+function learningApiMock(): LearningReviewApi {
+  return {
+    policy: vi.fn(async () => ({
+      autoEnabled: false,
+      dailyLimit: 2,
+      pendingLimit: 10,
+      timeoutMs: 20_000,
+    })),
+    setPolicy: vi.fn(async (_agentId, input) => ({
+      ...{
+        autoEnabled: false,
+        dailyLimit: 2,
+        pendingLimit: 10,
+        timeoutMs: 20_000,
+      },
+      ...input,
+    })),
+    listReviews: vi.fn(async () => []),
+    getReview: vi.fn(async () => {
+      throw new Error('No review fixture');
+    }),
+    cancelReview: vi.fn(async () => {
+      throw new Error('No review fixture');
+    }),
+    decideProposal: vi.fn(async () => {
+      throw new Error('No review fixture');
+    }),
+  };
 }
 
 const configuredWorkspace: DaemonWorkspaceState = {
@@ -155,6 +194,56 @@ describe('SettingsPanel workspace section', () => {
 });
 
 describe('SettingsPanel access', () => {
+  it('M38_learning_policy_checkbox_is_visible_and_defaults_off', async () => {
+    renderPanel(agent());
+
+    expect(
+      await screen.findByRole('checkbox', {
+        name: 'Automatically review completed tasks',
+      }),
+    ).not.toBeChecked();
+  });
+
+  it('M38_saves_learning_opt_in_through_its_own_policy_route', async () => {
+    const user = userEvent.setup();
+    const view = renderPanel(agent());
+    const checkbox = await screen.findByRole('checkbox', {
+      name: 'Automatically review completed tasks',
+    });
+    await waitFor(() => expect(checkbox).toBeEnabled());
+
+    await user.click(checkbox);
+
+    await waitFor(() =>
+      expect(view.props.learningApi.setPolicy).toHaveBeenCalledWith(
+        'agent-main',
+        { autoEnabled: true },
+      ),
+    );
+    expect(view.props.saveSettings).not.toHaveBeenCalled();
+    expect(checkbox).toBeChecked();
+  });
+
+  it('M38_retains_default_off_policy_when_opt_in_save_fails', async () => {
+    const user = userEvent.setup();
+    const api = learningApiMock();
+    api.setPolicy = vi.fn(async () => {
+      throw new Error('Policy save failed');
+    });
+    renderPanel(agent(), { learningApi: api });
+    const checkbox = await screen.findByRole('checkbox', {
+      name: 'Automatically review completed tasks',
+    });
+    await waitFor(() => expect(checkbox).toBeEnabled());
+
+    await user.click(checkbox);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Policy save failed',
+    );
+    expect(checkbox).not.toBeChecked();
+  });
+
   it('M34_opt_in_adds_only_memory_consolidate_and_preserves_existing_custom_grants', async () => {
     const user = userEvent.setup();
     const currentTools = [
@@ -634,7 +723,7 @@ describe('SettingsPanel access', () => {
     ]) {
       expect(control).toBeDisabled();
     }
-    expect(screen.getByRole('status')).toHaveTextContent('Resetting agent…');
+    expect(screen.getByText('Resetting agent…', { exact: true })).toBeVisible();
   });
 
   it.each([

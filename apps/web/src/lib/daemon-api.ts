@@ -35,6 +35,7 @@ import {
   type ConnectDriveInput,
   type GoalInput,
   type GoalStatus,
+  type LearningDecision,
   type Session,
   type SessionListOptions,
   type SessionMessage,
@@ -378,6 +379,30 @@ export const daemon = {
     id: string,
     input: { revision: number; status: GoalStatus },
   ) => setupClient.goals.setStatus(id, input),
+  learningPolicy: (agentId: string, options: { signal?: AbortSignal } = {}) =>
+    setupClient.learning.policy(agentId, options),
+  setLearningPolicy: (agentId: string, input: { autoEnabled: boolean }) =>
+    setupClient.learning.setPolicy(agentId, input),
+  requestLearningReview: (agentId: string, runId: string) =>
+    setupClient.learning.requestReview(agentId, runId),
+  listLearningReviews: (
+    agentId: string,
+    options: { signal?: AbortSignal } = {},
+  ) => setupClient.learning.listReviews(agentId, options),
+  getLearningReview: (
+    agentId: string,
+    reviewId: string,
+    options: { signal?: AbortSignal } = {},
+  ) => setupClient.learning.getReview(agentId, reviewId, options),
+  cancelLearningReview: (agentId: string, reviewId: string) =>
+    setupClient.learning.cancelReview(agentId, reviewId),
+  decideLearningProposal: (
+    agentId: string,
+    reviewId: string,
+    proposalId: string,
+    input: { decision: LearningDecision; expectedVersion: number },
+  ) =>
+    setupClient.learning.decideProposal(agentId, reviewId, proposalId, input),
   goalJobs: (id: string, options: { signal?: AbortSignal } = {}) =>
     setupClient.goals.jobs(id, options),
   listSessions: (agentId: string, options: SessionListOptions = {}) =>
