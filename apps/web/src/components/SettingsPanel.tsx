@@ -101,8 +101,11 @@ export function SettingsPanel({
   }, [agent.provider, agent.model]);
   const agentToolsKey = JSON.stringify([...agent.toolNames].sort());
   const hasMemoryRemove = agent.toolNames.includes('memory_remove');
+  const hasMemoryConsolidate = agent.toolNames.includes('memory_consolidate');
   const derivedAccess = deriveAccessProfile(
-    agent.toolNames.filter((tool) => tool !== 'memory_remove'),
+    agent.toolNames.filter(
+      (tool) => tool !== 'memory_remove' && tool !== 'memory_consolidate',
+    ),
   );
 
   const [name, setName] = useState(agent.name);
@@ -120,6 +123,8 @@ export function SettingsPanel({
   );
   const [accessChanged, setAccessChanged] = useState(false);
   const [allowMemoryRemove, setAllowMemoryRemove] = useState(hasMemoryRemove);
+  const [allowMemoryConsolidate, setAllowMemoryConsolidate] =
+    useState(hasMemoryConsolidate);
   const [savedFlash, setSavedFlash] = useState(false);
   const saveErrorRef = useRef<HTMLDivElement>(null);
   const resetErrorRef = useRef<HTMLDivElement>(null);
@@ -146,6 +151,7 @@ export function SettingsPanel({
     setAccessSelection(derivedAccess === 'custom' ? null : derivedAccess);
     setAccessChanged(false);
     setAllowMemoryRemove(hasMemoryRemove);
+    setAllowMemoryConsolidate(hasMemoryConsolidate);
   }, [
     agent.id,
     agent.name,
@@ -154,6 +160,7 @@ export function SettingsPanel({
     agent.system,
     agentToolsKey,
     hasMemoryRemove,
+    hasMemoryConsolidate,
     derivedAccess,
   ]);
 
@@ -222,7 +229,10 @@ export function SettingsPanel({
     accessChanged &&
     accessSelection !== null &&
     accessSelection !== derivedAccess;
-  const toolsDirty = accessDirty || allowMemoryRemove !== hasMemoryRemove;
+  const toolsDirty =
+    accessDirty ||
+    allowMemoryRemove !== hasMemoryRemove ||
+    allowMemoryConsolidate !== hasMemoryConsolidate;
   const dirty =
     name.trim() !== agent.name ||
     provider !== agent.provider ||
@@ -243,12 +253,19 @@ export function SettingsPanel({
         accessDirty && accessSelection
           ? toolNamesForProfile(accessSelection)
           : agent.toolNames;
-      if (allowMemoryRemove) {
-        patch.tools = selectedTools.includes('memory_remove')
-          ? selectedTools
-          : [...selectedTools, 'memory_remove'];
-      } else {
-        patch.tools = selectedTools.filter((tool) => tool !== 'memory_remove');
+      patch.tools = selectedTools.filter(
+        (tool) =>
+          (tool !== 'memory_remove' || allowMemoryRemove) &&
+          (tool !== 'memory_consolidate' || allowMemoryConsolidate),
+      );
+      if (allowMemoryRemove && !patch.tools.includes('memory_remove')) {
+        patch.tools.push('memory_remove');
+      }
+      if (
+        allowMemoryConsolidate &&
+        !patch.tools.includes('memory_consolidate')
+      ) {
+        patch.tools.push('memory_consolidate');
       }
     }
     if (Object.keys(patch).length === 0) return;
@@ -619,6 +636,7 @@ export function SettingsPanel({
                             setAccessSelection(profileName);
                             setAccessChanged(true);
                             setAllowMemoryRemove(false);
+                            setAllowMemoryConsolidate(false);
                           }}
                           className="mr-3 h-4 w-4 align-top"
                         />
@@ -665,6 +683,35 @@ export function SettingsPanel({
                       Allows permanent removal of one active Fact only with its
                       exact current text. Chats and backups remain; existing
                       approval rules still apply.
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-line bg-white/[0.015] p-3.5">
+                    <div className="flex items-start gap-3">
+                      <input
+                        id="settings-memory-consolidate"
+                        type="checkbox"
+                        aria-describedby="settings-memory-consolidate-help"
+                        checked={allowMemoryConsolidate}
+                        onChange={(event) =>
+                          setAllowMemoryConsolidate(event.target.checked)
+                        }
+                        className="mt-0.5 h-4 w-4 shrink-0"
+                      />
+                      <label
+                        htmlFor="settings-memory-consolidate"
+                        className="cursor-pointer font-medium text-ink"
+                      >
+                        Allow consolidating saved facts
+                      </label>
+                    </div>
+                    <p
+                      id="settings-memory-consolidate-help"
+                      className="mt-1 pl-7 text-sm text-ink-2"
+                    >
+                      Allows saving one summary from 2–8 exact current facts and
+                      keeping the originals in memory history. Original text and
+                      citations remain available; existing approval rules still
+                      apply.
                     </p>
                   </div>
                 </fieldset>

@@ -2,8 +2,45 @@
 
 use super::{
     build_index_text, entity_key, unique_strings, validate_importance, Memory, MemoryError,
-    MemoryManager, RelationshipEndpointKind,
+    MemoryManager, MemoryScope, MemoryType, NewMemory, RelationshipEndpointKind,
 };
+
+/// An exact-current-content source for an explicit Fact consolidation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MemoryConsolidationSource {
+    pub id: String,
+    pub expected_content: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MemoryConsolidation {
+    pub summary: Memory,
+    /// Source IDs in caller order; the original records remain as Reflections.
+    pub archived_ids: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MemoryConsolidationError {
+    InvalidInput,
+    SourceUnavailable,
+    SourceChanged,
+    IncompatibleCohort,
+    TagCapacity,
+    InvalidImportance,
+}
+
+impl MemoryConsolidationError {
+    pub const fn message(self) -> &'static str {
+        match self {
+            Self::InvalidInput => "Invalid memory consolidation input.",
+            Self::SourceUnavailable => "Memory source unavailable.",
+            Self::SourceChanged => "Memory source changed; read it again before consolidating.",
+            Self::IncompatibleCohort => "Memory sources must share an eligible scope and room.",
+            Self::TagCapacity => "Memory source has no capacity for the consolidation tag.",
+            Self::InvalidImportance => "Memory source importance is invalid.",
+        }
+    }
+}
 
 /// A partial change to a memory. Absent fields keep their value.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -38,6 +75,141 @@ pub struct EntityDeletion {
 }
 
 impl MemoryManager {
+    /// Validate the whole exact-CAS cohort, then add one Fact and archive its sources.
+    /// The caller owns persistence/rollback and must not infer summary faithfulness from success.
+    pub fn consolidate_facts(
+        &mut self,
+        agent_id: &str,
+        room_id: Option<&str>,
+        sources: &[MemoryConsolidationSource],
+        content: &str,
+        group_tag: &str,
+        visible: impl Fn(&Memory) -> bool,
+    ) -> Result<MemoryConsolidation, MemoryConsolidationError> {
+        if !(2..=8).contains(&sources.len())
+            || content.len() > 8000 * 4
+            || content.chars().count() > 8000
+            || content.trim().is_empty()
+            || !group_tag.strip_prefix("cg:").is_some_and(|suffix| {
+                suffix.len() == 32 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+        {
+            return Err(MemoryConsolidationError::InvalidInput);
+        }
+
+        let mut staged: Vec<Memory> = Vec::with_capacity(sources.len());
+        let mut importance = 0.0_f64;
+        for (index, source) in sources.iter().enumerate() {
+            if source.id.len() > 256
+                || source.id.trim().is_empty()
+                || source.expected_content.len() > 8000 * 4
+                || source.expected_content.chars().count() > 8000
+                || source.expected_content.is_empty()
+                || sources[..index]
+                    .iter()
+                    .any(|previous| previous.id == source.id)
+            {
+                return Err(MemoryConsolidationError::InvalidInput);
+            }
+            let memory = self
+                .memories
+                .get(&source.id)
+                .filter(|memory| {
+                    memory.agent_id == agent_id
+                        && memory.memory_type == MemoryType::Fact
+                        && memory.world_id.is_none()
+                        && memory.session_id.is_none()
+                        && visible(memory)
+                })
+                .ok_or(MemoryConsolidationError::SourceUnavailable)?;
+            if memory.content != source.expected_content {
+                return Err(MemoryConsolidationError::SourceChanged);
+            }
+            if (memory.scope == MemoryScope::Room
+                && !room_id.is_some_and(|room| {
+                    !room.is_empty() && memory.room_id.as_deref() == Some(room)
+                }))
+                || staged.first().is_some_and(|first| {
+                    first.scope != memory.scope || first.room_id != memory.room_id
+                })
+            {
+                return Err(MemoryConsolidationError::IncompatibleCohort);
+            }
+            if memory.tags.as_ref().is_some_and(|tags| tags.len() >= 20) {
+                return Err(MemoryConsolidationError::TagCapacity);
+            }
+            importance = importance.max(
+                validate_importance(memory.importance)
+                    .map_err(|_| MemoryConsolidationError::InvalidImportance)?,
+            );
+            staged.push(memory.clone());
+        }
+
+        let first = &staged[0];
+        let summary = self
+            .add(NewMemory {
+                agent_id: first.agent_id.clone(),
+                agent_name: first.agent_name.clone(),
+                memory_type: MemoryType::Fact,
+                content: content.trim().to_string(),
+                importance,
+                tags: Some(vec![
+                    "runtime".into(),
+                    "tool-memory-consolidate".into(),
+                    group_tag.into(),
+                ]),
+                scope: Some(first.scope),
+                room_id: first.room_id.clone(),
+                world_id: None,
+                session_id: None,
+            })
+            .map_err(|_| MemoryConsolidationError::InvalidImportance)?;
+        let mut archived_ids = Vec::with_capacity(staged.len());
+        for mut memory in staged {
+            memory.memory_type = MemoryType::Reflection;
+            memory
+                .tags
+                .get_or_insert_with(Vec::new)
+                .push(group_tag.into());
+            self.index
+                .add_document(memory.id.clone(), build_index_text(&memory));
+            archived_ids.push(memory.id.clone());
+            self.memories.insert(memory.id.clone(), memory);
+        }
+        Ok(MemoryConsolidation {
+            summary,
+            archived_ids,
+        })
+    }
+
+    /// Find a byte-exact duplicate for the native default-scope Fact add path.
+    /// This lookup changes nothing and returns only the deterministic oldest match.
+    pub fn find_exact_default_fact(
+        &self,
+        agent_id: &str,
+        content: &str,
+        visible: impl Fn(&Memory) -> bool,
+    ) -> Option<Memory> {
+        self.memories
+            .values()
+            .filter(|memory| {
+                memory.agent_id == agent_id
+                    && memory.memory_type == MemoryType::Fact
+                    && memory.scope == MemoryScope::Private
+                    && memory.room_id.is_none()
+                    && memory.world_id.is_none()
+                    && memory.session_id.is_none()
+                    && memory.content == content
+                    && visible(memory)
+            })
+            .min_by(|left, right| {
+                left.created_at
+                    .cmp(&right.created_at)
+                    .then_with(|| left.id.cmp(&right.id))
+            })
+            .cloned()
+    }
+
     /// Ok(None): no such memory. Validation happens before anything changes.
     pub fn update_memory(
         &mut self,

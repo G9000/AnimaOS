@@ -10,7 +10,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use anima_core::primitives::now_millis;
 
-pub use self::edit::{EntityDeletion, MemoryDeletion, MemoryPatch};
+pub use self::edit::{
+    EntityDeletion, MemoryConsolidation, MemoryConsolidationError, MemoryConsolidationSource,
+    MemoryDeletion, MemoryPatch,
+};
 pub use self::types::{
     AgentRelationship, AgentRelationshipOptions, Memory, MemoryContextOptions, MemoryEntity,
     MemoryEntityOptions, MemoryError, MemoryEvaluation, MemoryEvaluationDecision,

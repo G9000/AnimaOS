@@ -109,3 +109,13 @@ and bounded query offload are native implementations. The default local backend
 stays unchanged; declared multilingual E5 ranking/context fixtures do not prove
 whole-product parity or general semantic quality. No private upstream profile,
 Python runtime, file format or credentials are imported.
+
+M34 atomic Fact consolidation and idempotent add (same public pin 1fd18277267152893a8a24792b79213e7ca3f899):
+MemoryStore.add/apply_batch/_batch supplies exact duplicate-add and fully staged
+batch-edit boundaries. Anima uses one existing MemoryMutation/save and exact
+record-ID/full-text checks under a canonical same-agent write lock. A new summary
+Fact inherits the exact source cohort; source records become historical Reflection
+without changing original text, IDs or citations. The optional grant uses existing
+Write policy. No fuzzy selector, implicit sweep, source deletion, citation retarget,
+upstream profile/storage format or extra paid summarizer is imported. Group tags
+associate retained records but are editable, not immutable audit or fidelity proof.

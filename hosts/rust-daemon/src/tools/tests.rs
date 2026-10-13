@@ -291,6 +291,7 @@ fn registry_defines_every_registered_tool_schema() {
             &[][..],
         ),
         ("memory_remove", &["id", "expected_content"][..], &[][..]),
+        ("memory_consolidate", &["content", "sources"][..], &[][..]),
         ("recent_memories", &[][..], &["limit"][..]),
         ("web_fetch", &["url"][..], &["max_length"][..]),
         (
@@ -1827,6 +1828,607 @@ fn memory_correction_call(id: &str, expected: &str, content: &str) -> ToolCall {
             ("content".into(), DataValue::String(content.into())),
         ]),
     }
+}
+
+#[tokio::test]
+async fn memory_consolidate_registered_tool_archives_exact_sources_and_preserves_neighbor() {
+    use anima_memory::MemoryVectorIndex;
+    let root = create_temp_workspace("memory-consolidate-success");
+    let store = crate::memory_store::MemoryStoreConfig::Json(root.join("memory.json"));
+    let (context, mut agent, message) = memory_correction_fixture(Some(store.clone()));
+    agent.config.tools.as_mut().unwrap()[0].name = "memory_consolidate".into();
+    let first =
+        seed_correction_memory(&context, &agent.id, "I prefer unsweetened citron tea.").await;
+    let second =
+        seed_correction_memory(&context, &agent.id, "I drink citron tea each afternoon.").await;
+    let neighbor = seed_correction_memory(&context, &agent.id, "My notebook is amber.").await;
+    let summary = "I drink unsweetened citron tea each afternoon.";
+    let relationship = context
+        .memory
+        .write()
+        .await
+        .upsert_agent_relationship(anima_memory::NewAgentRelationship {
+            source_kind: None,
+            source_agent_id: agent.id.clone(),
+            source_agent_name: agent.name.clone(),
+            target_kind: None,
+            target_agent_id: "synthetic-peer".into(),
+            target_agent_name: "synthetic peer".into(),
+            relationship_type: "knows".into(),
+            summary: None,
+            strength: 0.5,
+            confidence: 0.5,
+            evidence_memory_ids: vec![first.id.clone(), second.id.clone()],
+            tags: None,
+            room_id: None,
+            world_id: None,
+            session_id: None,
+        })
+        .unwrap();
+    {
+        let mut embeddings = context.memory_embeddings.write().await;
+        *embeddings = MemoryEmbeddingRuntime::local_default();
+        for record in [&first, &second, &neighbor] {
+            embeddings.upsert_memory(record).unwrap();
+        }
+    }
+    assert_ne!(first.id, second.id);
+    assert_ne!(first.id, neighbor.id);
+    for source in [&first, &second] {
+        assert_eq!(source.agent_id, agent.id);
+        assert_eq!(source.memory_type, anima_memory::MemoryType::Fact);
+        assert!(source.world_id.is_none() && source.session_id.is_none());
+        assert_eq!(source.scope, first.scope);
+        assert_eq!(source.room_id, first.room_id);
+        assert!(!source.content.trim().is_empty());
+        assert!(!crate::memory_text::has_hidden_text(&source.id));
+        assert!(!crate::memory_text::has_hidden_text(&source.content));
+        assert!(source
+            .tags
+            .as_ref()
+            .unwrap()
+            .iter()
+            .all(|tag| { !crate::memory_text::has_hidden_text(tag) }));
+        assert_eq!(
+            context.memory.read().await.get(&source.id),
+            Some(source.clone())
+        );
+    }
+    let before = context.memory.read().await.snapshot();
+    assert_eq!(before.memories.len(), 3);
+    let call = ToolCall {
+        id: "consolidate-exact-sources".into(),
+        name: "memory_consolidate".into(),
+        args: BTreeMap::from([
+            ("content".into(), DataValue::String(summary.into())),
+            (
+                "sources".into(),
+                DataValue::Array(
+                    [&first, &second]
+                        .into_iter()
+                        .map(|source| {
+                            DataValue::Object(BTreeMap::from([
+                                ("id".into(), DataValue::String(source.id.clone())),
+                                (
+                                    "expected_content".into(),
+                                    DataValue::String(source.content.clone()),
+                                ),
+                            ]))
+                        })
+                        .collect(),
+                ),
+            ),
+        ]),
+    };
+    let result = context.clone().execute_tool(agent, message, call).await;
+    assert_eq!(result.status, TaskStatus::Success,
+        "an explicitly granted valid exact-source consolidation must reach the registered tool: {:?}", result.error);
+    let memory = context.memory.read().await;
+    let after = memory.snapshot();
+    assert_eq!(after.memories.len(), before.memories.len() + 1);
+    assert_eq!(memory.get(&neighbor.id), Some(neighbor.clone()));
+    for source in [&first, &second] {
+        let archived = memory.get(&source.id).unwrap();
+        assert_eq!(archived.memory_type, anima_memory::MemoryType::Reflection);
+        assert_eq!(archived.content, source.content);
+        assert_eq!(archived.created_at, source.created_at);
+        assert_eq!(archived.importance, source.importance);
+        assert_eq!(archived.scope, source.scope);
+    }
+    let summaries: Vec<_> = after
+        .memories
+        .iter()
+        .filter(|record| {
+            record.memory_type == anima_memory::MemoryType::Fact && record.content == summary
+        })
+        .collect();
+    assert_eq!(summaries.len(), 1);
+    assert!(![&first.id, &second.id, &neighbor.id].contains(&&summaries[0].id));
+    let group = summaries[0]
+        .tags
+        .as_ref()
+        .unwrap()
+        .iter()
+        .find(|tag| tag.starts_with("cg:"))
+        .unwrap();
+    assert_eq!(group.len(), 35);
+    for source in [&first, &second] {
+        let archived = memory.get(&source.id).unwrap();
+        let mut expected = source.clone();
+        expected.memory_type = anima_memory::MemoryType::Reflection;
+        expected.tags.as_mut().unwrap().push(group.clone());
+        assert_eq!(
+            archived, expected,
+            "only source type and shared tag may change"
+        );
+        assert!(memory
+            .search("citron", Default::default())
+            .iter()
+            .any(|hit| hit.id == source.id));
+    }
+    assert_eq!(
+        after
+            .agent_relationships
+            .iter()
+            .find(|item| item.id == relationship.id),
+        Some(&relationship)
+    );
+    let active = memory.select_context(
+        anima_memory::MemoryContextOptions {
+            agent_id: summaries[0].agent_id.clone(),
+            room_id: None,
+            query: "citron".into(),
+            limit: 6,
+        },
+        |_| true,
+    );
+    assert_eq!(active, vec![summaries[0].clone()]);
+    let summary_id = summaries[0].id.clone();
+    drop(memory);
+    assert_eq!(
+        crate::memory_store::load_memory_snapshot(&store)
+            .await
+            .unwrap()
+            .unwrap(),
+        after
+    );
+    let embeddings = context.memory_embeddings.read().await;
+    for id in [&first.id, &second.id, &summary_id] {
+        assert!(embeddings
+            .search("citron tea", 10)
+            .iter()
+            .any(|hit| &hit.memory_id == id));
+    }
+    drop(embeddings);
+    fs::remove_file(root.join("memory.json")).unwrap();
+    fs::remove_dir(root).unwrap();
+}
+
+fn memory_consolidate_call(sources: &[&anima_memory::Memory], content: &str) -> ToolCall {
+    ToolCall {
+        id: "consolidate-call".into(),
+        name: "memory_consolidate".into(),
+        args: BTreeMap::from([
+            ("content".into(), DataValue::String(content.into())),
+            (
+                "sources".into(),
+                DataValue::Array(
+                    sources
+                        .iter()
+                        .map(|source| {
+                            DataValue::Object(BTreeMap::from([
+                                ("id".into(), DataValue::String(source.id.clone())),
+                                (
+                                    "expected_content".into(),
+                                    DataValue::String(source.content.clone()),
+                                ),
+                            ]))
+                        })
+                        .collect(),
+                ),
+            ),
+        ]),
+    }
+}
+
+#[tokio::test]
+async fn memory_consolidate_descriptor_is_bounded_and_requires_its_own_grant() {
+    let registry = ToolRegistry::new();
+    let descriptor = registry.descriptor("memory_consolidate").unwrap();
+    assert_eq!(
+        descriptor.parameters_schema["additionalProperties"],
+        DataValue::Bool(false)
+    );
+    assert_eq!(
+        descriptor.parameters_schema["required"],
+        DataValue::Array(vec![
+            DataValue::String("content".into()),
+            DataValue::String("sources".into())
+        ])
+    );
+    let DataValue::Object(properties) = &descriptor.parameters_schema["properties"] else {
+        panic!("properties")
+    };
+    let DataValue::Object(sources) = &properties["sources"] else {
+        panic!("sources")
+    };
+    assert_eq!(sources["minItems"], DataValue::Number(2.0));
+    assert_eq!(sources["maxItems"], DataValue::Number(8.0));
+    let DataValue::Object(item) = &sources["items"] else {
+        panic!("item")
+    };
+    assert_eq!(item["additionalProperties"], DataValue::Bool(false));
+    let (context, agent, message) = memory_correction_fixture(None);
+    let original_config = agent.config.clone();
+    let first = seed_correction_memory(&context, &agent.id, "source one").await;
+    let second = seed_correction_memory(&context, &agent.id, "source two").await;
+    let before = context.memory.read().await.snapshot();
+    let result = context
+        .clone()
+        .execute_tool(
+            agent.clone(),
+            message,
+            memory_consolidate_call(&[&first, &second], "summary"),
+        )
+        .await;
+    assert_eq!(result.status, TaskStatus::Error);
+    assert_eq!(context.memory.read().await.snapshot(), before);
+    assert_eq!(agent.config, original_config);
+}
+
+#[tokio::test]
+async fn memory_consolidate_malformed_or_stale_sources_never_partially_archive() {
+    assert!(crate::memory_text::has_hidden_text("hidden\u{202e}"));
+    let (context, mut agent, message) = memory_correction_fixture(None);
+    agent.config.tools.as_mut().unwrap()[0].name = "memory_consolidate".into();
+    let first = seed_correction_memory(&context, &agent.id, "Exact source one. ").await;
+    let second = seed_correction_memory(&context, &agent.id, "Exact source two.").await;
+    let valid = memory_consolidate_call(&[&first, &second], "summary");
+    let before = context.memory.read().await.snapshot();
+    let mut cases = vec![
+        memory_consolidate_call(&[&first], "summary"),
+        memory_consolidate_call(&[&first, &first], "summary"),
+    ];
+    for (key, value) in [
+        ("content", DataValue::String(" ".into())),
+        ("content", DataValue::String("x".repeat(8001))),
+        ("content", DataValue::String("hidden\u{202e} text".into())),
+        ("sources", DataValue::Array(vec![])),
+        ("sources", DataValue::String("not an array".into())),
+        ("force", DataValue::Bool(true)),
+    ] {
+        let mut call = valid.clone();
+        call.args.insert(key.into(), value);
+        cases.push(call);
+    }
+    for (key, value) in [
+        (
+            "expected_content",
+            DataValue::String(first.content.trim().into()),
+        ),
+        ("expected_content", DataValue::String("x".repeat(8001))),
+        ("id", DataValue::String("x".repeat(257))),
+        ("id", DataValue::String("missing-source".into())),
+        ("id", DataValue::String("hidden\u{202e}".into())),
+        ("extra", DataValue::Bool(true)),
+    ] {
+        let mut call = valid.clone();
+        let DataValue::Array(items) = call.args.get_mut("sources").unwrap() else {
+            unreachable!()
+        };
+        let DataValue::Object(item) = &mut items[0] else {
+            unreachable!()
+        };
+        item.insert(key.into(), value);
+        cases.push(call);
+    }
+    for (case, call) in cases.into_iter().enumerate() {
+        let result = context
+            .clone()
+            .execute_tool(agent.clone(), message.clone(), call)
+            .await;
+        assert_eq!(result.status, TaskStatus::Error, "case {case}");
+        assert!(result.data.is_none(), "case {case}");
+        assert_eq!(
+            context.memory.read().await.snapshot(),
+            before,
+            "case {case}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn memory_consolidate_ineligible_cohorts_and_full_tags_preserve_every_source() {
+    let (context, mut agent, message) = memory_correction_fixture(None);
+    agent.config.tools.as_mut().unwrap()[0].name = "memory_consolidate".into();
+    let first = seed_correction_memory(&context, &agent.id, "first source").await;
+    let second = seed_correction_memory(&context, &agent.id, "second source").await;
+    let original = context.memory.read().await.snapshot();
+    for case in 0..8 {
+        let mut candidate = original.clone();
+        let source = candidate
+            .memories
+            .iter_mut()
+            .find(|record| record.id == second.id)
+            .unwrap();
+        match case {
+            0 => source.agent_id = "foreign-owner".into(),
+            1 => source.memory_type = anima_memory::MemoryType::Reflection,
+            2 => source.world_id = Some("world".into()),
+            3 => source.session_id = Some("session".into()),
+            4 => {
+                source.scope = anima_memory::MemoryScope::Room;
+                source.room_id = Some("other-room".into());
+            }
+            5 => source.tags = Some(vec!["hidden\u{202e}".into()]),
+            6 => source.tags = Some((0..20).map(|i| format!("tag-{i}")).collect()),
+            _ => source.content = "changed after review".into(),
+        }
+        context
+            .memory
+            .write()
+            .await
+            .replace_snapshot(candidate.clone());
+        let restored = context.memory.read().await.snapshot();
+        let result = context
+            .clone()
+            .execute_tool(
+                agent.clone(),
+                message.clone(),
+                memory_consolidate_call(&[&first, &second], "summary"),
+            )
+            .await;
+        assert_eq!(result.status, TaskStatus::Error, "case {case}");
+        assert_eq!(
+            context.memory.read().await.snapshot(),
+            restored,
+            "case {case}"
+        );
+    }
+    // Same-scope Room sources must also match the current message room.
+    let mut room_snapshot = original;
+    for source in &mut room_snapshot.memories {
+        source.scope = anima_memory::MemoryScope::Room;
+        source.room_id = Some("other-room".into());
+    }
+    context
+        .memory
+        .write()
+        .await
+        .replace_snapshot(room_snapshot.clone());
+    let result = context
+        .clone()
+        .execute_tool(
+            agent.clone(),
+            message.clone(),
+            memory_consolidate_call(&[&first, &second], "summary"),
+        )
+        .await;
+    assert_eq!(result.status, TaskStatus::Error);
+    assert_eq!(context.memory.read().await.snapshot(), room_snapshot);
+    room_snapshot
+        .memories
+        .iter_mut()
+        .find(|record| record.id == first.id)
+        .unwrap()
+        .content = "茶".repeat(2700);
+    room_snapshot
+        .memories
+        .iter_mut()
+        .find(|record| record.id == second.id)
+        .unwrap()
+        .content = "  \n ".into();
+    context
+        .memory
+        .write()
+        .await
+        .replace_snapshot(room_snapshot.clone());
+    let first_review = room_snapshot
+        .memories
+        .iter()
+        .find(|record| record.id == first.id)
+        .unwrap();
+    let second_review = room_snapshot
+        .memories
+        .iter()
+        .find(|record| record.id == second.id)
+        .unwrap();
+    let mut current_room = message;
+    current_room.room_id = "other-room".into();
+    let result = context
+        .clone()
+        .execute_tool(
+            agent,
+            current_room,
+            memory_consolidate_call(&[first_review, second_review], "午後のお茶の記録"),
+        )
+        .await;
+    assert_eq!(
+        result.status,
+        TaskStatus::Success,
+        "matching Room and full multibyte sources remain eligible within the character bound"
+    );
+    let after = context.memory.read().await.snapshot();
+    let summary = after
+        .memories
+        .iter()
+        .find(|record| record.memory_type == anima_memory::MemoryType::Fact)
+        .unwrap();
+    assert_eq!(summary.scope, anima_memory::MemoryScope::Room);
+    assert_eq!(summary.room_id.as_deref(), Some("other-room"));
+    assert_eq!(
+        after
+            .memories
+            .iter()
+            .find(|record| record.id == second.id)
+            .unwrap()
+            .content,
+        "  \n "
+    );
+}
+
+#[tokio::test]
+async fn memory_consolidate_save_failure_rolls_back_and_concurrent_review_archives_once() {
+    let root = create_temp_workspace("memory-consolidate-rollback");
+    let (context, mut agent, message) = memory_correction_fixture(Some(
+        crate::memory_store::MemoryStoreConfig::Json(root.clone()),
+    ));
+    agent.config.tools.as_mut().unwrap()[0].name = "memory_consolidate".into();
+    let first = seed_correction_memory(&context, &agent.id, "first original").await;
+    let second = seed_correction_memory(&context, &agent.id, "second original").await;
+    let before = context.memory.read().await.snapshot();
+    let call = memory_consolidate_call(&[&first, &second], "summary");
+    let result = context
+        .clone()
+        .execute_tool(agent.clone(), message.clone(), call.clone())
+        .await;
+    assert_eq!(result.status, TaskStatus::Error);
+    assert!(result
+        .error
+        .unwrap()
+        .starts_with("failed to persist memory consolidation:"));
+    assert_eq!(context.memory.read().await.snapshot(), before);
+    fs::remove_dir(root).unwrap();
+    let (context, mut agent, message) = memory_correction_fixture(None);
+    agent.config.tools.as_mut().unwrap()[0].name = "memory_consolidate".into();
+    let first = seed_correction_memory(&context, &agent.id, "first original").await;
+    let second = seed_correction_memory(&context, &agent.id, "second original").await;
+    let call = memory_consolidate_call(&[&first, &second], "summary");
+    let (a, b) = tokio::join!(
+        context
+            .clone()
+            .execute_tool(agent.clone(), message.clone(), call.clone()),
+        context.clone().execute_tool(agent, message, call)
+    );
+    assert_eq!(
+        [a.status, b.status]
+            .into_iter()
+            .filter(|status| *status == TaskStatus::Success)
+            .count(),
+        1
+    );
+    assert_eq!(context.memory.read().await.snapshot().memories.len(), 3);
+}
+
+fn exact_fact_add_call(content: &str, kind: &str) -> ToolCall {
+    ToolCall {
+        id: "exact-add".into(),
+        name: "memory_add".into(),
+        args: BTreeMap::from([
+            ("content".into(), DataValue::String(content.into())),
+            ("type".into(), DataValue::String(kind.into())),
+        ]),
+    }
+}
+
+#[tokio::test]
+async fn memory_add_exact_fact_duplicate_skips_save_and_index_preserving_oldest_metadata() {
+    let root = create_temp_workspace("memory-add-idempotent-no-save");
+    let (context, mut agent, message) = memory_correction_fixture(Some(
+        crate::memory_store::MemoryStoreConfig::Json(root.clone()),
+    ));
+    agent.config.tools.as_mut().unwrap()[0].name = "memory_add".into();
+    let first = seed_correction_memory(&context, &agent.id, "exact existing fact").await;
+    let second = seed_correction_memory(&context, &agent.id, &first.content).await;
+    let mut before = context.memory.read().await.snapshot();
+    before
+        .memories
+        .iter_mut()
+        .find(|record| record.id == first.id)
+        .unwrap()
+        .created_at = 1;
+    before
+        .memories
+        .iter_mut()
+        .find(|record| record.id == second.id)
+        .unwrap()
+        .created_at = 2;
+    context
+        .memory
+        .write()
+        .await
+        .replace_snapshot(before.clone());
+    *context.memory_embeddings.write().await = MemoryEmbeddingRuntime::local_default();
+    let result = context
+        .clone()
+        .execute_tool(
+            agent.clone(),
+            message.clone(),
+            exact_fact_add_call("  exact existing fact  ", "fact"),
+        )
+        .await;
+    assert_eq!(
+        result.status,
+        TaskStatus::Success,
+        "duplicate must skip otherwise failing directory save"
+    );
+    let data = result.data.unwrap();
+    assert_eq!(data.text, "memory already saved: exact existing fact");
+    let metadata = data.metadata.unwrap();
+    assert_eq!(metadata["memoryId"], DataValue::String(first.id));
+    assert_eq!(metadata["alreadyPresent"], DataValue::Bool(true));
+    assert_eq!(context.memory.read().await.snapshot(), before);
+    assert_eq!(
+        context.memory_embeddings.read().await.status().vector_count,
+        0,
+        "duplicate does not index or repair metadata"
+    );
+    let mut invalid = exact_fact_add_call("exact existing fact", "fact");
+    invalid
+        .args
+        .insert("importance".into(), DataValue::Number(2.0));
+    assert_eq!(
+        context
+            .clone()
+            .execute_tool(agent, message, invalid)
+            .await
+            .status,
+        TaskStatus::Error
+    );
+    fs::remove_dir(root).unwrap();
+}
+
+#[tokio::test]
+async fn memory_add_concurrent_exact_fact_is_single_but_case_paraphrase_and_other_types_remain_new()
+{
+    let (context, mut agent, message) = memory_correction_fixture(None);
+    agent.config.tools.as_mut().unwrap()[0].name = "memory_add".into();
+    let call = exact_fact_add_call("citron tea is unsweetened", "fact");
+    let (a, b) = tokio::join!(
+        context
+            .clone()
+            .execute_tool(agent.clone(), message.clone(), call.clone()),
+        context
+            .clone()
+            .execute_tool(agent.clone(), message.clone(), call)
+    );
+    assert_eq!(a.status, TaskStatus::Success);
+    assert_eq!(b.status, TaskStatus::Success);
+    assert_eq!(
+        a.data.unwrap().metadata.unwrap()["memoryId"],
+        b.data.unwrap().metadata.unwrap()["memoryId"]
+    );
+    assert_eq!(context.memory.read().await.snapshot().memories.len(), 1);
+    for (text, kind) in [
+        ("Citron tea is unsweetened", "fact"),
+        ("I take citron tea without sugar", "fact"),
+        ("citron tea is unsweetened", "reflection"),
+        ("citron tea is unsweetened", "reflection"),
+    ] {
+        assert_eq!(
+            context
+                .clone()
+                .execute_tool(
+                    agent.clone(),
+                    message.clone(),
+                    exact_fact_add_call(text, kind)
+                )
+                .await
+                .status,
+            TaskStatus::Success
+        );
+    }
+    assert_eq!(context.memory.read().await.snapshot().memories.len(), 5);
 }
 
 fn memory_remove_fixture(

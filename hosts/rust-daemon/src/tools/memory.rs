@@ -4,7 +4,8 @@ use anima_core::{
     AgentState, Content, DataValue, Message, TaskResult, ToolCall, MAX_CAPABILITY_ID_BYTES,
 };
 use anima_memory::{
-    Memory, MemoryPatch, MemoryRecallOptions, MemorySearchOptions, MemoryType, NewMemory,
+    Memory, MemoryConsolidationSource, MemoryPatch, MemoryRecallOptions, MemorySearchOptions,
+    MemoryType, NewMemory,
 };
 use futures::future::BoxFuture;
 use tracing::warn;
@@ -109,6 +110,134 @@ fn render_memory(memory: &Memory) -> String {
         memory.memory_type.as_str(),
         memory.content
     )
+}
+
+pub(super) fn execute_memory_consolidate(
+    context: ToolExecutionContext,
+    agent: AgentState,
+    user_message: Message,
+    tool_call: ToolCall,
+) -> BoxFuture<'static, TaskResult<Content>> {
+    Box::pin(async move {
+        const INVALID: &str = "memory_consolidate requires content and 2 to 8 exact sources with only id and expected_content";
+        let bounded_text = |value: &str| {
+            !value.is_empty()
+                && value.len() <= MAX_MEMORY_EDIT_CHARS * 4
+                && value.chars().count() <= MAX_MEMORY_EDIT_CHARS
+                && !has_hidden_text(value)
+        };
+        if tool_call
+            .args
+            .keys()
+            .any(|key| key != "content" && key != "sources")
+        {
+            return TaskResult::error(INVALID, 0);
+        }
+        let content = match tool_call.args.get("content") {
+            Some(DataValue::String(value)) if bounded_text(value) && !value.trim().is_empty() => {
+                value.trim().to_owned()
+            }
+            _ => return TaskResult::error(INVALID, 0),
+        };
+        let Some(DataValue::Array(items)) = tool_call.args.get("sources") else {
+            return TaskResult::error(INVALID, 0);
+        };
+        if !(2..=8).contains(&items.len()) {
+            return TaskResult::error(INVALID, 0);
+        }
+        let mut sources = Vec::with_capacity(items.len());
+        for item in items {
+            let DataValue::Object(fields) = item else {
+                return TaskResult::error(INVALID, 0);
+            };
+            if fields
+                .keys()
+                .any(|key| key != "id" && key != "expected_content")
+            {
+                return TaskResult::error(INVALID, 0);
+            }
+            let id = match fields.get("id") {
+                Some(DataValue::String(value))
+                    if !value.trim().is_empty()
+                        && value.len() <= MAX_CAPABILITY_ID_BYTES
+                        && !has_hidden_text(value) =>
+                {
+                    value.clone()
+                }
+                _ => return TaskResult::error(INVALID, 0),
+            };
+            let expected_content = match fields.get("expected_content") {
+                Some(DataValue::String(value)) if bounded_text(value) => value.clone(),
+                _ => return TaskResult::error(INVALID, 0),
+            };
+            if sources
+                .iter()
+                .any(|source: &MemoryConsolidationSource| source.id == id)
+            {
+                return TaskResult::error(INVALID, 0);
+            }
+            sources.push(MemoryConsolidationSource {
+                id,
+                expected_content,
+            });
+        }
+        let group_tag = format!("cg:{}", uuid::Uuid::new_v4().simple());
+        let consolidation = {
+            let mut guard = context.memory.write().await;
+            let mut mutation = MemoryMutation::new(&mut guard);
+            let result = match mutation.consolidate_facts(
+                &agent.id,
+                Some(&user_message.room_id),
+                &sources,
+                &content,
+                &group_tag,
+                visible_memory,
+            ) {
+                Ok(result) => result,
+                Err(error) => return TaskResult::error(error.message(), 0),
+            };
+            if let Err(error) = mutation.persist(context.memory_store.as_ref()).await {
+                return TaskResult::error(
+                    format!("failed to persist memory consolidation: {error}"),
+                    0,
+                );
+            }
+            result
+        };
+        // Original source IDs/text remain valid historical vectors. Index only the
+        // saved summary, re-reading canonical state in the shared memory→index order.
+        let guard = context.memory.read().await;
+        if let Some(summary) = guard.get(&consolidation.summary.id) {
+            if let Err(error) = context
+                .memory_embeddings
+                .write()
+                .await
+                .upsert_memory(&summary)
+            {
+                warn!(memory_id = %summary.id, error = %error, "failed to index memory_consolidate summary");
+            }
+        }
+        TaskResult::success(
+            Content {
+                text:
+                    "saved one summary Fact and archived its source Facts as historical Reflections"
+                        .into(),
+                metadata: Some(BTreeMap::from([
+                    (
+                        "memoryId".into(),
+                        DataValue::String(consolidation.summary.id),
+                    ),
+                    (
+                        "archivedCount".into(),
+                        DataValue::Number(consolidation.archived_ids.len() as f64),
+                    ),
+                    ("groupTag".into(), DataValue::String(group_tag)),
+                ])),
+                ..Content::default()
+            },
+            0,
+        )
+    })
 }
 
 pub(super) fn execute_memory_remove(
@@ -326,41 +455,50 @@ pub(super) fn execute_memory_add(
             }
         };
 
-        let memory = {
+        let (memory, added) = {
             let mut memory_guard = context.memory.write().await;
-            let mut memory_guard = MemoryMutation::new(&mut memory_guard);
-            let memory = match memory_guard.add(NewMemory {
-                agent_id: agent.id.clone(),
-                agent_name: agent.name.clone(),
-                memory_type,
-                content: content.clone(),
-                importance,
-                tags: Some(vec!["runtime".into(), "tool-memory-add".into()]),
-                scope: None,
-                room_id: None,
-                world_id: None,
-                session_id: None,
-            }) {
-                Ok(memory) => memory,
-                Err(error) => return TaskResult::error(error.message(), 0),
-            };
-            if let Err(error) = memory_guard.persist(context.memory_store.as_ref()).await {
-                return TaskResult::error(format!("failed to persist memory: {error}"), 0);
+            if let Some(existing) = (memory_type == MemoryType::Fact)
+                .then(|| memory_guard.find_exact_default_fact(&agent.id, &content, visible_memory))
+                .flatten()
+            {
+                (existing, false)
+            } else {
+                let mut memory_guard = MemoryMutation::new(&mut memory_guard);
+                let memory = match memory_guard.add(NewMemory {
+                    agent_id: agent.id.clone(),
+                    agent_name: agent.name.clone(),
+                    memory_type,
+                    content: content.clone(),
+                    importance,
+                    tags: Some(vec!["runtime".into(), "tool-memory-add".into()]),
+                    scope: None,
+                    room_id: None,
+                    world_id: None,
+                    session_id: None,
+                }) {
+                    Ok(memory) => memory,
+                    Err(error) => return TaskResult::error(error.message(), 0),
+                };
+                if let Err(error) = memory_guard.persist(context.memory_store.as_ref()).await {
+                    return TaskResult::error(format!("failed to persist memory: {error}"), 0);
+                }
+                (memory, true)
             }
-            memory
         };
 
-        if let Err(error) = context
-            .memory_embeddings
-            .write()
-            .await
-            .upsert_memory(&memory)
-        {
-            warn!(
-                memory_id = %memory.id,
-                error = %error,
-                "failed to index memory_add embedding"
-            );
+        if added {
+            if let Err(error) = context
+                .memory_embeddings
+                .write()
+                .await
+                .upsert_memory(&memory)
+            {
+                warn!(
+                    memory_id = %memory.id,
+                    error = %error,
+                    "failed to index memory_add embedding"
+                );
+            }
         }
 
         let mut metadata = BTreeMap::new();
@@ -369,10 +507,17 @@ pub(super) fn execute_memory_add(
             "memoryType".into(),
             DataValue::String(memory.memory_type.as_str().to_string()),
         );
+        if !added {
+            metadata.insert("alreadyPresent".into(), DataValue::Bool(true));
+        }
 
         TaskResult::success(
             Content {
-                text: format!("stored memory: {content}"),
+                text: if added {
+                    format!("stored memory: {content}")
+                } else {
+                    format!("memory already saved: {content}")
+                },
                 attachments: None,
                 metadata: Some(metadata),
             },
