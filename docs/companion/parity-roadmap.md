@@ -1,0 +1,170 @@
+# Companion capability parity roadmap
+
+Status: **scope locked; implementation and acceptance queued**. This roadmap covers the feature gaps identified against the locally installed Hermes source. It does not declare Anima at full parity.
+
+Baseline: Anima M36, `7d3eb52d7b37b8993ab2351fed33b209dff59ab6`; installed Hermes, `1fd18277267152893a8a24792b79213e7ca3f899`. The comparison inspected public source without starting either installation or reading personal profiles, accounts or credentials. M36 has current Rust gates; earlier real chat/task/account evidence stays revision-specific. See [harness evidence](harness-acceptance.md) and [daily use](daily-use.md).
+
+## What “done” means
+
+- **Planned:** work and acceptance criteria are recorded; no implementation claim.
+- **Implemented:** current source provides the capability and required local gates pass.
+- **Locally accepted:** a predeclared synthetic end-to-end case checks actual outputs, effects, cancellation and recovery on the recorded revision.
+- **Account accepted:** the selected real account/destination/resource has a separately recorded, authorized read/write/delivery/revocation case.
+- **Host accepted:** the target installation passes startup, streaming, shutdown, reboot, backup/restore and access checks.
+- Overall scoped parity requires the applicable acceptance for every selected work item. Test counts, discovery metadata, a saved configuration or one successful example cannot substitute for it. Quality claims require independently checked task outputs.
+
+Exact equality with every Hermes default is not the goal. Keep Anima's Rust engine/host separation, explicit owner control, bounded spending and retained source evidence. The initial integration scope stays Telegram, selected Discord text channels, Gmail, Calendar and Drive. Additional providers, seven terminal backends, unused channels and external user-modeling services are outside this program unless a concrete daily-use need adds them.
+
+## Locked work inventory
+
+Each PAR ID is stable. Milestone numbers after M38 are assigned when its detailed plan is cut from then-current main. File/API names below are candidates; capability, authority, scope and evidence requirements are binding.
+
+| ID     | Deliverable                                                  | Current state                                                                              | Dependency / accountable lane                                  |
+| ------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| PAR-01 | Budgeted post-task learning and durable advice               | Rule-based reflection/preferences exist; model review missing                              | First implementation: M38; native learning + SDK/web           |
+| PAR-02 | Apply reviewed lessons to memory/skills and prove reuse      | Skill proposal/update/approval/load exists; learning handoff and repeated reuse incomplete | PAR-01; native skills/memory + owner UI                        |
+| PAR-03 | Rich own-history discovery and anchored reading              | Bounded snippet search exists; model-visible window reading missing                        | Existing history; native history + tool contracts              |
+| PAR-04 | Dynamic MCP tools and installable community extensions       | Compiled connectors/approved skills exist; general MCP client/installer missing            | Existing tool policy; native protocol + SDK/web                |
+| PAR-05 | Interactive browser work                                     | Fetch/search exist; interactive browser missing                                            | PAR-04 boundary preferred; browser worker + owner UI           |
+| PAR-06 | Longer coding and delegated-task acceptance                  | Loop, files, shell and bounded helpers exist; broad coding evidence missing                | Current harness; optional PAR-02/PAR-04 adapters               |
+| PAR-07 | Native voice input/output                                    | Browser speech conveniences only                                                           | Attachment lifecycle; native audio + composer                  |
+| PAR-08 | Text/image acceptance and PDF/Office understanding           | Upload/storage exists; vision conditional; format extraction missing                       | Existing attachments/model adapters; document worker + SDK/web |
+| PAR-09 | Selected real connector workflows                            | Telegram/Discord/Google code exists; real-account acceptance unverified                    | Current connector code; later relevant media/browser changes   |
+| PAR-10 | Recurring schedules, outages and interrupted-work acceptance | Scheduler/receipts/recovery exist; recurrence/outage evidence incomplete                   | Current scheduler; optional PAR-06 acceptance fixtures         |
+| PAR-11 | Always-on single-owner installation and recovery             | Deployment instructions/offline checks exist; target-host acceptance missing               | Release with required capabilities; deployment/operator lane   |
+| PAR-12 | Clear capability controls and daily-use status               | Settings/approvals/catalog exist; cross-capability lifecycle UI incomplete                 | Add incrementally with PAR-01/04/05/07/08/09                   |
+
+### PAR-01: budgeted post-task learning (M38)
+
+- [ ] Add an explicit “review this completed task” action and an optional visible automatic mode, off by default.
+- [ ] Select bounded evidence from one settled own run. Preserve success/failure/unknown receipts and missing/shortened evidence; a completed response is not proof that the goal succeeded.
+- [ ] Admit a durable deduped attempt before one no-tools model request. No ordinary runtime fork, whole-transcript clone, evaluator writes or automatic retries.
+- [ ] Persist inspectable advice with supplied source anchors, review state, usage/unknown usage and decisions. Stop, opt-out and restart must not dispatch or publish an extra late/replayed result.
+- [ ] Keep canonical facts, skills, instructions and grants unchanged in M38. Proposed advice is not an enabled skill or verified Fact.
+- Initial limits: two admitted reviews per workspace/UTC day, one physically active reviewer, ten pending records, 12KiB evidence brief, three advice items/6KiB output, one generation attempt, zero tools/retries and a 20-second returned-result deadline. These are execution/request bounds, not a hard provider billing cap; preserve reservations under uncertainty.
+- Interfaces: a reusable no-tools inference/cancellation seam only where needed under `packages/*`; daemon learning records/quota/coordinator/routes under `hosts/rust-daemon`; additive SDK types and simple task-review/settings UI. The [M38 lean plan](../superpowers/plans/2026-10-13-companion-learning-m38.md) fixes the first wave.
+- Acceptance: an eligible synthetic task yields anchored useful advice; repeated/concurrent manual/automatic requests make one attempt; foreign/failed/interrupted/helper/review sources refuse; malformed/oversized/tool-call output and cancelled/late results refuse; advice and quota survive reload without replay; memory/skill/instruction/primary-run snapshots stay unchanged.
+
+### PAR-02: close the learning loop through reviewed adoption
+
+- [ ] Link a stored lesson to the existing SkillDraft create/update path or a separate exact own-memory operation. Do not build a second skill approval engine.
+- [ ] Owner sees the proposed bytes, sources and expected existing hash/text; changed sources/skill base/fact text conflict and require renewed review.
+- [ ] Provide bounded owner-selected user-profile and agent-note views from saved source-backed facts; declare what is frozen per run and refreshed next turn. Optional standard Markdown exchange uses an explicit reviewed import/export, without a second conflicting canonical store or reading personal Hermes folders.
+- [ ] Prove a corrected selected preference is available on a fresh generic conversation as well as a relevant task. Later opted dialogue-only curation is a separate case beyond M38's tool-using-task eligibility.
+- [ ] Approved skills remain hash-pinned and loadable through standard SKILL.md; imported references/scripts remain subject to capability grants, without automatically executing a package.
+- [ ] Prove a useful procedure is reused on two fresh related tasks with independently checked outputs and no copied conversation history.
+- [ ] Define optional unattended Fact curation only as a later distinct policy/grant/budget task with semantic-quality acceptance. It is not M38 and cannot silently weaken existing skill/instruction approvals.
+- Owners/files: native `skills/drafts.rs`/service and memory tools, existing owner routes, SDK and Skills/Memory UI. Preserve pending-draft limits, exact CAS, source scope and rollback/uncertain-durability behavior.
+- Acceptance: stale/rejected/foreign/duplicate handoffs write nothing; approval saves exactly reviewed content; reload retains approval and sources; later tasks demonstrate actual reuse. A proposal-only pass does not complete this item.
+
+### PAR-03: history as usable evidence
+
+- [ ] Add discovery with stable session/message anchors and explicit bounded time/kind filters; maintain ownership and hidden-source policy.
+- [ ] Add `read_conversation_window` around one validated anchor, initially at most 20 messages/16KiB rendered text. Return roles, source anchors, pairing and shortening flags; no binary attachments or unlimited transcript reads.
+- [ ] Merge hot/cold history deterministically. Missing/pruned anchors return a typed result, never another agent/session's evidence.
+- Owners/files: `tools/conversations.rs`, `sessions/views.rs`, history port/store only when needed, native tool registry; SDK/UI only for an exposed owner contract.
+- Acceptance: discover and read an older declared conversation amid distractors in a fresh task; cross-agent/pruned/edge-window/cold-store/oversized/pairing cases pass. Lookup itself adds no model call. Quoted history cannot establish tool or memory mutation authority.
+
+### PAR-04: MCP and community extension packages
+
+- [ ] Implement owned stdio and Streamable HTTP connections, handshake, discovery, namespaced schemas, invocation, cancellation, disconnect and meaningful health.
+- [ ] Bound schema depth/size, arguments/results, time and concurrent calls; handle reconnect, revision changes and revocation. Remote hints/metadata cannot classify themselves as trusted or enable tools.
+- [ ] Pin reviewed descriptors and maintain existing grants/approval policy/receipt authority at dispatch. Model output cannot configure process commands, endpoints, credentials or permissions.
+- [ ] Add a versioned package manifest and reproducible install/update/disable/remove flow for reviewed MCP/skill bundles and compiled connector contributions. Include permissions, compatible runtime range, digest, attribution and tests.
+- [ ] Provide one small example community package and contribution instructions. Out-of-process execution is not an OS sandbox; in-process native loading from arbitrary writable paths is outside the initial design.
+- Owners/interfaces: protocol-neutral ports under `packages/*`; daemon `mcp/` transport/lifecycle and trusted registry bridge; vault references; SDK/web connection/tool/package review. Choose current official libraries and license/dependency decisions in the detailed milestone, with dependencies allowed.
+- Acceptance: fake server handshake/list/call plus schema collision/change, malformed/large input, grant denial, approval, revocation during a call, timeout/cancel, redaction and restore; discovery cannot dispatch by itself. Install/update/revoke the example through the actual package path. Real connections use concrete owner-selected configuration, without importing personal Hermes secrets.
+
+### PAR-05: interactive browser tasks
+
+- [ ] Expose one reviewed task-scoped browser worker through the MCP/capability boundary where practical; otherwise use a narrow reusable BrowserPort and host adapter.
+- [ ] Support navigation, bounded accessibility snapshots/screenshots, click/type/scroll and selected upload/download. Plain fetch is not a substitute.
+- [ ] Use isolated contexts by default; do not import personal browser profiles, cookies or saved credentials. Maintain destination/network, action, page/output and lifetime limits outside prompts.
+- [ ] Stop and cleanup must release recorded owned contexts/processes; page text is untrusted evidence, not new grants or instructions. Authenticated/write actions use applicable owner controls.
+- Acceptance: deterministic controlled-page workflow and hostile redirects/page instructions, denied destinations, popups, oversized downloads, cancellation and clean context disposal; then a predeclared useful task whose output is checked. Existing read-only/public and isolated-test authority remains usable; personal-profile/external-write cases need concrete scope.
+
+### PAR-06: coding and delegation that finishes real work
+
+- [ ] Run a small synthetic repository bug-fix task through actual read/edit/test tools, saved todos and one bounded helper; independently check produced code against the predeclared oracle and preserve neighbors.
+- [ ] Include correction, tool failure, budget exhaustion and Stop/recovery cases, keeping honest wrap-up and all paired results/receipts.
+- [ ] Plan any external coding-worker adapter through the reviewed capability bridge. Evaluate helper terminal access only as a separate explicit grant/scope change; retain bounded workers and no self-granting/recursive runaway by default.
+- [ ] Declare an aggregate request/helper/time ceiling before each real case, including child calls; no unlimited-default or repeated-provider testing to manufacture a pass.
+- Owners: native harness/helper adapters when an actual gap is demonstrated; otherwise isolated acceptance driver and docs. Reuse existing loop, task, shell and filesystem implementations.
+- Acceptance: actual fixed tests/output, correct delegated result, limited calls, no unrelated edit, truthful unfinished work and recorded recovery. Full arbitrary coding quality is not inferred from one task.
+
+### PAR-07: native voice
+
+- [ ] Add provider-neutral transcription/speech ports and local/configured-provider adapters, visible microphone permission, transcript review and explicit playback.
+- [ ] Support selected chat/connector voice attachments through the existing bounded attachment lifecycle; distinguish browser dictation from daemon-native transcription.
+- [ ] Bound audio duration/bytes, inference/stream lifetime, output and retention; make cancellation, unsupported language/provider, noisy input and unavailable-device states clear.
+- [ ] No always-on recording, hidden upload or automatic authority from speech. Prefer local options when they fit; selected remote inference must expose its cost and privacy consequence.
+- Acceptance: synthetic audio and mocked provider/device tests, then consented capture/transcription/playback with a checked transcript and Stop/cleanup/retention proof. No microphone/account is activated by this roadmap.
+
+### PAR-08: attachment understanding and document work
+
+- [ ] Verify text and compatible-model image inputs reach the actual selected model and produce independently checked answers tied to the selected attachment.
+- [ ] Add bounded PDF/Office extraction, then OCR as a separate supported mode where needed. Keep originals downloadable and versioned derived text/page/section provenance.
+- [ ] Isolate parsing; cap decompression/pages/sheets/text/tokens/CPU/memory/time. Do not execute macros or treat extracted instructions as permissions. Unsupported/corrupt/encrypted inputs explain the limitation.
+- [ ] Only message-selected attachments enter context. Add checked export/artifact creation where a daily-use case calls for it; do not imply general Google Sheets/Slides support from local document parsing.
+- Owners: daemon attachments/document worker, host-neutral content ports/model adapters when needed, SDK and composer/preview UI.
+- Acceptance: generated fixtures, malformed/encrypted/large archives, wrong-owner access, cancellation, supported-model routing and source citations; actual text/image/PDF cases with declared content and no fabricated vision/extraction claim.
+
+### PAR-09: the five selected connector workflows
+
+- [ ] **Telegram:** pairing, one inbound task/reply, selected attachment if supported, disconnect/revocation and restart/uncertain-send handling.
+- [ ] **Discord:** selected-channel text receive/reply and permission/recovery proof. Gateway events, voice, threads/slash commands remain separate optional scope rather than a breadth requirement.
+- [ ] **Gmail:** selected mailbox read and reviewed draft, then separately authorized send if wanted; verify actual destination state and revocation. No automatic full-mailbox cleanup.
+- [ ] **Calendar:** selected event read and exact reviewed create/update/delete in a test calendar, with observed external result and cleanup.
+- [ ] **Drive:** owner-selected Docs/plaintext files, literal-name discovery and bounded reads; verify scopes versus local allowlist and revocation.
+- Owners: existing native connector managers/runtime and owner UI; use fake transports first. Integration code and fixture tests already exist; implement only demonstrated gaps.
+- Account acceptance is queued per named account/resource/destination and concrete action. Keep read, local draft and outbound/write evidence distinct; unknown delivery is not failure-free delivery and must not be automatically resent. Use synthetic owner-only test content, not customer data.
+
+### PAR-10: recurring and unattended jobs
+
+- [ ] Test recurring interval/daily/cron/time-zone and DST/clock-change behavior using controlled clocks; define skipped/missed-occurrence behavior and avoid catch-up storms.
+- [ ] Test long outage, before/after durable claim, in-flight shutdown/restart, cancelled/disabled jobs and uncertain effects without automatic replay.
+- [ ] Run one finite isolated recurrence case with fixed occurrence/model-call ceilings, checked file bytes/history/receipts and one restart. Disable it when the observation ends.
+- Owners: existing native scheduler/ledger/receipt tests; source fixes only for observed contract gaps. A browser closing is not a scheduler stop; the daemon must run.
+- Acceptance: declared due times/counts, no duplicate claimed effect observed, manual review for uncertainty, cleanup and no overnight paid loop. Do not infer exactly-once external delivery.
+
+### PAR-11: always-on operation
+
+- [ ] Prepare the single-owner release/config/TLS/private-ingress/service setup and upgrade/rollback instructions against actual current paths.
+- [ ] On an approved target, verify authenticated access, SSE/streaming, persistent sessions/memory/uploads/skills/tasks, SIGTERM drain and reboot.
+- [ ] Produce an encrypted backup, restore onto an isolated target and compare declared IDs/content/effects/permissions; retain a rollback generation and test failed upgrade.
+- [ ] Define health/failure reporting and what an operator must review after interruption; no uptime claim from unit tests or instructions.
+- Owners: `deploy/vps` and runtime shutdown/persistence only for demonstrated gaps; operator evidence identifies exact host/revision.
+- Public deployment, real containers/database servers and normal-profile credentials remain outside current activation authority. Code/package preparation and offline fixtures continue; actual activation waits for concrete target approval.
+
+### PAR-12: a usable owner console
+
+- [ ] Integrate controls with each feature: off/not configured/enabled/needs review/degraded/unavailable, meaningful reason, effective grants and active work.
+- [ ] Add Learning advice review/adoption, MCP/package lifecycle, browser/media controls and connector health where the underlying behavior exists.
+- [ ] Task modes select approved capabilities; they cannot grant tools, connect accounts or bypass approvals. Preserve unrelated settings and custom grants.
+- [ ] Keep labels nontechnical and distinguish configured, running and verified. Show unsupported features honestly; do not manufacture “ready” from a saved descriptor.
+- Acceptance: state transitions/failed saves/revocation/cancel/reload, keyboard/mobile access and SDK compatibility; every displayed action corresponds to real dispatcher/state behavior.
+
+## Execution waves and delegation
+
+1. **M37 now:** publish this locked inventory, master status and handover, plus the first lean M38 plan. Documentation completion is not feature completion.
+2. **Learning wave:** PAR-01/M38; PAR-02 reviewed adoption/reuse; PAR-03 history. First deliver a closed bounded learning workflow, then richer evidence retrieval.
+3. **Tool wave:** PAR-04 MCP/community packaging; PAR-05 browser; PAR-06 larger coding/delegation acceptance. Detailed planning can run in parallel; shared runtime implementation remains sequenced.
+4. **Media wave:** PAR-08 text/image/document pipeline and PAR-07 voice as separate useful milestones. SDK/web work runs beside native work only after interfaces freeze and files are disjoint.
+5. **Reliability wave:** PAR-09 selected connector cases one at a time, PAR-10 recurrence/outage, PAR-11 target-host operation. Preparation and mock tests need not wait for account/deployment approval.
+6. **PAR-12 spans the waves** as the corresponding capability ships. Final scoped parity audit checks every work item's required evidence and unresolved limitations; no percentage score.
+
+The controller owns milestone order, branch, contracts, risk rulings, integration, gates, ledger and publication. Standard Codex workers own bounded disjoint native/core and SDK/web tasks; a concurrency/security-specialist reviewer is reserved for subtle MCP/worker/cancellation/authority changes. Current team drafts covered harness/learning and interfaces/integrations; controller covered operational acceptance. No separate user-owned chats were created.
+
+Use one branch per implementation milestone from verified merged main. This shared checkout has no worktrees, so different milestones' code does not run concurrently. Within a milestone: meaningful RED, frozen interfaces, disjoint implementation workers, one native batch review, final web/SDK review, one justified fix wave and current relevant gates. Every Cargo command has CARGO_INCREMENTAL=0 and is serialized to actual exit. SDK gates use ANIMA_SKIP_SERVICE_TESTS=1. Stage explicit owned paths; never nx.json/anima.yaml/private evidence. Dependencies are allowed with a recorded reason; reuse existing where adequate. Ports/accounts/secrets/containers and public actions retain their existing authorization boundaries.
+
+## Controller rulings on the risks (binding)
+
+1. Ruling: track all twelve work IDs now and implement in source-compatible waves — shared runtime/SDK/persistence changes cannot be safely scattered across competing branches in one checkout — cost if wrong: some implementation is sequential; no feature disappears from the backlog.
+2. Ruling: M38 is bounded advice only and PAR-02 proves explicit adoption/reuse; optional unattended curation is a distinct opted policy task — proposals alone are not full learning and owner controls must not be silently bypassed — cost if wrong: full learning remains open until reuse and its applicable policy acceptance pass.
+3. Ruling: preserve controller-owned grants, cancellation, receipts, source scope and budgets across dynamic tools/media/learning — remote descriptions, generated advice and document/browser content are untrusted — cost if wrong: refuse a call/proposal rather than silently expand authority.
+4. Ruling: distinguish implementation, local, account and host acceptance per work item — code/configuration and synthetic tests cannot prove delivery, semantic quality or uptime — cost if wrong: scoped parity remains partial; no fabricated completion label.
+5. Ruling: carry already-authorized source work, read-only checks and isolated tests forward; request only still-required concrete account/write/profile/hosting activation — user asked continuous progress and has allowed dependencies — cost if wrong: those live evidence steps wait, while code/mock preparation continues. Retain upstream notices for actual ports and Anima product naming.
+
+## Change and completion record
+
+Each completed subtask records source/revision, actual checks, observed outputs/effects, owner of the next step, material limits and the next resume path in `.superpowers/sdd/<milestone>/progress.md`. Use `Ruling: what — why — cost if wrong` for changes in scope/design. Changes to this inventory need a reason and evidence, not another broad feature brainstorm. Refresh the detailed plan at milestone start; do not hardcode future dependency versions or fake readiness dates.
