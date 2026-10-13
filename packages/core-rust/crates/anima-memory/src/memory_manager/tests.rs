@@ -705,6 +705,352 @@ fn context_bounds_query_characters_and_distinct_terms() {
     );
 }
 
+struct ContextVectorIndex {
+    hits: Vec<VectorMemoryHit>,
+    queries: std::cell::RefCell<Vec<(String, usize)>>,
+}
+
+impl MemoryVectorIndex for ContextVectorIndex {
+    fn search(&self, _query: &str, _limit: usize) -> Vec<VectorMemoryHit> {
+        panic!("context must use the filtered port");
+    }
+
+    fn search_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        _eligible: &dyn Fn(&str) -> bool,
+    ) -> Vec<VectorMemoryHit> {
+        self.queries.borrow_mut().push((query.into(), limit));
+        // Deliberately ignore the contract to exercise the canonical bounded postfilter.
+        self.hits.clone()
+    }
+}
+
+#[test]
+fn semantic_context_preserves_the_exact_lexical_prefix_and_fallback() {
+    let mut manager = MemoryManager::new();
+    let lexical = add_memory(
+        &mut manager,
+        base(|memory| memory.content = "citron tea preference".into()),
+    );
+    let partial = add_memory(
+        &mut manager,
+        base(|memory| {
+            memory.content = "citron breakfast".into();
+            memory.importance = 1.0;
+        }),
+    );
+    let semantic = add_memory(
+        &mut manager,
+        base(|memory| memory.content = "The beverage is served unsweetened.".into()),
+    );
+    let options = context_options("citron tea", 3);
+    let expected = manager.select_context(options.clone(), |_| true);
+    assert_eq!(expected, vec![lexical.clone(), partial.clone()]);
+    let index = ContextVectorIndex {
+        hits: vec![VectorMemoryHit {
+            memory_id: semantic.id.clone(),
+            score: 99.0,
+        }],
+        queries: Default::default(),
+    };
+    let before = manager.snapshot();
+    let selected =
+        manager.select_context_with_vector_index(options.clone(), Some(&index), |_| true);
+    assert_eq!(selected, vec![lexical, partial, semantic]);
+    assert_eq!(
+        index.queries.borrow().as_slice(),
+        &[("citron tea".into(), 3)]
+    );
+    assert_eq!(
+        manager.select_context_with_vector_index(options.clone(), None, |_| true),
+        expected
+    );
+    let empty = ContextVectorIndex {
+        hits: Vec::new(),
+        queries: Default::default(),
+    };
+    assert_eq!(
+        manager.select_context_with_vector_index(options, Some(&empty), |_| true),
+        expected
+    );
+    assert_eq!(manager.snapshot(), before);
+}
+
+#[test]
+fn semantic_context_excludes_lexical_copies_before_native_vector_top_k() {
+    use crate::vector_index::{InMemoryVectorIndex, MemoryTextEmbedder, MemoryVectorError};
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    struct CountingEmbedder(Rc<Cell<usize>>);
+    impl MemoryTextEmbedder for CountingEmbedder {
+        fn embed(&self, _text: &str) -> Result<Vec<f32>, MemoryVectorError> {
+            self.0.set(self.0.get() + 1);
+            Ok(vec![1.0, 0.0])
+        }
+    }
+    let mut manager = MemoryManager::new();
+    let embeddings = Rc::new(Cell::new(0));
+    let mut index = InMemoryVectorIndex::new(CountingEmbedder(embeddings.clone()));
+    for copy in 0..8 {
+        let memory = add_memory(
+            &mut manager,
+            base(|memory| {
+                memory.content = if copy % 2 == 0 {
+                    "citron tea preference"
+                } else {
+                    "  CITRON   tea   preference  "
+                }
+                .into();
+            }),
+        );
+        index.upsert_embedding(&memory.id, vec![1.0, 0.0]).unwrap();
+    }
+    let semantic = add_memory(
+        &mut manager,
+        base(|memory| {
+            memory.content = "The beverage is served unsweetened.".into();
+        }),
+    );
+    index
+        .upsert_embedding(&semantic.id, vec![0.1, 1.0])
+        .unwrap();
+    let options = context_options("citron tea", 2);
+    let lexical = manager.select_context(options.clone(), |_| true);
+    assert_eq!(
+        lexical.len(),
+        1,
+        "normalized copies occupy one lexical slot"
+    );
+    assert!(
+        index
+            .search("citron tea", 2)
+            .iter()
+            .all(|hit| hit.memory_id != semantic.id),
+        "high-ranked lexical copies must crowd out the semantic fixture globally"
+    );
+    assert_eq!(embeddings.get(), 1);
+    let before = manager.snapshot();
+    let selected = manager.select_context_with_vector_index(options, Some(&index), |_| true);
+    assert_eq!(selected, vec![lexical[0].clone(), semantic]);
+    assert_eq!(
+        embeddings.get(),
+        2,
+        "one bounded lookup fills the spare slot without overfetch or another embedding"
+    );
+    assert_eq!(manager.snapshot(), before);
+}
+
+#[test]
+fn semantic_context_filters_canonical_scope_and_visibility_before_native_top_k() {
+    use crate::vector_index::{InMemoryVectorIndex, MemoryTextEmbedder, MemoryVectorError};
+
+    struct FixedEmbedder;
+    impl MemoryTextEmbedder for FixedEmbedder {
+        fn embed(&self, _text: &str) -> Result<Vec<f32>, MemoryVectorError> {
+            Ok(vec![1.0, 0.0])
+        }
+    }
+    let mut manager = MemoryManager::new();
+    let mut index = InMemoryVectorIndex::new(FixedEmbedder);
+    let mut permitted = Vec::new();
+    for scope in [MemoryScope::Shared, MemoryScope::Private, MemoryScope::Room] {
+        let memory = add_memory(
+            &mut manager,
+            base(|memory| {
+                memory.content = format!("semantic eligible {}", scope.as_str());
+                memory.scope = Some(scope);
+                memory.room_id = (scope == MemoryScope::Room).then(|| "room-current".into());
+            }),
+        );
+        index.upsert_embedding(&memory.id, vec![0.1, 1.0]).unwrap();
+        permitted.push(memory.id);
+    }
+    for exclusion in [
+        "foreign",
+        "reflection",
+        "observation",
+        "task",
+        "world",
+        "session",
+        "other-room",
+        "missing-room",
+        "hidden",
+    ] {
+        let memory = add_memory(
+            &mut manager,
+            base(|memory| {
+                memory.content = format!("excluded evidence {exclusion}");
+                match exclusion {
+                    "foreign" => memory.agent_id = "other".into(),
+                    "reflection" => memory.memory_type = MemoryType::Reflection,
+                    "observation" => memory.memory_type = MemoryType::Observation,
+                    "task" => memory.memory_type = MemoryType::TaskResult,
+                    "world" => memory.world_id = Some("world".into()),
+                    "session" => memory.session_id = Some("session".into()),
+                    "other-room" | "missing-room" => {
+                        memory.scope = Some(MemoryScope::Room);
+                        memory.room_id = (exclusion == "other-room").then(|| "other".into());
+                    }
+                    "hidden" => memory.tags = Some(vec!["hidden".into()]),
+                    _ => unreachable!(),
+                }
+            }),
+        );
+        index.upsert_embedding(&memory.id, vec![1.0, 0.0]).unwrap();
+    }
+    index
+        .upsert_embedding("missing-canonical", vec![1.0, 0.0])
+        .unwrap();
+    let query = "unmatched paraphrase";
+    assert!(manager
+        .select_context(context_options(query, 3), |_| true)
+        .is_empty());
+    assert!(index
+        .search(query, 3)
+        .iter()
+        .all(|hit| !permitted.contains(&hit.memory_id)));
+    let visible = |memory: &super::Memory| {
+        memory
+            .tags
+            .as_ref()
+            .is_none_or(|tags| !tags.iter().any(|tag| tag == "hidden"))
+    };
+    let before = manager.snapshot();
+    let mut selected: Vec<_> = manager
+        .select_context_with_vector_index(context_options(query, 3), Some(&index), visible)
+        .into_iter()
+        .map(|memory| memory.id)
+        .collect();
+    selected.sort();
+    permitted.sort();
+    assert_eq!(selected, permitted);
+    let mut no_room = context_options(query, 3);
+    no_room.room_id = None;
+    let selected = manager.select_context_with_vector_index(no_room, Some(&index), visible);
+    assert_eq!(selected.len(), 2);
+    assert!(selected
+        .iter()
+        .all(|memory| memory.scope != MemoryScope::Room));
+    assert_eq!(manager.snapshot(), before);
+}
+
+#[test]
+fn semantic_context_uses_raw_score_ties_dedup_and_bounded_defensive_hits() {
+    let mut manager = MemoryManager::new();
+    for (id, content, importance, created_at) in [
+        ("lexical", "citron fact", 0.1, 1),
+        ("lexical-copy", "  CITRON   fact ", 1.0, 2),
+        ("score", "best semantic evidence", 0.1, 1),
+        ("importance", "important evidence", 0.9, 1),
+        ("newer", "newer evidence", 0.7, 6),
+        ("tie-a", "tie evidence", 0.7, 5),
+        ("tie-b", "distinct tied evidence", 0.7, 5),
+        ("duplicate", "  TIE   evidence ", 0.1, 1),
+        ("hidden", "hidden evidence", 1.0, 99),
+        ("beyond", "outside the shortlist", 1.0, 100),
+    ] {
+        let original = add_memory(
+            &mut manager,
+            base(|memory| {
+                memory.content = content.into();
+                memory.importance = importance;
+            }),
+        );
+        let mut memory = manager.memories.remove(&original.id).unwrap();
+        memory.id = id.into();
+        memory.created_at = created_at;
+        manager.memories.insert(memory.id.clone(), memory);
+    }
+    let index = ContextVectorIndex {
+        hits: [
+            ("hidden", 100.0),
+            ("missing", 100.0),
+            ("score", f64::NAN),
+            ("score", f64::INFINITY),
+            ("score", 0.0),
+            ("score", -1.0),
+            ("duplicate", 0.5),
+            ("tie-b", 1.0),
+            ("tie-a", 1.0),
+            ("newer", 1.0),
+            ("importance", 1.0),
+            ("score", 2.0),
+            ("lexical", 200.0),
+            ("beyond", 999.0),
+        ]
+        .into_iter()
+        .map(|(id, score)| VectorMemoryHit {
+            memory_id: id.into(),
+            score,
+        })
+        .collect(),
+        queries: Default::default(),
+    };
+    let before = manager.snapshot();
+    let selected = manager.select_context_with_vector_index(
+        context_options("citron", 13),
+        Some(&index),
+        |memory| memory.id != "hidden",
+    );
+    let ids: Vec<_> = selected.iter().map(|memory| memory.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec![
+            "lexical-copy",
+            "score",
+            "importance",
+            "newer",
+            "tie-a",
+            "tie-b"
+        ]
+    );
+    assert_eq!(index.queries.borrow().len(), 1);
+    assert_eq!(manager.snapshot(), before);
+}
+
+#[test]
+fn semantic_context_bounds_unicode_query_and_skips_zero_blank_or_full_lexical_lookup() {
+    let mut manager = MemoryManager::new();
+    let fact = add_memory(
+        &mut manager,
+        base(|memory| memory.content = "citron preference".into()),
+    );
+    let index = ContextVectorIndex {
+        hits: vec![VectorMemoryHit {
+            memory_id: fact.id.clone(),
+            score: 1.0,
+        }],
+        queries: Default::default(),
+    };
+    assert!(manager
+        .select_context_with_vector_index(context_options("semantic", 0), Some(&index), |_| true)
+        .is_empty());
+    assert!(manager
+        .select_context_with_vector_index(context_options(" \t\n", 6), Some(&index), |_| true)
+        .is_empty());
+    assert_eq!(
+        manager.select_context_with_vector_index(
+            context_options("citron", 1),
+            Some(&index),
+            |_| true
+        ),
+        vec![fact.clone()]
+    );
+    assert!(index.queries.borrow().is_empty());
+    let query = format!("{}ignored-tail", "茶".repeat(512));
+    assert_eq!(
+        manager
+            .select_context_with_vector_index(context_options(&query, 2), Some(&index), |_| true),
+        vec![fact]
+    );
+    let queries = index.queries.borrow();
+    assert_eq!(queries.len(), 1);
+    assert_eq!(queries[0], ("茶".repeat(512), 2));
+}
+
 fn base_relationship(overrides: impl FnOnce(&mut NewAgentRelationship)) -> NewAgentRelationship {
     let mut relationship = NewAgentRelationship {
         source_kind: None,

@@ -713,6 +713,18 @@ docker build -f hosts/rust-daemon/Dockerfile -t anima-daemon:staging .
 
 For staging, set `ANIMAOS_RS_PERSISTENCE_MODE=postgres` and `DATABASE_URL`, leave `ANIMAOS_RS_CONTROL_PLANE_FILE`, `ANIMAOS_RS_MEMORY_FILE`, and `ANIMAOS_RS_MEMORY_SQLITE_FILE` unset, and run one daemon replica. In that profile, Postgres stores step logs plus control-plane and memory snapshots in `host_snapshots`.
 
+Automatic chat context uses the configured memory embedding backend once before
+its run loop. It keeps lexical matches first and fills spare slots with eligible
+semantic matches, using the same own-Fact and visibility rules. Context remains
+frozen for that run and retains six-record, 800-character excerpt and
+4,800-character total limits. Two process-wide worker slots and an inclusive
+five-second result deadline bound blocking lookup; unavailable or late lookup
+falls back to the lexical snapshot. A timed-out worker retains its slot until it
+exits. Remote embedding configuration may add one embedding request per run.
+The default `local` backend stays download-free; choose `fastembed` for learned
+multilingual recall. Its first model initialization may download public weights.
+Declared English/Spanish retrieval cases require separate real-model acceptance;
+positive similarity alone is not general quality or truth evidence.
 Vectors remain process-local for v1 staging. Start with `ANIMAOS_RS_MEMORY_EMBEDDINGS=local`; if cold-start vector rebuilds become expensive and your platform has a persistent volume, set `ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE=/var/lib/anima/memory-embeddings.sqlite`. See `.env.staging.example` for the full recommended env profile.
 
 ---

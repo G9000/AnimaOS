@@ -79,11 +79,24 @@ historical. One README review correction separates filtered zero-limit behavior
 from direct legacy portable search. No model/provider/service/account or real
 memory was used. Fixed local synonym groups are not general semantic quality;
 legacy external indexes can filter only their existing bounded shortlist.
-Automatic context remains lexical and consolidation is unimplemented.
+M32 did not change automatic context or implement consolidation.
+
+M33 adds configured semantic recall to automatic context. Existing lexical
+matches retain their order; eligible positive vector matches fill spare slots.
+The real multilingual E5 test predeclares English and Spanish paraphrases and
+requires the intended Fact to rank above eight unrelated own distractors before
+checking actual provider output. Both queries now include its exact ID and
+quoted full text; stronger foreign and hidden records remain excluded and
+canonical memory is unchanged. Two process-wide worker permits and a five-second
+result deadline bound lookup, with lexical fallback and discarded late results.
+The backend remains operator-selected: default local aliases do not establish
+learned quality. These cases prove learned ranking and context inclusion, not
+universal semantic quality, live model use of that evidence or remote-provider
+latency. Consolidation is the next separate milestone.
 
 The next useful step is personal use through the [daily-use setup](daily-use.md).
 Real Telegram/Discord/Google account delivery, microphone/vision, browser
-acceptance, semantic memory and hosted reboot/TLS/off-site restore remain separate
+acceptance, broader semantic quality and hosted reboot/TLS/off-site restore remain separate
 unverified work. Community connectors are compiled reviewed source, without a
 dynamic installer or sandbox claim. Extra integration breadth is not required
 to use the tested local loop.
@@ -91,3 +104,9 @@ to use the tested local loop.
 The [M28 plan](../superpowers/plans/2026-10-12-companion-agent-loop-m28.md)
 records the acceptance scope and exact run/session. Its private ledger retains
 raw evidence, controller corrections, publication and resume details.
+
+M33 final local gates passed **2,441 Rust tests / nine ignored / 40 suites**,
+sequential formatting and the explicit real E5 acceptance test. Eight reviewed
+source hashes remained unchanged. The single review fix wave removed inference
+lock retention and excluded selected lexical duplicates before vector top-k.
+SDK/web contracts and source are unchanged; their earlier gates remain historical.

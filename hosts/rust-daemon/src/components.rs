@@ -10,8 +10,14 @@ use crate::memory_embeddings::SharedMemoryEmbeddings;
 use crate::memory_store::MemoryStoreConfig;
 use crate::state::SharedMemoryStore;
 
-pub(crate) fn default_providers(memory: SharedMemoryStore) -> Vec<Arc<dyn Provider>> {
-    vec![Arc::new(RecentMemoriesProvider { memory })]
+pub(crate) fn default_providers(
+    memory: SharedMemoryStore,
+    memory_embeddings: SharedMemoryEmbeddings,
+) -> Vec<Arc<dyn Provider>> {
+    vec![Arc::new(RecentMemoriesProvider {
+        memory,
+        memory_embeddings,
+    })]
 }
 
 pub(crate) fn default_evaluators(

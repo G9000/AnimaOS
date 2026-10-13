@@ -12,8 +12,10 @@ were preserved; interrupted work was flagged for review before continuation.
 Memory context now selects relevant own facts ahead of recent reflections, with
 quoted, bounded excerpts. One real fresh-chat check recalled the corrected
 preference after twenty newer reflections and eight matching foreign facts,
-without using a search tool. Selection is lexical; semantic recall and automatic
-memory consolidation remain unverified. A real one-shot scheduled file task also
+without using a search tool. Automatic context now keeps lexical matches first
+and fills spare slots through the configured embedding backend. Learned recall
+uses the existing optional FastEmbed backend; the default local backend remains
+download-free. A real one-shot scheduled file task also
 restored before due, fired without a manual trigger and retained one completed
 write after another restart. Exact bytes and modification time stayed unchanged;
 the schedule was left disabled and the isolated daemon stopped. A separate real
@@ -80,8 +82,12 @@ exclude hidden text in record IDs, content and tags before limiting results;
 corrections refuse those records too. Native vector recall now applies
 canonical-record, supplied search-option and tool-visibility checks before
 its top matches, so foreign, hidden or removed records still in the index cannot crowd out
-your vector-only match. This preserves the current embedding setup and does not
-add automatic semantic context or consolidation. General semantic quality and
+your vector-only match. Automatic context now uses this filtered index once per
+run, with a five-second result deadline and lexical fallback. Remote embeddings
+may add one configured embedding request per run. Choose
+`ANIMAOS_RS_MEMORY_EMBEDDINGS=fastembed` for learned multilingual recall; initial
+model loading may download public weights. A fixed English/Spanish learned
+test verifies ranking and actual fact injection. General semantic quality and
 third-party index coverage remain unverified. The native local-index fixture passes;
 a custom index using the legacy fallback can only filter its existing shortlist.
 Use Files to inspect the chosen workspace. Attach text or an image when useful;
