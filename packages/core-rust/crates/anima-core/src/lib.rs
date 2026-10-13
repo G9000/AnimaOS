@@ -15,6 +15,12 @@ pub mod engine;
 pub mod events;
 pub mod evidence;
 pub mod execution;
+pub mod external_tools;
+pub use external_tools::{
+    bound_external_result, external_descriptor_digest, prepare_external_tool,
+    validate_external_arguments, validate_external_output, ExternalToolDescriptor,
+    ExternalToolError, ExternalToolResult,
+};
 pub mod memory;
 pub mod model;
 pub mod persistence;

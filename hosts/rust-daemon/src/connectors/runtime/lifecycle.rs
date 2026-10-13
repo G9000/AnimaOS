@@ -181,7 +181,8 @@ impl ConnectorManager {
             // Durable now: the cancelled messages stop waiting and are
             // announced; their controls go with them.
             {
-                let state = manager.state.read().await;
+                let mut state = manager.state.write().await;
+                state.finalize_removed_agent_mcp(&agent_id);
                 for (_, cancelled) in &cancelled_queued {
                     if let Some(control) = state.live.runs().control(&cancelled.id) {
                         control.cancel.cancel();

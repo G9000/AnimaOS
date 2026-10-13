@@ -26,6 +26,8 @@ keyring = "4.1.6"
 meval = "0.2"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "stream"] }
+rmcp = { version = "=3.5.1", default-features = false, features = ["client", "transport-streamable-http-client"] }
+sse-stream = "=0.2.4"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -34,6 +36,7 @@ sqlx = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["request-id", "timeout", "trace"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = { version = "=0.7.18", features = ["rt"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4"] }

@@ -12,6 +12,7 @@ mod jobs;
 mod learning;
 mod live;
 mod logs;
+mod mcp;
 mod memory_embeddings;
 mod memory_store;
 mod memory_text;

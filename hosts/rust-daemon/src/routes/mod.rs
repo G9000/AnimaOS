@@ -20,6 +20,9 @@ mod jobs;
 mod learning_reviews;
 mod logs;
 mod mail;
+mod mcp;
+#[cfg(test)]
+mod mcp_tests;
 mod memories;
 mod memory_edits;
 mod memory_views;
@@ -91,6 +94,8 @@ use crate::runtime_model::provider_summaries;
     paths(
         api_health_entry,
         capabilities_entry,
+        mcp::list, mcp::create, mcp::get, mcp::update, mcp::connect,
+        mcp::discover, mcp::review, mcp::disconnect, mcp::delete,
         jobs::list_jobs,
         jobs::create_job,
         jobs::cancel_job,
@@ -213,12 +218,19 @@ use crate::runtime_model::provider_summaries;
         attachments::upload, attachments::serve,
     ),
     components(schemas(self::contracts::AgentSummariesEnvelope, self::contracts::AttachmentEnvelope, self::contracts::AttachmentResponse,
+        self::contracts::mcp::McpToolDescriptorResponse, self::contracts::mcp::ReviewedMcpToolResponse,
+        self::contracts::mcp::McpStaticErrorResponse,
+        self::contracts::mcp::McpConnectionResponse, self::contracts::mcp::McpConnectionEnvelope,
+        self::contracts::mcp::McpConnectionsEnvelope, self::contracts::mcp::CreateMcpConnectionRequest,
+        self::contracts::mcp::UpdateMcpConnectionRequest, self::contracts::mcp::McpVersionRequest,
+        self::contracts::mcp::ReviewMcpToolRequest,
         self::contracts::MemoryDeleteRequest,
         self::contracts::agent_files::AgentFilesPreview, self::contracts::agent_files::PreviewMode,
         crate::agent_files::AgentFilesManifest, crate::agent_files::AgentFileManifestEntry,
         crate::agent_files::Availability, crate::agent_files::IdentitySource, crate::agent_files::ProjectSourceKind,
         crate::agent_files::AgentFileKind, crate::agent_files::AgentFileState, crate::agent_files::ReasonCode)),
     tags(
+        (name = "mcp", description = "Owner-scoped reviewed external tools"),
         (name = "attachments", description = "Owner-authorized session uploads and downloads"),
         (name = "health", description = "Daemon health endpoints"),
         (name = "agencies", description = "Agency generation and team drafting"),
@@ -244,6 +256,7 @@ struct ApiDoc;
 
 #[derive(Clone)]
 struct AppState {
+    pub(crate) mcp: crate::mcp::McpManager,
     mail: crate::connectors::mail::MailManager,
     pub(super) oauth_apps: crate::connectors::oauth_apps::OAuthAppService,
     daemon: SharedDaemonState,
@@ -691,7 +704,14 @@ fn router_with_services_with_policies_and_integrations(
         guard.drive_manager = Some(drive.weak());
     }
     mail.start();
+    let agent_runs = if agent_runs.mcp_manager().is_some() {
+        agent_runs
+    } else {
+        crate::app::coordinator_with_mcp(&state, agent_runs)
+    };
+    let mcp = agent_runs.mcp_manager().expect("MCP runtime is configured");
     let app_state = AppState {
+        mcp,
         mail,
         oauth_apps,
         daemon: Arc::clone(&state),
@@ -758,6 +778,12 @@ fn router_with_services_with_policies_and_integrations(
             "/api/agents/{agent_id}/connectors/discord/{connector_id}/outbound/suppress",
             axum::routing::post(discord::suppress),
         )
+        .route("/api/agents/{agent_id}/mcp-connections", get(mcp::list).post(mcp::create))
+        .route("/api/agents/{agent_id}/mcp-connections/{connection_id}", get(mcp::get).patch(mcp::update).delete(mcp::delete))
+        .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/connect", axum::routing::post(mcp::connect))
+        .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/discover", axum::routing::post(mcp::discover))
+        .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/review", axum::routing::post(mcp::review))
+        .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/disconnect", axum::routing::post(mcp::disconnect))
         .route("/openapi.json", get(openapi_entry))
         .route("/docs", get(docs_entry))
         .route("/docs/", get(docs_entry))

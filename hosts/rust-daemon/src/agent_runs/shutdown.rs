@@ -142,11 +142,15 @@ pub(crate) fn is_shutting_down(error: &ApiError) -> bool {
 impl AgentRunCoordinator {
     pub(crate) fn request_shutdown(&self) {
         self.accepted_runs.request_shutdown();
+        if let Some(manager) = self.mcp_manager() {
+            manager.request_shutdown();
+        }
     }
 
     /// Graceful shutdown's first step (`app::serve_with_state`): see the
     /// module documentation.
     pub(crate) async fn shutdown(&self) {
+        self.request_shutdown();
         self.learning.shutdown().await;
         let left = self.accepted_runs.close_and_wait().await;
         if !left.is_empty() {
@@ -155,6 +159,9 @@ impl AgentRunCoordinator {
                 wait_ms = self.accepted_runs.wait.as_millis() as u64,
                 "accepted runs were still going when shutdown stopped waiting; the restart interrupts them"
             );
+        }
+        if let Some(manager) = self.mcp_manager() {
+            manager.shutdown().await;
         }
     }
 
