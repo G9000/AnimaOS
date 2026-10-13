@@ -24,10 +24,13 @@ use crate::schedules::ScheduledPromptRecord;
 /// overrides (M8); version 11 adds attachment inputs on steers (M9), version
 /// 14 adds bounded learning advice and separate opt-in policies (M38), and
 /// 15 adds durable reviewed skill handoff lineage (M39);16 adds selected
-/// canonical memory references (M40). Older
+/// canonical memory references (M40); 17 adds reviewed MCP connection
+/// metadata (M42). Runtime transport sessions are never persisted. Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 16;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 17;
+pub(crate) const MEMORY_VIEWS_STORE_VERSION: u32 = 16;
+pub(crate) const PRE_MCP_BACKUP_SUFFIX: &str = ".pre-mcp.bak";
 pub(crate) const LEARNING_ADOPTION_STORE_VERSION: u32 = 15;
 pub(crate) const PRE_MEMORY_VIEWS_BACKUP_SUFFIX: &str = ".pre-memory-views.bak";
 pub(crate) const LEARNING_STORE_VERSION: u32 = 14;
@@ -163,6 +166,8 @@ pub(crate) struct ControlPlaneSnapshot {
     #[serde(default)]
     pub(crate) memory_views: Vec<crate::memory_views::MemoryViewSelection>,
     #[serde(default)]
+    pub(crate) mcp_connections: Vec<crate::mcp::McpConnectionRecord>,
+    #[serde(default)]
     pub(crate) sessions: Vec<crate::sessions::SessionRecord>,
     /// Tool grant sets already applied (spec §13.3 step 5).
     #[serde(default)]
@@ -213,6 +218,23 @@ pub(crate) async fn save_control_plane_snapshot(
     }
 }
 
+#[derive(Debug)]
+struct DurabilityUncertain;
+impl std::fmt::Display for DurabilityUncertain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("control-plane durability is uncertain")
+    }
+}
+impl std::error::Error for DurabilityUncertain {}
+pub(crate) fn durability_uncertain_error() -> io::Error {
+    io::Error::other(DurabilityUncertain)
+}
+pub(crate) fn is_durability_uncertain(error: &io::Error) -> bool {
+    error
+        .get_ref()
+        .is_some_and(|inner| inner.is::<DurabilityUncertain>())
+}
+
 pub(crate) async fn load_control_plane_snapshot(
     config: &ControlPlaneStoreConfig,
 ) -> io::Result<Option<ControlPlaneSnapshot>> {
@@ -239,7 +261,9 @@ fn save_json_snapshot_with_writer(
     AtomicFile::new(path, AllowOverwrite)
         .write(|file| write(file, payload.as_bytes()))
         .map_err(atomic_write_error)?;
-    sync_snapshot_parent(path)
+    // Atomic replacement already succeeded. A directory-sync failure must
+    // not be reported to callers as proof that the old bytes remain canonical.
+    sync_snapshot_parent(path).map_err(|_| durability_uncertain_error())
 }
 
 fn load_json_snapshot(path: &Path) -> io::Result<Option<ControlPlaneSnapshot>> {
@@ -376,8 +400,10 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
             PRE_LEARNING_BACKUP_SUFFIX
         } else if loaded_version < LEARNING_ADOPTION_STORE_VERSION {
             PRE_LEARNING_ADOPTION_BACKUP_SUFFIX
-        } else {
+        } else if loaded_version < MEMORY_VIEWS_STORE_VERSION {
             PRE_MEMORY_VIEWS_BACKUP_SUFFIX
+        } else {
+            PRE_MCP_BACKUP_SUFFIX
         });
         path.with_file_name(name)
     }
@@ -474,7 +500,7 @@ async fn save_postgres_snapshot(pool: &PgPool, snapshot: &ControlPlaneSnapshot) 
     .bind(payload)
     .execute(pool)
     .await
-    .map_err(postgres_error)?;
+    .map_err(|_| durability_uncertain_error())?;
     Ok(())
 }
 
@@ -622,6 +648,7 @@ impl ControlPlaneSnapshot {
             learning_reviews: vec![],
             learning_policies: vec![],
             memory_views: vec![],
+            mcp_connections: vec![],
         }
     }
 }
@@ -889,7 +916,7 @@ mod tests {
 
     #[test]
     fn the_version_constants() {
-        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 16);
+        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 17);
         assert_eq!(super::USAGE_STORE_VERSION, 10);
         assert_eq!(super::PRE_ATTACHMENTS_BACKUP_SUFFIX, ".pre-attachments.bak");
         assert_eq!(super::postgres_backup_key(10), "control_plane.backup.10");
@@ -1198,7 +1225,7 @@ mod discord_upgrade_tests {
         assert!(loaded.discord_connectors.is_empty());
         assert!(loaded.discord_inbound.is_empty());
         assert!(loaded.discord_outbound.is_empty());
-        assert_eq!(CONTROL_PLANE_STORE_VERSION, 16);
+        assert_eq!(CONTROL_PLANE_STORE_VERSION, 17);
         write_pre_upgrade_backup(&config, 11).await.unwrap();
         assert_eq!(
             std::fs::read_to_string(pre_discord_backup_path(&path)).unwrap(),
@@ -1239,6 +1266,31 @@ mod drive_snapshot_tests {
 #[cfg(test)]
 mod learning_snapshot_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn m42_version_sixteen_has_independent_exact_backup_and_empty_catalog() {
+        let path =
+            std::env::temp_dir().join(format!("anima-mcp-upgrade-{}.json", uuid::Uuid::new_v4()));
+        let original = "{\"version\":16,\"agents\":[],\"swarms\":[]}";
+        std::fs::write(&path, original).unwrap();
+        let config = ControlPlaneStoreConfig::Json(path.clone());
+        let loaded = load_control_plane_snapshot(&config).await.unwrap().unwrap();
+        assert!(loaded.mcp_connections.is_empty());
+        let prior = pre_upgrade_backup_path(&path, 15);
+        std::fs::write(&prior, "memory reference backup").unwrap();
+        write_pre_upgrade_backup(&config, 16).await.unwrap();
+        let backup = pre_upgrade_backup_path(&path, 16);
+        assert_ne!(backup, prior);
+        assert!(backup.to_string_lossy().ends_with(PRE_MCP_BACKUP_SUFFIX));
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
+        assert_eq!(
+            std::fs::read_to_string(&prior).unwrap(),
+            "memory reference backup"
+        );
+        for file in [backup, prior, path] {
+            std::fs::remove_file(file).unwrap();
+        }
+    }
 
     #[tokio::test]
     async fn m40_version_fifteen_defaults_empty_and_has_an_independent_exact_backup() {
@@ -1293,7 +1345,7 @@ mod learning_snapshot_tests {
             std::fs::read_to_string(&old_backup).unwrap(),
             "older backup"
         );
-        assert_eq!(CONTROL_PLANE_STORE_VERSION, 16);
+        assert_eq!(CONTROL_PLANE_STORE_VERSION, 17);
         std::fs::remove_file(backup).unwrap();
         std::fs::remove_file(old_backup).unwrap();
         std::fs::remove_file(path).unwrap();

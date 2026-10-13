@@ -4,6 +4,9 @@ mod conversations;
 mod drive;
 mod filesystem;
 mod mail;
+mod mcp;
+#[cfg(test)]
+mod mcp_tests;
 mod memory;
 mod process;
 mod skills;
@@ -62,6 +65,8 @@ struct ToolRegistration {
 
 #[derive(Clone)]
 pub(crate) struct ToolExecutionContext {
+    pub(super) mcp: Option<crate::mcp::McpManager>,
+    pub(super) mcp_stamp: Option<crate::mcp::McpDispatchStamp>,
     pub(super) team: Option<crate::agent_runs::AgentRunCoordinator>,
     pub(super) can_delegate: bool,
     pub(super) helper_starts: Arc<AtomicUsize>,
@@ -103,6 +108,8 @@ impl ToolExecutionContext {
         calendar: Option<CalendarManager>,
     ) -> Self {
         Self {
+            mcp: None,
+            mcp_stamp: None,
             team: None,
             can_delegate: false,
             helper_starts: Arc::new(AtomicUsize::new(0)),
@@ -195,8 +202,18 @@ impl ToolExecutionContext {
         self
     }
 
+    pub(crate) fn with_mcp(mut self, manager: Option<crate::mcp::McpManager>) -> Self {
+        if let (Some(manager), Some(run)) = (&manager, &self.run_link) {
+            self.tool_registry = self
+                .tool_registry
+                .with_mcp_descriptors(manager.ready_descriptors(&run.agent_id));
+        }
+        self.mcp = manager;
+        self
+    }
+
     pub(crate) async fn execute_tool(
-        self,
+        mut self,
         agent: AgentState,
         user_message: Message,
         tool_call: ToolCall,
@@ -208,6 +225,18 @@ impl ToolExecutionContext {
         let Some(handler) = self.tool_registry.lookup(&tool_call.name) else {
             return TaskResult::error(format!("Unknown tool: {}", tool_call.name), 0);
         };
+        if tool_call.name.starts_with("mcp_") {
+            if let Err(error) = mcp::arguments(&tool_call) {
+                return TaskResult::error(error, 0);
+            }
+            let (Some(manager), Some(run)) = (&self.mcp, &self.run_link) else {
+                return TaskResult::error("MCP dispatch context is unavailable", 0);
+            };
+            self.mcp_stamp = match manager.capture_dispatch(&agent, &tool_call, run) {
+                Ok(stamp) => Some(stamp),
+                Err(error) => return TaskResult::error(error.to_string(), 0),
+            };
+        }
         let protected = match crate::agent_files::write_policy::capture(
             self.workspace_root.as_deref(),
             &tool_call,
@@ -1170,6 +1199,16 @@ impl ToolRegistry {
                 handler,
             },
         );
+    }
+
+    pub(crate) fn with_mcp_descriptors(mut self, descriptors: Vec<ToolDescriptor>) -> Self {
+        for descriptor in descriptors {
+            // These are only the current owner's validated reviewed bindings.
+            // The native handler still captures and fences live authority.
+            assert!(descriptor.name.starts_with("mcp_"));
+            self.register(descriptor, mcp::execute);
+        }
+        self
     }
 
     pub(crate) fn lookup(&self, name: &str) -> Option<ToolHandler> {

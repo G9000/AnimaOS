@@ -1594,6 +1594,9 @@ pub(crate) struct DaemonState {
     pub(crate) memory_store: Option<MemoryStoreConfig>,
     pub(crate) memory_views: crate::memory_views::MemoryViewRegistry,
     pub(crate) memory_view_selections: crate::memory_views::SharedMemoryViewSelections,
+    pub(crate) mcp_registry: crate::mcp::McpRegistry,
+    pub(crate) mcp_publication: crate::mcp::SharedMcpPublication,
+    pub(crate) mcp_manager: Option<crate::mcp::McpManager>,
     pub(crate) control_plane_store: Option<ControlPlaneStoreConfig>,
     control_plane_revision: u64,
     control_plane_persist_order: Arc<ControlPlanePersistOrder>,
@@ -1665,6 +1668,8 @@ pub(crate) struct ControlPlanePersistRequest {
     revision: u64,
     order: Arc<ControlPlanePersistOrder>,
     action_candidate: Option<String>,
+    mcp_candidate: bool,
+    mcp_removed_grants: Option<(String, Vec<String>)>,
 }
 
 struct ControlPlanePersistOrder {
@@ -1679,6 +1684,8 @@ struct ControlPlaneAcknowledged {
     /// Action-only patches from the last acknowledged snapshot, bounded by
     /// its retained ledger. Never restore a row a later snapshot removed.
     run_actions: HashMap<String, AcknowledgedRunActions>,
+    mcp_connections: Option<Vec<crate::mcp::McpConnectionRecord>>,
+    mcp_removed_grants: Option<(String, Vec<String>)>,
 }
 
 struct AcknowledgedRunActions {
@@ -1692,6 +1699,7 @@ pub(crate) struct TestControlPlaneSaveGate {
     pub(crate) entered: Arc<Semaphore>,
     pub(crate) release: Arc<Semaphore>,
     fail: bool,
+    uncertain_after_save: bool,
 }
 
 impl ControlPlanePersistRequest {
@@ -1719,6 +1727,31 @@ impl ControlPlanePersistRequest {
     }
 
     pub(crate) async fn save_action_candidate(self) -> std::io::Result<()> {
+        self.save_ordered(true).await
+    }
+
+    pub(crate) fn with_mcp_candidate(
+        mut self,
+        rows: Vec<crate::mcp::McpConnectionRecord>,
+        remove_grants: Option<(String, Vec<String>)>,
+    ) -> Option<Self> {
+        self.snapshot.mcp_connections = rows;
+        if let Some((agent_id, aliases)) = &remove_grants {
+            let agent = self
+                .snapshot
+                .agents
+                .iter_mut()
+                .find(|agent| agent.state.id == *agent_id)?;
+            if let Some(tools) = &mut agent.state.config.tools {
+                tools.retain(|tool| !aliases.contains(&tool.name));
+            }
+        }
+        self.mcp_candidate = true;
+        self.mcp_removed_grants = remove_grants;
+        Some(self)
+    }
+
+    pub(crate) async fn save_mcp_candidate(self) -> std::io::Result<()> {
         self.save_ordered(true).await
     }
 
@@ -1754,6 +1787,53 @@ impl ControlPlanePersistRequest {
                 }
             }
         }
+        // A newer ordinary snapshot may have been prepared before an
+        // acknowledged MCP candidate reached the state publication lock.
+        // Preserve the settled catalog and exact revoked aliases, while never
+        // restoring records for an agent absent from the newer snapshot.
+        if !self.mcp_candidate {
+            if let Some(rows) = &acknowledged.mcp_connections {
+                self.snapshot.mcp_connections = rows
+                    .iter()
+                    .filter(|row| {
+                        self.snapshot
+                            .agents
+                            .iter()
+                            .any(|agent| agent.state.id == row.agent_id)
+                    })
+                    .cloned()
+                    .collect();
+                // A later candidate can supersede the last deletion patch.
+                // Derive revocations from the complete settled catalog so an
+                // older prepared configuration cannot resurrect any alias.
+                for agent in &mut self.snapshot.agents {
+                    if let Some(tools) = &mut agent.state.config.tools {
+                        tools.retain(|tool| {
+                            !tool.name.starts_with("mcp_")
+                                || rows.iter().any(|row| {
+                                    row.agent_id == agent.state.id
+                                        && row
+                                            .reviewed_tools
+                                            .iter()
+                                            .any(|reviewed| reviewed.alias == tool.name)
+                                })
+                        });
+                    }
+                }
+            }
+            if let Some((agent_id, aliases)) = &acknowledged.mcp_removed_grants {
+                if let Some(agent) = self
+                    .snapshot
+                    .agents
+                    .iter_mut()
+                    .find(|agent| agent.state.id == *agent_id)
+                {
+                    if let Some(tools) = &mut agent.state.config.tools {
+                        tools.retain(|tool| !aliases.contains(&tool.name));
+                    }
+                }
+            }
+        }
         #[cfg(test)]
         let test_save_gate = {
             self.order
@@ -1762,6 +1842,10 @@ impl ControlPlanePersistRequest {
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .take()
         };
+        #[cfg(test)]
+        let uncertain_after_save = test_save_gate
+            .as_ref()
+            .is_some_and(|gate| gate.uncertain_after_save);
         #[cfg(test)]
         if let Some(gate) = test_save_gate {
             gate.entered.add_permits(1);
@@ -1774,8 +1858,30 @@ impl ControlPlanePersistRequest {
                 return Err(std::io::Error::other("injected control-plane save failure"));
             }
         }
-        save_control_plane_snapshot(self.config.as_ref(), &self.snapshot).await?;
+        let save_result = save_control_plane_snapshot(self.config.as_ref(), &self.snapshot).await;
+        #[cfg(test)]
+        let save_result = if save_result.is_ok() && uncertain_after_save {
+            Err(crate::control_plane_store::durability_uncertain_error())
+        } else {
+            save_result
+        };
+        if let Err(error) = save_result {
+            if self.mcp_candidate && crate::control_plane_store::is_durability_uncertain(&error) {
+                // Retain the complete candidate as observed settlement data;
+                // the service publishes it fail-closed, never as a ready RPC.
+                acknowledged.revision = self.revision;
+                acknowledged.mcp_connections = Some(self.snapshot.mcp_connections.clone());
+                acknowledged.mcp_removed_grants = self.mcp_removed_grants;
+            }
+            return Err(error);
+        }
         acknowledged.revision = self.revision;
+        if self.mcp_candidate || acknowledged.mcp_connections.is_some() {
+            acknowledged.mcp_connections = Some(self.snapshot.mcp_connections.clone());
+        }
+        if self.mcp_candidate {
+            acknowledged.mcp_removed_grants = self.mcp_removed_grants;
+        }
         acknowledged.run_actions = self
             .snapshot
             .runs
@@ -1856,6 +1962,9 @@ impl DaemonState {
             memory_store: None,
             memory_views: crate::memory_views::MemoryViewRegistry::default(),
             memory_view_selections: crate::memory_views::MemoryViewRegistry::default().published(),
+            mcp_registry: crate::mcp::McpRegistry::default(),
+            mcp_publication: crate::mcp::McpRegistry::default().published(),
+            mcp_manager: None,
             control_plane_store: None,
             control_plane_revision: 0,
             control_plane_persist_order: Arc::new(ControlPlanePersistOrder {
@@ -1990,6 +2099,8 @@ impl DaemonState {
             revision: self.control_plane_revision,
             order: Arc::clone(&self.control_plane_persist_order),
             action_candidate: None,
+            mcp_candidate: false,
+            mcp_removed_grants: None,
         }
     }
 
@@ -2002,7 +2113,22 @@ impl DaemonState {
             entered: Arc::new(Semaphore::new(0)),
             release: Arc::new(Semaphore::new(0)),
             fail,
+            uncertain_after_save: false,
         };
+        *self
+            .control_plane_persist_order
+            .test_save_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(gate.clone());
+        gate
+    }
+
+    #[cfg(test)]
+    pub(crate) fn install_test_control_plane_uncertain_save_gate(
+        &mut self,
+    ) -> TestControlPlaneSaveGate {
+        let mut gate = self.install_test_control_plane_save_gate(false);
+        gate.uncertain_after_save = true;
         *self
             .control_plane_persist_order
             .test_save_gate
@@ -2083,6 +2209,16 @@ impl DaemonState {
         snapshot.discord_connectors.sort_by(|a, b| a.id.cmp(&b.id));
         snapshot.discord_credential_intents =
             self.discord_credential_intents.values().cloned().collect();
+        snapshot.mcp_connections = self
+            .mcp_registry
+            .snapshot()
+            .into_iter()
+            .filter(|row| {
+                self.agents
+                    .get(&row.agent_id)
+                    .is_some_and(|agent| !crate::agent_runs::is_helper_config(agent.config()))
+            })
+            .collect();
         snapshot
             .discord_credential_intents
             .sort_by(|a, b| (&a.connector_id, a.generation).cmp(&(&b.connector_id, b.generation)));
@@ -2147,6 +2283,22 @@ impl DaemonState {
         self.validate_control_plane_snapshot(&snapshot)?;
         crate::connectors::discord::validate_snapshot(&snapshot)?;
         crate::connectors::drive::validate_snapshot(&snapshot)?;
+        let mcp_owners: HashSet<_> = self
+            .agents
+            .keys()
+            .cloned()
+            .chain(snapshot.agents.iter().map(|agent| agent.state.id.clone()))
+            .collect();
+        let restored_mcp =
+            crate::mcp::McpRegistry::restored(snapshot.mcp_connections.clone(), &mcp_owners)?;
+        let catalog = crate::mcp::McpPublishedCatalog::from_registry(&restored_mcp);
+        let mut publication = self
+            .mcp_publication
+            .write()
+            .map_err(|_| "MCP publication is unavailable")?;
+        self.mcp_registry = restored_mcp;
+        *publication = catalog;
+        drop(publication);
         // Spec §13.3 step 2: legacy per-tick check-in rooms become their
         // automation's session. Only a snapshot older than the sessions
         // version can still hold a pre-M2 room-* check-in; relabeling a room a
@@ -2389,6 +2541,25 @@ impl DaemonState {
         for agent in &snapshot.agents {
             persisted_agents.insert(agent.state.id.clone(), agent.clone());
         }
+        let mcp_owners: HashSet<_> = persisted_agents
+            .iter()
+            .filter(|(_, agent)| !crate::agent_runs::is_helper_config(&agent.state.config))
+            .map(|(id, _)| id.clone())
+            .collect();
+        if snapshot
+            .mcp_connections
+            .iter()
+            .any(|row| !mcp_owners.contains(&row.agent_id))
+        {
+            return Err("MCP connection owner is missing or is a helper".into());
+        }
+        let mcp_catalog =
+            crate::mcp::McpRegistry::restored(snapshot.mcp_connections.clone(), &mcp_owners)?;
+        drop(
+            self.mcp_publication
+                .read()
+                .map_err(|_| "MCP publication is unavailable")?,
+        );
         let mut agent_ids = self.agents.keys().cloned().collect::<HashSet<_>>();
         let mut snapshot_agent_ids = HashSet::new();
         for agent in &snapshot.agents {
@@ -2398,7 +2569,12 @@ impl DaemonState {
                     "duplicate or empty agent id in snapshot: {agent_id}"
                 ));
             }
-            self.resolve_restored_agent_tools(agent.state.config.tools.clone())?;
+            self.resolve_tools_with_mcp_catalog(
+                Some(agent_id),
+                agent.state.config.tools.clone(),
+                true,
+                &mcp_catalog,
+            )?;
             agent_ids.insert(agent_id.clone());
         }
 
@@ -3054,7 +3230,7 @@ impl DaemonState {
         &mut self,
         mut config: AgentConfig,
     ) -> Result<AgentRuntimeSnapshot, String> {
-        config.tools = self.resolve_agent_tools(config.tools)?;
+        config.tools = self.resolve_agent_tools(None, config.tools)?;
         let mut runtime = AgentRuntime::new(config, Arc::clone(&self.model_adapter));
         runtime.set_providers(default_providers_with_memory_views(
             Arc::clone(&self.memory),
@@ -3078,7 +3254,14 @@ impl DaemonState {
 
     pub(crate) fn restore_agent_config(&mut self, agent_id: &str, config: AgentConfig) {
         if let Some(runtime) = self.agents.get_mut(agent_id) {
+            let before = mcp_permissions(runtime.config());
+            let after = mcp_permissions(&config);
             runtime.replace_config(config);
+            if before != after {
+                if let Some(manager) = &self.mcp_manager {
+                    manager.note_agent_permissions_changed(agent_id);
+                }
+            }
         }
     }
 
@@ -3094,14 +3277,20 @@ impl DaemonState {
             return Err(UpdateAgentError::NotFound);
         }
         patch.tools = self
-            .resolve_agent_tools(patch.tools)
+            .resolve_agent_tools(Some(agent_id), patch.tools)
             .map_err(UpdateAgentError::InvalidTools)?;
         let runtime = self
             .agents
             .get_mut(agent_id)
             .expect("agent existence was checked before validation");
+        let before = mcp_permissions(runtime.config());
         runtime.update_config(patch);
         let snapshot = runtime.snapshot();
+        if before != mcp_permissions(&snapshot.state.config) {
+            if let Some(manager) = &self.mcp_manager {
+                manager.note_agent_permissions_changed(agent_id);
+            }
+        }
         Ok(self.with_derived_status(snapshot))
     }
 
@@ -3136,7 +3325,7 @@ impl DaemonState {
 
     fn restore_agent_snapshot(&mut self, mut snapshot: AgentRuntimeSnapshot) -> Result<(), String> {
         snapshot.state.config.tools =
-            self.resolve_restored_agent_tools(snapshot.state.config.tools)?;
+            self.resolve_restored_agent_tools(&snapshot.state.id, snapshot.state.config.tools)?;
         let agent_id = snapshot.state.id.clone();
         let mut runtime = AgentRuntime::from_snapshot(snapshot, Arc::clone(&self.model_adapter));
         self.wire_runtime(&mut runtime);
@@ -3189,8 +3378,27 @@ impl DaemonState {
     }
 
     pub(crate) fn remove_agent(&mut self, agent_id: &str) {
+        if let Some(manager) = &self.mcp_manager {
+            manager.retire_agent(agent_id);
+        }
         if let Some(mut runtime) = self.agents.remove(agent_id) {
             runtime.stop();
+        }
+    }
+
+    /// Called only after the deletion snapshot was acknowledged. A failed
+    /// deletion can restore the agent and its reviewed descriptors, but its
+    /// retired connection remains disconnected until an explicit reconnect.
+    pub(crate) fn finalize_removed_agent_mcp(&mut self, agent_id: &str) {
+        if self.agents.contains_key(agent_id) {
+            return;
+        }
+        self.mcp_registry
+            .connections
+            .retain(|_, row| row.agent_id != agent_id);
+        if let Ok(mut publication) = self.mcp_publication.write() {
+            publication.known.retain(|(owner, _), _| owner != agent_id);
+            publication.live.retain(|(owner, _), _| owner != agent_id);
         }
     }
 
@@ -3237,41 +3445,58 @@ impl DaemonState {
 
     fn resolve_agent_tools(
         &self,
+        owner: Option<&str>,
         tools: Option<Vec<ToolDescriptor>>,
+    ) -> Result<Option<Vec<ToolDescriptor>>, String> {
+        self.resolve_tools_with_mcp_catalog(owner, tools, false, &self.mcp_registry)
+    }
+
+    fn resolve_tools_with_mcp_catalog(
+        &self,
+        owner: Option<&str>,
+        tools: Option<Vec<ToolDescriptor>>,
+        deduplicate: bool,
+        catalog: &crate::mcp::McpRegistry,
     ) -> Result<Option<Vec<ToolDescriptor>>, String> {
         let Some(tools) = tools else {
             return Ok(None);
         };
-        let mut names = Vec::with_capacity(tools.len());
+        let mut canonical = Vec::with_capacity(tools.len());
         let mut seen = HashSet::with_capacity(tools.len());
         for tool in tools {
             if !seen.insert(tool.name.clone()) {
+                if deduplicate {
+                    continue;
+                }
                 return Err(format!("duplicate tool '{}'", tool.name));
             }
-            if self.tool_registry.descriptor(&tool.name).is_none() {
-                return Err(format!("unknown tool: {}", tool.name));
-            }
-            names.push(tool.name);
+            let descriptor = self
+                .tool_registry
+                .descriptor(&tool.name)
+                .or_else(|| owner.and_then(|agent| catalog.known_descriptor(agent, &tool.name)))
+                .ok_or_else(|| format!("unknown tool: {}", tool.name))?;
+            canonical.push(descriptor);
         }
-
-        self.tool_registry.resolve_descriptors(names).map(Some)
+        Ok(Some(canonical))
     }
 
     fn resolve_restored_agent_tools(
         &self,
+        owner: &str,
         tools: Option<Vec<ToolDescriptor>>,
     ) -> Result<Option<Vec<ToolDescriptor>>, String> {
-        let Some(tools) = tools else {
-            return Ok(None);
-        };
-        let mut names = Vec::with_capacity(tools.len());
-        let mut seen = HashSet::with_capacity(tools.len());
-        for tool in tools {
-            if seen.insert(tool.name.clone()) {
-                names.push(tool.name);
-            }
-        }
-
-        self.tool_registry.resolve_descriptors(names).map(Some)
+        self.resolve_tools_with_mcp_catalog(Some(owner), tools, true, &self.mcp_registry)
     }
+}
+
+fn mcp_permissions(config: &AgentConfig) -> (bool, Vec<String>) {
+    let mut names: Vec<_> = config
+        .tools
+        .iter()
+        .flatten()
+        .filter(|tool| tool.name.starts_with("mcp_"))
+        .map(|tool| tool.name.clone())
+        .collect();
+    names.sort();
+    (crate::agent_runs::is_helper_config(config), names)
 }

@@ -11,6 +11,7 @@ mod connectors;
 mod gcalendar;
 pub(crate) mod learning_reviews;
 mod logs;
+pub(crate) mod mcp;
 mod memories;
 mod memory_edits;
 mod providers;

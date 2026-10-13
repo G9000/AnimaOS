@@ -116,7 +116,7 @@ fn helper_config(parent: &AgentState, name: String) -> AgentConfig {
         // and process tools and `propose_skill` (spec §8.3: helpers cannot
         // propose skills; they keep `load_skill`). The automation tools never reach a helper either
         // (spec §9.3: they would schedule runs of the helper).
-        tools: Some(parent.config.tools.iter().flatten().filter(|tool| !is_coordination_tool(&tool.name) && !crate::tools::is_process_tool(&tool.name) && tool.name != "search_conversations" && tool.name != "read_conversation_window" && tool.name != "propose_skill" && !crate::tools::is_automation_tool(&tool.name)).cloned().collect()),
+        tools: Some(parent.config.tools.iter().flatten().filter(|tool| !is_coordination_tool(&tool.name) && !crate::tools::is_process_tool(&tool.name) && !tool.name.starts_with("mcp_") && tool.name != "search_conversations" && tool.name != "read_conversation_window" && tool.name != "propose_skill" && !crate::tools::is_automation_tool(&tool.name)).cloned().collect()),
         settings: Some(AgentSettings {
             temperature: parent_settings.temperature,
             max_tokens: Some(parent_settings.max_tokens.unwrap_or(4096).min(4096)),
@@ -361,6 +361,7 @@ pub(crate) struct AgentRunCoordinator {
     max_runs_per_agent: usize,
     control_plane_transactions: Arc<Mutex<()>>,
     learning: crate::learning::LearningService,
+    mcp: Option<crate::mcp::McpManager>,
     /// How long a compaction's store read and model call may take.
     compaction_timeout: std::time::Duration,
     /// How long a title call may take before it is treated like a failed
@@ -637,6 +638,7 @@ impl AgentRunCoordinator {
             max_runs_per_agent: DEFAULT_MAX_RUNS_PER_AGENT,
             control_plane_transactions,
             learning,
+            mcp: None,
             compaction_timeout: std::time::Duration::from_millis(
                 crate::sessions::compaction::COMPACTION_TIMEOUT_MS,
             ),
@@ -678,6 +680,25 @@ impl AgentRunCoordinator {
     pub(crate) fn with_max_runs_per_agent(mut self, max_runs_per_agent: usize) -> Self {
         self.max_runs_per_agent = max_runs_per_agent.clamp(1, MAX_RUNS_PER_AGENT_LIMIT);
         self
+    }
+
+    pub(crate) fn with_mcp(mut self, manager: crate::mcp::McpManager) -> Self {
+        let transactions = manager.control_plane_transactions();
+        if !Arc::ptr_eq(&transactions, &self.control_plane_transactions) {
+            // A reconstructed router can reuse the state's existing manager.
+            // Its new coordinator must share that same settlement mutex.
+            self.learning = crate::learning::LearningService::new(
+                Arc::clone(&self.state),
+                Arc::clone(&transactions),
+            );
+            self.control_plane_transactions = transactions;
+        }
+        self.mcp = Some(manager);
+        self
+    }
+
+    pub(crate) fn mcp_manager(&self) -> Option<crate::mcp::McpManager> {
+        self.mcp.clone()
     }
 
     #[cfg(test)]
@@ -1594,6 +1615,17 @@ impl AgentRunCoordinator {
             tools
                 .retain(|tool| !matches!(tool.name.as_str(), "send_message" | "broadcast_message"));
         }
+        let ready_mcp = if delegated_parent.is_none() && !is_helper_config(&original_config) {
+            self.mcp
+                .as_ref()
+                .map(|manager| manager.ready_descriptors(&agent_id))
+                .unwrap_or_default()
+        } else {
+            vec![]
+        };
+        // Only the run copy loses disconnected descriptors. Canonical exact
+        // grants survive restart and reconnect without widening authority.
+        tools.retain(|tool| !tool.name.starts_with("mcp_") || ready_mcp.contains(tool));
         let registry = crate::tools::ToolRegistry::new();
         if delegated_parent.is_none() {
             for name in ["list_workspace_agents", "send_message", "broadcast_message"] {
@@ -1643,6 +1675,11 @@ impl AgentRunCoordinator {
             live_run.control().cancel,
             helper_deadline.map(|(_, deadline)| deadline),
         );
+        let mcp_for_run = if delegated_parent.is_none() && !is_helper_config(&original_config) {
+            self.mcp_manager()
+        } else {
+            None
+        };
         let tool_context = tool_context
             .with_action_journal(action_journal.clone())
             .with_team(self.clone(), can_delegate)
@@ -1654,6 +1691,7 @@ impl AgentRunCoordinator {
                 session_id: session_id.clone(),
                 agent_id: agent_id.clone(),
             }))
+            .with_mcp(mcp_for_run)
             .with_cancel(Some(live_run.control().cancel))
             // Spec §7.3: the gate between the live checks and dispatch.
             .with_approvals(Some(crate::approvals::ApprovalGate::new(
