@@ -328,6 +328,126 @@ impl McpManager {
         })
         .await
     }
+    pub(crate) async fn set_grant(
+        &self,
+        agent: &str,
+        id: &str,
+        alias: &str,
+        input: McpGrantInput,
+    ) -> Result<McpGrantOutcome, McpServiceError> {
+        let manager = self.clone();
+        let (agent, id, alias) = (agent.to_owned(), id.to_owned(), alias.to_owned());
+        self.owned(async move { manager.set_grant_owned(&agent, &id, &alias, input).await })
+            .await
+    }
+    async fn set_grant_owned(
+        &self,
+        agent: &str,
+        id: &str,
+        alias: &str,
+        input: McpGrantInput,
+    ) -> Result<McpGrantOutcome, McpServiceError> {
+        self.running()?;
+        let _transaction = self.inner.transactions.lock().await;
+        let state = self.state()?;
+        let (next, descriptor, persist) = {
+            let mut guard = state.write().await;
+            Self::owner(&guard, agent)?;
+            self.same_publication(&guard)?;
+            let row = guard
+                .mcp_registry
+                .connections
+                .get(id)
+                .filter(|row| row.agent_id == agent)
+                .ok_or(McpServiceError::NotFound)?;
+            if row.version != input.expected_version {
+                return Err(McpServiceError::Conflict);
+            }
+            let reviewed = row
+                .reviewed_tools
+                .iter()
+                .find(|tool| tool.alias == alias)
+                .ok_or(McpServiceError::NotFound)?;
+            if reviewed.descriptor.descriptor_digest != input.descriptor_digest {
+                return Err(McpServiceError::Conflict);
+            }
+            let descriptor = reviewed.tool_descriptor();
+            let old_tools = guard.agents[agent].config().tools.clone();
+            let mut tools = old_tools.clone();
+            apply_grant(&mut tools, alias, input.granted.then_some(&descriptor));
+            if tools == old_tools {
+                return Ok(McpGrantOutcome {
+                    connection: self.view(row.clone())?,
+                    granted: input.granted,
+                    tool_names: tools
+                        .iter()
+                        .flatten()
+                        .map(|tool| tool.name.clone())
+                        .collect(),
+                });
+            }
+            if guard.control_plane_store.is_none() {
+                return Err(McpServiceError::Unavailable);
+            }
+            let mut next = guard.mcp_registry.clone();
+            next.connections.retain(|_, row| {
+                guard
+                    .agents
+                    .get(&row.agent_id)
+                    .is_some_and(|runtime| !crate::agent_runs::is_helper_config(runtime.config()))
+            });
+            next.connections.get_mut(id).unwrap().version = next_version(row.version)?;
+            let persist = guard
+                .control_plane_persist_request()
+                .with_mcp_grant_candidate(next.snapshot(), agent, tools)
+                .ok_or(McpServiceError::Unavailable)?;
+            (next, descriptor, persist)
+        };
+        let uncertain = match persist.save_mcp_candidate().await {
+            Ok(()) => false,
+            Err(error) if crate::control_plane_store::is_durability_uncertain(&error) => true,
+            Err(_) => return Err(McpServiceError::Unavailable),
+        };
+        let mut guard = state.write().await;
+        if Self::owner(&guard, agent).is_err() {
+            self.retire_agent(agent);
+            return Err(McpServiceError::NotFound);
+        }
+        self.same_publication(&guard)?;
+        guard.mcp_registry = next;
+        let runtime = guard
+            .agents
+            .get_mut(agent)
+            .ok_or(McpServiceError::NotFound)?;
+        let mut config = runtime.config().clone();
+        // Other ordinary settings may settle during I/O. Publish this alias
+        // against their current configuration, preserving all unrelated fields.
+        apply_grant(
+            &mut config.tools,
+            alias,
+            input.granted.then_some(&descriptor),
+        );
+        let tool_names = config
+            .tools
+            .iter()
+            .flatten()
+            .map(|tool| tool.name.clone())
+            .collect();
+        runtime.replace_config(config);
+        self.note_agent_permissions_changed(agent);
+        if uncertain {
+            self.retire(id, Some(McpServiceError::Unavailable))?;
+        }
+        self.publish(&guard.mcp_registry)?;
+        if uncertain {
+            return Err(McpServiceError::Unavailable);
+        }
+        Ok(McpGrantOutcome {
+            connection: self.view(guard.mcp_registry.connections[id].clone())?,
+            granted: input.granted,
+            tool_names,
+        })
+    }
     async fn mutate(
         &self,
         agent: &str,
@@ -1244,6 +1364,28 @@ impl McpManager {
             text,
             ..Content::default()
         })
+    }
+}
+
+fn apply_grant(
+    tools: &mut Option<Vec<ToolDescriptor>>,
+    alias: &str,
+    descriptor: Option<&ToolDescriptor>,
+) {
+    match descriptor {
+        Some(descriptor) => {
+            let tools = tools.get_or_insert_with(Vec::new);
+            if let Some(existing) = tools.iter_mut().find(|tool| tool.name == alias) {
+                *existing = descriptor.clone();
+            } else {
+                tools.push(descriptor.clone());
+            }
+        }
+        None => {
+            if let Some(tools) = tools {
+                tools.retain(|tool| tool.name != alias);
+            }
+        }
     }
 }
 

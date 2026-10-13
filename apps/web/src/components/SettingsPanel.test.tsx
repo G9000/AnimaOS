@@ -890,6 +890,46 @@ describe('SettingsPanel access', () => {
   );
 });
 
+it('M43 keeps native, dormant external and custom permissions during unrelated saves and optional toggles', async () => {
+  const external = `mcp_${'1'.repeat(32)}_${'a'.repeat(16)}`;
+  const original = ['read_file', external, 'unknown_custom'];
+  const saveSettings = vi.fn(async () => true);
+  renderPanel(agent({ toolNames: original }), { saveSettings });
+  expect(
+    screen.getByText(
+      /Choosing a standard access profile replaces these permissions/,
+    ),
+  ).toBeVisible();
+  const name = screen.getByDisplayValue('Nova');
+  await userEvent.clear(name);
+  await userEvent.type(name, 'Nova Two');
+  await userEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  expect(saveSettings).toHaveBeenLastCalledWith({ name: 'Nova Two' });
+  await userEvent.click(
+    screen.getByRole('checkbox', { name: 'Allow removing saved facts' }),
+  );
+  await userEvent.click(
+    screen.getByRole('button', { name: /^(Save changes|Saved ✓)$/ }),
+  );
+  expect(saveSettings).toHaveBeenLastCalledWith({
+    name: 'Nova Two',
+    tools: [...original, 'memory_remove'],
+  });
+});
+
+it('M43 deliberate standard access selection replaces external grants without reinstalling them', async () => {
+  const external = `mcp_${'1'.repeat(32)}_${'a'.repeat(16)}`;
+  const saveSettings = vi.fn(async () => true);
+  renderPanel(agent({ toolNames: ['read_file', external, 'unknown_custom'] }), {
+    saveSettings,
+  });
+  await userEvent.click(screen.getByRole('radio', { name: /Collaborate/ }));
+  await userEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  expect(saveSettings).toHaveBeenCalledWith({
+    tools: toolNamesForProfile('collaborate'),
+  });
+});
+
 it('replaces a personality style saved at the start of an otherwise empty prompt', async () => {
   renderPanel(
     agent({ system: '[Personality style]\nBe calm.\n[/Personality style]' }),

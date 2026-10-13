@@ -2,12 +2,51 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   daemon,
+  mcpOwnerApi,
   toAgentDetail,
   toChatMessage,
   PROFILE_GENERATION_UNAVAILABLE,
   workspaceAvatarUrl,
   type DaemonSnapshot,
 } from './daemon-api';
+
+it('M43 shares owner transport for exact MCP grants and loads canonical configured permissions', async () => {
+  const alias = 'mcp_alias /?';
+  const current = snapshot();
+  const connection = { id: 'connection /?', version: 4 };
+  const outcome = {
+    connection,
+    granted: true,
+    toolNames: ['read_file', alias],
+  };
+  const fetchMock = vi
+    .fn<typeof fetch>()
+    .mockImplementation(async (url) =>
+      String(url).endsWith('/agents/agent%20%2F%3F')
+        ? Response.json({ agent: current })
+        : Response.json(outcome),
+    );
+  vi.stubGlobal('fetch', fetchMock);
+  expect(await mcpOwnerApi.toolNames('agent /?')).toEqual(
+    current.state.config.tools!.map((tool) => tool.name),
+  );
+  expect(
+    await mcpOwnerApi.setGrant('agent /?', 'connection /?', alias, {
+      expectedVersion: 3,
+      descriptorDigest: 'd'.repeat(64),
+      granted: true,
+    }),
+  ).toEqual(outcome);
+  expect(fetchMock.mock.calls[1][0]).toBe(
+    '/api/agents/agent%20%2F%3F/mcp-connections/connection%20%2F%3F/grants/mcp_alias%20%2F%3F',
+  );
+  expect(fetchMock.mock.calls[1][1]?.method).toBe('PATCH');
+  expect(JSON.parse(fetchMock.mock.calls[1][1]!.body as string)).toEqual({
+    expectedVersion: 3,
+    descriptorDigest: 'd'.repeat(64),
+    granted: true,
+  });
+});
 
 it('retains session attachment metadata without using file paths as URLs', () => {
   const attachment = {

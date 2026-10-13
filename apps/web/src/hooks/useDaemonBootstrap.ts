@@ -32,6 +32,10 @@ export interface DaemonBootstrap {
   retryProviders(): Promise<void>;
   refreshWorkspace(): Promise<void>;
   acceptAgentSnapshot(snapshot: DaemonSnapshot): void;
+  acceptAgentTools(
+    id: string,
+    tools: DaemonSnapshot['state']['config']['tools'],
+  ): void;
   removeAgentSnapshot(id: string): void;
 }
 
@@ -216,6 +220,26 @@ export function useDaemonBootstrap(
     });
   }, []);
 
+  const acceptAgentTools = useCallback(
+    (id: string, tools: DaemonSnapshot['state']['config']['tools']) => {
+      collectionMutationEpochRef.current += 1;
+      setAgents((current) =>
+        current.map((snapshot) =>
+          snapshot.state.id === id
+            ? {
+                ...snapshot,
+                state: {
+                  ...snapshot.state,
+                  config: { ...snapshot.state.config, tools },
+                },
+              }
+            : snapshot,
+        ),
+      );
+    },
+    [],
+  );
+
   const removeAgentSnapshot = useCallback((id: string) => {
     collectionMutationEpochRef.current += 1;
     setAgents((current) =>
@@ -310,6 +334,7 @@ export function useDaemonBootstrap(
     retryProviders,
     refreshWorkspace,
     acceptAgentSnapshot,
+    acceptAgentTools,
     removeAgentSnapshot,
   };
 }

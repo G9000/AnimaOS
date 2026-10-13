@@ -638,6 +638,16 @@ export function SettingsPanel({
               {/* Workspace access */}
               <section className="space-y-2.5">
                 <SectionTitle>Workspace access</SectionTitle>
+                {agent.toolNames.some((name) =>
+                  /^mcp_[0-9a-f]{32}_[0-9a-f]{16}$/.test(name),
+                ) && (
+                  <p className="text-xs leading-relaxed text-ink-3">
+                    External tool permissions are managed in Connectors.
+                    Choosing a standard access profile replaces these
+                    permissions when you save; saved connections and reviews are
+                    kept.
+                  </p>
+                )}
                 {derivedAccess === 'custom' ? (
                   <div className="rounded-xl border border-amber/25 bg-amber/[0.05] p-3.5">
                     <p className="text-sm font-semibold text-ink">

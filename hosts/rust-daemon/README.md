@@ -200,6 +200,8 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `PUT`    | `/api/workspace`                                                                             |
 | `PUT`    | `/api/workspace/avatar`                                                                      |
 
+| `PATCH` | `/api/agents/{agent_id}/mcp-connections/{connection_id}/grants/{alias}` |
+
 <!-- openapi-route-inventory:end -->
 
 ## ChatGPT subscription

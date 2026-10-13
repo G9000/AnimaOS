@@ -95,7 +95,7 @@ use crate::runtime_model::provider_summaries;
         api_health_entry,
         capabilities_entry,
         mcp::list, mcp::create, mcp::get, mcp::update, mcp::connect,
-        mcp::discover, mcp::review, mcp::disconnect, mcp::delete,
+        mcp::discover, mcp::review, mcp::set_grant, mcp::disconnect, mcp::delete,
         jobs::list_jobs,
         jobs::create_job,
         jobs::cancel_job,
@@ -223,7 +223,8 @@ use crate::runtime_model::provider_summaries;
         self::contracts::mcp::McpConnectionResponse, self::contracts::mcp::McpConnectionEnvelope,
         self::contracts::mcp::McpConnectionsEnvelope, self::contracts::mcp::CreateMcpConnectionRequest,
         self::contracts::mcp::UpdateMcpConnectionRequest, self::contracts::mcp::McpVersionRequest,
-        self::contracts::mcp::ReviewMcpToolRequest,
+        self::contracts::mcp::ReviewMcpToolRequest, self::contracts::mcp::McpGrantRequest,
+        self::contracts::mcp::McpGrantEnvelope,
         self::contracts::MemoryDeleteRequest,
         self::contracts::agent_files::AgentFilesPreview, self::contracts::agent_files::PreviewMode,
         crate::agent_files::AgentFilesManifest, crate::agent_files::AgentFileManifestEntry,
@@ -783,6 +784,7 @@ fn router_with_services_with_policies_and_integrations(
         .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/connect", axum::routing::post(mcp::connect))
         .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/discover", axum::routing::post(mcp::discover))
         .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/review", axum::routing::post(mcp::review))
+        .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/grants/{alias}", axum::routing::patch(mcp::set_grant))
         .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/disconnect", axum::routing::post(mcp::disconnect))
         .route("/openapi.json", get(openapi_entry))
         .route("/docs", get(docs_entry))

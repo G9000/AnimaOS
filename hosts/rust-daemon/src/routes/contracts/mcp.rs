@@ -104,3 +104,19 @@ pub(crate) struct ReviewMcpToolRequest {
     pub(crate) discovery_id: String,
     pub(crate) descriptor_digest: String,
 }
+
+#[derive(Clone, Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpGrantRequest {
+    pub(crate) expected_version: u64,
+    pub(crate) descriptor_digest: String,
+    pub(crate) granted: bool,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct McpGrantEnvelope {
+    pub(crate) connection: McpConnectionResponse,
+    pub(crate) granted: bool,
+    pub(crate) tool_names: Vec<String>,
+}

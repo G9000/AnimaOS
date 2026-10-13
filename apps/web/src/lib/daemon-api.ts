@@ -21,6 +21,11 @@ import {
   type MemoryFactOptions,
   type MemoryViewsSelectionInput,
   type MemoryViewCorrectionInput,
+  type McpCreateInput,
+  type McpUpdateInput,
+  type McpVersionInput,
+  type McpReviewInput,
+  type McpGrantInput,
   type LogLevel,
   type LogsQuery,
   type MemoryPatch,
@@ -59,6 +64,10 @@ export type {
   DriveStatus,
   DriveConnectResult,
   ConnectDriveInput,
+  McpConnection,
+  McpToolDescriptor,
+  ReviewedMcpTool,
+  McpGrantOutcome,
 } from '@animaOS-SWARM/sdk';
 
 /** Shared owner transport policy. The current console uses same-origin cookies;
@@ -77,6 +86,36 @@ const setupClient = createDaemonClient({
     return globalThis.fetch(url, { ...init, headers });
   },
 });
+
+/** All external-tool owner actions use the shared owner transport policy. */
+export const mcpOwnerApi = {
+  list: (agentId: string, options?: { signal?: AbortSignal }) =>
+    setupClient.mcp.list(agentId, options),
+  toolNames: async (agentId: string): Promise<string[]> => {
+    const snapshot = await setupClient.agents.get(agentId);
+    return snapshot.state.config.tools?.map((tool) => tool.name) ?? [];
+  },
+  create: (agentId: string, input: McpCreateInput) =>
+    setupClient.mcp.create(agentId, input),
+  update: (agentId: string, id: string, input: McpUpdateInput) =>
+    setupClient.mcp.update(agentId, id, input),
+  connect: (agentId: string, id: string, input: McpVersionInput) =>
+    setupClient.mcp.connect(agentId, id, input),
+  discover: (agentId: string, id: string, input: McpVersionInput) =>
+    setupClient.mcp.discover(agentId, id, input),
+  review: (agentId: string, id: string, input: McpReviewInput) =>
+    setupClient.mcp.review(agentId, id, input),
+  disconnect: (agentId: string, id: string, input: McpVersionInput) =>
+    setupClient.mcp.disconnect(agentId, id, input),
+  remove: (agentId: string, id: string, input: McpVersionInput) =>
+    setupClient.mcp.remove(agentId, id, input),
+  setGrant: (
+    agentId: string,
+    id: string,
+    alias: string,
+    input: McpGrantInput,
+  ) => setupClient.mcp.setGrant(agentId, id, alias, input),
+};
 
 export interface DaemonProvider {
   id: string;

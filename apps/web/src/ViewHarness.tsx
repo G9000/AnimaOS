@@ -223,6 +223,7 @@ export function ViewHarness() {
     retryProviders,
     refreshWorkspace,
     acceptAgentSnapshot,
+    acceptAgentTools,
     removeAgentSnapshot,
   } = useDaemonBootstrap({ live: streamOpen });
   const agents = useMemo(
@@ -558,6 +559,9 @@ export function ViewHarness() {
   const [resetError, setResetError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [mcpBusy, setMcpBusy] = useState(false);
+  const mcpBusyRef = useRef(false);
+  const mcpPermissionsUnknownRef = useRef(false);
   const [resetting, setResetting] = useState(false);
   const [legacyMigrationError, setLegacyMigrationError] = useState<
     string | null
@@ -635,6 +639,8 @@ export function ViewHarness() {
     resetInFlightRef.current = null;
     settingsTriggerRef.current = null;
     savingSettingsRef.current = false;
+    mcpBusyRef.current = false;
+    mcpPermissionsUnknownRef.current = false;
 
     setLegacyMigrationError(null);
     setSessionActionError(null);
@@ -642,6 +648,7 @@ export function ViewHarness() {
     setResetError(null);
     setShowSettings(false);
     setSavingSettings(false);
+    setMcpBusy(false);
     setResetting(false);
     // Another companion has other sessions: start from a new chat.
     if (previousAgentId !== null) navigate({ kind: 'home' }, { replace: true });
@@ -723,7 +730,12 @@ export function ViewHarness() {
     setShowSettings(true);
   };
   const closeSettings = () => {
-    if (savingSettingsRef.current || resetInFlightRef.current !== null) return;
+    if (
+      savingSettingsRef.current ||
+      mcpBusyRef.current ||
+      resetInFlightRef.current !== null
+    )
+      return;
     setShowSettings(false);
   };
 
@@ -737,6 +749,8 @@ export function ViewHarness() {
   const saveSettings = async (patch: AgentUpdateInput): Promise<boolean> => {
     if (
       !agent ||
+      mcpBusyRef.current ||
+      mcpPermissionsUnknownRef.current ||
       savingSettingsRef.current ||
       resetInFlightRef.current !== null
     ) {
@@ -772,6 +786,8 @@ export function ViewHarness() {
   const resetAgent = async () => {
     if (
       !agent ||
+      mcpBusyRef.current ||
+      mcpPermissionsUnknownRef.current ||
       savingSettingsRef.current ||
       resetInFlightRef.current !== null
     ) {
@@ -1104,7 +1120,7 @@ export function ViewHarness() {
       agent={agent}
       providers={providers}
       workspace={workspace}
-      saving={savingSettings}
+      saving={savingSettings || mcpBusy}
       resetting={resetting}
       saveError={settingsSaveError}
       resetError={resetError}
@@ -1348,6 +1364,70 @@ export function ViewHarness() {
           connectors={
             <ConnectorsView
               agentId={agent.id}
+              disabled={
+                savingSettings ||
+                resetting ||
+                mcpBusy ||
+                agent.workspaceRole === 'helper'
+              }
+              mcpPermissionsUncertain={mcpPermissionsUnknownRef.current}
+              mcpPermissionsBusy={mcpBusy}
+              onMcpBusyChanged={(busy) => {
+                if (
+                  currentAgentIdRef.current !== agent.id ||
+                  agentLifecycleGenerationRef.current !==
+                    onboardingLifecycleGeneration
+                )
+                  return;
+                mcpBusyRef.current = busy;
+                setMcpBusy(busy);
+              }}
+              onMcpGrantsChanged={async () => {
+                if (
+                  currentAgentIdRef.current !== agent.id ||
+                  agentLifecycleGenerationRef.current !==
+                    onboardingLifecycleGeneration
+                )
+                  return;
+                const operation = beginAgentOperation(agent.id);
+                let canonical: DaemonSnapshot;
+                try {
+                  canonical = (await daemon.getAgent(agent.id)).agent;
+                } catch (caught) {
+                  if (isCurrentAgentOperation(operation)) {
+                    mcpPermissionsUnknownRef.current = true;
+                    setSettingsSaveError(
+                      'External tool permissions need a fresh read. Close Settings and refresh status in Connectors before saving changes.',
+                    );
+                  }
+                  throw caught;
+                }
+                if (!isCurrentAgentOperation(operation)) return;
+                if (canonical.state.id !== agent.id) {
+                  mcpPermissionsUnknownRef.current = true;
+                  setSettingsSaveError(
+                    'External tool permissions need a fresh read. Close Settings and refresh status in Connectors before saving changes.',
+                  );
+                  throw new Error('Permission read did not match this agent.');
+                }
+                // Only permissions are reconciled. A simultaneous poll may have
+                // newer name/model/system fields than the owner read above.
+                acceptAgentTools(agent.id, canonical.state.config.tools);
+                mcpPermissionsUnknownRef.current = false;
+                setSettingsSaveError(null);
+              }}
+              onMcpPermissionsUncertain={() => {
+                if (
+                  currentAgentIdRef.current !== agent.id ||
+                  agentLifecycleGenerationRef.current !==
+                    onboardingLifecycleGeneration
+                )
+                  return;
+                mcpPermissionsUnknownRef.current = true;
+                setSettingsSaveError(
+                  'External tool permissions need a fresh read. Close Settings and refresh status in Connectors before saving changes.',
+                );
+              }}
               telegram={
                 <TelegramSettings
                   connector={telegramConnector}

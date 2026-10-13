@@ -58,6 +58,21 @@ export type {
   StartRunResult,
 } from './runs.js';
 export { LearningClient } from './learning.js';
+export { McpClient } from './mcp.js';
+export type {
+  McpConnection,
+  McpConnectionState,
+  McpCreateInput,
+  McpGrantInput,
+  McpGrantOutcome,
+  McpReadOptions,
+  McpReviewInput,
+  McpStaticError,
+  McpToolDescriptor,
+  McpUpdateInput,
+  McpVersionInput,
+  ReviewedMcpTool,
+} from './mcp.js';
 export type {
   LearningDecision,
   LearningPolicy,

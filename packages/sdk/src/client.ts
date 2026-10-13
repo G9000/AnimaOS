@@ -11,6 +11,7 @@ import { SwarmsClient } from './swarms.js';
 import { SessionsClient } from './sessions.js';
 import { RunsClient } from './runs.js';
 import { LearningClient } from './learning.js';
+import { McpClient } from './mcp.js';
 import { ApprovalsClient } from './approvals.js';
 import { SkillsClient } from './skills.js';
 import { AutomationsClient } from './automations.js';
@@ -86,6 +87,7 @@ export class DaemonClient {
   readonly sessions: SessionsClient;
   readonly runs: RunsClient;
   readonly learning: LearningClient;
+  readonly mcp: McpClient;
   readonly events: AgentEventsClient;
   readonly approvals: ApprovalsClient;
   readonly skills: SkillsClient;
@@ -119,6 +121,7 @@ export class DaemonClient {
     this.sessions = new SessionsClient(this);
     this.runs = new RunsClient(this);
     this.learning = new LearningClient(this);
+    this.mcp = new McpClient(this);
     this.events = new AgentEventsClient(this);
     this.approvals = new ApprovalsClient(this);
     this.skills = new SkillsClient(this);

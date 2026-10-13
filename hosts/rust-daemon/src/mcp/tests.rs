@@ -282,12 +282,892 @@ impl Fixture {
             )
             .unwrap()
     }
+    async fn grant(
+        &self,
+        view: &McpConnectionView,
+        granted: bool,
+    ) -> Result<McpGrantOutcome, McpServiceError> {
+        let tool = &view.record.reviewed_tools[0];
+        self.manager
+            .set_grant(
+                &self.agent,
+                &view.record.id,
+                &tool.alias,
+                McpGrantInput {
+                    expected_version: view.record.version,
+                    descriptor_digest: tool.descriptor.descriptor_digest.clone(),
+                    granted,
+                },
+            )
+            .await
+    }
+    async fn persisted(&self) -> crate::control_plane_store::ControlPlaneSnapshot {
+        let config = self.state.read().await.control_plane_store.clone().unwrap();
+        crate::control_plane_store::load_control_plane_snapshot(&config)
+            .await
+            .unwrap()
+            .unwrap()
+    }
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
         assert!(self.folder.starts_with(std::env::temp_dir()));
         let _ = std::fs::remove_dir_all(&self.folder);
     }
+}
+
+#[tokio::test]
+async fn m43_actual_owner_router_grants_one_exact_reviewed_alias() {
+    use axum::body::{to_bytes, Body};
+    use axum::http::{Request, StatusCode};
+    use tower::util::ServiceExt;
+
+    let fixture = Fixture::new().await;
+    let reviewed = fixture.reviewed().await;
+    let tool = &reviewed.record.reviewed_tools[0];
+    assert!(fixture.state.read().await.agents[&fixture.agent]
+        .config()
+        .tools
+        .is_none());
+    fixture.state.write().await.mcp_manager = Some(fixture.manager.clone());
+    let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!(
+                    "/api/agents/{}/mcp-connections/{}/grants/{}",
+                    fixture.agent, reviewed.record.id, tool.alias
+                ))
+                .header("host", "127.0.0.1:8080")
+                .header("origin", "http://localhost:4200")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"expectedVersion":reviewed.record.version,
+            "descriptorDigest":tool.descriptor.descriptor_digest,"granted":true})
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "the owner must be able to grant the exact reviewed alias through the narrow route"
+    );
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let bytes = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["granted"], true);
+    assert_eq!(body["toolNames"], json!([tool.alias]));
+    assert_eq!(body["connection"]["id"], reviewed.record.id);
+    assert_eq!(body["connection"]["version"], reviewed.record.version + 1);
+    assert_eq!(
+        fixture.state.read().await.agents[&fixture.agent]
+            .config()
+            .tools,
+        Some(vec![tool.tool_descriptor()])
+    );
+    assert_eq!(fixture.factory.connects.load(Ordering::SeqCst), 1);
+    let session = fixture.factory.sessions.lock().unwrap()[0].clone();
+    assert_eq!(session.discoveries.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        session.calls.load(Ordering::SeqCst),
+        0,
+        "granting an alias must not invoke a remote tool"
+    );
+    fixture.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn m43_grants_preserve_current_unrelated_descriptors_noops_and_none_semantics() {
+    let fixture = Fixture::new().await;
+    let first = fixture.reviewed().await;
+    let second = fixture.reviewed().await;
+    let native = crate::tools::ToolRegistry::new()
+        .resolve_descriptors(["read_file", "write_file"])
+        .unwrap();
+    let unrelated = vec![
+        native[0].clone(),
+        second.record.reviewed_tools[0].tool_descriptor(),
+        native[1].clone(),
+    ];
+    {
+        let mut state = fixture.state.write().await;
+        let runtime = state.agents.get_mut(&fixture.agent).unwrap();
+        let mut config = runtime.config().clone();
+        config.tools = Some(unrelated.clone());
+        runtime.replace_config(config);
+    }
+    let added = fixture.grant(&first, true).await.unwrap();
+    assert_eq!(added.connection.record.version, first.record.version + 1);
+    let mut expected = unrelated.clone();
+    expected.push(first.record.reviewed_tools[0].tool_descriptor());
+    assert_eq!(
+        fixture.state.read().await.agents[&fixture.agent]
+            .config()
+            .tools,
+        Some(expected.clone())
+    );
+    let repeat = fixture.grant(&added.connection, true).await.unwrap();
+    assert_eq!(repeat.connection.record, added.connection.record);
+    let removed = fixture.grant(&repeat.connection, false).await.unwrap();
+    assert_eq!(
+        removed.connection.record.version,
+        added.connection.record.version + 1
+    );
+    assert_eq!(
+        fixture.state.read().await.agents[&fixture.agent]
+            .config()
+            .tools,
+        Some(unrelated)
+    );
+    assert_eq!(
+        fixture
+            .manager
+            .get(&fixture.agent, &second.record.id)
+            .await
+            .unwrap()
+            .record,
+        second.record
+    );
+    assert_eq!(fixture.factory.connects.load(Ordering::SeqCst), 2);
+    assert!(fixture
+        .factory
+        .sessions
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|session| session.calls.load(Ordering::SeqCst) == 0));
+    fixture.manager.shutdown().await;
+
+    let fixture = Fixture::new().await;
+    let reviewed = fixture.reviewed().await;
+    let absent = fixture.grant(&reviewed, false).await.unwrap();
+    assert_eq!(absent.connection.record.version, reviewed.record.version);
+    assert!(fixture.state.read().await.agents[&fixture.agent]
+        .config()
+        .tools
+        .is_none());
+    let added = fixture.grant(&reviewed, true).await.unwrap();
+    let removed = fixture.grant(&added.connection, false).await.unwrap();
+    assert_eq!(
+        fixture.state.read().await.agents[&fixture.agent]
+            .config()
+            .tools,
+        Some(vec![])
+    );
+    assert_eq!(
+        fixture
+            .grant(&removed.connection, false)
+            .await
+            .unwrap()
+            .connection
+            .record,
+        removed.connection.record
+    );
+    fixture.manager.shutdown().await;
+}
+
+async fn m43_http(
+    app: &axum::Router,
+    uri: &str,
+    origin: Option<&str>,
+    body: serde_json::Value,
+) -> (axum::http::StatusCode, String, serde_json::Value) {
+    use axum::body::{to_bytes, Body};
+    use axum::http::Request;
+    use tower::util::ServiceExt;
+    let mut request = Request::builder()
+        .method("PATCH")
+        .uri(uri)
+        .header("host", "127.0.0.1:8080")
+        .header("content-type", "application/json");
+    if let Some(origin) = origin {
+        request = request.header("origin", origin);
+    }
+    let response = app
+        .clone()
+        .oneshot(request.body(Body::from(body.to_string())).unwrap())
+        .await
+        .unwrap();
+    let status = response.status();
+    let cache = response
+        .headers()
+        .get("cache-control")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+    let bytes = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+    (
+        status,
+        cache,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}
+
+#[tokio::test]
+async fn m43_grant_http_rejects_unauthorized_stale_foreign_helper_and_non_strict_inputs() {
+    use axum::http::StatusCode;
+    let fixture = Fixture::new().await;
+    let view = fixture.reviewed().await;
+    let tool = &view.record.reviewed_tools[0];
+    let (foreign, helper) = {
+        let mut state = fixture.state.write().await;
+        let foreign = state
+            .create_agent(crate::sessions::test_support::agent_config("Foreign owner"))
+            .unwrap()
+            .state
+            .id;
+        let mut config = crate::sessions::test_support::agent_config("Helper owner");
+        config.settings = Some(anima_core::AgentSettings::default());
+        config.settings.as_mut().unwrap().additional.insert(
+            "workspaceRole".into(),
+            anima_core::DataValue::String("helper".into()),
+        );
+        let helper = state.create_agent(config).unwrap().state.id;
+        state.mcp_manager = Some(fixture.manager.clone());
+        (foreign, helper)
+    };
+    let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
+    let path = format!(
+        "/api/agents/{}/mcp-connections/{}/grants/{}",
+        fixture.agent, view.record.id, tool.alias
+    );
+    let valid = json!({"expectedVersion":view.record.version,"descriptorDigest":tool.descriptor.descriptor_digest,"granted":true});
+    for origin in [None, Some("https://foreign.invalid")] {
+        let (status, cache, _) = m43_http(&app, &path, origin, valid.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(cache, "no-store");
+    }
+    for body in [
+        json!({"expectedVersion":view.record.version,"descriptorDigest":tool.descriptor.descriptor_digest}),
+        json!({"expectedVersion":null,"descriptorDigest":tool.descriptor.descriptor_digest,"granted":true}),
+        json!({"expectedVersion":view.record.version,"descriptorDigest":tool.descriptor.descriptor_digest,"granted":null}),
+        json!({"expectedVersion":view.record.version,"descriptorDigest":null,"granted":true}),
+        json!({"expectedVersion":view.record.version,"descriptorDigest":tool.descriptor.descriptor_digest,"granted":true,"tools":[]}),
+    ] {
+        let (status, cache, _) = m43_http(&app, &path, Some("http://localhost:4200"), body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(cache, "no-store");
+    }
+    for body in [
+        json!({"expectedVersion":view.record.version-1,"descriptorDigest":tool.descriptor.descriptor_digest,"granted":true}),
+        json!({"expectedVersion":view.record.version,"descriptorDigest":"sha256:wrong","granted":true}),
+    ] {
+        assert_eq!(
+            m43_http(&app, &path, Some("http://localhost:4200"), body)
+                .await
+                .0,
+            StatusCode::CONFLICT
+        );
+    }
+    for agent in [&foreign, &helper] {
+        let uri = format!(
+            "/api/agents/{agent}/mcp-connections/{}/grants/{}",
+            view.record.id, tool.alias
+        );
+        assert_eq!(
+            m43_http(&app, &uri, Some("http://localhost:4200"), valid.clone())
+                .await
+                .0,
+            StatusCode::NOT_FOUND
+        );
+    }
+    let uri = format!(
+        "/api/agents/{}/mcp-connections/{}/grants/unreviewed",
+        fixture.agent, view.record.id
+    );
+    assert_eq!(
+        m43_http(&app, &uri, Some("http://localhost:4200"), valid)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    assert!(fixture.state.read().await.agents[&fixture.agent]
+        .config()
+        .tools
+        .is_none());
+    assert_eq!(
+        fixture
+            .manager
+            .get(&fixture.agent, &view.record.id)
+            .await
+            .unwrap()
+            .record,
+        view.record
+    );
+    use tower::util::ServiceExt;
+    let response = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/openapi.json")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 2 * 1024 * 1024)
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(value["paths"]
+        ["/api/agents/{agent_id}/mcp-connections/{connection_id}/grants/{alias}"]["patch"]
+        .is_object());
+    fixture.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn m43_grant_precommit_failure_keeps_state_and_uncertainty_publishes_fail_closed() {
+    let fixture = Fixture::new().await;
+    let reviewed = fixture.reviewed().await;
+    let previous = std::fs::read(fixture.folder.join("control.json")).unwrap();
+    let invalid = fixture.folder.join("unwritable.json");
+    std::fs::create_dir(&invalid).unwrap();
+    fixture.state.write().await.control_plane_store = Some(ControlPlaneStoreConfig::Json(invalid));
+    assert_eq!(
+        fixture.grant(&reviewed, true).await.unwrap_err(),
+        McpServiceError::Unavailable
+    );
+    assert!(fixture.state.read().await.agents[&fixture.agent]
+        .config()
+        .tools
+        .is_none());
+    assert_eq!(
+        fixture
+            .manager
+            .get(&fixture.agent, &reviewed.record.id)
+            .await
+            .unwrap()
+            .record,
+        reviewed.record
+    );
+    assert_eq!(fixture.manager.ready_descriptors(&fixture.agent).len(), 1);
+    assert_eq!(
+        std::fs::read(fixture.folder.join("control.json")).unwrap(),
+        previous
+    );
+    fixture.state.write().await.control_plane_store = Some(ControlPlaneStoreConfig::Json(
+        fixture.folder.join("control.json"),
+    ));
+    fixture.grant(&reviewed, true).await.unwrap();
+    fixture.manager.shutdown().await;
+
+    let fixture = Fixture::new().await;
+    let reviewed = fixture.reviewed().await;
+    let gate = fixture
+        .state
+        .write()
+        .await
+        .install_test_control_plane_uncertain_save_gate();
+    let manager = fixture.manager.clone();
+    let agent = fixture.agent.clone();
+    let row = reviewed.clone();
+    let pending = tokio::spawn(async move {
+        manager
+            .set_grant(
+                &agent,
+                &row.record.id,
+                &row.record.reviewed_tools[0].alias,
+                McpGrantInput {
+                    expected_version: row.record.version,
+                    descriptor_digest: row.record.reviewed_tools[0]
+                        .descriptor
+                        .descriptor_digest
+                        .clone(),
+                    granted: true,
+                },
+            )
+            .await
+    });
+    timeout(Duration::from_secs(1), gate.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    assert!(fixture.state.read().await.agents[&fixture.agent]
+        .config()
+        .tools
+        .is_none());
+    assert_eq!(
+        fixture
+            .manager
+            .get(&fixture.agent, &reviewed.record.id)
+            .await
+            .unwrap()
+            .record
+            .version,
+        reviewed.record.version
+    );
+    gate.release.add_permits(1);
+    assert_eq!(
+        timeout(Duration::from_secs(1), pending)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err(),
+        McpServiceError::Unavailable
+    );
+    let alias = &reviewed.record.reviewed_tools[0].alias;
+    assert!(fixture.state.read().await.agents[&fixture.agent]
+        .config()
+        .allows_tool(alias));
+    assert_eq!(
+        fixture
+            .manager
+            .get(&fixture.agent, &reviewed.record.id)
+            .await
+            .unwrap()
+            .record
+            .version,
+        reviewed.record.version + 1
+    );
+    assert!(fixture.manager.ready_descriptors(&fixture.agent).is_empty());
+    let persisted = fixture.persisted().await;
+    assert!(persisted
+        .agents
+        .iter()
+        .find(|agent| agent.state.id == fixture.agent)
+        .unwrap()
+        .state
+        .config
+        .allows_tool(alias));
+    let mut restarted = DaemonState::new();
+    restarted.restore_control_plane_snapshot(persisted).unwrap();
+    assert!(restarted.agents[&fixture.agent].config().allows_tool(alias));
+    assert!(restarted.mcp_publication.read().unwrap().live.is_empty());
+    assert_eq!(restarted.mcp_publication.read().unwrap().known.len(), 1);
+    fixture.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn m43_dropped_grant_caller_still_settles_after_ack_without_staged_publication() {
+    let fixture = Fixture::new().await;
+    let reviewed = fixture.reviewed().await;
+    let gate = fixture
+        .state
+        .write()
+        .await
+        .install_test_control_plane_save_gate(false);
+    let manager = fixture.manager.clone();
+    let agent = fixture.agent.clone();
+    let row = reviewed.clone();
+    let pending = tokio::spawn(async move {
+        manager
+            .set_grant(
+                &agent,
+                &row.record.id,
+                &row.record.reviewed_tools[0].alias,
+                McpGrantInput {
+                    expected_version: row.record.version,
+                    descriptor_digest: row.record.reviewed_tools[0]
+                        .descriptor
+                        .descriptor_digest
+                        .clone(),
+                    granted: true,
+                },
+            )
+            .await
+    });
+    timeout(Duration::from_secs(1), gate.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    assert!(fixture.state.read().await.agents[&fixture.agent]
+        .config()
+        .tools
+        .is_none());
+    assert_eq!(
+        fixture
+            .manager
+            .get(&fixture.agent, &reviewed.record.id)
+            .await
+            .unwrap()
+            .record,
+        reviewed.record
+    );
+    pending.abort();
+    let _ = pending.await;
+    gate.release.add_permits(1);
+    timeout(Duration::from_secs(1), async {
+        loop {
+            if fixture.state.read().await.agents[&fixture.agent]
+                .config()
+                .allows_tool(&reviewed.record.reviewed_tools[0].alias)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        fixture.persisted().await.mcp_connections[0].version,
+        reviewed.record.version + 1
+    );
+    assert_eq!(
+        fixture.factory.sessions.lock().unwrap()[0]
+            .calls
+            .load(Ordering::SeqCst),
+        0
+    );
+    fixture.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn m43_ordered_grant_projection_survives_newer_stale_snapshots_and_opposite_connections() {
+    let fixture = Fixture::new().await;
+    let first = fixture.reviewed().await;
+    let second = fixture.reviewed().await;
+    let native = crate::tools::ToolRegistry::new()
+        .resolve_descriptors(["read_file"])
+        .unwrap()
+        .remove(0);
+    let a = first.record.reviewed_tools[0].tool_descriptor();
+    let b = second.record.reviewed_tools[0].tool_descriptor();
+    let (candidate, ordinary) = {
+        let mut state = fixture.state.write().await;
+        let mut rows = state.mcp_registry.snapshot();
+        rows.iter_mut()
+            .find(|row| row.id == first.record.id)
+            .unwrap()
+            .version += 1;
+        let candidate = state
+            .control_plane_persist_request()
+            .with_mcp_grant_candidate(rows, &fixture.agent, Some(vec![native.clone(), a.clone()]))
+            .unwrap();
+        let runtime = state.agents.get_mut(&fixture.agent).unwrap();
+        let mut config = runtime.config().clone();
+        config.tools = Some(vec![native.clone()]);
+        runtime.replace_config(config);
+        let ordinary = state.control_plane_persist_request();
+        (candidate, ordinary)
+    };
+    candidate.save_mcp_candidate().await.unwrap();
+    ordinary.save().await.unwrap();
+    assert_eq!(
+        fixture
+            .persisted()
+            .await
+            .agents
+            .iter()
+            .find(|row| row.state.id == fixture.agent)
+            .unwrap()
+            .state
+            .config
+            .tools,
+        Some(vec![native.clone(), a.clone()])
+    );
+    // Publish the first settled grant, then admit opposite edits on distinct
+    // connections. The newer ordinary snapshot still observes both old versions.
+    let (candidate, ordinary) = {
+        let mut state = fixture.state.write().await;
+        state
+            .mcp_registry
+            .connections
+            .get_mut(&first.record.id)
+            .unwrap()
+            .version += 1;
+        let runtime = state.agents.get_mut(&fixture.agent).unwrap();
+        let mut config = runtime.config().clone();
+        config.tools = Some(vec![native.clone(), a.clone()]);
+        runtime.replace_config(config);
+        let mut rows = state.mcp_registry.snapshot();
+        rows.iter_mut()
+            .find(|row| row.id == first.record.id)
+            .unwrap()
+            .version += 1;
+        rows.iter_mut()
+            .find(|row| row.id == second.record.id)
+            .unwrap()
+            .version += 1;
+        let candidate = state
+            .control_plane_persist_request()
+            .with_mcp_grant_candidate(rows, &fixture.agent, Some(vec![native.clone(), b.clone()]))
+            .unwrap();
+        let ordinary = state.control_plane_persist_request();
+        (candidate, ordinary)
+    };
+    candidate.save_mcp_candidate().await.unwrap();
+    ordinary.save().await.unwrap();
+    let persisted = fixture.persisted().await;
+    assert_eq!(
+        persisted
+            .agents
+            .iter()
+            .find(|row| row.state.id == fixture.agent)
+            .unwrap()
+            .state
+            .config
+            .tools,
+        Some(vec![native.clone(), b.clone()])
+    );
+    assert_eq!(
+        persisted
+            .mcp_connections
+            .iter()
+            .find(|row| row.id == first.record.id)
+            .unwrap()
+            .version,
+        first.record.version + 2
+    );
+    assert_eq!(
+        persisted
+            .mcp_connections
+            .iter()
+            .find(|row| row.id == second.record.id)
+            .unwrap()
+            .version,
+        second.record.version + 1
+    );
+    let (candidate, ordinary) = {
+        let mut state = fixture.state.write().await;
+        state.mcp_registry = McpRegistry::restored(
+            persisted.mcp_connections,
+            &HashSet::from([fixture.agent.clone()]),
+        )
+        .unwrap();
+        let runtime = state.agents.get_mut(&fixture.agent).unwrap();
+        let mut config = runtime.config().clone();
+        config.tools = Some(vec![native.clone(), b.clone()]);
+        runtime.replace_config(config);
+        let mut rows = state.mcp_registry.snapshot();
+        rows.iter_mut()
+            .find(|row| row.id == second.record.id)
+            .unwrap()
+            .version += 1;
+        let candidate = state
+            .control_plane_persist_request()
+            .with_mcp_grant_candidate(rows, &fixture.agent, Some(vec![native.clone()]))
+            .unwrap();
+        // A current-version intentional first-connection grant survives while
+        // the second connection's older snapshot receives its acknowledged revoke.
+        let runtime = state.agents.get_mut(&fixture.agent).unwrap();
+        let mut config = runtime.config().clone();
+        config.tools = Some(vec![native.clone(), a.clone(), b.clone()]);
+        runtime.replace_config(config);
+        let ordinary = state.control_plane_persist_request();
+        (candidate, ordinary)
+    };
+    candidate.save_mcp_candidate().await.unwrap();
+    ordinary.save().await.unwrap();
+    assert_eq!(
+        fixture
+            .persisted()
+            .await
+            .agents
+            .iter()
+            .find(|row| row.state.id == fixture.agent)
+            .unwrap()
+            .state
+            .config
+            .tools,
+        Some(vec![native, a])
+    );
+    fixture.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn m43_current_version_generic_settings_revoke_remains_authoritative() {
+    let fixture = Fixture::new().await;
+    let first = fixture.reviewed().await;
+    let second = fixture.reviewed().await;
+    let first = fixture.grant(&first, true).await.unwrap().connection;
+    let second = fixture.grant(&second, true).await.unwrap().connection;
+    fixture.state.write().await.mcp_manager = Some(fixture.manager.clone());
+    let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
+    assert_eq!(
+        m43_http(
+            &app,
+            &format!("/api/agents/{}", fixture.agent),
+            Some("http://localhost:4200"),
+            json!({"tools":["read_file"]})
+        )
+        .await
+        .0,
+        axum::http::StatusCode::OK
+    );
+    let native = crate::tools::ToolRegistry::new()
+        .resolve_descriptors(["read_file"])
+        .unwrap();
+    assert_eq!(
+        fixture.state.read().await.agents[&fixture.agent]
+            .config()
+            .tools,
+        Some(native.clone())
+    );
+    assert_eq!(
+        fixture
+            .persisted()
+            .await
+            .agents
+            .iter()
+            .find(|row| row.state.id == fixture.agent)
+            .unwrap()
+            .state
+            .config
+            .tools,
+        Some(native.clone())
+    );
+    assert_eq!(
+        fixture
+            .manager
+            .get(&fixture.agent, &first.record.id)
+            .await
+            .unwrap()
+            .record
+            .version,
+        first.record.version
+    );
+    assert_eq!(
+        fixture
+            .manager
+            .get(&fixture.agent, &second.record.id)
+            .await
+            .unwrap()
+            .record
+            .version,
+        second.record.version
+    );
+    let readded = fixture.grant(&second, true).await.unwrap();
+    assert!(!fixture.state.read().await.agents[&fixture.agent]
+        .config()
+        .allows_tool(&first.record.reviewed_tools[0].alias));
+    let mut expected = native;
+    expected.push(second.record.reviewed_tools[0].tool_descriptor());
+    assert_eq!(
+        fixture.state.read().await.agents[&fixture.agent]
+            .config()
+            .tools,
+        Some(expected)
+    );
+    assert_eq!(readded.connection.record.version, second.record.version + 1);
+    fixture.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn m43_deleted_connection_projection_cannot_restore_grants_and_restart_stays_disconnected() {
+    let fixture = Fixture::new().await;
+    let reviewed = fixture.reviewed().await;
+    let granted = fixture.grant(&reviewed, true).await.unwrap().connection;
+    let gate = fixture
+        .state
+        .write()
+        .await
+        .install_test_control_plane_save_gate(false);
+    let manager = fixture.manager.clone();
+    let agent = fixture.agent.clone();
+    let id = granted.record.id.clone();
+    let version = granted.record.version;
+    let pending = tokio::spawn(async move { manager.delete(&agent, &id, version).await });
+    timeout(Duration::from_secs(1), gate.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    let ordinary = fixture.state.write().await.control_plane_persist_request();
+    gate.release.add_permits(1);
+    timeout(Duration::from_secs(1), pending)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    ordinary.save().await.unwrap();
+    let persisted = fixture.persisted().await;
+    assert!(persisted.mcp_connections.is_empty());
+    assert!(!persisted
+        .agents
+        .iter()
+        .find(|row| row.state.id == fixture.agent)
+        .unwrap()
+        .state
+        .config
+        .allows_tool(&granted.record.reviewed_tools[0].alias));
+    let mut restarted = DaemonState::new();
+    restarted.restore_control_plane_snapshot(persisted).unwrap();
+    assert!(restarted.mcp_publication.read().unwrap().known.is_empty());
+    assert!(restarted.mcp_publication.read().unwrap().live.is_empty());
+    assert_eq!(
+        fixture.factory.sessions.lock().unwrap()[0]
+            .calls
+            .load(Ordering::SeqCst),
+        0
+    );
+    fixture.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn m43_active_call_revoke_fences_epoch_and_retains_physical_permit_until_close() {
+    let fixture = Fixture::new().await;
+    fixture.factory.hold_calls.store(true, Ordering::SeqCst);
+    let reviewed = fixture.reviewed().await;
+    let granted = fixture.grant(&reviewed, true).await.unwrap().connection;
+    let stamp = fixture.grant_and_stamp(&granted).await;
+    let stale_stamp = stamp.clone();
+    let session = fixture.factory.sessions.lock().unwrap()[0].clone();
+    session.hold_close.store(true, Ordering::SeqCst);
+    let manager = fixture.manager.clone();
+    let pending = tokio::spawn(async move {
+        manager
+            .invoke(stamp, json!({"value":"violet"}), CancelSignal::new())
+            .await
+    });
+    timeout(Duration::from_secs(1), session.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    let revoked = fixture.grant(&granted, false).await.unwrap();
+    assert!(!revoked.granted);
+    assert!(revoked.connection.physical_calls_active);
+    assert!(!fixture.state.read().await.agents[&fixture.agent]
+        .config()
+        .allows_tool(&granted.record.reviewed_tools[0].alias));
+    assert_eq!(
+        timeout(Duration::from_secs(1), pending)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err(),
+        McpServiceError::OutcomeUnknown
+    );
+    assert!(fixture
+        .manager
+        .invoke(stale_stamp, json!({"value":"violet"}), CancelSignal::new())
+        .await
+        .is_err());
+    assert_eq!(session.calls.load(Ordering::SeqCst), 1);
+    assert!(
+        fixture
+            .manager
+            .get(&fixture.agent, &granted.record.id)
+            .await
+            .unwrap()
+            .physical_calls_active
+    );
+    session.close_release.add_permits(1);
+    timeout(Duration::from_secs(1), async {
+        loop {
+            if !fixture
+                .manager
+                .get(&fixture.agent, &granted.record.id)
+                .await
+                .unwrap()
+                .physical_calls_active
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    fixture.manager.shutdown().await;
 }
 
 #[test]
