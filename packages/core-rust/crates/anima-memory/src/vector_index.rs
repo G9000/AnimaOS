@@ -90,6 +90,15 @@ impl<E> InMemoryVectorIndex<E> {
         embedding: &[f32],
         limit: usize,
     ) -> Result<Vec<VectorMemoryHit>, MemoryVectorError> {
+        self.search_embedding_filtered(embedding, limit, &|_| true)
+    }
+
+    pub fn search_embedding_filtered(
+        &self,
+        embedding: &[f32],
+        limit: usize,
+        eligible: &dyn Fn(&str) -> bool,
+    ) -> Result<Vec<VectorMemoryHit>, MemoryVectorError> {
         if limit == 0 || self.vectors.is_empty() {
             return Ok(Vec::new());
         }
@@ -98,6 +107,7 @@ impl<E> InMemoryVectorIndex<E> {
         let mut hits: Vec<_> = self
             .vectors
             .iter()
+            .filter(|(memory_id, _)| eligible(memory_id))
             .filter_map(|(memory_id, vector)| {
                 let score = dot(&query, vector);
                 (score > 0.0).then(|| VectorMemoryHit {
@@ -134,6 +144,22 @@ impl<E: MemoryTextEmbedder> MemoryVectorIndex for InMemoryVectorIndex<E> {
             return Vec::new();
         };
         self.search_embedding(&embedding, limit).unwrap_or_default()
+    }
+
+    fn search_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        eligible: &dyn Fn(&str) -> bool,
+    ) -> Vec<VectorMemoryHit> {
+        if limit == 0 {
+            return Vec::new();
+        }
+        let Ok(embedding) = self.embedder.embed(query) else {
+            return Vec::new();
+        };
+        self.search_embedding_filtered(&embedding, limit, eligible)
+            .unwrap_or_default()
     }
 }
 
@@ -192,6 +218,76 @@ mod tests {
                 vector_bit(contains_any(&lower, &["latency", "performance"])),
             ])
         }
+    }
+
+    #[test]
+    fn filtered_vector_search_precedes_top_k_and_preserves_scores_and_ties() {
+        let mut index = InMemoryVectorIndex::new(KeywordEmbedder);
+        for (id, vector) in [
+            ("hidden", vec![1.0, 0.0, 0.0]),
+            ("eligible-b", vec![0.5, 0.5, 0.0]),
+            ("eligible-a", vec![0.5, 0.5, 0.0]),
+            ("negative", vec![-1.0, 0.0, 0.0]),
+        ] {
+            index.upsert_embedding(id, vector).unwrap();
+        }
+        let query = [1.0, 0.0, 0.0];
+        let ordinary = index.search_embedding(&query, 4).unwrap();
+        assert_eq!(ordinary[0].memory_id, "hidden");
+        let filtered = index
+            .search_embedding_filtered(&query, 1, &|id| id.starts_with("eligible"))
+            .unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].memory_id, "eligible-a");
+        assert_eq!(filtered[0].score, ordinary[1].score);
+        assert_eq!(ordinary[1].memory_id, "eligible-a");
+        assert_eq!(ordinary[2].memory_id, "eligible-b");
+        assert_eq!(ordinary.len(), 3, "nonpositive cosine hits remain excluded");
+        assert_eq!(
+            index
+                .search_embedding_filtered(&query, 4, &|_| true)
+                .unwrap(),
+            ordinary
+        );
+        assert!(index
+            .search_embedding_filtered(&[], 0, &|_| panic!("zero limit must not inspect IDs"))
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn filtered_text_search_embeds_once_and_zero_or_failure_is_empty() {
+        use std::cell::Cell;
+
+        struct CountingEmbedder(Cell<usize>);
+        impl MemoryTextEmbedder for CountingEmbedder {
+            fn embed(&self, text: &str) -> Result<Vec<f32>, MemoryVectorError> {
+                self.0.set(self.0.get() + 1);
+                match text {
+                    "unavailable" => Err(MemoryVectorError::EmbeddingUnavailable),
+                    "wrong-dimension" => Ok(vec![1.0]),
+                    _ => Ok(vec![1.0, 0.0]),
+                }
+            }
+        }
+        let mut index = InMemoryVectorIndex::new(CountingEmbedder(Cell::new(0)));
+        index.upsert_embedding("hidden", vec![1.0, 0.0]).unwrap();
+        index.upsert_embedding("eligible", vec![0.5, 0.5]).unwrap();
+        let index_port: &dyn MemoryVectorIndex = &index;
+        assert!(index_port.search_filtered("query", 0, &|_| true).is_empty());
+        assert_eq!(index.embedder.0.get(), 0);
+        let hits = index_port.search_filtered("query", 1, &|id| id == "eligible");
+        assert_eq!(hits[0].memory_id, "eligible");
+        assert_eq!(index.embedder.0.get(), 1);
+        assert!(index_port
+            .search_filtered("unavailable", 1, &|_| true)
+            .is_empty());
+        assert!(index_port
+            .search_filtered("wrong-dimension", 1, &|_| true)
+            .is_empty());
+        assert_eq!(index.embedder.0.get(), 3);
+        assert_eq!(index_port.search("query", 1)[0].memory_id, "hidden");
+        assert_eq!(index.embedder.0.get(), 4);
     }
 
     #[test]

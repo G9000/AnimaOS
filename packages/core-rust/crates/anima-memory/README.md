@@ -4,6 +4,23 @@
 
 ## Quick usage
 
+Hybrid recall supplies canonical-record, all `MemorySearchOptions` and caller
+visibility checks through the object-safe `MemoryVectorIndex::search_filtered`
+entry. Native or overriding indexes can apply them before candidate selection;
+`InMemoryVectorIndex` applies the predicate before cosine scoring and top-k,
+preserving descending score and ID tie order.
+Recall still checks returned hits defensively and normalizes only eligible
+finite positive scores; fusion weights and exact-lexical suppression are unchanged.
+
+Existing custom indexes need not implement the new method: its default makes one
+ordinary bounded `search` request, examines at most that many returned hits and
+filters them. It cannot recover eligible records below an external index's old
+shortlist. Override it to support native-style pre-top-k filtering. The filtered
+entry returns empty at zero limit without an embedding request. Direct legacy
+`InMemoryVectorIndex::search` retains its existing embedding call at zero limit.
+Existing caller authorization remains authoritative. Persistent formats stay
+unchanged; embedding quality needs separate acceptance.
+
 ```rust
 use anima_memory::{MemoryManager, MemoryType, NewMemory, MemorySearchOptions};
 
@@ -44,12 +61,12 @@ for result in results {
 
 `MemoryType` classifies what kind of information a memory holds:
 
-| Variant | String key | Intended use |
-|---|---|---|
-| `Fact` | `"fact"` | Persistent, objective facts about the world or the user |
+| Variant       | String key      | Intended use                                              |
+| ------------- | --------------- | --------------------------------------------------------- |
+| `Fact`        | `"fact"`        | Persistent, objective facts about the world or the user   |
 | `Observation` | `"observation"` | Real-time observations made during a task or conversation |
-| `TaskResult` | `"task_result"` | Output or outcome recorded after completing a task |
-| `Reflection` | `"reflection"` | Higher-order inferences drawn from other memories |
+| `TaskResult`  | `"task_result"` | Output or outcome recorded after completing a task        |
+| `Reflection`  | `"reflection"`  | Higher-order inferences drawn from other memories         |
 
 The string keys are used internally in the search index and by host adapters that serialize domain records.
 
@@ -73,16 +90,16 @@ Use `upsert_agent_relationship(NewAgentRelationship)` to create or update one ed
 
 Relationship fields include:
 
-| Field | Description |
-|---|---|
-| `source_kind` / `target_kind` | Endpoint kind: `agent`, `user`, `system`, or `external` |
-| `source_agent_id` / `target_agent_id` | Directed edge endpoints |
-| `relationship_type` | Extensible string such as `collaborates_with`, `trusts`, `delegates_to`, or `blocks` |
-| `summary` | Optional human/model-readable description of the relationship |
-| `strength` | `0.0..=1.0` edge strength |
-| `confidence` | `0.0..=1.0` confidence in the relationship |
-| `evidence_memory_ids` | Memory IDs that support the relationship |
-| `room_id`, `world_id`, `session_id` | Optional context coordinates |
+| Field                                 | Description                                                                          |
+| ------------------------------------- | ------------------------------------------------------------------------------------ |
+| `source_kind` / `target_kind`         | Endpoint kind: `agent`, `user`, `system`, or `external`                              |
+| `source_agent_id` / `target_agent_id` | Directed edge endpoints                                                              |
+| `relationship_type`                   | Extensible string such as `collaborates_with`, `trusts`, `delegates_to`, or `blocks` |
+| `summary`                             | Optional human/model-readable description of the relationship                        |
+| `strength`                            | `0.0..=1.0` edge strength                                                            |
+| `confidence`                          | `0.0..=1.0` confidence in the relationship                                           |
+| `evidence_memory_ids`                 | Memory IDs that support the relationship                                             |
+| `room_id`, `world_id`, `session_id`   | Optional context coordinates                                                         |
 
 Use `list_agent_relationships(AgentRelationshipOptions)` to filter by any entity ID, agent ID, directed endpoint, endpoint kind, relationship type, context IDs, minimum strength/confidence, and limit.
 
@@ -100,9 +117,9 @@ Both temporal APIs support supersession. When a new record lists `supersedes_fac
 
 Temporal query options:
 
-| API | Filters |
-|---|---|
-| `list_temporal_facts(TemporalFactOptions)` | Subject kind/ID, predicate, object kind/ID, status, `valid_at`, context IDs, minimum confidence, inactive inclusion, limit |
+| API                                                        | Filters                                                                                                                           |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `list_temporal_facts(TemporalFactOptions)`                 | Subject kind/ID, predicate, object kind/ID, status, `valid_at`, context IDs, minimum confidence, inactive inclusion, limit        |
 | `list_temporal_relationships(TemporalRelationshipOptions)` | Source/target kind/ID, relationship type, status, `valid_at`, context IDs, minimum strength/confidence, inactive inclusion, limit |
 
 `get_temporal_fact(id)`, `get_temporal_relationship(id)`, `forget_temporal_fact(id)`, and `forget_temporal_relationship(id)` provide direct record access. The core crate only stores and filters these temporal records; extraction, conflict policy, and host route shape remain host responsibilities.
@@ -169,17 +186,17 @@ In the Nx workspace, run the focused harness with `bun x nx run core-rust:memory
 
 `MemorySearchOptions` fields:
 
-| Field | Type | Description |
-|---|---|---|
-| `agent_id` | `Option<String>` | Restrict results to a specific agent ID |
-| `agent_name` | `Option<String>` | Restrict results to a specific agent name |
-| `memory_type` | `Option<MemoryType>` | Restrict results to one memory type |
-| `scope` | `Option<MemoryScope>` | Restrict results to `shared`, `private`, or `room` memories |
-| `room_id` | `Option<String>` | Restrict results to a room |
-| `world_id` | `Option<String>` | Restrict results to a world |
-| `session_id` | `Option<String>` | Restrict results to a session |
-| `limit` | `Option<usize>` | Maximum number of results (default: 10) |
-| `min_importance` | `Option<f64>` | Exclude memories below this importance threshold |
+| Field            | Type                  | Description                                                 |
+| ---------------- | --------------------- | ----------------------------------------------------------- |
+| `agent_id`       | `Option<String>`      | Restrict results to a specific agent ID                     |
+| `agent_name`     | `Option<String>`      | Restrict results to a specific agent name                   |
+| `memory_type`    | `Option<MemoryType>`  | Restrict results to one memory type                         |
+| `scope`          | `Option<MemoryScope>` | Restrict results to `shared`, `private`, or `room` memories |
+| `room_id`        | `Option<String>`      | Restrict results to a room                                  |
+| `world_id`       | `Option<String>`      | Restrict results to a world                                 |
+| `session_id`     | `Option<String>`      | Restrict results to a session                               |
+| `limit`          | `Option<usize>`       | Maximum number of results (default: 10)                     |
+| `min_importance` | `Option<f64>`         | Exclude memories below this importance threshold            |
 
 Results are returned as `Vec<MemorySearchResult>`, which extends `Memory` with a `score: f64` field indicating BM25 relevance rank.
 

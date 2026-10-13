@@ -543,6 +543,21 @@ Every automation route requires local-owner authorization (the list too, since M
 
 ### Memories
 
+Native hybrid vector recall checks current canonical records and the supplied
+search filters before choosing its top vector matches. The model's
+`memory_search` also applies its existing own-agent and hidden-text checks there.
+Foreign, hidden or canonical-missing indexed IDs therefore cannot consume that tool's
+vector shortlist. Only eligible finite positive hits normalize vector scores;
+the fusion weights and exact-lexical vector suppression remain unchanged.
+
+This uses the existing embedding provider and one query embedding per nonzero
+search. The local provider has fixed synonym groups and hashed terms, so local
+fixtures do not establish general semantic quality. Automatic context remains
+lexical. External `MemoryVectorIndex` implementations that use the compatibility
+default can filter only their old bounded shortlist; native backfill is not a
+promise for those implementations. No new grants, provider configuration,
+storage format, automatic consolidation or public response shape is added.
+
 | Method | Path                              | Description                                                                                                                                                                                                                                                                                                                                                                  |
 | ------ | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `POST` | `/api/memories`                   | Store a memory. Required fields: `agentId`, `agentName`, `type`, `content`, `importance` (0-1). Optional fields: `scope` (`shared`, `private`, `room`), `roomId`, `worldId`, `sessionId`, and `tags`.                                                                                                                                                                        |
