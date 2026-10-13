@@ -769,6 +769,19 @@ describe('daemon memory requests', () => {
       includeInactive: true,
       limit: 500,
     });
+    await daemon.getMemoryViews('agent 1');
+    await daemon.memoryViewCandidates('agent 1', 'tea');
+    await daemon.selectMemoryViews('agent 1', {
+      expectedVersion: 0,
+      userProfile: [],
+      agentNotes: [],
+    });
+    await daemon.correctMemoryViewSource('agent 1', 'm 1', {
+      expectedVersion: 0,
+      expectedContent: 'Old',
+      expectedSourceHash: 'hash',
+      content: 'New',
+    });
     await daemon.replaceFact('f 1', 'Value');
     await daemon.deleteFact('f 1');
     await daemon.listMemoryEntities(200);
@@ -787,6 +800,10 @@ describe('daemon memory requests', () => {
       'DELETE /api/memories/m%201',
       'POST /api/memories',
       'GET /api/memories/facts?agentId=agent+1&includeInactive=true&limit=500',
+      'GET /api/agents/agent%201/memory-views',
+      'GET /api/agents/agent%201/memory-views/candidates?q=tea',
+      'PATCH /api/agents/agent%201/memory-views',
+      'PATCH /api/agents/agent%201/memory-views/sources/m%201',
       'PATCH /api/memories/facts/f%201',
       'DELETE /api/memories/facts/f%201',
       'GET /api/memories/entities?limit=200',

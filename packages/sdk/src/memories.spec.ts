@@ -49,6 +49,52 @@ const fact: MemoryFact = {
 };
 
 describe('memories client: edits, facts, and entities', () => {
+  it('reads, searches, selects and corrects owner memory views with exact CAS payloads', async () => {
+    const view = {
+      version: 4,
+      viewDigest: 'digest-4',
+      userProfile: [
+        { id: 'fact-1', content: 'Short answers', sourceHash: 'hash-1' },
+      ],
+      agentNotes: [],
+      unavailable: [],
+    };
+    const { memories, requests } = transport((url) =>
+      url.includes('/candidates')
+        ? Response.json({ candidates: view.userProfile, hasMore: false })
+        : Response.json(view),
+    );
+    const input = {
+      expectedVersion: 4,
+      userProfile: [{ id: 'fact-1', sourceHash: 'hash-1' }],
+      agentNotes: [],
+    };
+    const correction = {
+      expectedVersion: 4,
+      expectedContent: 'Short answers',
+      expectedSourceHash: 'hash-1',
+      content: 'Keep answers short.',
+    };
+
+    expect(await memories.getViews('agent/a')).toEqual(view);
+    expect(await memories.viewCandidates('agent/a', 'answers')).toEqual({
+      candidates: view.userProfile,
+      hasMore: false,
+    });
+    expect(await memories.selectViews('agent/a', input)).toEqual(view);
+    expect(
+      await memories.correctViewSource('agent/a', 'fact 1', correction),
+    ).toEqual(view);
+    expect(requests.map(({ url }) => url)).toEqual([
+      '/api/agents/agent%2Fa/memory-views',
+      '/api/agents/agent%2Fa/memory-views/candidates?q=answers',
+      '/api/agents/agent%2Fa/memory-views',
+      '/api/agents/agent%2Fa/memory-views/sources/fact%201',
+    ]);
+    expect(requests[2]?.init?.body).toBe(JSON.stringify(input));
+    expect(requests[3]?.init?.body).toBe(JSON.stringify(correction));
+  });
+
   it('update sends a PATCH with only the given fields', async () => {
     const { memories, requests } = transport(() =>
       Response.json({ id: 'm1', content: 'new' }),

@@ -14,9 +14,18 @@ pub(crate) fn default_providers(
     memory: SharedMemoryStore,
     memory_embeddings: SharedMemoryEmbeddings,
 ) -> Vec<Arc<dyn Provider>> {
+    default_providers_with_memory_views(memory, memory_embeddings, Default::default())
+}
+
+pub(crate) fn default_providers_with_memory_views(
+    memory: SharedMemoryStore,
+    memory_embeddings: SharedMemoryEmbeddings,
+    selections: crate::memory_views::SharedMemoryViewSelections,
+) -> Vec<Arc<dyn Provider>> {
     vec![Arc::new(RecentMemoriesProvider {
         memory,
         memory_embeddings,
+        selections,
     })]
 }
 

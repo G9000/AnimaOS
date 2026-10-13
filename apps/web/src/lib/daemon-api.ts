@@ -19,6 +19,8 @@ import {
   type AutomationTrigger,
   type HeartbeatInput,
   type MemoryFactOptions,
+  type MemoryViewsSelectionInput,
+  type MemoryViewCorrectionInput,
   type LogLevel,
   type LogsQuery,
   type MemoryPatch,
@@ -488,6 +490,20 @@ export const daemon = {
   saveMemory: (input: CreateMemoryInput) => setupClient.memories.create(input),
   listFacts: (options: MemoryFactOptions) =>
     setupClient.memories.facts(options),
+  getMemoryViews: (agentId: string, options: { signal?: AbortSignal } = {}) =>
+    setupClient.memories.getViews(agentId, options),
+  selectMemoryViews: (agentId: string, input: MemoryViewsSelectionInput) =>
+    setupClient.memories.selectViews(agentId, input),
+  memoryViewCandidates: (
+    agentId: string,
+    query?: string,
+    options: { signal?: AbortSignal } = {},
+  ) => setupClient.memories.viewCandidates(agentId, query, options),
+  correctMemoryViewSource: (
+    agentId: string,
+    sourceId: string,
+    input: MemoryViewCorrectionInput,
+  ) => setupClient.memories.correctViewSource(agentId, sourceId, input),
   replaceFact: (id: string, value: string) =>
     setupClient.memories.replaceFact(id, value),
   deleteFact: (id: string) => setupClient.memories.deleteFact(id),

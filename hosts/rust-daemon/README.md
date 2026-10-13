@@ -105,6 +105,8 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/workspace/inspect`                                                                     |
 | `GET`    | `/api/workspace`                                                                             |
 | `GET`    | `/api/agents/{agent_id}/learning-policy`                                                     |
+| `GET`    | `/api/agents/{agent_id}/memory-views`                                                        |
+| `GET`    | `/api/agents/{agent_id}/memory-views/candidates`                                             |
 | `GET`    | `/api/agents/{agent_id}/learning-reviews/{review_id}`                                        |
 | `GET`    | `/api/agents/{agent_id}/learning-reviews`                                                    |
 | `PATCH`  | `/api/agents/{agent_id}/connectors/discord/{connector_id}`                                   |
@@ -115,6 +117,8 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `PATCH`  | `/api/memories/facts/{fact_id}`                                                              |
 | `PATCH`  | `/api/skills/{slug}`                                                                         |
 | `PATCH`  | `/api/agents/{agent_id}/learning-policy`                                                     |
+| `PATCH`  | `/api/agents/{agent_id}/memory-views`                                                        |
+| `PATCH`  | `/api/agents/{agent_id}/memory-views/sources/{memory_id}`                                    |
 | `PATCH`  | `/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}`                |
 | `POST`   | `/api/agencies/create`                                                                       |
 | `POST`   | `/api/agencies/generate`                                                                     |
