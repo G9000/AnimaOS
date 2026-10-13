@@ -182,3 +182,10 @@ local embeddings, without another chat-model request, service, private profile o
 remote provider call. The prior M35 live case remains evidence at its recorded
 revision, not a repeated live test of M36. See the
 [M36 plan](../superpowers/plans/2026-10-13-companion-memory-m36.md).
+
+The complete scoped follow-up work is now locked in the
+[capability parity roadmap](parity-roadmap.md). Its twelve work items distinguish
+implementation, synthetic-local acceptance, account acceptance and host
+acceptance. The first M38 plan covers budgeted task-learning advice; reviewed
+adoption and fresh-task reuse are a separate step. Planning completion does not
+change the evidence above or establish full Hermes parity.
