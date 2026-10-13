@@ -86,6 +86,13 @@ can still return those historical notes. This reduces active facts, not storage,
 and the summary still needs judgment about accuracy. Exact duplicate default-scope
 Fact saves reuse the existing record without changing its importance or tags;
 paraphrases and case differences remain separate.
+
+A bounded synthetic acceptance also exercised one model-authored consolidation
+of two dragonfruit-allergy facts and one fresh Spanish recall after a quiet
+same-store restart with no tools. See the
+[harness evidence](harness-acceptance.md); this single example is not a general
+accuracy guarantee.
+
 Explicit search now filters eligible records before its lexical result limit, so
 stronger foreign matches cannot hide your matching facts. Search and recent reads
 exclude hidden text in record IDs, content and tags before limiting results;
