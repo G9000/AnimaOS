@@ -107,6 +107,14 @@ model loading may download public weights. A fixed English/Spanish learned
 test verifies ranking and actual fact injection. General semantic quality and
 third-party index coverage remain unverified. The native local-index fixture passes;
 a custom index using the legacy fallback can only filter its existing shortlist.
+
+The native vector cache now checks the exact saved text before reusing a vector.
+A stale vector cannot influence semantic ranking after a correction; the current
+fact remains available through lexical recall while reindexing is pending.
+Older cache rows without a text fingerprint rebuild once using the selected
+backend. A configured remote backend can make embedding requests during this
+rebuild. This changes the derived cache, not your saved facts or citations.
+
 Use Files to inspect the chosen workspace. Attach text or an image when useful;
 vision requires a compatible model. PDF/Office attachments can be stored and
 retrieved, but their contents are not parsed by this feature set.

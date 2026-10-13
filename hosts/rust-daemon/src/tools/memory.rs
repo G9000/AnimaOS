@@ -55,6 +55,7 @@ pub(super) fn execute_memory_search(
         let results = {
             let memory_guard = context.memory.read().await;
             let embeddings_guard = context.memory_embeddings.read().await;
+            let vector_index = embeddings_guard.for_memories(&memory_guard);
             memory_guard.recall_with_vector_index_filtered(
                 &query,
                 MemoryRecallOptions {
@@ -73,7 +74,7 @@ pub(super) fn execute_memory_search(
                     recent_limit: Some(0),
                     ..MemoryRecallOptions::default()
                 },
-                Some(&*embeddings_guard),
+                Some(&vector_index),
                 visible_memory,
             )
         };

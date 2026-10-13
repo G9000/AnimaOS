@@ -266,7 +266,8 @@ pub(crate) async fn handle_recall_memories(
         };
         let memory_guard = memory.read().await;
         let embeddings_guard = embeddings.read().await;
-        memory_guard.recall_with_vector_index(&search_query, options, Some(&*embeddings_guard))
+        let vector_index = embeddings_guard.for_memories(&memory_guard);
+        memory_guard.recall_with_vector_index(&search_query, options, Some(&vector_index))
     };
 
     Ok(MemoryRecallEnvelope {

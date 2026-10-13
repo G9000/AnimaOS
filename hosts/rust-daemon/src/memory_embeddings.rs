@@ -5,13 +5,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anima_memory::{
-    InMemoryVectorIndex, Memory, MemoryTextEmbedder, MemoryVectorError, MemoryVectorIndex,
-    VectorMemoryHit,
+    InMemoryVectorIndex, Memory, MemoryManager, MemoryTextEmbedder, MemoryVectorError,
+    MemoryVectorIndex, VectorMemoryHit,
 };
 use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
 use reqwest::blocking::Client as BlockingHttpClient;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tokio::sync::RwLock as AsyncRwLock;
 use tracing::warn;
 
@@ -56,6 +57,7 @@ pub(crate) struct MemoryEmbeddingRuntime {
     enabled: bool,
     embedder: MemoryEmbeddingProvider,
     index: InMemoryVectorIndex<MemoryEmbeddingProvider>,
+    indexed_content: HashMap<String, [u8; 32]>,
     store: Option<SqliteMemoryEmbeddingStore>,
 }
 
@@ -91,6 +93,7 @@ impl MemoryEmbeddingRuntime {
             enabled: true,
             embedder: embedder.clone(),
             index: InMemoryVectorIndex::new(embedder),
+            indexed_content: HashMap::new(),
             store: None,
         }
     }
@@ -102,6 +105,7 @@ impl MemoryEmbeddingRuntime {
             enabled: false,
             embedder: embedder.clone(),
             index: InMemoryVectorIndex::new(embedder),
+            indexed_content: HashMap::new(),
             store: None,
         }
     }
@@ -204,6 +208,7 @@ impl MemoryEmbeddingRuntime {
             enabled: true,
             embedder: embedder.clone(),
             index: InMemoryVectorIndex::new(embedder),
+            indexed_content: HashMap::new(),
             store: None,
         }
     }
@@ -239,6 +244,21 @@ impl MemoryEmbeddingRuntime {
         })
     }
 
+    pub(crate) fn matches_current(&self, memory: &Memory) -> bool {
+        self.enabled
+            && self.indexed_content.get(&memory.id) == Some(&content_digest(&memory.content))
+    }
+
+    pub(crate) fn for_memories<'a>(
+        &'a self,
+        memories: &'a MemoryManager,
+    ) -> CurrentMemoryVectorIndex<'a> {
+        CurrentMemoryVectorIndex {
+            runtime: self,
+            memories,
+        }
+    }
+
     pub(crate) fn search_precomputed_query(
         &self,
         model_key: &str,
@@ -260,6 +280,7 @@ impl MemoryEmbeddingRuntime {
     ) -> Result<MemoryEmbeddingRebuildReport, String> {
         let mut report = MemoryEmbeddingRebuildReport::default();
         self.index.clear();
+        self.indexed_content.clear();
         if !self.enabled {
             return Ok(report);
         }
@@ -273,7 +294,7 @@ impl MemoryEmbeddingRuntime {
                     && stored.model == storage_model
                     && self.embedder.accepts_dimension(stored.vector.len())
                 {
-                    stored_by_id.insert(stored.memory_id, stored.vector);
+                    stored_by_id.insert(stored.memory_id, (stored.vector, stored.content_hash));
                 }
             }
             report.removed_stale_vectors = store
@@ -282,12 +303,15 @@ impl MemoryEmbeddingRuntime {
         }
 
         for memory in memories {
-            if let Some(vector) = stored_by_id.remove(&memory.id) {
-                if self
-                    .index
-                    .upsert_embedding(memory.id.clone(), vector)
-                    .is_ok()
+            let digest = content_digest(&memory.content);
+            if let Some((vector, Some(stored_digest))) = stored_by_id.remove(&memory.id) {
+                if stored_digest == digest
+                    && self
+                        .index
+                        .upsert_embedding(memory.id.clone(), vector)
+                        .is_ok()
                 {
+                    self.indexed_content.insert(memory.id.clone(), digest);
                     report.loaded_vectors += 1;
                     continue;
                 }
@@ -300,9 +324,10 @@ impl MemoryEmbeddingRuntime {
             self.index
                 .upsert_embedding(memory.id.clone(), vector.clone())
                 .map_err(|error| error.message().to_string())?;
+            self.indexed_content.insert(memory.id.clone(), digest);
             if let Some(store) = &self.store {
                 store
-                    .upsert(&memory.id, &storage_model, &vector)
+                    .upsert(&memory.id, &storage_model, &vector, &digest)
                     .map_err(|error| error.to_string())?;
             }
             report.rebuilt_vectors += 1;
@@ -322,9 +347,11 @@ impl MemoryEmbeddingRuntime {
         self.index
             .upsert_embedding(memory.id.clone(), vector.clone())
             .map_err(|error| error.message().to_string())?;
+        let digest = content_digest(&memory.content);
+        self.indexed_content.insert(memory.id.clone(), digest);
         if let Some(store) = &self.store {
             store
-                .upsert(&memory.id, &self.embedder.storage_model(), &vector)
+                .upsert(&memory.id, &self.embedder.storage_model(), &vector, &digest)
                 .map_err(|error| error.to_string())?;
         }
         Ok(())
@@ -333,6 +360,7 @@ impl MemoryEmbeddingRuntime {
     pub(crate) fn remove_memories(&mut self, memory_ids: &[String]) -> Result<(), String> {
         for memory_id in memory_ids {
             self.index.remove(memory_id);
+            self.indexed_content.remove(memory_id);
         }
         if let Some(store) = &self.store {
             store
@@ -341,6 +369,55 @@ impl MemoryEmbeddingRuntime {
         }
         Ok(())
     }
+}
+
+pub(crate) struct CurrentMemoryVectorIndex<'a> {
+    runtime: &'a MemoryEmbeddingRuntime,
+    memories: &'a MemoryManager,
+}
+
+impl MemoryVectorIndex for CurrentMemoryVectorIndex<'_> {
+    fn search(&self, query: &str, limit: usize) -> Vec<VectorMemoryHit> {
+        self.search_filtered(query, limit, &|_| true)
+    }
+
+    fn search_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        eligible: &dyn Fn(&str) -> bool,
+    ) -> Vec<VectorMemoryHit> {
+        self.runtime.search_filtered(query, limit, &|id| {
+            eligible(id)
+                && self
+                    .memories
+                    .get(id)
+                    .is_some_and(|memory| self.runtime.matches_current(&memory))
+        })
+    }
+}
+
+fn content_digest(content: &str) -> [u8; 32] {
+    Sha256::digest(content.as_bytes()).into()
+}
+
+fn encode_digest(digest: &[u8; 32]) -> String {
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn decode_digest(value: &str) -> Option<[u8; 32]> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return None;
+    }
+    let mut digest = [0; 32];
+    for (index, byte) in digest.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16).ok()?;
+    }
+    Some(digest)
 }
 
 impl MemoryVectorIndex for MemoryEmbeddingRuntime {
@@ -760,6 +837,7 @@ struct StoredEmbedding {
     memory_id: String,
     model: String,
     vector: Vec<f32>,
+    content_hash: Option<[u8; 32]>,
 }
 
 impl SqliteMemoryEmbeddingStore {
@@ -784,7 +862,9 @@ impl SqliteMemoryEmbeddingStore {
     }
 
     fn ensure_schema(&self) -> io::Result<()> {
-        self.connection()?
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        transaction
             .execute_batch(
                 r#"
                 CREATE TABLE IF NOT EXISTS memory_embedding_schema (
@@ -797,24 +877,48 @@ impl SqliteMemoryEmbeddingStore {
                     model TEXT NOT NULL,
                     dimension INTEGER NOT NULL,
                     vector_json TEXT NOT NULL,
+                    content_hash TEXT,
                     updated_at TEXT NOT NULL
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_memory_embeddings_model
                     ON memory_embeddings(model);
 
-                INSERT OR REPLACE INTO memory_embedding_schema(key, value)
-                    VALUES ('version', '1');
                 "#,
             )
-            .map_err(sqlite_error)
+            .map_err(sqlite_error)?;
+        let has_content_hash = {
+            let mut statement = transaction
+                .prepare("PRAGMA table_info(memory_embeddings)")
+                .map_err(sqlite_error)?;
+            let columns = statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .map_err(sqlite_error)?;
+            let mut found = false;
+            for column in columns {
+                found |= column.map_err(sqlite_error)? == "content_hash";
+            }
+            found
+        };
+        if !has_content_hash {
+            transaction
+                .execute_batch("ALTER TABLE memory_embeddings ADD COLUMN content_hash TEXT")
+                .map_err(sqlite_error)?;
+        }
+        transaction
+            .execute(
+                "INSERT OR REPLACE INTO memory_embedding_schema(key,value) VALUES ('version','2')",
+                [],
+            )
+            .map_err(sqlite_error)?;
+        transaction.commit().map_err(sqlite_error)
     }
 
     fn load_all(&self) -> io::Result<Vec<StoredEmbedding>> {
         let connection = self.connection()?;
         let mut statement = connection
             .prepare(
-                "SELECT memory_id, model, dimension, vector_json FROM memory_embeddings ORDER BY memory_id",
+                "SELECT memory_id, model, dimension, vector_json, content_hash FROM memory_embeddings ORDER BY memory_id",
             )
             .map_err(sqlite_error)?;
         let mut rows = statement.query([]).map_err(sqlite_error)?;
@@ -829,6 +933,11 @@ impl SqliteMemoryEmbeddingStore {
                 .try_into()
                 .unwrap_or(0);
             let raw: String = row.get(3).map_err(sqlite_error)?;
+            let content_hash = row
+                .get::<_, Option<String>>(4)
+                .map_err(sqlite_error)?
+                .as_deref()
+                .and_then(decode_digest);
             let Ok(vector) = serde_json::from_str::<Vec<f32>>(&raw) else {
                 warn!(memory_id = %memory_id, "skipping malformed persisted memory embedding");
                 continue;
@@ -841,24 +950,32 @@ impl SqliteMemoryEmbeddingStore {
                 memory_id,
                 model,
                 vector,
+                content_hash,
             });
         }
 
         Ok(embeddings)
     }
 
-    fn upsert(&self, memory_id: &str, model: &str, vector: &[f32]) -> io::Result<()> {
+    fn upsert(
+        &self,
+        memory_id: &str,
+        model: &str,
+        vector: &[f32],
+        digest: &[u8; 32],
+    ) -> io::Result<()> {
         let vector_json = serde_json::to_string(vector).map_err(json_error)?;
         self.connection()?
             .execute(
                 r#"
-                INSERT INTO memory_embeddings(memory_id, model, dimension, vector_json, updated_at)
-                VALUES (?1, ?2, ?3, ?4, ?5)
+                INSERT INTO memory_embeddings(memory_id, model, dimension, vector_json, updated_at, content_hash)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                 ON CONFLICT(memory_id) DO UPDATE SET
                     model = excluded.model,
                     dimension = excluded.dimension,
                     vector_json = excluded.vector_json,
-                    updated_at = excluded.updated_at
+                    updated_at = excluded.updated_at,
+                    content_hash = excluded.content_hash
                 "#,
                 params![
                     memory_id,
@@ -866,6 +983,7 @@ impl SqliteMemoryEmbeddingStore {
                     vector.len() as i64,
                     vector_json,
                     anima_core::primitives::now_millis().to_string(),
+                    encode_digest(digest),
                 ],
             )
             .map(|_| ())
@@ -1232,6 +1350,331 @@ mod tests {
     }
 
     #[test]
+    fn memory_embedding_content_identity_rebuilds_changed_text_cache() {
+        let path = temp_sqlite_path("content-identity");
+        let _ = remove_file(&path);
+        let original = test_memory("changed", "Operator wants concise ship notes");
+        let neighbor = test_memory("neighbor", "Operator wants concise ship notes");
+        let mut first = MemoryEmbeddingRuntime::local(DEFAULT_EMBEDDING_DIMENSION);
+        first.store = Some(SqliteMemoryEmbeddingStore::new(path.clone()).unwrap());
+        first.upsert_memory(&original).unwrap();
+        first.upsert_memory(&neighbor).unwrap();
+        assert_eq!(first.search(&original.content, 1)[0].memory_id, original.id);
+
+        // Simulate canonical persistence succeeding before a vector rewrite: same
+        // ID/model/dimension, but the full current text now describes another fact.
+        let mut changed = original.clone();
+        changed.content = "Billing ledger exports include invoice IDs".into();
+        let canonical = vec![changed.clone(), neighbor.clone()];
+        assert_eq!(canonical[1], neighbor);
+        let mut fresh = MemoryEmbeddingRuntime::local(DEFAULT_EMBEDDING_DIMENSION);
+        for memory in &canonical {
+            fresh.upsert_memory(memory).unwrap();
+        }
+        assert_eq!(fresh.search(&original.content, 1)[0].memory_id, neighbor.id);
+        assert_eq!(fresh.search(&changed.content, 1)[0].memory_id, changed.id);
+        assert_ne!(
+            first.search(&original.content, 2),
+            fresh.search(&original.content, 2)
+        );
+
+        let mut restored = MemoryEmbeddingRuntime::local(DEFAULT_EMBEDDING_DIMENSION);
+        restored.store = Some(SqliteMemoryEmbeddingStore::new(path.clone()).unwrap());
+        let report = restored.rebuild_from_memories(&canonical).unwrap();
+        assert_eq!(
+            report.rebuilt_vectors, 1,
+            "changed canonical text must invalidate its old cached vector"
+        );
+        assert_eq!(
+            report.loaded_vectors, 1,
+            "the unchanged neighbor retains its cached vector"
+        );
+        for query in [&original.content, &changed.content] {
+            assert_eq!(restored.search(query, 2), fresh.search(query, 2));
+        }
+        assert_eq!(canonical, vec![changed, neighbor]);
+        drop(first);
+        drop(restored);
+        let _ = remove_file(&path);
+    }
+
+    #[test]
+    fn memory_embedding_content_identity_migrates_legacy_null_cache_once() {
+        let path = temp_sqlite_path("legacy-content-hash");
+        let _ = remove_file(&path);
+        let memory = test_memory("legacy", "Operator wants concise ship notes");
+        let vector = LocalMemoryEmbedder::new(DEFAULT_EMBEDDING_DIMENSION)
+            .embed(&memory.content)
+            .unwrap();
+        let connection = Connection::open(&path).unwrap();
+        connection.execute_batch("CREATE TABLE memory_embedding_schema(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+            INSERT INTO memory_embedding_schema VALUES('version','1');
+            CREATE TABLE memory_embeddings(memory_id TEXT PRIMARY KEY,model TEXT NOT NULL,dimension INTEGER NOT NULL,vector_json TEXT NOT NULL,updated_at TEXT NOT NULL);").unwrap();
+        connection
+            .execute(
+                "INSERT INTO memory_embeddings VALUES(?1,?2,?3,?4,'1')",
+                params![
+                    memory.id,
+                    LOCAL_MODEL,
+                    DEFAULT_EMBEDDING_DIMENSION as i64,
+                    serde_json::to_string(&vector).unwrap()
+                ],
+            )
+            .unwrap();
+        drop(connection);
+        let store = SqliteMemoryEmbeddingStore::new(path.clone()).unwrap();
+        assert_eq!(
+            store.load_all().unwrap()[0].content_hash,
+            None,
+            "legacy identity is never a wildcard"
+        );
+        let mut runtime = MemoryEmbeddingRuntime::local_default();
+        runtime.store = Some(store);
+        assert_eq!(
+            runtime
+                .rebuild_from_memories(std::slice::from_ref(&memory))
+                .unwrap()
+                .rebuilt_vectors,
+            1
+        );
+        assert!(runtime.matches_current(&memory));
+        let store = SqliteMemoryEmbeddingStore::new(path.clone()).unwrap();
+        store.ensure_schema().unwrap();
+        let version: String = store
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT value FROM memory_embedding_schema WHERE key='version'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, "2");
+        assert_eq!(
+            store.load_all().unwrap()[0].content_hash,
+            Some(content_digest(&memory.content))
+        );
+        let mut reloaded = MemoryEmbeddingRuntime::local_default();
+        reloaded.store = Some(store);
+        let report = reloaded
+            .rebuild_from_memories(std::slice::from_ref(&memory))
+            .unwrap();
+        assert_eq!((report.loaded_vectors, report.rebuilt_vectors), (1, 0));
+        let _ = remove_file(path);
+    }
+
+    #[test]
+    fn memory_embedding_content_identity_rejects_bad_hash_model_dimension_and_zero_vector() {
+        for case in 0..5 {
+            let path = temp_sqlite_path("invalid-content-cache");
+            let _ = remove_file(&path);
+            let memory = test_memory("current", "Billing invoice ledger");
+            let mut runtime = MemoryEmbeddingRuntime::local_default();
+            runtime.store = Some(SqliteMemoryEmbeddingStore::new(path.clone()).unwrap());
+            runtime.upsert_memory(&memory).unwrap();
+            let connection = runtime.store.as_ref().unwrap().connection().unwrap();
+            match case {
+                0 => {
+                    connection
+                        .execute(
+                            "UPDATE memory_embeddings SET content_hash=?1",
+                            ["G".repeat(64)],
+                        )
+                        .unwrap();
+                }
+                1 => {
+                    connection
+                        .execute(
+                            "UPDATE memory_embeddings SET content_hash=?1",
+                            [encode_digest(&content_digest("old text"))],
+                        )
+                        .unwrap();
+                }
+                2 => {
+                    connection
+                        .execute("UPDATE memory_embeddings SET model='other-model'", [])
+                        .unwrap();
+                }
+                3 => {
+                    connection
+                        .execute(
+                            "UPDATE memory_embeddings SET dimension=2,vector_json='[1,0]'",
+                            [],
+                        )
+                        .unwrap();
+                }
+                _ => {
+                    connection
+                        .execute(
+                            "UPDATE memory_embeddings SET vector_json=?1",
+                            [
+                                serde_json::to_string(&vec![0.0_f32; DEFAULT_EMBEDDING_DIMENSION])
+                                    .unwrap(),
+                            ],
+                        )
+                        .unwrap();
+                }
+            }
+            drop(connection);
+            let report = runtime
+                .rebuild_from_memories(std::slice::from_ref(&memory))
+                .unwrap();
+            assert_eq!(
+                (report.loaded_vectors, report.rebuilt_vectors),
+                (0, 1),
+                "case {case}"
+            );
+            assert!(runtime.matches_current(&memory));
+            assert_eq!(
+                runtime
+                    .rebuild_from_memories(std::slice::from_ref(&memory))
+                    .unwrap()
+                    .loaded_vectors,
+                1,
+                "repaired case {case} loads next time"
+            );
+            let _ = remove_file(path);
+        }
+    }
+
+    #[test]
+    fn memory_embedding_content_identity_filters_failed_and_late_old_upserts_before_top_k() {
+        let original = test_memory("a-stale", "Operator wants concise ship notes");
+        let current_match = test_memory("b-current", &original.content);
+        let neighbor = test_memory("neighbor", "Bicycle chain requires oil");
+        let mut runtime = MemoryEmbeddingRuntime::local_default();
+        for memory in [&original, &current_match, &neighbor] {
+            runtime.upsert_memory(memory).unwrap();
+        }
+        let before_hits = runtime.search(&original.content, 3);
+        let mut changed = original.clone();
+        changed.content = "!!!".into();
+        assert!(runtime.upsert_memory(&changed).is_err());
+        assert_eq!(runtime.search(&original.content, 3), before_hits);
+        assert!(runtime.matches_current(&original));
+        assert!(
+            !runtime.matches_current(&changed),
+            "failed embedding cannot relabel the old vector"
+        );
+        changed.content = "Billing invoice ledger".into();
+        runtime.upsert_memory(&changed).unwrap();
+        assert!(runtime.matches_current(&changed));
+        runtime.upsert_memory(&original).unwrap(); // A delayed old snapshot wins the index write.
+        assert!(!runtime.matches_current(&changed));
+        let canonical = vec![changed.clone(), current_match.clone(), neighbor.clone()];
+        let mut manager = MemoryManager::new();
+        manager.replace_snapshot(anima_memory::MemoryManagerSnapshot {
+            memories: canonical.clone(),
+            ..Default::default()
+        });
+        assert_eq!(
+            runtime.search(&original.content, 1)[0].memory_id,
+            original.id
+        );
+        assert_eq!(
+            runtime.for_memories(&manager).search(&original.content, 1)[0].memory_id,
+            current_match.id
+        );
+        assert!(runtime
+            .for_memories(&manager)
+            .search_filtered(&original.content, 1, &|id| id == original.id)
+            .is_empty());
+        assert_eq!(manager.snapshot().memories, canonical);
+        let mut exact = current_match.clone();
+        for text in [
+            format!(" {}", exact.content),
+            format!("{} ", exact.content),
+            format!("{}é", exact.content),
+        ] {
+            exact.content = text;
+            assert!(
+                !runtime.matches_current(&exact),
+                "identity is full exact UTF8, not normalized"
+            );
+        }
+        let long = test_memory("long", &format!("{}first", "ship ".repeat(200)));
+        runtime.upsert_memory(&long).unwrap();
+        let mut changed_tail = long.clone();
+        changed_tail.content = format!("{}other", "ship ".repeat(200));
+        assert!(
+            !runtime.matches_current(&changed_tail),
+            "identity includes text beyond context excerpts"
+        );
+        assert!(
+            !runtime
+                .for_memories(&manager)
+                .search(&long.content, 10)
+                .iter()
+                .any(|hit| hit.memory_id == long.id),
+            "missing canonical ID is excluded"
+        );
+    }
+
+    #[test]
+    fn memory_embedding_content_identity_pairs_cache_failure_and_remove_clear_lifecycle() {
+        let path = temp_sqlite_path("content-pair-lifecycle");
+        let _ = remove_file(&path);
+        let original = test_memory("current", "Operator wants concise ship notes");
+        let neighbor = test_memory("neighbor", "Bicycle chain oil");
+        let mut runtime = MemoryEmbeddingRuntime::local_default();
+        runtime.store = Some(SqliteMemoryEmbeddingStore::new(path.clone()).unwrap());
+        runtime.upsert_memory(&original).unwrap();
+        runtime.upsert_memory(&neighbor).unwrap();
+        runtime.store.as_ref().unwrap().connection().unwrap().execute_batch("CREATE TRIGGER deny_cache_write BEFORE INSERT ON memory_embeddings BEGIN SELECT RAISE(FAIL,'synthetic cache failure'); END;").unwrap();
+        let mut changed = original.clone();
+        changed.content = "Billing invoice ledger".into();
+        assert!(runtime.upsert_memory(&changed).is_err());
+        assert!(
+            runtime.matches_current(&changed),
+            "in-memory successful vector/hash remains truthful after cache failure"
+        );
+        assert!(!runtime.matches_current(&original));
+        assert_eq!(
+            runtime
+                .store
+                .as_ref()
+                .unwrap()
+                .load_all()
+                .unwrap()
+                .iter()
+                .find(|row| row.memory_id == original.id)
+                .unwrap()
+                .content_hash,
+            Some(content_digest(&original.content))
+        );
+        runtime
+            .store
+            .as_ref()
+            .unwrap()
+            .connection()
+            .unwrap()
+            .execute_batch("DROP TRIGGER deny_cache_write")
+            .unwrap();
+        let report = runtime
+            .rebuild_from_memories(&[changed.clone(), neighbor.clone()])
+            .unwrap();
+        assert_eq!((report.rebuilt_vectors, report.loaded_vectors), (1, 1));
+        runtime
+            .remove_memories(std::slice::from_ref(&changed.id))
+            .unwrap();
+        assert!(!runtime.matches_current(&changed));
+        assert!(runtime.matches_current(&neighbor));
+        assert!(!runtime.indexed_content.contains_key(&changed.id));
+        assert_eq!(runtime.status().vector_count, 1);
+        runtime.rebuild_from_memories(&[]).unwrap();
+        assert_eq!(runtime.status().vector_count, 0);
+        assert!(runtime.indexed_content.is_empty());
+        assert!(runtime
+            .store
+            .as_ref()
+            .unwrap()
+            .load_all()
+            .unwrap()
+            .is_empty());
+        let _ = remove_file(path);
+    }
+
+    #[test]
     fn sqlite_store_skips_corrupt_vectors_and_rebuilds() {
         let path = temp_sqlite_path("corrupt");
         let _ = remove_file(&path);
@@ -1267,7 +1710,12 @@ mod tests {
         let _ = remove_file(&path);
         let store = SqliteMemoryEmbeddingStore::new(path.clone()).expect("store opens");
         store
-            .upsert("stale", LOCAL_MODEL, &[1.0, 0.0, 0.0])
+            .upsert(
+                "stale",
+                LOCAL_MODEL,
+                &[1.0, 0.0, 0.0],
+                &content_digest("stale"),
+            )
             .expect("stale vector inserts");
         let mut runtime = MemoryEmbeddingRuntime::local(DEFAULT_EMBEDDING_DIMENSION);
         runtime.store = Some(store);
