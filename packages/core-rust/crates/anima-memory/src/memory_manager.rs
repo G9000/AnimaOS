@@ -323,20 +323,27 @@ impl MemoryManager {
         }
 
         if let Some(vector_index) = vector_index {
-            let vector_hits = vector_index.search(query, lexical_limit);
+            let eligible = |memory_id: &str| {
+                self.memories.get(memory_id).is_some_and(|memory| {
+                    memory_matches_search_options(memory, &opts.search) && visible(memory)
+                })
+            };
+            // Bound and recheck adapter output before it can affect candidate scores.
+            let vector_hits: Vec<_> = vector_index
+                .search_filtered(query, lexical_limit, &eligible)
+                .into_iter()
+                .take(lexical_limit)
+                .filter(|hit| hit.score.is_finite() && hit.score > 0.0 && eligible(&hit.memory_id))
+                .collect();
             let max_vector_score = vector_hits
                 .iter()
-                .filter(|hit| hit.score.is_finite() && hit.score > 0.0)
                 .map(|hit| hit.score)
                 .fold(0.0_f64, f64::max);
             for hit in vector_hits {
                 let Some(memory) = self.memories.get(&hit.memory_id) else {
                     continue;
                 };
-                if !memory_matches_search_options(memory, &opts.search) || !visible(memory) {
-                    continue;
-                }
-                if max_vector_score > 0.0 && hit.score.is_finite() && hit.score > 0.0 {
+                if max_vector_score > 0.0 {
                     let candidate = recall_candidate(&mut candidates, memory);
                     candidate.vector_score =
                         candidate.vector_score.max(hit.score / max_vector_score);

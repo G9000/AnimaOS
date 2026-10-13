@@ -510,6 +510,26 @@ pub struct VectorMemoryHit {
 
 pub trait MemoryVectorIndex {
     fn search(&self, query: &str, limit: usize) -> Vec<VectorMemoryHit>;
+
+    /// Search eligible memory IDs. Filtering-aware indexes should apply eligibility before top-k.
+    /// The compatible fallback examines at most the old search's first `limit` hits and cannot
+    /// backfill eligible matches that fall outside that candidate pool.
+    /// Eligibility callbacks should be pure and deterministic; callers may check IDs again.
+    fn search_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        eligible: &dyn Fn(&str) -> bool,
+    ) -> Vec<VectorMemoryHit> {
+        if limit == 0 {
+            return Vec::new();
+        }
+        self.search(query, limit)
+            .into_iter()
+            .take(limit)
+            .filter(|hit| eligible(&hit.memory_id))
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

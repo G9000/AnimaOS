@@ -2317,6 +2317,174 @@ async fn memory_retrieval_read(
     }
 }
 
+#[tokio::test]
+async fn memory_search_vector_only_owned_fact_survives_higher_foreign_and_hidden_top_k() {
+    use anima_memory::{MemorySearchOptions, MemoryVectorIndex};
+    let (context, mut agent, message) = memory_correction_fixture(None);
+    agent.config.tools = Some(
+        context
+            .tool_registry
+            .resolve_descriptors(["memory_search"])
+            .unwrap(),
+    );
+    let query = "release briefing style";
+    let eligible =
+        seed_correction_memory(&context, &agent.id, "Operator wants concise ship notes").await;
+    let mut excluded = Vec::new();
+    for _ in 0..4 {
+        excluded.push(seed_correction_memory(&context, "foreign-agent", query).await);
+    }
+    let hidden_tag = seed_correction_memory(&context, &agent.id, query).await;
+    let hidden_content =
+        seed_correction_memory(&context, &agent.id, &format!("{query}\u{202E}")).await;
+    let mut snapshot = context.memory.read().await.snapshot();
+    let tagged = snapshot
+        .memories
+        .iter_mut()
+        .find(|record| record.id == hidden_tag.id)
+        .unwrap();
+    tagged.tags = Some(vec!["hidden\u{202E}tag".into()]);
+    excluded.push(tagged.clone());
+    excluded.push(hidden_content);
+    context.memory.write().await.replace_snapshot(snapshot);
+    let before = context.memory.read().await.snapshot();
+    let lexical = context.memory.read().await.search(
+        query,
+        MemorySearchOptions {
+            agent_id: Some(agent.id.clone()),
+            ..Default::default()
+        },
+    );
+    assert!(
+        lexical.iter().all(|hit| hit.id != eligible.id),
+        "the eligible record must be genuinely vector-only"
+    );
+    {
+        let mut embeddings = context.memory_embeddings.write().await;
+        *embeddings = MemoryEmbeddingRuntime::local_default();
+        for record in std::iter::once(&eligible).chain(excluded.iter()) {
+            embeddings.upsert_memory(record).unwrap();
+        }
+        let all = embeddings.search(query, 7);
+        let own_score = all
+            .iter()
+            .find(|hit| hit.memory_id == eligible.id)
+            .expect("eligible local synonym vector hit")
+            .score;
+        assert!(own_score > 0.0);
+        let top = embeddings.search(query, 4);
+        assert_eq!(top.len(), 4);
+        assert!(
+            top.iter()
+                .all(|hit| hit.memory_id != eligible.id && hit.score > own_score),
+            "actual global top four must exclude the positive eligible hit"
+        );
+    }
+    let result = context
+        .clone()
+        .execute_tool(
+            agent,
+            message,
+            ToolCall {
+                id: "native-vector-recall".into(),
+                name: "memory_search".into(),
+                args: BTreeMap::from([
+                    ("query".into(), DataValue::String(query.into())),
+                    ("limit".into(), DataValue::Number(1.0)),
+                ]),
+            },
+        )
+        .await;
+    assert_eq!(result.status, TaskStatus::Success);
+    assert_eq!(
+        context.memory.read().await.snapshot(),
+        before,
+        "recall changes no canonical record"
+    );
+    let data = result.data.unwrap();
+    assert_eq!(
+        data.metadata.as_ref().unwrap()["matchCount"],
+        DataValue::Number(1.0),
+        "M32: eligible own vector-only recall must not be starved by the global top-k"
+    );
+    assert!(data.text.contains(&eligible.id));
+    assert!(excluded
+        .iter()
+        .all(|record| !data.text.contains(&record.id)));
+}
+
+#[tokio::test]
+async fn native_vector_recall_uses_current_canonical_type_room_and_absence_before_top_k() {
+    use anima_memory::{MemoryRecallOptions, MemoryScope, MemorySearchOptions, MemoryType};
+    let (context, agent, _) = memory_correction_fixture(None);
+    let eligible =
+        seed_correction_memory(&context, &agent.id, "Operator wants concise ship notes").await;
+    let mut excluded = Vec::new();
+    for _ in 0..5 {
+        excluded.push(seed_correction_memory(&context, &agent.id, "release briefing style").await);
+    }
+    let mut snapshot = context.memory.read().await.snapshot();
+    for memory in &mut snapshot.memories {
+        memory.scope = MemoryScope::Room;
+        memory.room_id = Some("review-room".into());
+    }
+    context.memory.write().await.replace_snapshot(snapshot);
+    {
+        let memory = context.memory.read().await;
+        let mut embeddings = context.memory_embeddings.write().await;
+        *embeddings = MemoryEmbeddingRuntime::local_default();
+        for record in memory.snapshot().memories {
+            embeddings.upsert_memory(&record).unwrap();
+        }
+    }
+    // Change canonical filters after vectors were indexed; index IDs cannot
+    // establish scope/type authority, and a stale high-scoring ID stays indexed.
+    let mut snapshot = context.memory.read().await.snapshot();
+    for (index, original) in excluded.iter().enumerate() {
+        let record = snapshot
+            .memories
+            .iter_mut()
+            .find(|record| record.id == original.id)
+            .unwrap();
+        if index < 2 {
+            record.memory_type = MemoryType::Observation;
+        } else if index < 4 {
+            record.room_id = Some("another-room".into());
+        }
+    }
+    snapshot
+        .memories
+        .retain(|memory| memory.id != excluded[4].id);
+    context.memory.write().await.replace_snapshot(snapshot);
+    let memory = context.memory.read().await;
+    let before = memory.snapshot();
+    let embeddings = context.memory_embeddings.read().await;
+    let results = memory.recall_with_vector_index_filtered(
+        "release briefing style",
+        MemoryRecallOptions {
+            search: MemorySearchOptions {
+                agent_id: Some(agent.id),
+                memory_type: Some(MemoryType::Fact),
+                scope: Some(MemoryScope::Room),
+                room_id: Some("review-room".into()),
+                ..Default::default()
+            },
+            limit: Some(1),
+            recent_limit: Some(0),
+            ..Default::default()
+        },
+        Some(&*embeddings),
+        |_| true,
+    );
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].memory.id, eligible.id);
+    assert_eq!(
+        results[0].vector_score, 1.0,
+        "normalize only eligible vector evidence"
+    );
+    assert_eq!(memory.snapshot(), before);
+}
+
 async fn assert_memory_retrieval_ignores_hidden_crowdout(kind: &str, name: &str) {
     let (context, agent, message, visible, hidden) = memory_retrieval_fixture(kind).await;
     let before = context.memory.read().await.snapshot();

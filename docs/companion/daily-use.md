@@ -77,8 +77,13 @@ console does not retry or fall back to deleting by ID alone.
 Explicit search now filters eligible records before its lexical result limit, so
 stronger foreign matches cannot hide your matching facts. Search and recent reads
 exclude hidden text in record IDs, content and tags before limiting results;
-corrections refuse those records too. Semantic vector candidate coverage remains
-unverified.
+corrections refuse those records too. Native vector recall now applies
+canonical-record, supplied search-option and tool-visibility checks before
+its top matches, so foreign, hidden or removed records still in the index cannot crowd out
+your vector-only match. This preserves the current embedding setup and does not
+add automatic semantic context or consolidation. General semantic quality and
+third-party index coverage remain unverified. The native local-index fixture passes;
+a custom index using the legacy fallback can only filter its existing shortlist.
 Use Files to inspect the chosen workspace. Attach text or an image when useful;
 vision requires a compatible model. PDF/Office attachments can be stored and
 retrieved, but their contents are not parsed by this feature set.

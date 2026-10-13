@@ -304,14 +304,23 @@ impl MemoryEmbeddingRuntime {
 
 impl MemoryVectorIndex for MemoryEmbeddingRuntime {
     fn search(&self, query: &str, limit: usize) -> Vec<VectorMemoryHit> {
-        if !self.enabled {
+        self.search_filtered(query, limit, &|_| true)
+    }
+
+    fn search_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        eligible: &dyn Fn(&str) -> bool,
+    ) -> Vec<VectorMemoryHit> {
+        if limit == 0 || !self.enabled {
             return Vec::new();
         }
         let Ok(embedding) = self.embedder.embed_query(query) else {
             return Vec::new();
         };
         self.index
-            .search_embedding(&embedding, limit)
+            .search_embedding_filtered(&embedding, limit, eligible)
             .unwrap_or_default()
     }
 }
@@ -1096,6 +1105,61 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].memory_id, "memory-1");
         assert!(hits[0].score > 0.0);
+    }
+
+    #[test]
+    fn native_filtered_vector_search_selects_eligible_before_limit_and_preserves_unfiltered_order()
+    {
+        let mut runtime = MemoryEmbeddingRuntime::local_default();
+        for memory in [
+            test_memory("excluded-a", "release briefing style"),
+            test_memory("excluded-b", "release briefing style"),
+            test_memory("owned", "Operator wants concise ship notes"),
+        ] {
+            runtime.upsert_memory(&memory).unwrap();
+        }
+        let unfiltered = runtime.search("release briefing style", 3);
+        assert_eq!(unfiltered.len(), 3);
+        assert_eq!(unfiltered[0].memory_id, "excluded-a");
+        assert_eq!(unfiltered[1].memory_id, "excluded-b");
+        assert_eq!(
+            runtime.search_filtered("release briefing style", 3, &|_| true),
+            unfiltered
+        );
+        let filtered = runtime.search_filtered("release briefing style", 1, &|id| id == "owned");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].memory_id, "owned");
+        assert_eq!(filtered[0].score, unfiltered[2].score);
+        assert!(filtered[0].score > 0.0);
+        assert!(runtime
+            .search_filtered("release briefing style", 1, &|_| false)
+            .is_empty());
+    }
+
+    #[test]
+    fn native_filtered_vector_search_disabled_zero_empty_and_unavailable_fail_empty() {
+        let mut runtime = MemoryEmbeddingRuntime::local_default();
+        let no_scan = |_: &str| -> bool { panic!("empty search must not scan candidates") };
+        assert!(runtime
+            .search_filtered("release briefing", 1, &no_scan)
+            .is_empty());
+        runtime
+            .upsert_memory(&test_memory("owned", "ship notes"))
+            .unwrap();
+        assert!(runtime
+            .search_filtered("release briefing", 0, &no_scan)
+            .is_empty());
+        assert!(runtime.search("release briefing", 0).is_empty());
+        assert!(runtime.search_filtered("", 1, &no_scan).is_empty());
+        assert!(runtime.search_filtered("!!!", 1, &no_scan).is_empty());
+        let mut disabled = MemoryEmbeddingRuntime::disabled();
+        disabled
+            .index
+            .upsert_embedding("owned", vec![1.0; DEFAULT_EMBEDDING_DIMENSION])
+            .unwrap();
+        assert!(disabled
+            .search_filtered("release briefing", 1, &no_scan)
+            .is_empty());
     }
 
     #[test]

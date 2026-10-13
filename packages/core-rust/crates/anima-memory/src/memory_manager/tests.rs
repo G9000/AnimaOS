@@ -361,8 +361,8 @@ fn retrieval_filter_visibility_precedes_limits_on_each_recall_source() {
             "lexical" => assert!(results[0].lexical_score > 0.0),
             "recent" => assert_eq!(results[0].recency_score, 1.0),
             "vector" => assert_eq!(
-                results[0].vector_score, 0.5,
-                "existing vector normalization/top-k remain unchanged"
+                results[0].vector_score, 1.0,
+                "vector normalization uses only eligible hits"
             ),
             "relationship" => assert!(results[0].relationship_score > 0.0),
             "temporal" | "fallback" => assert!(results[0].temporal_score > 0.0),
@@ -784,6 +784,213 @@ fn base_temporal_relationship(
 
 struct StaticVectorIndex {
     hits: Vec<VectorMemoryHit>,
+}
+
+#[test]
+fn legacy_vector_index_filtered_default_is_object_safe_and_bounded() {
+    use std::cell::Cell;
+
+    struct LegacyIndex(Cell<usize>);
+    impl MemoryVectorIndex for LegacyIndex {
+        fn search(&self, _query: &str, limit: usize) -> Vec<VectorMemoryHit> {
+            self.0.set(self.0.get() + 1);
+            assert_eq!(limit, 2);
+            ["hidden", "eligible", "beyond"]
+                .into_iter()
+                .map(|id| VectorMemoryHit {
+                    memory_id: id.into(),
+                    score: 1.0,
+                })
+                .collect()
+        }
+    }
+    let legacy = LegacyIndex(Cell::new(0));
+    let port: &dyn MemoryVectorIndex = &legacy;
+    assert!(port
+        .search_filtered("query", 0, &|_| panic!("zero limit must not filter"))
+        .is_empty());
+    assert_eq!(legacy.0.get(), 0);
+    let examined = Cell::new(0);
+    let hits = port.search_filtered("query", 2, &|id| {
+        examined.set(examined.get() + 1);
+        id != "hidden"
+    });
+    assert_eq!(legacy.0.get(), 1);
+    assert_eq!(examined.get(), 2);
+    assert_eq!(hits.len(), 1);
+    assert_eq!(
+        hits[0].memory_id, "eligible",
+        "legacy fallback cannot backfill beyond old top-k"
+    );
+}
+
+#[test]
+fn filtered_vector_recall_applies_every_option_and_canonical_visibility_before_top_k() {
+    use crate::vector_index::{InMemoryVectorIndex, MemoryTextEmbedder, MemoryVectorError};
+
+    struct FixedEmbedder;
+    impl MemoryTextEmbedder for FixedEmbedder {
+        fn embed(&self, _text: &str) -> Result<Vec<f32>, MemoryVectorError> {
+            Ok(vec![1.0, 0.0])
+        }
+    }
+    for field in [
+        "agent_id",
+        "agent_name",
+        "type",
+        "scope",
+        "room",
+        "world",
+        "session",
+        "importance",
+        "visible",
+        "canonical",
+    ] {
+        let mut manager = MemoryManager::new();
+        let own = add_memory(
+            &mut manager,
+            base(|memory| {
+                memory.content = "stored semantic detail".into();
+                memory.scope = Some(MemoryScope::Room);
+                memory.room_id = Some("room".into());
+                memory.world_id = Some("world".into());
+                memory.session_id = Some("session".into());
+                memory.importance = 0.8;
+            }),
+        );
+        let excluded = add_memory(
+            &mut manager,
+            base(|memory| {
+                memory.content = own.content.clone();
+                memory.scope = Some(MemoryScope::Room);
+                memory.room_id = own.room_id.clone();
+                memory.world_id = own.world_id.clone();
+                memory.session_id = own.session_id.clone();
+                memory.importance = own.importance;
+                match field {
+                    "agent_id" => memory.agent_id = "other".into(),
+                    "agent_name" => memory.agent_name = "other".into(),
+                    "type" => memory.memory_type = MemoryType::Reflection,
+                    "scope" => memory.scope = Some(MemoryScope::Private),
+                    "room" => memory.room_id = Some("other".into()),
+                    "world" => memory.world_id = Some("other".into()),
+                    "session" => memory.session_id = Some("other".into()),
+                    "importance" => memory.importance = 0.1,
+                    _ => {}
+                }
+            }),
+        );
+        let mut search = MemorySearchOptions::default();
+        match field {
+            "agent_id" => search.agent_id = Some(own.agent_id.clone()),
+            "agent_name" => search.agent_name = Some(own.agent_name.clone()),
+            "type" => search.memory_type = Some(own.memory_type),
+            "scope" => search.scope = Some(own.scope),
+            "room" => search.room_id = own.room_id.clone(),
+            "world" => search.world_id = own.world_id.clone(),
+            "session" => search.session_id = own.session_id.clone(),
+            "importance" => search.min_importance = Some(0.7),
+            _ => {}
+        }
+        let mut index = InMemoryVectorIndex::new(FixedEmbedder);
+        index.upsert_embedding(&own.id, vec![0.5, 0.5]).unwrap();
+        let excluded_id = if field == "canonical" {
+            "missing"
+        } else {
+            &excluded.id
+        };
+        index.upsert_embedding(excluded_id, vec![1.0, 0.0]).unwrap();
+        assert_eq!(index.search("unmatched-query", 1)[0].memory_id, excluded_id);
+        assert!(manager.search("unmatched-query", search.clone()).is_empty());
+        let before = manager.snapshot();
+        let hits = manager.recall_with_vector_index_filtered(
+            "unmatched-query",
+            MemoryRecallOptions {
+                search,
+                limit: Some(1),
+                lexical_limit: Some(1),
+                recent_limit: Some(0),
+                temporal_limit: Some(0),
+                ..MemoryRecallOptions::default()
+            },
+            Some(&index),
+            |memory| field != "visible" || memory.id != excluded.id,
+        );
+        assert_eq!(hits.len(), 1, "{field}");
+        assert_eq!(hits[0].memory.id, own.id, "{field}");
+        assert_eq!(hits[0].vector_score, 1.0, "{field}");
+        assert_eq!(manager.snapshot(), before, "{field}");
+    }
+}
+
+#[test]
+fn filtered_vector_recall_defends_against_oversized_and_invalid_adapter_hits() {
+    struct NoncompliantIndex(Vec<VectorMemoryHit>);
+    impl MemoryVectorIndex for NoncompliantIndex {
+        fn search(&self, _query: &str, _limit: usize) -> Vec<VectorMemoryHit> {
+            panic!("recall must use the filtered port");
+        }
+        fn search_filtered(
+            &self,
+            _query: &str,
+            limit: usize,
+            _eligible: &dyn Fn(&str) -> bool,
+        ) -> Vec<VectorMemoryHit> {
+            assert_eq!(limit, 7);
+            self.0.clone()
+        }
+    }
+    let mut manager = MemoryManager::new();
+    let own = add_memory(&mut manager, base(|_| {}));
+    let hidden = add_memory(&mut manager, base(|_| {}));
+    let beyond = add_memory(&mut manager, base(|_| {}));
+    let mut raw = vec![
+        VectorMemoryHit {
+            memory_id: "missing".into(),
+            score: 99.0,
+        },
+        VectorMemoryHit {
+            memory_id: hidden.id.clone(),
+            score: 10.0,
+        },
+    ];
+    raw.extend(
+        [f64::NAN, f64::INFINITY, 0.0, -1.0, 0.4]
+            .into_iter()
+            .map(|score| VectorMemoryHit {
+                memory_id: own.id.clone(),
+                score,
+            }),
+    );
+    raw.push(VectorMemoryHit {
+        memory_id: beyond.id.clone(),
+        score: 100.0,
+    });
+    let index = NoncompliantIndex(raw);
+    let before = manager.snapshot();
+    let hits = manager.recall_with_vector_index_filtered(
+        "unmatched-query",
+        MemoryRecallOptions {
+            limit: Some(2),
+            lexical_limit: Some(7),
+            recent_limit: Some(0),
+            temporal_limit: Some(0),
+            ..MemoryRecallOptions::default()
+        },
+        Some(&index),
+        |memory| memory.id != hidden.id,
+    );
+    assert_eq!(
+        hits.len(),
+        1,
+        "extra hits beyond the requested candidate budget must not be examined"
+    );
+    assert_eq!(hits[0].memory.id, own.id);
+    assert_eq!(
+        hits[0].vector_score, 1.0,
+        "only eligible finite positive hits normalize the vector score"
+    );
+    assert_eq!(manager.snapshot(), before);
 }
 
 impl MemoryVectorIndex for StaticVectorIndex {
