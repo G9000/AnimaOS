@@ -5,6 +5,7 @@
 
 pub(crate) mod compaction;
 pub(crate) mod context;
+pub(crate) mod history_read;
 mod list_snapshot;
 pub(crate) mod migration;
 pub(crate) mod pruning;

@@ -77,6 +77,8 @@
 | M39 Reviewed procedural adoption  | `2026-10-13-companion-learning-adoption-m39.md`    | complete: reviewed skill handoff, immutable lineage, exact duplicates and source/base checks through existing approval; Rust2494/9ignored/40suites/lint, SDK130 and web1231/type/build pass; two actual fresh skill/load/write/read tasks and quiet restart accepted, 12297 reported tokens; profile/preferences in M40; publication in M39 ledger                                                                 |
 | M40 Selected profile memory       | `2026-10-13-companion-profile-memory-m40.md`       | complete: source-reference profile/notes, guarded canonical correction, bounded fresh context and version16 backup; Rust2511/9ignored/40suites/lint, SDK131 and web1240/type/build pass; two fresh corrected-name effects and exact quiet restart, 1296 reported tokens; second introduction task quality miss retained; broader parity open; publication in M40 ledger                                            |
 
+| M41 Anchored own history | `2026-10-13-companion-history-m41.md` | complete: filtered real anchors, bounded own-context tool, optional owner grant and hot/cold source checks; Rust2525/9ignored/40suites/lint, web1245/111/type/build; one actual source-cited search/read task and exact quiet restart accepted,5420reportedtokens; preserved85memories/139messages/25sessions,restoredgrants,14processesgone; broader parity open; publication in M41 ledger |
+
 Dependencies: M0 → M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9 → M10. M4–M9 depend on M3's ledger, runs, and event stream; their internal order follows the spec's milestone list.
 
 ---

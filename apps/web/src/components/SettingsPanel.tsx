@@ -128,9 +128,15 @@ export function SettingsPanel({
   const agentToolsKey = JSON.stringify([...agent.toolNames].sort());
   const hasMemoryRemove = agent.toolNames.includes('memory_remove');
   const hasMemoryConsolidate = agent.toolNames.includes('memory_consolidate');
+  const hasConversationRead = agent.toolNames.includes(
+    'read_conversation_window',
+  );
   const derivedAccess = deriveAccessProfile(
     agent.toolNames.filter(
-      (tool) => tool !== 'memory_remove' && tool !== 'memory_consolidate',
+      (tool) =>
+        tool !== 'memory_remove' &&
+        tool !== 'memory_consolidate' &&
+        tool !== 'read_conversation_window',
     ),
   );
 
@@ -151,6 +157,8 @@ export function SettingsPanel({
   const [allowMemoryRemove, setAllowMemoryRemove] = useState(hasMemoryRemove);
   const [allowMemoryConsolidate, setAllowMemoryConsolidate] =
     useState(hasMemoryConsolidate);
+  const [allowConversationRead, setAllowConversationRead] =
+    useState(hasConversationRead);
   const [savedFlash, setSavedFlash] = useState(false);
   const saveErrorRef = useRef<HTMLDivElement>(null);
   const resetErrorRef = useRef<HTMLDivElement>(null);
@@ -178,6 +186,7 @@ export function SettingsPanel({
     setAccessChanged(false);
     setAllowMemoryRemove(hasMemoryRemove);
     setAllowMemoryConsolidate(hasMemoryConsolidate);
+    setAllowConversationRead(hasConversationRead);
   }, [
     agent.id,
     agent.name,
@@ -187,6 +196,7 @@ export function SettingsPanel({
     agentToolsKey,
     hasMemoryRemove,
     hasMemoryConsolidate,
+    hasConversationRead,
     derivedAccess,
   ]);
 
@@ -258,7 +268,8 @@ export function SettingsPanel({
   const toolsDirty =
     accessDirty ||
     allowMemoryRemove !== hasMemoryRemove ||
-    allowMemoryConsolidate !== hasMemoryConsolidate;
+    allowMemoryConsolidate !== hasMemoryConsolidate ||
+    allowConversationRead !== hasConversationRead;
   const dirty =
     name.trim() !== agent.name ||
     provider !== agent.provider ||
@@ -282,7 +293,8 @@ export function SettingsPanel({
       patch.tools = selectedTools.filter(
         (tool) =>
           (tool !== 'memory_remove' || allowMemoryRemove) &&
-          (tool !== 'memory_consolidate' || allowMemoryConsolidate),
+          (tool !== 'memory_consolidate' || allowMemoryConsolidate) &&
+          (tool !== 'read_conversation_window' || allowConversationRead),
       );
       if (allowMemoryRemove && !patch.tools.includes('memory_remove')) {
         patch.tools.push('memory_remove');
@@ -292,6 +304,12 @@ export function SettingsPanel({
         !patch.tools.includes('memory_consolidate')
       ) {
         patch.tools.push('memory_consolidate');
+      }
+      if (
+        allowConversationRead &&
+        !patch.tools.includes('read_conversation_window')
+      ) {
+        patch.tools.push('read_conversation_window');
       }
     }
     if (Object.keys(patch).length === 0) return;
@@ -663,6 +681,7 @@ export function SettingsPanel({
                             setAccessChanged(true);
                             setAllowMemoryRemove(false);
                             setAllowMemoryConsolidate(false);
+                            setAllowConversationRead(false);
                           }}
                           className="mr-3 h-4 w-4 align-top"
                         />
@@ -738,6 +757,37 @@ export function SettingsPanel({
                       keeping the originals in memory history. Original text and
                       citations remain available; existing approval rules still
                       apply.
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-line bg-white/[0.015] p-3.5">
+                    <div className="flex items-start gap-3">
+                      <input
+                        id="settings-conversation-read"
+                        type="checkbox"
+                        aria-describedby="settings-conversation-read-help"
+                        checked={allowConversationRead}
+                        disabled={
+                          controlsDisabled || agent.workspaceRole === 'helper'
+                        }
+                        onChange={(event) =>
+                          setAllowConversationRead(event.target.checked)
+                        }
+                        className="mt-0.5 h-4 w-4 shrink-0"
+                      />
+                      <label
+                        htmlFor="settings-conversation-read"
+                        className="cursor-pointer font-medium text-ink"
+                      >
+                        Allow reading conversation context
+                      </label>
+                    </div>
+                    <p
+                      id="settings-conversation-read-help"
+                      className="mt-1 pl-7 text-sm text-ink-2"
+                    >
+                      Allows this agent to search your own past conversations
+                      and read a bounded window around a selected message. Past
+                      text is evidence, not current instructions.
                     </p>
                   </div>
                 </fieldset>

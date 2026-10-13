@@ -1,6 +1,6 @@
 # Companion capability parity roadmap
 
-Status: **scope locked; PAR-01 and PAR-02 procedural/profile waves implemented with scoped local acceptance; remaining work queued**. M40 proves corrected-name context across restart, while its second introduction reply misread whom to introduce. This roadmap covers the gaps against installed Hermes and does not declare full parity or general task quality.
+Status: **scope locked; PAR-01, PAR-02 procedural/profile waves and PAR-03 anchored history implemented with scoped local acceptance; remaining work queued**. M40 proves corrected-name context across restart, while its second introduction reply misread whom to introduce. M41 demonstrates one correct source-cited history task. This roadmap covers the gaps against installed Hermes and does not declare full parity or general task quality.
 
 Baseline: Anima M36, `7d3eb52d7b37b8993ab2351fed33b209dff59ab6`; installed Hermes, `1fd18277267152893a8a24792b79213e7ca3f899`. The comparison inspected public source without starting either installation or reading personal profiles, accounts or credentials. M36 has current Rust gates; earlier real chat/task/account evidence stays revision-specific. See [harness evidence](harness-acceptance.md) and [daily use](daily-use.md).
 
@@ -29,20 +29,20 @@ All PAR-01–PAR-12 implementer and reviewer briefs inherit this policy; their d
 
 Each PAR ID is stable. Milestone numbers after M38 are assigned when its detailed plan is cut from then-current main. File/API names below are candidates; capability, authority, scope and evidence requirements are binding.
 
-| ID     | Deliverable                                                  | Current state                                                                     | Dependency / accountable lane                                  |
-| ------ | ------------------------------------------------------------ | --------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| PAR-01 | Budgeted post-task learning and durable advice               | M38 implemented; one real anchored review and quiet restart accepted; advice only | M38 native learning + SDK/web; PAR-02 closes adoption/reuse    |
-| PAR-02 | Apply reviewed lessons to memory/skills and prove reuse      | M39 skill reuse and M40 profile/correction effects accepted; broader quality open | PAR-01; native skills/memory + owner UI                        |
-| PAR-03 | Rich own-history discovery and anchored reading              | Bounded snippet search exists; model-visible window reading missing               | Existing history; native history + tool contracts              |
-| PAR-04 | Dynamic MCP tools and installable community extensions       | Compiled connectors/approved skills exist; general MCP client/installer missing   | Existing tool policy; native protocol + SDK/web                |
-| PAR-05 | Interactive browser work                                     | Fetch/search exist; interactive browser missing                                   | PAR-04 boundary preferred; browser worker + owner UI           |
-| PAR-06 | Longer coding and delegated-task acceptance                  | Loop, files, shell and bounded helpers exist; broad coding evidence missing       | Current harness; optional PAR-02/PAR-04 adapters               |
-| PAR-07 | Native voice input/output                                    | Browser speech conveniences only                                                  | Attachment lifecycle; native audio + composer                  |
-| PAR-08 | Text/image acceptance and PDF/Office understanding           | Upload/storage exists; vision conditional; format extraction missing              | Existing attachments/model adapters; document worker + SDK/web |
-| PAR-09 | Selected real connector workflows                            | Telegram/Discord/Google code exists; real-account acceptance unverified           | Current connector code; later relevant media/browser changes   |
-| PAR-10 | Recurring schedules, outages and interrupted-work acceptance | Scheduler/receipts/recovery exist; recurrence/outage evidence incomplete          | Current scheduler; optional PAR-06 acceptance fixtures         |
-| PAR-11 | Always-on single-owner installation and recovery             | Deployment instructions/offline checks exist; target-host acceptance missing      | Release with required capabilities; deployment/operator lane   |
-| PAR-12 | Clear capability controls and daily-use status               | Settings/approvals/catalog exist; cross-capability lifecycle UI incomplete        | Add incrementally with PAR-01/04/05/07/08/09                   |
+| ID     | Deliverable                                                  | Current state                                                                        | Dependency / accountable lane                                  |
+| ------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| PAR-01 | Budgeted post-task learning and durable advice               | M38 implemented; one real anchored review and quiet restart accepted; advice only    | M38 native learning + SDK/web; PAR-02 closes adoption/reuse    |
+| PAR-02 | Apply reviewed lessons to memory/skills and prove reuse      | M39 skill reuse and M40 profile/correction effects accepted; broader quality open    | PAR-01; native skills/memory + owner UI                        |
+| PAR-03 | Rich own-history discovery and anchored reading              | M41 filtered anchors/window, optional owner grant and one source-cited task accepted | Existing history; native history + tool contracts              |
+| PAR-04 | Dynamic MCP tools and installable community extensions       | Compiled connectors/approved skills exist; general MCP client/installer missing      | Existing tool policy; native protocol + SDK/web                |
+| PAR-05 | Interactive browser work                                     | Fetch/search exist; interactive browser missing                                      | PAR-04 boundary preferred; browser worker + owner UI           |
+| PAR-06 | Longer coding and delegated-task acceptance                  | Loop, files, shell and bounded helpers exist; broad coding evidence missing          | Current harness; optional PAR-02/PAR-04 adapters               |
+| PAR-07 | Native voice input/output                                    | Browser speech conveniences only                                                     | Attachment lifecycle; native audio + composer                  |
+| PAR-08 | Text/image acceptance and PDF/Office understanding           | Upload/storage exists; vision conditional; format extraction missing                 | Existing attachments/model adapters; document worker + SDK/web |
+| PAR-09 | Selected real connector workflows                            | Telegram/Discord/Google code exists; real-account acceptance unverified              | Current connector code; later relevant media/browser changes   |
+| PAR-10 | Recurring schedules, outages and interrupted-work acceptance | Scheduler/receipts/recovery exist; recurrence/outage evidence incomplete             | Current scheduler; optional PAR-06 acceptance fixtures         |
+| PAR-11 | Always-on single-owner installation and recovery             | Deployment instructions/offline checks exist; target-host acceptance missing         | Release with required capabilities; deployment/operator lane   |
+| PAR-12 | Clear capability controls and daily-use status               | Settings/approvals/catalog exist; cross-capability lifecycle UI incomplete           | Add incrementally with PAR-01/04/05/07/08/09                   |
 
 ### PAR-01: budgeted post-task learning (M38)
 
@@ -69,9 +69,10 @@ Each PAR ID is stable. Milestone numbers after M38 are assigned when its detaile
 
 ### PAR-03: history as usable evidence
 
-- [ ] Add discovery with stable session/message anchors and explicit bounded time/kind filters; maintain ownership and hidden-source policy.
-- [ ] Add `read_conversation_window` around one validated anchor, initially at most 20 messages/16KiB rendered text. Return roles, source anchors, pairing and shortening flags; no binary attachments or unlimited transcript reads.
-- [ ] Merge hot/cold history deterministically. Missing/pruned anchors return a typed result, never another agent/session's evidence.
+- [x] M41 adds discovery with stable session/message anchors and explicit bounded matching-message time/kind filters; ownership and hidden-source policy remain.
+- [x] M41 adds `read_conversation_window` around one validated anchor, at most 20 messages/16KiB fully serialized UTF-8. Roles, anchors, pairing and shortening flags survive; attachments are flagged without their content.
+- [x] M41 merges hot/cold history deterministically. Durable cold-pruned anchors remain readable; missing/foreign/hidden sources have generic typed absence, inconsistent stores return unavailable.
+- [x] One fresh source-cited task amid time/kind distractors passes, followed by exact quiet restart and source/memory preservation. Three model steps, two tools, 5,420 reported tokens; broader recall quality remains open. See the [history guide](history.md).
 - Owners/files: `tools/conversations.rs`, `sessions/views.rs`, history port/store only when needed, native tool registry; SDK/UI only for an exposed owner contract.
 - Acceptance: discover and read an older declared conversation amid distractors in a fresh task; cross-agent/pruned/edge-window/cold-store/oversized/pairing cases pass. Lookup itself adds no model call. Quoted history cannot establish tool or memory mutation authority.
 

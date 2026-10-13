@@ -174,7 +174,7 @@ async fn search_conversations_without_a_workspace_run_answers_plainly() {
             system: None,
             tools: Some(
                 ToolRegistry::new()
-                    .resolve_descriptors(["search_conversations"])
+                    .resolve_descriptors(["search_conversations", "read_conversation_window"])
                     .unwrap(),
             ),
             plugins: None,
@@ -196,8 +196,8 @@ async fn search_conversations_without_a_workspace_run_answers_plainly() {
     };
     let result = context
         .execute_tool(
-            agent,
-            user_message,
+            agent.clone(),
+            user_message.clone(),
             ToolCall {
                 id: "search-no-team".into(),
                 name: "search_conversations".into(),
@@ -210,6 +210,35 @@ async fn search_conversations_without_a_workspace_run_answers_plainly() {
     assert_eq!(
         result.error.as_deref(),
         Some("Conversation search is unavailable in this execution context")
+    );
+
+    let context = ToolExecutionContext::new(
+        Arc::new(AsyncRwLock::new(MemoryManager::new())),
+        Arc::new(AsyncRwLock::new(MemoryEmbeddingRuntime::disabled())),
+        None,
+        ToolRegistry::new(),
+        new_shared_process_manager_with_limit(DEFAULT_MAX_BACKGROUND_PROCESSES),
+        None,
+        None,
+    );
+    let result = context
+        .execute_tool(
+            agent,
+            user_message,
+            ToolCall {
+                id: "read-no-team".into(),
+                name: "read_conversation_window".into(),
+                args: BTreeMap::from([
+                    ("session_id".into(), DataValue::String("chat:own".into())),
+                    ("anchor_message_id".into(), DataValue::String("m1".into())),
+                ]),
+            },
+        )
+        .await;
+    assert_eq!(result.status, TaskStatus::Error);
+    assert_eq!(
+        result.error.as_deref(),
+        Some("Conversation history is unavailable in this execution context")
     );
 }
 
@@ -301,7 +330,16 @@ fn registry_defines_every_registered_tool_schema() {
         ),
         ("get_current_time", &[][..], &[][..]),
         ("calculate", &["expression"][..], &[][..]),
-        ("search_conversations", &["query"][..], &["limit"][..]),
+        (
+            "search_conversations",
+            &["query"][..],
+            &["limit", "kind", "after_ms", "before_ms"][..],
+        ),
+        (
+            "read_conversation_window",
+            &["session_id", "anchor_message_id"][..],
+            &["before_count", "after_count"][..],
+        ),
         ("load_skill", &["name"][..], &[][..]),
         (
             "propose_skill",

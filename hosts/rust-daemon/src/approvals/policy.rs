@@ -29,6 +29,7 @@ const READ_TOOLS: &[&str] = &[
     "drive_search",
     "drive_read",
     "search_conversations",
+    "read_conversation_window",
     "load_skill",
     "list_automations",
 ];
@@ -553,6 +554,7 @@ mod tests {
                     "drive_search",
                     "drive_read",
                     "search_conversations",
+                    "read_conversation_window",
                     "load_skill",
                     "list_automations",
                 ][..],

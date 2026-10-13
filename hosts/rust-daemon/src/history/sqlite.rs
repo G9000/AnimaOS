@@ -10,8 +10,9 @@ use async_trait::async_trait;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 
 use super::{
-    message_ordinal, role_name, search_tokens, searchable_text, to_i64, ApprovalPageQuery,
-    HistoryError, HistoryMessage, HistoryStore, MessagePageQuery, UsagePageQuery,
+    message_ordinal, role_name, search_tokens, searchable_text, to_i64, validate_after_query,
+    validate_filtered_query, ApprovalPageQuery, FilteredSessionSearchQuery, HistoryError,
+    HistoryMessage, HistoryStore, MessageAfterQuery, MessagePageQuery, UsagePageQuery,
 };
 use crate::approvals::ApprovalRequest;
 use crate::attachments::AttachmentRecord;
@@ -183,6 +184,14 @@ WHERE agent_id = ?1 AND session_id = ?2 AND (?3 OR hidden = 0)
   AND (?4 IS NULL OR created_at_ms < ?4
        OR (created_at_ms = ?4 AND (ordinal < ?5 OR (ordinal = ?5 AND id < ?6))))
 ORDER BY created_at_ms DESC, ordinal DESC, id DESC
+LIMIT ?7";
+
+const PAGE_MESSAGES_AFTER: &str = "
+SELECT agent_id, session_id, hidden, record FROM messages
+WHERE agent_id = ?1 AND session_id = ?2 AND (?3 OR hidden = 0)
+  AND (created_at_ms > ?4
+       OR (created_at_ms = ?4 AND (ordinal > ?5 OR (ordinal = ?5 AND id > ?6))))
+ORDER BY created_at_ms ASC, ordinal ASC, id ASC
 LIMIT ?7";
 
 impl From<rusqlite::Error> for HistoryError {
@@ -712,6 +721,36 @@ impl HistoryStore for SqliteHistoryStore {
         .await
     }
 
+    async fn page_messages_after(
+        &self,
+        query: &MessageAfterQuery,
+    ) -> Result<Vec<HistoryMessage>, HistoryError> {
+        validate_after_query(query)?;
+        if query.limit == 0 {
+            return Ok(Vec::new());
+        }
+        let query = query.clone();
+        self.run(move |connection| {
+            let mut statement = connection.prepare_cached(PAGE_MESSAGES_AFTER)?;
+            let rows = statement
+                .query_map(
+                    params![
+                        query.agent_id,
+                        query.session_id,
+                        query.include_hidden,
+                        to_i64(query.after.created_at_ms)?,
+                        to_i64(query.after.ordinal)?,
+                        query.after.id,
+                        query.limit as i64,
+                    ],
+                    raw_row,
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            decode(rows)
+        })
+        .await
+    }
+
     async fn visible_message_counts(
         &self,
         agent_id: &str,
@@ -885,6 +924,61 @@ impl HistoryStore for SqliteHistoryStore {
         .await
     }
 
+    async fn search_sessions_filtered(
+        &self,
+        query: &FilteredSessionSearchQuery,
+    ) -> Result<Vec<HistoryMessage>, HistoryError> {
+        validate_filtered_query(query)?;
+        let tokens = search_tokens(&query.query);
+        if tokens.is_empty() || query.session_ids.is_empty() || query.limit == 0 {
+            return Ok(Vec::new());
+        }
+        let query = query.clone();
+        let fts = tokens
+            .iter()
+            .map(|token| format!("\"{}\"*", token.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" ");
+        self.run(move |connection| {
+            use rusqlite::types::Value;
+            let after = query.session_ids.len() + query.excluded_message_ids.len() + 3;
+            let before = after + 1;
+            let limit = before + 1;
+            let mut values = vec![Value::Text(fts), Value::Text(query.agent_id)];
+            values.extend(query.session_ids.iter().cloned().map(Value::Text));
+            values.extend(query.excluded_message_ids.iter().cloned().map(Value::Text));
+            values.push(query.after_ms.map(to_i64).transpose()?.map_or(Value::Null, Value::Integer));
+            values.push(query.before_ms.map(to_i64).transpose()?.map_or(Value::Null, Value::Integer));
+            values.push(Value::Integer(query.limit as i64));
+            let exclude = if query.excluded_message_ids.is_empty() { String::new() } else {
+                format!("AND messages.id NOT IN ({})", placeholders(query.session_ids.len() + 3, query.excluded_message_ids.len()))
+            };
+            let sql = format!(
+                "SELECT agent_id, session_id, hidden, record FROM (
+                     SELECT messages.agent_id AS agent_id, messages.session_id AS session_id,
+                            messages.hidden AS hidden, messages.record AS record,
+                            messages.created_at_ms AS created_at_ms, messages.ordinal AS ordinal, messages.id AS id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY messages.agent_id, messages.session_id
+                                ORDER BY messages.created_at_ms DESC, messages.ordinal DESC, messages.id DESC
+                            ) AS rn
+                     FROM messages_fts JOIN messages ON messages.rowid = messages_fts.rowid
+                     WHERE messages_fts MATCH ?1 AND messages.agent_id = ?2
+                       AND messages.session_id IN ({}) AND messages.hidden = 0 AND messages.role <> 'system'
+                       {exclude}
+                       AND (?{after} IS NULL OR messages.created_at_ms >= ?{after})
+                       AND (?{before} IS NULL OR messages.created_at_ms < ?{before})
+                 ) ranked WHERE rn = 1
+                 ORDER BY created_at_ms DESC, ordinal DESC, id DESC LIMIT ?{limit}",
+                placeholders(3, query.session_ids.len())
+            );
+            let mut statement = connection.prepare(&sql)?;
+            let rows = statement.query_map(params_from_iter(values.iter()), raw_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            decode(rows)
+        }).await
+    }
+
     async fn delete_session(&self, agent_id: &str, session_id: &str) -> Result<(), HistoryError> {
         let (agent_id, session_id) = (agent_id.to_string(), session_id.to_string());
         self.run(move |connection| {
@@ -967,6 +1061,7 @@ mod tests {
         assert_history_store_conformance(&store).await;
         crate::history::conformance::assert_history_store_attachment_conformance(&store).await;
         assert_history_store_session_search_conformance(&store).await;
+        crate::history::conformance::assert_history_store_m41_conformance(&store).await;
         assert_history_store_checkin_text_conformance(&store).await;
         assert_history_store_indexed_text_cap_conformance(&store).await;
         assert_history_store_diacritics_conformance(&store).await;

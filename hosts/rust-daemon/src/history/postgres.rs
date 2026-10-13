@@ -7,8 +7,9 @@ use async_trait::async_trait;
 use sqlx::{PgPool, Row};
 
 use super::{
-    message_ordinal, role_name, search_tokens, searchable_text, to_i64, ApprovalPageQuery,
-    HistoryError, HistoryMessage, HistoryStore, MessagePageQuery, UsagePageQuery,
+    message_ordinal, role_name, search_tokens, searchable_text, to_i64, validate_after_query,
+    validate_filtered_query, ApprovalPageQuery, FilteredSessionSearchQuery, HistoryError,
+    HistoryMessage, HistoryStore, MessageAfterQuery, MessagePageQuery, UsagePageQuery,
 };
 use crate::approvals::ApprovalRequest;
 use crate::attachments::AttachmentRecord;
@@ -453,6 +454,32 @@ impl HistoryStore for PostgresHistoryStore {
         rows.iter().map(decode_row).collect()
     }
 
+    async fn page_messages_after(
+        &self,
+        query: &MessageAfterQuery,
+    ) -> Result<Vec<HistoryMessage>, HistoryError> {
+        validate_after_query(query)?;
+        if query.limit == 0 {
+            return Ok(Vec::new());
+        }
+        let rows = sqlx::query(
+            "SELECT agent_id, session_id, hidden, record FROM history_messages
+             WHERE agent_id = $1 AND session_id = $2 AND ($3 OR NOT hidden)
+               AND (created_at_ms, ordinal, id COLLATE \"C\") > ($4, $5, $6)
+             ORDER BY created_at_ms ASC, ordinal ASC, id COLLATE \"C\" ASC LIMIT $7",
+        )
+        .bind(&query.agent_id)
+        .bind(&query.session_id)
+        .bind(query.include_hidden)
+        .bind(to_i64(query.after.created_at_ms)?)
+        .bind(to_i64(query.after.ordinal)?)
+        .bind(&query.after.id)
+        .bind(query.limit as i64)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(decode_row).collect()
+    }
+
     async fn visible_message_counts(
         &self,
         agent_id: &str,
@@ -536,6 +563,36 @@ impl HistoryStore for PostgresHistoryStore {
         rows.iter().map(decode_row).collect()
     }
 
+    async fn search_sessions_filtered(
+        &self,
+        query: &FilteredSessionSearchQuery,
+    ) -> Result<Vec<HistoryMessage>, HistoryError> {
+        validate_filtered_query(query)?;
+        let tokens = search_tokens(&query.query);
+        if tokens.is_empty() || query.session_ids.is_empty() || query.limit == 0 {
+            return Ok(Vec::new());
+        }
+        let rows = sqlx::query(
+            "SELECT agent_id, session_id, hidden, record FROM (
+                 SELECT DISTINCT ON (agent_id, session_id)
+                        agent_id, session_id, hidden, record, created_at_ms, ordinal, id
+                 FROM history_messages
+                 WHERE search @@ to_tsquery('simple', $1) AND agent_id = $2 AND session_id = ANY($3)
+                   AND NOT (id = ANY($4))
+                   AND NOT hidden AND role <> 'system'
+                   AND ($5::bigint IS NULL OR created_at_ms >= $5)
+                   AND ($6::bigint IS NULL OR created_at_ms < $6)
+                 ORDER BY agent_id, session_id, created_at_ms DESC, ordinal DESC, id COLLATE \"C\" DESC
+             ) ranked
+             ORDER BY created_at_ms DESC, ordinal DESC, id COLLATE \"C\" DESC LIMIT $7",
+        )
+        .bind(prefix_tsquery(&tokens)).bind(&query.agent_id).bind(&query.session_ids)
+        .bind(&query.excluded_message_ids)
+        .bind(query.after_ms.map(to_i64).transpose()?).bind(query.before_ms.map(to_i64).transpose()?)
+        .bind(query.limit as i64).fetch_all(&self.pool).await?;
+        rows.iter().map(decode_row).collect()
+    }
+
     async fn delete_session(&self, agent_id: &str, session_id: &str) -> Result<(), HistoryError> {
         let mut transaction = self.pool.begin().await?;
         for table in [
@@ -602,6 +659,7 @@ mod tests {
         assert_history_store_conformance(&store).await;
         crate::history::conformance::assert_history_store_attachment_conformance(&store).await;
         assert_history_store_session_search_conformance(&store).await;
+        crate::history::conformance::assert_history_store_m41_conformance(&store).await;
         assert_history_store_checkin_text_conformance(&store).await;
         assert_history_store_indexed_text_cap_conformance(&store).await;
         assert_history_store_diacritics_conformance(&store).await;
