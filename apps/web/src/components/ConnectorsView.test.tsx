@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { ConnectorsView } from './ConnectorsView';
+import { mcpOwnerApi } from '../lib/daemon-api';
 const api = vi.hoisted(() => ({
   calendarStatus: vi.fn(),
   driveStatus: vi.fn(),
@@ -43,6 +44,8 @@ const draft = {
 };
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.spyOn(mcpOwnerApi, 'list').mockResolvedValue([]);
+  vi.spyOn(mcpOwnerApi, 'toolNames').mockResolvedValue(['read_file']);
   api.oauthAppStatus.mockImplementation((provider) =>
     Promise.resolve({
       provider,
@@ -77,6 +80,20 @@ it('shows all five services with honest OAuth setup state', async () => {
   );
   expect(screen.getByRole('button', { name: 'Connect Gmail' })).toBeDisabled();
   expect(api.approveMailDraft).not.toHaveBeenCalled();
+});
+it('M43_owner_connectors_expose_the_external_tools_review_section', () => {
+  render(<ConnectorsView agentId="main" telegram={null} />);
+
+  expect(
+    screen.getByRole('heading', { name: 'External tools (MCP)' }),
+  ).toBeVisible();
+  expect(
+    screen.getByRole('textbox', { name: 'Connection label' }),
+  ).toBeVisible();
+  expect(screen.getByRole('textbox', { name: 'Server URL' })).toBeVisible();
+  expect(
+    screen.getByRole('button', { name: 'Save disabled connection' }),
+  ).toBeVisible();
 });
 it('sends the reviewed saved draft only after explicit Send', async () => {
   api.mailStatus.mockImplementation((_id, provider) =>

@@ -1686,6 +1686,14 @@ struct ControlPlaneAcknowledged {
     run_actions: HashMap<String, AcknowledgedRunActions>,
     mcp_connections: Option<Vec<crate::mcp::McpConnectionRecord>>,
     mcp_removed_grants: Option<(String, Vec<String>)>,
+    mcp_grants: HashMap<String, AcknowledgedMcpGrants>,
+}
+
+/// Only current own reviewed aliases are retained; four connections and 128
+/// reviewed tools bound this in-memory publication witness, not a second ledger.
+struct AcknowledgedMcpGrants {
+    connection_versions: HashMap<String, u64>,
+    tools: Vec<ToolDescriptor>,
 }
 
 struct AcknowledgedRunActions {
@@ -1755,6 +1763,24 @@ impl ControlPlanePersistRequest {
         self.save_ordered(true).await
     }
 
+    pub(crate) fn with_mcp_grant_candidate(
+        self,
+        rows: Vec<crate::mcp::McpConnectionRecord>,
+        agent_id: &str,
+        tools: Option<Vec<ToolDescriptor>>,
+    ) -> Option<Self> {
+        let mut request = self.with_mcp_candidate(rows, None)?;
+        request
+            .snapshot
+            .agents
+            .iter_mut()
+            .find(|agent| agent.state.id == agent_id)?
+            .state
+            .config
+            .tools = tools;
+        Some(request)
+    }
+
     async fn save_ordered(mut self, require_current: bool) -> std::io::Result<()> {
         let mut acknowledged = self.order.acknowledged.lock().await;
         if self.revision <= acknowledged.revision {
@@ -1791,26 +1817,33 @@ impl ControlPlanePersistRequest {
         // acknowledged MCP candidate reached the state publication lock.
         // Preserve the settled catalog and exact revoked aliases, while never
         // restoring records for an agent absent from the newer snapshot.
+        let original_mcp_versions: HashMap<_, _> = self
+            .snapshot
+            .mcp_connections
+            .iter()
+            .map(|row| ((row.agent_id.clone(), row.id.clone()), row.version))
+            .collect();
         if !self.mcp_candidate {
             if let Some(rows) = &acknowledged.mcp_connections {
                 self.snapshot.mcp_connections = rows
                     .iter()
                     .filter(|row| {
-                        self.snapshot
-                            .agents
-                            .iter()
-                            .any(|agent| agent.state.id == row.agent_id)
+                        self.snapshot.agents.iter().any(|agent| {
+                            agent.state.id == row.agent_id
+                                && !crate::agent_runs::is_helper_config(&agent.state.config)
+                        })
                     })
                     .cloned()
                     .collect();
                 // A later candidate can supersede the last deletion patch.
                 // Derive revocations from the complete settled catalog so an
                 // older prepared configuration cannot resurrect any alias.
+                let settled_rows = &self.snapshot.mcp_connections;
                 for agent in &mut self.snapshot.agents {
                     if let Some(tools) = &mut agent.state.config.tools {
                         tools.retain(|tool| {
                             !tool.name.starts_with("mcp_")
-                                || rows.iter().any(|row| {
+                                || settled_rows.iter().any(|row| {
                                     row.agent_id == agent.state.id
                                         && row
                                             .reviewed_tools
@@ -1831,6 +1864,56 @@ impl ControlPlanePersistRequest {
                     if let Some(tools) = &mut agent.state.config.tools {
                         tools.retain(|tool| !aliases.contains(&tool.name));
                     }
+                }
+            }
+            for agent in &mut self.snapshot.agents {
+                let Some(projection) = acknowledged.mcp_grants.get(&agent.state.id) else {
+                    continue;
+                };
+                let stale: HashSet<_> = projection
+                    .connection_versions
+                    .iter()
+                    .filter_map(|(id, version)| {
+                        (original_mcp_versions
+                            .get(&(agent.state.id.clone(), id.clone()))
+                            .copied()
+                            .unwrap_or(0)
+                            < *version)
+                            .then_some(id.as_str())
+                    })
+                    .collect();
+                if stale.is_empty() {
+                    continue;
+                }
+                let aliases: HashSet<_> = self
+                    .snapshot
+                    .mcp_connections
+                    .iter()
+                    .filter(|row| row.agent_id == agent.state.id && stale.contains(row.id.as_str()))
+                    .flat_map(|row| row.reviewed_tools.iter().map(|tool| tool.alias.as_str()))
+                    .collect();
+                let desired: Vec<_> = projection
+                    .tools
+                    .iter()
+                    .filter(|tool| aliases.contains(tool.name.as_str()))
+                    .cloned()
+                    .collect();
+                if let Some(tools) = &mut agent.state.config.tools {
+                    tools.retain(|tool| {
+                        !aliases.contains(tool.name.as_str())
+                            || desired.iter().any(|wanted| wanted.name == tool.name)
+                    });
+                    for tool in &desired {
+                        if let Some(existing) =
+                            tools.iter_mut().find(|existing| existing.name == tool.name)
+                        {
+                            *existing = tool.clone();
+                        } else {
+                            tools.push(tool.clone());
+                        }
+                    }
+                } else if !desired.is_empty() {
+                    agent.state.config.tools = Some(desired);
                 }
             }
         }
@@ -1872,6 +1955,7 @@ impl ControlPlanePersistRequest {
                 acknowledged.revision = self.revision;
                 acknowledged.mcp_connections = Some(self.snapshot.mcp_connections.clone());
                 acknowledged.mcp_removed_grants = self.mcp_removed_grants;
+                acknowledged.mcp_grants = acknowledged_mcp_grants(&self.snapshot);
             }
             return Err(error);
         }
@@ -1881,6 +1965,9 @@ impl ControlPlanePersistRequest {
         }
         if self.mcp_candidate {
             acknowledged.mcp_removed_grants = self.mcp_removed_grants;
+        }
+        if self.mcp_candidate || !acknowledged.mcp_grants.is_empty() {
+            acknowledged.mcp_grants = acknowledged_mcp_grants(&self.snapshot);
         }
         acknowledged.run_actions = self
             .snapshot
@@ -1899,6 +1986,54 @@ impl ControlPlanePersistRequest {
             .collect();
         Ok(())
     }
+}
+
+fn acknowledged_mcp_grants(
+    snapshot: &ControlPlaneSnapshot,
+) -> HashMap<String, AcknowledgedMcpGrants> {
+    snapshot
+        .agents
+        .iter()
+        .filter(|agent| !crate::agent_runs::is_helper_config(&agent.state.config))
+        .filter_map(|agent| {
+            let rows: Vec<_> = snapshot
+                .mcp_connections
+                .iter()
+                .filter(|row| row.agent_id == agent.state.id)
+                .collect();
+            if rows.is_empty() {
+                return None;
+            }
+            let connection_versions = rows
+                .iter()
+                .map(|row| (row.id.clone(), row.version))
+                .collect();
+            let mut seen = HashSet::new();
+            let tools = agent
+                .state
+                .config
+                .tools
+                .iter()
+                .flatten()
+                .filter(|tool| {
+                    seen.insert(tool.name.clone())
+                        && rows.iter().any(|row| {
+                            row.reviewed_tools.iter().any(|reviewed| {
+                                reviewed.alias == tool.name && reviewed.tool_descriptor() == **tool
+                            })
+                        })
+                })
+                .cloned()
+                .collect();
+            Some((
+                agent.state.id.clone(),
+                AcknowledgedMcpGrants {
+                    connection_versions,
+                    tools,
+                },
+            ))
+        })
+        .collect()
 }
 
 impl DaemonState {

@@ -10,7 +10,8 @@ use super::http::{json_response, read_limited_body};
 use super::jobs::{authorize, no_store};
 use super::{parse_json_body, ApiError, AppState};
 use crate::mcp::{
-    CreateMcpConnection, McpConnectionView, McpServiceError, ReviewMcpTool, UpdateMcpConnection,
+    CreateMcpConnection, McpConnectionView, McpGrantInput, McpServiceError, ReviewMcpTool,
+    UpdateMcpConnection,
 };
 use anima_core::external_tools::ExternalToolDescriptor;
 
@@ -308,6 +309,51 @@ pub(super) async fn review(
             )
             .await,
     )
+}
+
+#[utoipa::path(patch, path = "/api/agents/{agent_id}/mcp-connections/{connection_id}/grants/{alias}", tag = "mcp",
+    params(("agent_id" = String, Path), ("connection_id" = String, Path), ("alias" = String, Path)), request_body = McpGrantRequest,
+    responses((status = 200, description = "Acknowledged exact alias permission; no tool is called", body = McpGrantEnvelope),
+        (status = 400, description = "Invalid request", body = ErrorBody), (status = 403, description = "Local owner required", body = ErrorBody),
+        (status = 404, description = "Agent, connection or reviewed alias not found", body = ErrorBody),
+        (status = 409, description = "Connection version or reviewed descriptor changed", body = ErrorBody),
+        (status = 503, description = "Permission settlement unavailable or uncertain", body = ErrorBody)))]
+pub(super) async fn set_grant(
+    State(state): State<AppState>,
+    Path((agent_id, connection_id, alias)): Path<(String, String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, false) {
+        return response;
+    }
+    let input: McpGrantRequest = match body(&state, request).await {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    match state
+        .mcp
+        .set_grant(
+            &agent_id,
+            &connection_id,
+            &alias,
+            McpGrantInput {
+                expected_version: input.expected_version,
+                descriptor_digest: input.descriptor_digest,
+                granted: input.granted,
+            },
+        )
+        .await
+    {
+        Ok(outcome) => no_store(json_response(
+            StatusCode::OK,
+            &McpGrantEnvelope {
+                connection: connection_response(outcome.connection),
+                granted: outcome.granted,
+                tool_names: outcome.tool_names,
+            },
+        )),
+        Err(error) => service_error(error),
+    }
 }
 
 #[utoipa::path(post, path = "/api/agents/{agent_id}/mcp-connections/{connection_id}/disconnect", tag = "mcp",

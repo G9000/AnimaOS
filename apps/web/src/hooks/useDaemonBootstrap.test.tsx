@@ -139,6 +139,53 @@ afterEach(() => {
 });
 
 describe('useDaemonBootstrap', () => {
+  it('M43 merges canonical tools into a same-batch current snapshot and fences an older poll without adding missing owners', async () => {
+    const original = snapshot('main', 1, 'Original');
+    const neighbor = snapshot('neighbor', 2);
+    resolveBootstrap([original, neighbor]);
+    const { result } = renderHook(() => useDaemonBootstrap());
+    await flushBootstrap();
+    const pending = deferred<{ agents: DaemonSnapshot[] }>();
+    listAgentsMock.mockReturnValueOnce(pending.promise);
+    let refresh!: Promise<void>;
+    act(() => {
+      refresh = result.current.refreshAgents();
+    });
+    const latest = structuredClone(original);
+    latest.state.name = 'Latest';
+    latest.state.config.name = 'Latest';
+    latest.state.config.model = 'new-model';
+    latest.state.config.system = 'New instructions';
+    latest.messageCount = 17;
+    const tools = [
+      {
+        name: 'mcp_exact_alias',
+        description: 'Actual canonical descriptor',
+        parameters: { type: 'object' },
+      },
+    ];
+    act(() => {
+      result.current.acceptAgentSnapshot(latest);
+      result.current.acceptAgentTools('main', tools);
+      result.current.acceptAgentTools('missing-owner', tools);
+    });
+    expect(result.current.agents).toEqual([
+      {
+        ...latest,
+        state: { ...latest.state, config: { ...latest.state.config, tools } },
+      },
+      neighbor,
+    ]);
+    await act(async () => {
+      pending.resolve({ agents: [original, neighbor] });
+      await refresh;
+    });
+    expect(result.current.agents[0].state.config.tools).toEqual(tools);
+    expect(result.current.agents[0].state.name).toBe('Latest');
+    expect(result.current.agents).toHaveLength(2);
+    expect(result.current.agents[1]).toEqual(neighbor);
+  });
+
   it('starts synchronously in an unknown, unloaded state', () => {
     healthMock.mockReturnValue(
       new Promise<{ status: string }>(() => undefined),

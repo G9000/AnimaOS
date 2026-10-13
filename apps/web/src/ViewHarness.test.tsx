@@ -21,6 +21,8 @@ import { toolNamesForProfile } from './lib/agent-access';
 import { deferred, snapshot } from './test/view-harness';
 import {
   daemon,
+  mcpOwnerApi,
+  type McpConnection,
   type DaemonProvider,
   type DaemonSnapshot,
 } from './lib/daemon-api';
@@ -471,6 +473,8 @@ beforeEach(() => {
     revision: '1',
   });
   vi.spyOn(daemon, 'listConnectors').mockResolvedValue({ connectors: [] });
+  vi.spyOn(mcpOwnerApi, 'list').mockResolvedValue([]);
+  vi.spyOn(mcpOwnerApi, 'toolNames').mockResolvedValue([]);
   vi.spyOn(daemon, 'discordConnectors').mockResolvedValue([]);
   vi.spyOn(daemon, 'listSchedules').mockResolvedValue({ schedules: [] });
   vi.spyOn(daemon, 'importLegacySchedules').mockResolvedValue({
@@ -2691,6 +2695,349 @@ it('replies to a Telegram session through the runs route', async () => {
     { text: 'On my way', mode: 'queue' },
     expect.any(String),
   );
+});
+
+function mcpReviewFixture(agentId: string): McpConnection {
+  return {
+    id: 'mcp-1',
+    agentId,
+    label: 'Synthetic external tools',
+    endpoint: 'http://127.0.0.1:8089/mcp',
+    enabled: true,
+    version: 3,
+    state: 'ready',
+    wireGeneration: 1,
+    discoveryId: 'discovery-1',
+    physicalCallsActive: false,
+    error: null,
+    candidates: [
+      {
+        remoteName: 'lookup',
+        description: 'Lookup',
+        inputSchema: {},
+        outputSchema: null,
+        descriptorDigest: 'a'.repeat(64),
+      },
+    ],
+    reviewedTools: [
+      {
+        remoteName: 'lookup',
+        description: 'Lookup',
+        inputSchema: {},
+        outputSchema: null,
+        descriptorDigest: 'a'.repeat(64),
+        alias: `mcp_${'1'.repeat(32)}_${'a'.repeat(16)}`,
+      },
+    ],
+  };
+}
+
+it('M43 reconciles canonical grant descriptors without overwriting newer settings from a poll', async () => {
+  const user = userEvent.setup();
+  const initial = snapshot('agent-main', 'Nova', 1, [
+    'read_file',
+    'unknown_custom',
+  ]);
+  const latest = structuredClone(initial);
+  latest.state.name = 'Nova Prime';
+  latest.state.config.name = 'Nova Prime';
+  latest.state.config.system = 'Newer instructions';
+  latest.state.config.model = 'gpt-4.1-mini';
+  const canonical = structuredClone(initial);
+  const external = mcpReviewFixture('agent-main');
+  canonical.state.config.tools!.push({
+    name: external.reviewedTools[0].alias,
+    description: 'Canonical remote descriptor',
+    parameters: { type: 'object', properties: { query: { type: 'string' } } },
+  });
+  const ownerRead = deferred<{ agent: DaemonSnapshot }>();
+  vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+  vi.spyOn(daemon, 'listAgents')
+    .mockResolvedValueOnce({ agents: [initial] })
+    .mockResolvedValue({ agents: [latest] });
+  vi.spyOn(daemon, 'getAgent').mockReturnValue(ownerRead.promise);
+  vi.mocked(mcpOwnerApi.list).mockResolvedValue([external]);
+  vi.mocked(mcpOwnerApi.toolNames).mockResolvedValue([
+    'read_file',
+    'unknown_custom',
+  ]);
+  vi.spyOn(mcpOwnerApi, 'setGrant').mockResolvedValue({
+    connection: { ...external, version: 4 },
+    granted: true,
+    toolNames: canonical.state.config.tools!.map((tool) => tool.name),
+  });
+  mockProviders();
+  const poll = capturePollTimer();
+  window.history.replaceState(null, '', '/#/connectors');
+  render(<ViewHarness />);
+  await user.click(await screen.findByRole('button', { name: 'Grant lookup' }));
+  await waitFor(() =>
+    expect(daemon.getAgent).toHaveBeenCalledWith('agent-main'),
+  );
+  act(() => poll());
+  await waitFor(() => expect(daemon.listAgents).toHaveBeenCalledTimes(2));
+  await act(async () => {
+    ownerRead.resolve({ agent: canonical });
+    await ownerRead.promise;
+  });
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Revoke lookup' })).toBeEnabled(),
+  );
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  expect(screen.getByDisplayValue('Nova Prime')).toBeVisible();
+  expect(screen.getByRole('textbox', { name: 'System prompt' })).toHaveValue(
+    'Newer instructions',
+  );
+  expect(
+    screen.getByText(
+      ['read_file', 'unknown_custom', external.reviewedTools[0].alias].join(
+        ', ',
+      ),
+    ),
+  ).toBeVisible();
+});
+
+it('M43 reconciles deleted aliases while preserving actual native and unrelated dormant descriptors', async () => {
+  const user = userEvent.setup();
+  const external = mcpReviewFixture('agent-main');
+  const dormant = `mcp_${'2'.repeat(32)}_${'b'.repeat(16)}`;
+  const initial = snapshot('agent-main', 'Nova', 1, [
+    'read_file',
+    external.reviewedTools[0].alias,
+    dormant,
+    'unknown_custom',
+  ]);
+  const canonical = structuredClone(initial);
+  canonical.state.config.tools = canonical.state.config.tools!.filter(
+    (tool) => tool.name !== external.reviewedTools[0].alias,
+  );
+  vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+  vi.spyOn(daemon, 'listAgents').mockResolvedValue({ agents: [initial] });
+  vi.spyOn(daemon, 'getAgent').mockResolvedValue({ agent: canonical });
+  vi.mocked(mcpOwnerApi.list).mockResolvedValue([external]);
+  vi.mocked(mcpOwnerApi.toolNames)
+    .mockResolvedValueOnce(initial.state.config.tools!.map((tool) => tool.name))
+    .mockResolvedValue(canonical.state.config.tools!.map((tool) => tool.name));
+  vi.spyOn(mcpOwnerApi, 'remove').mockResolvedValue(undefined);
+  mockProviders();
+  window.history.replaceState(null, '', '/#/connectors');
+  render(<ViewHarness />);
+  await user.click(
+    await screen.findByRole('button', { name: 'Remove saved connection' }),
+  );
+  await user.click(screen.getByRole('button', { name: 'Confirm removal' }));
+  await waitFor(() =>
+    expect(daemon.getAgent).toHaveBeenCalledWith('agent-main'),
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Save disabled connection' }),
+    ).toBeDisabled(),
+  ); // empty form stays disabled after settlement
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Refresh status' }),
+    ).toBeEnabled(),
+  );
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  expect(
+    screen.getByText(['read_file', dormant, 'unknown_custom'].join(', ')),
+  ).toBeVisible();
+  expect(
+    screen.queryByText(
+      initial.state.config.tools!.map((tool) => tool.name).join(', '),
+    ),
+  ).not.toBeInTheDocument();
+});
+
+it('M43 uncertainty survives Chat and Connectors navigation until explicit read-only refresh enables Settings save', async () => {
+  const user = userEvent.setup();
+  const external = mcpReviewFixture('agent-main');
+  const initial = snapshot('agent-main', 'Nova', 1, [
+    'read_file',
+    'unknown_custom',
+  ]);
+  const canonical = snapshot('agent-main', 'Nova', 1, [
+    'read_file',
+    'unknown_custom',
+    external.reviewedTools[0].alias,
+  ]);
+  vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+  vi.spyOn(daemon, 'listAgents').mockResolvedValue({ agents: [initial] });
+  vi.spyOn(daemon, 'getAgent').mockResolvedValue({ agent: canonical });
+  vi.spyOn(daemon, 'updateAgent').mockResolvedValue({ agent: canonical });
+  vi.mocked(mcpOwnerApi.list).mockResolvedValue([external]);
+  vi.spyOn(mcpOwnerApi, 'setGrant').mockRejectedValue({ status: 503 });
+  mockProviders();
+  window.history.replaceState(null, '', '/#/connectors');
+  render(<ViewHarness />);
+  await user.click(await screen.findByRole('button', { name: 'Grant lookup' }));
+  await screen.findByText(
+    'The result could not be confirmed. Refresh status before taking another action.',
+  );
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  const name = screen.getByDisplayValue('Nova');
+  await user.clear(name);
+  await user.type(name, 'Edited Nova');
+  await user.click(screen.getByRole('button', { name: 'Save changes' }));
+  expect(daemon.updateAgent).not.toHaveBeenCalled();
+  expect(
+    screen.getByText(/External tool permissions need a fresh read/),
+  ).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Close settings' }));
+  vi.mocked(mcpOwnerApi.toolNames).mockResolvedValue(
+    canonical.state.config.tools!.map((tool) => tool.name),
+  );
+  await user.click(screen.getByRole('button', { name: 'Open companion chat' }));
+  expect(
+    screen.queryByRole('heading', { name: 'External tools (MCP)' }),
+  ).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Connectors' }));
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Refresh status' }),
+    ).toBeEnabled(),
+  );
+  expect(daemon.getAgent).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', { name: 'Refresh status' }));
+  await waitFor(() =>
+    expect(daemon.getAgent).toHaveBeenCalledWith('agent-main'),
+  );
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Revoke lookup' })).toBeEnabled(),
+  );
+  expect(mcpOwnerApi.setGrant).toHaveBeenCalledTimes(1);
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  expect(
+    screen.getByText(
+      canonical.state.config.tools!.map((tool) => tool.name).join(', '),
+    ),
+  ).toBeVisible();
+  const nextName = screen.getByDisplayValue('Nova');
+  await user.clear(nextName);
+  await user.type(nextName, 'Edited Nova');
+  await user.click(screen.getByRole('button', { name: 'Save changes' }));
+  expect(daemon.updateAgent).toHaveBeenCalledWith('agent-main', {
+    name: 'Edited Nova',
+  });
+});
+
+it('M43 an acknowledged grant after navigation blocks optional Settings writes until canonical refresh preserves it', async () => {
+  const user = userEvent.setup();
+  const external = mcpReviewFixture('agent-main');
+  const initial = snapshot('agent-main', 'Nova', 1, [
+    'read_file',
+    'unknown_custom',
+  ]);
+  const canonical = snapshot('agent-main', 'Nova', 1, [
+    'read_file',
+    'unknown_custom',
+    external.reviewedTools[0].alias,
+  ]);
+  const pending = deferred<Awaited<ReturnType<typeof mcpOwnerApi.setGrant>>>();
+  vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+  vi.spyOn(daemon, 'listAgents').mockResolvedValue({ agents: [initial] });
+  vi.spyOn(daemon, 'getAgent').mockResolvedValue({ agent: canonical });
+  vi.spyOn(daemon, 'updateAgent').mockResolvedValue({ agent: canonical });
+  vi.mocked(mcpOwnerApi.list).mockResolvedValue([external]);
+  vi.spyOn(mcpOwnerApi, 'setGrant').mockReturnValue(pending.promise);
+  mockProviders();
+  window.history.replaceState(null, '', '/#/connectors');
+  render(<ViewHarness />);
+  await user.click(await screen.findByRole('button', { name: 'Grant lookup' }));
+  await user.click(screen.getByRole('button', { name: 'Open companion chat' }));
+  expect(
+    screen.queryByRole('heading', { name: 'External tools (MCP)' }),
+  ).not.toBeInTheDocument();
+  await act(async () => {
+    pending.resolve({
+      connection: { ...external, version: 4 },
+      granted: true,
+      toolNames: canonical.state.config.tools!.map((tool) => tool.name),
+    });
+    await pending.promise;
+  });
+  expect(daemon.getAgent).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await user.click(
+    screen.getByRole('checkbox', { name: 'Allow removing saved facts' }),
+  );
+  await user.click(screen.getByRole('button', { name: 'Save changes' }));
+  expect(daemon.updateAgent).not.toHaveBeenCalled();
+  expect(
+    screen.getByText(/External tool permissions need a fresh read/),
+  ).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Close settings' }));
+  vi.mocked(mcpOwnerApi.list).mockResolvedValue([{ ...external, version: 4 }]);
+  vi.mocked(mcpOwnerApi.toolNames).mockResolvedValue(
+    canonical.state.config.tools!.map((tool) => tool.name),
+  );
+  await user.click(screen.getByRole('button', { name: 'Connectors' }));
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Refresh status' }),
+    ).toBeEnabled(),
+  );
+  await user.click(screen.getByRole('button', { name: 'Refresh status' }));
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Revoke lookup' })).toBeEnabled(),
+  );
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await user.click(
+    screen.getByRole('checkbox', { name: 'Allow removing saved facts' }),
+  );
+  await user.click(screen.getByRole('button', { name: 'Save changes' }));
+  expect(daemon.updateAgent).toHaveBeenCalledWith('agent-main', {
+    tools: [
+      'read_file',
+      'unknown_custom',
+      external.reviewedTools[0].alias,
+      'memory_remove',
+    ],
+  });
+  expect(mcpOwnerApi.setGrant).toHaveBeenCalledTimes(1);
+});
+
+it('M43 never adds an old owner back when the canonical permission read settles after agent replacement', async () => {
+  const user = userEvent.setup();
+  const first = snapshot('agent-a', 'Alpha', 1);
+  const next = snapshot('agent-b', 'Beta', 2);
+  const replacement = deferred<{ agents: DaemonSnapshot[] }>();
+  const ownerRead = deferred<{ agent: DaemonSnapshot }>();
+  vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+  vi.spyOn(daemon, 'listAgents')
+    .mockResolvedValueOnce({ agents: [first] })
+    .mockReturnValueOnce(replacement.promise);
+  vi.spyOn(daemon, 'getAgent').mockReturnValue(ownerRead.promise);
+  const external = mcpReviewFixture('agent-a');
+  vi.mocked(mcpOwnerApi.list).mockResolvedValue([external]);
+  vi.spyOn(mcpOwnerApi, 'setGrant').mockResolvedValue({
+    connection: { ...external, version: 4 },
+    granted: true,
+    toolNames: [external.reviewedTools[0].alias],
+  });
+  mockProviders();
+  const poll = capturePollTimer();
+  window.history.replaceState(null, '', '/#/connectors');
+  render(<ViewHarness />);
+  await user.click(await screen.findByRole('button', { name: 'Grant lookup' }));
+  await waitFor(() => expect(daemon.getAgent).toHaveBeenCalledWith('agent-a'));
+  act(() => poll());
+  await act(async () => {
+    replacement.resolve({ agents: [next] });
+    await replacement.promise;
+  });
+  await screen.findByRole('heading', { name: 'Say something to Beta' });
+  await act(async () => {
+    ownerRead.resolve({ agent: first });
+    await ownerRead.promise;
+  });
+  expect(
+    screen.getByRole('heading', { name: 'Say something to Beta' }),
+  ).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  expect(screen.getByDisplayValue('Beta')).toBeVisible();
+  expect(screen.queryByDisplayValue('Alpha')).not.toBeInTheDocument();
 });
 
 it('opens a selected Discord conversation from Connectors and sends a native text run', async () => {

@@ -7,6 +7,7 @@ import {
 } from '@animaOS-SWARM/sdk';
 import { primaryBtnCls } from './ui-bits';
 import { GoogleDriveCard } from './GoogleDriveCard';
+import { McpConnectionsPanel } from './mcp/McpConnectionsPanel';
 
 const client = createDaemonClient({ baseUrl: '' }).connectors;
 const button =
@@ -816,10 +817,22 @@ export function ConnectorsView({
   agentId,
   telegram,
   discord,
+  disabled = false,
+  onMcpGrantsChanged,
+  onMcpBusyChanged,
+  onMcpPermissionsUncertain,
+  mcpPermissionsUncertain = false,
+  mcpPermissionsBusy = false,
 }: {
   agentId: string;
   telegram: ReactNode;
   discord?: ReactNode;
+  disabled?: boolean;
+  onMcpGrantsChanged?: (toolNames: string[]) => void | Promise<void>;
+  onMcpBusyChanged?: (busy: boolean) => void;
+  onMcpPermissionsUncertain?: () => void;
+  mcpPermissionsUncertain?: boolean;
+  mcpPermissionsBusy?: boolean;
 }) {
   const [oauthGeneration, setOauthGeneration] = useState({
     google: 0,
@@ -870,6 +883,16 @@ export function ConnectorsView({
             />
           </div>
         </section>
+        <McpConnectionsPanel
+          key={agentId}
+          agentId={agentId}
+          disabled={disabled}
+          permissionsUncertain={mcpPermissionsUncertain}
+          permissionsBusy={mcpPermissionsBusy}
+          onGrantsChanged={onMcpGrantsChanged}
+          onBusyChanged={onMcpBusyChanged}
+          onPermissionsUncertain={onMcpPermissionsUncertain}
+        />
         <div className="grid min-w-0 items-start gap-4 xl:grid-cols-2">
           <div className="min-w-0 rounded-2xl border border-line bg-panel/60 p-4 sm:p-6">
             {telegram}

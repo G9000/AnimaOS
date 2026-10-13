@@ -240,6 +240,19 @@ pub(crate) struct ReviewMcpTool {
     pub(crate) discovery_id: String,
     pub(crate) descriptor_digest: String,
 }
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpGrantInput {
+    pub(crate) expected_version: u64,
+    pub(crate) descriptor_digest: String,
+    pub(crate) granted: bool,
+}
+#[derive(Clone, Debug)]
+pub(crate) struct McpGrantOutcome {
+    pub(crate) connection: McpConnectionView,
+    pub(crate) granted: bool,
+    pub(crate) tool_names: Vec<String>,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum McpServiceError {
     InvalidRequest,
