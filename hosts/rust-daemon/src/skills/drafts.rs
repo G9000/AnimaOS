@@ -245,11 +245,48 @@ impl SkillService {
         };
         self.locked(move |service, root| async move {
             let reviewed_root = root.clone();
+            let linked = service.state.read().await.skills.draft(&id).cloned();
+            if let Some(draft) =
+                linked.filter(|draft| draft.is_pending() && draft.learning_source.is_some())
+            {
+                let read_root = root.clone();
+                let read_slug = draft.slug.clone();
+                let bytes = blocking(move || disk::read_skill_bytes(&read_root, &read_slug))
+                    .await?
+                    .map_err(SkillError::Unavailable)?;
+                let actual_hash = bytes.as_deref().map(skill_hash);
+                crate::learning::validate_skill_source(
+                    &service.state,
+                    draft.learning_source.as_ref().expect("linked draft"),
+                    &draft.id,
+                )
+                .await?;
+                let guard = service.state.read().await;
+                let current_hash = guard
+                    .skills
+                    .get(&draft.slug)
+                    .map(|record| record.approved_hash.clone());
+                if current_hash != draft.base_hash || actual_hash != draft.base_hash {
+                    return Err(SkillError::conflict(
+                        "Skill base changed; review a fresh draft before replacing it",
+                    ));
+                }
+            }
             let (slug, draft) = service
                 .apply(&root, move |skills, now_ms| {
                     let previous_draft = skills.draft(&id).cloned().ok_or(SkillError::NotFound)?;
                     if !previous_draft.is_pending() {
                         return Err(SkillError::conflict(SKILL_DRAFT_DECIDED));
+                    }
+                    if previous_draft.learning_source.is_some()
+                        && previous_draft.base_hash
+                            != skills
+                                .get(&previous_draft.slug)
+                                .map(|record| record.approved_hash.clone())
+                    {
+                        return Err(SkillError::conflict(
+                            "Skill base changed; review a fresh draft before replacing it",
+                        ));
                     }
                     // Pending now but not when read: refuse (fail closed).
                     review

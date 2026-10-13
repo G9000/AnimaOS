@@ -46,6 +46,77 @@ const review = {
 };
 
 describe('learning client', () => {
+  it('creates a pending skill draft with exact proposal/source CAS and bytes', async () => {
+    const draft = {
+      id: 'skd-learning-1',
+      slug: 'source-checking',
+      name: 'Source checking',
+      description: 'Check cited sources.',
+      body: 'Verify the cited source before summarizing.',
+      source: 'agent',
+      proposedBy: { agentId: 'agent/a', sessionId: 'chat:1', runId: 'run:1' },
+      baseHash: null,
+      currentHash: null,
+      stale: false,
+      fileHash: null,
+      createdAtMs: 4,
+      status: 'pending',
+      decidedAtMs: null,
+      problem: null,
+      learningSource: {
+        agentId: 'agent/a',
+        reviewId: 'review/1',
+        proposalId: 'proposal/1',
+        sourceRunId: 'run:1',
+        sessionId: 'chat:1',
+        evidenceDigest: 'digest-current',
+        decisionVersion: 3,
+      },
+    };
+    let attempts = 0;
+    const { learning, requests } = transport((url) => {
+      if (!url.endsWith('/skill-draft')) return Response.json({ review });
+      attempts += 1;
+      return Response.json({ draft }, { status: attempts === 1 ? 201 : 200 });
+    });
+    const input = {
+      expectedVersion: 3,
+      evidenceDigest: 'digest-current',
+      skill: {
+        slug: 'source-checking',
+        name: 'Source checking',
+        description: 'Check cited sources.',
+        body: 'Verify the cited source before summarizing.',
+        expectedHash: null,
+      },
+    };
+
+    expect(
+      await learning.createSkillDraft(
+        'agent/a',
+        'review/1',
+        'proposal/1',
+        input,
+      ),
+    ).toEqual(draft);
+    expect(
+      await learning.createSkillDraft(
+        'agent/a',
+        'review/1',
+        'proposal/1',
+        input,
+      ),
+    ).toEqual(draft);
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.url).toBe(
+      '/api/agents/agent%2Fa/learning-reviews/review%2F1/proposals/proposal%2F1/skill-draft',
+    );
+    expect(requests[0]?.init?.method).toBe('POST');
+    expect(requests[0]?.init?.body).toBe(JSON.stringify(input));
+    expect(requests[1]?.url).toBe(requests[0]?.url);
+    expect(requests[1]?.init?.body).toBe(requests[0]?.init?.body);
+  });
+
   it('uses owner policy, review, cancellation, and versioned proposal routes', async () => {
     const { learning, requests } = transport((url) => {
       if (url.endsWith('/learning-policy'))

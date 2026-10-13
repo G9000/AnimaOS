@@ -27,8 +27,8 @@ fn now_ms() -> u64 {
 
 #[derive(Clone)]
 pub(crate) struct LearningService {
-    state: SharedDaemonState,
-    transactions: Arc<AsyncMutex<()>>,
+    pub(super) state: SharedDaemonState,
+    pub(super) transactions: Arc<AsyncMutex<()>>,
     timeout: Duration,
 }
 
@@ -781,7 +781,7 @@ fn parse_proposals(
             || proposal.anchors.iter().any(|anchor| !known.contains(anchor))
             || proposal.anchors.iter().collect::<std::collections::HashSet<_>>().len() != proposal.anchors.len() { return Err(()); }
         Ok(LearningProposal { id: uuid::Uuid::new_v4().to_string(), observation: proposal.observation,
-            suggestion: proposal.suggestion, anchors: proposal.anchors, decision: LearningDecision::Pending, decision_version: 0 })
+            suggestion: proposal.suggestion, anchors: proposal.anchors, decision: LearningDecision::Pending, decision_version: 0, skill_draft_id: None })
     }).collect()
 }
 

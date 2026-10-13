@@ -1,5 +1,19 @@
 # Native harness acceptance
 
+## M39 reviewed procedural reuse (2026-10-13)
+
+One retained M38 lesson was explicitly edited into a pending skill draft, deduplicated and approved through the ordinary skill route. Standard SKILL.md bytes and the approved SHA-256 matched. Two fresh empty synthetic sessions selected and loaded that skill without a slug in their prompts, then wrote and read back different proof files in separate rounds. Both final answers quoted the correct path and contents; independent file-byte checks and durable tool details matched. Each task used four model steps: 6,118 and 6,179 reported tokens, **12,297 total**. No new review generation, evaluator probe, repair prompt or model-task retry was submitted.
+
+The first operator request lacked the required idempotency header and received400 before admission; its session had zero runs/messages. Its corrected first admission used the same empty session and a stable key. There were two accepted primary tasks, rather than three model tasks, and no unknown-outcome resubmission.
+
+One quiet same-store restart between tasks retained the exact linked review/draft, skill approval/hash, memory and configuration; no replay was observed. All74 preexisting canonical memory records and citations/temporal fields were unchanged. Four ordinary runtime journals were appended. The three temporary settings and21 original descriptors were restored, both original agent configurations matched, and all14 exact captured process identities were gone with 8080/4200 free. An older hot-ledger run aged out under existing24-hour retention; its read-only history row retains identical task data with the expected host-local mirrored flag distinction. Quiet forced process cleanup does not establish graceful wrapper shutdown.
+
+Fresh local gates: **Rust2,494 passed / nine ignored /40suites**, sequential formatting, **SDK130 / three intentional service skips**, **web1,231 /111files**, SDK/web type checks and builds. Eight native router groups and the snapshot-backup case cover owner/strict input, source/base conflicts, duplicates, save rollback, original-content retention after edited approval and reload. One new web regression needed to open the new review after switching agents; its stale-result assertions remained intact and the final full suite passed.
+
+This accepts one adapted procedural learning cycle on two simple file tasks. Source-backed profile/preference views, generic corrected-preference recall and unattended curation remain separate PAR-02 work. It does not establish full Hermes parity or real-account/host acceptance. See [the M39 plan](../superpowers/plans/2026-10-13-companion-learning-adoption-m39.md) and [learning controls](learning.md); exact source, operator captures, gate logs and publication are in the private M39 ledger.
+
+## Earlier acceptance
+
 The selected local assistant loop is usable: real tasks have exercised workspace
 work, memory correction, helpers, saved tasks, approved skills, compaction and
 restart recovery. This is evidence for those cases, rather than a claim of

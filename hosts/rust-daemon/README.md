@@ -174,6 +174,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/workspace/pick-folder`                                                                 |
 | `POST`   | `/api/workspace/resume`                                                                      |
 | `POST`   | `/api/agents/{agent_id}/learning-reviews/{review_id}/cancel`                                 |
+| `POST`   | `/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}/skill-draft`    |
 | `POST`   | `/api/agents/{agent_id}/runs/{run_id}/learning-review`                                       |
 | `PUT`    | `/api/agents/{agent_id}/approval-policy`                                                     |
 | `PUT`    | `/api/agents/{agent_id}/avatar`                                                              |

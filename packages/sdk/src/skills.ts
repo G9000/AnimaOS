@@ -62,6 +62,16 @@ export interface SkillDraft {
   decidedAtMs: number | null;
   /** Why a file draft's SKILL.md is not valid. */
   problem: string | null;
+  /** The learning review/proposal that produced this pending draft. */
+  learningSource?: {
+    agentId: string;
+    reviewId: string;
+    proposalId: string;
+    sourceRunId: string;
+    sessionId: string;
+    evidenceDigest: string;
+    decisionVersion: number;
+  } | null;
 }
 
 export interface SkillInput {

@@ -408,6 +408,8 @@ pub(crate) struct SkillDraft {
     pub(crate) source: DraftSource,
     #[serde(default)]
     pub(crate) proposed_by: Option<ProposedBy>,
+    #[serde(default)]
+    pub(crate) learning_source: Option<crate::learning::LearningSkillSource>,
     /// The skill's approved hash when the draft was made (`None`: a new slug).
     #[serde(default)]
     pub(crate) base_hash: Option<String>,
@@ -437,6 +439,7 @@ impl SkillDraft {
             body: file.body,
             source,
             proposed_by,
+            learning_source: None,
             base_hash,
             file_hash: None,
             created_at_ms: now_ms,

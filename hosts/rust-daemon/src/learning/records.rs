@@ -82,6 +82,22 @@ pub(crate) struct LearningProposal {
     pub(crate) anchors: Vec<String>,
     pub(crate) decision: LearningDecision,
     pub(crate) decision_version: u64,
+    #[serde(default)]
+    pub(crate) skill_draft_id: Option<String>,
+}
+
+/// Immutable lineage for an explicitly reviewed procedural handoff. Advice
+/// remains unverified; this is not permission to install or run a skill.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LearningSkillSource {
+    pub(crate) agent_id: String,
+    pub(crate) review_id: String,
+    pub(crate) proposal_id: String,
+    pub(crate) source_run_id: String,
+    pub(crate) session_id: String,
+    pub(crate) evidence_digest: String,
+    pub(crate) decision_version: u64,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -190,6 +206,7 @@ impl LearningRegistry {
         let mut ids = HashSet::new();
         let mut keys = HashSet::new();
         let mut policies = HashSet::new();
+        let mut handoffs = HashSet::new();
         for policy in &snapshot.policies {
             if policy.agent_id.is_empty() || !policies.insert(&policy.agent_id) {
                 return Err("invalid learning policy".into());
@@ -233,6 +250,11 @@ impl LearningRegistry {
             let mut proposal_ids = HashSet::new();
             for proposal in &record.proposals {
                 if proposal.id.is_empty()
+                    || proposal.skill_draft_id.as_ref().is_some_and(|id| {
+                        !id.starts_with(crate::skills::DRAFT_ID_PREFIX)
+                            || id.len() > 100
+                            || !handoffs.insert(id)
+                    })
                     || !proposal_ids.insert(&proposal.id)
                     || proposal.observation.trim().is_empty()
                     || proposal.suggestion.trim().is_empty()
@@ -311,4 +333,28 @@ impl LearningRegistry {
         self.reviews.insert(review.id.clone(), review.clone());
         Ok(review)
     }
+}
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LearningSkillDraftRequest {
+    pub(crate) expected_version: u64,
+    pub(crate) evidence_digest: String,
+    pub(crate) skill: LearningSkillContent,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LearningSkillContent {
+    pub(crate) slug: String,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) body: String,
+    #[serde(deserialize_with = "required_nullable_hash")]
+    pub(crate) expected_hash: Option<String>,
+}
+
+fn required_nullable_hash<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    Option::<String>::deserialize(deserializer)
 }

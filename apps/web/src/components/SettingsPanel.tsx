@@ -79,6 +79,10 @@ const DEFAULT_LEARNING_API: LearningReviewApi = {
     daemon.cancelLearningReview(agentId, reviewId),
   decideProposal: (agentId, reviewId, proposalId, input) =>
     daemon.decideLearningProposal(agentId, reviewId, proposalId, input),
+  listSkills: (options) => daemon.listSkills(options),
+  skill: (slug, options) => daemon.skill(slug, options),
+  createSkillDraft: (agentId, reviewId, proposalId, input) =>
+    daemon.createLearningSkillDraft(agentId, reviewId, proposalId, input),
 };
 
 /**
@@ -100,6 +104,7 @@ export function SettingsPanel({
   integrations,
   refreshProviders,
   learningApi,
+  onOpenSkills,
 }: {
   agent: AgentDetail;
   providers: DaemonProvider[] | null;
@@ -114,6 +119,7 @@ export function SettingsPanel({
   integrations?: ReactNode;
   refreshProviders?: () => void | Promise<void>;
   learningApi?: LearningReviewApi;
+  onOpenSkills?: () => void;
 }) {
   const seedModel = useMemo(() => {
     const options = MODEL_SUGGESTIONS[agent.provider] ?? [];
@@ -741,6 +747,7 @@ export function SettingsPanel({
                 agentId={agent.id}
                 api={learningApi ?? DEFAULT_LEARNING_API}
                 disabled={controlsDisabled}
+                onOpenSkills={onOpenSkills}
               />
 
               {integrations}

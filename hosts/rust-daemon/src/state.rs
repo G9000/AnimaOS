@@ -2422,6 +2422,27 @@ impl DaemonState {
             &snapshot.approval_rules,
         )?;
         crate::skills::SkillRegistry::validate(&snapshot.skills, &snapshot.skill_drafts)?;
+        for draft in &snapshot.skill_drafts {
+            if let Some(source) = &draft.learning_source {
+                let matches = snapshot.learning_reviews.iter().any(|review| {
+                    review.id == source.review_id
+                        && review.agent_id == source.agent_id
+                        && review.source_run_id == source.source_run_id
+                        && review.session_id == source.session_id
+                        && review.evidence_digest == source.evidence_digest
+                        && review.proposals.iter().any(|proposal| {
+                            proposal.id == source.proposal_id
+                                && proposal.skill_draft_id.as_deref() == Some(draft.id.as_str())
+                                && proposal.decision_version >= source.decision_version
+                        })
+                });
+                if !matches {
+                    return Err(
+                        "learning skill draft lineage does not match its saved lesson".into(),
+                    );
+                }
+            }
+        }
         crate::schedules::FireLog::validate(&snapshot.schedule_fires)?;
         let mut swarm_ids = HashSet::new();
         for swarm in &snapshot.swarms {

@@ -126,6 +126,11 @@ function learningApiMock(): LearningReviewApi {
     decideProposal: vi.fn(async () => {
       throw new Error('No review fixture');
     }),
+    listSkills: vi.fn(async () => []),
+    skill: vi.fn(async () => ({ skill: null, file: null })),
+    createSkillDraft: vi.fn(async () => {
+      throw new Error('No skill draft fixture');
+    }),
   };
 }
 

@@ -117,6 +117,7 @@ fn m38_snapshot_validation_rejects_duplicate_attempts_unknown_anchors_and_hidden
         anchors: vec!["foreign".into()],
         decision: LearningDecision::Pending,
         decision_version: 0,
+        skill_draft_id: None,
     });
     assert!(LearningRegistry::validate(&snapshot).is_err());
     snapshot.reviews[0].proposals[0].anchors = vec!["reply".into()];

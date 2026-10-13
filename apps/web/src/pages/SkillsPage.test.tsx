@@ -62,6 +62,41 @@ afterEach(() => {
 });
 
 describe('SkillsPage', () => {
+  it('shows learning lineage and links a pending draft to its source task', async () => {
+    const user = userEvent.setup();
+    const draft = skillDraftFixture('skd_learning', {
+      slug: 'source-checking',
+      name: 'Source checking',
+      learningSource: {
+        agentId: 'agent-main',
+        reviewId: 'review-1',
+        proposalId: 'proposal-1',
+        sourceRunId: 'run-source',
+        sessionId: 'chat-source',
+        evidenceDigest: 'evidence-digest-123456',
+        decisionVersion: 2,
+      },
+    });
+    vi.mocked(daemon.listSkillDrafts).mockImplementation(async ({ status }) =>
+      status === 'pending' ? [draft] : [],
+    );
+    const view = renderPage();
+
+    const card = await screen.findByRole('region', {
+      name: 'Skill draft: Source checking',
+    });
+    expect(within(card).getByText(/review review-1/)).toBeVisible();
+    expect(within(card).getByText(/source run run-source/)).toBeVisible();
+    await user.click(
+      within(card).getByRole('button', { name: 'Open source task' }),
+    );
+    expect(view.onOpenSession).toHaveBeenCalledWith({
+      agentId: 'agent-main',
+      sessionId: 'chat-source',
+      runId: 'run-source',
+    });
+  });
+
   it('lists skills with their status and turns one off', async () => {
     const user = userEvent.setup();
     const toggle = vi

@@ -111,6 +111,7 @@ pub(crate) struct SkillDraftResponse {
     /// `agent`, `import`, or `file`.
     pub(crate) source: String,
     pub(crate) proposed_by: Option<ProposedByResponse>,
+    pub(crate) learning_source: Option<crate::learning::LearningSkillSource>,
     /// The skill's approved hash when the draft was made; `null` for a new slug.
     pub(crate) base_hash: Option<String>,
     /// The skill's approved hash now; `null` when it has no record.
@@ -142,6 +143,7 @@ impl From<&DraftView> for SkillDraftResponse {
                 session_id: by.session_id.clone(),
                 run_id: by.run_id.clone(),
             }),
+            learning_source: draft.learning_source.clone(),
             base_hash: draft.base_hash.clone(),
             current_hash: view.current_hash.clone(),
             stale: draft.is_pending()

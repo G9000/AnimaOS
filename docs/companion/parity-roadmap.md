@@ -1,6 +1,6 @@
 # Companion capability parity roadmap
 
-Status: **scope locked; PAR-01 implemented and locally accepted, remaining work queued**. This roadmap covers the feature gaps identified against the locally installed Hermes source. It does not declare Anima at full parity.
+Status: **scope locked; PAR-01 and the PAR-02 procedural skill wave implemented and locally accepted; remaining work queued**. This roadmap covers the feature gaps identified against the locally installed Hermes source. It does not declare Anima at full parity.
 
 Baseline: Anima M36, `7d3eb52d7b37b8993ab2351fed33b209dff59ab6`; installed Hermes, `1fd18277267152893a8a24792b79213e7ca3f899`. The comparison inspected public source without starting either installation or reading personal profiles, accounts or credentials. M36 has current Rust gates; earlier real chat/task/account evidence stays revision-specific. See [harness evidence](harness-acceptance.md) and [daily use](daily-use.md).
 
@@ -29,20 +29,20 @@ All PAR-01–PAR-12 implementer and reviewer briefs inherit this policy; their d
 
 Each PAR ID is stable. Milestone numbers after M38 are assigned when its detailed plan is cut from then-current main. File/API names below are candidates; capability, authority, scope and evidence requirements are binding.
 
-| ID     | Deliverable                                                  | Current state                                                                              | Dependency / accountable lane                                  |
-| ------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
-| PAR-01 | Budgeted post-task learning and durable advice               | M38 implemented; one real anchored review and quiet restart accepted; advice only          | M38 native learning + SDK/web; PAR-02 closes adoption/reuse    |
-| PAR-02 | Apply reviewed lessons to memory/skills and prove reuse      | Skill proposal/update/approval/load exists; learning handoff and repeated reuse incomplete | PAR-01; native skills/memory + owner UI                        |
-| PAR-03 | Rich own-history discovery and anchored reading              | Bounded snippet search exists; model-visible window reading missing                        | Existing history; native history + tool contracts              |
-| PAR-04 | Dynamic MCP tools and installable community extensions       | Compiled connectors/approved skills exist; general MCP client/installer missing            | Existing tool policy; native protocol + SDK/web                |
-| PAR-05 | Interactive browser work                                     | Fetch/search exist; interactive browser missing                                            | PAR-04 boundary preferred; browser worker + owner UI           |
-| PAR-06 | Longer coding and delegated-task acceptance                  | Loop, files, shell and bounded helpers exist; broad coding evidence missing                | Current harness; optional PAR-02/PAR-04 adapters               |
-| PAR-07 | Native voice input/output                                    | Browser speech conveniences only                                                           | Attachment lifecycle; native audio + composer                  |
-| PAR-08 | Text/image acceptance and PDF/Office understanding           | Upload/storage exists; vision conditional; format extraction missing                       | Existing attachments/model adapters; document worker + SDK/web |
-| PAR-09 | Selected real connector workflows                            | Telegram/Discord/Google code exists; real-account acceptance unverified                    | Current connector code; later relevant media/browser changes   |
-| PAR-10 | Recurring schedules, outages and interrupted-work acceptance | Scheduler/receipts/recovery exist; recurrence/outage evidence incomplete                   | Current scheduler; optional PAR-06 acceptance fixtures         |
-| PAR-11 | Always-on single-owner installation and recovery             | Deployment instructions/offline checks exist; target-host acceptance missing               | Release with required capabilities; deployment/operator lane   |
-| PAR-12 | Clear capability controls and daily-use status               | Settings/approvals/catalog exist; cross-capability lifecycle UI incomplete                 | Add incrementally with PAR-01/04/05/07/08/09                   |
+| ID     | Deliverable                                                  | Current state                                                                                        | Dependency / accountable lane                                  |
+| ------ | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| PAR-01 | Budgeted post-task learning and durable advice               | M38 implemented; one real anchored review and quiet restart accepted; advice only                    | M38 native learning + SDK/web; PAR-02 closes adoption/reuse    |
+| PAR-02 | Apply reviewed lessons to memory/skills and prove reuse      | M39 reviewed skill handoff + two fresh task uses/restart accepted; profile/preferences remain queued | PAR-01; native skills/memory + owner UI                        |
+| PAR-03 | Rich own-history discovery and anchored reading              | Bounded snippet search exists; model-visible window reading missing                                  | Existing history; native history + tool contracts              |
+| PAR-04 | Dynamic MCP tools and installable community extensions       | Compiled connectors/approved skills exist; general MCP client/installer missing                      | Existing tool policy; native protocol + SDK/web                |
+| PAR-05 | Interactive browser work                                     | Fetch/search exist; interactive browser missing                                                      | PAR-04 boundary preferred; browser worker + owner UI           |
+| PAR-06 | Longer coding and delegated-task acceptance                  | Loop, files, shell and bounded helpers exist; broad coding evidence missing                          | Current harness; optional PAR-02/PAR-04 adapters               |
+| PAR-07 | Native voice input/output                                    | Browser speech conveniences only                                                                     | Attachment lifecycle; native audio + composer                  |
+| PAR-08 | Text/image acceptance and PDF/Office understanding           | Upload/storage exists; vision conditional; format extraction missing                                 | Existing attachments/model adapters; document worker + SDK/web |
+| PAR-09 | Selected real connector workflows                            | Telegram/Discord/Google code exists; real-account acceptance unverified                              | Current connector code; later relevant media/browser changes   |
+| PAR-10 | Recurring schedules, outages and interrupted-work acceptance | Scheduler/receipts/recovery exist; recurrence/outage evidence incomplete                             | Current scheduler; optional PAR-06 acceptance fixtures         |
+| PAR-11 | Always-on single-owner installation and recovery             | Deployment instructions/offline checks exist; target-host acceptance missing                         | Release with required capabilities; deployment/operator lane   |
+| PAR-12 | Clear capability controls and daily-use status               | Settings/approvals/catalog exist; cross-capability lifecycle UI incomplete                           | Add incrementally with PAR-01/04/05/07/08/09                   |
 
 ### PAR-01: budgeted post-task learning (M38)
 
@@ -57,12 +57,12 @@ Each PAR ID is stable. Milestone numbers after M38 are assigned when its detaile
 
 ### PAR-02: close the learning loop through reviewed adoption
 
-- [ ] Link a stored lesson to the existing SkillDraft create/update path or a separate exact own-memory operation. Do not build a second skill approval engine.
-- [ ] Owner sees the proposed bytes, sources and expected existing hash/text; changed sources/skill base/fact text conflict and require renewed review.
+- [x] M39 links a stored lesson to the existing SkillDraft create/update path; a separate exact own-memory handoff remains a follow-up. Do not build a second skill approval engine.
+- [x] M39 shows edited skill bytes, sources and expected existing hash; changed sources/skill bases conflict. Exact Fact correction and profile selection remain follow-ups.
 - [ ] Provide bounded owner-selected user-profile and agent-note views from saved source-backed facts; declare what is frozen per run and refreshed next turn. Optional standard Markdown exchange uses an explicit reviewed import/export, without a second conflicting canonical store or reading personal Hermes folders.
 - [ ] Prove a corrected selected preference is available on a fresh generic conversation as well as a relevant task. Later opted dialogue-only curation is a separate case beyond M38's tool-using-task eligibility.
-- [ ] Approved skills remain hash-pinned and loadable through standard SKILL.md; imported references/scripts remain subject to capability grants, without automatically executing a package.
-- [ ] Prove a useful procedure is reused on two fresh related tasks with independently checked outputs and no copied conversation history.
+- [x] Approved skills remain hash-pinned and loadable through standard SKILL.md; imported references/scripts remain subject to capability grants, without automatically executing a package.
+- [x] M39 proves one owner-adapted verification procedure on two fresh file tasks with actual skill loading, independent exact-byte/output checks and no copied conversation history. This is narrow procedural evidence, not broad learning quality.
 - [ ] Define optional unattended Fact curation only as a later distinct policy/grant/budget task with semantic-quality acceptance. It is not M38 and cannot silently weaken existing skill/instruction approvals.
 - Owners/files: native `skills/drafts.rs`/service and memory tools, existing owner routes, SDK and Skills/Memory UI. Preserve pending-draft limits, exact CAS, source scope and rollback/uncertain-durability behavior.
 - Acceptance: stale/rejected/foreign/duplicate handoffs write nothing; approval saves exactly reviewed content; reload retains approval and sources; later tasks demonstrate actual reuse. A proposal-only pass does not complete this item.

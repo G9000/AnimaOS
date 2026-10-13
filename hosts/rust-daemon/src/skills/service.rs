@@ -107,7 +107,7 @@ pub(super) struct Change<T> {
 
 /// Runs blocking file work on the blocking pool, bounded by
 /// `SKILL_IO_TIMEOUT_MS`; work slower than `SKILL_IO_SLOW_MS` is logged.
-pub(super) async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, SkillError> {
     let started = Instant::now();

@@ -193,7 +193,7 @@ use crate::runtime_model::provider_summaries;
         runs::start_session_run, runs::list_session_runs, runs::get_run, runs::stop_run,
         learning_reviews::request_review, learning_reviews::list_reviews,
         learning_reviews::get_review, learning_reviews::cancel_review,
-        learning_reviews::decide_proposal, learning_reviews::get_policy, learning_reviews::set_policy,
+        learning_reviews::decide_proposal, learning_reviews::adopt_skill, learning_reviews::get_policy, learning_reviews::set_policy,
         approvals::list_approvals, approvals::decide_approval, approvals::get_approval_policy,
         approvals::put_approval_policy, approvals::list_approval_rules, approvals::create_approval_rule,
         approvals::delete_approval_rule,
@@ -851,6 +851,10 @@ fn router_with_services_with_policies_and_integrations(
         .route(
             "/api/agents/{agent_id}/learning-policy",
             get(learning_reviews::get_policy).patch(learning_reviews::set_policy),
+        )
+        .route(
+            "/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}/skill-draft",
+            axum::routing::post(learning_reviews::adopt_skill),
         )
         .route(
             "/api/agents/{agent_id}/runs/{run_id}/stop",
