@@ -1,6 +1,6 @@
 # M44 owned stdio MCP: implementation plan
 
-M43/PR49 is verified merged at5580abec15c59e63dd196f13d4a102eb5f6c2f7d with passing gates/controlled acceptance. M44 branch g9000/companion-mcp-stdio-m44 is cut from exact main. Binding rulings below supersede proposed alternatives; M44 behavior/gates remain unverified until recorded.
+M43/PR49 is verified merged at `5580abec15c59e63dd196f13d4a102eb5f6c2f7d`. M44 on `g9000/companion-mcp-stdio-m44` is complete for scoped implementation and controlled Windows acceptance. Current Rust/core2592/nine intentional ignores/40 suites/lint/build,18 focused native including two real executor cases, SDK138/three intentional service skips/build/typecheck and web1269/112 files/typecheck/build/14 focused panel pass. Actual built-console/SDK/Rust-owner-API restart/reconnect/revoke/remove acceptance passed. Binding rulings below supersede the initial alternatives. Explicit unsigned publication/attached PR/exact-head verified merge remains pending; proof settles in the private M44 ledger.
 
 ## Goal and boundary
 
@@ -8,63 +8,63 @@ Add one owner-configured, long-lived MCP stdio transport for an ordinary Anima a
 
 This is transport support, not package installation. An owner supplies an explicit executable and argument vector; the host never invokes a shell, package manager, `npx`, `uvx`, or downloaded artifact. New records are disabled by default. No implicit environment inheritance, secrets, OAuth, browser setup, community catalog, auto-install, or tool grants. No endpoint or process starts on create, list, restore, or review. Existing explicit enable/connect/disable/disconnect/owner removal flow remains the authority.
 
-PAR-04 stays partial. This is not full Hermes parity. Selected local fake-process evidence does not establish general package compatibility, production process isolation, or arbitrary community server safety.
+PAR-04 stays partial. Non-Windows stdio, community packages, credentials/OAuth and selected real-server/host acceptance remain open. Controlled synthetic process evidence cannot establish general package compatibility, production process isolation, arbitrary community server safety, task quality or full Hermes parity.
 
 ## Source-backed reuse and cost choice
 
-`hosts/rust-daemon/Cargo.toml` pins `rmcp = 3.5.1` with `client` and `transport-streamable-http-client`; it does not currently enable child-process transport. The exact cached crate source at `C:/Users/leoca/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmcp-3.5.1/` exposes `transport::TokioChildProcess` behind `transport-child-process`. Its builder accepts `tokio::process::Command` and piped stdio, and the transport implements `rmcp::transport::Transport<RoleClient>`. That feature brings `transport-async-rw`, Tokio process support and the crate's `process-wrap` dependency. Its source also shows Drop schedules a kill task; explicit `graceful_shutdown` closes transport and waits up to a fixed three seconds before kill. Therefore the SDK is the lowest-cost protocol adapter, while its default process lifecycle alone is not enough to satisfy Anima's tracked cleanup/quarantine guarantees.
+`hosts/rust-daemon/Cargo.toml` pins `rmcp = 3.5.1` with client, Streamable HTTP and `transport-async-rw` features, explicit Tokio process/io-util and process-wrap10.0.1 with default tracing disabled. The exact cached SDK source at `C:/Users/leoca/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmcp-3.5.1/` also exposes `TokioChildProcessBuilder` behind `transport-child-process`. That evaluated alternative hides raw pipes and schedules Drop cleanup; its fixed graceful-close/kill path alone cannot establish Anima's pre-decode bounds or joined physical exit. M44 instead uses the SDK's `AsyncRwTransport` for framing/session mechanics with a narrow bounded-pipe/process owner.
 
-Recommendation for root binding: enable only `rmcp/transport-child-process`; use `TokioChildProcessBuilder` for the owned protocol pipes, but retain a narrow Anima MCP child-owner/session wrapper that records child identity, stderr reader and cleanup completion in the existing `McpManager` lifecycle. Do not route MCP children through `bg_start`: `tools/process/background.rs` runs shell strings, captures line-oriented output, exposes process controls and has a separate eight-process allowance, so it cannot provide private framed stdin/stdout or connection-scoped MCP authority. Reuse its explicit child kill/wait and owned-reader cleanup principles, not its shell command surface or storage.
+The binding choice reuses process-wrap Job Objects and joined owned-reader cleanup through the existing `McpManager`; unused SDK child-process transport is not enabled. MCP children do not use `bg_start`: `tools/process/background.rs` runs shell strings, captures line-oriented output, exposes process controls and has a separate eight-process allowance, so it cannot provide private framed stdin/stdout or connection-scoped MCP authority. Only its owned lifecycle principles informed the design.
 
 The existing M42 public comparison inspected Hermes at commit `6e7b83a2f1c093e992a8d838ed77ea320fbd8e51` and cited `tools/mcp_tool.py`, `tools/mcp_tool_transport.py`, `tools/mcp_tool_lifecycle.py`, and the upstream MIT license. That evidence supports comparing its one long-lived server task and lifecycle split. It does not show that Hermes' Python implementation is a suitable Rust process owner or that M44 has parity. No Hermes code is copied in this draft. If implementation later copies code, record exact source lines, license and notice before merge; otherwise retain the existing source-comparison citation only.
 
-## Proposed connection record and lifecycle
+## Connection record and lifecycle
 
-Keep the existing connection identity, owner, enabled flag, version, reviewed tools and runtime state. Add a strict tagged transport configuration with two variants:
+Keep the existing connection identity, owner, enabled flag, version, reviewed tools and runtime state. Preserve legacy HTTP durable rows and add an optional stdio launch; the public response distinguishes:
 
-- `streamableHttp { endpoint }` for the existing M42 rows and wire behavior.
-- `stdio { executable, args }` for an explicitly supplied executable path/name and ordered argument strings.
+- `streamableHttp` with the existing endpoint and `stdio: null`.
+- `stdio` with `stdio: { executable, args }`, an absolute executable and ordered literal argument strings; endpoint is empty.
 
-No shell string, command template, env map, working-directory override, executable download, or arbitrary launch metadata is accepted. The exact persisted serde migration shape and owner HTTP DTO need root binding before production; preserve all M42 serialized HTTP rows exactly if schema compatibility can do so. If a safe additive record schema cannot preserve existing rows, stop and split a versioned migration into its own plan rather than silently rewriting them.
+No shell string, command template, env map, working-directory override, executable download, or arbitrary launch metadata is accepted. The immutable optional launch and strict mutually exclusive create DTO are bound below. CP18 preserves M42 serialized HTTP rows and adds an independent version17 `.pre-mcp-stdio.bak`, retaining earlier backups. Stdio PATCH allows label/enabled only; changed launch requires remove/recreate.
 
-A stdio record starts disabled and disconnected. `enable` only saves configuration. Explicit `connect` resolves the executable, starts one child with stdin/stdout piped and stderr separately drained into a bounded redacted diagnostic buffer, then completes initialization and first discovery under the same M42 5-second/256-KiB shared operation budgets. Discovery and descriptor review never execute a tool. Review remains bound to exact discovery ID and full descriptor digest. A changed descriptor gets a new alias and requires a separate grant.
+A stdio record starts disabled and disconnected. `enable` only saves configuration. On Windows, explicit `connect` checks the absolute executable, starts one child with piped stdin/stdout and separately drained/discarded stderr, then completes initialization and first discovery under the same M42 5-second/256-KiB shared operation budgets. Other hosts fail unavailable before filesystem lookup, reservation or spawn. Discovery and descriptor review never execute a tool. Review remains bound to exact discovery ID and full descriptor digest. A changed descriptor gets a new alias and requires a separate grant.
 
 One physical connection owns one child process and one client session. Calls keep M42 per-connection serialization, global two-call slots, queue and deadline, schema/output/argument bounds, approval classification, provenance and receipts. Stop, revoke, timeout, disconnect, disable, delete and daemon shutdown cancel the session and child; no slot or replacement child is allowed until the child is reaped and owned stream/reader cleanup finishes. If kill/wait/reader join cannot establish exit, retain a quarantine and surface static cleanup uncertainty. Never claim a remote effect was undone just because local process termination succeeded.
 
 No automatic restart, crash loop, retry, package install, executable update, or launch after daemon restore. Restored stdio and HTTP records stay disconnected; no process starts on restore. Owner must explicitly connect again. Executable resolution should happen only at explicit connect and should produce a static diagnostic without leaking environment or full argv. Avoid logging arbitrary arguments; they may contain local paths or sensitive values even though env and credentials are disallowed.
 
-## Strict process input and platform rules to bind
+## Strict process input and platform rules
 
-- Accept only a bounded executable identifier/path and bounded argv count, per-argument UTF-8 bytes, and total serialized bytes. Reject NUL/control characters and invalid/empty executable values.
-- Never interpolate args into a shell or pass MCP args to the shell tool. Spawn directly with `tokio::process::Command` through the rmcp builder.
-- Clear inherited environment by default. Add no env configuration in this milestone. Verify the minimum OS runtime behavior without printing env data.
-- Pin process working directory to an existing daemon-controlled safe directory; do not inherit agent workspace or honor remote metadata for cwd.
+- Accept only an absolute Windows `.exe` path, at most2,048 UTF-8 bytes,32 ordered arguments at most2,048 bytes each, and16 KiB combined executable/argument content. Reject NUL/control characters, invalid/empty executable values and known shell/package-manager launchers.
+- Never interpolate args into a shell or pass MCP args to the shell tool. Spawn directly with `tokio::process::Command` and process-wrap; rmcp owns protocol framing/session mechanics.
+- Clear inherited environment except fixed `SystemRoot`/`WINDIR`; add no owner env configuration or ambient provider/key/PATH/user-profile variables.
+- Use a daemon-owned private TempDir cwd; do not inherit agent workspace or honor remote metadata for cwd.
 - Enforce workspace-wide connection/child caps jointly across HTTP and stdio; keep four configured connections global, not four per transport. One child per configured connected stdio record, with no background process-manager quota bypass.
-- Separate stderr from MCP stdout. Drain it continuously to avoid child deadlock, retain only a small bounded tail, and redact/truncate before owner-visible diagnostics. Never merge stderr into JSON-RPC.
+- Separate stderr from MCP stdout. Drain and discard it continuously to avoid child deadlock; expose no tail or raw error text. Never merge stderr into JSON-RPC.
 - Treat process exit, malformed protocol output, pipe failures and initialization timeout as unavailable/degraded with a static owner error. No raw stderr or child error strings in model context or API.
-- Require an explicit owner confirmation in the future UI before saving/running a stdio executable. Do not make stdio selectable from existing HTTP-only controls until the SDK and console wire are updated in a separately reviewed web lane.
+- The SDK/console lane adds an explicit Local process choice and trust confirmation for executable/argv before disabled save. Start remains a separate owner click; no tools/call button. Untouched empty argument text means zero args, with a separate singleton-empty-argument choice that resets trust.
 
-These are proposed defaults, not frozen values. Root must bind which executable identifiers are permitted, whether absolute paths are required, exact byte/count bounds, safe cwd, env policy, Windows process-tree containment, combined transport caps, and UI/API sequencing before implementation.
+These are frozen implementation rules. The five original binding rulings and subsequent Windows-only refinements remain below; current native gates and scoped controlled browser/restart acceptance passed.
 
-## Interface and file ownership proposal
+## Interfaces and file ownership
 
-Root owns Cargo feature changes/lockfile, record migration and restore, manager dispatch and shutdown integration, route registration/OpenAPI, shared state, and aggregate gates. A bounded daemon implementation would likely touch:
+Root owns Cargo feature changes/lockfile, record migration/restore integration, manager dispatch/shutdown integration, route registration/OpenAPI, shared state and aggregate gates. The bounded daemon lanes cover:
 
-- `hosts/rust-daemon/Cargo.toml` (enable the already-pinned rmcp child transport feature only, unless source proves another dependency necessary).
-- `hosts/rust-daemon/src/mcp/records.rs` (strict tagged transport configuration, validation, preserve HTTP restore).
+- `hosts/rust-daemon/Cargo.toml` (pinned SDK async-rw, explicit Tokio process/io-util and attributed process-wrap with command tracing excluded).
+- `hosts/rust-daemon/src/mcp/records.rs` (optional immutable stdio launch validation, preserving HTTP restore).
 - `hosts/rust-daemon/src/mcp/transport.rs` or a focused `mcp/stdio.rs` (rmcp adapter, child identity, bounded stderr drain, kill/wait cleanup).
 - `hosts/rust-daemon/src/mcp/service.rs` (select transport based on validated saved config, shared budgets/slots, retain current grant/approval behavior).
 - `hosts/rust-daemon/src/mcp/tests.rs` (manager lifecycle and coexistence cases).
-- `hosts/rust-daemon/src/routes/contracts/mcp.rs`, `routes/mcp.rs`, and `routes/tests/mcp.rs` (only after HTTP DTO migration is bound).
+- `hosts/rust-daemon/src/routes/contracts/mcp.rs`, `routes/mcp.rs`, and `routes/mcp_tests.rs` (strict additive stdio DTO and owner handlers/tests).
 - route/OpenAPI registration and state wiring stay with root.
 
-The `packages/sdk` and `apps/web` MCP DTO/panel need a separate additive lane before owners can configure stdio through the console. Do not silently add half of a public transport variant or make the panel send raw command strings against an HTTP-only server. A first daemon-only vertical slice can use strict route tests and fake executable fixtures, then a follow-up SDK/web lane can expose it once lifecycle acceptance passes.
+The separate additive `packages/sdk` and `apps/web` lane provides typed stdio DTOs and explicit trusted-local-process controls. It sends executable/argv fields, never raw shell strings. Current SDK/web gates and actual controlled built-console lifecycle acceptance passed.
 
 ## RED and focused acceptance matrix
 
 Write tests first using only deterministic local child fixtures (small test binary or existing test executable mode), never a downloaded community server, real account, provider, or user config.
 
-1. **Feature/reuse:** compile-time exercise `TokioChildProcessBuilder` through the pinned SDK; fake process exchanges initialize/list/call/close over real stdio framing. Confirm HTTP adapter tests remain unchanged.
+1. **Feature/reuse:** exercise `AsyncRwTransport` through the pinned SDK and the maintained process owner; the controlled native peer exchanges initialize/list/call/close over real stdio framing. Preserve HTTP adapter coverage.
 2. **Strict launch config:** missing/unknown/null fields, shell injection-shaped strings, NULs, overlong argv, empty executable and bad encoding fail before child spawn. Assert process-start counter stays zero on create/list/restore/review/invalid config.
 3. **Authority:** disabled connection cannot start; helper/foreign owner denied; enabled explicit connect starts exactly one child; discovery/review never calls a tool; exact grant and normal Exec approval remain required.
 4. **Lifecycle:** stdout contains only JSON-RPC; large stderr is drained but bounded; exit before init, malformed output, stalled initialization and EOF produce static redacted state; no retry or automatic respawn.
@@ -75,7 +75,9 @@ Write tests first using only deterministic local child fixtures (small test bina
 
 Suggested focused names: `m44_stdio_sdk_fake_server_handshake_and_call`, `m44_stdio_create_review_restore_do_not_spawn`, `m44_stdio_invalid_launch_arguments_are_rejected_before_spawn`, `m44_stdio_explicit_connect_requires_review_grant_and_exec_approval`, `m44_stdio_exit_timeout_and_malformed_frames_are_static`, `m44_stdio_stop_revocation_and_shutdown_reap_before_reconnect`, `m44_http_and_stdio_share_global_limits_and_restore_disconnected`, and `m44_stdio_failure_settlement_and_caller_drop_are_owned`.
 
-## Five risks for root binding
+## Five initial risks and proposed alternatives
+
+This table preserves the initial comparison. The five controller rulings below and later Windows-only refinement bind the implemented behavior.
 
 | Risk                                                       | Proposed ruling                                                                                                                            | Cost/limit                                                                         |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
@@ -87,10 +89,10 @@ Suggested focused names: `m44_stdio_sdk_fake_server_handshake_and_call`, `m44_st
 
 ## Reuse attribution and validation status
 
-- Official MCP SDK: pinned local `rmcp` 3.5.1 source and the M42 crate manifest. Its `TokioChildProcessBuilder` is the proposed stdio transport; enabling its child-process feature is not yet implemented or verified in this milestone.
+- Official MCP SDK: pinned local `rmcp` 3.5.1 source supplies the selected `AsyncRwTransport` framing/session adapter. `TokioChildProcessBuilder` was evaluated but not selected because its hidden pipes and detached default cleanup cannot establish Anima's required pre-decode/physical-close witnesses.
 - Anima ownership: current M42 `McpManager` owns per-connection lifecycle, global call slots, cleanup, grant epochs and quarantine. `tools/process/background.rs` is inspected as a lifecycle reference only and is unsuitable as the MCP transport because it executes shell commands and owns line-based background output.
 - Hermes: public source provenance recorded in the M42 plan is `NousResearch/hermes-agent` commit `6e7b83a2f1c093e992a8d838ed77ea320fbd8e51`, files `tools/mcp_tool.py`, `tools/mcp_tool_transport.py`, `tools/mcp_tool_lifecycle.py`, license MIT. M42 recorded a lifecycle comparison; this draft does not assert stdio code reuse or behavior parity. Reinspect those exact public files if implementation needs a substantive comparison. No private installation data was read.
-- No code, tests, dependencies or gates changed for M44. M43 merge, gates and acceptance are prerequisites; after they are recorded, root should bind this scope and choose a branch before implementation.
+- M44 source, strict owner API, SDK/web controls, CP18 migration, bounded process adapter and deterministic cases passed current gates and scoped controlled acceptance. Rust/core2592/nine intentional ignores/40 suites/lint/build,18 focused native including two real executor cases, SDK138/three intentional service skips/build/typecheck and web1269/112 files/typecheck/build/14 focused panel pass. All 22 frozen source hashes/timestamps remain exact with no post-gate production change; publication is pending on the existing M44 branch.
 
 ## Controller rulings on the risks (binding)
 
@@ -113,3 +115,21 @@ Ruling: Share all four global configured connections, physical slots, review/gra
 - Minimum cases: strict mixed/null/unknown input; bounds/no shell; save/list/review/restore zero starts; descendant kill/reap/pipe close; cancel/dropped startup/call and repeated cleanup; raw line/no-newline/idle/stderr bounds; same protocol and exact reviewed approval before dispatch; caller-owned effects unknown; HTTP+stdio shared limits/grants; CP backup/restore and uncertainty; current UI explicit trust/start/changed agent/permissions preservation. Real task quality and real packages are not inferred.
 
 Reuse provenance: official pinned [rmcp3.5.1 source](https://docs.rs/rmcp/3.5.1/src/rmcp/transport/async_rw.rs.html); maintained [process-wrap10.0.1](https://docs.rs/process-wrap/10.0.1/process_wrap/) and [upstream](https://github.com/watchexec/process-wrap), process groups/Job Objects and shims instead of custom platform code. Root must retain actual fetched crate licenses, MSRV/lock/cost and precise cleanup semantics before claiming acceptance. The private draft's public Hermes comparison remains behavioral provenance only; no private installation or copied Python runtime.
+
+## Source-backed refinements after meaningful RED
+
+Ruling: Hold a runtime-only four-child semaphore and per-connection lease in the cached factory through startup, live work, retirement and dropped/failed initialization, releasing only after SDK/process group/readers join — deleted rows and an outer timeout cannot prove physical cleanup — cost if wrong: bounded quarantine may prevent another start until cleanup is established, rather than allowing leaked or overlapping children. No separate durable process ledger or global singleton across isolated hosts.
+
+Ruling: Prevalidate each completed bounded nonblank frame as ServerJsonRpcMessage before SDK decoding, with static errors and retained partial-frame/cancellation bytes — the SDK's malformed-frame debug messages can otherwise echo untrusted values — cost if wrong: one additional bounded parse/copy, without replacing the SDK protocol engine.
+
+The fetched process-wrap10.0.1 is Apache-2.0 OR MIT, MSRV1.87; tempfile is pinned to the existing locked3.27.0, MIT OR Apache-2.0, MSRV1.63. Rust1.93 meets these requirements. The lock adds eight process/platform packages and updates libc185→190 because new nix0.31.3 requires at least186. JobObjectChild waits for the leader and the whole-job completion port; dropping group ownership is not a cleanup witness. Root built the registered native mcp_stdio_peer example through Nx before passing transport cases; no nested Cargo, harness banners or silently skipped tests. Actual native owner-route RED400expected201 and missing UI selector RED preceded production; current native and scoped controlled acceptance passed.
+
+M44 execution is Windows-only: other hosts return unavailable before filesystem lookup, reservation or spawn. Pinned Unix group wait is insufficient to witness orphaned descendant exit. HTTP remains portable. The native child monitor uses the safe guarded inner trait method without changing outer Job Object wait state; EOF retires a still-live peer. Dependency defaults are disabled to exclude command-argument tracing. These refinements bind the original risk rulings; Windows native descendant/reader and controlled owner-console acceptance passed without claiming Unix runtime acceptance.
+
+## Final validation and publication status
+
+M44 is complete for scoped implementation and controlled Windows acceptance. Actual exit0 gates: Rust/core **2,592 passed / nine intentional ignores / 40 suites / lint/build**, **18 focused native cases including two real stdio executor cases**; SDK **138 passed / three intentional real-service skips / build/typecheck**; web **1,269 passed / 112 files / typecheck/build**, including **14 focused MCP panel cases**. All 22 frozen source inputs retained hashes/timestamps; no production change followed the gates. Native cases include actual ordinary Exec approval, bounded provenance, reloaded durable Succeeded receipts and zero added RPC on revocation.
+
+Actual built-console/SDK/Rust-owner-API acceptance passed disabled save/enable with an absent peer marker, explicit start/exact full-digest review/separate grant retaining `read_file`, quiet disconnect waiting for peer exit and exact same-profile stopped-daemon restart with identical disconnected launch/review/grants and unchanged peer counts. Explicit reconnect restored readiness; revoke/disconnect/confirmed removal retained `read_file` with zero MCP rows. Its two native peer processes each recorded initialize1/initialized1/list1/call0, combined **2/2/2/0**; ambient-environment/inherited-cwd booleans were false. No model task, messages or tokens. The proxy blocked provider/status/auth/accounts/tasks/connectors; unused HTTP fake zero RPC. All five exact owned processes were gone,4200/8081/43219 were free and the created tab closed. Quiet force-stop recovery is not graceful wrapper acceptance.
+
+Operator-only proxy/config/UTC-tick/Stopping-refresh corrections and exact evidence are retained in `.superpowers/sdd/2026-10-14-companion-mcp-stdio-m44/progress.md`. Per-command unsigned publication, attached PR and exact-head verified standing merge remain pending; root records exact commit/merge proof there. The read-only 216-line private M45 community-package draft is prepared; cut its branch only after verified M44 main and bind the five root risks before implementation. Packages/auth, selected real servers, Unix/selected-host acceptance, whole Hermes parity and M40's independent introduction-quality miss remain open. No ordinary profile/account, DB server/container/Docker55432 or public deployment was used.

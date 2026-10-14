@@ -151,6 +151,131 @@ async fn m42_save_only_owner_connection_stays_disabled_and_ungranted() {
 }
 
 #[tokio::test]
+async fn m44_save_only_owner_stdio_connection_stays_disabled_and_unspawned() {
+    let (app, _snapshot) = daemon_app();
+    let agent_id = create_ordinary_agent(&app, "M44 ordinary stdio agent").await;
+    let base = format!("/api/agents/{agent_id}/mcp-connections");
+
+    let (created_status, created_cache, created) = owner_json(
+        &app,
+        "POST",
+        &base,
+        Some(json!({
+            "label": "M44 synthetic stdio",
+            "stdio": {
+                "executable": "C:\\Synthetic\\m44-server.exe",
+                "args": []
+            }
+        })),
+    )
+    .await;
+
+    assert_eq!(created_status, StatusCode::CREATED);
+    assert_eq!(created_cache, "no-store");
+    let connection = &created["connection"];
+    assert_eq!(connection["agentId"], agent_id);
+    assert_eq!(connection["label"], "M44 synthetic stdio");
+    assert_eq!(connection["transport"], "stdio");
+    assert_eq!(connection["endpoint"], "");
+    assert_eq!(
+        connection["stdio"]["executable"],
+        "C:\\Synthetic\\m44-server.exe"
+    );
+    assert_eq!(connection["stdio"]["args"], json!([]));
+    assert_eq!(connection["enabled"], false);
+    assert_eq!(connection["version"], 1);
+    assert_eq!(connection["state"], "disconnected");
+    assert_eq!(connection["reviewedTools"], json!([]));
+
+    let connection_id = connection["id"].as_str().expect("created connection ID");
+    let (list_status, list_cache, listed) = owner_json(&app, "GET", &base, None).await;
+    assert_eq!(list_status, StatusCode::OK);
+    assert_eq!(list_cache, "no-store");
+    assert_eq!(listed["connections"].as_array().unwrap().len(), 1);
+    assert_eq!(listed["connections"][0]["id"], connection_id);
+    assert_eq!(listed["connections"][0]["transport"], "stdio");
+    assert_eq!(listed["connections"][0]["enabled"], false);
+    assert_eq!(listed["connections"][0]["state"], "disconnected");
+    assert_eq!(listed["connections"][0]["reviewedTools"], json!([]));
+}
+
+#[tokio::test]
+async fn m44_stdio_launch_is_strict_and_immutable_after_save() {
+    let (app, _snapshot) = daemon_app();
+    let agent_id = create_ordinary_agent(&app, "M44 stdio validation").await;
+    let base = format!("/api/agents/{agent_id}/mcp-connections");
+    let invalid_bodies = [
+        json!({"label":"both","endpoint":"https://mcp.example.invalid","stdio":{"executable":"C:\\Synthetic\\server.exe","args":[]}}),
+        json!({"label":"neither"}),
+        json!({"label":"null","endpoint":null}),
+        json!({"label":"unknown","stdio":{"executable":"C:\\Synthetic\\server.exe","args":[],"env":{}}}),
+        json!({"label":"relative","stdio":{"executable":"server.exe","args":[]}}),
+        json!({"label":"launcher","stdio":{"executable":"C:\\Windows\\System32\\cmd.exe","args":["/c","whoami"]}}),
+        json!({"label":"nul","stdio":{"executable":"C:\\Synthetic\\server.exe\u{0000}","args":[]}}),
+        json!({"label":"large arg","stdio":{"executable":"C:\\Synthetic\\server.exe","args":["x".repeat(2_049)]}}),
+    ];
+    for body in invalid_bodies {
+        let (status, cache, _) = owner_json(&app, "POST", &base, Some(body)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(cache, "no-store");
+    }
+    let (list_status, _, listed) = owner_json(&app, "GET", &base, None).await;
+    assert_eq!(list_status, StatusCode::OK);
+    assert_eq!(listed["connections"], json!([]));
+
+    let (created_status, _, created) = owner_json(
+        &app,
+        "POST",
+        &base,
+        Some(json!({
+            "label":"immutable launch",
+            "stdio":{"executable":"C:\\Synthetic\\m44-server.exe","args":["--fixture"]}
+        })),
+    )
+    .await;
+    assert_eq!(created_status, StatusCode::CREATED);
+    let connection = &created["connection"];
+    let id = connection["id"].as_str().unwrap();
+    let path = format!("{base}/{id}");
+
+    let (launch_patch, cache, _) = owner_json(
+        &app,
+        "PATCH",
+        &path,
+        Some(json!({"expectedVersion":1,"stdio":{"executable":"C:\\Synthetic\\other.exe","args":[]}})),
+    )
+    .await;
+    assert_eq!(launch_patch, StatusCode::BAD_REQUEST);
+    assert_eq!(cache, "no-store");
+
+    let (endpoint_patch, _, _) = owner_json(
+        &app,
+        "PATCH",
+        &path,
+        Some(json!({"expectedVersion":1,"endpoint":"https://mcp.example.invalid/mcp"})),
+    )
+    .await;
+    assert_eq!(endpoint_patch, StatusCode::BAD_REQUEST);
+
+    let (label_patch, _, renamed) = owner_json(
+        &app,
+        "PATCH",
+        &path,
+        Some(json!({"expectedVersion":1,"label":"renamed"})),
+    )
+    .await;
+    assert_eq!(label_patch, StatusCode::OK);
+    assert_eq!(renamed["connection"]["version"], 2);
+    assert_eq!(renamed["connection"]["label"], "renamed");
+    assert_eq!(
+        renamed["connection"]["stdio"]["executable"],
+        "C:\\Synthetic\\m44-server.exe"
+    );
+    assert_eq!(renamed["connection"]["stdio"]["args"], json!(["--fixture"]));
+    assert_eq!(renamed["connection"]["state"], "disconnected");
+}
+
+#[tokio::test]
 async fn mcp_owner_routes_reject_foreign_and_unknown_request_fields() {
     let (app, _snapshot) = daemon_app();
     let agent_id = create_ordinary_agent(&app, "M42 owner boundary").await;

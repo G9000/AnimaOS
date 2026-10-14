@@ -1,4 +1,4 @@
-//! Bounded anonymous HTTP adaptation of rmcp 3.5.1. The SDK owns MCP mechanics.
+//! Bounded MCP adaptation of rmcp 3.5.1. The SDK owns MCP mechanics.
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -41,9 +41,9 @@ use tokio::sync::{Mutex, Notify};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-const PROTOCOL: &str = "2025-11-25";
-const RAW_TOTAL: usize = 256 * 1024;
-const RAW_EVENT: usize = 64 * 1024;
+pub(super) const PROTOCOL: &str = "2025-11-25";
+pub(super) const RAW_TOTAL: usize = 256 * 1024;
+pub(super) const RAW_EVENT: usize = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum McpTransportError {
@@ -79,7 +79,7 @@ impl std::error::Error for McpTransportError {}
 #[derive(Debug)]
 pub(crate) struct WireBudget(AtomicUsize);
 impl WireBudget {
-    fn consume(&self, n: usize) -> Result<(), McpTransportError> {
+    pub(super) fn consume(&self, n: usize) -> Result<(), McpTransportError> {
         self.0
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |old| {
                 old.checked_add(n).filter(|new| *new <= RAW_TOTAL)
@@ -93,7 +93,7 @@ pub(crate) struct TransportControl {
     pub(crate) deadline: Instant,
     pub(crate) cancel: CancellationToken,
     pub(crate) wire_budget: Arc<WireBudget>,
-    dispatched: Arc<AtomicBool>,
+    pub(super) dispatched: Arc<AtomicBool>,
 }
 impl TransportControl {
     pub(crate) fn new(deadline: Instant, cancel: CancellationToken) -> Self {
@@ -104,7 +104,7 @@ impl TransportControl {
             dispatched: Arc::new(AtomicBool::new(false)),
         }
     }
-    fn check(&self) -> Result<(), McpTransportError> {
+    pub(super) fn check(&self) -> Result<(), McpTransportError> {
         if self.cancel.is_cancelled() {
             Err(McpTransportError::Cancelled)
         } else if Instant::now() >= self.deadline {
@@ -113,7 +113,7 @@ impl TransportControl {
             Ok(())
         }
     }
-    async fn run<T>(
+    pub(super) async fn run<T>(
         &self,
         future: impl std::future::Future<Output = Result<T, McpTransportError>>,
     ) -> Result<T, McpTransportError> {
@@ -128,6 +128,14 @@ impl TransportControl {
 #[derive(Clone, Debug)]
 pub(crate) struct ValidatedMcpEndpoint(pub(crate) String);
 #[derive(Clone, Debug)]
+pub(crate) enum ValidatedMcpLaunch {
+    Http(ValidatedMcpEndpoint),
+    Stdio {
+        spec: super::McpStdioSpec,
+        connection_id: String,
+    },
+}
+#[derive(Clone, Debug)]
 pub(crate) struct McpCall {
     pub(crate) remote_name: String,
     pub(crate) arguments: Value,
@@ -141,6 +149,9 @@ pub(crate) struct McpDiscovery {
 #[derive(Debug)]
 pub(crate) struct PhysicalClose(());
 impl PhysicalClose {
+    pub(super) fn joined() -> Self {
+        Self(())
+    }
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
         Self(())
@@ -149,7 +160,7 @@ impl PhysicalClose {
 pub(crate) trait McpTransportFactory: Send + Sync {
     fn connect(
         &self,
-        endpoint: ValidatedMcpEndpoint,
+        launch: ValidatedMcpLaunch,
         control: TransportControl,
     ) -> BoxFuture<'static, Result<Arc<dyn McpTransportSession>, McpTransportError>>;
 }
@@ -166,11 +177,11 @@ pub(crate) trait McpTransportSession: Send + Sync {
     fn close(&self) -> BoxFuture<'static, Result<PhysicalClose, McpTransportError>>;
 }
 
-fn lock<T>(m: &StdMutex<T>) -> std::sync::MutexGuard<'_, T> {
+pub(super) fn lock<T>(m: &StdMutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 #[derive(Default)]
-struct Activity {
+pub(super) struct Activity {
     count: AtomicUsize,
     changed: Notify,
 }
@@ -188,7 +199,7 @@ impl Drop for Active {
     }
 }
 impl Activity {
-    async fn idle(&self) {
+    pub(super) async fn idle(&self) {
         loop {
             let notice = self.changed.notified();
             tokio::pin!(notice);
@@ -202,12 +213,12 @@ impl Activity {
 }
 // SDK startup takes ownership of the transport. Dropping that startup future
 // cancels WorkerTransport without joining it, so retain an owned close path.
-struct JoinedTransport<T: Transport<RoleClient> + 'static> {
+pub(super) struct JoinedTransport<T: Transport<RoleClient> + 'static> {
     inner: Option<T>,
     retirement: Option<Active>,
 }
 impl<T: Transport<RoleClient> + 'static> JoinedTransport<T> {
-    fn new(inner: T, workers: &Arc<Activity>) -> Self {
+    pub(super) fn new(inner: T, workers: &Arc<Activity>) -> Self {
         Self {
             inner: Some(inner),
             retirement: Some(Active::new(workers)),
@@ -220,10 +231,16 @@ impl<T: Transport<RoleClient> + 'static> Transport<RoleClient> for JoinedTranspo
         &mut self,
         message: ClientJsonRpcMessage,
     ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send + 'static {
-        self.inner
+        let active = Active::new(&self.retirement.as_ref().expect("transport is live").0);
+        let send = self
+            .inner
             .as_mut()
             .expect("transport owned until close")
-            .send(message)
+            .send(message);
+        async move {
+            let _active = active;
+            send.await
+        }
     }
     async fn receive(&mut self) -> Option<ServerJsonRpcMessage> {
         match self.inner.as_mut() {
@@ -477,7 +494,7 @@ impl HttpBackend {
         Ok(StreamableHttpPostResponse::Json(message, id))
     }
 }
-fn check_initialize(message: &ServerJsonRpcMessage) -> Result<(), McpTransportError> {
+pub(super) fn check_initialize(message: &ServerJsonRpcMessage) -> Result<(), McpTransportError> {
     if let ServerJsonRpcMessage::Response(response) = message {
         if let ServerResult::InitializeResult(info) = &response.result {
             if info.protocol_version.as_str() != PROTOCOL {
@@ -557,7 +574,9 @@ impl StreamableHttpClient for HttpBackend {
 }
 
 #[derive(Default)]
-pub(crate) struct DefaultMcpTransportFactory;
+pub(crate) struct DefaultMcpTransportFactory {
+    stdio: Arc<super::stdio::StdioRuntime>,
+}
 struct SessionInner {
     backend: HttpBackend,
     sdk: Mutex<Option<RunningService<RoleClient, ClientConfig>>>,
@@ -621,58 +640,19 @@ impl HttpSession {
         self.0.backend.begin(control.clone());
         let sdk = self.0.sdk.lock().await;
         let sdk = sdk.as_ref().ok_or(McpTransportError::Unavailable)?;
-        let mut cursor = None;
-        let mut cursors = HashSet::new();
-        let mut names = HashSet::new();
-        let mut tools = Vec::new();
-        for page in 0..4 {
-            let params = cursor
-                .take()
-                .map(|c| PaginatedRequestParams::default().with_cursor(Some(c)));
-            let result = control
-                .run(async {
-                    sdk.list_tools(params)
-                        .await
-                        .map_err(|_| self.error(McpTransportError::Malformed))
-                })
-                .await?;
-            self.0.backend.activity.idle().await;
-            if let Some(error) = *lock(&self.0.backend.error) {
-                return Err(error);
-            }
-            for tool in result.tools {
-                if tools.len() >= 64 || !names.insert(tool.name.to_string()) {
-                    return Err(McpTransportError::WireLimit);
+        discover_sdk(
+            sdk,
+            &control,
+            |fallback| self.error(fallback),
+            || async {
+                self.0.backend.activity.idle().await;
+                match *lock(&self.0.backend.error) {
+                    Some(error) => Err(error),
+                    None => Ok(()),
                 }
-                let descriptor = external_tools::prepare_external_tool(
-                    &tool.name,
-                    tool.description.as_deref().unwrap_or(""),
-                    Value::Object((*tool.input_schema).clone()),
-                    tool.output_schema.map(|s| Value::Object((*s).clone())),
-                )
-                .map_err(|_| McpTransportError::SchemaRejected)?;
-                tools.push(descriptor);
-            }
-            match result.next_cursor {
-                None => {
-                    return Ok(McpDiscovery {
-                        protocol_version: PROTOCOL.into(),
-                        tools,
-                    })
-                }
-                Some(c)
-                    if page < 3
-                        && !c.is_empty()
-                        && c.len() <= 256
-                        && !c.chars().any(char::is_control)
-                        && cursors.insert(c.clone()) =>
-                {
-                    cursor = Some(c)
-                }
-                _ => return Err(McpTransportError::WireLimit),
-            }
-        }
-        Err(McpTransportError::WireLimit)
+            },
+        )
+        .await
     }
     async fn call_inner(
         self,
@@ -691,41 +671,14 @@ impl HttpSession {
         self.0.backend.begin(control.clone());
         let sdk = self.0.sdk.lock().await;
         let sdk = sdk.as_ref().ok_or(McpTransportError::Unavailable)?;
-        let request = ClientRequest::CallToolRequest(CallToolRequest::new(
-            CallToolRequestParams::new(call.remote_name).with_arguments(
-                call.arguments
-                    .as_object()
-                    .cloned()
-                    .ok_or(McpTransportError::SchemaRejected)?,
-            ),
-        ));
-        let remaining = control.deadline.saturating_duration_since(Instant::now());
-        let options = PeerRequestOptions::with_timeout(remaining).with_max_total_timeout(remaining);
-        let response = control
-            .run(async {
-                let request = sdk
-                    .peer()
-                    .send_cancellable_request(request, options)
-                    .await
-                    .map_err(|_| self.error(McpTransportError::Unavailable))?;
-                request.await_response().await.map_err(|error| match error {
-                    ServiceError::McpError(_) => McpTransportError::RemoteError,
-                    ServiceError::Timeout { .. } => McpTransportError::TimedOut,
-                    ServiceError::Cancelled { .. } => McpTransportError::Cancelled,
-                    _ => self.error(McpTransportError::Unavailable),
-                })
-            })
-            .await;
-        let response = match response {
-            Err(
-                McpTransportError::Cancelled
-                | McpTransportError::TimedOut
-                | McpTransportError::Unavailable,
-            ) if control.dispatched.load(Ordering::SeqCst) => {
-                return Err(McpTransportError::OutcomeUnknown)
-            }
-            other => other?,
-        };
+        let response = request_sdk(
+            sdk,
+            call.remote_name,
+            call.arguments,
+            &control,
+            |fallback| self.error(fallback),
+        )
+        .await?;
         // Correlation can precede the SDK's final response-stream drain.
         control
             .run(async {
@@ -737,45 +690,164 @@ impl HttpSession {
         if let Some(error) = *lock(&self.0.backend.error) {
             return Err(error);
         }
-        let ServerResult::CallToolResult(result) = response else {
-            return Err(McpTransportError::UnsupportedResult);
-        };
-        let is_error = result.is_error.unwrap_or(false);
-        let mut output_descriptor = call.descriptor.clone();
-        if is_error {
-            output_descriptor.output_schema = None;
-        }
-        let structured = match result.structured_content {
-            Some(value) => {
-                external_tools::validate_external_output(&output_descriptor, &value)
-                    .map_err(|_| McpTransportError::SchemaRejected)?;
-                Some(portable(value)?)
-            }
-            None if !is_error && call.descriptor.output_schema.is_some() => {
-                return Err(McpTransportError::SchemaRejected)
-            }
-            None => None,
-        };
-        let mut text_blocks = Vec::new();
-        let mut omitted_blocks = 0u32;
-        for block in result.content {
-            match block {
-                ContentBlock::Text(text) if text_blocks.len() < 16 => text_blocks.push(text.text),
-                _ => omitted_blocks = omitted_blocks.saturating_add(1),
-            }
-        }
-        external_tools::bound_external_result(
-            ExternalToolResult {
-                text_blocks,
-                structured_data: structured,
-                is_error,
-                omitted_blocks,
-                shortened: omitted_blocks > 0,
-            },
-            1024,
-        )
-        .map_err(|_| McpTransportError::WireLimit)
+        bound_sdk_result(response, &call.descriptor)
     }
+}
+
+pub(super) async fn discover_sdk<F, A, Fut>(
+    sdk: &RunningService<RoleClient, ClientConfig>,
+    control: &TransportControl,
+    error: F,
+    mut after_page: A,
+) -> Result<McpDiscovery, McpTransportError>
+where
+    F: Fn(McpTransportError) -> McpTransportError,
+    A: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<(), McpTransportError>>,
+{
+    let mut cursor = None;
+    let mut cursors = HashSet::new();
+    let mut names = HashSet::new();
+    let mut tools = Vec::new();
+    for page in 0..4 {
+        let params = cursor
+            .take()
+            .map(|c| PaginatedRequestParams::default().with_cursor(Some(c)));
+        let result = control
+            .run(async {
+                sdk.list_tools(params)
+                    .await
+                    .map_err(|_| error(McpTransportError::Malformed))
+            })
+            .await?;
+        after_page().await?;
+        for tool in result.tools {
+            if tools.len() >= 64 || !names.insert(tool.name.to_string()) {
+                return Err(McpTransportError::WireLimit);
+            }
+            tools.push(
+                external_tools::prepare_external_tool(
+                    &tool.name,
+                    tool.description.as_deref().unwrap_or(""),
+                    Value::Object((*tool.input_schema).clone()),
+                    tool.output_schema
+                        .map(|schema| Value::Object((*schema).clone())),
+                )
+                .map_err(|_| McpTransportError::SchemaRejected)?,
+            );
+        }
+        match result.next_cursor {
+            None => {
+                return Ok(McpDiscovery {
+                    protocol_version: PROTOCOL.into(),
+                    tools,
+                })
+            }
+            Some(c)
+                if page < 3
+                    && !c.is_empty()
+                    && c.len() <= 256
+                    && !c.chars().any(char::is_control)
+                    && cursors.insert(c.clone()) =>
+            {
+                cursor = Some(c)
+            }
+            _ => return Err(McpTransportError::WireLimit),
+        }
+    }
+    Err(McpTransportError::WireLimit)
+}
+
+pub(super) async fn request_sdk<F>(
+    sdk: &RunningService<RoleClient, ClientConfig>,
+    remote_name: String,
+    arguments: Value,
+    control: &TransportControl,
+    error: F,
+) -> Result<ServerResult, McpTransportError>
+where
+    F: Fn(McpTransportError) -> McpTransportError,
+{
+    let request = ClientRequest::CallToolRequest(CallToolRequest::new(
+        CallToolRequestParams::new(remote_name).with_arguments(
+            arguments
+                .as_object()
+                .cloned()
+                .ok_or(McpTransportError::SchemaRejected)?,
+        ),
+    ));
+    let remaining = control.deadline.saturating_duration_since(Instant::now());
+    let options = PeerRequestOptions::with_timeout(remaining).with_max_total_timeout(remaining);
+    let response = control
+        .run(async {
+            let request = sdk
+                .peer()
+                .send_cancellable_request(request, options)
+                .await
+                .map_err(|_| error(McpTransportError::Unavailable))?;
+            request
+                .await_response()
+                .await
+                .map_err(|failure| match failure {
+                    ServiceError::McpError(_) => McpTransportError::RemoteError,
+                    ServiceError::Timeout { .. } => McpTransportError::TimedOut,
+                    ServiceError::Cancelled { .. } => McpTransportError::Cancelled,
+                    _ => error(McpTransportError::Unavailable),
+                })
+        })
+        .await;
+    match response {
+        Err(
+            McpTransportError::Cancelled
+            | McpTransportError::TimedOut
+            | McpTransportError::Unavailable,
+        ) if control.dispatched.load(Ordering::SeqCst) => Err(McpTransportError::OutcomeUnknown),
+        other => other,
+    }
+}
+
+pub(super) fn bound_sdk_result(
+    response: ServerResult,
+    descriptor: &ExternalToolDescriptor,
+) -> Result<ExternalToolResult, McpTransportError> {
+    let ServerResult::CallToolResult(result) = response else {
+        return Err(McpTransportError::UnsupportedResult);
+    };
+    let is_error = result.is_error.unwrap_or(false);
+    let mut output_descriptor = descriptor.clone();
+    if is_error {
+        output_descriptor.output_schema = None;
+    }
+    let structured = match result.structured_content {
+        Some(value) => {
+            external_tools::validate_external_output(&output_descriptor, &value)
+                .map_err(|_| McpTransportError::SchemaRejected)?;
+            Some(portable(value)?)
+        }
+        None if !is_error && descriptor.output_schema.is_some() => {
+            return Err(McpTransportError::SchemaRejected)
+        }
+        None => None,
+    };
+    let mut text_blocks = Vec::new();
+    let mut omitted_blocks = 0u32;
+    for block in result.content {
+        match block {
+            ContentBlock::Text(text) if text_blocks.len() < 16 => text_blocks.push(text.text),
+            _ => omitted_blocks = omitted_blocks.saturating_add(1),
+        }
+    }
+    external_tools::bound_external_result(
+        ExternalToolResult {
+            text_blocks,
+            structured_data: structured,
+            is_error,
+            omitted_blocks,
+            shortened: omitted_blocks > 0,
+        },
+        1024,
+    )
+    .map_err(|_| McpTransportError::WireLimit)
 }
 fn portable(value: Value) -> Result<DataValue, McpTransportError> {
     Ok(match value {
@@ -797,7 +869,7 @@ fn portable(value: Value) -> Result<DataValue, McpTransportError> {
         ),
     })
 }
-fn owned<T: Send + 'static>(
+pub(super) fn owned<T: Send + 'static>(
     control: TransportControl,
     future: impl std::future::Future<Output = Result<T, McpTransportError>> + Send + 'static,
 ) -> BoxFuture<'static, Result<T, McpTransportError>> {
@@ -854,8 +926,12 @@ impl McpTransportSession for HttpSession {
         Box::pin(session.wait_closed())
     }
 }
-impl McpTransportFactory for DefaultMcpTransportFactory {
-    fn connect(
+impl DefaultMcpTransportFactory {
+    #[cfg(test)]
+    pub(crate) fn stdio_child_count(&self) -> usize {
+        self.stdio.child_count()
+    }
+    fn connect_http(
         &self,
         endpoint: ValidatedMcpEndpoint,
         control: TransportControl,
@@ -935,6 +1011,22 @@ impl McpTransportFactory for DefaultMcpTransportFactory {
             }
             Ok(Arc::new(session) as Arc<dyn McpTransportSession>)
         })
+    }
+}
+
+impl McpTransportFactory for DefaultMcpTransportFactory {
+    fn connect(
+        &self,
+        launch: ValidatedMcpLaunch,
+        control: TransportControl,
+    ) -> BoxFuture<'static, Result<Arc<dyn McpTransportSession>, McpTransportError>> {
+        match launch {
+            ValidatedMcpLaunch::Http(endpoint) => self.connect_http(endpoint, control),
+            ValidatedMcpLaunch::Stdio {
+                spec,
+                connection_id,
+            } => super::stdio::connect(self.stdio.clone(), spec, connection_id, control),
+        }
     }
 }
 
@@ -1072,8 +1164,8 @@ mod tests {
         for sse in [false, true] {
             let (endpoint, methods, server) = server(sse, false).await;
             let ctl = control(5);
-            let session = DefaultMcpTransportFactory
-                .connect(endpoint, ctl.clone())
+            let session = DefaultMcpTransportFactory::default()
+                .connect(ValidatedMcpLaunch::Http(endpoint), ctl.clone())
                 .await
                 .unwrap();
             let first = session.discover(ctl).await.unwrap();
@@ -1150,8 +1242,8 @@ mod tests {
         for (result, valid_error) in cases {
             let (endpoint, methods, server) = server_with_result(false, false, Some(result)).await;
             let ctl = control(5);
-            let session = DefaultMcpTransportFactory
-                .connect(endpoint, ctl.clone())
+            let session = DefaultMcpTransportFactory::default()
+                .connect(ValidatedMcpLaunch::Http(endpoint), ctl.clone())
                 .await
                 .unwrap();
             let source = session.discover(ctl).await.unwrap().tools.remove(0);
@@ -1270,8 +1362,8 @@ mod tests {
     async fn session_expiry_is_unknown_and_never_reinitializes_or_replays() {
         let (endpoint, methods, server) = server(false, true).await;
         let ctl = control(5);
-        let session = DefaultMcpTransportFactory
-            .connect(endpoint, ctl.clone())
+        let session = DefaultMcpTransportFactory::default()
+            .connect(ValidatedMcpLaunch::Http(endpoint), ctl.clone())
             .await
             .unwrap();
         let descriptor = session.discover(ctl).await.unwrap().tools.remove(0);
@@ -1391,9 +1483,9 @@ mod tests {
             let server = tokio::spawn(async move {
                 axum::serve(listener, app).await.unwrap();
             });
-            let result = DefaultMcpTransportFactory
+            let result = DefaultMcpTransportFactory::default()
                 .connect(
-                    ValidatedMcpEndpoint(format!("http://{addr}/mcp")),
+                    ValidatedMcpLaunch::Http(ValidatedMcpEndpoint(format!("http://{addr}/mcp"))),
                     control(5),
                 )
                 .await;

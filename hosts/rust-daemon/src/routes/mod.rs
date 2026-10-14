@@ -220,6 +220,7 @@ use crate::runtime_model::provider_summaries;
     components(schemas(self::contracts::AgentSummariesEnvelope, self::contracts::AttachmentEnvelope, self::contracts::AttachmentResponse,
         self::contracts::mcp::McpToolDescriptorResponse, self::contracts::mcp::ReviewedMcpToolResponse,
         self::contracts::mcp::McpStaticErrorResponse,
+        self::contracts::mcp::McpStdioRequest, self::contracts::mcp::McpStdioResponse,
         self::contracts::mcp::McpConnectionResponse, self::contracts::mcp::McpConnectionEnvelope,
         self::contracts::mcp::McpConnectionsEnvelope, self::contracts::mcp::CreateMcpConnectionRequest,
         self::contracts::mcp::UpdateMcpConnectionRequest, self::contracts::mcp::McpVersionRequest,

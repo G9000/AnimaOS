@@ -1,4 +1,11 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { McpConnection, McpToolDescriptor } from '../../lib/daemon-api';
@@ -18,6 +25,8 @@ function connection(patch: Partial<McpConnection> = {}): McpConnection {
     id: 'server-1',
     agentId: 'main',
     label: 'Local server',
+    transport: 'streamableHttp',
+    stdio: null,
     endpoint: 'http://127.0.0.1:8089/mcp',
     enabled: false,
     version: 1,
@@ -74,6 +83,333 @@ async function loaded() {
 }
 
 describe('owner external tools', () => {
+  it('M44_owner_explicitly_selects_connection_type_before_configuring_local_server', async () => {
+    const mock = api();
+    render(<McpConnectionsPanel agentId="main" api={mock} />);
+    await loaded();
+    expect(
+      screen.getByRole('combobox', { name: 'Connection type' }),
+    ).toHaveValue('streamableHttp');
+    expect(mock.create).not.toHaveBeenCalled();
+    expect(mock.connect).not.toHaveBeenCalled();
+    expect(mock.discover).not.toHaveBeenCalled();
+  });
+
+  it('M44 confirms trusted immutable launch, saves disabled, enables separately and starts only on an explicit click', async () => {
+    const user = userEvent.setup();
+    const mock = api();
+    const stdio = {
+      executable: 'C:\\synthetic\\mcp-server.exe',
+      args: ['--mode', 'one argument with spaces', '"literal quotes"'],
+    };
+    const local = connection({ transport: 'stdio', stdio, endpoint: '' });
+    vi.mocked(mock.create).mockResolvedValue(local);
+    vi.mocked(mock.update)
+      .mockResolvedValueOnce({ ...local, enabled: true, version: 2 })
+      .mockResolvedValueOnce({
+        ...local,
+        enabled: true,
+        label: 'Renamed local',
+        version: 3,
+      });
+    vi.mocked(mock.connect).mockResolvedValue({
+      ...local,
+      label: 'Renamed local',
+      enabled: true,
+      version: 3,
+      state: 'needs_review',
+      discoveryId: 'local-discovery',
+      candidates: [tool],
+    });
+    render(<McpConnectionsPanel agentId="main" api={mock} />);
+    await loaded();
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Connection type' }),
+      'stdio',
+    );
+    expect(
+      screen.queryByRole('textbox', { name: 'Server URL' }),
+    ).not.toBeInTheDocument();
+    await user.type(
+      screen.getByRole('textbox', { name: 'Connection label' }),
+      'Local server',
+    );
+    await user.type(
+      screen.getByRole('textbox', { name: 'Absolute executable path' }),
+      stdio.executable,
+    );
+    await user.type(
+      screen.getByRole('textbox', { name: 'Arguments — one per line' }),
+      stdio.args.join('\n'),
+    );
+    expect(
+      screen.getByRole('button', { name: 'Save disabled connection' }),
+    ).toBeDisabled();
+    await user.click(
+      screen.getByRole('checkbox', {
+        name: 'I trust this local program and its arguments',
+      }),
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Save disabled connection' }),
+    );
+    expect(mock.create).toHaveBeenCalledWith('main', {
+      label: 'Local server',
+      stdio,
+    });
+    const card = within(
+      await screen.findByRole('article', {
+        name: 'External server Local server',
+      }),
+    );
+    expect(card.getByText(stdio.executable)).toBeVisible();
+    expect(
+      card.getByRole('button', { name: 'Start local server' }),
+    ).toBeDisabled();
+    expect(mock.connect).not.toHaveBeenCalled();
+    await user.click(card.getByRole('button', { name: 'Enable connection' }));
+    await waitFor(() =>
+      expect(
+        card.getByRole('button', { name: 'Start local server' }),
+      ).toBeEnabled(),
+    );
+    expect(mock.update).toHaveBeenCalledWith('main', 'server-1', {
+      expectedVersion: 1,
+      enabled: true,
+    });
+    expect(mock.connect).not.toHaveBeenCalled();
+    await user.click(card.getByText('Edit saved connection'));
+    expect(
+      card.queryByRole('textbox', { name: 'Saved server URL' }),
+    ).not.toBeInTheDocument();
+    expect(
+      card.queryByRole('textbox', { name: 'Absolute executable path' }),
+    ).not.toBeInTheDocument();
+    const label = card.getByRole('textbox', { name: 'Saved label' });
+    await user.clear(label);
+    await user.type(label, 'Renamed local');
+    await user.click(
+      card.getByRole('button', { name: 'Save connection changes' }),
+    );
+    expect(mock.update).toHaveBeenLastCalledWith('main', 'server-1', {
+      expectedVersion: 2,
+      label: 'Renamed local',
+    });
+    await waitFor(() =>
+      expect(
+        card.getByRole('button', { name: 'Start local server' }),
+      ).toBeEnabled(),
+    );
+    await user.click(card.getByRole('button', { name: 'Start local server' }));
+    expect(mock.connect).toHaveBeenCalledWith('main', 'server-1', {
+      expectedVersion: 3,
+    });
+    expect(
+      await card.findByRole('button', { name: 'Review lookup' }),
+    ).toBeEnabled();
+    expect(mock.review).not.toHaveBeenCalled();
+    expect(mock.setGrant).not.toHaveBeenCalled();
+    expect(mock.discover).not.toHaveBeenCalled();
+  });
+
+  it('M44 explicitly distinguishes singleton empty argv from untouched zero argv', async () => {
+    const user = userEvent.setup();
+    const mock = api();
+    const executable = 'C:\\synthetic\\mcp-server.exe';
+    vi.mocked(mock.create)
+      .mockResolvedValueOnce(
+        connection({
+          label: 'No arguments',
+          transport: 'stdio',
+          stdio: { executable, args: [] },
+          endpoint: '',
+        }),
+      )
+      .mockResolvedValueOnce(
+        connection({
+          id: 'server-empty',
+          label: 'One empty argument',
+          transport: 'stdio',
+          stdio: { executable, args: [''] },
+          endpoint: '',
+        }),
+      );
+    render(<McpConnectionsPanel agentId="main" api={mock} />);
+    await loaded();
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Connection type' }),
+      'stdio',
+    );
+    const label = screen.getByRole('textbox', { name: 'Connection label' });
+    const path = screen.getByRole('textbox', {
+      name: 'Absolute executable path',
+    });
+    const args = screen.getByRole('textbox', {
+      name: 'Arguments — one per line',
+    });
+    const trust = screen.getByRole('checkbox', {
+      name: 'I trust this local program and its arguments',
+    });
+    await user.type(label, 'No arguments');
+    await user.type(path, executable);
+    expect(args).toHaveValue('');
+    await user.click(trust);
+    await user.click(
+      screen.getByRole('button', { name: 'Save disabled connection' }),
+    );
+    expect(mock.create).toHaveBeenNthCalledWith(1, 'main', {
+      label: 'No arguments',
+      stdio: { executable, args: [] },
+    });
+    await screen.findByRole('article', {
+      name: 'External server No arguments',
+    });
+    await waitFor(() => expect(trust).toBeEnabled());
+
+    await user.type(label, 'One empty argument');
+    await user.type(path, executable);
+    await user.click(trust);
+    const oneEmpty = screen.getByRole('checkbox', {
+      name: 'Pass one empty argument',
+    });
+    expect(oneEmpty).not.toBeChecked();
+    await user.click(oneEmpty);
+    expect(oneEmpty).toBeChecked();
+    expect(trust).not.toBeChecked();
+    expect(args).toHaveValue('');
+    await user.click(trust);
+    await user.click(
+      screen.getByRole('button', { name: 'Save disabled connection' }),
+    );
+    expect(mock.create).toHaveBeenNthCalledWith(2, 'main', {
+      label: 'One empty argument',
+      stdio: { executable, args: [''] },
+    });
+    await screen.findByRole('article', {
+      name: 'External server One empty argument',
+    });
+    expect(mock.create).toHaveBeenCalledTimes(2);
+    expect(mock.connect).not.toHaveBeenCalled();
+    expect(mock.discover).not.toHaveBeenCalled();
+  });
+
+  it('M44 rejects relative paths and oversized argv locally and invalidates trust whenever launch details change', async () => {
+    const user = userEvent.setup();
+    const mock = api();
+    render(<McpConnectionsPanel agentId="main" api={mock} />);
+    await loaded();
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Connection type' }),
+      'stdio',
+    );
+    await user.type(
+      screen.getByRole('textbox', { name: 'Connection label' }),
+      'Bounded local',
+    );
+    const executable = screen.getByRole('textbox', {
+      name: 'Absolute executable path',
+    });
+    const args = screen.getByRole('textbox', {
+      name: 'Arguments — one per line',
+    });
+    const trust = screen.getByRole('checkbox', {
+      name: 'I trust this local program and its arguments',
+    });
+    await user.type(executable, 'relative.exe');
+    await user.click(trust);
+    expect(
+      screen.getByRole('button', { name: 'Save disabled connection' }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText('Enter an absolute executable path.'),
+    ).toBeVisible();
+    await user.clear(executable);
+    await user.type(executable, 'C:\\synthetic\\mcp.exe');
+    expect(trust).not.toBeChecked();
+    await user.click(trust);
+    expect(
+      screen.getByRole('button', { name: 'Save disabled connection' }),
+    ).toBeEnabled();
+    await user.type(
+      args,
+      Array.from({ length: 33 }, (_, index) => `arg-${index}`).join('\n'),
+    );
+    expect(trust).not.toBeChecked();
+    await user.click(trust);
+    expect(
+      screen.getByRole('button', { name: 'Save disabled connection' }),
+    ).toBeDisabled();
+    expect(screen.getByText(/Use at most 32 arguments/)).toBeVisible();
+    fireEvent.change(args, { target: { value: 'é'.repeat(1025) } });
+    await user.click(trust);
+    expect(
+      screen.getByRole('button', { name: 'Save disabled connection' }),
+    ).toBeDisabled();
+    expect(screen.getByText(/Use at most 32 arguments/)).toBeVisible();
+    fireEvent.change(args, { target: { value: 'argument\twith-control' } });
+    await user.click(trust);
+    expect(
+      screen.getByRole('button', { name: 'Save disabled connection' }),
+    ).toBeDisabled();
+    expect(mock.create).not.toHaveBeenCalled();
+    expect(mock.connect).not.toHaveBeenCalled();
+  });
+
+  it('M44 shows restored local launch arguments as plain owner data and never starts on load, refresh or agent switch', async () => {
+    const mock = api([
+      connection({
+        transport: 'stdio',
+        stdio: {
+          executable: '/synthetic/mcp-server',
+          args: ['<img src="https://remote.test/track">', '$SECRET'],
+        },
+        endpoint: '',
+        enabled: true,
+      }),
+    ]);
+    const view = render(<McpConnectionsPanel agentId="main" api={mock} />);
+    await loaded();
+    expect(screen.getByText('/synthetic/mcp-server')).toBeVisible();
+    expect(
+      screen.getByText(JSON.stringify('<img src="https://remote.test/track">')),
+    ).toBeVisible();
+    expect(view.container.querySelector('img, a, iframe')).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Start local server' }),
+    ).toBeEnabled();
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Refresh status' }),
+    );
+    await loaded();
+    expect(mock.connect).not.toHaveBeenCalled();
+    expect(mock.discover).not.toHaveBeenCalled();
+    expect(mock.setGrant).not.toHaveBeenCalled();
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Connection type' }),
+      'stdio',
+    );
+    await userEvent.type(
+      screen.getByRole('textbox', { name: 'Absolute executable path' }),
+      '/synthetic/other-server',
+    );
+    await userEvent.click(
+      screen.getByRole('checkbox', {
+        name: 'I trust this local program and its arguments',
+      }),
+    );
+    vi.mocked(mock.list).mockResolvedValue([]);
+    view.rerender(<McpConnectionsPanel agentId="beta" api={mock} />);
+    await loaded();
+    expect(
+      screen.getByRole('combobox', { name: 'Connection type' }),
+    ).toHaveValue('streamableHttp');
+    expect(
+      screen.queryByRole('textbox', { name: 'Absolute executable path' }),
+    ).not.toBeInTheDocument();
+    expect(mock.connect).not.toHaveBeenCalled();
+    expect(mock.create).not.toHaveBeenCalled();
+  });
+
   it('saves disabled, enables, connects, reviews then grants exactly one displayed binding', async () => {
     const user = userEvent.setup();
     const mock = api();

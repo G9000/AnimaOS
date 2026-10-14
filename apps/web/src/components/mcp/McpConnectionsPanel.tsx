@@ -39,6 +39,32 @@ function statusText(connection: McpConnection): string {
   return 'Status unknown — refresh before taking action';
 }
 
+function launchIssue(
+  label: string,
+  executable: string,
+  args: string[],
+): string | null {
+  const bytes = (value: string) => new TextEncoder().encode(value).length;
+  const control = /[\u0000-\u001f\u007f]/;
+  if (!/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(executable))
+    return 'Enter an absolute executable path.';
+  if (control.test(executable) || bytes(executable) > 2048)
+    return 'The executable path contains unsupported characters or is too long.';
+  if (
+    /^(?:[A-Za-z]:[\\/]|\\\\)/.test(executable) &&
+    !executable.toLowerCase().endsWith('.exe')
+  )
+    return 'A Windows executable must end in .exe.';
+  if (
+    args.length > 32 ||
+    args.some((arg) => control.test(arg) || bytes(arg) > 2048)
+  )
+    return 'Use at most 32 arguments, each within 2048 bytes and without control characters.';
+  if (bytes(JSON.stringify({ label, stdio: { executable, args } })) > 16 * 1024)
+    return 'The saved launch details exceed the size limit.';
+  return null;
+}
+
 export function McpConnectionsPanel({
   agentId,
   disabled = false,
@@ -62,6 +88,13 @@ export function McpConnectionsPanel({
   const [toolNames, setToolNames] = useState<string[] | null>(null);
   const [label, setLabel] = useState('');
   const [endpoint, setEndpoint] = useState('');
+  const [connectionType, setConnectionType] = useState<
+    'streamableHttp' | 'stdio'
+  >('streamableHttp');
+  const [executable, setExecutable] = useState('');
+  const [argumentsText, setArgumentsText] = useState('');
+  const [passEmptyArgument, setPassEmptyArgument] = useState(false);
+  const [trustedLocalCode, setTrustedLocalCode] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [needsRefresh, setNeedsRefresh] = useState(false);
@@ -135,6 +168,11 @@ export function McpConnectionsPanel({
     setToolNames(null);
     setLabel('');
     setEndpoint('');
+    setConnectionType('streamableHttp');
+    setExecutable('');
+    setArgumentsText('');
+    setPassEmptyArgument(false);
+    setTrustedLocalCode(false);
     setBusy(false);
     setNeedsRefresh(false);
     setError(null);
@@ -196,6 +234,16 @@ export function McpConnectionsPanel({
 
   const blocked =
     disabled || loading || busy || needsRefresh || permissionsUncertain;
+  const launchArgs =
+    argumentsText === ''
+      ? passEmptyArgument
+        ? ['']
+        : []
+      : argumentsText.split(/\r?\n/);
+  const localIssue =
+    connectionType === 'stdio'
+      ? launchIssue(label, executable, launchArgs)
+      : null;
   return (
     <section
       aria-label="External tools (MCP)"
@@ -248,20 +296,44 @@ export function McpConnectionsPanel({
           event.preventDefault();
           const savedLabel = label;
           const savedEndpoint = endpoint;
+          if (connectionType === 'stdio' && (!trustedLocalCode || localIssue))
+            return;
+          const savedInput: Parameters<McpOwnerApi['create']>[1] =
+            connectionType === 'stdio'
+              ? { label: savedLabel, stdio: { executable, args: launchArgs } }
+              : { label: savedLabel, endpoint: savedEndpoint };
           void mutate(
-            () =>
-              api.create(agentId, {
-                label: savedLabel,
-                endpoint: savedEndpoint,
-              }),
+            () => api.create(agentId, savedInput),
             (row) => {
               replace(row);
               setLabel('');
               setEndpoint('');
+              setExecutable('');
+              setArgumentsText('');
+              setPassEmptyArgument(false);
+              setTrustedLocalCode(false);
             },
           );
         }}
       >
+        <label className="text-xs">
+          Connection type
+          <select
+            className={inputClass}
+            value={connectionType}
+            disabled={blocked}
+            onChange={(event) => {
+              setConnectionType(
+                event.target.value as 'streamableHttp' | 'stdio',
+              );
+              setPassEmptyArgument(false);
+              setTrustedLocalCode(false);
+            }}
+          >
+            <option value="streamableHttp">HTTP server</option>
+            <option value="stdio">Local process</option>
+          </select>
+        </label>
         <label className="text-xs">
           Connection label
           <input
@@ -272,21 +344,96 @@ export function McpConnectionsPanel({
             onChange={(event) => setLabel(event.target.value)}
           />
         </label>
-        <label className="text-xs">
-          Server URL
-          <input
-            className={inputClass}
-            value={endpoint}
-            maxLength={2048}
-            disabled={blocked}
-            placeholder="https://server.example/mcp"
-            onChange={(event) => setEndpoint(event.target.value)}
-          />
-        </label>
+        {connectionType === 'streamableHttp' ? (
+          <label className="text-xs">
+            Server URL
+            <input
+              className={inputClass}
+              value={endpoint}
+              maxLength={2048}
+              disabled={blocked}
+              placeholder="https://server.example/mcp"
+              onChange={(event) => setEndpoint(event.target.value)}
+            />
+          </label>
+        ) : (
+          <div className="space-y-3 sm:col-span-2">
+            <p className="text-xs text-ink-3">
+              A local process runs code on this computer. Use an installed
+              executable you trust. No shell commands, package launchers,
+              installs or environment settings are supported. Saving stays
+              disabled and does not start it.
+            </p>
+            <label className="block text-xs">
+              Absolute executable path
+              <input
+                className={inputClass}
+                value={executable}
+                maxLength={2048}
+                disabled={blocked}
+                onChange={(event) => {
+                  setExecutable(event.target.value);
+                  setTrustedLocalCode(false);
+                }}
+              />
+            </label>
+            <label className="block text-xs">
+              Arguments — one per line
+              <textarea
+                className={inputClass}
+                value={argumentsText}
+                maxLength={16 * 1024}
+                disabled={blocked}
+                onChange={(event) => {
+                  setArgumentsText(event.target.value);
+                  setPassEmptyArgument(false);
+                  setTrustedLocalCode(false);
+                }}
+              />
+            </label>
+            {argumentsText === '' && (
+              <label className="flex items-start gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={passEmptyArgument}
+                  disabled={blocked}
+                  onChange={(event) => {
+                    setPassEmptyArgument(event.target.checked);
+                    setTrustedLocalCode(false);
+                  }}
+                />
+                Pass one empty argument
+              </label>
+            )}
+            <p className="text-xs text-ink-3">
+              Each line is one argument. Spaces and quotes are passed literally;
+              blank lines are empty arguments. Launch details cannot be edited
+              after saving.
+            </p>
+            {executable && localIssue && (
+              <p className="text-xs text-ink-3">{localIssue}</p>
+            )}
+            <label className="flex items-start gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={trustedLocalCode}
+                disabled={blocked}
+                onChange={(event) => setTrustedLocalCode(event.target.checked)}
+              />
+              I trust this local program and its arguments
+            </label>
+          </div>
+        )}
         <div className="sm:col-span-2">
           <button
             className={button}
-            disabled={blocked || !label.trim() || !endpoint.trim()}
+            disabled={
+              blocked ||
+              !label.trim() ||
+              (connectionType === 'stdio'
+                ? !trustedLocalCode || localIssue !== null
+                : !endpoint.trim())
+            }
             type="submit"
           >
             Save disabled connection
@@ -452,6 +599,7 @@ function ConnectionCard({
     }
   }, [row.label, row.endpoint, row.version, label, endpoint]);
   const [confirmRemove, setConfirmRemove] = useState<number | null>(null);
+  const local = row.transport === 'stdio';
   const wireBusy =
     row.state === 'stopping' ||
     row.state === 'connecting' ||
@@ -464,7 +612,32 @@ function ConnectionCard({
     >
       <h3 className="break-words font-medium">{row.label}</h3>
       <p className="text-xs text-ink-3">{statusText(row)}</p>
-      <p className="break-all text-xs text-ink-3">{row.endpoint}</p>
+      {local ? (
+        <div className="space-y-1 text-xs text-ink-3">
+          <p>Local process — saved launch</p>
+          <p className="whitespace-pre-wrap break-all">
+            {row.stdio?.executable ?? 'Launch details unavailable'}
+          </p>
+          {row.stdio &&
+            (row.stdio.args.length > 0 ? (
+              <ol className="list-decimal space-y-1 pl-5">
+                {row.stdio.args.map((arg, index) => (
+                  <li key={index} className="whitespace-pre-wrap break-all">
+                    {JSON.stringify(arg)}
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p>No arguments</p>
+            ))}
+          <p>
+            Only start code you trust. To change the program or arguments,
+            remove this connection and save a new one.
+          </p>
+        </div>
+      ) : (
+        <p className="break-all text-xs text-ink-3">{row.endpoint}</p>
+      )}
       {row.physicalCallsActive && (
         <p className="text-xs">
           Work or cleanup is still active. Disconnecting does not undo completed
@@ -493,24 +666,31 @@ function ConnectionCard({
               }}
             />
           </label>
-          <label className="text-xs">
-            Saved server URL
-            <input
-              className={inputClass}
-              value={endpoint}
-              maxLength={2048}
-              disabled={blocked || wireBusy}
-              onChange={(event) => {
-                dirty.current.endpoint = true;
-                setEndpoint(event.target.value);
-              }}
-            />
-          </label>
+          {!local && (
+            <label className="text-xs">
+              Saved server URL
+              <input
+                className={inputClass}
+                value={endpoint}
+                maxLength={2048}
+                disabled={blocked || wireBusy}
+                onChange={(event) => {
+                  dirty.current.endpoint = true;
+                  setEndpoint(event.target.value);
+                }}
+              />
+            </label>
+          )}
           <button
             className={button}
-            disabled={blocked || wireBusy || !label.trim() || !endpoint.trim()}
+            disabled={
+              blocked ||
+              wireBusy ||
+              !label.trim() ||
+              (!local && !endpoint.trim())
+            }
             onClick={() =>
-              save({ label, endpoint }, (saved) => {
+              save(local ? { label } : { label, endpoint }, (saved) => {
                 dirty.current = { label: false, endpoint: false };
                 setLabel(saved.label);
                 setEndpoint(saved.endpoint);
@@ -531,10 +711,16 @@ function ConnectionCard({
         </button>
         <button
           className={button}
-          disabled={blocked || wireBusy || !row.enabled || connected}
+          disabled={
+            blocked ||
+            wireBusy ||
+            !row.enabled ||
+            connected ||
+            (local && !row.stdio)
+          }
           onClick={connect}
         >
-          Connect server
+          {local ? 'Start local server' : 'Connect server'}
         </button>
         <button
           className={button}
@@ -550,7 +736,7 @@ function ConnectionCard({
           }
           onClick={disconnect}
         >
-          Disconnect server
+          {local ? 'Stop local server' : 'Disconnect server'}
         </button>
         <button
           className={button}
@@ -563,8 +749,8 @@ function ConnectionCard({
       {confirmRemove !== null && (
         <div className="space-y-2 text-xs">
           <p>
-            Remove this saved connection? Completed remote effects are kept.
-            Only this connection will be removed.
+            Remove this saved connection? Completed tool effects are kept. Only
+            this connection will be removed.
           </p>
           {confirmRemove !== row.version && (
             <p>
