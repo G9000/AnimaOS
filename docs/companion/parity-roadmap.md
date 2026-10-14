@@ -103,7 +103,7 @@ CP19 has an independent pre-community backup. Live uncertain 503 fails closed; i
 - [ ] Stop and cleanup must release recorded owned contexts/processes; page text is untrusted evidence, not new grants or instructions. Authenticated/write actions use applicable owner controls.
 - Acceptance: deterministic controlled-page workflow and hostile redirects/page instructions, denied destinations, popups, oversized downloads, cancellation and clean context disposal; then a predeclared useful task whose output is checked. Existing read-only/public and isolated-test authority remains usable; personal-profile/external-write cases need concrete scope.
 
-M46 has a held 297-line private browser plan against public Hermes `1fd18277267152893a8a24792b79213e7ca3f899`; no browser implementation is released or claimed.
+M46 now has a [bound lean plan](../superpowers/plans/2026-10-14-companion-browser-m46.md) on verified M45 main, informed by public Hermes `1fd18277267152893a8a24792b79213e7ca3f899`. Typed core/native seams are delegated; implementation and controlled browser acceptance remain pending.
 
 ### PAR-06: coding and delegation that finishes real work
 
