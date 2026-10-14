@@ -58,6 +58,10 @@ pub(crate) fn read_skill_bytes(workspace: &Path, slug: &str) -> Result<Option<Ve
 
 fn read_in(root: &Path, slug: &str) -> Result<Option<Vec<u8>>, String> {
     let path = root.join(SKILLS_FOLDER).join(slug).join(SKILL_FILE_NAME);
+    read_inside(root, &path)
+}
+
+fn read_inside(root: &Path, path: &Path) -> Result<Option<Vec<u8>>, String> {
     match fs::symlink_metadata(&path) {
         Ok(_) => {}
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
@@ -95,6 +99,29 @@ fn read_in(root: &Path, slug: &str) -> Result<Option<Vec<u8>>, String> {
         return Err(SKILL_FILE_TOO_LARGE.to_string());
     }
     Ok(Some(bytes))
+}
+
+/// Exact post-rename witness for a bundle removal. Retains the existing
+/// regular-file and canonical containment checks without opening arbitrary paths.
+pub(crate) fn read_trashed_skill_bytes(
+    workspace: &Path,
+    slug: &str,
+    name: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    checked(slug)?;
+    if !is_trash_name(slug, name) {
+        return Err("not a skills trash name".into());
+    }
+    let root = root_of(workspace)?;
+    existing_inside(&root, &root.join(TRASH_ROOT))?;
+    existing_inside(&root, &root.join(SKILLS_TRASH_FOLDER))?;
+    read_inside(
+        &root,
+        &root
+            .join(SKILLS_TRASH_FOLDER)
+            .join(name)
+            .join(SKILL_FILE_NAME),
+    )
 }
 
 /// What `slug`'s `SKILL.md` holds now; `Ok(None)` when there is none.
@@ -338,6 +365,41 @@ pub(crate) fn trash_skill_folder(
     Ok(Some(name))
 }
 
+/// Uses an intention's pre-reserved name. A collision is a conflict, never
+/// an overwrite or a second destination. Called outside bundle state guards.
+pub(crate) fn trash_skill_folder_to(
+    workspace: &Path,
+    slug: &str,
+    name: &str,
+) -> Result<Option<String>, String> {
+    checked(slug)?;
+    if !is_trash_name(slug, name) {
+        return Err("not a skills trash name".into());
+    }
+    let root = root_of(workspace)?;
+    let skills = root.join(SKILLS_FOLDER);
+    let folder = skills.join(slug);
+    match fs::symlink_metadata(&folder) {
+        Ok(_) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("Community skill folder is unavailable".into()),
+    }
+    if !skills
+        .canonicalize()
+        .map_err(|_| "Community skills folder is unavailable".to_string())?
+        .starts_with(&root)
+    {
+        return Err(SKILLS_FOLDER_OUTSIDE.into());
+    }
+    let trash = trash_folder(&root)?;
+    if fs::symlink_metadata(trash.join(name)).is_ok() {
+        return Err("Community skill trash destination exists".into());
+    }
+    fs::rename(folder, trash.join(name))
+        .map_err(|_| "Community skill could not be moved".to_string())?;
+    Ok(Some(name.into()))
+}
+
 /// Whether `name` is exactly `<slug>-<digits>` or `<slug>-<digits>-<digits>`.
 fn is_trash_name(slug: &str, name: &str) -> bool {
     let Some(rest) = name
@@ -351,6 +413,9 @@ fn is_trash_name(slug: &str, name: &str) -> bool {
         && parts
             .iter()
             .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+}
+pub(crate) fn valid_bundle_trash_name(slug: &str, name: &str) -> bool {
+    name.len() <= 128 && is_valid_slug(slug) && is_trash_name(slug, name)
 }
 
 /// Puts a trashed folder (a name `trash_skill_folder` returned) back, for a

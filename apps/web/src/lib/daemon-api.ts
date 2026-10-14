@@ -26,6 +26,11 @@ import {
   type McpVersionInput,
   type McpReviewInput,
   type McpGrantInput,
+  type BundleReviewInput,
+  type BundleInstallInput,
+  type BundleUpdateInput,
+  type BundleEnabledInput,
+  type BundleStateInput,
   type LogLevel,
   type LogsQuery,
   type MemoryPatch,
@@ -68,6 +73,12 @@ export type {
   McpToolDescriptor,
   ReviewedMcpTool,
   McpGrantOutcome,
+  BundleSummary,
+  BundleView,
+  BundleReview,
+  BundleComponentView,
+  ComponentReview,
+  CommunityManifest,
 } from '@animaOS-SWARM/sdk';
 
 /** Shared owner transport policy. The current console uses same-origin cookies;
@@ -115,6 +126,25 @@ export const mcpOwnerApi = {
     alias: string,
     input: McpGrantInput,
   ) => setupClient.mcp.setGrant(agentId, id, alias, input),
+};
+
+/** Bundle configuration shares owner transport and existing canonical grants. */
+export const communityBundlesOwnerApi = {
+  list: (agentId: string, options?: { signal?: AbortSignal }) =>
+    setupClient.communityBundles.list(agentId, options),
+  get: (agentId: string, id: string, options?: { signal?: AbortSignal }) =>
+    setupClient.communityBundles.get(agentId, id, options),
+  review: (agentId: string, input: BundleReviewInput) =>
+    setupClient.communityBundles.review(agentId, input),
+  install: (agentId: string, input: BundleInstallInput) =>
+    setupClient.communityBundles.install(agentId, input),
+  update: (agentId: string, id: string, input: BundleUpdateInput) =>
+    setupClient.communityBundles.update(agentId, id, input),
+  setEnabled: (agentId: string, id: string, input: BundleEnabledInput) =>
+    setupClient.communityBundles.setEnabled(agentId, id, input),
+  remove: (agentId: string, id: string, input: BundleStateInput) =>
+    setupClient.communityBundles.remove(agentId, id, input),
+  toolNames: (agentId: string) => mcpOwnerApi.toolNames(agentId),
 };
 
 export interface DaemonProvider {

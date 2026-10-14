@@ -8,6 +8,7 @@ import {
 import { primaryBtnCls } from './ui-bits';
 import { GoogleDriveCard } from './GoogleDriveCard';
 import { McpConnectionsPanel } from './mcp/McpConnectionsPanel';
+import { CommunityBundlesPanel } from './community-bundles/CommunityBundlesPanel';
 
 const client = createDaemonClient({ baseUrl: '' }).connectors;
 const button =
@@ -834,6 +835,18 @@ export function ConnectorsView({
   mcpPermissionsUncertain?: boolean;
   mcpPermissionsBusy?: boolean;
 }) {
+  const currentOwner = useRef(agentId);
+  currentOwner.current = agentId;
+  const [ownerBusy, setOwnerBusy] = useState(false);
+  const [mcpRefreshRequired, setMcpRefreshRequired] = useState(false);
+  useEffect(() => {
+    setOwnerBusy(false);
+    setMcpRefreshRequired(false);
+  }, [agentId]);
+  const reportOwnerBusy = (busy: boolean) => {
+    if (currentOwner.current === agentId) setOwnerBusy(busy);
+    onMcpBusyChanged?.(busy);
+  };
   const [oauthGeneration, setOauthGeneration] = useState({
     google: 0,
     microsoft: 0,
@@ -886,11 +899,34 @@ export function ConnectorsView({
         <McpConnectionsPanel
           key={agentId}
           agentId={agentId}
-          disabled={disabled}
+          disabled={disabled || ownerBusy || mcpRefreshRequired}
           permissionsUncertain={mcpPermissionsUncertain}
-          permissionsBusy={mcpPermissionsBusy}
-          onGrantsChanged={onMcpGrantsChanged}
-          onBusyChanged={onMcpBusyChanged}
+          permissionsBusy={mcpPermissionsBusy || ownerBusy}
+          onGrantsChanged={async (names) => {
+            await onMcpGrantsChanged?.(names);
+            if (currentOwner.current === agentId) setMcpRefreshRequired(false);
+          }}
+          onBusyChanged={reportOwnerBusy}
+          onPermissionsUncertain={onMcpPermissionsUncertain}
+        />
+        {mcpRefreshRequired && (
+          <p className="text-xs text-ink-3">
+            A bundle changed its saved components. Use Refresh status in
+            External tools before editing those connections; your entered fields
+            are kept.
+          </p>
+        )}
+        <CommunityBundlesPanel
+          key={agentId}
+          agentId={agentId}
+          disabled={disabled || ownerBusy}
+          permissionsUncertain={mcpPermissionsUncertain}
+          permissionsBusy={mcpPermissionsBusy || ownerBusy}
+          onGrantsChanged={async (names) => {
+            await onMcpGrantsChanged?.(names);
+            if (currentOwner.current === agentId) setMcpRefreshRequired(true);
+          }}
+          onBusyChanged={reportOwnerBusy}
           onPermissionsUncertain={onMcpPermissionsUncertain}
         />
         <div className="grid min-w-0 items-start gap-4 xl:grid-cols-2">

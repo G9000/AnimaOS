@@ -3,6 +3,7 @@ mod agent_runs;
 mod app;
 mod approvals;
 mod attachments;
+mod community_bundles;
 mod components;
 mod connectors;
 mod control_plane_store;

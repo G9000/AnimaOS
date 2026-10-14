@@ -371,6 +371,7 @@ impl McpManager {
             let mut guard = state.write().await;
             Self::owner(&guard, agent)?;
             self.same_publication(&guard)?;
+            crate::community_bundles::check_mcp_edit(&guard, id, input.granted, false)?;
             let row = guard
                 .mcp_registry
                 .connections
@@ -474,7 +475,7 @@ impl McpManager {
         self.running()?;
         let _transaction = self.inner.transactions.lock().await;
         let state = self.state()?;
-        let (next, persist, result_id, retire, remove_grants) = {
+        let (next, persist, result_id, retire, remove_grants, bundle_patch) = {
             let mut guard = state.write().await;
             Self::owner(&guard, agent)?;
             self.same_publication(&guard)?;
@@ -490,6 +491,7 @@ impl McpManager {
             });
             let mut retire = false;
             let mut remove_grants = None;
+            let mut bundle_patch = None;
             let result_id = match mutation {
                 Mutation::Create(input) => {
                     if next.connections.len() >= MAX_CONNECTIONS {
@@ -531,6 +533,16 @@ impl McpManager {
                 }
                 mutation => {
                     let id = id.ok_or(McpServiceError::InvalidRequest)?;
+                    let activation = matches!(
+                        &mutation,
+                        Mutation::Review(_)
+                            | Mutation::Update(UpdateMcpConnection {
+                                enabled: Some(true),
+                                ..
+                            })
+                    );
+                    let deleting = matches!(&mutation, Mutation::Delete(_));
+                    crate::community_bundles::check_mcp_edit(&guard, id, activation, deleting)?;
                     let row = next
                         .connections
                         .get_mut(id)
@@ -623,6 +635,54 @@ impl McpManager {
                                     .collect::<Vec<_>>(),
                             ));
                             next.connections.remove(id);
+                            if guard.community_bundles.iter().any(|bundle| {
+                                bundle
+                                    .predecessors
+                                    .iter()
+                                    .any(|part| part.connection_id == id)
+                            }) {
+                                let mut bundles = guard.community_bundles.clone();
+                                let bundle = bundles
+                                    .iter_mut()
+                                    .find(|bundle| {
+                                        bundle
+                                            .predecessors
+                                            .iter()
+                                            .any(|part| part.connection_id == id)
+                                    })
+                                    .unwrap();
+                                bundle.predecessors.retain(|part| part.connection_id != id);
+                                bundle.version =
+                                    crate::community_bundles::next_version(bundle.version)
+                                        .map_err(|_| McpServiceError::Conflict)?;
+                                let mut drafts = guard
+                                    .skills
+                                    .pending_drafts()
+                                    .into_iter()
+                                    .filter(|draft| {
+                                        draft
+                                            .bundle_source
+                                            .as_ref()
+                                            .is_some_and(|source| source.bundle_id == bundle.id)
+                                    })
+                                    .cloned()
+                                    .collect::<Vec<_>>();
+                                for draft in &mut drafts {
+                                    if let Some(source) = &mut draft.bundle_source {
+                                        source.bundle_version = bundle.version;
+                                    }
+                                }
+                                let affected_bundle_id = bundle.id.clone();
+                                bundle_patch = Some((
+                                    bundles,
+                                    guard
+                                        .community_generation
+                                        .checked_add(1)
+                                        .ok_or(McpServiceError::Conflict)?,
+                                    drafts,
+                                    affected_bundle_id,
+                                ));
+                            }
                             retire = true;
                             None
                         }
@@ -631,11 +691,39 @@ impl McpManager {
                 }
             };
             McpRegistry::validate(&next.snapshot()).map_err(|_| McpServiceError::InvalidRequest)?;
-            let persist = guard
-                .control_plane_persist_request()
-                .with_mcp_candidate(next.snapshot(), remove_grants.clone())
-                .ok_or(McpServiceError::Unavailable)?;
-            (next, persist, result_id, retire, remove_grants)
+            let mut skills = guard.skills.snapshot();
+            if let Some((_, _, drafts, _)) = &bundle_patch {
+                for draft in drafts {
+                    if let Some(existing) = skills
+                        .drafts
+                        .iter_mut()
+                        .find(|existing| existing.id == draft.id)
+                    {
+                        *existing = draft.clone();
+                    }
+                }
+            }
+            let request = guard.control_plane_persist_request();
+            let persist = if let Some((bundles, generation, _, _)) = &bundle_patch {
+                request.with_bundle_candidate(
+                    bundles.clone(),
+                    *generation,
+                    next.snapshot(),
+                    skills,
+                    remove_grants.clone(),
+                )
+            } else {
+                request.with_mcp_candidate(next.snapshot(), remove_grants.clone())
+            }
+            .ok_or(McpServiceError::Unavailable)?;
+            (
+                next,
+                persist,
+                result_id,
+                retire,
+                remove_grants,
+                bundle_patch,
+            )
         };
         let uncertain = match persist.save_mcp_candidate().await {
             Ok(()) => false,
@@ -646,6 +734,26 @@ impl McpManager {
         Self::owner(&guard, agent)?;
         self.same_publication(&guard)?;
         guard.mcp_registry = next;
+        if let Some((mut bundles, generation, drafts, affected_bundle_id)) = bundle_patch {
+            if uncertain {
+                for bundle in &mut bundles {
+                    if bundle.id == affected_bundle_id {
+                        bundle.state = "unavailable".into();
+                        self.retire_bundle_connections(
+                            &bundle
+                                .mcp()
+                                .map(|part| part.connection_id.clone())
+                                .collect::<Vec<_>>(),
+                        )?;
+                    }
+                }
+            }
+            guard.community_bundles = bundles;
+            guard.community_generation = generation;
+            for draft in drafts {
+                guard.skills.put_draft(draft);
+            }
+        }
         if let Some((agent, aliases)) = remove_grants {
             if let Some(runtime) = guard.agents.get_mut(&agent) {
                 let mut config = runtime.config().clone();
@@ -789,6 +897,7 @@ impl McpManager {
         let record = tokio::time::timeout_at(deadline, self.record(agent, id, Some(expected)))
             .await
             .map_err(|_| McpServiceError::TimedOut)??;
+        crate::community_bundles::check_mcp_edit(&*self.state()?.read().await, id, true, false)?;
         if !record.enabled {
             return Err(McpServiceError::Conflict);
         }
@@ -1146,6 +1255,56 @@ impl McpManager {
             notified.await;
         }
     }
+    pub(crate) fn publish_bundle_catalog(
+        &self,
+        registry: &McpRegistry,
+        retire: &[String],
+        _agent: &str,
+    ) -> Result<(), McpServiceError> {
+        self.running()?;
+        for id in retire {
+            self.retire(id, None)?;
+        }
+        self.publish(registry)
+    }
+    pub(crate) fn retire_bundle_connections(&self, ids: &[String]) -> Result<(), McpServiceError> {
+        for id in ids {
+            self.retire(id, Some(McpServiceError::Unavailable))?;
+        }
+        Ok(())
+    }
+    pub(crate) async fn join_bundle_connections(
+        &self,
+        ids: &[String],
+    ) -> Result<(), McpServiceError> {
+        tokio::time::timeout(Duration::from_secs(25), async {
+            loop {
+                let notified = self.inner.settled.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                let complete = {
+                    let live = self
+                        .inner
+                        .live
+                        .lock()
+                        .map_err(|_| McpServiceError::Unavailable)?;
+                    ids.iter().all(|id| {
+                        live.connections.get(id).is_none_or(|row| {
+                            row.state != McpConnectionState::Stopping
+                                && row.session.is_none()
+                                && row.permit.available_permits() > 0
+                        })
+                    })
+                };
+                if complete {
+                    return Ok(());
+                }
+                notified.await;
+            }
+        })
+        .await
+        .map_err(|_| McpServiceError::Unavailable)?
+    }
     pub(crate) fn capture_dispatch(
         &self,
         agent: &AgentState,
@@ -1209,6 +1368,8 @@ impl McpManager {
         Self::owner(&guard, &stamp.agent_id)?;
         self.same_publication(&guard)?;
         let runtime = &guard.agents[&stamp.agent_id];
+        crate::community_bundles::check_mcp_edit(&guard, &stamp.connection_id, true, false)
+            .map_err(|_| McpServiceError::Revoked)?;
         let run = guard
             .runs
             .get(&stamp.run_id)

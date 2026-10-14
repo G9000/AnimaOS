@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "id": "local.synthetic-violet",
+  "version": "1.0.0",
+  "name": "Synthetic violet",
+  "description": "One controlled Windows MCP peer and a separately approved procedural skill.",
+  "compatibility": {
+    "host": "rust-daemon",
+    "minVersion": "0.1.0",
+    "maxVersionExclusive": "0.2.0",
+    "requiredCapabilities": [
+      "mcp.owner.v1",
+      "mcp.stdio.windows.v1",
+      "skills.import-draft.v1"
+    ]
+  },
+  "permissions": {
+    "nativeToolNames": [],
+    "externalTools": [
+      {
+        "component": "peer",
+        "remoteName": "synthetic_stdio_record"
+      }
+    ]
+  },
+  "attribution": [
+    {
+      "component": "peer",
+      "source": "hosts/rust-daemon/tests/fixtures/mcp_stdio_peer.rs",
+      "revision": "15e40c397a6ef961639e9375fe50ee513d09c9bf",
+      "license": "MIT (Cargo/package metadata; no bundled license text)",
+      "notice": "Existing deterministic test peer; Cargo authors: animaOS contributors. Preserve source notices and Anima branding. Root LICENSE absent; metadata is not an additional redistribution grant."
+    },
+    {
+      "component": "procedure",
+      "source": "examples/community-bundles/synthetic-violet/SKILL.md",
+      "revision": "Local example 1.0.0",
+      "license": "MIT (Cargo/package metadata; no separate example license grant)",
+      "notice": "Repository-local procedural source. Version is an example label, not a source commit or publisher signature. See ATTRIBUTION.md for the missing license-text boundary."
+    }
+  ],
+  "components": [
+    {
+      "key": "peer",
+      "kind": "mcpStdio",
+      "label": "Synthetic violet peer",
+      "programRef": "synthetic-peer",
+      "args": ["--mode", "normal"]
+    },
+    {
+      "key": "procedure",
+      "kind": "skill",
+      "skillFile": "---\nname: Synthetic violet procedure\ndescription: Inspect one synthetic local MCP result through existing owner approvals\n---\n\nUse this procedure only when the owner explicitly requests the synthetic violet example.\nLoading or approving this skill does not authorize a tool call.\n\n1. Identify the already reviewed and granted alias for `synthetic_stdio_record` on the\n   bundle-owned Synthetic violet peer. If the connection, descriptor review or grant\n   is unavailable, stop and direct the owner to External tools. Do not enable, start,\n   discover, review or grant the server yourself.\n2. Request one call with the exact arguments `{\"value\":\"violet\"}`. Honor the normal\n   execution approval decision; a skill, manifest request or previous result cannot\n   replace that decision.\n3. Inspect the returned text and receipt provenance. The controlled peer returns\n   `Synthetic stdio violet record`; this is synthetic local evidence, not a provider\n   response or a general validation of community servers.\n4. If execution is denied, revoked, unavailable or uncertain, report that state.\n   Do not retry automatically or claim that an unknown call had no effect.\n\nThis procedure requires no accounts, credentials, model requests, downloads or shell.\n"
+    }
+  ]
+}

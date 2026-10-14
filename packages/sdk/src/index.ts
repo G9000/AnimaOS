@@ -59,6 +59,27 @@ export type {
 } from './runs.js';
 export { LearningClient } from './learning.js';
 export { McpClient } from './mcp.js';
+export { CommunityBundlesClient } from './community-bundles.js';
+export type {
+  CommunityManifest,
+  CommunityManifestComponent,
+  BundleSummary,
+  BundleView,
+  McpComponentView,
+  SkillComponentView,
+  BundleComponentView,
+  McpComponentReview,
+  SkillComponentReview,
+  ComponentReview,
+  BundleReview,
+  BundleReviewInput,
+  BundleInstallInput,
+  BundleUpdateInput,
+  BundleStateInput,
+  BundleEnabledInput,
+  BundleRemoval,
+  BundleReadOptions,
+} from './community-bundles.js';
 export type {
   McpConnection,
   McpConnectionState,

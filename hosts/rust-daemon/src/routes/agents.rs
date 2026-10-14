@@ -114,6 +114,15 @@ pub(crate) async fn handle_delete_agent(
         if guard.in_flight_runs(agent_id) > 0 {
             return Err(ApiError::conflict(AGENT_BUSY_MESSAGE));
         }
+        if guard
+            .community_bundles
+            .iter()
+            .any(|bundle| bundle.agent_id == agent_id)
+        {
+            return Err(ApiError::conflict(
+                "Remove owned community bundles before deleting this agent",
+            ));
+        }
         guard.remove_agent(agent_id);
         guard.control_plane_persist_request()
     };

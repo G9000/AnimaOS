@@ -132,6 +132,7 @@ fn file_draft(slug: &str, file: &ScannedFile) -> SkillDraft {
         source: DraftSource::File,
         proposed_by: None,
         learning_source: None,
+        bundle_source: None,
         base_hash: None,
         file_hash: file.hash.clone(),
         created_at_ms: millis(file.modified),

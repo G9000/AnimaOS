@@ -6,6 +6,7 @@ mod approvals;
 mod attachments;
 mod capabilities;
 mod chatgpt;
+mod community_bundles;
 mod connectors;
 mod contracts;
 mod discord;
@@ -94,6 +95,8 @@ use crate::runtime_model::provider_summaries;
     paths(
         api_health_entry,
         capabilities_entry,
+        community_bundles::review,community_bundles::install,community_bundles::list,community_bundles::get,
+        community_bundles::update,community_bundles::set_enabled,community_bundles::remove,
         mcp::list, mcp::create, mcp::get, mcp::update, mcp::connect,
         mcp::discover, mcp::review, mcp::set_grant, mcp::disconnect, mcp::delete,
         jobs::list_jobs,
@@ -226,12 +229,19 @@ use crate::runtime_model::provider_summaries;
         self::contracts::mcp::UpdateMcpConnectionRequest, self::contracts::mcp::McpVersionRequest,
         self::contracts::mcp::ReviewMcpToolRequest, self::contracts::mcp::McpGrantRequest,
         self::contracts::mcp::McpGrantEnvelope,
+        crate::community_bundles::ReviewRequest,crate::community_bundles::InstallRequest,crate::community_bundles::UpdateRequest,
+        crate::community_bundles::ChangeRequest,crate::community_bundles::RemoveRequest,crate::community_bundles::BundleReview,
+        crate::community_bundles::ComponentReview,crate::community_bundles::CompatibilityReport,crate::community_bundles::SettlementView,
+        crate::community_bundles::BundleSummary,crate::community_bundles::BundleView,crate::community_bundles::BundleComponentView,
+        crate::community_bundles::McpComponentView,crate::community_bundles::SkillComponentView,
+        crate::community_bundles::ReviewEnvelope,crate::community_bundles::BundleEnvelope,crate::community_bundles::BundlesEnvelope,crate::community_bundles::RemoveOutcome,
         self::contracts::MemoryDeleteRequest,
         self::contracts::agent_files::AgentFilesPreview, self::contracts::agent_files::PreviewMode,
         crate::agent_files::AgentFilesManifest, crate::agent_files::AgentFileManifestEntry,
         crate::agent_files::Availability, crate::agent_files::IdentitySource, crate::agent_files::ProjectSourceKind,
         crate::agent_files::AgentFileKind, crate::agent_files::AgentFileState, crate::agent_files::ReasonCode)),
     tags(
+        (name="community-bundles",description="Owner-reviewed declarative content and disabled MCP metadata"),
         (name = "mcp", description = "Owner-scoped reviewed external tools"),
         (name = "attachments", description = "Owner-authorized session uploads and downloads"),
         (name = "health", description = "Daemon health endpoints"),
@@ -781,6 +791,10 @@ fn router_with_services_with_policies_and_integrations(
             axum::routing::post(discord::suppress),
         )
         .route("/api/agents/{agent_id}/mcp-connections", get(mcp::list).post(mcp::create))
+        .route("/api/agents/{agent_id}/community-bundles",get(community_bundles::list).post(community_bundles::install))
+        .route("/api/agents/{agent_id}/community-bundles/reviews",axum::routing::post(community_bundles::review))
+        .route("/api/agents/{agent_id}/community-bundles/{bundle_id}",get(community_bundles::get).patch(community_bundles::set_enabled).delete(community_bundles::remove))
+        .route("/api/agents/{agent_id}/community-bundles/{bundle_id}/update",axum::routing::post(community_bundles::update))
         .route("/api/agents/{agent_id}/mcp-connections/{connection_id}", get(mcp::get).patch(mcp::update).delete(mcp::delete))
         .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/connect", axum::routing::post(mcp::connect))
         .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/discover", axum::routing::post(mcp::discover))
@@ -1839,6 +1853,19 @@ async fn delete_agent_entry(
         );
     }
     let _deleting = state.agent_runs.begin_agent_deletion(&agent_id);
+    if state
+        .daemon
+        .read()
+        .await
+        .community_bundles
+        .iter()
+        .any(|bundle| bundle.agent_id == agent_id)
+    {
+        return jobs::no_store(
+            ApiError::conflict("Remove owned community bundles before deleting this agent")
+                .into_response(),
+        );
+    }
     if state.daemon.read().await.in_flight_runs(&agent_id) > 0 {
         return delete_agent_error(ConnectorManagerError::AgentBusy);
     }

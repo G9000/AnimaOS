@@ -5,6 +5,7 @@ pub use agent_files::{
 };
 pub mod agent;
 pub mod communication;
+pub mod community_bundles;
 pub use communication::{AgentCommunicationRoute, MAX_AGENT_COMMUNICATION_HOPS};
 pub mod capability;
 pub mod components;
