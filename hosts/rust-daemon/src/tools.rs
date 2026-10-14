@@ -1,4 +1,7 @@
 pub(crate) mod automations;
+mod browser;
+#[cfg(test)]
+mod browser_tests;
 pub(crate) mod calendar;
 mod conversations;
 mod drive;
@@ -36,6 +39,7 @@ use crate::memory_store::MemoryStoreConfig;
 use crate::state::SharedMemoryStore;
 
 pub(crate) use automations::is_automation_tool;
+pub(crate) use browser::is_browser_tool;
 pub(crate) use process::{
     background_process_count, new_shared_process_manager_with_limit, SharedProcessManager,
     DEFAULT_MAX_BACKGROUND_PROCESSES,
@@ -67,6 +71,8 @@ struct ToolRegistration {
 pub(crate) struct ToolExecutionContext {
     pub(super) mcp: Option<crate::mcp::McpManager>,
     pub(super) mcp_stamp: Option<crate::mcp::McpDispatchStamp>,
+    pub(super) browser: Option<crate::browser::BrowserService>,
+    pub(super) browser_stamp: Option<crate::browser::BrowserDispatchStamp>,
     pub(super) team: Option<crate::agent_runs::AgentRunCoordinator>,
     pub(super) can_delegate: bool,
     pub(super) helper_starts: Arc<AtomicUsize>,
@@ -110,6 +116,8 @@ impl ToolExecutionContext {
         Self {
             mcp: None,
             mcp_stamp: None,
+            browser: None,
+            browser_stamp: None,
             team: None,
             can_delegate: false,
             helper_starts: Arc::new(AtomicUsize::new(0)),
@@ -225,6 +233,34 @@ impl ToolExecutionContext {
         let Some(handler) = self.tool_registry.lookup(&tool_call.name) else {
             return TaskResult::error(format!("Unknown tool: {}", tool_call.name), 0);
         };
+        if is_browser_tool(&tool_call.name) {
+            let (Some(service), Some(run), Some(_), Some(_), Some(_)) = (
+                &self.browser,
+                &self.run_link,
+                &self.approvals,
+                &self.action_journal,
+                &self.cancel,
+            ) else {
+                return TaskResult::error(
+                    "Browser dispatch requires an ordinary run, approval gate and action journal",
+                    0,
+                );
+            };
+            let (operation, expected) = match browser::arguments(&tool_call) {
+                Ok(value) => value,
+                Err(error) => return TaskResult::error(error, 0),
+            };
+            self.browser_stamp = match service
+                .capture_dispatch(run, &tool_call, operation, expected)
+                .await
+            {
+                Ok(stamp) => Some(stamp),
+                Err(error) => return TaskResult::error(error.to_string(), 0),
+            };
+            if let Err(result) = self.revalidate_browser().await {
+                return result;
+            }
+        }
         if tool_call.name.starts_with("mcp_") {
             if let Err(error) = mcp::arguments(&tool_call) {
                 return TaskResult::error(error, 0);
@@ -284,6 +320,9 @@ impl ToolExecutionContext {
                 );
             }
         }
+        if let Err(result) = self.revalidate_browser().await {
+            return result;
+        }
         let journal = self.action_journal.clone();
         if let Some(journal) = &journal {
             if !journal.owns_caller(&agent.id, &user_message.agent_id) {
@@ -298,6 +337,7 @@ impl ToolExecutionContext {
                     .await
                     .map_err(|error| TaskResult::error(error, 0))?;
                 self.live_checks(&agent, &tool_call).await?;
+                self.revalidate_browser().await?;
                 if let Some(gate) = &self.approvals {
                     gate.revalidate_after_receipt(&agent, &tool_call, configured, approved)
                         .await?;
@@ -324,11 +364,23 @@ impl ToolExecutionContext {
             }
         }
         let call = tool_call.clone();
+        let browser_cleanup = if is_browser_tool(&call.name) {
+            self.browser.clone().zip(self.run_link.clone())
+        } else {
+            None
+        };
         let started = std::time::Instant::now();
         let result = handler(self, agent, user_message, tool_call).await;
         if let Some(journal) = journal {
             let duration = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
             if let Err(error) = journal.finish(&call, &result, duration).await {
+                if let Some((browser, run)) = browser_cleanup {
+                    browser.retire_run(&run.run_id).await;
+                    return TaskResult::error(
+                        "Browser outcome persistence is unknown; effects may have occurred",
+                        duration,
+                    );
+                }
                 return TaskResult::error(error, duration);
             }
         }
@@ -343,6 +395,16 @@ impl ToolExecutionContext {
         agent: &AgentState,
         tool_call: &ToolCall,
     ) -> Result<(), TaskResult<Content>> {
+        if is_browser_tool(&tool_call.name)
+            && (self.delegated_parent.is_some()
+                || !self.peer_sources.is_empty()
+                || crate::agent_runs::is_helper_config(&agent.config))
+        {
+            return Err(TaskResult::error(
+                "Browser tools require a direct ordinary owner chat run",
+                0,
+            ));
+        }
         if !agent.config.allows_tool(&tool_call.name) {
             return Err(TaskResult::error(
                 tool_not_configured_error(&tool_call.name),
@@ -392,6 +454,19 @@ impl ToolExecutionContext {
                     0,
                 ));
             }
+        }
+        Ok(())
+    }
+    pub(crate) fn with_browser(mut self, service: Option<crate::browser::BrowserService>) -> Self {
+        self.browser = service;
+        self
+    }
+    async fn revalidate_browser(&self) -> Result<(), TaskResult<Content>> {
+        if let (Some(service), Some(stamp)) = (&self.browser, &self.browser_stamp) {
+            service
+                .revalidate_dispatch(stamp)
+                .await
+                .map_err(|e| TaskResult::error(e.to_string(), 0))?;
         }
         Ok(())
     }
@@ -1183,6 +1258,7 @@ impl ToolRegistry {
             ),
             mail::execute_mail_create_draft,
         );
+        browser::register(&mut registry);
         registry
     }
 

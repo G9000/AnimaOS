@@ -15,6 +15,8 @@ import {
   StatusTooOldError,
   type Session,
   type SessionMessage,
+  type BrowserPolicy,
+  type BrowserScope,
 } from '@animaOS-SWARM/sdk';
 
 import { toolNamesForProfile } from './lib/agent-access';
@@ -245,6 +247,348 @@ function mockRuns() {
     },
   );
 }
+
+function mockBrowserPolicy(): BrowserPolicy {
+  const policy: BrowserPolicy = {
+    id: 'local-quotes',
+    origin: 'http://127.0.0.1:43220',
+    routes: [{ id: 'home', method: 'GET', path: '/' }],
+    policyDigest: 'a'.repeat(64),
+    installationId: 'edge',
+    installationDigest: 'b'.repeat(64),
+    workerAvailable: true,
+    limits: {
+      actions: 40,
+      requests: 80,
+      scopeMs: 120000,
+      frameBytes: 65536,
+      wireBytes: 1048576,
+      observationNodes: 128,
+      observationTextBytes: 8192,
+      inputBytes: 16384,
+      outputBytes: 16384,
+      screenshotBytes: 262144,
+    },
+  };
+  vi.spyOn(daemon.browserScopes, 'policies').mockResolvedValue([policy]);
+  vi.spyOn(daemon.browserScopes, 'get').mockResolvedValue(null);
+  return policy;
+}
+
+async function openBrowserPolicyPicker() {
+  const details = screen.getByText('Browser task').closest('details')!;
+  details.open = true;
+  fireEvent(details, new Event('toggle'));
+  return screen.findByLabelText('Browser policy for next message');
+}
+
+it('M46 sends one explicit browser selection from an existing chat without carrying it to the next message', async () => {
+  const user = userEvent.setup();
+  mockBrowserPolicy();
+  const { input } = await openLiveSession({ kind: 'chat' });
+  vi.mocked(daemon.startRun).mockImplementation(
+    async (agentId, sessionId, input) =>
+      acceptedRun(agentId, sessionId, input.text),
+  );
+  const details = screen.getByText('Browser task').closest('details')!;
+  details.open = true;
+  fireEvent(details, new Event('toggle'));
+  await screen.findByRole('option', { name: /local-quotes/ });
+  await user.selectOptions(
+    screen.getByLabelText('Browser policy for next message'),
+    'local-quotes',
+  );
+  await user.type(input, 'Compare offers');
+  await user.click(screen.getByRole('button', { name: 'Send' }));
+  await waitFor(() =>
+    expect(daemon.startRun).toHaveBeenCalledWith(
+      'agent-main',
+      'room-7',
+      expect.objectContaining({
+        browserSelection: { policyId: 'local-quotes', selectedInputIds: [] },
+      }),
+      expect.any(String),
+    ),
+  );
+  expect(screen.getByLabelText('Browser policy for next message')).toHaveValue(
+    '',
+  );
+  await user.type(input, 'Just a chat');
+  await user.click(screen.getByRole('button', { name: 'Send' }));
+  await waitFor(() => expect(daemon.startRun).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(daemon.startRun).mock.calls[1][2]).not.toHaveProperty(
+    'browserSelection',
+  );
+});
+
+it('M46 captures browser selection across asynchronous first-session creation', async () => {
+  const user = userEvent.setup();
+  mockBrowserPolicy();
+  vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+  vi.spyOn(daemon, 'listAgents').mockResolvedValue({
+    agents: [snapshot('alpha', 'Alpha', 1)],
+  });
+  mockProviders();
+  render(<ViewHarness />);
+  const input = await screen.findByPlaceholderText('Message Alpha…');
+  const details = screen.getByText('Browser task').closest('details')!;
+  details.open = true;
+  fireEvent(details, new Event('toggle'));
+  await screen.findByRole('option', { name: /local-quotes/ });
+  await user.selectOptions(
+    screen.getByLabelText('Browser policy for next message'),
+    'local-quotes',
+  );
+  await user.type(input, 'First browser task');
+  await user.click(screen.getByRole('button', { name: 'Send' }));
+  await waitFor(() =>
+    expect(daemon.startRun).toHaveBeenCalledWith(
+      'alpha',
+      expect.any(String),
+      expect.objectContaining({
+        browserSelection: { policyId: 'local-quotes', selectedInputIds: [] },
+      }),
+      expect.any(String),
+    ),
+  );
+  expect(daemon.createSession).toHaveBeenCalledTimes(1);
+});
+
+it('M46 keeps active browser scope Stop CAS and artifacts when a newer ordinary message is queued', async () => {
+  const user = userEvent.setup();
+  const policy = mockBrowserPolicy();
+  const active = runFixture('browser-active', {
+    sessionId: 'room-7',
+    status: 'running',
+    createdAtMs: 100,
+    startedAtMs: 100,
+    input: {
+      text: 'Browser comparison in progress',
+      attachmentIds: [],
+      skill: null,
+    },
+  });
+  const queued = runFixture('plain-follow-up', {
+    sessionId: 'room-7',
+    status: 'queued',
+    createdAtMs: 200,
+    input: {
+      text: 'Queued ordinary follow-up',
+      attachmentIds: [],
+      skill: null,
+    },
+  });
+  const currentScope: BrowserScope = {
+    id: 'browser-scope-active',
+    agentId: 'agent-main',
+    runId: active.id,
+    sessionId: 'room-7',
+    version: 7,
+    enabled: true,
+    state: 'active',
+    policyId: policy.id,
+    origin: policy.origin,
+    policyDigest: policy.policyDigest,
+    installationId: policy.installationId,
+    installationDigest: policy.installationDigest,
+    selectedInputIds: [],
+    expiresAtMs: Date.now() + 60000,
+    actionsUsed: 3,
+    requestsUsed: 2,
+    wireBytesUsed: 1200,
+    physicalLeaseHeld: true,
+    document: null,
+    artifacts: [
+      {
+        id: 'att-11111111-1111-4111-8111-111111111111',
+        kind: 'csv',
+        bytes: 72,
+        sha256: 'c'.repeat(64),
+      },
+    ],
+    toolNames: ['read_file', 'browser_navigate', 'browser_observe'],
+    error: null,
+  };
+  const getScope = vi
+    .mocked(daemon.browserScopes.get)
+    .mockImplementation(async (_agentId, runId) =>
+      runId === active.id ? currentScope : null,
+    );
+  const stopScope = vi.spyOn(daemon.browserScopes, 'stop').mockResolvedValue({
+    ...currentScope,
+    version: 8,
+    state: 'closed',
+    enabled: false,
+    physicalLeaseHeld: false,
+  });
+  const { stream } = await openLiveSession({ kind: 'chat', activeRuns: 1 });
+  act(() =>
+    stream.push(snapshotEvent([snapshotRun(active), snapshotRun(queued)])),
+  );
+  await screen.findByText('Queued ordinary follow-up');
+  await openBrowserPolicyPicker();
+
+  await waitFor(() =>
+    expect(getScope).toHaveBeenCalledWith('agent-main', active.id, {
+      signal: expect.any(AbortSignal),
+    }),
+  );
+  expect(getScope).not.toHaveBeenCalledWith(
+    'agent-main',
+    queued.id,
+    expect.anything(),
+  );
+  const controls = screen.getByRole('region', {
+    name: 'Browser task controls',
+  });
+  expect(
+    within(controls).getByRole('button', {
+      name: 'Download browser-output.csv',
+    }),
+  ).toBeVisible();
+  expect(
+    within(controls).getByText(/Physical browser cleanup is pending/),
+  ).toBeVisible();
+  await user.click(
+    within(controls).getByRole('button', { name: 'Stop browser' }),
+  );
+  await waitFor(() =>
+    expect(stopScope).toHaveBeenCalledExactlyOnceWith('agent-main', active.id, {
+      expectedVersion: 7,
+    }),
+  );
+  expect(
+    within(controls).getByRole('button', {
+      name: 'Download browser-output.csv',
+    }),
+  ).toBeVisible();
+});
+
+it('M46 delayed Home creation sends captured policy A without clearing policy B in another chat', async () => {
+  const user = userEvent.setup();
+  const policyA = mockBrowserPolicy();
+  const policyB = {
+    ...policyA,
+    id: 'other-quotes',
+    policyDigest: 'd'.repeat(64),
+  };
+  vi.mocked(daemon.browserScopes.policies).mockResolvedValue([
+    policyA,
+    policyB,
+  ]);
+  vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+  vi.spyOn(daemon, 'listAgents').mockResolvedValue({
+    agents: [snapshot('alpha', 'Alpha', 1)],
+  });
+  mockProviders();
+  routes.sessions.push(
+    sessionFixture('existing-chat', {
+      agentId: 'alpha',
+      title: 'Existing quotes',
+      origin: 'api',
+      lastActivityAtMs: Date.now(),
+    }),
+  );
+  const creating = deferred<void>();
+  const createSession = vi.mocked(daemon.createSession);
+  const createListed = createSession.getMockImplementation()!;
+  createSession.mockImplementationOnce(async (agentId) => {
+    await creating.promise;
+    return createListed(agentId);
+  });
+  const startRun = vi
+    .mocked(daemon.startRun)
+    .mockImplementation(async (agentId, sessionId, input) =>
+      acceptedRun(agentId, sessionId, input.text),
+    );
+  render(<ViewHarness />);
+  const homeInput = await screen.findByPlaceholderText('Message Alpha…');
+  await user.selectOptions(await openBrowserPolicyPicker(), policyA.id);
+  await user.type(homeInput, 'Original Home browser task');
+  await user.click(screen.getByRole('button', { name: 'Send' }));
+  await waitFor(() => expect(createSession).toHaveBeenCalledTimes(1));
+  expect(startRun).not.toHaveBeenCalled();
+
+  await user.click(
+    await screen.findByRole('button', { name: 'Existing quotes' }),
+  );
+  await waitFor(() => expect(window.location.hash).toBe('#/s/existing-chat'));
+  const existingInput = screen.getByPlaceholderText('Message Alpha…');
+  await waitFor(() => expect(existingInput).toBeEnabled());
+  const otherPicker = await openBrowserPolicyPicker();
+  await user.selectOptions(otherPicker, policyB.id);
+  expect(otherPicker).toHaveValue(policyB.id);
+  await act(async () => creating.resolve());
+
+  await waitFor(() =>
+    expect(startRun).toHaveBeenCalledWith(
+      'alpha',
+      'chat:new-1',
+      expect.objectContaining({
+        text: 'Original Home browser task',
+        browserSelection: { policyId: policyA.id, selectedInputIds: [] },
+      }),
+      expect.any(String),
+    ),
+  );
+  expect(window.location.hash).toBe('#/s/existing-chat');
+  expect(screen.getByLabelText('Browser policy for next message')).toHaveValue(
+    policyB.id,
+  );
+  await user.type(existingInput, 'Use the second selection');
+  await user.click(screen.getByRole('button', { name: 'Send' }));
+  await waitFor(() =>
+    expect(startRun).toHaveBeenCalledWith(
+      'alpha',
+      'existing-chat',
+      expect.objectContaining({
+        text: 'Use the second selection',
+        browserSelection: { policyId: policyB.id, selectedInputIds: [] },
+      }),
+      expect.any(String),
+    ),
+  );
+});
+
+it('M46 failed Home creation consumes browser selection before recovery and resend', async () => {
+  const user = userEvent.setup();
+  const policy = mockBrowserPolicy();
+  vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+  vi.spyOn(daemon, 'listAgents').mockResolvedValue({
+    agents: [snapshot('alpha', 'Alpha', 1)],
+  });
+  mockProviders();
+  const createSession = vi
+    .mocked(daemon.createSession)
+    .mockRejectedValueOnce(new Error('Temporary session creation failure'));
+  const startRun = vi
+    .mocked(daemon.startRun)
+    .mockImplementation(async (agentId, sessionId, input) =>
+      acceptedRun(agentId, sessionId, input.text),
+    );
+  render(<ViewHarness />);
+  const input = await screen.findByPlaceholderText('Message Alpha…');
+  await user.selectOptions(await openBrowserPolicyPicker(), policy.id);
+  await user.type(input, 'Recover this first message');
+  await user.click(screen.getByRole('button', { name: 'Send' }));
+  const restore = await screen.findByRole('button', {
+    name: 'Restore message',
+  });
+  expect(startRun).not.toHaveBeenCalled();
+  await user.click(restore);
+  expect(input).toHaveValue('Recover this first message');
+  await user.click(screen.getByRole('button', { name: 'Send' }));
+
+  await waitFor(() => expect(startRun).toHaveBeenCalledTimes(1));
+  expect(createSession).toHaveBeenCalledTimes(2);
+  const [agentId, sessionId, sentInput] = startRun.mock.calls[0];
+  expect([agentId, sessionId, sentInput.text]).toEqual([
+    'alpha',
+    'chat:new-1',
+    'Recover this first message',
+  ]);
+  expect(sentInput).not.toHaveProperty('browserSelection');
+});
 
 /** What the runs route answers for a message whose run already finished. */
 function acceptedRun(agentId: string, sessionId: string, text: string) {

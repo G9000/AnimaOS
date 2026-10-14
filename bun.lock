@@ -5,6 +5,7 @@
     "": {
       "name": "animaOS-SWARM",
       "dependencies": {
+        "playwright-core": "1.59.1",
         "react": "^19.2.5",
         "react-dom": "^19.2.5",
       },

@@ -5,6 +5,7 @@ import {
   type RunMode,
   type StartRunResult,
   type UploadedAttachment,
+  type BrowserSelection,
 } from '@animaOS-SWARM/sdk';
 
 import { daemon } from '../lib/daemon-api';
@@ -41,6 +42,8 @@ export interface SessionSend {
   mode: RunMode;
   /** The skill a `/skill` message was sent with (spec §8.3). */
   skill?: string;
+  /** One in-memory owner selection; never restored from sessionStorage. */
+  browserSelection?: BrowserSelection;
   /** Telegram errors are scrubbed of bot tokens before they are shown. */
   telegram: boolean;
   /** Native Discord setup errors use static safe UI messages. */
@@ -270,6 +273,14 @@ export class SendQueue {
       ...this.sends,
       {
         ...input,
+        ...(input.browserSelection
+          ? {
+              browserSelection: {
+                policyId: input.browserSelection.policyId,
+                selectedInputIds: [...input.browserSelection.selectedInputIds],
+              },
+            }
+          : {}),
         ...(input.attachmentIds
           ? { attachmentIds: [...input.attachmentIds] }
           : {}),
@@ -394,6 +405,9 @@ export class SendQueue {
             : {}),
           mode: send.mode,
           ...(send.skill ? { skill: send.skill } : {}),
+          ...(send.browserSelection
+            ? { browserSelection: send.browserSelection }
+            : {}),
         },
         send.key,
       );

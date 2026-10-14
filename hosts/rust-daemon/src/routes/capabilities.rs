@@ -66,12 +66,12 @@ pub(super) fn inventory(state: &DaemonState) -> CapabilityInventory {
             ("camera", "Camera observation", "Observe an authorized camera through a bounded perception module."),
             ("voice", "Voice", "Add microphone input and speech with separate access controls."),
             ("smart-home", "Smart home", "Connect devices, inspect their state, and verify authorized actions."),
-            ("browser-control", "Browser control", "Interact with web applications through an isolated browser session."),
             ("document-engine", "Document processing", "Extract and create PDF, Word, and spreadsheet artifacts with format-aware validation."),
             ("coding-agents", "External coding agents", "Connect an external coding worker through a bounded execution adapter."),
         ].into_iter().map(|(id, label, description)| PlannedExtension { id, label, status: "planned", description }).collect(),
         limitations: vec![
             "Registered tools still require agent access and their connection or workspace prerequisites.",
+            "Interactive browser tasks require a verified Windows installation, an exact operator policy and ordinary live-run scope, separate grants and Exec approval. Request interception is not an operating-system egress sandbox.",
             "Storage labels describe configuration, not a successful storage health check.",
             "Saved tasks and memories do not imply automatic resumption of interrupted runs. Uncertain scheduled actions require review.",
             "Background shell processes are managed only while this daemon is running. Shell access is not an operating-system sandbox.",
@@ -83,6 +83,7 @@ pub(super) fn inventory(state: &DaemonState) -> CapabilityInventory {
 
 fn metadata(name: &str) -> (&'static str, Vec<&'static str>) {
     match name {
+        "browser_navigate"|"browser_observe"|"browser_act"|"browser_transfer"=>("browser",vec!["An owner-selected installed policy and live ordinary chat scope, explicit native tool grants and Exec approval. No helper access or restored browser session."]),
         "read_file" | "write_file" | "edit_file" | "multi_edit" | "list_dir" | "glob" | "grep" =>
             ("workspace", vec!["Workspace access and an explicit tool grant."]),
         "todo_read" | "todo_write" =>

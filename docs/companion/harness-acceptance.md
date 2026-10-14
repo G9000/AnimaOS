@@ -292,4 +292,46 @@ The actual browser peer recorded **one initialize / one initialized / one tools/
 
 Live uncertain 503 outcomes fail closed. Immediate restart validates the complete prior/observed snapshot actually persisted: new components remain disabled/pending without launch, grant, adoption or replay, while prior explicit approvals/grants may survive and final removal may already be absent. Remaining durable cleanup intentions stay unavailable; recovery of those intentions remains a limit. This is no unconditional restart-unavailable, rollback or atomic external-filesystem claim.
 
-Scoped package implementation and local acceptance are complete. Exact source, PR and verified merge settlement is recorded in the M45 ledger. Authentication, selected real servers, non-Windows stdio and broader quality/full Hermes parity remain open, including M40's introduction-quality miss. M46 has only a held 297-line private plan against public Hermes `1fd18277267152893a8a24792b79213e7ca3f899`, with no implementation. See the [bundle guide](community-bundles.md), [M45 plan](../superpowers/plans/2026-10-14-companion-community-packages-m45.md) and [parity roadmap](parity-roadmap.md).
+Scoped package implementation and local acceptance are complete. Exact source, PR and verified merge settlement is recorded in the M45 ledger. Authentication, selected real servers, non-Windows stdio and broader quality/full Hermes parity remain open, including M40's introduction-quality miss. See the [bundle guide](community-bundles.md), [M45 plan](../superpowers/plans/2026-10-14-companion-community-packages-m45.md) and [parity roadmap](parity-roadmap.md).
+
+## M46 scoped Windows browser: controlled acceptance passed (2026-10-14)
+
+The native ordinary-tool dispatcher performed real navigation, selected CSV upload,
+form loading/filtering/selection/submission, observation, typed download, scrolling
+and JPEG capture. The independently checked form was exactly
+`{supplier:supplierA,quantity:3,maxDeliveryDays:2}` with one POST. The retained CSV
+was75bytes with SHA-256
+`6ae52000e58f4c8faa1a4e1daf9100186ef053795dd2fccd33be258f5b812b35`,
+including supplierA, quantity3, unit12.50, total37.50 and delivery2. It remained
+readable through existing attachment authority after browser disposal and grant
+revocation. The main run recorded12 succeeded action receipts,12 actions,
+four guarded requests and36,480 wire bytes. Actual provider/model calls were zero.
+
+Four separate tasks checked ordinary Run Stop, refusal of a same-origin redirect,
+a blocked link and a page-initiated native download. The last case requires
+rejection and automatic joined retirement before cleanup; its sink received zero
+requests. A real earlier RED reached that sink despite disabled native downloads,
+so the worker now uses guarded typed downloads plus an owned deny-only HTTP proxy.
+The proxy never forwards HTTP or CONNECT and joins its listener and sockets.
+All five tasks have independent kernel creation-time/PID/image/ancestry witnesses;
+26 controlled processes were observed, none remained, and every private directory
+was removed. A control-plane snapshot reconstruction interrupted unfinished runs
+without restoring browser contexts; this is not a daemon reboot test.
+
+Accepted installation: Node22.12.0, Playwright-core1.59.1 and its already installed
+paired headless shell revision1217 (package metadata147.0.7727.15), executable SHA
+`f7c1ef91a3e287b64509a9733fc8fd43678cf4e2765d67f4d0eceb0e39ecd026`.
+Branded Edge155/Chrome155 are unaccepted. Their download/background-request
+failures remain diagnostic evidence; one manually removed Edge residue does not
+count as automatic cleanup. A faster read-only OS census resolved an initially
+missed short-lived redirect descendant without changing production behavior.
+
+Fresh gates: Rust/core **2,661 tests/11 intentional ignores/40 suites/lint/build**,
+compiled README192operations, SDK **148/three service skips/typecheck/build**,
+web **1,301/114 files/typecheck/build**, worker **42/zero skips**. The real Node-only
+helper separately passed distinct Execute cancellation, dropped startup, descendant
+held pipes, heartbeat stop and joined cleanup. One native batch/final SDK-web
+review/fix wave preceded gates; physical failures produced bounded corrections
+with preserved REDs. Public/account browsing, other hosts/installations, provider
+planning quality and full Hermes parity remain open. See the [M46 plan](../superpowers/plans/2026-10-14-companion-browser-m46.md)
+and [browser guide](browser-work.md); publication and exact source/merge are in the ledger.

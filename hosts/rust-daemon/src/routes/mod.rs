@@ -4,6 +4,9 @@ mod agent_files;
 mod agents;
 mod approvals;
 mod attachments;
+mod browser;
+#[cfg(test)]
+mod browser_tests;
 mod capabilities;
 mod chatgpt;
 mod community_bundles;
@@ -95,6 +98,7 @@ use crate::runtime_model::provider_summaries;
     paths(
         api_health_entry,
         capabilities_entry,
+        browser::get,browser::save,browser::stop,browser::list,browser::policies,
         community_bundles::review,community_bundles::install,community_bundles::list,community_bundles::get,
         community_bundles::update,community_bundles::set_enabled,community_bundles::remove,
         mcp::list, mcp::create, mcp::get, mcp::update, mcp::connect,
@@ -229,6 +233,10 @@ use crate::runtime_model::provider_summaries;
         self::contracts::mcp::UpdateMcpConnectionRequest, self::contracts::mcp::McpVersionRequest,
         self::contracts::mcp::ReviewMcpToolRequest, self::contracts::mcp::McpGrantRequest,
         self::contracts::mcp::McpGrantEnvelope,
+        crate::browser::BrowserSelection,crate::browser::SaveBrowserScope,crate::browser::StopBrowserScope,crate::browser::BrowserScopeEnvelope,crate::browser::BrowserSavedScopeEnvelope,
+        crate::browser::BrowserScopesEnvelope,crate::browser::BrowserPoliciesEnvelope,crate::browser::BrowserScopeView,
+        crate::browser::BrowserScopeState,crate::browser::BrowserPolicyView,crate::browser::BrowserPolicyRouteView,
+        crate::browser::BrowserDocumentView,crate::browser::BrowserArtifactView,crate::browser::BrowserArtifactKindView,crate::browser::BrowserLimitsView,
         crate::community_bundles::ReviewRequest,crate::community_bundles::InstallRequest,crate::community_bundles::UpdateRequest,
         crate::community_bundles::ChangeRequest,crate::community_bundles::RemoveRequest,crate::community_bundles::BundleReview,
         crate::community_bundles::ComponentReview,crate::community_bundles::CompatibilityReport,crate::community_bundles::SettlementView,
@@ -268,6 +276,7 @@ struct ApiDoc;
 
 #[derive(Clone)]
 struct AppState {
+    browser: crate::browser::BrowserService,
     pub(crate) mcp: crate::mcp::McpManager,
     mail: crate::connectors::mail::MailManager,
     pub(super) oauth_apps: crate::connectors::oauth_apps::OAuthAppService,
@@ -715,14 +724,42 @@ fn router_with_services_with_policies_and_integrations(
         guard.mail_manager = Some(mail.clone());
         guard.drive_manager = Some(drive.weak());
     }
-    mail.start();
     let agent_runs = if agent_runs.mcp_manager().is_some() {
         agent_runs
     } else {
         crate::app::coordinator_with_mcp(&state, agent_runs)
     };
     let mcp = agent_runs.mcp_manager().expect("MCP runtime is configured");
+    let browser = {
+        let mut guard = state
+            .try_write()
+            .expect("runtime construction requires an uncontended daemon state");
+        let browser = guard.browser_service.clone().unwrap_or_else(|| {
+            if let Some(setup) = guard.browser_setup.clone() {
+                crate::browser::BrowserService::new_with_factory(
+                    &state,
+                    agent_runs.control_plane_transactions(),
+                    setup.policies,
+                    setup.factory,
+                )
+            } else {
+                crate::browser::BrowserService::new(
+                    &state,
+                    agent_runs.control_plane_transactions(),
+                    crate::browser::InstalledBrowserPolicies::default(),
+                    Arc::new(crate::browser::UnavailableBrowserPort),
+                )
+            }
+        });
+        guard.browser_service = Some(browser.clone());
+        browser
+    };
+    let agent_runs = agent_runs.with_browser(browser.clone());
+    // Background mail installation may acquire the daemon state immediately.
+    // Finish synchronous runtime installation before starting that work.
+    mail.start();
     let app_state = AppState {
+        browser,
         mcp,
         mail,
         oauth_apps,
@@ -791,6 +828,10 @@ fn router_with_services_with_policies_and_integrations(
             axum::routing::post(discord::suppress),
         )
         .route("/api/agents/{agent_id}/mcp-connections", get(mcp::list).post(mcp::create))
+        .route("/api/agents/{agent_id}/runs/{run_id}/browser-scope",get(browser::get).put(browser::save))
+        .route("/api/agents/{agent_id}/runs/{run_id}/browser-scope/stop",axum::routing::post(browser::stop))
+        .route("/api/agents/{agent_id}/browser-scopes",get(browser::list))
+        .route("/api/agents/{agent_id}/browser-policies",get(browser::policies))
         .route("/api/agents/{agent_id}/community-bundles",get(community_bundles::list).post(community_bundles::install))
         .route("/api/agents/{agent_id}/community-bundles/reviews",axum::routing::post(community_bundles::review))
         .route("/api/agents/{agent_id}/community-bundles/{bundle_id}",get(community_bundles::get).patch(community_bundles::set_enabled).delete(community_bundles::remove))

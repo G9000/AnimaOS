@@ -9,6 +9,8 @@ import {
   isTerminalRunStatus,
   type Automation,
   type Session,
+  type BrowserSelection,
+  type UploadedAttachment,
 } from '@animaOS-SWARM/sdk';
 
 import { useSaveToMemory } from '../../hooks/useSaveToMemory';
@@ -31,6 +33,7 @@ import { ghostBtnCls } from '../ui-bits';
 import { useReadAloud } from '../../hooks/useReadAloud';
 import type { AttachmentDraft } from '../../lib/attachments';
 import type { KnownRunAttachments } from '../../lib/run-attachments';
+import { BrowserTaskControls } from './BrowserTaskControls';
 
 export interface SessionComposerState {
   draft: string;
@@ -98,6 +101,11 @@ export interface SessionViewProps {
   /** Opens the automation's editor on the Automations page. */
   onEditAutomation?: (automation: Automation) => void;
   notice?: ReactNode;
+  browserTask?: {
+    selection: BrowserSelection | null;
+    attachments: readonly UploadedAttachment[];
+    onSelection(selection: BrowserSelection | null): void;
+  };
 }
 
 export type SessionFooter =
@@ -283,6 +291,7 @@ export function SessionView({
   automation = null,
   onEditAutomation,
   notice = null,
+  browserTask,
 }: SessionViewProps) {
   // The session record names its agent, so a helper's session saves to that
   // helper even when the agents list does not hold it (then `agent` is the
@@ -401,6 +410,36 @@ export function SessionView({
         <p role="alert" className="px-4 text-sm text-danger">
           {readAloud.error}
         </p>
+      )}
+      {browserTask && (!session || session.kind === 'chat') && (
+        <BrowserTaskControls
+          key={voiceKey}
+          agentId={agent.id}
+          runId={
+            runs
+              .filter((item) =>
+                runs.some(
+                  ({ run }) =>
+                    run.status === 'running' ||
+                    run.status === 'awaiting_approval',
+                )
+                  ? item.run.status === 'running' ||
+                    item.run.status === 'awaiting_approval'
+                  : item.run.status !== 'queued',
+              )
+              .reduce<
+                (typeof runs)[number] | null
+              >((latest, item) => (!latest || item.run.createdAtMs > latest.run.createdAtMs ? item : latest), null)
+              ?.run.id ?? null
+          }
+          disabled={
+            composer.disabled || composer.sending || Boolean(composer.runActive)
+          }
+          offline={composer.offline}
+          attachments={browserTask.attachments}
+          selection={browserTask.selection}
+          onSelection={browserTask.onSelection}
+        />
       )}
       {footer.kind === 'composer' ? (
         <Composer

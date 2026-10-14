@@ -146,6 +146,14 @@ impl AgentRunCoordinator {
             }
         }
         drop(transaction);
+        if let Some(browser) = &self.browser {
+            for id in &plan.signal {
+                browser.retire_run(id).await;
+            }
+            for record in &plan.cancelled {
+                browser.retire_run(&record.id).await;
+            }
+        }
         Ok(plan.run)
     }
 }

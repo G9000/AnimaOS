@@ -4,6 +4,14 @@ pub use agent_files::{
     AgentFileRenderBudget, AgentFileSection, RenderedAgentFiles, RuntimePromptIdentity,
 };
 pub mod agent;
+pub mod browser;
+pub use browser::{
+    decode_observation, decode_operation, decode_scope, operation_digest, scope_digest,
+    validate_observation, validate_operation, validate_scope, BrowserArtifact, BrowserArtifactKind,
+    BrowserClose, BrowserControl, BrowserEffect, BrowserError, BrowserErrorCode, BrowserLimits,
+    BrowserMethod, BrowserNode, BrowserNodeRef, BrowserObservation, BrowserOperation, BrowserPort,
+    BrowserRoute, BrowserScope, BrowserSession,
+};
 pub mod communication;
 pub mod community_bundles;
 pub use communication::{AgentCommunicationRoute, MAX_AGENT_COMMUNICATION_HOPS};

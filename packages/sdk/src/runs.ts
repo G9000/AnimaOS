@@ -1,4 +1,5 @@
 import type { DaemonClient } from './client.js';
+import type { BrowserSelection } from './browser.js';
 
 export type RunStatus =
   | 'queued'
@@ -78,6 +79,8 @@ export interface StartRunInput {
   attachmentIds?: string[];
   skill?: string;
   mode?: RunMode;
+  /** Explicit owner opt-in for a new immediately eligible Chat run; replay never renews it. */
+  browserSelection?: BrowserSelection;
 }
 
 export interface StartRunResult {
