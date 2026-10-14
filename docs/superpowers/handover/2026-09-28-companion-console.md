@@ -1,3 +1,17 @@
+# Handover: coding/delegation acceptance (M0–M47)
+
+## Start here (2026-10-14): M46 merged; M47 plan active
+
+Continue `g9000/companion-coding-acceptance-m47`, cut from exact verified M46 main `0f166fea3e7e33d6b1f79c1d937b73cca61a1e76`. [PR52](https://github.com/G9000/animaOS-SWARM/pull/52) merged source `e43bd63b1aa2f76c6d5b0cb78ac07d7af86865ad` with identical tree `db7d9b8894f57e44cd740b3e39e1a99e662c7c3b`. M46 gates/actual browser/independent cleanup are complete, all owned processes stopped, only unrelated nx.json preserved. The context-only update was sent to “Check Git pull and pending work”; do not edit its separate animaOS repository.
+
+The [M47 lean plan](../plans/2026-10-14-companion-coding-acceptance-m47.md) is delegated with five binding controller rulings. Current ownership/release/evidence/resume is `.superpowers/sdd/2026-10-14-companion-coding-acceptance-m47/progress.md`. First close the existing Windows shell direct-child/detached-reader/caller-drop gap with maintained Job ownership and actual self-cleaning descendant RED/GREEN. In parallel prepare a deliberately buggy offline invoice fixture, independent frozen oracle and native coding/todo/helper/receipt/recovery cases using existing handlers. No new runtime, project or dependency is planned; no SDK/web production change without evidence.
+
+Root alone runs Cargo/Nx/fmt/Git/services/models with `CARGO_INCREMENTAL=0`/jobs1. One native review batch, final affected SDK/web review, one fix wave and fresh gates precede actual acceptance. One bounded real coding task, exactly one observed advisory helper, max_tool_iterations4/max_retries0/max_tokens2048/20s call deadline/180s root deadline; target at most10 total model calls, conservative existing four-helper bound25 including wrap-ups. No second real verification request or pass hunting. Existing helper write inheritance is disclosed; read-only assignment is behavioral, and helper edits/extra helpers fail acceptance. Provider quality and failed outcomes stay separate from scripted wiring evidence.
+
+Standing Codex delegation, dependencies, per-command unsigned commits, reviewed merge-and-continue, isolated testing and context-only updates remain authorized. Preserve nx.json SHA `3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`. Stage explicit owned paths only; never nx.json/anima.yaml/private evidence. No worktree/stash/reset/restore/path checkout, ordinary profiles/accounts/real sends/DB servers/containers/Docker55432/public deployment. The public Hermes comparison remains pinned at `1fd18277267152893a8a24792b79213e7ca3f899`; preserve notices for actual reuse and Anima branding. Public/account browser work, other hosts, selected real MCP auth/servers and M40 introduction quality remain open.
+
+## Historical M46 handover (publication superseded by verified merge above)
+
 # Handover: isolated interactive browser work (M0–M46)
 
 ## Start here (2026-10-14): M46 scoped acceptance complete; publish and verify merge
