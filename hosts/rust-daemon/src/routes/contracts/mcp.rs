@@ -34,6 +34,9 @@ pub(crate) struct McpConnectionResponse {
     pub(crate) agent_id: String,
     pub(crate) label: String,
     pub(crate) endpoint: String,
+    pub(crate) transport: String,
+    #[schema(value_type = Option<McpStdioResponse>, nullable)]
+    pub(crate) stdio: Option<McpStdioResponse>,
     pub(crate) enabled: bool,
     pub(crate) version: u64,
     pub(crate) reviewed_tools: Vec<ReviewedMcpToolResponse>,
@@ -68,7 +71,26 @@ pub(crate) struct McpConnectionsEnvelope {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct CreateMcpConnectionRequest {
     pub(crate) label: String,
-    pub(crate) endpoint: String,
+    #[serde(default, deserialize_with = "non_null")]
+    #[schema(value_type = Option<String>, nullable)]
+    pub(crate) endpoint: Option<String>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub(crate) stdio: Option<McpStdioRequest>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpStdioRequest {
+    pub(crate) executable: String,
+    #[serde(default)]
+    pub(crate) args: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct McpStdioResponse {
+    pub(crate) executable: String,
+    pub(crate) args: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]

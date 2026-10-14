@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 use super::records::*;
 use super::transport::{
     McpCall, McpDiscovery, McpTransportError, McpTransportFactory, McpTransportSession,
-    TransportControl, ValidatedMcpEndpoint,
+    TransportControl, ValidatedMcpEndpoint, ValidatedMcpLaunch,
 };
 use crate::runs::{RunLink, RunStatus};
 use crate::state::DaemonState;
@@ -118,6 +118,7 @@ impl Drop for CancelOnDrop {
 
 enum Mutation {
     Create(CreateMcpConnection),
+    CreateStdio { label: String, spec: McpStdioSpec },
     Update(UpdateMcpConnection),
     Review(ReviewMcpTool),
     Delete(u64),
@@ -275,6 +276,22 @@ impl McpManager {
         self.owned(async move {
             manager
                 .mutate(&agent, None, Mutation::Create(input))
+                .await?
+                .ok_or(McpServiceError::Unavailable)
+        })
+        .await
+    }
+    pub(crate) async fn create_stdio(
+        &self,
+        agent: &str,
+        label: String,
+        spec: McpStdioSpec,
+    ) -> Result<McpConnectionView, McpServiceError> {
+        let manager = self.clone();
+        let agent = agent.to_owned();
+        self.owned(async move {
+            manager
+                .mutate(&agent, None, Mutation::CreateStdio { label, spec })
                 .await?
                 .ok_or(McpServiceError::Unavailable)
         })
@@ -483,6 +500,27 @@ impl McpManager {
                         agent_id: agent.into(),
                         label: normalized_label(&input.label)?,
                         endpoint: normalized_endpoint(&input.endpoint)?,
+                        stdio: None,
+                        enabled: false,
+                        version: 1,
+                        reviewed_tools: Vec::new(),
+                    };
+                    let id = row.id.clone();
+                    next.connections.insert(id.clone(), row);
+                    Some(id)
+                }
+                Mutation::CreateStdio { label, spec } => {
+                    if next.connections.len() >= MAX_CONNECTIONS {
+                        return Err(McpServiceError::Busy);
+                    }
+                    spec.validate()
+                        .map_err(|_| McpServiceError::InvalidRequest)?;
+                    let row = McpConnectionRecord {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        agent_id: agent.into(),
+                        label: normalized_label(&label)?,
+                        endpoint: String::new(),
+                        stdio: Some(spec),
                         enabled: false,
                         version: 1,
                         reviewed_tools: Vec::new(),
@@ -520,6 +558,9 @@ impl McpManager {
                                 row.label = normalized_label(&label)?;
                             }
                             if let Some(endpoint) = input.endpoint {
+                                if row.stdio.is_some() {
+                                    return Err(McpServiceError::InvalidRequest);
+                                }
                                 row.endpoint = normalized_endpoint(&endpoint)?;
                             }
                             if let Some(enabled) = input.enabled {
@@ -798,7 +839,15 @@ impl McpManager {
                 .inner
                 .factory
                 .connect(
-                    ValidatedMcpEndpoint(record.endpoint.clone()),
+                    match record.stdio.clone() {
+                        Some(spec) => ValidatedMcpLaunch::Stdio {
+                            spec,
+                            connection_id: record.id.clone(),
+                        },
+                        None => {
+                            ValidatedMcpLaunch::Http(ValidatedMcpEndpoint(record.endpoint.clone()))
+                        }
+                    },
                     control.clone(),
                 )
                 .await

@@ -68,6 +68,7 @@ export type {
   McpReadOptions,
   McpReviewInput,
   McpStaticError,
+  McpStdioSpec,
   McpToolDescriptor,
   McpUpdateInput,
   McpVersionInput,

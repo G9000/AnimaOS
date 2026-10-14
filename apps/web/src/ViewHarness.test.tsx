@@ -2702,6 +2702,8 @@ function mcpReviewFixture(agentId: string): McpConnection {
     id: 'mcp-1',
     agentId,
     label: 'Synthetic external tools',
+    transport: 'streamableHttp',
+    stdio: null,
     endpoint: 'http://127.0.0.1:8089/mcp',
     enabled: true,
     version: 3,

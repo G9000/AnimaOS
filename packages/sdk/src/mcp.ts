@@ -25,11 +25,20 @@ export interface McpStaticError {
   message: string;
 }
 
+/** Immutable local-process launch. No shell, environment or installation. */
+export interface McpStdioSpec {
+  executable: string;
+  args: string[];
+}
+
 /** Owner-visible metadata and runtime status for one saved MCP connection. */
 export interface McpConnection {
   id: string;
   agentId: string;
   label: string;
+  transport: 'streamableHttp' | 'stdio';
+  stdio: McpStdioSpec | null;
+  /** Empty for a stdio connection. */
   endpoint: string;
   enabled: boolean;
   version: number;
@@ -42,14 +51,14 @@ export interface McpConnection {
   error: McpStaticError | null;
 }
 
-export interface McpCreateInput {
-  label: string;
-  endpoint: string;
-}
+export type McpCreateInput =
+  | { label: string; endpoint: string; stdio?: never }
+  | { label: string; stdio: McpStdioSpec; endpoint?: never };
 
 export interface McpUpdateInput {
   expectedVersion: number;
   label?: string;
+  /** HTTP only. Local-process launch configuration cannot be edited. */
   endpoint?: string;
   enabled?: boolean;
 }

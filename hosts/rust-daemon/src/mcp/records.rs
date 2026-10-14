@@ -7,6 +7,73 @@ use serde_json::Value;
 
 pub(crate) const MAX_CONNECTIONS: usize = 4;
 pub(crate) const MAX_REVIEWED_TOOLS: usize = 32;
+pub(crate) const MAX_STDIO_EXECUTABLE_BYTES: usize = 2_048;
+pub(crate) const MAX_STDIO_ARGS: usize = 32;
+pub(crate) const MAX_STDIO_ARG_BYTES: usize = 2_048;
+pub(crate) const MAX_STDIO_CONFIG_BYTES: usize = 16 * 1_024;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpStdioSpec {
+    pub(crate) executable: String,
+    #[serde(default)]
+    pub(crate) args: Vec<String>,
+}
+
+impl McpStdioSpec {
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        if self.executable.is_empty()
+            || self.executable.len() > MAX_STDIO_EXECUTABLE_BYTES
+            || self.args.len() > MAX_STDIO_ARGS
+            || self.executable.chars().any(char::is_control)
+            || self
+                .args
+                .iter()
+                .any(|arg| arg.len() > MAX_STDIO_ARG_BYTES || arg.chars().any(char::is_control))
+            || self.args.iter().map(String::len).sum::<usize>() + self.executable.len()
+                > MAX_STDIO_CONFIG_BYTES
+        {
+            return Err("Invalid MCP stdio launch".into());
+        }
+        let executable = std::path::Path::new(&self.executable);
+        if !executable.is_absolute() {
+            return Err("MCP stdio executable must be an absolute path".into());
+        }
+        let name = executable
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "Invalid MCP stdio executable".to_string())?
+            .to_ascii_lowercase();
+        let stem = name.strip_suffix(".exe").unwrap_or(&name);
+        if matches!(
+            stem,
+            "cmd"
+                | "powershell"
+                | "pwsh"
+                | "bash"
+                | "sh"
+                | "zsh"
+                | "fish"
+                | "wsl"
+                | "npm"
+                | "npx"
+                | "pnpm"
+                | "yarn"
+                | "pip"
+                | "pipx"
+                | "uv"
+                | "uvx"
+                | "bun"
+        ) {
+            return Err("Shell and package-manager launchers are not accepted".into());
+        }
+        #[cfg(windows)]
+        if !name.ends_with(".exe") {
+            return Err("MCP stdio executable must be a Windows .exe".into());
+        }
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -53,6 +120,8 @@ pub(crate) struct McpConnectionRecord {
     pub(crate) agent_id: String,
     pub(crate) label: String,
     pub(crate) endpoint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) stdio: Option<McpStdioSpec>,
     pub(crate) enabled: bool,
     pub(crate) version: u64,
     pub(crate) reviewed_tools: Vec<ReviewedMcpTool>,
@@ -77,7 +146,11 @@ impl McpRegistry {
                 || !ids.insert(&row.id)
                 || !valid_id(&row.agent_id)
                 || normalized_label(&row.label).as_deref() != Ok(row.label.as_str())
-                || normalized_endpoint(&row.endpoint).as_deref() != Ok(row.endpoint.as_str())
+                || if let Some(stdio) = &row.stdio {
+                    !row.endpoint.is_empty() || stdio.validate().is_err()
+                } else {
+                    normalized_endpoint(&row.endpoint).as_deref() != Ok(row.endpoint.as_str())
+                }
                 || row.version == 0
                 || row.version > 9_007_199_254_740_991
                 || row.reviewed_tools.len() > MAX_REVIEWED_TOOLS

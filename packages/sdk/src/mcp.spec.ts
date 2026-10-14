@@ -8,6 +8,8 @@ function connection(overrides: Partial<McpConnection> = {}): McpConnection {
     id: 'connection/1',
     agentId: 'agent/a',
     label: 'Synthetic server',
+    transport: 'streamableHttp',
+    stdio: null,
     endpoint: 'https://example.test/mcp',
     enabled: false,
     version: 1,
@@ -35,6 +37,62 @@ function harness(respond: (url: string, init?: RequestInit) => Response) {
 }
 
 describe('MCP owner client', () => {
+  it('M44 preserves exact HTTP create and sends only the immutable stdio launch body with empty response endpoint', async () => {
+    const stdio = {
+      executable: 'C:\\synthetic\\mcp-server.exe',
+      args: ['--mode', 'one argument with spaces', '"literal quotes"'],
+    };
+    const local = connection({ transport: 'stdio', stdio, endpoint: '' });
+    const { mcp, requests } = harness((_url, init) => {
+      const body = init?.body ? JSON.parse(init.body as string) : {};
+      return Response.json({ connection: body.stdio ? local : connection() });
+    });
+    const httpInput = { label: 'HTTP', endpoint: 'https://example.test/mcp' };
+    expect(await mcp.create('agent/a', httpInput)).toMatchObject({
+      transport: 'streamableHttp',
+      stdio: null,
+    });
+    expect(await mcp.create('agent/a', { label: 'Local', stdio })).toEqual(
+      local,
+    );
+    expect(JSON.parse(requests[0].init!.body as string)).toEqual(httpInput);
+    expect(JSON.parse(requests[1].init!.body as string)).toEqual({
+      label: 'Local',
+      stdio,
+    });
+    expect(requests).toHaveLength(2);
+    expect(requests.map(({ init }) => init?.method)).toEqual(['POST', 'POST']);
+  });
+
+  it('M44 uses label and enable patches for stdio without sending launch fields or starting a process', async () => {
+    const value = connection({
+      transport: 'stdio',
+      stdio: { executable: '/synthetic/mcp-server', args: [] },
+      endpoint: '',
+      version: 3,
+    });
+    const { mcp, requests } = harness(() =>
+      Response.json({ connection: value }),
+    );
+    expect(await mcp.get('agent/a', 'connection/1')).toEqual(value);
+    expect(
+      await mcp.update('agent/a', 'connection/1', {
+        expectedVersion: 2,
+        label: 'Renamed',
+        enabled: true,
+      }),
+    ).toEqual(value);
+    expect(JSON.parse(requests[1].init!.body as string)).toEqual({
+      expectedVersion: 2,
+      label: 'Renamed',
+      enabled: true,
+    });
+    expect(requests.map(({ url }) => url)).toEqual([
+      '/api/agents/agent%2Fa/mcp-connections/connection%2F1',
+      '/api/agents/agent%2Fa/mcp-connections/connection%2F1',
+    ]);
+  });
+
   it('uses encoded paths, exact bodies, envelopes, and canonical grant projection', async () => {
     const current = connection({
       version: 3,

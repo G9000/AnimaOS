@@ -10,8 +10,8 @@ use super::http::{json_response, read_limited_body};
 use super::jobs::{authorize, no_store};
 use super::{parse_json_body, ApiError, AppState};
 use crate::mcp::{
-    CreateMcpConnection, McpConnectionView, McpGrantInput, McpServiceError, ReviewMcpTool,
-    UpdateMcpConnection,
+    CreateMcpConnection, McpConnectionView, McpGrantInput, McpServiceError, McpStdioSpec,
+    ReviewMcpTool, UpdateMcpConnection,
 };
 use anima_core::external_tools::ExternalToolDescriptor;
 
@@ -65,6 +65,15 @@ fn connection_response(view: McpConnectionView) -> McpConnectionResponse {
         agent_id: view.record.agent_id,
         label: view.record.label,
         endpoint: view.record.endpoint,
+        transport: if view.record.stdio.is_some() {
+            "stdio".into()
+        } else {
+            "streamableHttp".into()
+        },
+        stdio: view.record.stdio.map(|spec| McpStdioResponse {
+            executable: spec.executable,
+            args: spec.args,
+        }),
         enabled: view.record.enabled,
         version: view.record.version,
         reviewed_tools: view
@@ -149,19 +158,35 @@ pub(super) async fn create(
         Ok(input) => input,
         Err(response) => return response,
     };
-    one(
-        StatusCode::CREATED,
-        state
-            .mcp
-            .create(
-                &agent_id,
-                CreateMcpConnection {
-                    label: input.label,
-                    endpoint: input.endpoint,
-                },
-            )
-            .await,
-    )
+    let result = match (input.endpoint, input.stdio) {
+        (Some(endpoint), None) => {
+            state
+                .mcp
+                .create(
+                    &agent_id,
+                    CreateMcpConnection {
+                        label: input.label,
+                        endpoint,
+                    },
+                )
+                .await
+        }
+        (None, Some(spec)) => {
+            state
+                .mcp
+                .create_stdio(
+                    &agent_id,
+                    input.label,
+                    McpStdioSpec {
+                        executable: spec.executable,
+                        args: spec.args,
+                    },
+                )
+                .await
+        }
+        _ => Err(McpServiceError::InvalidRequest),
+    };
+    one(StatusCode::CREATED, result)
 }
 
 #[utoipa::path(get, path = "/api/agents/{agent_id}/mcp-connections/{connection_id}", tag = "mcp",

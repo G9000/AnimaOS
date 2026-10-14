@@ -26,6 +26,7 @@ fn candidate() -> anima_core::ExternalToolDescriptor {
 #[derive(Default)]
 struct FakeFactory {
     connects: AtomicUsize,
+    stdio_launches: StdMutex<Vec<(McpStdioSpec, String)>>,
     hold_calls: AtomicBool,
     sessions: StdMutex<Vec<Arc<FakeSession>>>,
 }
@@ -60,10 +61,20 @@ impl FakeSession {
 impl McpTransportFactory for FakeFactory {
     fn connect(
         &self,
-        _endpoint: ValidatedMcpEndpoint,
+        launch: ValidatedMcpLaunch,
         _control: TransportControl,
     ) -> BoxFuture<'static, Result<Arc<dyn McpTransportSession>, McpTransportError>> {
         self.connects.fetch_add(1, Ordering::SeqCst);
+        if let ValidatedMcpLaunch::Stdio {
+            spec,
+            connection_id,
+        } = launch
+        {
+            self.stdio_launches
+                .lock()
+                .unwrap()
+                .push((spec, connection_id));
+        }
         let session = Arc::new(FakeSession::new(self.hold_calls.load(Ordering::SeqCst)));
         self.sessions.lock().unwrap().push(session.clone());
         Box::pin(async move { Ok(session as Arc<dyn McpTransportSession>) })
@@ -1179,6 +1190,7 @@ fn reviewed_records_round_trip_validate_and_restore_only_known_ordinary_owners()
         agent_id: "owner".into(),
         label: "Own".into(),
         endpoint: "https://example.com/mcp".into(),
+        stdio: None,
         enabled: true,
         version: 3,
         reviewed_tools: vec![ReviewedMcpTool {
@@ -1187,6 +1199,10 @@ fn reviewed_records_round_trip_validate_and_restore_only_known_ordinary_owners()
         }],
     };
     let encoded = serde_json::to_value(&row).unwrap();
+    assert!(
+        encoded.get("stdio").is_none(),
+        "legacy HTTP rows keep their serialized shape"
+    );
     assert!(encoded["reviewedTools"][0]["descriptor"].is_object());
     let decoded: McpConnectionRecord = serde_json::from_value(encoded).unwrap();
     assert_eq!(row, decoded);
@@ -1309,6 +1325,117 @@ async fn configuration_discovery_review_are_separate_from_grant_and_call() {
         .known_descriptor(&fixture.agent, &view.record.reviewed_tools[0].alias)
         .is_some());
     fixture.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn m44_stdio_save_list_restore_and_disabled_connect_never_start_transport() {
+    let fixture = Fixture::new().await;
+    let spec = McpStdioSpec {
+        executable: std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+        args: Vec::new(),
+    };
+    let created = fixture
+        .manager
+        .create_stdio(&fixture.agent, "Synthetic stdio".into(), spec.clone())
+        .await
+        .unwrap();
+    assert_eq!(created.record.endpoint, "");
+    assert_eq!(created.record.stdio, Some(spec.clone()));
+    assert_eq!(created.state, McpConnectionState::Disconnected);
+    assert!(!created.record.enabled);
+    assert_eq!(fixture.manager.list(&fixture.agent).await.unwrap().len(), 1);
+    assert_eq!(fixture.factory.connects.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        fixture
+            .manager
+            .connect(&fixture.agent, &created.record.id, created.record.version)
+            .await
+            .unwrap_err(),
+        McpServiceError::Conflict,
+        "a disabled stdio save must not launch its executable"
+    );
+    assert_eq!(fixture.factory.connects.load(Ordering::SeqCst), 0);
+
+    let snapshot = fixture.persisted().await;
+    let mut restored = DaemonState::new();
+    restored.restore_control_plane_snapshot(snapshot).unwrap();
+    let row = &restored.mcp_registry.connections[&created.record.id];
+    assert_eq!(row.stdio, Some(spec.clone()));
+    assert!(!row.enabled);
+    assert_eq!(restored.mcp_publication.read().unwrap().live.len(), 0);
+    assert_eq!(fixture.factory.connects.load(Ordering::SeqCst), 0);
+
+    let enabled = fixture
+        .manager
+        .update(
+            &fixture.agent,
+            &created.record.id,
+            UpdateMcpConnection {
+                expected_version: 1,
+                label: None,
+                endpoint: None,
+                enabled: Some(true),
+            },
+        )
+        .await
+        .unwrap();
+    let connected = fixture
+        .manager
+        .connect(&fixture.agent, &created.record.id, enabled.record.version)
+        .await
+        .unwrap();
+    assert_eq!(connected.record.stdio, Some(spec.clone()));
+    assert_eq!(fixture.factory.connects.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        *fixture.factory.stdio_launches.lock().unwrap(),
+        vec![(spec, created.record.id)]
+    );
+    fixture.manager.shutdown().await;
+}
+
+#[test]
+fn m44_stdio_spec_enforces_argument_bounds_and_rejects_known_launchers() {
+    let executable = std::env::current_exe()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let valid = McpStdioSpec {
+        executable: executable.clone(),
+        args: vec!["x".into(); MAX_STDIO_ARGS],
+    };
+    assert!(valid.validate().is_ok());
+
+    let too_many = McpStdioSpec {
+        args: vec![String::new(); MAX_STDIO_ARGS + 1],
+        ..valid.clone()
+    };
+    assert!(too_many.validate().is_err());
+
+    let oversized_arg = McpStdioSpec {
+        args: vec!["x".repeat(MAX_STDIO_ARG_BYTES + 1)],
+        ..valid.clone()
+    };
+    assert!(oversized_arg.validate().is_err());
+
+    let oversized_total = McpStdioSpec {
+        args: vec!["x".repeat(MAX_STDIO_ARG_BYTES); MAX_STDIO_ARGS],
+        ..valid.clone()
+    };
+    assert!(oversized_total.validate().is_err());
+
+    let launcher = std::path::Path::new(&executable).with_file_name(if cfg!(windows) {
+        "cmd.exe"
+    } else {
+        "sh"
+    });
+    let known_launcher = McpStdioSpec {
+        executable: launcher.to_string_lossy().into_owned(),
+        args: Vec::new(),
+    };
+    assert!(known_launcher.validate().is_err());
 }
 
 #[tokio::test]

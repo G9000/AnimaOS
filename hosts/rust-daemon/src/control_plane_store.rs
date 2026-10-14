@@ -23,14 +23,17 @@ use crate::schedules::ScheduledPromptRecord;
 /// `once` triggers, and the fire log (M6); version 10 adds the owner's pricing
 /// overrides (M8); version 11 adds attachment inputs on steers (M9), version
 /// 14 adds bounded learning advice and separate opt-in policies (M38), and
-/// 15 adds durable reviewed skill handoff lineage (M39);16 adds selected
-/// canonical memory references (M40); 17 adds reviewed MCP connection
-/// metadata (M42). Runtime transport sessions are never persisted. Older
+/// 15 adds durable reviewed skill handoff lineage (M39); 16 adds selected
+/// canonical memory references (M40); 17 adds reviewed HTTP MCP connection
+/// metadata (M42); 18 adds optional owned stdio MCP launch specifications
+/// (M44). Runtime transport sessions/processes are never persisted. Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 17;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 18;
 pub(crate) const MEMORY_VIEWS_STORE_VERSION: u32 = 16;
 pub(crate) const PRE_MCP_BACKUP_SUFFIX: &str = ".pre-mcp.bak";
+pub(crate) const MCP_STORE_VERSION: u32 = 17;
+pub(crate) const PRE_MCP_STDIO_BACKUP_SUFFIX: &str = ".pre-mcp-stdio.bak";
 pub(crate) const LEARNING_ADOPTION_STORE_VERSION: u32 = 15;
 pub(crate) const PRE_MEMORY_VIEWS_BACKUP_SUFFIX: &str = ".pre-memory-views.bak";
 pub(crate) const LEARNING_STORE_VERSION: u32 = 14;
@@ -402,8 +405,10 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
             PRE_LEARNING_ADOPTION_BACKUP_SUFFIX
         } else if loaded_version < MEMORY_VIEWS_STORE_VERSION {
             PRE_MEMORY_VIEWS_BACKUP_SUFFIX
-        } else {
+        } else if loaded_version < MCP_STORE_VERSION {
             PRE_MCP_BACKUP_SUFFIX
+        } else {
+            PRE_MCP_STDIO_BACKUP_SUFFIX
         });
         path.with_file_name(name)
     }
@@ -916,7 +921,7 @@ mod tests {
 
     #[test]
     fn the_version_constants() {
-        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 17);
+        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 18);
         assert_eq!(super::USAGE_STORE_VERSION, 10);
         assert_eq!(super::PRE_ATTACHMENTS_BACKUP_SUFFIX, ".pre-attachments.bak");
         assert_eq!(super::postgres_backup_key(10), "control_plane.backup.10");
@@ -1225,7 +1230,7 @@ mod discord_upgrade_tests {
         assert!(loaded.discord_connectors.is_empty());
         assert!(loaded.discord_inbound.is_empty());
         assert!(loaded.discord_outbound.is_empty());
-        assert_eq!(CONTROL_PLANE_STORE_VERSION, 17);
+        assert_eq!(CONTROL_PLANE_STORE_VERSION, 18);
         write_pre_upgrade_backup(&config, 11).await.unwrap();
         assert_eq!(
             std::fs::read_to_string(pre_discord_backup_path(&path)).unwrap(),
@@ -1293,6 +1298,42 @@ mod learning_snapshot_tests {
     }
 
     #[tokio::test]
+    async fn m44_version_seventeen_gets_an_independent_exact_stdio_backup() {
+        let path = std::env::temp_dir().join(format!(
+            "anima-mcp-stdio-upgrade-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let original = r#"{"version":17,"agents":[],"swarms":[],"mcpConnections":[{"id":"00000000-0000-4000-8000-000000000017","agentId":"owner","label":"Existing HTTP","endpoint":"https://example.com/mcp","enabled":false,"version":1,"reviewedTools":[]}]}"#;
+        std::fs::write(&path, original).unwrap();
+        let config = ControlPlaneStoreConfig::Json(path.clone());
+        let loaded = load_control_plane_snapshot(&config).await.unwrap().unwrap();
+        assert_eq!(loaded.mcp_connections.len(), 1);
+        assert!(loaded.mcp_connections[0].stdio.is_none());
+        assert_eq!(
+            loaded.mcp_connections[0].endpoint,
+            "https://example.com/mcp"
+        );
+        let prior = pre_upgrade_backup_path(&path, 16);
+        std::fs::write(&prior, "M42 backup remains untouched").unwrap();
+
+        write_pre_upgrade_backup(&config, 17).await.unwrap();
+
+        let backup = pre_upgrade_backup_path(&path, 17);
+        assert_ne!(backup, prior);
+        assert!(backup
+            .to_string_lossy()
+            .ends_with(PRE_MCP_STDIO_BACKUP_SUFFIX));
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
+        assert_eq!(
+            std::fs::read_to_string(&prior).unwrap(),
+            "M42 backup remains untouched"
+        );
+        for file in [backup, prior, path] {
+            std::fs::remove_file(file).unwrap();
+        }
+    }
+
+    #[tokio::test]
     async fn m40_version_fifteen_defaults_empty_and_has_an_independent_exact_backup() {
         let path = std::env::temp_dir().join(format!(
             "anima-memory-views-upgrade-{}.json",
@@ -1345,7 +1386,7 @@ mod learning_snapshot_tests {
             std::fs::read_to_string(&old_backup).unwrap(),
             "older backup"
         );
-        assert_eq!(CONTROL_PLANE_STORE_VERSION, 17);
+        assert_eq!(CONTROL_PLANE_STORE_VERSION, 18);
         std::fs::remove_file(backup).unwrap();
         std::fs::remove_file(old_backup).unwrap();
         std::fs::remove_file(path).unwrap();
