@@ -412,6 +412,28 @@ fn registry_defines_every_registered_tool_schema() {
         ),
         ("drive_search", &[][..], &["query"][..]),
         ("drive_read", &["file_id"][..], &[][..]),
+        ("browser_navigate", &["routeId"][..], &[][..]),
+        ("browser_observe", &["screenshot"][..], &[][..]),
+        (
+            "browser_act",
+            &[
+                "documentId",
+                "documentGeneration",
+                "observationDigest",
+                "action",
+            ][..],
+            &[][..],
+        ),
+        (
+            "browser_transfer",
+            &[
+                "documentId",
+                "documentGeneration",
+                "observationDigest",
+                "action",
+            ][..],
+            &[][..],
+        ),
     ];
 
     assert_eq!(registry.tool_names().len(), expectations.len());

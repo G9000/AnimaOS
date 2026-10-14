@@ -11,6 +11,7 @@ import {
   type RunMode,
   type Session,
   type UploadedAttachment,
+  type BrowserSelection,
 } from '@animaOS-SWARM/sdk';
 
 import { AlertIcon } from './components/icons';
@@ -356,6 +357,13 @@ export function ViewHarness() {
     ? sessionConversation(routeSessionId)
     : HOME_CONVERSATION;
   const activeChatKey = agentId ? chatKey(agentId, conversation) : null;
+  const [browserChoice, setBrowserChoice] = useState<{
+    key: string;
+    selection: BrowserSelection;
+  } | null>(null);
+  useEffect(() => {
+    setBrowserChoice(null);
+  }, [activeChatKey]);
   const [chats, setChats] = useState<Record<string, ChatState>>({});
   const chat = activeChatKey ? chatState(chats, activeChatKey) : EMPTY_CHAT;
   const { draft, failedDrafts, sending, error: workspaceError } = chat;
@@ -833,6 +841,17 @@ export function ViewHarness() {
 
   /** Hands a message to the send queue (spec §4.2): retried with its key,
    *  in order with the session's other messages. */
+  const consumeBrowserChoice = (): BrowserSelection | null => {
+    const captured =
+      browserChoice?.key === activeChatKey ? browserChoice : null;
+    if (!captured) return null;
+    setBrowserChoice((current) => (current === captured ? null : current));
+    return {
+      policyId: captured.selection.policyId,
+      selectedInputIds: [...captured.selection.selectedInputIds],
+    };
+  };
+
   const queueSend = (
     target: Pick<Session, 'agentId' | 'id' | 'kind'>,
     conversation: string,
@@ -841,12 +860,22 @@ export function ViewHarness() {
     mode: RunMode = 'queue',
     skill?: string,
     attachmentInput?: SendAttachments,
+    capturedBrowserSelection?: BrowserSelection | null,
   ) => {
     if (
       !availableAgentIdsRef.current.has(target.agentId) ||
       resetInFlightRef.current !== null
     )
       return;
+    const browserSelection =
+      capturedBrowserSelection !== undefined
+        ? capturedBrowserSelection
+        : target.agentId === agentId &&
+            target.kind === 'chat' &&
+            mode === 'queue' &&
+            (!routeSessionId || target.id === routeSessionId)
+          ? consumeBrowserChoice()
+          : null;
     sends.send({
       key: idempotencyKey,
       agentId: target.agentId,
@@ -858,6 +887,16 @@ export function ViewHarness() {
       ...(attachmentInput ?? {}),
       telegram: target.kind === 'telegram',
       discord: target.kind === 'discord',
+      ...(browserSelection
+        ? {
+            browserSelection: {
+              policyId: browserSelection.policyId,
+              selectedInputIds: browserSelection.selectedInputIds.filter((id) =>
+                attachmentInput?.attachmentIds.includes(id),
+              ),
+            },
+          }
+        : {}),
     });
   };
 
@@ -894,6 +933,8 @@ export function ViewHarness() {
     const homeKey = chatKey(targetId, HOME_CONVERSATION);
     const lifecycleGeneration = agentLifecycleGenerationRef.current;
     if (pendingSendsRef.current.has(homeKey)) return;
+    // Consume before session creation: a later completion owns only this snapshot.
+    const capturedBrowserSelection = consumeBrowserChoice();
     pendingSendsRef.current.add(homeKey);
     updateChat(homeKey, { sending: true, error: null, draft: '' });
     let session: Session;
@@ -942,19 +983,16 @@ export function ViewHarness() {
         lastConversationRef.current = created;
       else navigate(created, { replace: true });
     }
-    if (attachmentInput)
-      queueSend(
-        session,
-        target,
-        text,
-        crypto.randomUUID(),
-        'queue',
-        skill,
-        attachmentInput,
-      );
-    else if (skill)
-      queueSend(session, target, text, crypto.randomUUID(), 'queue', skill);
-    else queueSend(session, target, text, crypto.randomUUID());
+    queueSend(
+      session,
+      target,
+      text,
+      crypto.randomUUID(),
+      'queue',
+      skill,
+      attachmentInput,
+      capturedBrowserSelection,
+    );
   };
 
   const newChat = () => navigate({ kind: 'home' });
@@ -1173,6 +1211,17 @@ export function ViewHarness() {
   const sessionView = (
     <SessionView
       agent={sessionAgent ?? agent}
+      browserTask={{
+        selection:
+          browserChoice?.key === activeChatKey ? browserChoice.selection : null,
+        attachments: attachments.readyAttachments,
+        onSelection: (selection) =>
+          setBrowserChoice(
+            selection && activeChatKey
+              ? { key: activeChatKey, selection }
+              : null,
+          ),
+      }}
       session={viewedSession}
       messages={routeSessionId ? chatMessages : []}
       knownAttachments={sends.knownRunAttachments}

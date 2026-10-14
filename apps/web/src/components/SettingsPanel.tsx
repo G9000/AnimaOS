@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ACCESS_PROFILES,
+  BROWSER_TOOL_ACCESS,
+  isBrowserTool,
   deriveAccessProfile,
   toolNamesForProfile,
   type AccessProfile,
@@ -136,6 +138,7 @@ export function SettingsPanel({
       (tool) =>
         tool !== 'memory_remove' &&
         tool !== 'memory_consolidate' &&
+        !isBrowserTool(tool) &&
         tool !== 'read_conversation_window',
     ),
   );
@@ -154,6 +157,9 @@ export function SettingsPanel({
     derivedAccess === 'custom' ? null : derivedAccess,
   );
   const [accessChanged, setAccessChanged] = useState(false);
+  const [browserGrants, setBrowserGrants] = useState<string[]>(
+    agent.toolNames.filter(isBrowserTool),
+  );
   const [allowMemoryRemove, setAllowMemoryRemove] = useState(hasMemoryRemove);
   const [allowMemoryConsolidate, setAllowMemoryConsolidate] =
     useState(hasMemoryConsolidate);
@@ -184,6 +190,7 @@ export function SettingsPanel({
     setSystem(agent.system ?? '');
     setAccessSelection(derivedAccess === 'custom' ? null : derivedAccess);
     setAccessChanged(false);
+    setBrowserGrants(agent.toolNames.filter(isBrowserTool));
     setAllowMemoryRemove(hasMemoryRemove);
     setAllowMemoryConsolidate(hasMemoryConsolidate);
     setAllowConversationRead(hasConversationRead);
@@ -267,6 +274,10 @@ export function SettingsPanel({
     accessSelection !== derivedAccess;
   const toolsDirty =
     accessDirty ||
+    BROWSER_TOOL_ACCESS.some(
+      ({ name }) =>
+        browserGrants.includes(name) !== agent.toolNames.includes(name),
+    ) ||
     allowMemoryRemove !== hasMemoryRemove ||
     allowMemoryConsolidate !== hasMemoryConsolidate ||
     allowConversationRead !== hasConversationRead;
@@ -293,6 +304,7 @@ export function SettingsPanel({
       patch.tools = selectedTools.filter(
         (tool) =>
           (tool !== 'memory_remove' || allowMemoryRemove) &&
+          !isBrowserTool(tool) &&
           (tool !== 'memory_consolidate' || allowMemoryConsolidate) &&
           (tool !== 'read_conversation_window' || allowConversationRead),
       );
@@ -311,6 +323,11 @@ export function SettingsPanel({
       ) {
         patch.tools.push('read_conversation_window');
       }
+      patch.tools.push(
+        ...BROWSER_TOOL_ACCESS.filter(({ name }) =>
+          browserGrants.includes(name),
+        ).map(({ name }) => name),
+      );
     }
     if (Object.keys(patch).length === 0) return;
     if (await saveSettings(patch)) {
@@ -692,6 +709,7 @@ export function SettingsPanel({
                             setAllowMemoryRemove(false);
                             setAllowMemoryConsolidate(false);
                             setAllowConversationRead(false);
+                            setBrowserGrants([]);
                           }}
                           className="mr-3 h-4 w-4 align-top"
                         />
@@ -712,6 +730,33 @@ export function SettingsPanel({
                       </div>
                     );
                   })}
+                  <div className="rounded-xl border border-line bg-white/[0.015] p-3.5">
+                    <p className="font-medium text-ink">Browser tool access</p>
+                    <p className="mt-1 text-sm text-ink-2">
+                      Each chat task also needs an installed browser policy.
+                      Existing action approval rules still apply.
+                    </p>
+                    {BROWSER_TOOL_ACCESS.map(({ name, label }) => (
+                      <label key={name} className="mt-2 block text-sm text-ink">
+                        <input
+                          type="checkbox"
+                          checked={browserGrants.includes(name)}
+                          onChange={(event) =>
+                            setBrowserGrants((current) =>
+                              event.target.checked
+                                ? [
+                                    ...current.filter((tool) => tool !== name),
+                                    name,
+                                  ]
+                                : current.filter((tool) => tool !== name),
+                            )
+                          }
+                          className="mr-2"
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
                   <div className="rounded-xl border border-line bg-white/[0.015] p-3.5">
                     <div className="flex items-start gap-3">
                       <input

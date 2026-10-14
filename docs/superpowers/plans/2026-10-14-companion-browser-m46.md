@@ -1,6 +1,6 @@
 # M46 isolated interactive browser: implementation plan
 
-Status: plan bound on g9000/companion-browser-m46, cut from verified M45/PR51 main802bb366539ee3533f4f5ec04b8fed38fd3e0497. Implementation/acceptance remains pending.
+Status: scoped implementation and controlled Windows acceptance complete on g9000/companion-browser-m46, cut from verified M45/PR51 main802bb366539ee3533f4f5ec04b8fed38fd3e0497. One native batch, final SDK/web review and combined fix wave are complete; evidence-driven physical corrections followed. Current Rust/core2,661/11intentional ignores/40suites/test/lint/build, SDK148/3service-skips/type/build, web1,301/114files/type/build and42worker tests pass. The exact POST/CSV/JPEG task and four lifecycle/hostile cases pass with26 independently observed controlled processes, five kernel process/image witnesses, zero remaining processes and all private directories removed. Publication/verified merge is recorded in the milestone ledger.
 M45 tested source7afc26961382cf91d381bdb40fb22e7379867727 and merged main have identical trees; current source/authority seams are refreshed before release.
 The five Controller rulings below bind adapter, authority, lifetime, bounds and initial acceptance.
 The original design proposals are retained below; binding refinements supersede them. No PAR-05/Hermes completion claim.
@@ -13,14 +13,14 @@ Reuse existing MCP protocol/process machinery where it fits; create no new engin
 **Tech stack:** existing Rust runtime/approval/journal; candidate Playwright worker.
 Use maintained Playwright-core1.59.1 already in bun.lock, Node>=18 (local22.12), Apache-2.0 and the existing Windows process-wrap10.0.1 ownership. A direct production dependency declaration and exact runtime layout remain root-owned preparation.
 
-## Current evidence and limits
+## Baseline evidence and limits (before M46 implementation)
 
-- `docs/companion/parity-roadmap.md:93` locks interactive PAR-05 after PAR-04.
+- The [PAR-05 roadmap](../../companion/parity-roadmap.md) locks interactive browser work after PAR-04.
 - It requires navigation, accessibility/screenshots, click/type/scroll and selected
   upload/download, task isolation, guarded destinations, cancellation and an oracle.
-- `BrowserPort` currently occurs only as the roadmap's proposed fallback seam.
-  No BrowserPort implementation/type was found in the current source tree.
-- `hosts/rust-daemon/src/tools.rs` registers `web_fetch`/`exa_search`, not browser work.
+- At the M45 baseline, `BrowserPort` occurred only as a proposed fallback seam.
+  M46 now defines the reusable port and data helpers in `packages/core-rust/crates/anima-core/src/browser.rs`.
+- The baseline `hosts/rust-daemon/src/tools.rs` registered `web_fetch`/`exa_search`; M46 adds four separately granted browser tools.
 - `tools/web.rs` remains fetch/search; preserve it rather than call fetch interactive.
 - `ToolExecutionContext::execute_tool` owns configuration checks, gates and journaling.
 - `approvals/policy.rs` has static Read/Write/Exec/Network/Delegate classification.
@@ -305,3 +305,35 @@ These historical proposals are superseded by the five binding controller rulings
 5. **Release and acceptance.** Ruling: Proceed from verified M45 main through actual core/owner/executor RED, frozen native/worker wire, bounded independent implementers, one native batch/final SDK-web review/one fix wave, current gates and a zero-model useful task with an independent exact oracle — deterministic browser dispatch cannot establish provider planning quality or all Hermes browser behavior — cost if wrong: PAR-05 stays partial and no broader release claim. The fixture performs real DOM interaction and one declared local quote submission/download; expected supplierA/quantity3/unit12.50/total37.50/delivery2 and exact CSV bytes are predeclared. Include hostile redirects/popups/instructions, stale nodes/approvals, oversized output, Stop and descendant/pipe cleanup. Use pinned public Hermes task ownership/bounded observation/teardown patterns only; no private profiles or Python-runtime port. Preserve notices for any actual code adaptation and Anima product naming.
 
 No worker runs Cargo/Nx/Git/fmt/models or starts services. Root owns commands and observes actual exits. No pre-flight audit or between-task check-in is added; uncertainties and implementation judgments are recorded as Ruling entries in the M46 ledger. Dependencies are permitted by the user's later instruction; ordinary services/accounts/DBservers/containers/Docker55432/public deployment remain excluded.
+
+## Initial contract refinements (binding)
+
+Core declarations and eight borrowed helper signatures are frozen with11passing focused cases after an actual missing-feature RED. The actual owner route RED compiled and failed404expected200 on a configured live ordinary run; Node's three parser/bootstrap cases failed explicit MissingFeature, not imports or a browser launch. Broader gates, actual engine compatibility and browser/task acceptance remain pending.
+
+- Reusable Node adapter lives at `packages/core-rust/browser-worker/worker.mjs`, tested by the existing core project’s `browser-worker-test` target. Root linked exactly the already-locked Playwright-core1.59.1 runtime dependency; frozen install preserved the lock except that direct declaration. No browser download or model/runtime process started.
+- Metadata selects a generic installed operator `policyId`, never a fixture-only product API or model URL/command. The policy table is immutable startup configuration, not a second registry/journal. Core/host authority and exact workspace/ordinary-run/live controls remain separate from digests.
+- IPC is ABW1+u32BE, total header+payload64KiB and aggregate1MiB both directions, JSON depth8/nodes2048, safe positive IDs with separate incoming/outgoing order. Replies echo only the exact pending request. Bootstrap paths are host-private fixed admission data; finite agent operations accept no paths/selectors/code/options.
+- Type is literal UTF-8 at most4,096bytes; Scroll is nonzero±2,048. Observation128nodes/8KiB role/label text drops whole oversized nodes with honest omitted counts. At most one CSV and one screenshot per observation/four opaque artifacts per session; input/CSV16KiB and screenshot256KiB. Existing attachment storage retains accepted output after context disposal; no new blob store.
+- First useful criteria CSV is `quantity,max_delivery_days\n3,2\n`, with no supplier answer in the input. The actual fixture generates from received selection/quantity and the three-offer table; independently expected output is `supplier,quantity,unit_price,total,delivery_days\nsupplierA,3,12.50,37.50,2\n` and exactly one declared quote POST.
+- Maintained public ARIA snapshot/ref APIs are confirmed in installed1.59.1. Interception uses bounded manual-redirect streaming before fulfillment; automatic route continuation or eagerly buffered fetch cannot establish redirect/body bounds. Application interception is not OS egress isolation. Native owned whole-job/IO proof, not an engineClosed acknowledgement, releases the physical slot.
+
+Exact exits, file ownership and decisions are in `.superpowers/sdd/2026-10-14-companion-browser-m46/progress.md`. One combined review/fix wave resolved seven P2 findings, including three reproduced UI regressions, cumulative fetched-byte accounting, distinct-operation cancellation, grant ABA, output-publication ordering and failed-usage retention. Fresh full gates and controlled browser acceptance pass. Subsequent physical failures led to the binding corrections below. No full PAR-05/Hermes claim.
+
+## Runtime and chat refinements (binding)
+
+- Normal owner messages may explicitly select `browserSelection:{policyId,selectedInputIds}`. Only an immediately eligible new ordinary Chat/Web run receives it. Reserve the real existing run ticket under acceptance serialization and bind scope after acknowledged Running/live registration, before compaction or the first model/tool step. Omission preserves existing queue/steer/connector behavior. Matching message-key replay returns the original run without binding, renewal or restart restoration.
+- Trusted installation is explicit startup-only `ANIMAOS_RS_BROWSER_CONFIG_FILE`, with strict version1 installation program/script paths and SHA witnesses plus immutable policies. Deterministic constructors do not load it. A per-task immutable factory receives scope, policy, installation, expiry, selected bytes and fixed output slots; a shared native runtime owns the physical lease. The same actor checks the explicitly approved document witness before IPC.
+- The console separates browser tool grants in Settings from one-use chat policy/file selection. Selection is omitted from recovered-draft storage. Public output IDs are accepted owned attachment IDs; private worker slot tokens never become download authority. The [operator guide](../../companion/browser-work.md) documents setup and current limits.
+- The real acceptance uses one embedded, joined numeric-loopback fixture and the exact independent31-byte criteria input/75-byte CSV output oracle. Its handler derives prices from actual posted choice/quantity and the offer table, with separate wrong-choice/quantity checks. There is no standalone Node fixture package or external account. Scripted adapter tests and zero-provider deterministic browser calls do not establish autonomous provider planning quality.
+
+## Physical acceptance corrections (binding)
+
+- Windows Node22.12 reports path device0 while the opened file handle reports its volume. Use exact BigInt identities and timestamps, regular/no-symlink/pre-post checks, containment, length and hash; compare every available nonzero device witness. Do not claim an absent path-volume witness was verified.
+- Typed Download resolves the current pinned anchor and exact configured GET route, then uses the same guarded request/stream budget and exclusive output writer as other resources. It never clicks a browser download or accepts a model URL. Actual Chrome saved an uncounted native download outside context routing, so browser events cannot establish accepted artifact authority.
+- Native downloads remain disabled and unexpected download events retire the task. This is insufficient to prevent initiating HTTP: a real page-initiated download reached the denied fixture sink. Release requires an owned deny-only loopback proxy for unrouted browser HTTP, with no forwarding/CONNECT/credentials/bypass, bounded connections/headers/time and joined listener/socket disposal. Maintained routing still fulfills allowed guarded responses; this is not an OS egress or arbitrary-browser safety claim.
+- The exact useful oracle retains one actual POST map `{supplier:supplierA,quantity:3,maxDeliveryDays:2}`, independently recomputes the retained75-byte CSV hash after cleanup, and records actual counters/receipts/model calls. A hostile-download test must reject and automatically retire before cleanup; forced test Stop cannot satisfy its zero-sink assertion.
+- Assertion failures await service retirement and fixture join before propagating panic. Physical witnesses use kernel process identity/image/creation times and actual ancestry. Manually removed diagnostic residue remains separately recorded and does not count as automatic cleanup.
+
+Accepted installation: Node22.12.0, Playwright-core1.59.1 and its already installed paired headless shell revision1217 (package metadata147.0.7727.15), executable hash `f7c1ef91a3e287b64509a9733fc8fd43678cf4e2765d67f4d0eceb0e39ecd026`. Branded Edge/Chrome155 are not accepted by this record. Every deny-proxy attempt is refused and counted; ordinary denial before the first admitted action does not cancel a trusted blank startup, while limits/errors always retire and later refusals retain strict retirement. No hostname exception or forwarding is introduced.
+
+Final real oracle: one exact supplierA/quantity3/maxDeliveryDays2 POST; retained75-byte CSV SHA-256 `6ae52000e58f4c8faa1a4e1daf9100186ef053795dd2fccd33be258f5b812b35`;12 actions/12 succeeded receipts, four guarded requests,36,480 wire bytes, zero model calls, one refused redirect and zero sink requests. Scope Stop, ordinary Run Stop, stale grants and snapshot restore preserve no-replay behavior; snapshot reconstruction is not a real daemon reboot claim. The final32.74-second case passed with automatic hostile retirement and all five private roots removed. A faster read-only Windows census corrected a missed short-lived redirect observation; it resolves the nvm alias to the exact same physical executable and records kernel creation times, not basename-only identity.

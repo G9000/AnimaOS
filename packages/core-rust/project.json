@@ -4,6 +4,21 @@
   "root": "packages/core-rust",
   "projectType": "library",
   "targets": {
+    "browser-worker-test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --test packages/core-rust/browser-worker/worker.test.mjs"
+      },
+      "inputs": [
+        "default",
+        "{projectRoot}/browser-worker/**/*",
+        "{workspaceRoot}/package.json",
+        "{workspaceRoot}/bun.lock"
+      ],
+      "cache": false,
+      "parallelism": false
+    },
     "build": {
       "executor": "nx:run-commands",
       "options": {

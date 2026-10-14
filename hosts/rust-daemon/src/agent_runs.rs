@@ -116,7 +116,7 @@ fn helper_config(parent: &AgentState, name: String) -> AgentConfig {
         // and process tools and `propose_skill` (spec §8.3: helpers cannot
         // propose skills; they keep `load_skill`). The automation tools never reach a helper either
         // (spec §9.3: they would schedule runs of the helper).
-        tools: Some(parent.config.tools.iter().flatten().filter(|tool| !is_coordination_tool(&tool.name) && !crate::tools::is_process_tool(&tool.name) && !tool.name.starts_with("mcp_") && tool.name != "search_conversations" && tool.name != "read_conversation_window" && tool.name != "propose_skill" && !crate::tools::is_automation_tool(&tool.name)).cloned().collect()),
+        tools: Some(parent.config.tools.iter().flatten().filter(|tool| !is_coordination_tool(&tool.name) && !crate::tools::is_process_tool(&tool.name) && !crate::tools::is_browser_tool(&tool.name) && !tool.name.starts_with("mcp_") && tool.name != "search_conversations" && tool.name != "read_conversation_window" && tool.name != "propose_skill" && !crate::tools::is_automation_tool(&tool.name)).cloned().collect()),
         settings: Some(AgentSettings {
             temperature: parent_settings.temperature,
             max_tokens: Some(parent_settings.max_tokens.unwrap_or(4096).min(4096)),
@@ -362,6 +362,7 @@ pub(crate) struct AgentRunCoordinator {
     control_plane_transactions: Arc<Mutex<()>>,
     learning: crate::learning::LearningService,
     mcp: Option<crate::mcp::McpManager>,
+    browser: Option<crate::browser::BrowserService>,
     /// How long a compaction's store read and model call may take.
     compaction_timeout: std::time::Duration,
     /// How long a title call may take before it is treated like a failed
@@ -639,6 +640,7 @@ impl AgentRunCoordinator {
             control_plane_transactions,
             learning,
             mcp: None,
+            browser: None,
             compaction_timeout: std::time::Duration::from_millis(
                 crate::sessions::compaction::COMPACTION_TIMEOUT_MS,
             ),
@@ -694,6 +696,11 @@ impl AgentRunCoordinator {
             self.control_plane_transactions = transactions;
         }
         self.mcp = Some(manager);
+        self
+    }
+
+    pub(crate) fn with_browser(mut self, browser: crate::browser::BrowserService) -> Self {
+        self.browser = Some(browser);
         self
     }
 
@@ -916,6 +923,30 @@ impl AgentRunCoordinator {
             Some(run_id),
         )
         .await
+    }
+    pub(crate) async fn run_accepted_browser(
+        &self,
+        request: AgentRunRequest,
+        run_id: String,
+        ticket: RunTicket,
+        prepared: crate::browser::PreparedBrowserSelection,
+    ) -> Result<AgentRunEnvelope, ApiError> {
+        let coordinator = self.clone();
+        tokio::spawn(async move {
+            coordinator.prevalidate(&request).await?;
+            coordinator
+                .run_locked_inner(
+                    request,
+                    ticket,
+                    |_, _| Ok(()),
+                    None,
+                    Some(run_id),
+                    Some(prepared),
+                )
+                .await
+        })
+        .await
+        .map_err(run_worker_stopped)?
     }
 
     /// `run_accepted` with a source commit and rollback (a Telegram session's
@@ -1251,8 +1282,23 @@ impl AgentRunCoordinator {
         request: AgentRunRequest,
         ticket: RunTicket,
         commit: F,
+        rollback: Option<AgentRunRollback>,
+        accepted: Option<String>,
+    ) -> Result<AgentRunEnvelope, ApiError>
+    where
+        F: FnOnce(&mut DaemonState, &RunOutcome) -> Result<(), ApiError> + Send,
+    {
+        self.run_locked_inner(request, ticket, commit, rollback, accepted, None)
+            .await
+    }
+    async fn run_locked_inner<F>(
+        &self,
+        request: AgentRunRequest,
+        ticket: RunTicket,
+        commit: F,
         mut rollback: Option<AgentRunRollback>,
         accepted: Option<String>,
+        browser_selection: Option<crate::browser::PreparedBrowserSelection>,
     ) -> Result<AgentRunEnvelope, ApiError>
     where
         F: FnOnce(&mut DaemonState, &RunOutcome) -> Result<(), ApiError> + Send,
@@ -1524,6 +1570,51 @@ impl AgentRunCoordinator {
             live_run.publish(live_run.session_event(LiveEventBody::SessionCreated));
         }
         live_run.publish_record(&started);
+        if let Some(prepared) = browser_selection {
+            let bound = match &self.browser {
+                Some(browser) => browser.bind_prepared(&agent_id, &run_id, prepared).await,
+                None => Err(crate::browser::BrowserServiceError::Unavailable),
+            };
+            if bound.is_err() {
+                live_run.control().cancel.cancel();
+                if let Some(browser) = &self.browser {
+                    browser.retire_run(&run_id).await;
+                }
+                let transaction = self.control_plane_transaction().await;
+                let (record, persist) = {
+                    let mut guard = self.state.write().await;
+                    let record = guard
+                        .runs
+                        .get_mut(&run_id)
+                        .ok_or_else(ApiError::not_found)?;
+                    record.finish(
+                        RunStatus::Failed,
+                        Some(RunError::new(
+                            "browser_scope_admission_failed",
+                            "Browser scope admission failed before model execution",
+                        )),
+                        anima_core::primitives::now_millis(),
+                    );
+                    let record = record.clone();
+                    (record, guard.control_plane_persist_request())
+                };
+                let saved = persist.save().await;
+                drop(transaction);
+                live_run.publish_record(&record);
+                in_flight.disarm();
+                return Err(ApiError::service_unavailable(if saved.is_ok() {
+                    "Browser scope admission failed before model execution"
+                } else {
+                    "Browser scope admission failed; persistence outcome is unknown"
+                }));
+            }
+        }
+        // Every subsequent terminal/error/drop path retires an ordinary-run
+        // scope, including scopes assigned while this run awaited approval.
+        let _browser_retirement = self
+            .browser
+            .as_ref()
+            .map(|browser| BrowserRunRetirement(browser.clone(), run_id.clone()));
         // A helper's deadline starts before its compaction, which counts
         // toward it (Task 12 fix round 1).
         let helper_deadline = config_helper_parent(runtime.config()).is_some().then(|| {
@@ -1692,6 +1783,7 @@ impl AgentRunCoordinator {
                 agent_id: agent_id.clone(),
             }))
             .with_mcp(mcp_for_run)
+            .with_browser(self.browser.clone())
             .with_cancel(Some(live_run.control().cancel))
             // Spec §7.3: the gate between the live checks and dispatch.
             .with_approvals(Some(crate::approvals::ApprovalGate::new(
@@ -1929,6 +2021,9 @@ impl AgentRunCoordinator {
         self.announce_stopped_approvals(&orphaned_approvals).await;
         drop(transaction);
         if let Some(finished) = &finished {
+            if let Some(browser) = &self.browser {
+                browser.retire_run(&run_id).await;
+            }
             for event in committed_message_events(finished, &change_set.delta.messages) {
                 live_run.publish(event);
             }
@@ -2062,6 +2157,16 @@ fn validate_run_request(
                 .tools
                 .iter()
                 .flatten()
+                .any(|tool| crate::tools::is_browser_tool(&tool.name))
+            {
+                return Err(ApiError::bad_request_static(
+                    "Browser tools are unavailable to helpers",
+                ));
+            }
+            if target
+                .tools
+                .iter()
+                .flatten()
                 .any(|tool| crate::tools::is_process_tool(&tool.name))
             {
                 return Err(ApiError::bad_request_static(
@@ -2137,6 +2242,19 @@ async fn save_offered_steers(state: &SharedDaemonState, offered: Vec<RunRecord>)
         }
         Err(error) => {
             warn!(run_id = %first.id, error = %error, "could not save the steers a failed run held");
+        }
+    }
+}
+
+struct BrowserRunRetirement(crate::browser::BrowserService, String);
+impl Drop for BrowserRunRetirement {
+    fn drop(&mut self) {
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            let browser = self.0.clone();
+            let run = self.1.clone();
+            runtime.spawn(async move {
+                browser.retire_run(&run).await;
+            });
         }
     }
 }

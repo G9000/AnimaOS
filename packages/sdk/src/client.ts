@@ -13,6 +13,7 @@ import { RunsClient } from './runs.js';
 import { LearningClient } from './learning.js';
 import { McpClient } from './mcp.js';
 import { CommunityBundlesClient } from './community-bundles.js';
+import { BrowserScopesClient } from './browser.js';
 import { ApprovalsClient } from './approvals.js';
 import { SkillsClient } from './skills.js';
 import { AutomationsClient } from './automations.js';
@@ -90,6 +91,7 @@ export class DaemonClient {
   readonly learning: LearningClient;
   readonly mcp: McpClient;
   readonly communityBundles: CommunityBundlesClient;
+  readonly browserScopes: BrowserScopesClient;
   readonly events: AgentEventsClient;
   readonly approvals: ApprovalsClient;
   readonly skills: SkillsClient;
@@ -125,6 +127,7 @@ export class DaemonClient {
     this.learning = new LearningClient(this);
     this.mcp = new McpClient(this);
     this.communityBundles = new CommunityBundlesClient(this);
+    this.browserScopes = new BrowserScopesClient(this);
     this.events = new AgentEventsClient(this);
     this.approvals = new ApprovalsClient(this);
     this.skills = new SkillsClient(this);

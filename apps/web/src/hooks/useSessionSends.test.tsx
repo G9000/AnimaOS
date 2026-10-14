@@ -55,6 +55,48 @@ describe('isRetryableSendError', () => {
 });
 
 describe('useSessionSends', () => {
+  it('carries one explicit browser selection without persisting browser authority for reload', async () => {
+    const gate = deferred<Awaited<ReturnType<typeof daemon.startRun>>>();
+    const startRun = vi.spyOn(daemon, 'startRun').mockReturnValue(gate.promise);
+    const { result, unmount } = renderHook(() =>
+      useSessionSends({ onAccepted: vi.fn(), onFailed: vi.fn() }),
+    );
+    await act(async () =>
+      result.current.send({
+        ...message('browser-key'),
+        browserSelection: {
+          policyId: 'quotes',
+          selectedInputIds: ['att-input'],
+        },
+      }),
+    );
+    expect(startRun).toHaveBeenCalledWith(
+      'agent-main',
+      'chat:1',
+      expect.objectContaining({
+        browserSelection: {
+          policyId: 'quotes',
+          selectedInputIds: ['att-input'],
+        },
+      }),
+      'browser-key',
+    );
+    const saved = JSON.parse(
+      sessionStorage.getItem('animaos.pendingSends') ?? '[]',
+    );
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).not.toHaveProperty('browserSelection');
+    unmount();
+    const onRestore = vi.fn();
+    const restored = renderHook(() =>
+      useSessionSends({ onAccepted: vi.fn(), onFailed: vi.fn(), onRestore }),
+    );
+    expect(onRestore).toHaveBeenCalledTimes(1);
+    expect(onRestore.mock.calls[0][0]).not.toHaveProperty('browserSelection');
+    expect(startRun).toHaveBeenCalledTimes(1);
+    restored.unmount();
+    await act(async () => gate.resolve({ run: runFixture('browser-run') }));
+  });
   it('keeps ordered attachment IDs and safe metadata through retries and manual recovery', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const attachment = {

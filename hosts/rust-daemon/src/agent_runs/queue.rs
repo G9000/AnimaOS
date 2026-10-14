@@ -214,11 +214,15 @@ pub(super) struct SteerLeftovers {
     pub(super) stopped: bool,
 }
 
-type StartFn = Box<dyn FnOnce(String) -> BoxFuture<'static, Result<(), QueuedStartError>> + Send>;
+type StartFn = Box<
+    dyn FnOnce(String, Option<super::RunTicket>) -> BoxFuture<'static, Result<(), QueuedStartError>>
+        + Send,
+>;
 
 /// Starts an accepted run given its id and resolves once the run is over;
 /// `Err` says why it did not run.
 pub(crate) struct QueuedRunStart {
+    reserved_ticket: Option<super::RunTicket>,
     /// The room of a start whose admission (`acquire_accepted_ticket`) can
     /// take the room from its session queue (final fix wave S2-B): the queue
     /// then takes the room's lease before it picks the run, and hands it on.
@@ -234,8 +238,9 @@ impl QueuedRunStart {
         start: impl FnOnce(String) -> BoxFuture<'static, Result<(), QueuedStartError>> + Send + 'static,
     ) -> Self {
         Self {
+            reserved_ticket: None,
             room_id: None,
-            start: Box::new(start),
+            start: Box::new(move |id, _| start(id)),
         }
     }
 }
@@ -473,15 +478,32 @@ impl AgentRunCoordinator {
         start: QueuedRunStart,
     ) -> Result<AcceptedRun, ApiError> {
         let coordinator = self.clone();
-        tokio::spawn(async move { coordinator.accept_run_owned(request, start).await })
+        tokio::spawn(async move { coordinator.accept_run_owned(request, start, None).await })
             .await
             .map_err(|_| ApiError::service_unavailable("Run acceptance worker stopped"))?
+    }
+
+    pub(crate) async fn accept_browser_run(
+        &self,
+        request: AcceptRun,
+        start: QueuedRunStart,
+        prepared: crate::browser::PreparedBrowserSelection,
+    ) -> Result<AcceptedRun, ApiError> {
+        let coordinator = self.clone();
+        tokio::spawn(async move {
+            coordinator
+                .accept_run_owned(request, start, Some(prepared))
+                .await
+        })
+        .await
+        .map_err(|_| ApiError::service_unavailable("Run acceptance worker stopped"))?
     }
 
     async fn accept_run_owned(
         &self,
         request: AcceptRun,
-        start: QueuedRunStart,
+        mut start: QueuedRunStart,
+        browser: Option<crate::browser::PreparedBrowserSelection>,
     ) -> Result<AcceptedRun, ApiError> {
         let transaction = self.control_plane_transaction().await;
         let now_ms = now_millis();
@@ -520,6 +542,51 @@ impl AgentRunCoordinator {
                     .map(|workspace| workspace.root_path.clone()),
             )
         };
+        if let Some(prepared) = &browser {
+            let valid = {
+                let guard = self.state.read().await;
+                request.source == RunSource::Web
+                    && request.source_ref.is_none()
+                    && request.mode == SessionRunMode::Queue
+                    && self.browser.as_ref().is_some_and(|service| {
+                        service.prepared_current(
+                            &guard,
+                            &request.agent_id,
+                            &request.session_id,
+                            prepared,
+                        )
+                    })
+                    && !guard
+                        .runs
+                        .snapshot_records(&guard.agents.keys().cloned().collect())
+                        .iter()
+                        .any(|r| {
+                            r.agent_id == request.agent_id
+                                && r.session_id == request.session_id
+                                && !r.status.is_terminal()
+                        })
+            };
+            let queued = self
+                .session_queues
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .contains_key(&(request.agent_id.clone(), request.session_id.clone()));
+            if !valid || queued {
+                return Err(ApiError::conflict(
+                    "Browser selection requires an immediately available ordinary chat run",
+                ));
+            }
+            let room = start.room_id.as_deref().ok_or_else(|| {
+                ApiError::conflict("Browser selection requires an ordinary chat start")
+            })?;
+            start.reserved_ticket = Some(self.try_ticket(&request.agent_id, room).await.map_err(
+                |_| {
+                    ApiError::conflict(
+                        "Browser selection requires an immediately available ordinary chat run",
+                    )
+                },
+            )?);
+        }
         super::attachments::validate_attachment_ids(&request.attachment_ids)?;
         if request.text.trim().is_empty() && request.attachment_ids.is_empty() {
             return Err(ApiError::bad_request_static(
@@ -1005,10 +1072,30 @@ impl AgentRunCoordinator {
         _skill: Option<String>,
         _attachment_ids: Vec<String>,
     ) -> QueuedRunStart {
+        self.web_start_internal(agent_id, room_id, idempotency_key, None)
+    }
+    pub(crate) fn web_start_with_browser(
+        &self,
+        agent_id: String,
+        room_id: String,
+        idempotency_key: String,
+        prepared: crate::browser::PreparedBrowserSelection,
+    ) -> QueuedRunStart {
+        self.web_start_internal(agent_id, room_id, idempotency_key, Some(prepared))
+    }
+    fn web_start_internal(
+        &self,
+        agent_id: String,
+        room_id: String,
+        idempotency_key: String,
+        browser: Option<crate::browser::PreparedBrowserSelection>,
+    ) -> QueuedRunStart {
         let coordinator = self.clone();
         let room = room_id.clone();
         let start: StartFn = Box::new(
-            move |run_id: String| -> BoxFuture<'static, Result<(), QueuedStartError>> {
+            move |run_id: String,
+                  ticket: Option<super::RunTicket>|
+                  -> BoxFuture<'static, Result<(), QueuedStartError>> {
                 Box::pin(async move {
                     let metadata = BTreeMap::from([(
                         CLIENT_REQUEST_ID_METADATA_KEY.to_string(),
@@ -1032,23 +1119,37 @@ impl AgentRunCoordinator {
                         source_ref: None,
                         parent: None,
                     };
-                    coordinator
-                        .run_accepted(request, run_id)
-                        .await
-                        .map(|_| ())
-                        .map_err(|error| {
-                            if super::shutdown::is_shutting_down(&error) {
-                                QueuedStartError::ShuttingDown
-                            } else {
-                                QueuedStartError::Failed(error.message().to_string())
-                            }
-                        })
+                    let result = match browser {
+                        Some(prepared) => {
+                            coordinator
+                                .run_accepted_browser(
+                                    request,
+                                    run_id,
+                                    ticket.ok_or_else(|| {
+                                        QueuedStartError::Failed(
+                                            "Browser admission ticket unavailable".into(),
+                                        )
+                                    })?,
+                                    prepared,
+                                )
+                                .await
+                        }
+                        None => coordinator.run_accepted(request, run_id).await,
+                    };
+                    result.map(|_| ()).map_err(|error| {
+                        if super::shutdown::is_shutting_down(&error) {
+                            QueuedStartError::ShuttingDown
+                        } else {
+                            QueuedStartError::Failed(error.message().to_string())
+                        }
+                    })
                 })
             },
         );
         // `run_accepted` reaches `acquire_accepted_ticket` with no lock of its
         // own, so it can take the room its session queue holds for it.
         QueuedRunStart {
+            reserved_ticket: None,
             room_id: Some(room),
             start,
         }
@@ -1112,7 +1213,13 @@ impl AgentRunCoordinator {
                     return;
                 };
                 match queue.front() {
-                    Some(front) => front.start.room_id.clone(),
+                    Some(front) => {
+                        if front.start.reserved_ticket.is_some() {
+                            None
+                        } else {
+                            front.start.room_id.clone()
+                        }
+                    }
                     None => {
                         queues.remove(&key);
                         return;
@@ -1136,7 +1243,7 @@ impl AgentRunCoordinator {
                 }
                 None => None,
             };
-            let next = {
+            let mut next = {
                 let mut queues = self
                     .session_queues
                     .lock()
@@ -1187,7 +1294,12 @@ impl AgentRunCoordinator {
                 }
             }
             // Its own task, so a panic cannot take the session's queue with it.
-            let failure = match tokio::spawn((next.start.start)(next.run_id.clone())).await {
+            let failure = match tokio::spawn((next.start.start)(
+                next.run_id.clone(),
+                next.start.reserved_ticket.take(),
+            ))
+            .await
+            {
                 Ok(Ok(())) => None,
                 // Left as it is: settling or saving it now would turn a run
                 // that never started into a failure (review Minor 4).

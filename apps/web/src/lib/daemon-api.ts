@@ -433,6 +433,7 @@ export interface WorkspaceResumeResponse {
 }
 
 export const daemon = {
+  browserScopes: setupClient.browserScopes,
   agentFilesPreview: (id: string, options: { signal?: AbortSignal } = {}) =>
     setupClient.agentFiles.preview(id, options),
   capabilities: () => setupClient.capabilities(),

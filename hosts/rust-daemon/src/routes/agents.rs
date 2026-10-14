@@ -186,6 +186,26 @@ pub(crate) async fn handle_update_agent(
         return Err(ApiError::service_unavailable(error.to_string()));
     }
 
+    let browser_access = |config: &anima_core::AgentConfig| {
+        [
+            "browser_navigate",
+            "browser_observe",
+            "browser_act",
+            "browser_transfer",
+        ]
+        .map(|name| config.allows_tool(name))
+    };
+    if browser_access(&previous.state.config) != browser_access(&snapshot.state.config) {
+        let epoch = guard
+            .browser_permission_epochs
+            .entry(agent_id.into())
+            .or_default();
+        *epoch = epoch.saturating_add(1);
+        if let Some(browser) = &guard.browser_service {
+            browser.note_permissions_acknowledged(agent_id);
+        }
+    }
+
     Ok(AgentEnvelope {
         agent: AgentRuntimeSnapshotResponse::from(&snapshot),
     })

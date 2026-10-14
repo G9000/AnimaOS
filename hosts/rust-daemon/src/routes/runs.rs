@@ -42,6 +42,8 @@ pub(super) enum StartRunMode {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct StartRunRequest {
+    #[serde(default, deserialize_with = "crate::browser::optional_selection")]
+    browser_selection: Option<crate::browser::BrowserSelection>,
     #[serde(default)]
     text: String,
     #[serde(default)]
@@ -191,6 +193,27 @@ pub(super) async fn start_session_run(
             };
         }
     }
+    let browser = if let Some(selection) = input.browser_selection.clone() {
+        if matches!(input.mode, StartRunMode::Steer) {
+            return rejected(ApiError::bad_request_static(
+                "Browser selection cannot steer a run",
+            ));
+        }
+        match state
+            .browser
+            .prepare_selection(&agent_id, &session_id, selection)
+            .await
+        {
+            Ok(prepared) => Some(prepared),
+            Err(_) => {
+                return rejected(ApiError::conflict(
+                    "Browser selection is unavailable or changed",
+                ))
+            }
+        }
+    } else {
+        None
+    };
     // Which flow runs the message; `accept_run` re-checks the session under
     // the control-plane transaction.
     let target = {
@@ -320,37 +343,49 @@ pub(super) async fn start_session_run(
         None => (
             RunSource::Web,
             None,
-            state.agent_runs.web_start_with_attachments(
-                agent_id.clone(),
-                room_id,
-                input.text.clone(),
-                idempotency_key.clone(),
-                input.skill.clone(),
-                input.attachment_ids.clone(),
-            ),
+            if let Some(prepared) = &browser {
+                state.agent_runs.web_start_with_browser(
+                    agent_id.clone(),
+                    room_id,
+                    idempotency_key.clone(),
+                    prepared.clone(),
+                )
+            } else {
+                state.agent_runs.web_start_with_attachments(
+                    agent_id.clone(),
+                    room_id,
+                    input.text.clone(),
+                    idempotency_key.clone(),
+                    input.skill.clone(),
+                    input.attachment_ids.clone(),
+                )
+            },
         ),
     };
     let mode = match input.mode {
         StartRunMode::Queue => SessionRunMode::Queue,
         StartRunMode::Steer => SessionRunMode::Steer,
     };
-    let accepted = state
-        .agent_runs
-        .accept_run(
-            AcceptRun {
-                agent_id,
-                session_id,
-                text: input.text,
-                attachment_ids: input.attachment_ids,
-                idempotency_key,
-                mode,
-                source,
-                source_ref,
-                skill: input.skill,
-            },
-            start,
-        )
-        .await;
+    let request = AcceptRun {
+        agent_id,
+        session_id,
+        text: input.text,
+        attachment_ids: input.attachment_ids,
+        idempotency_key,
+        mode,
+        source,
+        source_ref,
+        skill: input.skill,
+    };
+    let accepted = match browser {
+        Some(prepared) => {
+            state
+                .agent_runs
+                .accept_browser_run(request, start, prepared)
+                .await
+        }
+        None => state.agent_runs.accept_run(request, start).await,
+    };
     accepted_response(accepted)
 }
 

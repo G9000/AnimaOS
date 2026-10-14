@@ -53,7 +53,15 @@ const WRITE_TOOLS: &[&str] = &[
     "calendar_update_event",
     "calendar_delete_event",
 ];
-const EXEC_TOOLS: &[&str] = &["bash", "bg_start", "bg_stop"];
+const EXEC_TOOLS: &[&str] = &[
+    "bash",
+    "bg_start",
+    "bg_stop",
+    "browser_navigate",
+    "browser_observe",
+    "browser_act",
+    "browser_transfer",
+];
 const NETWORK_TOOLS: &[&str] = &["web_fetch", "exa_search"];
 const DELEGATE_TOOLS: &[&str] = &[
     "delegate_to_agent",

@@ -1,6 +1,18 @@
 export { AgentsClient, action, agent, plugin } from './agents.js';
 export { AgentFilesClient } from './agent-files.js';
 export { AttachmentsClient } from './attachments.js';
+export { BrowserScopesClient } from './browser.js';
+export type {
+  BrowserSelection,
+  BrowserLimits,
+  BrowserPolicy,
+  BrowserDocument,
+  BrowserArtifact,
+  BrowserScope,
+  SaveBrowserScopeInput,
+  StopBrowserScopeInput,
+  BrowserReadOptions,
+} from './browser.js';
 export type { UploadedAttachment } from './attachments.js';
 export { AgenciesClient } from './agencies.js';
 export type {

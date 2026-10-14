@@ -3,6 +3,17 @@ import type { AgentDetail } from './types';
 export type AccessProfile = 'observe' | 'collaborate' | 'operate';
 export type DerivedAccessProfile = AccessProfile | 'custom';
 
+export const BROWSER_TOOL_ACCESS = [
+  { name: 'browser_navigate', label: 'Allow browser navigation' },
+  { name: 'browser_observe', label: 'Allow browser observation' },
+  { name: 'browser_act', label: 'Allow browser interaction' },
+  { name: 'browser_transfer', label: 'Allow browser file transfers' },
+] as const;
+
+export function isBrowserTool(name: string): boolean {
+  return BROWSER_TOOL_ACCESS.some((tool) => tool.name === name);
+}
+
 const COMMON_TOOLS = [
   'memory_search',
   'memory_add',

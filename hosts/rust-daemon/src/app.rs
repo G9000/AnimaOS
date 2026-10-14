@@ -207,6 +207,19 @@ pub async fn app_with_configured_persistence(config: DaemonConfig) -> io::Result
 }
 
 pub async fn serve(listener: TcpListener, config: DaemonConfig) -> io::Result<()> {
+    // Only the real daemon reads explicit operator configuration. Embeddings
+    // and deterministic constructors remain independent of ambient config.
+    let browser_setup = match std::env::var_os(crate::browser::config::BROWSER_CONFIG_ENV) {
+        Some(path) => Some(
+            tokio::task::spawn_blocking(move || {
+                crate::browser::config::load_startup_setup(std::path::Path::new(&path))
+            })
+            .await
+            .map_err(|_| io::Error::other("Browser configuration worker unavailable"))?
+            .map_err(|_| io::Error::other("Browser configuration unavailable or invalid"))?,
+        ),
+        None => None,
+    };
     let chatgpt_auth = crate::chatgpt_auth::ChatGptAuth::new();
     let state = Arc::new(RwLock::new(configured_state(
         &config,
@@ -220,6 +233,7 @@ pub async fn serve(listener: TcpListener, config: DaemonConfig) -> io::Result<()
     {
         let mut guard = state.write().await;
         guard.chatgpt_auth = chatgpt_auth;
+        guard.browser_setup = browser_setup;
         // AI titles for new chats (spec §12.3): only the real daemon turns
         // them on, so test and embedding states never see an unscripted
         // model call.
@@ -262,6 +276,7 @@ pub(crate) async fn serve_with_state(
     let jobs = runtime.jobs.clone();
     let history = runtime.history.clone();
     let live = state.read().await.live.clone();
+    let browser_state = state.clone();
     let router = router_with_runtime(state, config, runtime, bind_is_loopback);
     let shutdown_live = live.clone();
     let drain_expired = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -285,6 +300,10 @@ pub(crate) async fn serve_with_state(
                 },
                 async {
                     agent_runs.shutdown().await;
+                    let browser = browser_state.read().await.browser_service.clone();
+                    if let Some(browser) = browser {
+                        browser.shutdown().await;
+                    }
                     jobs.shutdown().await;
                     scheduler.shutdown().await;
                     skills.shutdown().await;

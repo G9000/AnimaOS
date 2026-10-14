@@ -394,6 +394,32 @@ describe('SettingsPanel access', () => {
     });
   });
 
+  it('M46_browser_grants_are_separate_and_preserve_neighbors_and_partial_browser_access', async () => {
+    const user = userEvent.setup();
+    const currentTools = [
+      'read_file',
+      'legacy_workspace_tool',
+      'browser_observe',
+    ];
+    const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+    renderPanel(agent({ toolNames: currentTools }), { saveSettings });
+    expect(
+      screen.getByRole('checkbox', { name: 'Allow browser observation' }),
+    ).toBeChecked();
+    const navigate = screen.getByRole('checkbox', {
+      name: 'Allow browser navigation',
+    });
+    expect(navigate).not.toBeChecked();
+    await user.click(navigate);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    const tools = saveSettings.mock.calls[0][0].tools ?? [];
+    expect([...tools].sort()).toEqual(
+      [...currentTools, 'browser_navigate'].sort(),
+    );
+    expect(tools).not.toContain('browser_act');
+    expect(tools).not.toContain('browser_transfer');
+  });
+
   it('M34_opt_out_removes_only_memory_consolidate_from_a_mixed_grant_set', async () => {
     const user = userEvent.setup();
     const currentTools = [

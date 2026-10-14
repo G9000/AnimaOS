@@ -1,6 +1,6 @@
 # Companion capability parity roadmap
 
-Status: **scope locked; PAR-01, PAR-02 procedural/profile waves, PAR-03 anchored history and scoped PAR-04 HTTP/Windows MCP plus reviewed bundles implemented with local acceptance; remaining work queued**. M40 proves corrected-name context across restart, while its second introduction reply misread whom to introduce. M41 demonstrates one correct source-cited history task. This roadmap covers the gaps against installed Hermes and does not declare full parity or general task quality.
+Status: **scope locked; PAR-01, PAR-02 procedural/profile waves, PAR-03 anchored history, scoped PAR-04 HTTP/Windows MCP plus reviewed bundles, and scoped PAR-05 Windows loopback browser work implemented with local acceptance; remaining work queued**. M40 proves corrected-name context across restart, while its second introduction reply misread whom to introduce. M41 demonstrates one correct source-cited history task. This roadmap covers the gaps against installed Hermes and does not declare full parity or general task quality.
 
 Baseline: Anima M36, `7d3eb52d7b37b8993ab2351fed33b209dff59ab6`; installed Hermes, `1fd18277267152893a8a24792b79213e7ca3f899`. The comparison inspected public source without starting either installation or reading personal profiles, accounts or credentials. M36 has current Rust gates; earlier real chat/task/account evidence stays revision-specific. See [harness evidence](harness-acceptance.md) and [daily use](daily-use.md).
 
@@ -35,7 +35,7 @@ Each PAR ID is stable. Milestone numbers after M38 are assigned when its detaile
 | PAR-02 | Apply reviewed lessons to memory/skills and prove reuse      | M39 skill reuse and M40 profile/correction effects accepted; broader quality open                                              | PAR-01; native skills/memory + owner UI                        |
 | PAR-03 | Rich own-history discovery and anchored reading              | M41 filtered anchors/window, optional owner grant and one source-cited task accepted                                           | Existing history; native history + tool contracts              |
 | PAR-04 | Dynamic MCP tools and installable community extensions       | M42–M45 HTTP/Windows MCP and reviewed MCP/skill bundles locally accepted; auth/selected servers/non-Windows/contributions open | Existing tool policy; native protocol + SDK/web                |
-| PAR-05 | Interactive browser work                                     | Fetch/search exist; interactive browser missing                                                                                | PAR-04 boundary preferred; browser worker + owner UI           |
+| PAR-05 | Interactive browser work                                     | Scoped Windows loopback browser locally accepted in M46; public/account/other-host/provider quality remains open               | Narrow BrowserPort, owned worker and owner UI                  |
 | PAR-06 | Longer coding and delegated-task acceptance                  | Loop, files, shell and bounded helpers exist; broad coding evidence missing                                                    | Current harness; optional PAR-02/PAR-04 adapters               |
 | PAR-07 | Native voice input/output                                    | Browser speech conveniences only                                                                                               | Attachment lifecycle; native audio + composer                  |
 | PAR-08 | Text/image acceptance and PDF/Office understanding           | Upload/storage exists; vision conditional; format extraction missing                                                           | Existing attachments/model adapters; document worker + SDK/web |
@@ -97,13 +97,14 @@ CP19 has an independent pre-community backup. Live uncertain 503 fails closed; i
 
 ### PAR-05: interactive browser tasks
 
-- [ ] Expose one reviewed task-scoped browser worker through the MCP/capability boundary where practical; otherwise use a narrow reusable BrowserPort and host adapter.
-- [ ] Support navigation, bounded accessibility snapshots/screenshots, click/type/scroll and selected upload/download. Plain fetch is not a substitute.
-- [ ] Use isolated contexts by default; do not import personal browser profiles, cookies or saved credentials. Maintain destination/network, action, page/output and lifetime limits outside prompts.
-- [ ] Stop and cleanup must release recorded owned contexts/processes; page text is untrusted evidence, not new grants or instructions. Authenticated/write actions use applicable owner controls.
+- [x] M46 exposes a narrow reusable BrowserPort and reviewed host-owned worker for ordinary owner chat, with separate native grants, Exec approval and action receipts.
+- [x] M46 supports navigation, bounded accessibility snapshots/screenshots, click/type/scroll and selected upload/download through a real DOM workflow.
+- [x] M46 uses isolated contexts and operator-configured numeric-loopback routes, bounded requests/actions/assets/wire, guarded fetch and a deny-only fallback for unrouted HTTP. No profile/cookie import or OS egress-sandbox claim.
+- [x] M46 proves Windows whole-job/IO cleanup, Scope Stop and ordinary Run Stop with exact owned process witnesses; page content supplies no grants. Contexts are unavailable after control-plane snapshot restoration.
+- [ ] Public destinations, authenticated websites, other browser/host installations and autonomous provider browser-task quality still need their own scoped implementation and acceptance.
 - Acceptance: deterministic controlled-page workflow and hostile redirects/page instructions, denied destinations, popups, oversized downloads, cancellation and clean context disposal; then a predeclared useful task whose output is checked. Existing read-only/public and isolated-test authority remains usable; personal-profile/external-write cases need concrete scope.
 
-M46 now has a [bound lean plan](../superpowers/plans/2026-10-14-companion-browser-m46.md) on verified M45 main, informed by public Hermes `1fd18277267152893a8a24792b79213e7ca3f899`. Typed core/native seams are delegated; implementation and controlled browser acceptance remain pending.
+M46's [bound lean plan](../superpowers/plans/2026-10-14-companion-browser-m46.md) and [operator guide](browser-work.md) record the accepted Node22.12/Playwright-core1.59.1/paired headless-shell1217 installation. One independently checked75-byte supplier CSV, exact single POST map, JPEG,12 succeeded receipts, zero model calls, refused redirect and zero denied-sink requests pass. All five task process/image/kernel-time witnesses and removed private directories were independently verified;26 controlled processes were observed and none remained. This accepts the controlled Windows slice rather than full browser parity. The public Hermes comparison remains pinned to `1fd18277267152893a8a24792b79213e7ca3f899`.
 
 ### PAR-06: coding and delegation that finishes real work
 

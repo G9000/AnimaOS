@@ -1600,6 +1600,11 @@ pub(crate) struct DaemonState {
     pub(crate) community_bundles: Vec<crate::community_bundles::BundleRecord>,
     pub(crate) community_generation: u64,
     pub(crate) community_reviews: HashMap<String, crate::community_bundles::ReviewReceipt>,
+    /// Shared ephemeral browser service; neither scopes nor workers restore.
+    pub(crate) browser_service: Option<crate::browser::BrowserService>,
+    pub(crate) browser_setup: Option<crate::browser::config::VerifiedBrowserSetup>,
+    /// Ephemeral acknowledged browser grant epochs. Scopes are never restored.
+    pub(crate) browser_permission_epochs: HashMap<String, u64>,
     pub(crate) control_plane_store: Option<ControlPlaneStoreConfig>,
     control_plane_revision: u64,
     control_plane_persist_order: Arc<ControlPlanePersistOrder>,
@@ -2182,6 +2187,9 @@ impl DaemonState {
             community_bundles: Vec::new(),
             community_generation: 0,
             community_reviews: HashMap::new(),
+            browser_service: None,
+            browser_setup: None,
+            browser_permission_epochs: HashMap::new(),
             mcp_publication: crate::mcp::McpRegistry::default().published(),
             mcp_manager: None,
             control_plane_store: None,
@@ -3605,6 +3613,7 @@ impl DaemonState {
     }
 
     pub(crate) fn remove_agent(&mut self, agent_id: &str) {
+        self.browser_permission_epochs.remove(agent_id);
         if let Some(manager) = &self.mcp_manager {
             manager.retire_agent(agent_id);
         }

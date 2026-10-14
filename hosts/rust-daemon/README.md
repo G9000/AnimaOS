@@ -13,6 +13,16 @@ disabled connections and pending content, followed by existing separate owner
 start, descriptor grants and exact skill approval. It does not install executable
 artifacts or native connector modules.
 
+## Scoped browser work
+
+M46 adds four separately granted browser tools for ordinary owner chat runs,
+backed by a host-owned Playwright worker and explicit immutable startup policies.
+See [Browser work](../../docs/companion/browser-work.md) for installation,
+`ANIMAOS_RS_BROWSER_CONFIG_FILE`, one-use chat selection and output handling. The
+initial controlled loopback/Windows boundary is narrower than general public
+browsing or account automation; current acceptance status is in the
+[handover](../../docs/superpowers/handover/2026-09-28-companion-console.md).
+
 ## API route inventory
 
 This marked inventory follows `ApiDoc::openapi()`. Detailed authorization and limits
@@ -52,6 +62,8 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/approval-rules`                                                      |
 | `GET`    | `/api/agents/{agent_id}/attachments/{attachment_id}`                                         |
 | `GET`    | `/api/agents/{agent_id}/avatar`                                                              |
+| `GET`    | `/api/agents/{agent_id}/browser-policies`                                                    |
+| `GET`    | `/api/agents/{agent_id}/browser-scopes`                                                      |
 | `GET`    | `/api/agents/{agent_id}/community-bundles`                                                   |
 | `GET`    | `/api/agents/{agent_id}/community-bundles/{bundle_id}`                                       |
 | `GET`    | `/api/agents/{agent_id}/connectors`                                                          |
@@ -74,6 +86,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/memory-views`                                                        |
 | `GET`    | `/api/agents/{agent_id}/memory-views/candidates`                                             |
 | `GET`    | `/api/agents/{agent_id}/runs/{run_id}`                                                       |
+| `GET`    | `/api/agents/{agent_id}/runs/{run_id}/browser-scope`                                         |
 | `GET`    | `/api/agents/{agent_id}/schedules`                                                           |
 | `GET`    | `/api/agents/{agent_id}/schedules/{schedule_id}/history`                                     |
 | `GET`    | `/api/agents/{agent_id}/sessions`                                                            |
@@ -173,6 +186,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/mcp-connections/{connection_id}/review`                              |
 | `POST`   | `/api/agents/{agent_id}/messages`                                                            |
 | `POST`   | `/api/agents/{agent_id}/run`                                                                 |
+| `POST`   | `/api/agents/{agent_id}/runs/{run_id}/browser-scope/stop`                                    |
 | `POST`   | `/api/agents/{agent_id}/runs/{run_id}/learning-review`                                       |
 | `POST`   | `/api/agents/{agent_id}/runs/{run_id}/stop`                                                  |
 | `POST`   | `/api/agents/{agent_id}/schedules`                                                           |
@@ -207,6 +221,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `PUT`    | `/api/agents/{agent_id}/avatar`                                                              |
 | `PUT`    | `/api/agents/{agent_id}/connectors/{connector_id}/credential`                                |
 | `PUT`    | `/api/agents/{agent_id}/connectors/discord/{connector_id}/credential`                        |
+| `PUT`    | `/api/agents/{agent_id}/runs/{run_id}/browser-scope`                                         |
 | `PUT`    | `/api/agents/{agent_id}/tasks`                                                               |
 | `PUT`    | `/api/connectors/oauth-apps/{provider}`                                                      |
 | `PUT`    | `/api/skills/{slug}`                                                                         |
