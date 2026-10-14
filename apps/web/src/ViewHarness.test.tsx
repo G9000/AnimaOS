@@ -19,9 +19,11 @@ import {
 
 import { toolNamesForProfile } from './lib/agent-access';
 import { deferred, snapshot } from './test/view-harness';
+import { communityBundle } from './test/community-bundles';
 import {
   daemon,
   mcpOwnerApi,
+  communityBundlesOwnerApi,
   type McpConnection,
   type DaemonProvider,
   type DaemonSnapshot,
@@ -475,6 +477,7 @@ beforeEach(() => {
   vi.spyOn(daemon, 'listConnectors').mockResolvedValue({ connectors: [] });
   vi.spyOn(mcpOwnerApi, 'list').mockResolvedValue([]);
   vi.spyOn(mcpOwnerApi, 'toolNames').mockResolvedValue([]);
+  vi.spyOn(communityBundlesOwnerApi, 'list').mockResolvedValue([]);
   vi.spyOn(daemon, 'discordConnectors').mockResolvedValue([]);
   vi.spyOn(daemon, 'listSchedules').mockResolvedValue({ schedules: [] });
   vi.spyOn(daemon, 'importLegacySchedules').mockResolvedValue({
@@ -2733,6 +2736,170 @@ function mcpReviewFixture(agentId: string): McpConnection {
     ],
   };
 }
+
+it('M45 reconciles acknowledged bundle removal permissions without overwriting newer polled settings', async () => {
+  const user = userEvent.setup();
+  const ownedAlias = mcpReviewFixture('agent-main').reviewedTools[0].alias;
+  const initial = snapshot('agent-main', 'Nova', 1, [
+    'read_file',
+    ownedAlias,
+    'unknown_custom',
+  ]);
+  const latest = structuredClone(initial);
+  latest.state.name = 'Nova Prime';
+  latest.state.config.name = 'Nova Prime';
+  latest.state.config.system = 'Newer instructions';
+  latest.state.config.model = 'gpt-4.1-mini';
+  const canonical = structuredClone(initial);
+  canonical.state.config.tools = canonical.state.config.tools!.filter(
+    (tool) => tool.name !== ownedAlias,
+  );
+  const ownerRead = deferred<{ agent: DaemonSnapshot }>();
+  const bundle = communityBundle({ agentId: 'agent-main' });
+  vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+  vi.spyOn(daemon, 'listAgents')
+    .mockResolvedValueOnce({ agents: [initial] })
+    .mockResolvedValue({ agents: [latest] });
+  vi.spyOn(daemon, 'getAgent').mockReturnValue(ownerRead.promise);
+  vi.mocked(communityBundlesOwnerApi.list).mockResolvedValue([bundle]);
+  vi.spyOn(communityBundlesOwnerApi, 'get').mockResolvedValue(bundle);
+  vi.spyOn(communityBundlesOwnerApi, 'remove').mockResolvedValue({
+    bundleId: bundle.id,
+    removed: true,
+    trashPaths: ['.trash/owned'],
+    toolNames: canonical.state.config.tools!.map((tool) => tool.name),
+  });
+  mockProviders();
+  const poll = capturePollTimer();
+  window.history.replaceState(null, '', '/#/connectors');
+  render(<ViewHarness />);
+  const card = within(
+    await screen.findByRole('article', {
+      name: 'Community bundle Violet bundle',
+    }),
+  );
+  await user.click(card.getByRole('button', { name: 'Inspect bundle' }));
+  await waitFor(() =>
+    expect(card.getByRole('button', { name: 'Remove bundle' })).toBeEnabled(),
+  );
+  await user.click(card.getByRole('button', { name: 'Remove bundle' }));
+  await user.click(
+    card.getByRole('button', { name: 'Confirm bundle removal' }),
+  );
+  await waitFor(() =>
+    expect(daemon.getAgent).toHaveBeenCalledWith('agent-main'),
+  );
+  act(() => poll());
+  await waitFor(() => expect(daemon.listAgents).toHaveBeenCalledTimes(2));
+  await act(async () => {
+    ownerRead.resolve({ agent: canonical });
+    await ownerRead.promise;
+  });
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Refresh bundle status' }),
+    ).toBeEnabled(),
+  );
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  expect(screen.getByDisplayValue('Nova Prime')).toBeVisible();
+  expect(screen.getByRole('textbox', { name: 'System prompt' })).toHaveValue(
+    'Newer instructions',
+  );
+  expect(screen.getByText('read_file, unknown_custom')).toBeVisible();
+  expect(communityBundlesOwnerApi.remove).toHaveBeenCalledTimes(1);
+});
+
+it('M45 unmounted removal keeps Settings fenced until an explicit canonical bundle refresh', async () => {
+  const user = userEvent.setup();
+  const ownedAlias = mcpReviewFixture('agent-main').reviewedTools[0].alias;
+  const initial = snapshot('agent-main', 'Nova', 1, [
+    'read_file',
+    ownedAlias,
+    'unknown_custom',
+  ]);
+  const canonical = structuredClone(initial);
+  canonical.state.config.tools = canonical.state.config.tools!.filter(
+    (tool) => tool.name !== ownedAlias,
+  );
+  const bundle = communityBundle({ agentId: 'agent-main' });
+  const removal =
+    deferred<Awaited<ReturnType<typeof communityBundlesOwnerApi.remove>>>();
+  vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+  vi.spyOn(daemon, 'listAgents').mockResolvedValue({ agents: [initial] });
+  vi.spyOn(daemon, 'getAgent').mockResolvedValue({ agent: canonical });
+  vi.spyOn(daemon, 'updateAgent').mockResolvedValue({ agent: canonical });
+  vi.mocked(communityBundlesOwnerApi.list).mockResolvedValue([bundle]);
+  vi.spyOn(communityBundlesOwnerApi, 'get').mockResolvedValue(bundle);
+  vi.spyOn(communityBundlesOwnerApi, 'remove').mockReturnValue(removal.promise);
+  mockProviders();
+  window.history.replaceState(null, '', '/#/connectors');
+  render(<ViewHarness />);
+  const card = within(
+    await screen.findByRole('article', {
+      name: 'Community bundle Violet bundle',
+    }),
+  );
+  await user.click(card.getByRole('button', { name: 'Inspect bundle' }));
+  await waitFor(() =>
+    expect(card.getByRole('button', { name: 'Remove bundle' })).toBeEnabled(),
+  );
+  await user.click(card.getByRole('button', { name: 'Remove bundle' }));
+  await user.click(
+    card.getByRole('button', { name: 'Confirm bundle removal' }),
+  );
+  await user.click(screen.getByRole('button', { name: 'Open companion chat' }));
+  expect(
+    screen.queryByRole('region', { name: 'Community bundles' }),
+  ).not.toBeInTheDocument();
+  await act(async () => {
+    removal.resolve({
+      bundleId: bundle.id,
+      removed: true,
+      trashPaths: [],
+      toolNames: ['read_file', 'unknown_custom'],
+    });
+    await removal.promise;
+  });
+  expect(daemon.getAgent).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await user.click(
+    screen.getByRole('checkbox', { name: 'Allow removing saved facts' }),
+  );
+  await user.click(screen.getByRole('button', { name: 'Save changes' }));
+  expect(daemon.updateAgent).not.toHaveBeenCalled();
+  expect(
+    screen.getByText(/External tool permissions need a fresh read/),
+  ).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Close settings' }));
+  vi.mocked(communityBundlesOwnerApi.list).mockResolvedValue([]);
+  vi.mocked(mcpOwnerApi.toolNames).mockResolvedValue([
+    'read_file',
+    'unknown_custom',
+  ]);
+  await user.click(screen.getByRole('button', { name: 'Connectors' }));
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Refresh bundle status' }),
+    ).toBeEnabled(),
+  );
+  await user.click(
+    screen.getByRole('button', { name: 'Refresh bundle status' }),
+  );
+  await waitFor(() =>
+    expect(
+      screen.queryByText(/After the current request finishes, refresh status/),
+    ).not.toBeInTheDocument(),
+  );
+  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await user.click(
+    screen.getByRole('checkbox', { name: 'Allow removing saved facts' }),
+  );
+  await user.click(screen.getByRole('button', { name: 'Save changes' }));
+  expect(daemon.updateAgent).toHaveBeenCalledWith('agent-main', {
+    tools: ['read_file', 'unknown_custom', 'memory_remove'],
+  });
+  expect(communityBundlesOwnerApi.remove).toHaveBeenCalledTimes(1);
+});
 
 it('M43 reconciles canonical grant descriptors without overwriting newer settings from a poll', async () => {
   const user = userEvent.setup();

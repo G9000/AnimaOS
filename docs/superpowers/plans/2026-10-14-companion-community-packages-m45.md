@@ -1,7 +1,7 @@
 # M45 reviewed community MCP and skill bundles: implementation plan
 
-Status: M44/PR50 verified merged at15e40c397a6ef961639e9375fe50ee513d09c9bf with exact tested tree; M45 branch g9000/companion-community-packages-m45 cut from verified main. Controller rulings below bind the draft. No M45 implementation or acceptance is yet claimed.
-This draft does not establish M44 merge, M45 readiness, or complete PAR-04 parity.
+Status: M45 scoped implementation and controlled acceptance complete on g9000/companion-community-packages-m45, cut from verified M44/PR50 main15e40c397a6ef961639e9375fe50ee513d09c9bf. Current relevant gates passed; exact publication/PR/verified merge is recorded in the M45 ledger.
+The starting plan and risk proposals below are retained as history; controller rulings and the final evidence section bind current behavior. Complete PAR-04/Hermes parity is not claimed.
 
 **Goal:** Install, inspect, update, disable and remove one reviewed declarative bundle containing MCP configuration proposals and standard SKILL.md content.
 
@@ -11,8 +11,8 @@ An installed bundle records exact ownership and review evidence, without install
 
 **Tech stack:** Existing Rust serde/serde_json, anima-core serde_jcs/SHA-256, daemon control-plane transactions, skill services, rmcp-backed MCP manager, SDK and web controls.
 
-For future workers: root first binds the five risks, refreshes this draft against verified main, then releases bounded tasks through the repository's RED/review/fix-wave workflow.
-Do not infer an implementation release, branch, check-in, process start or additional agent from this draft.
+Execution followed five bound controller risks, meaningful core/owner/UI RED, frozen native interfaces and bounded disjoint implementation lanes.
+One native batch and final SDK/web review fed one combined fix wave. A later actual idle-scan acceptance failure justified one bounded correction and fresh native gates.
 
 ## Source-backed starting point
 
@@ -234,7 +234,7 @@ Zero providers/models/accounts/profile reads; selected local package evidence do
 
 These are proposals. Root must bind schema/caps, coordinated approval/disable fencing, ownership/removal, predecessor retention/capacity policy and the external-program integrity boundary before implementation.
 
-## Required future verification and honest status
+## Planned verification and honest status
 
 - Root resolves current Nx project/target names, then runs fresh Rust host/core tests, lint/build and applicable SDK/web test/typecheck/build targets under repository constraints.
 - If reusable core code changes, include its meaningful manifest/schema/digest tests through the existing relevant workspace target.
@@ -262,3 +262,34 @@ Ruling: This milestone installs configuration and reviewed content, not executab
 - Three bounded implementation lanes maximum; root owns commands/Cargo/Nx/fmt/Git/services/model budget, native batch/final SDK-web review/one justified fix wave and fresh gates. Isolated controlled lifecycle/native executor acceptance only; no provider task, ordinary credentials/services or whole-Hermes claim.
 
 Ruling: Review requests for update pin an explicit bundleId/expectedBundleVersion pair, both absent for install; require manifest identity match and exact ordinary owner — an external manifest name or version alone cannot select installed authority — cost if wrong: a small strict DTO refinement and renewed review, rather than cross-bundle target confusion. Initial pure-core interfaces are parse_manifest(&[u8])->Result<CommunityManifest,ManifestError>, validate_manifest(&CommunityManifest,&RuntimeCompatibility)->Result<ValidatedManifest,ManifestError>, and host-computed canonical manifest digest; no server-issued receipt in core. Native worker freezes DTO/envelopes/candidate IDs after the actual owner-route RED before SDK/web production.
+
+## Binding seam refinements after actual RED
+
+All three initial behavior REDs are observed: actual configured owner route404expected200, actual Connectors region missing, and valid-manifest parser MissingFeature; no fixture/import/type failure. Detailed native146-line/core/web notes are frozen in the M45 ledger and accepted with these refinements:
+
+- Keep the existing ApiError JSON `{error:string}` and owner status/no-store rules, using fixed bounded messages; no new global error envelope.
+- Managed bundle draft approval must match its declared canonical bytes. A changed body requires fresh bundle review/update or an independent skill; ordinary unrelated draft editing remains unchanged.
+- The existing transaction may span ordered CP durability save. New bundle workspace reads/writes/trash happen outside NEW CP/state guards; existing separate SkillService approval keeps its inherited behavior and rechecks enabled/current bundle lineage within its authority transaction. No global skill-I/O rewrite, external-editor atomic CAS or undo-effects claim.
+- Mutation detail returns current canonical owner `toolNames`; successful removal returns `{bundleId,removed:true,trashPaths,toolNames}` for functional permission reconciliation. SDK/web uses existing shared owner mutation/uncertainty fences and makes no grant/approval or optimistic-success assumption.
+
+Ruling: Updates that remove, rename or change kind of existing skill component keys return409; same-key content changes and bounded additions remain supported — metadata-only update cannot silently retire owned global files and the frozen view has only MCP predecessors — cost if wrong: owner removes/reviews a new bundle for topology change; no hidden global artifact or new retirement schema.
+
+## Binding durability and owner-lifecycle boundary
+
+Ruling: Preserve the existing single atomic control-plane candidate, and distinguish live fail-closed uncertainty from immediate-crash recovery — an atomic replacement may have committed before its acknowledgement is classified uncertain, including separate skill adoption and final removal; another ready-state write moves that same ambiguity — cost if wrong: the owner inspects canonical state after an unknown response instead of assuming rollback, and this slice does not claim an unconditional restart-unavailable marker. No new journal or retry is introduced. Live uncertainty retains observed identities unavailable and retires execution. Restart validates the complete snapshot actually present: new bundle connections remain disabled, draft content remains unapproved, and no process, grant, adoption or install is replayed. Prior separately approved exact skills and grants can survive; a completed removal can already be absent. Durable disable/removal intentions that remain in the snapshot stay unavailable; this is distinct from a final replacement that already committed. Immediate-reload regressions must read actual saved bytes without a follow-up save that manufactures the expected marker.
+
+Ruling: Refuse ordinary-agent deletion while it owns bundles, at the authoritative shared transaction as well as the route — otherwise global managed skills lose their owner and a preflight alone races installation — cost if wrong: settle/remove bundles before deleting their agent. Preserve stored resume preferences when unchanged components are updated while disabled, and restrict uncertain predecessor-deletion quarantine to the affected bundle; neighboring owned records and approvals remain exact.
+
+Ruling: Public review/component-state witnesses bind exact semantic skill records, drafts and owned content hashes, rather than the scanner's internal attempt generation — actual built-console acceptance and a real unchanged-scan RED showed that an otherwise valid ten-minute review expired on an idle sixty-second scan — cost if wrong: genuine metadata/content/workspace/capacity changes still conflict, while harmless scans do not require re-review. The internal scan/load concurrency counter is preserved. This bounded acceptance correction follows the initial passing gates; fresh relevant Rust gates are required again, with unchanged SDK/web inputs retained.
+
+## Final current evidence (2026-10-14)
+
+Fresh Rust/core **2,619 passed / nine intentional ignores / 40 suites / lint/build**, including **16 M45 native / 11 pure-core cases** and the **187-operation compiled README**. SDK **145 passed / three intentional service skips / build/typecheck**. Web **1,291 passed / 113 files / typecheck/build**, including **18 community-panel cases**. All 33 frozen source hashes and UTC ticks remained exact through actual acceptance; no new dependency or post-gate production change.
+
+Actual built console/current typed SDK/owner HTTP completed review-only zero writes, install without child/grant, separate exact initial and updated skill approvals, metadata enable without start, explicit MCP start/discovery/full review/grant/Stop, changed launch with fresh disabled ID and no authority transfer, quiet same-profile restart without replay, disable and confirmed recoverable removal. Exact updated canonical skill bytes were checked in workspace trash; independent neighbor metadata/bytes and `read_file` stayed exact. One peer recorded initialize1/initialized1/list1/call0. Native executor acceptance separately proves one Ask/AllowOnce call with durable provenance/receipt and pending-Ask disable fencing zero extra RPC.
+
+The actual console exposed a within-TTL review conflict after an unchanged background scan. An actual `SkillService.scan` RED confirmed the cause. Only the raw scanner-attempt generation was removed from the public bundle observation; exact semantic records/drafts/workspace/MCP/grants/owned hashes and internal scan concurrency fencing remain. The regression also proves a real semantic enable change conflicts without writes. Relevant full native gates were rerun; unchanged SDK/web inputs retained their passing gates.
+
+All six exact owned synthetic processes stopped, ports4200/8081 free and the created tab closed. Zero runtime model tasks/messages/tokens, ordinary profiles/accounts, database servers/containers/Docker55432 or public deployment. Quiet forced-daemon recovery is not graceful-shutdown evidence. Controlled deterministic calls do not prove provider task quality, arbitrary executable/server safety, publisher authenticity, external filesystem atomicity or full Hermes parity. Uncertain storage acknowledgements are inspected as actual committed snapshots; prior explicit approvals may remain and final erase may already be absent, as ruled above.
+
+Exact REDs, review dispositions, corrections, proof files, publication and verified merge settlement live in `.superpowers/sdd/2026-10-14-companion-community-packages-m45/progress.md`. See [bundle use/contribution instructions](../../companion/community-bundles.md), [harness evidence](../../companion/harness-acceptance.md) and [remaining parity](../../companion/parity-roadmap.md). M46 remains held planning until verified M45 main and its five bound controller risks.

@@ -246,6 +246,30 @@ impl SkillService {
         self.locked(move |service, root| async move {
             let reviewed_root = root.clone();
             let linked = service.state.read().await.skills.draft(&id).cloned();
+            if let Some(draft) = linked.as_ref().filter(|draft| draft.is_pending()) {
+                let guard = service.state.read().await;
+                crate::community_bundles::check_skill_edit(&guard, &draft.slug, true)?;
+                let canonical = skill_hash(
+                    compose_skill_file(
+                        &draft.name,
+                        &draft.description,
+                        approval.body.as_deref().unwrap_or(&draft.body),
+                    )
+                    .as_bytes(),
+                );
+                crate::community_bundles::check_draft(&guard, draft, Some(&canonical))?;
+                drop(guard);
+                if draft.bundle_source.is_some() {
+                    let workspace = root.clone();
+                    let slug = draft.slug.clone();
+                    let bytes = blocking(move || disk::read_skill_bytes(&workspace, &slug))
+                        .await?
+                        .map_err(SkillError::Unavailable)?;
+                    if bytes.as_deref().map(skill_hash) != draft.base_hash {
+                        return Err(SkillError::conflict("Community bundle skill base changed"));
+                    }
+                }
+            }
             if let Some(draft) =
                 linked.filter(|draft| draft.is_pending() && draft.learning_source.is_some())
             {
@@ -372,6 +396,7 @@ impl SkillService {
             if root != read_root {
                 return Err(SkillError::conflict(SKILL_HASH_MISMATCH));
             }
+            crate::community_bundles::check_skill_edit(&*service.state.read().await, &slug, true)?;
             let (target, approved_file) = (slug.clone(), file.clone());
             service
                 .apply(&root, move |skills, now_ms| {

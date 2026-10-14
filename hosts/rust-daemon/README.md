@@ -7,6 +7,12 @@ contributions compiled into this host. See [Contributing connectors](CONNECTOR-C
 for interfaces, authority boundaries and verification. Community adapters require
 a rebuild and run with host privileges; installable modules are deferred.
 
+Reviewed [community bundles](../../docs/companion/community-bundles.md) can save
+declarative MCP configuration and inline SKILL.md drafts. Installation creates
+disabled connections and pending content, followed by existing separate owner
+start, descriptor grants and exact skill approval. It does not install executable
+artifacts or native connector modules.
+
 ## API route inventory
 
 This marked inventory follows `ApiDoc::openapi()`. Detailed authorization and limits
@@ -23,18 +29,19 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `DELETE` | `/api/agents/{agent_id}`                                                                     |
 | `DELETE` | `/api/agents/{agent_id}/approval-rules/{rule_id}`                                            |
 | `DELETE` | `/api/agents/{agent_id}/avatar`                                                              |
+| `DELETE` | `/api/agents/{agent_id}/community-bundles/{bundle_id}`                                       |
+| `DELETE` | `/api/agents/{agent_id}/connectors/{connector_id}`                                           |
 | `DELETE` | `/api/agents/{agent_id}/connectors/discord/{connector_id}`                                   |
 | `DELETE` | `/api/agents/{agent_id}/connectors/gcalendar/{connector_id}`                                 |
 | `DELETE` | `/api/agents/{agent_id}/connectors/gdrive/{connector_id}`                                    |
 | `DELETE` | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}`                           |
-| `DELETE` | `/api/agents/{agent_id}/connectors/{connector_id}`                                           |
 | `DELETE` | `/api/agents/{agent_id}/mcp-connections/{connection_id}`                                     |
 | `DELETE` | `/api/agents/{agent_id}/schedules/{schedule_id}`                                             |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}`                                               |
 | `DELETE` | `/api/connectors/oauth-apps/{provider}`                                                      |
+| `DELETE` | `/api/memories/{memory_id}`                                                                  |
 | `DELETE` | `/api/memories/entities/{entity_id}`                                                         |
 | `DELETE` | `/api/memories/facts/{fact_id}`                                                              |
-| `DELETE` | `/api/memories/{memory_id}`                                                                  |
 | `DELETE` | `/api/providers/chatgpt`                                                                     |
 | `DELETE` | `/api/providers/chatgpt/login`                                                               |
 | `DELETE` | `/api/skills/{slug}`                                                                         |
@@ -45,7 +52,10 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/approval-rules`                                                      |
 | `GET`    | `/api/agents/{agent_id}/attachments/{attachment_id}`                                         |
 | `GET`    | `/api/agents/{agent_id}/avatar`                                                              |
+| `GET`    | `/api/agents/{agent_id}/community-bundles`                                                   |
+| `GET`    | `/api/agents/{agent_id}/community-bundles/{bundle_id}`                                       |
 | `GET`    | `/api/agents/{agent_id}/connectors`                                                          |
+| `GET`    | `/api/agents/{agent_id}/connectors/{connector_id}/messages`                                  |
 | `GET`    | `/api/agents/{agent_id}/connectors/discord`                                                  |
 | `GET`    | `/api/agents/{agent_id}/connectors/gcalendar`                                                |
 | `GET`    | `/api/agents/{agent_id}/connectors/gcalendar/{connector_id}/writes`                          |
@@ -53,7 +63,6 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/connectors/mail/{provider}`                                          |
 | `GET`    | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/drafts`                    |
 | `GET`    | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/messages`                  |
-| `GET`    | `/api/agents/{agent_id}/connectors/{connector_id}/messages`                                  |
 | `GET`    | `/api/agents/{agent_id}/events`                                                              |
 | `GET`    | `/api/agents/{agent_id}/jobs`                                                                |
 | `GET`    | `/api/agents/{agent_id}/learning-policy`                                                     |
@@ -84,6 +93,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/health`                                                                                |
 | `GET`    | `/api/logs`                                                                                  |
 | `GET`    | `/api/logs/stream`                                                                           |
+| `GET`    | `/api/memories/{memory_id}/trace`                                                            |
 | `GET`    | `/api/memories/entities`                                                                     |
 | `GET`    | `/api/memories/facts`                                                                        |
 | `GET`    | `/api/memories/readiness`                                                                    |
@@ -91,7 +101,6 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/memories/recent`                                                                       |
 | `GET`    | `/api/memories/relationships`                                                                |
 | `GET`    | `/api/memories/search`                                                                       |
-| `GET`    | `/api/memories/{memory_id}/trace`                                                            |
 | `GET`    | `/api/providers`                                                                             |
 | `GET`    | `/api/providers/chatgpt/status`                                                              |
 | `GET`    | `/api/ready`                                                                                 |
@@ -113,22 +122,29 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/workspace/files`                                                                       |
 | `GET`    | `/api/workspace/inspect`                                                                     |
 | `PATCH`  | `/api/agents/{agent_id}`                                                                     |
+| `PATCH`  | `/api/agents/{agent_id}/community-bundles/{bundle_id}`                                       |
 | `PATCH`  | `/api/agents/{agent_id}/connectors/discord/{connector_id}`                                   |
 | `PATCH`  | `/api/agents/{agent_id}/learning-policy`                                                     |
 | `PATCH`  | `/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}`                |
 | `PATCH`  | `/api/agents/{agent_id}/mcp-connections/{connection_id}`                                     |
+| `PATCH`  | `/api/agents/{agent_id}/mcp-connections/{connection_id}/grants/{alias}`                      |
 | `PATCH`  | `/api/agents/{agent_id}/memory-views`                                                        |
 | `PATCH`  | `/api/agents/{agent_id}/memory-views/sources/{memory_id}`                                    |
 | `PATCH`  | `/api/agents/{agent_id}/schedules/{schedule_id}`                                             |
 | `PATCH`  | `/api/agents/{agent_id}/sessions/{session_id}`                                               |
-| `PATCH`  | `/api/memories/facts/{fact_id}`                                                              |
 | `PATCH`  | `/api/memories/{memory_id}`                                                                  |
+| `PATCH`  | `/api/memories/facts/{fact_id}`                                                              |
 | `PATCH`  | `/api/skills/{slug}`                                                                         |
 | `POST`   | `/api/agencies/create`                                                                       |
 | `POST`   | `/api/agencies/generate`                                                                     |
 | `POST`   | `/api/agents`                                                                                |
-| `POST`   | `/api/agents/generate-profile`                                                               |
 | `POST`   | `/api/agents/{agent_id}/approval-rules`                                                      |
+| `POST`   | `/api/agents/{agent_id}/community-bundles`                                                   |
+| `POST`   | `/api/agents/{agent_id}/community-bundles/{bundle_id}/update`                                |
+| `POST`   | `/api/agents/{agent_id}/community-bundles/reviews`                                           |
+| `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/messages`                                  |
+| `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/pairings/{chat_id}/approve`                |
+| `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/restart`                                   |
 | `POST`   | `/api/agents/{agent_id}/connectors/discord`                                                  |
 | `POST`   | `/api/agents/{agent_id}/connectors/discord/{connector_id}/activate`                          |
 | `POST`   | `/api/agents/{agent_id}/connectors/discord/{connector_id}/outbound/suppress`                 |
@@ -143,9 +159,6 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/drafts/{draft_id}/approve` |
 | `POST`   | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/drafts/{draft_id}/reject`  |
 | `POST`   | `/api/agents/{agent_id}/connectors/telegram`                                                 |
-| `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/messages`                                  |
-| `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/pairings/{chat_id}/approve`                |
-| `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/restart`                                   |
 | `POST`   | `/api/agents/{agent_id}/jobs`                                                                |
 | `POST`   | `/api/agents/{agent_id}/jobs/{job_id}/approve`                                               |
 | `POST`   | `/api/agents/{agent_id}/jobs/{job_id}/cancel`                                                |
@@ -163,12 +176,13 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/runs/{run_id}/learning-review`                                       |
 | `POST`   | `/api/agents/{agent_id}/runs/{run_id}/stop`                                                  |
 | `POST`   | `/api/agents/{agent_id}/schedules`                                                           |
-| `POST`   | `/api/agents/{agent_id}/schedules/import`                                                    |
 | `POST`   | `/api/agents/{agent_id}/schedules/{schedule_id}/run`                                         |
+| `POST`   | `/api/agents/{agent_id}/schedules/import`                                                    |
 | `POST`   | `/api/agents/{agent_id}/sessions`                                                            |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/attachments`                                   |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/compact`                                       |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/runs`                                          |
+| `POST`   | `/api/agents/generate-profile`                                                               |
 | `POST`   | `/api/approvals/{approval_id}/decision`                                                      |
 | `POST`   | `/api/goals`                                                                                 |
 | `POST`   | `/api/goals/{goal_id}/status`                                                                |
@@ -182,8 +196,8 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/schedules/preview`                                                                     |
 | `POST`   | `/api/skill-drafts/{draft_id}/approve`                                                       |
 | `POST`   | `/api/skill-drafts/{draft_id}/reject`                                                        |
-| `POST`   | `/api/skills/import`                                                                         |
 | `POST`   | `/api/skills/{slug}/approve`                                                                 |
+| `POST`   | `/api/skills/import`                                                                         |
 | `POST`   | `/api/swarms`                                                                                |
 | `POST`   | `/api/swarms/{swarm_id}/run`                                                                 |
 | `POST`   | `/api/workspace/bootstrap`                                                                   |
@@ -191,16 +205,14 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/workspace/resume`                                                                      |
 | `PUT`    | `/api/agents/{agent_id}/approval-policy`                                                     |
 | `PUT`    | `/api/agents/{agent_id}/avatar`                                                              |
-| `PUT`    | `/api/agents/{agent_id}/connectors/discord/{connector_id}/credential`                        |
 | `PUT`    | `/api/agents/{agent_id}/connectors/{connector_id}/credential`                                |
+| `PUT`    | `/api/agents/{agent_id}/connectors/discord/{connector_id}/credential`                        |
 | `PUT`    | `/api/agents/{agent_id}/tasks`                                                               |
 | `PUT`    | `/api/connectors/oauth-apps/{provider}`                                                      |
 | `PUT`    | `/api/skills/{slug}`                                                                         |
 | `PUT`    | `/api/usage/pricing`                                                                         |
 | `PUT`    | `/api/workspace`                                                                             |
 | `PUT`    | `/api/workspace/avatar`                                                                      |
-
-| `PATCH` | `/api/agents/{agent_id}/mcp-connections/{connection_id}/grants/{alias}` |
 
 <!-- openapi-route-inventory:end -->
 

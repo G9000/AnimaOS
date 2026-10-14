@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { ConnectorsView } from './ConnectorsView';
-import { mcpOwnerApi } from '../lib/daemon-api';
+import { communityBundlesOwnerApi, mcpOwnerApi } from '../lib/daemon-api';
+import { communityBundle } from '../test/community-bundles';
 const api = vi.hoisted(() => ({
   calendarStatus: vi.fn(),
   driveStatus: vi.fn(),
@@ -46,6 +47,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.spyOn(mcpOwnerApi, 'list').mockResolvedValue([]);
   vi.spyOn(mcpOwnerApi, 'toolNames').mockResolvedValue(['read_file']);
+  vi.spyOn(communityBundlesOwnerApi, 'list').mockResolvedValue([]);
   api.oauthAppStatus.mockImplementation((provider) =>
     Promise.resolve({
       provider,
@@ -94,6 +96,120 @@ it('M43_owner_connectors_expose_the_external_tools_review_section', () => {
   expect(
     screen.getByRole('button', { name: 'Save disabled connection' }),
   ).toBeVisible();
+});
+it('M45_owner_connectors_expose_the_community_bundles_review_region', () => {
+  render(<ConnectorsView agentId="main" telegram={null} />);
+
+  const region = screen.getByRole('region', { name: 'Community bundles' });
+  expect(region).toBeVisible();
+  const bundles = within(region);
+  expect(
+    bundles.getByRole('textbox', { name: 'Bundle manifest' }),
+  ).toBeVisible();
+  expect(bundles.getByRole('button', { name: 'Review bundle' })).toBeDisabled();
+});
+it('M45 shares the owner lock and preserves dirty MCP fields through canonical bundle changes', async () => {
+  const user = userEvent.setup();
+  const connection = {
+    id: 'http-1',
+    agentId: 'main',
+    label: 'Existing HTTP server',
+    transport: 'streamableHttp' as const,
+    stdio: null,
+    endpoint: 'http://127.0.0.1:8089/mcp',
+    enabled: false,
+    version: 1,
+    reviewedTools: [],
+    state: 'disconnected' as const,
+    wireGeneration: 1,
+    discoveryId: null,
+    candidates: [],
+    physicalCallsActive: false,
+    error: null,
+  };
+  const bundle = communityBundle();
+  let settle!: (value: typeof bundle) => void;
+  const mutation = new Promise<typeof bundle>((resolve) => {
+    settle = resolve;
+  });
+  vi.mocked(mcpOwnerApi.list).mockResolvedValue([connection]);
+  vi.mocked(communityBundlesOwnerApi.list).mockResolvedValue([bundle]);
+  vi.spyOn(communityBundlesOwnerApi, 'get').mockResolvedValue(bundle);
+  vi.spyOn(communityBundlesOwnerApi, 'setEnabled').mockReturnValue(mutation);
+  const canonical = vi.fn().mockResolvedValue(undefined);
+  const busy = vi.fn();
+  render(
+    <ConnectorsView
+      agentId="main"
+      telegram={null}
+      onMcpGrantsChanged={canonical}
+      onMcpBusyChanged={busy}
+    />,
+  );
+  const external = within(
+    await screen.findByRole('article', {
+      name: 'External server Existing HTTP server',
+    }),
+  );
+  await user.click(external.getByText('Edit saved connection'));
+  const label = external.getByRole('textbox', { name: 'Saved label' });
+  const url = external.getByRole('textbox', { name: 'Saved server URL' });
+  await user.clear(label);
+  await user.type(label, 'Unsaved owner label');
+  await user.clear(url);
+  await user.type(url, 'http://127.0.0.1:9099/dirty');
+  const owned = within(
+    screen.getByRole('article', { name: 'Community bundle Violet bundle' }),
+  );
+  await user.click(owned.getByRole('button', { name: 'Inspect bundle' }));
+  await waitFor(() =>
+    expect(owned.getByRole('button', { name: 'Disable bundle' })).toBeEnabled(),
+  );
+  await user.click(owned.getByRole('button', { name: 'Disable bundle' }));
+  expect(label).toBeDisabled();
+  expect(
+    external.getByRole('button', { name: 'Save connection changes' }),
+  ).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Refresh status' })).toBeDisabled();
+  expect(busy).toHaveBeenLastCalledWith(true);
+  vi.mocked(mcpOwnerApi.list).mockResolvedValue([
+    {
+      ...connection,
+      version: 2,
+      label: 'Canonical server',
+      endpoint: 'http://127.0.0.1:8089/new',
+    },
+  ]);
+  await act(async () => {
+    settle({
+      ...bundle,
+      version: 4,
+      enabled: false,
+      state: 'disabled',
+      reviewedComponentStateDigest: 'component-state-4',
+    });
+    await mutation;
+  });
+  await waitFor(() => expect(busy).toHaveBeenLastCalledWith(false));
+  expect(canonical).toHaveBeenCalledWith(bundle.toolNames);
+  expect(
+    external.getByRole('button', { name: 'Save connection changes' }),
+  ).toBeDisabled();
+  expect(label).toHaveValue('Unsaved owner label');
+  expect(url).toHaveValue('http://127.0.0.1:9099/dirty');
+  await user.click(screen.getByRole('button', { name: 'Refresh status' }));
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Save connection changes' }),
+    ).toBeEnabled(),
+  );
+  expect(screen.getByRole('textbox', { name: 'Saved label' })).toHaveValue(
+    'Unsaved owner label',
+  );
+  expect(screen.getByRole('textbox', { name: 'Saved server URL' })).toHaveValue(
+    'http://127.0.0.1:9099/dirty',
+  );
+  expect(communityBundlesOwnerApi.setEnabled).toHaveBeenCalledTimes(1);
 });
 it('sends the reviewed saved draft only after explicit Send', async () => {
   api.mailStatus.mockImplementation((_id, provider) =>

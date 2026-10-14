@@ -53,7 +53,7 @@ impl SkillError {
         Self::Invalid(message.to_string())
     }
 
-    pub(super) fn conflict(message: &str) -> Self {
+    pub(crate) fn conflict(message: &str) -> Self {
         Self::Conflict(message.to_string())
     }
 
@@ -240,13 +240,32 @@ impl SkillService {
         root: &Path,
         change: impl FnOnce(&mut SkillRegistry, u64) -> Result<Change<T>, SkillError>,
     ) -> Result<T, SkillError> {
+        let mut guard = self.state.write().await;
+        let change = change(&mut guard.skills, now_millis())?;
+        let managed = change
+            .slug
+            .as_ref()
+            .is_some_and(|slug| crate::community_bundles::managed_skill(&guard, slug).is_some());
+        if let Some(slug) = &change.slug {
+            if let Err(error) = crate::community_bundles::check_skill_edit(&guard, slug, false) {
+                (change.undo)(&mut guard.skills);
+                return Err(error);
+            }
+        }
+        let prior_generation = guard.community_generation;
+        if managed {
+            guard.community_generation = prior_generation
+                .checked_add(1)
+                .ok_or_else(|| SkillError::conflict("Community bundle generation exhausted"))?;
+        }
+        drop(guard);
         let Change {
             value,
             undo,
             write,
             slug,
             draft_id,
-        } = change(&mut self.state.write().await.skills, now_millis())?;
+        } = change;
         if let Some((written, bytes)) = write {
             let (workspace, target) = (root.to_path_buf(), written.clone());
             let outcome = blocking(move || {
@@ -268,14 +287,48 @@ impl SkillService {
                     // the next scan.
                     let mut guard = self.state.write().await;
                     undo(&mut guard.skills);
+                    guard.community_generation = prior_generation;
                     guard.skills.set_scanned(&written, None);
                     return Err(error);
                 }
             }
         }
-        let persist = self.state.write().await.control_plane_persist_request();
-        if let Err(error) = persist.save().await {
-            undo(&mut self.state.write().await.skills);
+        let persist = {
+            let mut guard = self.state.write().await;
+            let bundles = guard.community_bundles.clone();
+            let generation = guard.community_generation;
+            let rows = guard.mcp_registry.snapshot();
+            let skills = guard.skills.snapshot();
+            let request = guard.control_plane_persist_request();
+            if managed {
+                request
+                    .with_bundle_candidate(bundles, generation, rows, skills, None)
+                    .ok_or_else(|| SkillError::conflict("Community bundle owner changed"))?
+            } else {
+                request
+            }
+        };
+        let saved = if managed {
+            persist.save_mcp_candidate().await
+        } else {
+            persist.save().await
+        };
+        if let Err(error) = saved {
+            let mut guard = self.state.write().await;
+            if managed && crate::control_plane_store::is_durability_uncertain(&error) {
+                if let Some(slug) = &slug {
+                    if let Some(bundle) = guard
+                        .community_bundles
+                        .iter_mut()
+                        .find(|bundle| bundle.skills().any(|part| &part.slug == slug))
+                    {
+                        bundle.state = "unavailable".into();
+                    }
+                }
+            } else {
+                undo(&mut guard.skills);
+                guard.community_generation = prior_generation;
+            }
             return Err(SkillError::Unavailable(error.to_string()));
         }
         self.state
@@ -448,6 +501,11 @@ impl SkillService {
         let review = self.review_file(&slug).await?;
         self.locked(move |service, root| async move {
             let bytes = compose_skill_file(&file.name, &file.description, &file.body).into_bytes();
+            crate::community_bundles::check_skill_edit(
+                &*service.state.read().await,
+                &slug,
+                enabled.unwrap_or(true),
+            )?;
             let hash = skill_hash(&bytes);
             let (target, written_root) = (slug.clone(), root.clone());
             let created = service
@@ -484,6 +542,11 @@ impl SkillService {
     ) -> Result<SkillRecord, SkillError> {
         let slug = slug.to_string();
         self.locked(move |service, root| async move {
+            crate::community_bundles::check_skill_edit(
+                &*service.state.read().await,
+                &slug,
+                enabled,
+            )?;
             let target = slug.clone();
             service
                 .apply(&root, move |skills, now_ms| {
@@ -519,6 +582,15 @@ impl SkillService {
         }
         let slug = slug.to_string();
         self.locked(move |service, root| async move {
+            if crate::community_bundles::check_skill_edit(
+                &*service.state.read().await,
+                &slug,
+                false,
+            )? {
+                return Err(SkillError::conflict(
+                    "Remove this skill through its community bundle",
+                ));
+            }
             let previous = service.state.write().await.skills.remove(&slug);
             let (workspace, target) = (root.clone(), slug.clone());
             let moved =
@@ -618,6 +690,7 @@ impl SkillService {
             if root != read_root {
                 return Err(SkillError::conflict(SKILL_HASH_MISMATCH));
             }
+            crate::community_bundles::check_skill_edit(&*service.state.read().await, &slug, true)?;
             let target = slug.clone();
             service
                 .apply(&root, move |skills, now_ms| {
@@ -661,7 +734,14 @@ impl SkillService {
             else {
                 return Err(SKILLS_NEED_WORKSPACE.to_string());
             };
-            (root, guard.skills.find(name).cloned())
+            (
+                root,
+                guard
+                    .skills
+                    .find(name)
+                    .filter(|record| crate::community_bundles::runnable_skill(&guard, &record.slug))
+                    .cloned(),
+            )
         };
         let Some(record) = record else {
             return Err(skill_not_found(name.trim()));
@@ -681,7 +761,14 @@ impl SkillService {
             else {
                 return Err(SKILLS_NEED_WORKSPACE.to_string());
             };
-            (root, guard.skills.get(slug).cloned())
+            (
+                root,
+                guard
+                    .skills
+                    .get(slug)
+                    .filter(|record| crate::community_bundles::runnable_skill(&guard, &record.slug))
+                    .cloned(),
+            )
         };
         let Some(record) = record else {
             return Err(skill_not_found(slug));
@@ -694,6 +781,9 @@ impl SkillService {
         let guard = self.state.read().await;
         if guard.workspace.is_none() {
             return Err(UNKNOWN_SKILL);
+        }
+        if !crate::community_bundles::runnable_skill(&guard, slug) {
+            return Err(SKILL_NOT_RUNNABLE);
         }
         match guard.skills.runnable(slug) {
             None => Err(UNKNOWN_SKILL),
@@ -708,7 +798,13 @@ impl SkillService {
         if guard.workspace.is_none() {
             return Vec::new();
         }
-        guard.skills.index().into_iter().cloned().collect()
+        guard
+            .skills
+            .index()
+            .into_iter()
+            .filter(|record| crate::community_bundles::runnable_skill(&guard, &record.slug))
+            .cloned()
+            .collect()
     }
 }
 

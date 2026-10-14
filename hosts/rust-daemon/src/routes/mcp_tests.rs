@@ -89,6 +89,256 @@ fn daemon_app() -> (Router, SyntheticSnapshot) {
 }
 
 #[tokio::test]
+async fn m45_owner_bundle_review_saves_no_connection_skill_or_authority() {
+    let (app, snapshot) = daemon_app();
+    let workspace = tempfile::tempdir().unwrap();
+    let (workspace_status, _, configured) = owner_json(
+        &app,
+        "PUT",
+        "/api/workspace",
+        Some(json!({
+            "rootPath": workspace.path().to_str().unwrap(),
+            "companyName": "M45 synthetic workspace",
+            "mission": "Review declarative content without authority",
+            "values": []
+        })),
+    )
+    .await;
+    assert_eq!(workspace_status, StatusCode::OK);
+    assert_eq!(configured["configured"], true);
+    let agent_id = create_ordinary_agent(&app, "M45 ordinary bundle owner").await;
+    let agent_path = format!("/api/agents/{agent_id}");
+    let (before_status, _, before_agent) = owner_json(&app, "GET", &agent_path, None).await;
+    assert_eq!(before_status, StatusCode::OK);
+    let manifest = json!({
+        "schemaVersion": 1,
+        "id": "example.synthetic-violet",
+        "version": "1.0.0",
+        "name": "Synthetic violet procedure",
+        "description": "A declarative inline skill review fixture",
+        "compatibility": {
+            "host": "rust-daemon",
+            "minVersion": "0.1.0",
+            "maxVersionExclusive": "0.2.0",
+            "requiredCapabilities": ["skills.import-draft.v1"]
+        },
+        "permissions": {"nativeToolNames": [], "externalTools": []},
+        "attribution": [{
+            "component": "violet-procedure",
+            "source": "repository-local synthetic fixture",
+            "revision": "synthetic-m45",
+            "license": "repository-license",
+            "notice": "Synthetic declarative review only"
+        }],
+        "components": [{
+            "key": "violet-procedure",
+            "kind": "skill",
+            "skillFile": "---\nname: Violet procedure\ndescription: Inspect synthetic reviewed evidence\n---\n\nUse only existing granted tools and quote the returned provenance.\n"
+        }]
+    });
+    let (review_status, review_cache, _) = owner_json(
+        &app,
+        "POST",
+        &format!("/api/agents/{agent_id}/community-bundles/reviews"),
+        Some(json!({
+            "manifestText": manifest.to_string(),
+            "programBindings": {}
+        })),
+    )
+    .await;
+    assert_eq!(
+        review_status,
+        StatusCode::OK,
+        "an owner can review inline skill content without installing or granting it"
+    );
+    assert_eq!(review_cache, "no-store");
+
+    let (after_status, _, after_agent) = owner_json(&app, "GET", &agent_path, None).await;
+    assert_eq!(after_status, StatusCode::OK);
+    assert_eq!(
+        after_agent["agent"]["state"]["config"]["tools"],
+        before_agent["agent"]["state"]["config"]["tools"],
+        "review cannot change any effective grant"
+    );
+    let (list_status, _, listed) = owner_json(
+        &app,
+        "GET",
+        &format!("/api/agents/{agent_id}/mcp-connections"),
+        None,
+    )
+    .await;
+    assert_eq!(list_status, StatusCode::OK);
+    assert_eq!(listed["connections"], json!([]));
+    let (draft_status, draft_cache, drafts) =
+        owner_json(&app, "GET", "/api/skill-drafts", None).await;
+    assert_eq!(draft_status, StatusCode::OK);
+    assert_eq!(draft_cache, "no-store");
+    assert_eq!(drafts["drafts"], json!([]));
+    let (skill_status, _, skills) = owner_json(&app, "GET", "/api/skills", None).await;
+    assert_eq!(skill_status, StatusCode::OK);
+    assert_eq!(skills["skills"], json!([]));
+    let saved = crate::control_plane_store::load_control_plane_snapshot(
+        &crate::control_plane_store::ControlPlaneStoreConfig::Json(snapshot.0.clone()),
+    )
+    .await
+    .unwrap()
+    .expect("ordinary agent creation persists the synthetic snapshot");
+    assert!(saved.mcp_connections.is_empty());
+    assert!(
+        saved.skills.is_empty(),
+        "review cannot approve or save a skill"
+    );
+    assert!(
+        saved.skill_drafts.is_empty(),
+        "review cannot stage a skill draft"
+    );
+}
+
+#[tokio::test]
+async fn m45_owner_routes_keep_canonical_permissions_and_refuse_managed_draft_edits() {
+    let (app, snapshot) = daemon_app();
+    let workspace = tempfile::tempdir().unwrap();
+    assert_eq!(owner_json(&app,"PUT","/api/workspace",Some(json!({"rootPath":workspace.path().to_str().unwrap(),"companyName":"Synthetic M45 lifecycle","mission":"Bounded owner-route evidence","values":[]}))).await.0,StatusCode::OK);
+    let agent = create_ordinary_agent(&app, "M45 route lifecycle owner").await;
+    let path = format!("/api/agents/{agent}/community-bundles");
+    let (_, _, before) = owner_json(&app, "GET", &format!("/api/agents/{agent}"), None).await;
+    let tool_names = before["agent"]["state"]["config"]["tools"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|tool| tool["name"].clone())
+        .collect::<Vec<_>>();
+    let manifest = json!({"schemaVersion":1,"id":"synthetic.route-procedure","version":"1.0.0","name":"Synthetic route procedure","description":"Owner-route lifecycle fixture",
+      "compatibility":{"host":"rust-daemon","minVersion":"0.1.0","maxVersionExclusive":"0.2.0","requiredCapabilities":["skills.import-draft.v1"]},"permissions":{"nativeToolNames":["shell"],"externalTools":[]},
+      "attribution":[{"component":"procedure","source":"local synthetic test","revision":"m45","license":"MIT","notice":"Synthetic only"}],
+      "components":[{"kind":"skill","key":"procedure","skillFile":"---\nname: Route procedure\ndescription: Controlled content\n---\n\nQuote controlled evidence.\n"}]});
+    let (status, cache, review) = owner_json(
+        &app,
+        "POST",
+        &format!("{path}/reviews"),
+        Some(json!({"manifestText":manifest.to_string(),"programBindings":{}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cache, "no-store");
+    let receipt =
+        json!({"reviewId":review["review"]["id"],"reviewDigest":review["review"]["reviewDigest"]});
+    let (status, cache, installed) = owner_json(&app, "POST", &path, Some(receipt.clone())).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(cache, "no-store");
+    assert_eq!(installed["bundle"]["toolNames"], json!(tool_names));
+    let member = &installed["bundle"]["components"][0];
+    let draft = member["draftId"].as_str().unwrap();
+    let (status, _, edited) = owner_json(
+        &app,
+        "POST",
+        &format!("/api/skill-drafts/{draft}/approve"),
+        Some(json!({"body":"Changed through approval body"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(edited["error"].is_string());
+    assert!(!workspace.path().join("skills").exists());
+    assert_eq!(
+        owner_json(&app, "POST", &path, Some(receipt)).await.0,
+        StatusCode::CONFLICT
+    );
+    let bundle_id = installed["bundle"]["id"].as_str().unwrap();
+    assert_eq!(
+        owner_json(&app, "DELETE", &format!("/api/agents/{agent}"), None)
+            .await
+            .0,
+        StatusCode::CONFLICT
+    );
+    let input = json!({"expectedVersion":installed["bundle"]["version"],"reviewedComponentStateDigest":installed["bundle"]["reviewedComponentStateDigest"],"enabled":false});
+    let (status, cache, disabled) =
+        owner_json(&app, "PATCH", &format!("{path}/{bundle_id}"), Some(input)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cache, "no-store");
+    assert_eq!(disabled["bundle"]["state"], "disabled");
+    assert_eq!(disabled["bundle"]["toolNames"], json!(tool_names));
+    assert_eq!(
+        owner_json(
+            &app,
+            "POST",
+            &format!("/api/skill-drafts/{draft}/approve"),
+            Some(json!({}))
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+    let input = json!({"expectedVersion":disabled["bundle"]["version"],"reviewedComponentStateDigest":disabled["bundle"]["reviewedComponentStateDigest"]});
+    let (status, cache, removed) =
+        owner_json(&app, "DELETE", &format!("{path}/{bundle_id}"), Some(input)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cache, "no-store");
+    assert_eq!(removed["removed"], true);
+    assert_eq!(removed["trashPaths"], json!([]));
+    assert_eq!(removed["toolNames"], json!(tool_names));
+    assert_eq!(
+        owner_json(&app, "GET", &path, None).await.2["bundles"],
+        json!([])
+    );
+    let saved = crate::control_plane_store::load_control_plane_snapshot(
+        &crate::control_plane_store::ControlPlaneStoreConfig::Json(snapshot.0.clone()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(saved.community_bundles.is_empty());
+    assert!(saved.skill_drafts.is_empty());
+    assert!(saved.skills.is_empty());
+}
+
+#[tokio::test]
+async fn m45_owner_review_allows_bounded_json_escaping_and_static_strict_input_errors() {
+    let (app, _snapshot) = daemon_app();
+    let workspace = tempfile::tempdir().unwrap();
+    let agent = create_ordinary_agent(&app, "M45 strict route owner").await;
+    let path = format!("/api/agents/{agent}/community-bundles/reviews");
+    let (status, _, error) = owner_json(
+        &app,
+        "GET",
+        &format!("/api/agents/{agent}/community-bundles"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(error["error"].is_string());
+    assert_eq!(owner_json(&app,"PUT","/api/workspace",Some(json!({"rootPath":workspace.path().to_str().unwrap(),"companyName":"M45 escaped review","mission":"Bounded decoded source","values":[]}))).await.0,StatusCode::OK);
+    let source = format!(
+        "---\nname: Escaped procedure\ndescription: Synthetic bounded text\n---\n\n{}",
+        "\\".repeat(20 * 1024)
+    );
+    let manifest = json!({"schemaVersion":1,"id":"synthetic.escaped","version":"1.0.0","name":"Escaped synthetic source","description":"Bounded JSON escaping",
+      "compatibility":{"host":"rust-daemon","minVersion":"0.1.0","maxVersionExclusive":"0.2.0","requiredCapabilities":["skills.import-draft.v1"]},"permissions":{"nativeToolNames":[],"externalTools":[]},
+      "attribution":[{"component":"synthetic","source":"local synthetic test","revision":"m45","license":"MIT","notice":"Synthetic only"}],
+      "components":[{"kind":"skill","key":"first","skillFile":source},{"kind":"skill","key":"second","skillFile":source}]});
+    let valid = json!({"manifestText":manifest.to_string(),"programBindings":{}});
+    assert!(valid.to_string().len() > 64 * 1024);
+    assert_eq!(
+        owner_json(&app, "POST", &path, Some(valid.clone())).await.0,
+        StatusCode::OK
+    );
+    for input in [
+        json!({"manifestText":manifest.to_string(),"programBindings":{},"expectedBundleVersion":1}),
+        json!({"manifestText":manifest.to_string(),"programBindings":{},"bundleId":null}),
+        json!({"manifestText":manifest.to_string(),"programBindings":{},"environment":{}}),
+    ] {
+        let (status, cache, error) = owner_json(&app, "POST", &path, Some(input)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(cache, "no-store");
+        assert_eq!(error, json!({"error":"Community bundle input is invalid"}));
+    }
+    let (status, _, error) =
+        owner_json_from(&app, "https://foreign.invalid", "POST", &path, Some(valid)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(error["error"].is_string());
+    assert!(!workspace.path().join("skills").exists());
+}
+
+#[tokio::test]
 async fn m42_save_only_owner_connection_stays_disabled_and_ungranted() {
     let (app, _snapshot) = daemon_app();
     let agent_id = create_ordinary_agent(&app, "M42 ordinary agent").await;

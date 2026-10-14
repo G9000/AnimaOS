@@ -25,6 +25,7 @@ impl ConnectorManager {
                     return Err(ConnectorManagerError::AgentBusy);
                 }
                 if !crate::connectors::drive::can_tombstone_agent(&state,&agent_id){return Err(ConnectorManagerError::Persistence);}
+                if state.community_bundles.iter().any(|bundle|bundle.agent_id==agent_id){return Err(ConnectorManagerError::Persistence);}
             }
             let connectors = manager
                 .state
@@ -76,6 +77,9 @@ impl ConnectorManager {
             // protocol): a crash right after a successful save still replays
             // this deletion on restart.
             if !crate::connectors::drive::can_tombstone_agent(&*manager.state.read().await,&agent_id) {
+                drop(_transaction);manager.restore_agent_delete_configuration(&previous).await?;return Err(ConnectorManagerError::Persistence);
+            }
+            if manager.state.read().await.community_bundles.iter().any(|bundle|bundle.agent_id==agent_id) {
                 drop(_transaction);manager.restore_agent_delete_configuration(&previous).await?;return Err(ConnectorManagerError::Persistence);
             }
             let deletion = HistoryDeletion::agent(&agent_id);

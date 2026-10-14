@@ -1597,6 +1597,9 @@ pub(crate) struct DaemonState {
     pub(crate) mcp_registry: crate::mcp::McpRegistry,
     pub(crate) mcp_publication: crate::mcp::SharedMcpPublication,
     pub(crate) mcp_manager: Option<crate::mcp::McpManager>,
+    pub(crate) community_bundles: Vec<crate::community_bundles::BundleRecord>,
+    pub(crate) community_generation: u64,
+    pub(crate) community_reviews: HashMap<String, crate::community_bundles::ReviewReceipt>,
     pub(crate) control_plane_store: Option<ControlPlaneStoreConfig>,
     control_plane_revision: u64,
     control_plane_persist_order: Arc<ControlPlanePersistOrder>,
@@ -1670,6 +1673,7 @@ pub(crate) struct ControlPlanePersistRequest {
     action_candidate: Option<String>,
     mcp_candidate: bool,
     mcp_removed_grants: Option<(String, Vec<String>)>,
+    bundle_candidate: bool,
 }
 
 struct ControlPlanePersistOrder {
@@ -1687,6 +1691,14 @@ struct ControlPlaneAcknowledged {
     mcp_connections: Option<Vec<crate::mcp::McpConnectionRecord>>,
     mcp_removed_grants: Option<(String, Vec<String>)>,
     mcp_grants: HashMap<String, AcknowledgedMcpGrants>,
+    bundles: Option<AcknowledgedBundles>,
+}
+
+struct AcknowledgedBundles {
+    generation: u64,
+    records: Vec<crate::community_bundles::BundleRecord>,
+    skills: Vec<crate::skills::SkillRecord>,
+    drafts: Vec<crate::skills::SkillDraft>,
 }
 
 /// Only current own reviewed aliases are retained; four connections and 128
@@ -1761,6 +1773,23 @@ impl ControlPlanePersistRequest {
 
     pub(crate) async fn save_mcp_candidate(self) -> std::io::Result<()> {
         self.save_ordered(true).await
+    }
+
+    pub(crate) fn with_bundle_candidate(
+        self,
+        bundles: Vec<crate::community_bundles::BundleRecord>,
+        generation: u64,
+        rows: Vec<crate::mcp::McpConnectionRecord>,
+        skills: crate::skills::SkillSnapshot,
+        remove_grants: Option<(String, Vec<String>)>,
+    ) -> Option<Self> {
+        let mut request = self.with_mcp_candidate(rows, remove_grants)?;
+        request.snapshot.community_bundles = bundles;
+        request.snapshot.community_generation = generation;
+        request.snapshot.skills = skills.skills;
+        request.snapshot.skill_drafts = skills.drafts;
+        request.bundle_candidate = true;
+        Some(request)
     }
 
     pub(crate) fn with_mcp_grant_candidate(
@@ -1917,6 +1946,32 @@ impl ControlPlanePersistRequest {
                 }
             }
         }
+        // Bundle candidates and ordinary managed skill approvals share this
+        // publication generation. Merge only managed metadata, preserving
+        // unrelated skills and newer owner changes in the prepared snapshot.
+        if !self.bundle_candidate {
+            if let Some(bundles) = &acknowledged.bundles {
+                if self.snapshot.community_generation < bundles.generation {
+                    let slugs: HashSet<_> = self
+                        .snapshot
+                        .community_bundles
+                        .iter()
+                        .chain(bundles.records.iter())
+                        .flat_map(|bundle| bundle.skills().map(|part| part.slug.clone()))
+                        .collect();
+                    self.snapshot
+                        .skills
+                        .retain(|skill| !slugs.contains(&skill.slug));
+                    self.snapshot.skills.extend(bundles.skills.clone());
+                    self.snapshot
+                        .skill_drafts
+                        .retain(|draft| draft.bundle_source.is_none());
+                    self.snapshot.skill_drafts.extend(bundles.drafts.clone());
+                    self.snapshot.community_bundles = bundles.records.clone();
+                    self.snapshot.community_generation = bundles.generation;
+                }
+            }
+        }
         #[cfg(test)]
         let test_save_gate = {
             self.order
@@ -1956,10 +2011,12 @@ impl ControlPlanePersistRequest {
                 acknowledged.mcp_connections = Some(self.snapshot.mcp_connections.clone());
                 acknowledged.mcp_removed_grants = self.mcp_removed_grants;
                 acknowledged.mcp_grants = acknowledged_mcp_grants(&self.snapshot);
+                acknowledged.bundles = Some(acknowledged_bundles(&self.snapshot));
             }
             return Err(error);
         }
         acknowledged.revision = self.revision;
+        acknowledged.bundles = Some(acknowledged_bundles(&self.snapshot));
         if self.mcp_candidate || acknowledged.mcp_connections.is_some() {
             acknowledged.mcp_connections = Some(self.snapshot.mcp_connections.clone());
         }
@@ -1985,6 +2042,30 @@ impl ControlPlanePersistRequest {
             })
             .collect();
         Ok(())
+    }
+}
+
+fn acknowledged_bundles(snapshot: &ControlPlaneSnapshot) -> AcknowledgedBundles {
+    let slugs: HashSet<_> = snapshot
+        .community_bundles
+        .iter()
+        .flat_map(|bundle| bundle.skills().map(|part| part.slug.as_str()))
+        .collect();
+    AcknowledgedBundles {
+        generation: snapshot.community_generation,
+        records: snapshot.community_bundles.clone(),
+        skills: snapshot
+            .skills
+            .iter()
+            .filter(|skill| slugs.contains(skill.slug.as_str()))
+            .cloned()
+            .collect(),
+        drafts: snapshot
+            .skill_drafts
+            .iter()
+            .filter(|draft| draft.bundle_source.is_some())
+            .cloned()
+            .collect(),
     }
 }
 
@@ -2098,6 +2179,9 @@ impl DaemonState {
             memory_views: crate::memory_views::MemoryViewRegistry::default(),
             memory_view_selections: crate::memory_views::MemoryViewRegistry::default().published(),
             mcp_registry: crate::mcp::McpRegistry::default(),
+            community_bundles: Vec::new(),
+            community_generation: 0,
+            community_reviews: HashMap::new(),
             mcp_publication: crate::mcp::McpRegistry::default().published(),
             mcp_manager: None,
             control_plane_store: None,
@@ -2236,6 +2320,7 @@ impl DaemonState {
             action_candidate: None,
             mcp_candidate: false,
             mcp_removed_grants: None,
+            bundle_candidate: false,
         }
     }
 
@@ -2338,6 +2423,8 @@ impl DaemonState {
         snapshot.mail_records = self.mail_records.values().cloned().collect();
         snapshot.mail_drafts = self.mail_drafts.values().cloned().collect();
         snapshot.workspace = self.workspace.clone();
+        snapshot.community_bundles = self.community_bundles.clone();
+        snapshot.community_generation = self.community_generation;
         snapshot.drive_records = self.drive_records.values().cloned().collect();
         snapshot.drive_records.sort_by(|a, b| a.id.cmp(&b.id));
         snapshot.discord_connectors = self.discord_connectors.values().cloned().collect();
@@ -2451,6 +2538,9 @@ impl DaemonState {
         // Ledger session ids follow the room mapping; always idempotent.
         let mapped_runs = crate::sessions::migration::map_ledger_session_ids(&mut snapshot.runs);
         self.workspace = snapshot.workspace.clone();
+        self.community_bundles = snapshot.community_bundles.clone();
+        self.community_generation = snapshot.community_generation;
+        self.community_reviews.clear();
         let mut restored_agents = 0;
         let mut restored_swarms = 0;
 
@@ -2634,6 +2724,7 @@ impl DaemonState {
             },
             anima_core::primitives::now_millis(),
         );
+        crate::community_bundles::restore_records(self);
         self.schedule_fires = crate::schedules::FireLog::restored(snapshot.schedule_fires);
         // A saved list that no longer validates is dropped whole: pricing is
         // advisory, so a restore never fails on it.
@@ -2752,6 +2843,7 @@ impl DaemonState {
             &snapshot.approval_rules,
         )?;
         crate::skills::SkillRegistry::validate(&snapshot.skills, &snapshot.skill_drafts)?;
+        crate::community_bundles::validate_snapshot(snapshot)?;
         for draft in &snapshot.skill_drafts {
             if let Some(source) = &draft.learning_source {
                 let matches = snapshot.learning_reviews.iter().any(|review| {
