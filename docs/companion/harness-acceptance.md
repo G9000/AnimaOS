@@ -440,3 +440,29 @@ failed-call consumption is unknown. The predeclared request release is consumed.
 This new rejection does not recover M47's historical body/cause or accept its
 coding task. Account-aware subscription model availability/selection is next;
 voice and broader useful-provider parity remain open. See the [M48 plan](../superpowers/plans/2026-10-15-companion-provider-diagnostics-m48.md).
+
+## M49: deliberate subscription selection and unavailable metadata
+
+The [M49 plan](../superpowers/plans/2026-10-15-companion-subscription-models-m49.md)
+records implemented account-scoped metadata, a bounded fixed-query adapter,
+ephemeral principal-bound cache, cache-only owner GET/explicit Refresh, typed SDK
+and shared web selection. New ChatGPT setup starts without a model default;
+saved/custom/dirty strings and grants are preserved. Catalog rows are selection
+metadata, never proof of generation access or tool compatibility.
+
+Fresh required gates: **2,709 Rust/core tests / 20 intentional ignores / 40 suites**,
+Rust formatting/build, **151 SDK / three intentional service skips**, **1,320 web /
+115 files**, SDK/web type checks and builds. The one native/core review issue was
+an asynchronous acquisition/publication deadline gap: two regressions were observed
+RED before the fix, then GREEN in the full suite. Final SDK/web review was clean.
+All 29 reviewed source/README hashes stayed frozen; compiled route inventory194.
+Pinned public Hermes metadata behavior is reused with the retained MIT notice.
+
+The one separately released metadata-only actual check selected exactly one test
+and returned **unavailable** with zero IDs and a fixed unavailable error in
+**1.45 seconds**. This failed availability result is not a valid empty catalog.
+No raw cause was retained; transport/non-success HTTP/credential/size distinctions
+remain unknown. No retry, alternate query/version/model/provider, generation,
+helper, daemon, real connector, DB server or container followed. Its release is
+consumed. No useful provider task, memory-content recovery or broader parity is
+accepted by this check; M47's failed candidate/result remains immutable.

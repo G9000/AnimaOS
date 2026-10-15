@@ -300,7 +300,6 @@ export interface LegacyScheduleInput {
 /** Model suggestions keyed by daemon provider id. */
 export const MODEL_SUGGESTIONS: Record<string, string[]> = {
   ...PROVIDER_MODELS,
-  chatgpt: ['gpt-5.5', 'gpt-5.6-luna'],
   deterministic: ['deterministic'],
 };
 

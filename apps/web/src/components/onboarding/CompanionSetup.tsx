@@ -76,7 +76,11 @@ export function CompanionSetup({
       );
     if (available) {
       setProvider(available.id);
-      setModel(MODEL_SUGGESTIONS[available.id]?.[0] ?? '__custom__');
+      setModel(
+        available.id === 'chatgpt'
+          ? ''
+          : (MODEL_SUGGESTIONS[available.id]?.[0] ?? '__custom__'),
+      );
     }
   }, [providers, provider]);
 
@@ -216,8 +220,13 @@ export function CompanionSetup({
             model={model}
             customModel={customModel}
             onProviderChange={(value) => {
+              if (value === provider) return;
               setProvider(value);
-              setModel(MODEL_SUGGESTIONS[value]?.[0] ?? '__custom__');
+              setModel(
+                value === 'chatgpt'
+                  ? ''
+                  : (MODEL_SUGGESTIONS[value]?.[0] ?? '__custom__'),
+              );
               setCustomModel('');
             }}
             onModelChange={setModel}

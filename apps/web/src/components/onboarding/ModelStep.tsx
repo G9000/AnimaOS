@@ -1,8 +1,9 @@
-import { useEffect, useRef, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 
 import { MODEL_SUGGESTIONS, type DaemonProvider } from '../../lib/daemon-api';
 import { labelCls } from '../ui-bits';
 import { ChatGptConnection } from '../ChatGptConnection';
+import { ChatGptModelSelect } from '../ChatGptModelSelect';
 
 export interface ModelStepProps {
   providers: DaemonProvider[] | null;
@@ -60,12 +61,15 @@ export function ModelStep({
   customModelValidationErrorId,
 }: ModelStepProps) {
   const modelSuggestions = MODEL_SUGGESTIONS[provider] ?? [];
+  const [modelScope, setModelScope] = useState({ revision: 0, pending: false });
   const selectedProviderRef = useRef<HTMLButtonElement>(null);
   const retryButtonRef = useRef<HTMLButtonElement>(null);
   const providerCatalogBusy =
     catalogState === 'loading' || catalogState === 'retrying';
   const chatGpt = providers?.find((candidate) => candidate.id === 'chatgpt');
-  const selectedProvider = providers?.find((candidate) => candidate.id === provider);
+  const selectedProvider = providers?.find(
+    (candidate) => candidate.id === provider,
+  );
 
   useEffect(() => {
     if (catalogState === 'error' || catalogState === 'empty') {
@@ -93,10 +97,16 @@ export function ModelStep({
         </p>
       </div>
 
-      {provider && catalogState === 'ready' && !selectedProvider?.configured && (
-          <p role="status" className="rounded-xl border border-amber/30 bg-amber/5 p-4 text-sm text-ink-2">
-            Your selected provider ({selectedProvider?.label ?? provider}) is unavailable.
-            Your model selection is kept. Reconnect it, or choose another provider to continue.
+      {provider &&
+        catalogState === 'ready' &&
+        !selectedProvider?.configured && (
+          <p
+            role="status"
+            className="rounded-xl border border-amber/30 bg-amber/5 p-4 text-sm text-ink-2"
+          >
+            Your selected provider ({selectedProvider?.label ?? provider}) is
+            unavailable. Your model selection is kept. Reconnect it, or choose
+            another provider to continue.
           </p>
         )}
 
@@ -107,11 +117,19 @@ export function ModelStep({
               Start with your ChatGPT subscription
             </h3>
             <p className="mt-1 text-sm text-ink-2">
-              Sign in and use your plan for your companion. No
-              other AI provider connection or API key is needed.
+              Sign in and use your plan for your companion. No other AI provider
+              connection or API key is needed.
             </p>
           </div>
-          <ChatGptConnection onConnectionChange={onRetryProviders} />
+          <ChatGptConnection
+            onConnectionChange={onRetryProviders}
+            onModelScopeChange={(pending) =>
+              setModelScope((current) => ({
+                revision: current.revision + 1,
+                pending,
+              }))
+            }
+          />
           <button
             ref={provider === 'chatgpt' ? selectedProviderRef : undefined}
             type="button"
@@ -240,7 +258,20 @@ export function ModelStep({
         </div>
       </details>
 
-      {catalogState === 'ready' ? (
+      {catalogState === 'ready' && provider === 'chatgpt' ? (
+        <ChatGptModelSelect
+          id="onboarding-model"
+          scopeKey={`onboarding:${modelScope.revision}`}
+          connectionPending={modelScope.pending}
+          model={model}
+          customModel={customModel}
+          onModelChange={onModelChange}
+          onCustomModelChange={onCustomModelChange}
+          modelSelectRef={modelSelectRef}
+          customModelInputRef={customModelInputRef}
+          customModelValidationErrorId={customModelValidationErrorId}
+        />
+      ) : catalogState === 'ready' ? (
         <>
           <div>
             <label htmlFor="onboarding-model" className={labelCls}>

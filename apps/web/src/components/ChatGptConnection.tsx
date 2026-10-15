@@ -8,8 +8,11 @@ const buttonClass =
 
 export function ChatGptConnection({
   onConnectionChange,
+  onModelScopeChange,
 }: {
   onConnectionChange?: () => void | Promise<void>;
+  /** Invalidates picker requests before auth work; settled events reconcile cache only. */
+  onModelScopeChange?: (pending: boolean) => void;
 }) {
   const [status, setStatus] = useState<ChatGptStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -18,22 +21,29 @@ export function ChatGptConnection({
   const [poll, setPoll] = useState(0);
   const generation = useRef(0);
   const connected = useRef<boolean | null>(null);
+  const account = useRef<string | null>(null);
   const onChange = useRef(onConnectionChange);
   onChange.current = onConnectionChange;
+  const modelScopeChange = useRef(onModelScopeChange);
+  modelScopeChange.current = onModelScopeChange;
 
   async function request(
     action: 'status' | 'login' | 'cancel' | 'disconnect',
     foreground = true,
   ) {
     const version = ++generation.current;
-    if (foreground) setBusy(true);
+    if (foreground) {
+      setBusy(true);
+      modelScopeChange.current?.(true);
+    }
     setError(null);
     try {
       const next = await client[action]();
       if (version !== generation.current) return;
       setStatus(next);
       if (
-        connected.current !== next.connected &&
+        (connected.current !== next.connected ||
+          account.current !== next.accountId) &&
         (connected.current !== null || next.connected)
       ) {
         void Promise.resolve(onChange.current?.()).catch(() => {
@@ -43,7 +53,15 @@ export function ChatGptConnection({
             );
         });
       }
+      if (
+        !foreground &&
+        (connected.current !== next.connected ||
+          account.current !== next.accountId)
+      ) {
+        modelScopeChange.current?.(false);
+      }
       connected.current = next.connected;
+      account.current = next.accountId;
     } catch (cause) {
       if (version === generation.current)
         setError(
@@ -53,6 +71,7 @@ export function ChatGptConnection({
         );
     } finally {
       if (version === generation.current) {
+        if (foreground) modelScopeChange.current?.(false);
         setBusy(false);
         setNow(Date.now());
         setPoll((value) => value + 1);

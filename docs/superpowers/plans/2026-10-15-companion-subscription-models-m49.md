@@ -2,14 +2,13 @@
 
 > For workers: use the existing lean controller workflow and disjoint releases.
 
-Status: bound plan active on `g9000/companion-subscription-models-m49`, cut from
-verified M48/PR54 main `317792304772f8cf203f6d6335a1d4a95d4c5cf1`.
-M48 source `cc5c2bba03323b2889c6132d1fbd681f4a72b4fc` and that merge share tested
-tree `729a71aea0e8d5153142afa2fec0dbb049f4f19f`. M48 is committed/pushed/merged;
-its one zero-tool request rejected model access. Exact current release/resume is
+Status: scoped implementation complete; required local gates pass on
+`g9000/companion-subscription-models-m49`, cut from verified M48/PR54 main
+`317792304772f8cf203f6d6335a1d4a95d4c5cf1`. The one separately released actual
+metadata refresh returned unavailable; no catalog or generation is accepted.
+Exact source/PR/verified merge settlement and resume are in
 `.superpowers/sdd/2026-10-15-companion-subscription-models-m49/progress.md`.
-No M49 source, actual metadata request or generation is implied by this plan.
-Do not recover, retry, repair or replay M47's failed useful coding task.
+M47's failed useful task and M48's consumed generation release remain unchanged.
 
 **Goal:** Stop selecting a static subscription default as though account access
 were known; offer bounded current-account catalog metadata and deliberate selection.
@@ -467,3 +466,47 @@ Core success/status/body bounds are tested with joined synthetic HTTP peers.
 Native auth/cache late results and default routes use in-memory auth/fake metadata,
 never OS vault. The ignored optional actual driver must check its exact opt-in
 before auth/client/vault/I/O and stay held until root release after gates.
+
+## Recorded outcome (2026-10-15)
+
+Implemented the reusable fixed-route bounded catalog adapter and ephemeral
+principal-bound host cache, cache-only owner GET, explicit owner POST Refresh,
+typed SDK and shared web selector. New ChatGPT setup requires deliberate selection.
+Saved/custom/dirty models and grants survive cache/account transitions; metadata
+never changes inference dispatch or proves generation entitlement. Pinned public
+Hermes ranking/query behavior is narrowly reused with the existing MIT notice.
+No new dependency, manifest/lockfile, ordinary profile or service was introduced.
+
+Meaningful decoder, actual-route and rendered-default REDs preceded implementation.
+The final SDK/web review was clean. The combined native/core review found one
+asynchronous deadline gap; two contention regressions failed against original
+production, then passed after the one fix wave. One absolute deadline now covers
+initial lock acquisition through publication. Expiry invalidates the private cache
+epoch before single-flight release, without awaited or spawned cleanup. Existing
+synchronous OS-vault operations are not newly promised physically preemptible.
+
+Required fresh gates passed: **2,709 Rust/core tests / 20 intentional ignores /
+40 suites**, Rust formatting/build, **151 SDK tests / three real-service skips**,
+**1,320 web tests / 115 files**, SDK/web type checks and builds. Both deadline
+regressions and the compiled 194-operation README/OpenAPI inventory passed.
+All 29 reviewed source/README hashes remained unchanged throughout the gates.
+Owned Markdown/TypeScript formatting and final document checks are recorded in
+the private ledger. Local gates remain authoritative given the known Nx Cloud step.
+
+After gates, the single metadata-only driver selected exactly one ignored test
+through normal application vault access. It returned state **unavailable**,
+zero IDs, fixed `Model metadata is unavailable.` in **1.45 seconds**. The
+empty-ID JSON digest is
+`4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945`.
+This is a failed availability check, not a successful empty catalog. The fixed
+category does not distinguish transport, non-success HTTP, credential resolution
+or a size-bound failure; no raw error body/cause was retained. No retry, query
+fallback, generation, helper, daemon, connector, DB server or container followed.
+At most one catalog GET was authorized; whether every pre-dispatch condition
+succeeded is not proven by this redacted receipt. The release is consumed.
+
+Useful provider coding/delegation remains unaccepted. A distinct JSONL task and
+literal independent oracle may be prepared next, while generation remains held
+until deliberate current-account selection has evidence. Preserve the original
+M47 failed candidate/result; do not repair/replay it or substitute a guessed slug.
+Native voice and broader account/host/quality parity stay open.

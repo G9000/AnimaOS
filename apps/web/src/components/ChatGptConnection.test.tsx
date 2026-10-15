@@ -46,6 +46,32 @@ describe('ChatGPT connection lifecycle', () => {
   });
   afterEach(() => vi.useRealTimers());
 
+  it('m49_chatgpt_models_invalidates_before_auth_mutation_and_reconciles_after_settlement', async () => {
+    api.status.mockResolvedValue(connected);
+    let complete!: (value: typeof disconnected) => void;
+    api.disconnect.mockReturnValue(
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+    );
+    const scopeChanged = vi.fn();
+    render(<ChatGptConnection onModelScopeChange={scopeChanged} />);
+    await settle();
+    expect(scopeChanged.mock.calls.map(([pending]) => pending)).toEqual([
+      true,
+      false,
+    ]);
+    scopeChanged.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect ChatGPT' }));
+    expect(scopeChanged.mock.calls.map(([pending]) => pending)).toEqual([true]);
+    await act(async () => complete(disconnected));
+    expect(scopeChanged.mock.calls.map(([pending]) => pending)).toEqual([
+      true,
+      false,
+    ]);
+    expect(screen.getByText('ChatGPT is not connected.')).toBeVisible();
+  });
+
   it('recovers pending login and stops polling when authorization completes', async () => {
     api.status.mockResolvedValueOnce(pending()).mockResolvedValue(connected);
     const changed = vi.fn();
@@ -110,11 +136,15 @@ describe('ChatGPT connection lifecycle', () => {
   });
 
   it('can clear a partially deleted saved connection after reopening settings', async () => {
-    api.status.mockRejectedValue(new Error('ChatGPT credential vault is unavailable'));
+    api.status.mockRejectedValue(
+      new Error('ChatGPT credential vault is unavailable'),
+    );
     api.disconnect.mockResolvedValue(disconnected);
     render(<ChatGptConnection />);
     await settle();
-    fireEvent.click(screen.getByRole('button', { name: 'Clear saved ChatGPT connection' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Clear saved ChatGPT connection' }),
+    );
     await settle();
     expect(api.disconnect).toHaveBeenCalledOnce();
     expect(screen.getByText('ChatGPT is not connected.')).toBeTruthy();

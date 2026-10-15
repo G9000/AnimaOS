@@ -29,20 +29,20 @@ All PAR-01–PAR-12 implementer and reviewer briefs inherit this policy; their d
 
 Each PAR ID is stable. Milestone numbers after M38 are assigned when its detailed plan is cut from then-current main. File/API names below are candidates; capability, authority, scope and evidence requirements are binding.
 
-| ID     | Deliverable                                                  | Current state                                                                                                                    | Dependency / accountable lane                                  |
-| ------ | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| PAR-01 | Budgeted post-task learning and durable advice               | M38 implemented; one real anchored review and quiet restart accepted; advice only                                                | M38 native learning + SDK/web; PAR-02 closes adoption/reuse    |
-| PAR-02 | Apply reviewed lessons to memory/skills and prove reuse      | M39 skill reuse and M40 profile/correction effects accepted; broader quality open                                                | PAR-01; native skills/memory + owner UI                        |
-| PAR-03 | Rich own-history discovery and anchored reading              | M41 filtered anchors/window, optional owner grant and one source-cited task accepted                                             | Existing history; native history + tool contracts              |
-| PAR-04 | Dynamic MCP tools and installable community extensions       | M42–M45 HTTP/Windows MCP and reviewed MCP/skill bundles locally accepted; auth/selected servers/non-Windows/contributions open   | Existing tool policy; native protocol + SDK/web                |
-| PAR-05 | Interactive browser work                                     | Scoped Windows loopback browser locally accepted in M46; public/account/other-host/provider quality remains open                 | Narrow BrowserPort, owned worker and owner UI                  |
-| PAR-06 | Longer coding and delegated-task acceptance                  | M47 deterministic coding/Windows ownership and failed-run restart pass; actual subscription task rejected HTTP 400; quality open | Current harness; optional PAR-02/PAR-04 adapters               |
-| PAR-07 | Native voice input/output                                    | Browser speech conveniences only                                                                                                 | Attachment lifecycle; native audio + composer                  |
-| PAR-08 | Text/image acceptance and PDF/Office understanding           | Upload/storage exists; vision conditional; format extraction missing                                                             | Existing attachments/model adapters; document worker + SDK/web |
-| PAR-09 | Selected real connector workflows                            | Telegram/Discord/Google code exists; real-account acceptance unverified                                                          | Current connector code; later relevant media/browser changes   |
-| PAR-10 | Recurring schedules, outages and interrupted-work acceptance | Scheduler/receipts/recovery exist; recurrence/outage evidence incomplete                                                         | Current scheduler; optional PAR-06 acceptance fixtures         |
-| PAR-11 | Always-on single-owner installation and recovery             | Deployment instructions/offline checks exist; target-host acceptance missing                                                     | Release with required capabilities; deployment/operator lane   |
-| PAR-12 | Clear capability controls and daily-use status               | Settings/approvals/catalog exist; cross-capability lifecycle UI incomplete                                                       | Add incrementally with PAR-01/04/05/07/08/09                   |
+| ID     | Deliverable                                                  | Current state                                                                                                                                  | Dependency / accountable lane                                  |
+| ------ | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| PAR-01 | Budgeted post-task learning and durable advice               | M38 implemented; one real anchored review and quiet restart accepted; advice only                                                              | M38 native learning + SDK/web; PAR-02 closes adoption/reuse    |
+| PAR-02 | Apply reviewed lessons to memory/skills and prove reuse      | M39 skill reuse and M40 profile/correction effects accepted; broader quality open                                                              | PAR-01; native skills/memory + owner UI                        |
+| PAR-03 | Rich own-history discovery and anchored reading              | M41 filtered anchors/window, optional owner grant and one source-cited task accepted                                                           | Existing history; native history + tool contracts              |
+| PAR-04 | Dynamic MCP tools and installable community extensions       | M42–M45 HTTP/Windows MCP and reviewed MCP/skill bundles locally accepted; auth/selected servers/non-Windows/contributions open                 | Existing tool policy; native protocol + SDK/web                |
+| PAR-05 | Interactive browser work                                     | Scoped Windows loopback browser locally accepted in M46; public/account/other-host/provider quality remains open                               | Narrow BrowserPort, owned worker and owner UI                  |
+| PAR-06 | Longer coding and delegated-task acceptance                  | M47 deterministic coding/restart pass; M48 model-access rejection; M49 selection implemented, actual metadata unavailable; useful quality open | Current harness; optional PAR-02/PAR-04 adapters               |
+| PAR-07 | Native voice input/output                                    | Browser speech conveniences only                                                                                                               | Attachment lifecycle; native audio + composer                  |
+| PAR-08 | Text/image acceptance and PDF/Office understanding           | Upload/storage exists; vision conditional; format extraction missing                                                                           | Existing attachments/model adapters; document worker + SDK/web |
+| PAR-09 | Selected real connector workflows                            | Telegram/Discord/Google code exists; real-account acceptance unverified                                                                        | Current connector code; later relevant media/browser changes   |
+| PAR-10 | Recurring schedules, outages and interrupted-work acceptance | Scheduler/receipts/recovery exist; recurrence/outage evidence incomplete                                                                       | Current scheduler; optional PAR-06 acceptance fixtures         |
+| PAR-11 | Always-on single-owner installation and recovery             | Deployment instructions/offline checks exist; target-host acceptance missing                                                                   | Release with required capabilities; deployment/operator lane   |
+| PAR-12 | Clear capability controls and daily-use status               | Settings/approvals/catalog exist; cross-capability lifecycle UI incomplete                                                                     | Add incrementally with PAR-01/04/05/07/08/09                   |
 
 ### PAR-01: budgeted post-task learning (M38)
 
@@ -107,6 +107,15 @@ CP19 has an independent pre-community backup. Live uncertain 503 fails closed; i
 M46's [bound lean plan](../superpowers/plans/2026-10-14-companion-browser-m46.md) and [operator guide](browser-work.md) record the accepted Node22.12/Playwright-core1.59.1/paired headless-shell1217 installation. One independently checked75-byte supplier CSV, exact single POST map, JPEG,12 succeeded receipts, zero model calls, refused redirect and zero denied-sink requests pass. All five task process/image/kernel-time witnesses and removed private directories were independently verified;26 controlled processes were observed and none remained. This accepts the controlled Windows slice rather than full browser parity. The public Hermes comparison remains pinned to `1fd18277267152893a8a24792b79213e7ca3f899`.
 
 ### PAR-06: coding and delegation that finishes real work
+
+M49 implements deliberate current-account subscription selection and preserves
+saved/custom models. Its local gates passed Rust2709, SDK151 and web1320 with
+required formatting/type checks/builds. The single metadata-only actual check
+returned unavailable in1.45s, with no catalog, retry or generation; the cause is
+unknown. M48's separate model-access rejection and M47's failed useful task remain
+unchanged. A distinct JSONL acceptance fixture may be prepared, but current-account
+selection and independently correct provider coding/delegation stay open. See the
+[M49 outcome](../superpowers/plans/2026-10-15-companion-subscription-models-m49.md).
 
 - [ ] Run a small synthetic repository bug-fix task through actual read/edit/test tools, saved todos and one bounded helper; independently check produced code against the predeclared oracle and preserve neighbors.
 - [x] M47 deterministic cases include correction, tool failure, budget exhaustion and Stop/recovery, with paired results and honest wrap-up; actual useful-provider recovery remains separate.

@@ -115,6 +115,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/memories/relationships`                                                                |
 | `GET`    | `/api/memories/search`                                                                       |
 | `GET`    | `/api/providers`                                                                             |
+| `GET`    | `/api/providers/chatgpt/models`                                                              |
 | `GET`    | `/api/providers/chatgpt/status`                                                              |
 | `GET`    | `/api/ready`                                                                                 |
 | `GET`    | `/api/search`                                                                                |
@@ -207,6 +208,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/memories/relationships`                                                                |
 | `POST`   | `/api/memories/retention`                                                                    |
 | `POST`   | `/api/providers/chatgpt/login`                                                               |
+| `POST`   | `/api/providers/chatgpt/models/refresh`                                                      |
 | `POST`   | `/api/schedules/preview`                                                                     |
 | `POST`   | `/api/skill-drafts/{draft_id}/approve`                                                       |
 | `POST`   | `/api/skill-drafts/{draft_id}/reject`                                                        |
@@ -403,6 +405,23 @@ application endpoints. The summary below matches the live router in
 | `GET`  | `/openapi.json` | OpenAPI document for the live daemon routes.                                                                                                                                                               |
 | `GET`  | `/docs`         | Scalar API reference for exploring the daemon API in a browser.                                                                                                                                            |
 | `GET`  | `/docs/`        | Scalar API reference for exploring the daemon API in a browser.                                                                                                                                            |
+
+### ChatGPT subscription model metadata
+
+| Method | Path                                    | Description                                                                        |
+| ------ | --------------------------------------- | ---------------------------------------------------------------------------------- |
+| `GET`  | `/api/providers/chatgpt/models`         | Owner-only cached current-connection snapshot; no upstream refresh or generation.  |
+| `POST` | `/api/providers/chatgpt/models/refresh` | Owner-only exact `{}` body; one fixed-origin metadata GET, no retry or generation. |
+
+Both routes use `Cache-Control: no-store`, including errors. The direct snapshot
+contains state, opaque connection/catalog revisions, nullable fetch/expiry times,
+exact model ID rows and a fixed error. Cache lifetime is five minutes, memory only;
+restart, disconnect or principal replacement never restores or fetches a catalog.
+Refresh has a ten-second total bound, returns `409` while another refresh is active,
+and reports metadata failure as unavailable/stale without changing saved agents.
+Catalog presence is metadata, not proof of model/tool acceptance. New selection is
+deliberate; existing/custom model strings and grants remain unchanged until Save.
+The registered OpenAPI inventory now contains 194 operations.
 
 ### Agents
 

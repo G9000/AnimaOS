@@ -41,9 +41,28 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             ))
         })
         .collect();
+    let actual = inventory();
+    assert_eq!(actual.len(), 194, "complete registered operation count");
+    for (method, path) in [
+        ("GET", "/api/providers/chatgpt/models"),
+        ("POST", "/api/providers/chatgpt/models/refresh"),
+    ] {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "model metadata operation must be registered"
+        );
+    }
     assert_eq!(
-        documented,
-        inventory(),
+        actual
+            .iter()
+            .filter(|(_, path)| path != "/api/providers/chatgpt/models"
+                && path != "/api/providers/chatgpt/models/refresh")
+            .count(),
+        192,
+        "pre-M49 registered operations remain present"
+    );
+    assert_eq!(
+        documented, actual,
         "Regenerate the marked README table from ApiDoc::openapi(); aliases belong outside it."
     );
 }
