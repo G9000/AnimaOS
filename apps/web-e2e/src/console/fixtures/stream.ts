@@ -11,6 +11,7 @@ export async function installStreams(
   page: Page,
   state: ConsoleFixtureState,
   onConnection: () => void,
+  origin = ORIGIN,
 ) {
   await page.exposeBinding('consoleStreamSnapshot', () => {
     onConnection();
@@ -96,7 +97,7 @@ export async function installStreams(
         });
       };
     },
-    { origin: ORIGIN, agentId: AGENT },
+    { origin, agentId: AGENT },
   );
 }
 export async function emit(page: Page, event: AgentEvent) {

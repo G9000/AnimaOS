@@ -1,5 +1,38 @@
 # Native harness acceptance
 
+## M61 built-console memory HTTP and forced restart (2026-10-16)
+
+A fresh synthetic Windows case used the actual built console and Rust memory HTTP
+to create one Fact, edit its exact content/importance/tags through the UI, and read
+the same saved ID and edited bytes after one quiet forced daemon restart. Search
+found the edited record; reviewed UI deletion was checked against the actual API
+and JSON store. Both explicit status reads showed a disabled vector index and
+14 of 14 fixed local fixture checks. Desktop and 390px screenshots were inspected.
+
+The shell, bootstrap, event stream, account/provider and connector APIs remained
+mocked. The actual daemon had no configured companion; its memory record used the
+fixture companion ID. This proves selective memory integration and lexical search,
+not full real-backend shell, semantic/provider quality, graceful shutdown, reboot,
+external delivery or whole-host integrity. M52 strict quality remains PARTIAL.
+
+Fresh gates: 18 offline console tests with the isolated case intentionally
+skipped, e2e/web/SDK dependency typechecks/build, the isolated actual case, harmless
+owned-child tests, source formatting/docs and protected hashes. Four prior fresh
+cases failed on test wire keys, editor locator, premature response inspection and
+Node replay dropping browser Fetch Metadata. Their results/releases/stores remain
+unchanged; none was replayed or regraded. The corrected bridge uses natural browser
+requests, manual redirects and bounded response observations. Offline regressions
+cover editor controls with a held response and refusal to follow memory redirects.
+
+The accepted case 5bef15c3-d184-446d-bfab-c03550af69f4 completed in 5.657 seconds with one
+restart, one stop, all 24 recorded owned identities retired
+and both isolated ports free. Fresh task-local stores and a kill-on-close Windows
+job kept ordinary profiles/services untouched. No account, model/provider, device,
+database server, container or deployment action; no dependencies added. Product,
+native, SDK and configuration source is unchanged: M60 web1491/121files and SDK183/
+three service skips, and M59 Rust2856/26 ignores/45 suites/lint/build remain evidence
+for identical inputs. See the [M61 plan](../superpowers/plans/2026-10-16-companion-memory-http-m61.md).
+
 ## M60 explicit memory index status (2026-10-16)
 
 The Memory page now has an explicit Check memory search status action. It reuses

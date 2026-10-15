@@ -45,3 +45,20 @@ bun x nx run @animaOS-SWARM/web-e2e:e2e-live
 The live suite checks legacy websocket integrations; it does not substitute for
 the current session/SSE console contract. Do not use default/live targets when
 services are prohibited.
+
+## Isolated memory HTTP acceptance (M61)
+
+The normal `bun x nx run @animaOS-SWARM/web-e2e:e2e-console --skipNxCache`
+remains offline: 18 cases pass, including a held-response memory editor and
+manual-redirect regression. The actual memory HTTP/restart case is skipped unless
+an explicit fresh M61 root release enables it. Do not enable it against a normal
+profile or start the ordinary Playwright development-server configuration for it.
+
+The manual acceptance uses private, unstaged Windows process-ownership helpers,
+fresh JSON/SQLite-file stores, ports18752/18753 and one bounded restart/stop. It
+bridges only the declared memory routes; bootstrap/events/accounts/providers and
+connectors remain mocked. Natural browser requests preserve owner Fetch Metadata;
+the memory-only guard refuses automatic redirects. Each live release/result is
+single-use; failed evidence is retained. See the [bound plan](../../docs/superpowers/plans/2026-10-16-companion-memory-http-m61.md)
+and [acceptance evidence](../../docs/companion/harness-acceptance.md) for exact scope
+and limitations. This test does not provide general provider or host acceptance.
