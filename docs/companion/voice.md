@@ -1,8 +1,37 @@
-# Selected audio to a chat draft
+# Voice input to a chat draft
 
 Anima can upload a selected WAV file and, when the server is explicitly
-configured, transcribe it through the OpenAI Platform API. Browser dictation and
+configured, transcribe it through the OpenAI Platform API. The console can also
+record a short WAV locally for that same attachment flow. Browser dictation and
 browser read-aloud remain separate controls.
+
+## Record locally
+
+In an attach-capable Web Chat composer, choose **Record audio** to request
+microphone permission. **Stop recording** finishes a local candidate; **Cancel
+recording** discards it. Review its filename, duration and size, then choose
+**Add recording** to upload it through the ordinary attachment controls, or
+**Discard recording**. Nothing is uploaded before Add recording. Recording does
+not transcribe, insert text or send a chat message.
+
+The recorder requires a secure context (HTTPS or localhost), microphone access,
+AudioWorklet and a browser that can create a 16,000 Hz AudioContext. It records
+mono PCM16 WAV for at most two minutes; the limit finishes a valid candidate.
+Unsupported features or sample rates fail closed. Use a supported file or browser
+dictation when capture is unavailable; there is no automatic codec conversion.
+
+Only one capture may own resources per page. An ignored permission prompt or
+unsettled browser cleanup can keep Record unavailable. Late-granted tracks are
+stopped. Navigation, a disabled composer or leaving the view discards the local
+candidate and fences late results. Reload if cleanup cannot settle. Stopping
+Anima's tracks does not promise that another application stopped using the
+physical microphone.
+
+Capture uses one bounded worklet buffer and an ephemeral File. It does not save
+audio in browser storage, create audio URLs, monitor the microphone through the
+speakers or play a preview. Once added, the recording follows the ordinary
+uploaded-attachment retention rules. No transcription credentials are needed to
+record locally.
 
 ## Use it
 
@@ -62,8 +91,8 @@ behavior; this is not a claim that it is the newest or best transcription model.
 - A UTF-8 plain-text transcript of at most 16 KiB, with no empty or NUL-containing
   result. Outer whitespace is trimmed.
 
-Compressed WAV, MP3, M4A, WebM, RF64, live microphone capture and automatic format
-conversion are outside this slice. Unsupported files are rejected; supported
+Compressed WAV, MP3, M4A, WebM, RF64 and automatic format conversion are outside
+this slice. Unsupported files are rejected; supported
 original uploads remain downloadable. Audio sent with a normal chat message
 remains a file reference, without hidden transcription or binary model input.
 
@@ -83,9 +112,13 @@ M56 validation uses synthetic PCM silence, deterministic transcription ports,
 and finite loopback HTTP peers. It can establish request shape, source authority,
 byte limits, lifecycle and draft behavior. It does not establish spoken-audio
 accuracy, live provider availability, billing behavior, microphone support,
-native speech output, connector voice support, or full assistant parity.
+native speech output, connector voice support, or full assistant parity. M57
+adds fake-device lifecycle tests and evaluates the emitted worklet against the
+same independent WAV fixture. It does not activate a microphone or establish
+hardware compatibility, noisy-speech quality or live transcription accuracy.
 
 The Rust transport narrowly ports useful Hermes behavior with its pinned MIT
 attribution in the model adapter's [notice](../../packages/core-rust/crates/anima-model-adapters/HERMES-NOTICE). Product controls retain Anima
-naming. See the [bound M56 plan](../superpowers/plans/2026-10-16-companion-native-voice-m56.md)
+naming. See the [bound M56 plan](../superpowers/plans/2026-10-16-companion-native-voice-m56.md),
+the [M57 capture plan](../superpowers/plans/2026-10-16-companion-microphone-m57.md)
 and [parity roadmap](parity-roadmap.md) for remaining work.

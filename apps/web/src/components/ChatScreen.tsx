@@ -38,6 +38,7 @@ import { AttachmentChips } from './attachments/AttachmentChips';
 import { MessageAttachments } from './attachments/MessageAttachments';
 import type { AttachmentDraft } from '../lib/attachments';
 import { DictationControl } from './voice/DictationControl';
+import { MicrophoneCapture } from './voice/MicrophoneCapture';
 import {
   NativeTranscription,
   type NativeVoiceScope,
@@ -834,6 +835,14 @@ export function Composer({
           conversationKey={conversationKey}
           onTranscript={appendDictation}
         />
+        {attachments && (
+          <MicrophoneCapture
+            key={conversationKey ?? ''}
+            conversationKey={conversationKey ?? ''}
+            disabled={!conversationKey || !canPick || voiceDisabled}
+            onAdd={attachments.onAdd}
+          />
+        )}
         {nativeVoice && attachments && (
           <NativeTranscription
             key={JSON.stringify([

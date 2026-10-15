@@ -123,7 +123,9 @@ with text and pages included, without inferring scanned content. See
 [document coverage and limits](documents.md). OCR and other Office formats remain
 storage/download only.
 
-Selected WAV files can also be uploaded, then explicitly transcribed through the
+Record a short WAV in the composer when microphone capture is supported. It stays
+local until **Add recording** uploads it; **Discard recording** clears it. You can
+also attach a supported WAV file. Uploaded WAVs can be explicitly transcribed through the
 opt-in OpenAI Platform API into an editable preview. Use transcript appends to
 your current draft; Send stays separate. This requires a server API key, not
 ChatGPT subscription sign-in. Stop is local; remote inference/billing may

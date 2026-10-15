@@ -1,3 +1,50 @@
+# Handover: microphone capture and native voice (M0–M57)
+
+## Start here (2026-10-16): M57 gated; settle publication then continue
+
+Continue `g9000/companion-microphone-m57` from verified M56/PR62 main
+`23f780a2d024924922b0f18a7f66db9313f17cc7`. Bound plan was committed/pushed at
+`2905602b57e85e3df71fce6f4d4f6af769892927` before existing-Composer RED. Reviewed
+implementation and the single fix wave are frozen and gated. Finish explicit-path
+per-command unsigned commit/push/PR, attach it, then standing authorized merge and
+exact tree/hash proof. Fast-forward local main by nonforced fetch BEFORE switching
+to it, avoiding an old-main checkout and EOL roundtrip. Preserve unrelated nx.json.
+
+Fresh web **1,458/119 files**, SDK **172/three intentional service skips**,
+SDK/web typecheck/build pass. Emitted standalone worklet is app-referenced and
+produces the exact M56 8,044-byte/4,000-frame WAV under fake worklet globals.
+Owned formatting/diff/docs/hash checks are the remaining publication checks.
+No native/SDK/dependency change; verified M56 Rust inputs remain unchanged.
+
+Capture is local until Add recording. One fixed 16kHz mono PCM16 buffer,120s/4MiB,
+one terminal transfer, silent output and retained global browser owner. Pending
+permission/module/resume/close and uncertain cleanup retain ownership; late grants
+are stopped. Ready metadata waits for known cleanup settlement. UI cancellation
+begins during layout cleanup and generation-fences late callbacks; missing scope
+shows a disabled Record control. One capture/worklet batch review and one final web/SDK
+review, seven genuine regression failures and one fix wave are complete.
+
+No actual microphone/provider/model/account/ordinary daemon/database server/
+container/deployment activation. Actual hardware/voice quality, native output,
+connector/local-provider coverage and full Hermes parity remain open. M52 remains
+PARTIAL; consumed actual cases are immutable. Reuse M56's attributed Hermes STT
+path, no personal profiles/credentials or Python process import.
+
+Resume ledger: `.superpowers/sdd/2026-10-16-companion-microphone-m57/progress.md`.
+Held next proposal only: native speech output under the M58 private directory;
+root must verify upstream/API/config and bind risks after M57 merge. No next
+source or provider/device request is released by that proposal.
+
+Root alone runs commands/fmt/Git/processes. Codex source-only lanes, no check-ins
+or extra audit. If Cargo is needed use CARGO_INCREMENTAL=0/jobs1/threads2 and the
+documented Nx targets. Explicit staging only, never nx.json/anima.yaml/.superpowers.
+No stash/reset/restore/path checkout/worktree, ordinary profile/credential readout,
+real accounts/DB servers/containers/Docker55432/public deployment. Per-command
+unsigned commits, justified dependencies and merge-and-continue remain authorized.
+Preserve nx SHA `3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`.
+
+## Historical M56 gated handover
+
 # Handover: selected native voice input (M0–M56)
 
 ## Start here (2026-10-16): M56 gated; settle publication then continue
