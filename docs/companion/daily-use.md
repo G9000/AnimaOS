@@ -158,7 +158,7 @@ stops continuation. Without that store, receipts are temporary and explicitly
 marked memory only. Receipts do not commit an interrupted conversation or resume
 an action. A crash between the effect and saving its result can still leave an
 unknown outcome. Inspect the effect before an explicit retry; scheduled work is
-not automatically replayed. Older runs without receipts cannot be backfilled.
+not automatically replayed. Older runs without receipts cannot be backfilled. A persisted unfinished schedule claim is disabled for review on recovery and reports an interrupted local outcome. Inspect the actual effect before explicitly resuming; that local record cannot prove whether an external action happened.
 
 Browser dictation/read-aloud depends on browser speech support and permissions.
 An unavailable microphone or speech API does not prevent typed chat. Web fetch

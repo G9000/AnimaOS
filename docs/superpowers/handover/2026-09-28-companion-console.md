@@ -1,32 +1,36 @@
 # Handover: persisted schedule recovery (M0–M59)
 
-## Start here (2026-10-16): M58 merged; M59 bound recovery acceptance
+## Start here (2026-10-16): M59 gated; settle publication then continue parity
 
-Continue g9000/companion-schedule-recovery-m59 from verified [M58/PR64](https://github.com/G9000/animaOS-SWARM/pull/64)
-main119ab161902ca840eb57003c6545d1cb21bfe6ce, source0479b11ae2c7eb509d84031e5a6100b2a89a109e,
-identical tested/merge tree5d48f05cda6eb8238c84618f13093b9648fb9f21. Fresh Rust2855/
-26 intentional ignores/45 suites/lint/build, SDK183/3 service skips, web1468/120files/
-type/build, actual200-route inventory/docs/format pass. All38 publication/30 source/
-128 unowned hashes and nx exact; main advanced before switch. M58 ledger settled
-and authorized other-chat context update sent. No actual voice/provider acceptance.
+Continue g9000/companion-schedule-recovery-m59 from M58/PR64 main
+119ab161902ca840eb57003c6545d1cb21bfe6ce. Bound plan c6d0ab7b1861517f6abcde3331b2d015326b8e25
+was pushed before test source. One finite fresh-state JSON claim case and native
+batch review settled; local gates pass. Finish explicit-path unsigned commit/push/
+PR, attach and standing authorized merge, exact tree/hash proof. Advance local
+main by nonforced fetch before switch to avoid EOL rewrites; preserve nx.json.
 
-The [M59 bound plan](../plans/2026-10-16-companion-schedule-recovery-m59.md) targets
-one unresolved-claim JSON roundtrip into a fresh daemon and second reload after
-reconciliation. Existing scheduler policy disables interrupted work rather than
-replaying it; no external exactly-once claim. One claim, zero fake-model calls,
-bounded explicit ticks, exact owner/occurrence/next-due/local outcome and disk
-proof. Only schedules/shutdown_tests.rs is released after plan publication.
-Existing cadence/same-state restart/UI controls already exist; no duplicate UI.
+Fresh Rust/core **2,856/26 ignores/45 suites**, lint/build. One
+test-only source path; all30 M58 source hashes unchanged. M58 SDK183/three service
+skips, web1468/120files/type/build and actual200-operation API inventory remain
+revision-specific evidence for identical inputs; no redundant browser test claim.
+Docs/format/hash publication checks finish the milestone. No dependencies.
+
+The actual first JSON snapshot has one enabled unresolved claim at T, next due
+T+60,000. Restore into a new daemon, startup reconcile disabled/local Failed /
+schedule_run_interrupted, explicit later tick refuses, disk equals memory;
+second fresh restore is quiet/stable. Zero fake-model calls and no messages/
+duplicate occurrence. Existing scheduler policy/owner controls are unchanged.
+No external exactly-once claim or complete PAR-10/11 acceptance. M52 PARTIAL
+and consumed cases remain unchanged; actual models/providers/accounts/services/
+devices/database servers/containers/deployment remain unactivated.
 
 Resume .superpowers/sdd/2026-10-16-companion-schedule-recovery-m59/progress.md.
-Root owns commands/fmt/Git; source-only Codex implementer and one native review,
-one fix wave then gates. SDK/web source stays exact with M58 evidence retained.
-Cargo CARGO_INCREMENTAL=0/jobs1/threads2 serialized, clear provider/service env.
-Explicit paths only, never nx.json/anima.yaml/.superpowers. Unsigned per-command
-commits, dependencies when justified and merge-and-continue remain authorized.
+Root owns commands/fmt/Git; source-only Codex delegation, no check-ins. Cargo
+CARGO_INCREMENTAL=0/jobs1/threads2 serialized, cleared provider/service env.
+Explicit paths only, never nx.json/anima.yaml/.superpowers. Per-command unsigned
+commits, justified dependencies and reviewed merge-and-continue remain authorized.
 No stash/reset/restore/path checkout/worktree, ordinary profiles/credentials,
-actual provider/model/account/device/ordinary service/database server/container/
-Docker55432/deployment activation. M52 PARTIAL/cases immutable. nx SHA
+real accounts/DB servers/containers/Docker55432/public deployment. nx SHA
 3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90 preserved.
 
 ## Historical M58 gated handover

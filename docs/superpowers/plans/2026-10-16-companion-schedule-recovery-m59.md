@@ -113,3 +113,34 @@ attach and standing authorized merge with exact tree/hash proof. Never stage
 nx.json/anima.yaml/.superpowers. No stash/reset/restore/path checkout/worktree.
 No ordinary profiles/credentials, actual models/accounts/services/devices,
 database servers, containers/Docker55432 or deployment. M52 remains PARTIAL.
+
+## Gated outcome (2026-10-16)
+
+One finite synthetic acceptance case now crosses the unresolved-claim JSON disk
+boundary into a freshly constructed daemon, then reloads a second new daemon
+after reconciliation. The first snapshot contains exactly one enabled unresolved
+claim at declared T and next due T + 60,000 ms. Startup preserves its identity,
+disables it for review and records local Failed / schedule_run_interrupted.
+An explicit later tick does not run it; the saved reconciled record matches memory
+and survives the second fresh restore without another execution or changed receipt.
+
+The fake-model call count stays zero. No chat message, duplicate occurrence or
+external effect is produced. This reuses the existing scheduler, claim, JSON
+load/restore and safe-outcome code. Production, SDK/web, APIs, owner controls,
+dependencies and all 30 frozen M58 source hashes remain unchanged. The useful
+new evidence is fresh-state disk recovery; existing same-state restart and late
+interval advancement tests remain distinct.
+
+One native batch review is settled. Fresh Rust/core **2,856 tests / 26
+intentional ignores / 45 suites / format / build** pass. The current unchanged
+SDK/web inputs retain M58's 183 SDK tests / three service skips and 1,468 web tests /
+120 files / typecheck / build evidence; no redundant browser/provider run is claimed.
+Owned docs, formatting and preservation checks complete publication.
+
+This is local claim recovery, without a remote exactly-once guarantee. Broader
+recurrence, daily/cron/DST/clock changes, long outages, real target-host recovery
+and checked scheduled task effects remain open under PAR-10/PAR-11. No actual
+model/provider/account/service/device/database server/container/deployment is
+activated. M52 strict quality remains PARTIAL and consumed cases are unchanged.
+
+See [harness evidence](../../companion/harness-acceptance.md).
