@@ -2,7 +2,7 @@ use std::io::Write;
 
 use anima_core::document_content::{
     render_document_snapshots, validate_document_extraction, DocumentExtractionStatus as Status,
-    DocumentOmission as Omission, DocumentSnapshot,
+    DocumentLocator, DocumentOmission as Omission, DocumentSnapshot,
 };
 use anima_document_content::extract_docx;
 use rawzip::{CompressionMethod, ZipArchive, ZipArchiveWriter};
@@ -117,9 +117,15 @@ fn stored_and_deflate_keep_literal_body_table_order_tabs_breaks_and_ruby_base() 
             result.blocks[0].text,
             "Anchor violet 581.\ttab\nline\nreturn & 🦀base"
         );
-        assert_eq!(result.blocks[0].paragraph, 1);
+        assert_eq!(
+            result.blocks[0].locator,
+            DocumentLocator::DocxParagraph { paragraph: 1 }
+        );
         assert_eq!(result.blocks[1].text, "Cell two.");
-        assert_eq!(result.blocks[1].paragraph, 2);
+        assert_eq!(
+            result.blocks[1].locator,
+            DocumentLocator::DocxParagraph { paragraph: 2 }
+        );
         assert_eq!(result.omissions, [Omission::MainBodyOnly]);
         validate_document_extraction(&result).unwrap();
     }

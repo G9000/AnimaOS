@@ -117,6 +117,15 @@ pub(crate) fn attachment_content(
                 "Attached text: {} ({}). Use read_file to read the saved file.",
                 row.name, row.path
             ),
+            AttachmentKind::Document
+                if crate::attachments::documents::document_format(row)
+                    == Some(anima_core::document_content::DocumentFormat::Pdf) =>
+            {
+                format!(
+                    "Attached document: {} ({}). Original saved; any admitted PDF excerpt covers the text layer only, without OCR or visual layout.",
+                    row.name, row.path
+                )
+            }
             AttachmentKind::Document => format!(
                 "Attached document: {} ({}). Original saved; any admitted text excerpt covers main-body text only.",
                 row.name, row.path

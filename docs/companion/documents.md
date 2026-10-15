@@ -1,22 +1,43 @@
 # Selected documents in chat
 
-On Windows, send a DOCX attachment with a message in your own web chat. Anima
-extracts a bounded portion of its main-body text for that message. The saved
-attachment shows the extraction outcome and keeps its original download action.
+On Windows, send a DOCX or PDF attachment with a message in your own web chat.
+Anima extracts bounded DOCX main-body text or PDF text-layer content for that
+message. The saved attachment shows the outcome and keeps its original download.
 The original message and document bytes are preserved.
 
-The first two selected DOCX files can be parsed, each up to 2 MiB. Together their
-quoted excerpts and paragraph locators fit within 16 KiB, and may be reduced
-further to fit the chat context. Newest selected history has priority; at most
-four document sources are checked for each model request. Older saved excerpts
-can be omitted from that request. Changing or deleting the original prevents
-reuse of its old excerpt. Reload reuses the saved result without reparsing it.
+The first two supported documents in selected order can be parsed, each up to
+2 MiB, counting both formats together. A failed or oversized supported file
+still consumes an attempt. Together their quoted excerpts and locators fit within
+16 KiB, and may be reduced further to fit the chat context. At most ten selected
+documents retain an outcome; extra originals remain downloadable.
 
-Coverage is **main-body text only**: ordinary paragraphs, table paragraphs,
+Admission can read each of those two sources before and after extraction: four
+reads maximum. Each later model request or compaction separately checks at most
+four current/newest sources, with 2 MiB plus a sentinel byte per read. Initial
+admission plus the first model request can therefore make eight bounded reads.
+Four physical read leases are shared across these paths. Older saved excerpts
+can be omitted from a request. Changing or deleting the original prevents reuse
+of its old excerpt. Reload reuses the saved result without reparsing it.
+
+DOCX coverage is **main-body text only**: ordinary paragraphs, table paragraphs,
 tabs, line breaks and ruby base text. Headers, footers, footnotes, comments,
 drawings, text boxes, field results, deleted revisions and layout are excluded.
 A paragraph locator identifies the original selected attachment and its position
 in word/document.xml; it does not identify a page.
+
+PDF coverage is **text layer only**, with at most 100 pages. Anima examines every
+accepted page, even after the retained text fills. The outcome reports total
+pages, pages producing nonblank text, and pages whose excerpts were included.
+An empty text result does not establish whether a page is scanned or image-only.
+The native locator `pdf#page=N` identifies the source page; there is no visual
+layout, OCR or page rendering. A known limit can shorten a PDF excerpt at a
+UTF-8 boundary. Invalid page `Contents` references or failed supported page-stream
+decoding discard the whole PDF excerpt. Page content supports unfiltered streams
+or a single FlateDecode filter with strict zlib completion and checksum checking.
+Other filters, chains and empty filter arrays are unsupported in this slice.
+The library can tolerate malformed unused objects and some resource/font/form
+data, so success does not certify that every PDF object is valid or every visual
+element produced text.
 
 “Main body text extracted” means extraction succeeded. “Some main body text
 extracted” means a known limit shortened coverage. Other outcomes explain an
@@ -24,6 +45,12 @@ unsupported, encrypted, malformed, oversized, empty, unavailable, cancelled or
 context-omitted result. Historical attachments without an outcome have no
 extraction evidence. An extraction outcome does not verify the assistant's
 answer or the completeness of the document.
+
+PDF outcomes show text-layer coverage instead of paragraph counts. Failed or
+unavailable extraction has unknown page counts. A context-omitted result can
+retain known coverage while including zero pages. Encrypted PDFs, including
+ones that the library internally opens with an empty password, release no text.
+No password is supplied or requested. Original downloads remain available.
 
 Parsing runs in a fixed, one-shot worker with checked Windows Job memory and
 process limits before document bytes are sent, a ten-second parent wall deadline,
@@ -33,7 +60,7 @@ read waits also yield to Stop and the extraction deadline; late work cannot
 publish a usable result. A stuck physical worker retains its slot until its
 retirement is proved.
 
-PDF, OCR, other Office formats and native extraction on other operating systems
+OCR, other Office formats and native extraction on other operating systems
 remain unsupported in this slice; their originals can still be stored and
 downloaded. Browser dictation, compatible-model image input and native voice are
 separate capabilities. Extraction itself makes no model request, enables no
@@ -43,6 +70,8 @@ bounds.
 
 The Rust parser narrowly ports useful DOCX behavior from the pinned public
 Hermes source, with its MIT notice retained. See the
-[M54 plan](../superpowers/plans/2026-10-16-companion-document-understanding-m54.md)
-for scope, limits and verification, and the
+[M54 DOCX plan](../superpowers/plans/2026-10-16-companion-document-understanding-m54.md)
+and [M55 PDF plan](../superpowers/plans/2026-10-16-companion-pdf-understanding-m55.md)
+for scope, limits and verification. PDF extraction directly uses pinned Rust
+libraries rather than a converter process. See the
 [parity roadmap](parity-roadmap.md) for the remaining media work.

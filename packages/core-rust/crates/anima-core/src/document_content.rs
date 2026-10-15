@@ -8,13 +8,36 @@ use crate::primitives::{Content, DataValue};
 use crate::runtime_serde::data_value_to_json;
 
 pub const DOCUMENT_EXTRACTS_METADATA_KEY: &str = "documentExtracts";
-pub const DOCUMENT_CONTENT_VERSION: u32 = 1;
+pub const DOCUMENT_CONTENT_VERSION: u32 = 2;
 /// Preserve an honest status row for each selected upload.
 pub const MAX_DOCUMENT_SNAPSHOTS: usize = 10;
 /// At most two status rows may carry extracted text.
 pub const MAX_USABLE_DOCUMENT_SNAPSHOTS: usize = 2;
 pub const MAX_DOCUMENT_RENDERED_BYTES: usize = 16 * 1024;
 pub const MAX_DOCUMENT_PARAGRAPHS: usize = 2_000;
+pub const MAX_PDF_PAGES: usize = 100;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentFormat {
+    Docx,
+    Pdf,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DocumentLocator {
+    DocxParagraph { paragraph: u32 },
+    PdfPage { page: u32 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PdfCoverage {
+    pub page_count: u32,
+    pub text_page_count: u32,
+    pub included_page_count: u32,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -39,31 +62,53 @@ pub enum DocumentOmission {
     TextLimit,
     ContextLimit,
     SelectionLimit,
+    TextLayerOnly,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DocumentBlock {
-    pub paragraph: u32,
+    pub locator: DocumentLocator,
     pub text: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExtractedDocumentText {
+    #[serde(deserialize_with = "deserialize_v2")]
     pub version: u32,
+    pub format: DocumentFormat,
     pub status: DocumentExtractionStatus,
     pub blocks: Vec<DocumentBlock>,
     pub omissions: Vec<DocumentOmission>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pdf_coverage: Option<PdfCoverage>,
+}
+
+fn deserialize_v2<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
+    let version = u32::deserialize(deserializer)?;
+    if version == DOCUMENT_CONTENT_VERSION {
+        Ok(version)
+    } else {
+        Err(serde::de::Error::custom(
+            "expected document extraction version 2",
+        ))
+    }
 }
 
 impl ExtractedDocumentText {
     pub fn empty(status: DocumentExtractionStatus) -> Self {
+        Self::empty_for(DocumentFormat::Docx, status)
+    }
+
+    pub fn empty_for(format: DocumentFormat, status: DocumentExtractionStatus) -> Self {
         Self {
             version: DOCUMENT_CONTENT_VERSION,
+            format,
             status,
             blocks: Vec::new(),
             omissions: Vec::new(),
+            pdf_coverage: None,
         }
     }
 }
@@ -101,19 +146,77 @@ pub fn validate_document_extraction(
     {
         return Err(DocumentContentError);
     }
+    match value.format {
+        DocumentFormat::Docx => {
+            if value.pdf_coverage.is_some()
+                || value.omissions.contains(&DocumentOmission::TextLayerOnly)
+            {
+                return Err(DocumentContentError);
+            }
+        }
+        DocumentFormat::Pdf => {
+            if value.blocks.len() > MAX_PDF_PAGES
+                || value.omissions.iter().any(|omission| {
+                    matches!(
+                        omission,
+                        DocumentOmission::MainBodyOnly | DocumentOmission::ParagraphLimit
+                    )
+                })
+            {
+                return Err(DocumentContentError);
+            }
+            match value.pdf_coverage {
+                Some(coverage) => {
+                    if !matches!(
+                        value.status,
+                        DocumentExtractionStatus::Ready
+                            | DocumentExtractionStatus::Partial
+                            | DocumentExtractionStatus::NoText
+                            | DocumentExtractionStatus::ContextOmitted
+                    ) || coverage.page_count > MAX_PDF_PAGES as u32
+                        || coverage.included_page_count != value.blocks.len() as u32
+                        || coverage.included_page_count > coverage.text_page_count
+                        || coverage.text_page_count > coverage.page_count
+                        || (coverage.page_count == 0
+                            && value.status != DocumentExtractionStatus::NoText)
+                        || (usable
+                            && (coverage.page_count == 0 || coverage.included_page_count == 0))
+                        || (value.status == DocumentExtractionStatus::NoText
+                            && coverage.text_page_count != 0)
+                    {
+                        return Err(DocumentContentError);
+                    }
+                }
+                None if usable || value.status == DocumentExtractionStatus::NoText => {
+                    return Err(DocumentContentError);
+                }
+                None => {}
+            }
+        }
+    }
     let mut previous = 0;
     let mut bytes = 0usize;
     for block in &value.blocks {
         bytes = bytes.saturating_add(block.text.len());
-        if block.paragraph <= previous
-            || block.paragraph > MAX_DOCUMENT_PARAGRAPHS as u32
+        let (position, limit) = match (value.format, block.locator) {
+            (DocumentFormat::Docx, DocumentLocator::DocxParagraph { paragraph }) => {
+                (paragraph, MAX_DOCUMENT_PARAGRAPHS as u32)
+            }
+            (DocumentFormat::Pdf, DocumentLocator::PdfPage { page }) => (
+                page,
+                value.pdf_coverage.ok_or(DocumentContentError)?.page_count,
+            ),
+            _ => return Err(DocumentContentError),
+        };
+        if position <= previous
+            || position > limit
             || block.text.trim().is_empty()
             || bytes > MAX_DOCUMENT_RENDERED_BYTES
             || block.text.contains('\0')
         {
             return Err(DocumentContentError);
         }
-        previous = block.paragraph;
+        previous = position;
     }
     Ok(())
 }
@@ -161,7 +264,16 @@ fn render_unchecked(snapshots: &[DocumentSnapshot]) -> String {
         for block in &snapshot.extraction.blocks {
             // JSON quoting keeps document delimiters/control characters inside data.
             let quoted = serde_json::to_string(&block.text).expect("strings serialize");
-            rendered.push_str(&format!("\n[UNTRUSTED DOCUMENT DATA attachment={} locator=word/document.xml#paragraph={}]\n{}\n", snapshot.attachment_id, block.paragraph, quoted));
+            let locator = match block.locator {
+                DocumentLocator::DocxParagraph { paragraph } => {
+                    format!("word/document.xml#paragraph={paragraph}")
+                }
+                DocumentLocator::PdfPage { page } => format!("pdf#page={page}"),
+            };
+            rendered.push_str(&format!(
+                "\n[UNTRUSTED DOCUMENT DATA attachment={} locator={}]\n{}\n",
+                snapshot.attachment_id, locator, quoted
+            ));
         }
     }
     rendered
@@ -179,7 +291,8 @@ pub fn render_document_snapshots(
     Ok(rendered)
 }
 
-/// Drop whole paragraphs only. Input is never mutated or automatically reparsed.
+/// Drop whole DOCX paragraphs; PDF page text may retain a UTF-8 prefix.
+/// Input is never mutated or automatically reparsed.
 pub fn fit_document_snapshots(
     snapshots: &[DocumentSnapshot],
     max_bytes: usize,
@@ -195,10 +308,41 @@ pub fn fit_document_snapshots(
             fitted[index].extraction.blocks.push(block.clone());
             if render_unchecked(&fitted).len() > max_bytes {
                 fitted[index].extraction.blocks.pop();
+                if source.extraction.format == DocumentFormat::Pdf {
+                    let boundaries: Vec<_> = block
+                        .text
+                        .char_indices()
+                        .map(|(i, _)| i)
+                        .chain(std::iter::once(block.text.len()))
+                        .collect();
+                    let mut low = 0;
+                    let mut high = boundaries.len();
+                    while low + 1 < high {
+                        let middle = low + (high - low) / 2;
+                        fitted[index].extraction.blocks.push(DocumentBlock {
+                            locator: block.locator,
+                            text: block.text[..boundaries[middle]].into(),
+                        });
+                        let fits = render_unchecked(&fitted).len() <= max_bytes;
+                        fitted[index].extraction.blocks.pop();
+                        if fits {
+                            low = middle;
+                        } else {
+                            high = middle;
+                        }
+                    }
+                    let prefix = &block.text[..boundaries[low]];
+                    if !prefix.trim().is_empty() {
+                        fitted[index].extraction.blocks.push(DocumentBlock {
+                            locator: block.locator,
+                            text: prefix.into(),
+                        });
+                    }
+                }
                 break;
             }
         }
-        if fitted[index].extraction.blocks.len() < source.extraction.blocks.len() {
+        if fitted[index].extraction.blocks != source.extraction.blocks {
             let extraction = &mut fitted[index].extraction;
             extraction.status = if extraction.blocks.is_empty() {
                 DocumentExtractionStatus::ContextOmitted
@@ -212,7 +356,12 @@ pub fn fit_document_snapshots(
                 extraction.omissions.push(DocumentOmission::ContextLimit);
             }
         }
+        let included = fitted[index].extraction.blocks.len() as u32;
+        if let Some(coverage) = &mut fitted[index].extraction.pdf_coverage {
+            coverage.included_page_count = included;
+        }
     }
+    render_document_snapshots(&fitted)?;
     Ok(fitted)
 }
 
@@ -275,6 +424,56 @@ pub fn parse_document_snapshots(
     }
     let mut json = data_value_to_json(value);
     normalize_numbers(&mut json);
+    let rows = json.as_array_mut().ok_or(DocumentContentError)?;
+    // V1 is admitted only at the persisted metadata boundary, never by the V2
+    // worker codec. Check its closed original shape before normalizing in memory.
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct LegacyBlock {
+        paragraph: u32,
+        text: String,
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct LegacyExtraction {
+        version: u32,
+        status: DocumentExtractionStatus,
+        blocks: Vec<LegacyBlock>,
+        omissions: Vec<DocumentOmission>,
+    }
+    for row in rows.iter_mut() {
+        let extraction = row.get_mut("extraction").ok_or(DocumentContentError)?;
+        if extraction
+            .get("version")
+            .and_then(serde_json::Value::as_u64)
+            == Some(1)
+        {
+            let legacy: LegacyExtraction =
+                serde_json::from_value(extraction.clone()).map_err(|_| DocumentContentError)?;
+            if legacy.version != 1 || legacy.omissions.contains(&DocumentOmission::TextLayerOnly) {
+                return Err(DocumentContentError);
+            }
+            let normalized = ExtractedDocumentText {
+                version: DOCUMENT_CONTENT_VERSION,
+                format: DocumentFormat::Docx,
+                status: legacy.status,
+                blocks: legacy
+                    .blocks
+                    .into_iter()
+                    .map(|block| DocumentBlock {
+                        locator: DocumentLocator::DocxParagraph {
+                            paragraph: block.paragraph,
+                        },
+                        text: block.text,
+                    })
+                    .collect(),
+                omissions: legacy.omissions,
+                pdf_coverage: None,
+            };
+            validate_document_extraction(&normalized)?;
+            *extraction = serde_json::to_value(normalized).map_err(|_| DocumentContentError)?;
+        }
+    }
     let snapshots: Vec<DocumentSnapshot> =
         serde_json::from_value(json).map_err(|_| DocumentContentError)?;
     render_document_snapshots(&snapshots)?;
@@ -319,13 +518,15 @@ mod tests {
             attachment_id: "att-1".into(),
             source_sha256: "a".repeat(64),
             extraction: ExtractedDocumentText {
-                version: 1,
+                version: DOCUMENT_CONTENT_VERSION,
+                format: DocumentFormat::Docx,
                 status: DocumentExtractionStatus::Ready,
                 blocks: vec![DocumentBlock {
-                    paragraph: 1,
+                    locator: DocumentLocator::DocxParagraph { paragraph: 1 },
                     text: text.into(),
                 }],
                 omissions: vec![DocumentOmission::MainBodyOnly],
+                pdf_coverage: None,
             },
         }
     }
@@ -507,7 +708,7 @@ mod tests {
             },
             DocumentSnapshot {
                 extraction: ExtractedDocumentText {
-                    version: 2,
+                    version: 3,
                     ..good.extraction.clone()
                 },
                 ..good.clone()
@@ -562,5 +763,300 @@ mod tests {
             crate::select_context(&[message], None, bytes - 1, &TokenEstimator::new(0.5));
         assert!(selection.messages.is_empty());
         assert_eq!(content, before);
+    }
+
+    fn pdf_snapshot(text: &str) -> DocumentSnapshot {
+        DocumentSnapshot {
+            extraction: ExtractedDocumentText {
+                format: DocumentFormat::Pdf,
+                blocks: vec![DocumentBlock {
+                    locator: DocumentLocator::PdfPage { page: 2 },
+                    text: text.into(),
+                }],
+                omissions: vec![DocumentOmission::TextLayerOnly],
+                pdf_coverage: Some(PdfCoverage {
+                    page_count: 3,
+                    text_page_count: 2,
+                    included_page_count: 1,
+                }),
+                ..snapshot(text).extraction
+            },
+            ..snapshot(text)
+        }
+    }
+
+    #[test]
+    fn legacy_v1_normalizes_only_at_metadata_boundary_without_changing_render_or_content() {
+        let source = snapshot("quote \"🦀\"\n");
+        let mut metadata = document_snapshots_metadata(&[source.clone()]).unwrap();
+        let DataValue::Array(rows) = &mut metadata else {
+            panic!()
+        };
+        let DataValue::Object(row) = &mut rows[0] else {
+            panic!()
+        };
+        let DataValue::Object(extraction) = row.get_mut("extraction").unwrap() else {
+            panic!()
+        };
+        extraction.insert("version".into(), DataValue::Number(1.0));
+        extraction.remove("format");
+        let DataValue::Array(blocks) = extraction.get_mut("blocks").unwrap() else {
+            panic!()
+        };
+        let DataValue::Object(block) = &mut blocks[0] else {
+            panic!()
+        };
+        block.remove("locator");
+        block.insert("paragraph".into(), DataValue::Number(1.0));
+        let content = Content {
+            metadata: Some(BTreeMap::from([(
+                DOCUMENT_EXTRACTS_METADATA_KEY.into(),
+                metadata,
+            )])),
+            ..Content::default()
+        };
+        let before = content.clone();
+        let normalized = parse_document_snapshots(&content).unwrap();
+        assert_eq!(normalized, vec![source]);
+        let rendered = render_document_snapshots(&normalized).unwrap();
+        assert_eq!(rendered, "\n[UNTRUSTED DOCUMENT DATA attachment=att-1 locator=word/document.xml#paragraph=1]\n\"quote \\\"🦀\\\"\\n\"\n");
+        assert_eq!(document_rendered_bytes(&content), rendered.len());
+        assert_eq!(content, before);
+        let mut old_worker = serde_json::to_value(&normalized[0].extraction).unwrap();
+        old_worker["version"] = serde_json::json!(1);
+        assert!(serde_json::from_value::<ExtractedDocumentText>(old_worker).is_err());
+
+        let mut invalid = content.clone();
+        let DataValue::Array(rows) = invalid
+            .metadata
+            .as_mut()
+            .unwrap()
+            .get_mut(DOCUMENT_EXTRACTS_METADATA_KEY)
+            .unwrap()
+        else {
+            panic!()
+        };
+        let DataValue::Object(row) = &mut rows[0] else {
+            panic!()
+        };
+        let DataValue::Object(extraction) = row.get_mut("extraction").unwrap() else {
+            panic!()
+        };
+        extraction.insert("version".into(), DataValue::Number(2.0));
+        assert!(parse_document_snapshots(&invalid).is_err());
+        let DataValue::Array(rows) = invalid
+            .metadata
+            .as_mut()
+            .unwrap()
+            .get_mut(DOCUMENT_EXTRACTS_METADATA_KEY)
+            .unwrap()
+        else {
+            panic!()
+        };
+        let DataValue::Object(row) = &mut rows[0] else {
+            panic!()
+        };
+        let DataValue::Object(extraction) = row.get_mut("extraction").unwrap() else {
+            panic!()
+        };
+        extraction.insert("version".into(), DataValue::Number(1.0));
+        extraction.insert("format".into(), DataValue::String("docx".into()));
+        assert!(parse_document_snapshots(&invalid).is_err());
+    }
+
+    #[test]
+    fn pdf_locators_counts_and_format_omissions_fail_closed() {
+        let good = pdf_snapshot("literal").extraction;
+        validate_document_extraction(&good).unwrap();
+        for coverage in [
+            PdfCoverage {
+                page_count: 101,
+                text_page_count: 2,
+                included_page_count: 1,
+            },
+            PdfCoverage {
+                page_count: 3,
+                text_page_count: 4,
+                included_page_count: 1,
+            },
+            PdfCoverage {
+                page_count: 3,
+                text_page_count: 0,
+                included_page_count: 1,
+            },
+            PdfCoverage {
+                page_count: 3,
+                text_page_count: 2,
+                included_page_count: 2,
+            },
+            PdfCoverage {
+                page_count: 1,
+                text_page_count: 1,
+                included_page_count: 1,
+            },
+            PdfCoverage {
+                page_count: 0,
+                text_page_count: 0,
+                included_page_count: 0,
+            },
+        ] {
+            assert!(validate_document_extraction(&ExtractedDocumentText {
+                pdf_coverage: Some(coverage),
+                ..good.clone()
+            })
+            .is_err());
+        }
+        for bad in [
+            ExtractedDocumentText {
+                pdf_coverage: None,
+                ..good.clone()
+            },
+            ExtractedDocumentText {
+                format: DocumentFormat::Docx,
+                ..good.clone()
+            },
+            ExtractedDocumentText {
+                omissions: vec![DocumentOmission::MainBodyOnly],
+                ..good.clone()
+            },
+            ExtractedDocumentText {
+                omissions: vec![DocumentOmission::ParagraphLimit],
+                ..good.clone()
+            },
+            ExtractedDocumentText {
+                blocks: vec![DocumentBlock {
+                    locator: DocumentLocator::PdfPage { page: 0 },
+                    text: "literal".into(),
+                }],
+                ..good.clone()
+            },
+            ExtractedDocumentText {
+                blocks: vec![DocumentBlock {
+                    locator: DocumentLocator::DocxParagraph { paragraph: 1 },
+                    text: "literal".into(),
+                }],
+                ..good.clone()
+            },
+            ExtractedDocumentText {
+                status: DocumentExtractionStatus::Malformed,
+                ..good.clone()
+            },
+            ExtractedDocumentText {
+                omissions: vec![DocumentOmission::TextLayerOnly],
+                ..snapshot("docx").extraction
+            },
+            ExtractedDocumentText {
+                blocks: vec![
+                    DocumentBlock {
+                        locator: DocumentLocator::PdfPage { page: 2 },
+                        text: "second".into(),
+                    },
+                    DocumentBlock {
+                        locator: DocumentLocator::PdfPage { page: 1 },
+                        text: "first".into(),
+                    },
+                ],
+                pdf_coverage: Some(PdfCoverage {
+                    page_count: 3,
+                    text_page_count: 2,
+                    included_page_count: 2,
+                }),
+                ..good.clone()
+            },
+            ExtractedDocumentText {
+                blocks: vec![
+                    DocumentBlock {
+                        locator: DocumentLocator::PdfPage { page: 2 },
+                        text: "second".into(),
+                    },
+                    DocumentBlock {
+                        locator: DocumentLocator::PdfPage { page: 2 },
+                        text: "duplicate".into(),
+                    },
+                ],
+                pdf_coverage: Some(PdfCoverage {
+                    page_count: 3,
+                    text_page_count: 2,
+                    included_page_count: 2,
+                }),
+                ..good.clone()
+            },
+        ] {
+            assert!(validate_document_extraction(&bad).is_err());
+        }
+        for invalid_locator in [
+            serde_json::json!({"kind":"pdf_page","page":2,"paragraph":1}),
+            serde_json::json!({"kind":"pdf_page","page":1.5}),
+            serde_json::json!({"kind":"link","page":1}),
+        ] {
+            assert!(serde_json::from_value::<DocumentLocator>(invalid_locator).is_err());
+        }
+        let mut no_text =
+            ExtractedDocumentText::empty_for(DocumentFormat::Pdf, DocumentExtractionStatus::NoText);
+        assert!(validate_document_extraction(&no_text).is_err());
+        no_text.pdf_coverage = Some(PdfCoverage {
+            page_count: 0,
+            text_page_count: 0,
+            included_page_count: 0,
+        });
+        validate_document_extraction(&no_text).unwrap();
+        no_text.status = DocumentExtractionStatus::Malformed;
+        assert!(validate_document_extraction(&no_text).is_err());
+    }
+
+    #[test]
+    fn mixed_format_fit_keeps_exact_quoted_utf8_prefix_and_honest_coverage() {
+        let docx = snapshot("old whole paragraph");
+        let pdf = DocumentSnapshot {
+            attachment_id: "att-2".into(),
+            ..pdf_snapshot("é🦀\\\"suffix")
+        };
+        let first_cost = render_document_snapshots(&[docx.clone()]).unwrap().len();
+        let prefix_pdf = DocumentSnapshot {
+            extraction: ExtractedDocumentText {
+                blocks: vec![DocumentBlock {
+                    locator: DocumentLocator::PdfPage { page: 2 },
+                    text: "é🦀".into(),
+                }],
+                ..pdf.extraction.clone()
+            },
+            ..pdf.clone()
+        };
+        let cap = first_cost + render_document_snapshots(&[prefix_pdf]).unwrap().len();
+        let input = vec![docx, pdf];
+        let fitted = fit_document_snapshots(&input, cap).unwrap();
+        assert_eq!(fitted[0], input[0]);
+        assert_eq!(fitted[1].extraction.blocks[0].text, "é🦀");
+        assert_eq!(
+            fitted[1].extraction.status,
+            DocumentExtractionStatus::Partial
+        );
+        assert_eq!(
+            fitted[1].extraction.pdf_coverage,
+            input[1].extraction.pdf_coverage
+        );
+        assert!(fitted[1]
+            .extraction
+            .omissions
+            .contains(&DocumentOmission::ContextLimit));
+        let rendered = render_document_snapshots(&fitted).unwrap();
+        assert_eq!(rendered.len(), cap);
+        assert!(rendered.contains("locator=pdf#page=2"));
+        assert_eq!(input[1].extraction.blocks[0].text, "é🦀\\\"suffix");
+        let omitted = fit_document_snapshots(&input, first_cost).unwrap();
+        assert!(omitted[1].extraction.blocks.is_empty());
+        assert_eq!(
+            omitted[1].extraction.status,
+            DocumentExtractionStatus::ContextOmitted
+        );
+        let coverage = omitted[1].extraction.pdf_coverage.unwrap();
+        assert_eq!(
+            (
+                coverage.page_count,
+                coverage.text_page_count,
+                coverage.included_page_count
+            ),
+            (3, 2, 0)
+        );
     }
 }

@@ -1,5 +1,34 @@
 # Native harness acceptance
 
+## M55 selected PDF text (2026-10-16)
+
+Selected own Windows Web PDFs now supply bounded text-layer excerpts as quoted
+User data with native page locators. The independent real-handler missing-text
+test first failed, then passed. A two-page fixture produces known coverage of
+two pages, one text page and one included page. Mixed DOCX/PDF selection shares
+two attempts, ten outcomes and 16KiB exact rendered data. Current/history,
+stream, reload, compaction and ownership/hash/format exclusions are covered.
+Private V2 normalizes strict saved DOCX V1 in memory; public DOCX remains V1.
+PDF V2 status contains coverage only, with null counts when unknown.
+
+Rust/core 2,788 passed / 26 intentional ignores / 45 suites; all parser cases and three explicit Windows physical cases, formatting/build; SDK151/three service skips; web1,370/115files; SDK/web typechecks/builds passed. One combined native review and one final SDK/web review each
+found one P2, fixed in one wave. The native regression additionally exposed
+suppressed Flate errors during the gate: existing flate2 now requires complete
+zlib input and checksum, preserving every negative assertion. Page Contents
+accept unfiltered/singleFlate streams; known other filters/chains are unsupported.
+The UI regression first returned null for a valid context-omitted result and now
+retains its known coverage. A label-array type inference error was also corrected.
+
+These are deterministic synthetic files/recording adapters and finite isolated
+workers, with no actual model, daemon service, account, DB server or container.
+Windows memory/process/retirement limits and wall deadline remain checked;
+no kernel CPU quota or filesystem/network sandbox is claimed. Empty output does
+not establish scanned content; OCR, visual layout, other Office/non-Windows,
+live answer quality and full Hermes parity remain open. M52 stays PARTIAL and
+its consumed actual case remains immutable. See the
+[M55 plan](../superpowers/plans/2026-10-16-companion-pdf-understanding-m55.md)
+and [document coverage](documents.md).
+
 ## M54 selected DOCX text (2026-10-16)
 
 Selected own Web DOCX text reaches normal generate and stream requests as

@@ -5,7 +5,7 @@ use crate::{
     sessions::{SessionRecord, TitleSource},
 };
 use anima_core::document_content::{
-    document_rendered_bytes, parse_document_snapshots, DocumentBlock,
+    document_rendered_bytes, parse_document_snapshots, DocumentBlock, DocumentLocator, PdfCoverage,
 };
 use async_trait::async_trait;
 use std::{
@@ -17,6 +17,254 @@ const DOCX: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/fixtures/documents/m54-selected.docx"
 ));
+const PDF: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/documents/m55-selected.pdf"
+));
+
+fn pdf_output() -> ExtractedDocumentText {
+    ExtractedDocumentText {
+        version: 2,
+        format: DocumentFormat::Pdf,
+        status: Status::Ready,
+        blocks: vec![DocumentBlock {
+            locator: DocumentLocator::PdfPage { page: 1 },
+            text: "bounded selected PDF content".into(),
+        }],
+        omissions: vec![DocumentOmission::TextLayerOnly],
+        pdf_coverage: Some(PdfCoverage {
+            page_count: 2,
+            text_page_count: 1,
+            included_page_count: 1,
+        }),
+    }
+}
+
+struct FormatExtractor(std::sync::Mutex<Vec<DocumentFormat>>);
+#[async_trait]
+impl DocumentExtractor for FormatExtractor {
+    async fn extract(
+        &self,
+        format: DocumentFormat,
+        _bytes: Vec<u8>,
+        _cancel: CancelSignal,
+        _deadline: Option<tokio::time::Instant>,
+    ) -> Result<ExtractedDocumentText, WorkerFailure> {
+        self.0.lock().unwrap().push(format);
+        Ok(match format {
+            DocumentFormat::Docx => output(),
+            DocumentFormat::Pdf => pdf_output(),
+        })
+    }
+}
+
+fn selected_record(
+    temp: &Temp,
+    template: &AttachmentRecord,
+    id: &str,
+    pdf: bool,
+) -> AttachmentRecord {
+    let (extension, mime, bytes) = if pdf {
+        ("pdf", super::super::PDF_MIME, PDF)
+    } else {
+        ("docx", super::super::DOCX_MIME, DOCX)
+    };
+    let name = format!("{id}.{extension}");
+    let saved = save_upload(&temp.0, "2026-10-16", &name, bytes).unwrap();
+    AttachmentRecord {
+        id: id.into(),
+        name,
+        mime: mime.into(),
+        size: bytes.len() as u64,
+        path: saved.path,
+        sha256: saved.sha256,
+        workspace_root: saved.workspace_root,
+        ..template.clone()
+    }
+}
+
+#[tokio::test]
+async fn mixed_documents_share_two_attempts_ten_statuses_and_four_source_reads() {
+    let (temp, state, agent, id, config, row) = fixture().await;
+    let rows = (0..12)
+        .map(|i| selected_record(&temp, &row, &format!("mixed{i}"), i % 2 == 1))
+        .collect::<Vec<_>>();
+    state
+        .read()
+        .await
+        .history
+        .store()
+        .upsert_attachments(&rows)
+        .await
+        .unwrap();
+    let extraction = Arc::new(FormatExtractor(std::sync::Mutex::new(Vec::new())));
+    let reads = Arc::new(AtomicUsize::new(0));
+    let captured = reads.clone();
+    let mut input = crate::agent_runs::attachments::attachment_content("original", &rows, None);
+    admit_with_reader(
+        &state,
+        &agent,
+        "chat:docs",
+        &id,
+        RunSource::Web,
+        &config,
+        &mut input,
+        extraction.clone(),
+        CancelSignal::new(),
+        None,
+        Arc::new(move |root, record| {
+            captured.fetch_add(1, Ordering::SeqCst);
+            read_attachment_bytes(root, record)
+        }),
+    )
+    .await;
+    let snapshots = parse_document_snapshots(&input).unwrap();
+    assert_eq!(
+        *extraction.0.lock().unwrap(),
+        [DocumentFormat::Docx, DocumentFormat::Pdf]
+    );
+    assert_eq!(reads.load(Ordering::SeqCst), 4);
+    assert_eq!(snapshots.len(), 10);
+    assert_eq!(
+        snapshots
+            .iter()
+            .filter(|s| !s.extraction.blocks.is_empty())
+            .count(),
+        2
+    );
+    assert!(document_rendered_bytes(&input) <= MAX_DOCUMENT_RENDERED_BYTES);
+    assert_eq!(
+        snapshots[1].extraction.pdf_coverage,
+        pdf_output().pdf_coverage
+    );
+    for snapshot in &snapshots[2..] {
+        assert_eq!(snapshot.extraction.status, Status::ContextOmitted);
+        assert_eq!(
+            snapshot.extraction.omissions,
+            [DocumentOmission::SelectionLimit]
+        );
+    }
+}
+
+#[tokio::test]
+async fn oversized_and_failed_supported_selections_consume_the_attempt_allowance() {
+    let (temp, state, agent, id, config, row) = fixture().await;
+    let mut oversized = selected_record(&temp, &row, "oversized", false);
+    oversized.size = MAX_DOCUMENT_INPUT_BYTES + 1;
+    let pdf = selected_record(&temp, &row, "malformed", true);
+    let third = selected_record(&temp, &row, "never-attempted", false);
+    let rows = [oversized, pdf, third];
+    state
+        .read()
+        .await
+        .history
+        .store()
+        .upsert_attachments(&rows)
+        .await
+        .unwrap();
+    let extraction = Arc::new(Extractor {
+        calls: AtomicUsize::new(0),
+        output: ExtractedDocumentText::empty_for(DocumentFormat::Pdf, Status::Malformed),
+        change: None,
+        cancel: false,
+    });
+    let mut input = crate::agent_runs::attachments::attachment_content("original", &rows, None);
+    run(
+        &state,
+        &agent,
+        &id,
+        &config,
+        &mut input,
+        extraction.clone(),
+        CancelSignal::new(),
+    )
+    .await;
+    let snapshots = parse_document_snapshots(&input).unwrap();
+    assert_eq!(extraction.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(snapshots[0].extraction.status, Status::TooLarge);
+    assert_eq!(snapshots[1].extraction.status, Status::Malformed);
+    assert_eq!(snapshots[1].extraction.format, DocumentFormat::Pdf);
+    assert_eq!(snapshots[2].extraction.status, Status::ContextOmitted);
+    assert_eq!(
+        snapshots[2].extraction.omissions,
+        [DocumentOmission::SelectionLimit]
+    );
+    assert!(snapshots.iter().all(|s| s.extraction.blocks.is_empty()));
+}
+
+#[tokio::test]
+async fn pdf_worker_format_mismatch_and_cancel_are_empty_pdf_outcomes() {
+    let (temp, state, agent, id, config, row) = fixture().await;
+    let pdf = selected_record(&temp, &row, "selected", true);
+    state
+        .read()
+        .await
+        .history
+        .store()
+        .upsert_attachments(&[pdf.clone()])
+        .await
+        .unwrap();
+    for cancelled in [false, true] {
+        let extraction = Arc::new(Extractor {
+            calls: AtomicUsize::new(0),
+            output: output(),
+            change: None,
+            cancel: cancelled,
+        });
+        let mut input =
+            crate::agent_runs::attachments::attachment_content("original", &[pdf.clone()], None);
+        run(
+            &state,
+            &agent,
+            &id,
+            &config,
+            &mut input,
+            extraction,
+            CancelSignal::new(),
+        )
+        .await;
+        let snapshots = parse_document_snapshots(&input).unwrap();
+        assert_eq!(snapshots[0].extraction.format, DocumentFormat::Pdf);
+        assert_eq!(
+            snapshots[0].extraction.status,
+            if cancelled {
+                Status::Cancelled
+            } else {
+                Status::Unavailable
+            }
+        );
+        assert!(snapshots[0].extraction.blocks.is_empty());
+    }
+}
+
+#[test]
+fn document_recognition_requires_exact_kind_mime_and_extension() {
+    let mut row = crate::history::conformance::attachment_record("document", "agent", "chat:docs");
+    row.kind = AttachmentKind::Document;
+    for (name, mime, expected) in [
+        (
+            "selected.PDF",
+            super::super::PDF_MIME,
+            Some(DocumentFormat::Pdf),
+        ),
+        (
+            "selected.DOCX",
+            super::super::DOCX_MIME,
+            Some(DocumentFormat::Docx),
+        ),
+        ("selected.pdf", super::super::DOCX_MIME, None),
+        ("selected.docx", super::super::PDF_MIME, None),
+        ("selected.pdf", "application/pdf; charset=utf-8", None),
+        ("selected", super::super::PDF_MIME, None),
+    ] {
+        row.name = name.into();
+        row.mime = mime.into();
+        assert_eq!(document_format(&row), expected);
+    }
+    row.name = "selected.pdf".into();
+    row.kind = AttachmentKind::Image;
+    assert_eq!(document_format(&row), None);
+}
 struct Temp(PathBuf);
 impl Drop for Temp {
     fn drop(&mut self) {
@@ -33,6 +281,7 @@ struct Extractor {
 impl DocumentExtractor for Extractor {
     async fn extract(
         &self,
+        _format: DocumentFormat,
         _bytes: Vec<u8>,
         cancel: CancelSignal,
         _deadline: Option<tokio::time::Instant>,
@@ -49,13 +298,15 @@ impl DocumentExtractor for Extractor {
 }
 fn output() -> ExtractedDocumentText {
     ExtractedDocumentText {
-        version: 1,
+        version: 2,
+        format: DocumentFormat::Docx,
         status: Status::Ready,
         blocks: vec![DocumentBlock {
-            paragraph: 1,
+            locator: DocumentLocator::DocxParagraph { paragraph: 1 },
             text: "bounded selected content".into(),
         }],
         omissions: vec![DocumentOmission::MainBodyOnly],
+        pdf_coverage: None,
     }
 }
 fn extractor() -> Arc<Extractor> {
@@ -243,7 +494,7 @@ async fn admission_rejects_malformed_worker_output_and_late_stop_text() {
     let mut input = crate::agent_runs::attachments::attachment_content("original", &[row], None);
     let original = input.text.clone();
     let mut malformed = output();
-    malformed.blocks[0].paragraph = 0;
+    malformed.blocks[0].locator = DocumentLocator::DocxParagraph { paragraph: 0 };
     let bad = Arc::new(Extractor {
         calls: AtomicUsize::new(0),
         output: malformed,

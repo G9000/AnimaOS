@@ -167,6 +167,166 @@ it('labels partial, limited, and other closed extraction outcomes', () => {
   );
 });
 
+it('describes PDF text-layer coverage with honest page counts', () => {
+  expect(
+    describeDocumentExtraction({
+      version: 2,
+      format: 'pdf',
+      status: 'ready',
+      pageCount: 2,
+      textPageCount: 1,
+      includedPageCount: 1,
+      omissions: ['text_layer_only'],
+    }),
+  ).toBe(
+    'PDF text layer extracted · 1 of 2 pages with text · 1 page included · Only the PDF text layer was read',
+  );
+  expect(
+    describeDocumentExtraction({
+      version: 2,
+      format: 'pdf',
+      status: 'partial',
+      pageCount: 2,
+      textPageCount: 2,
+      includedPageCount: 1,
+      omissions: ['context_limit'],
+    }),
+  ).toBe(
+    'Some PDF text layer extracted · 2 of 2 pages with text · 1 page included · Not all PDF text fit in this message context',
+  );
+  expect(
+    describeDocumentExtraction({
+      version: 2,
+      format: 'pdf',
+      status: 'no_text',
+      pageCount: 2,
+      textPageCount: 0,
+      includedPageCount: 0,
+      omissions: [],
+    }),
+  ).toBe(
+    'No PDF text layer text found · 0 of 2 pages with text · 0 pages included',
+  );
+  expect(
+    describeDocumentExtraction({
+      version: 2,
+      format: 'pdf',
+      status: 'context_omitted',
+      pageCount: null,
+      textPageCount: null,
+      includedPageCount: null,
+      omissions: ['context_limit'],
+    }),
+  ).toBe(
+    'PDF text not included · Not all PDF text fit in this message context',
+  );
+});
+
+it('quietly rejects invalid or historical PDF summaries', () => {
+  const valid = {
+    version: 2,
+    format: 'pdf',
+    status: 'ready',
+    pageCount: 2,
+    textPageCount: 1,
+    includedPageCount: 1,
+    omissions: [],
+  };
+  const invalid = [
+    undefined,
+    { ...valid, version: 1 },
+    { ...valid, status: 'future_status' },
+    { ...valid, privateText: 'secret' },
+    { ...valid, page: 1 },
+    { ...valid, omissions: ['main_body_only'] },
+    { ...valid, omissions: ['text_layer_only', 'text_layer_only'] },
+    { ...valid, pageCount: null },
+    { ...valid, textPageCount: null },
+    { ...valid, includedPageCount: null },
+    { ...valid, pageCount: 101 },
+    { ...valid, textPageCount: 3 },
+    { ...valid, includedPageCount: 2 },
+    { ...valid, status: 'ready', includedPageCount: 0 },
+    { ...valid, status: 'no_text', textPageCount: 1 },
+    { ...valid, status: 'no_text', pageCount: 0 },
+    { ...valid, status: 'context_omitted', includedPageCount: 1 },
+    {
+      ...valid,
+      status: 'malformed',
+      pageCount: 2,
+      textPageCount: 1,
+      includedPageCount: 0,
+    },
+    {
+      ...valid,
+      status: 'malformed',
+      pageCount: null,
+      textPageCount: 2,
+      includedPageCount: null,
+    },
+    { ...valid, status: 'partial', textPageCount: 0, includedPageCount: 0 },
+  ];
+
+  for (const extraction of invalid) {
+    expect(describeDocumentExtraction(extraction)).toBeNull();
+  }
+});
+
+it('keeps known PDF coverage visible when context omits all text', () => {
+  expect(
+    describeDocumentExtraction({
+      version: 2,
+      format: 'pdf',
+      status: 'context_omitted',
+      pageCount: 2,
+      textPageCount: 1,
+      includedPageCount: 0,
+      omissions: ['text_layer_only', 'context_limit'],
+    }),
+  ).toBe(
+    'PDF text not included · 1 of 2 pages with text · 0 pages included · Only the PDF text layer was read · Not all PDF text fit in this message context',
+  );
+});
+
+it('renders a PDF summary beside its unchanged original download', async () => {
+  const download = vi
+    .spyOn(daemon, 'downloadAttachment')
+    .mockResolvedValue(new Blob(['pdf'], { type: 'application/pdf' }));
+  render(
+    <MessageAttachments
+      agentId="agent"
+      attachments={[
+        {
+          ...uploaded,
+          type: 'file',
+          kind: 'document',
+          mime: 'application/pdf',
+          name: 'selected.pdf',
+          extraction: {
+            version: 2,
+            format: 'pdf',
+            status: 'partial',
+            pageCount: 2,
+            textPageCount: 1,
+            includedPageCount: 1,
+            omissions: ['text_layer_only'],
+          },
+        },
+      ]}
+    />,
+  );
+
+  expect(screen.getByText(/Some PDF text layer extracted/)).toHaveTextContent(
+    'Some PDF text layer extracted · 1 of 2 pages with text · 1 page included · Only the PDF text layer was read',
+  );
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Download selected.pdf' }),
+  );
+  expect(download).toHaveBeenCalledWith('agent', 'att_1', {
+    signal: expect.any(AbortSignal),
+  });
+});
+
 it('renders partial extraction without implying the original document is complete', () => {
   render(
     <MessageAttachments

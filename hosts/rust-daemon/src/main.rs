@@ -6,15 +6,15 @@ use tokio::net::TcpListener;
 use tracing::info;
 
 fn main() -> io::Result<()> {
-    let mut arguments = std::env::args_os().skip(1);
+    let arguments: Vec<_> = std::env::args_os().skip(1).collect();
     if arguments
-        .next()
-        .is_some_and(|argument| argument == "--document-worker-v1")
+        .iter()
+        .any(|argument| argument.to_string_lossy().starts_with("--document-worker-"))
     {
-        if arguments.next().is_some() {
+        if arguments.len() != 1 || arguments[0] != "--document-worker-v2" {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "document worker accepts no additional arguments",
+                "document worker requires exactly --document-worker-v2",
             ));
         }
         return anima_daemon::document_worker_entry();

@@ -142,12 +142,33 @@ export type DocumentOmission =
   | 'context_limit'
   | 'selection_limit';
 
-export interface SessionMessageDocumentExtraction {
+export interface SessionMessageDocxExtraction {
   version: 1;
   status: DocumentExtractionStatus;
   paragraphCount: number;
   omissions: DocumentOmission[];
 }
+
+export type PdfDocumentOmission =
+  | 'text_layer_only'
+  | 'text_limit'
+  | 'context_limit'
+  | 'selection_limit';
+
+export interface SessionMessagePdfExtraction {
+  version: 2;
+  format: 'pdf';
+  status: DocumentExtractionStatus;
+  pageCount: number | null;
+  textPageCount: number | null;
+  includedPageCount: number | null;
+  omissions: PdfDocumentOmission[];
+}
+
+/** Closed public summaries for the attachment's extracted document text. */
+export type SessionMessageDocumentExtraction =
+  | SessionMessageDocxExtraction
+  | SessionMessagePdfExtraction;
 
 export interface SessionMessage {
   id: string;
