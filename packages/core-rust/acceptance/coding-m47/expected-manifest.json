@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "valid": [
+    {
+      "id": "primary",
+      "input": "id,customer,status,amount\ni-1,Cedar,open,12.50\ni-2,Cedar,open,7.05\ni-3,Cedar,void,99.99\ni-4,Orchid,open,0.10\ni-5,Orchid,open,0.20\ni-6,Cedar,open,0.45\n",
+      "expected": "customer,open_count,total\nCedar,3,20.00\nOrchid,2,0.30\n"
+    },
+    {
+      "id": "changed-amount",
+      "input": "id,customer,status,amount\ni-1,Cedar,open,13.50\ni-2,Cedar,open,7.05\ni-3,Cedar,void,99.99\ni-4,Orchid,open,0.10\ni-5,Orchid,open,0.20\ni-6,Cedar,open,0.45\n",
+      "expected": "customer,open_count,total\nCedar,3,21.00\nOrchid,2,0.30\n"
+    },
+    {
+      "id": "reverse-order",
+      "input": "id,customer,status,amount\ni-6,Cedar,open,0.45\ni-5,Orchid,open,0.20\ni-4,Orchid,open,0.10\ni-3,Cedar,void,99.99\ni-2,Cedar,open,7.05\ni-1,Cedar,open,12.50\n",
+      "expected": "customer,open_count,total\nCedar,3,20.00\nOrchid,2,0.30\n"
+    },
+    {
+      "id": "header-only",
+      "input": "id,customer,status,amount\n",
+      "expected": "customer,open_count,total\n"
+    },
+    {
+      "id": "all-void",
+      "input": "id,customer,status,amount\nv1,Cedar,void,9.99\nv2,Orchid,void,0.00",
+      "expected": "customer,open_count,total\n"
+    },
+    {
+      "id": "unicode-codepoint-order",
+      "input": "id,customer,status,amount\n1,𐀀,open,0.07\n2,\ue000,open,0.06\n3,😀,open,0.08\n4,a,open,0.02\n5,A,open,0.01\n6,Ω,open,0.05\n7,Á,open,0.04\n8,AA,open,0.03\n",
+      "expected": "customer,open_count,total\nA,1,0.01\nAA,1,0.03\na,1,0.02\nÁ,1,0.04\nΩ,1,0.05\n\ue000,1,0.06\n𐀀,1,0.07\n😀,1,0.08\n"
+    },
+    {
+      "id": "large-exact-cents",
+      "input": "id,customer,status,amount\n1,Large,open,123456789012345678901234567890.12\n2,Large,open,0.88\n3,Large,void,999999999999999999999999999999.99\n",
+      "expected": "customer,open_count,total\nLarge,2,123456789012345678901234567891.00\n"
+    },
+    {
+      "id": "crlf-and-leading-zeroes",
+      "input": "id,customer,status,amount\r\n1,Cedar,open,000.09\r\n2,Cedar,open,0.01\r\n",
+      "expected": "customer,open_count,total\nCedar,2,0.10\n"
+    }
+  ],
+  "invalid": [
+    { "id": "missing-header", "input": "" },
+    { "id": "wrong-header", "input": "customer,id,status,amount\n" },
+    { "id": "short-row", "input": "id,customer,status,amount\n1,Cedar,open\n" },
+    {
+      "id": "extra-field",
+      "input": "id,customer,status,amount\n1,Cedar,open,1.00,extra\n"
+    },
+    {
+      "id": "empty-id",
+      "input": "id,customer,status,amount\n,Cedar,open,1.00\n"
+    },
+    {
+      "id": "empty-customer",
+      "input": "id,customer,status,amount\n1,,open,1.00\n"
+    },
+    {
+      "id": "unknown-status",
+      "input": "id,customer,status,amount\n1,Cedar,paid,1.00\n"
+    },
+    {
+      "id": "negative-amount",
+      "input": "id,customer,status,amount\n1,Cedar,open,-1.00\n"
+    },
+    {
+      "id": "one-fraction-digit",
+      "input": "id,customer,status,amount\n1,Cedar,open,1.0\n"
+    },
+    {
+      "id": "three-fraction-digits",
+      "input": "id,customer,status,amount\n1,Cedar,open,1.001\n"
+    },
+    {
+      "id": "exponent-amount",
+      "input": "id,customer,status,amount\n1,Cedar,open,1e2\n"
+    },
+    {
+      "id": "nan-amount",
+      "input": "id,customer,status,amount\n1,Cedar,open,NaN\n"
+    },
+    {
+      "id": "amount-whitespace",
+      "input": "id,customer,status,amount\n1,Cedar,open, 1.00\n"
+    },
+    {
+      "id": "quoted-customer",
+      "input": "id,customer,status,amount\n1,\"Cedar\",open,1.00\n"
+    },
+    {
+      "id": "blank-interior-row",
+      "input": "id,customer,status,amount\n\n1,Cedar,open,1.00\n"
+    },
+    {
+      "id": "bare-carriage-return",
+      "input": "id,customer,status,amount\n1,Ce\rdar,open,1.00\n"
+    },
+    {
+      "id": "invalid-void-amount",
+      "input": "id,customer,status,amount\n1,Cedar,void,invalid\n"
+    },
+    {
+      "id": "invalid-row-after-valid",
+      "input": "id,customer,status,amount\n1,Cedar,open,2.00\n2,Cedar,open,broken\n"
+    }
+  ]
+}

@@ -193,17 +193,24 @@ pub async fn app_with_configured_persistence(config: DaemonConfig) -> io::Result
         .write()
         .await
         .set_calendar_manager(Some(runtime.calendar.clone()));
-    runtime.jobs.start().await.map_err(|error| {
+    let jobs = runtime.jobs.clone();
+    let connectors = runtime.connectors.clone();
+    let discord = runtime.discord.clone();
+    let drive = runtime.drive.clone();
+    let scheduler = runtime.scheduler.clone();
+    // Install synchronous services before any producer can contend for state.
+    let router = router_with_runtime(state, config, runtime, false);
+    jobs.start().await.map_err(|error| {
         io::Error::new(
             io::ErrorKind::Other,
             format!("job recovery failed: {error:?}"),
         )
     })?;
-    runtime.connectors.start_restored().await;
-    runtime.discord.start_restored().await;
-    runtime.drive.start_restored().await;
-    runtime.scheduler.start().await;
-    Ok(router_with_runtime(state, config, runtime, false))
+    connectors.start_restored().await;
+    discord.start_restored().await;
+    drive.start_restored().await;
+    scheduler.start().await;
+    Ok(router)
 }
 
 pub async fn serve(listener: TcpListener, config: DaemonConfig) -> io::Result<()> {
@@ -256,28 +263,31 @@ pub(crate) async fn serve_with_state(
         .write()
         .await
         .set_calendar_manager(Some(runtime.calendar.clone()));
-    runtime.jobs.start().await.map_err(|error| {
+    let connectors = runtime.connectors.clone();
+    let discord = runtime.discord.clone();
+    let drive = runtime.drive.clone();
+    let scheduler = runtime.scheduler.clone();
+    let agent_runs = runtime.agent_runs.clone();
+    let jobs = runtime.jobs.clone();
+    let history = runtime.history.clone();
+    let skills = crate::skills::SkillScanner::new(runtime.agent_runs.skills());
+    let live = state.read().await.live.clone();
+    let browser_state = state.clone();
+    let router = router_with_runtime(state, config, runtime, bind_is_loopback);
+    // Router installation uses uncontended construction-time state. Restored
+    // workers and the scanner may acquire it immediately after being started.
+    jobs.start().await.map_err(|error| {
         io::Error::new(
             io::ErrorKind::Other,
             format!("job recovery failed: {error:?}"),
         )
     })?;
-    runtime.connectors.start_restored().await;
-    runtime.discord.start_restored().await;
-    runtime.drive.start_restored().await;
-    runtime.scheduler.start().await;
+    connectors.start_restored().await;
+    discord.start_restored().await;
+    drive.start_restored().await;
+    scheduler.start().await;
     // Spec §8.1: the startup rescan, then one every 60 seconds.
-    let skills = crate::skills::SkillScanner::new(runtime.agent_runs.skills());
     skills.start();
-    let connectors = runtime.connectors.clone();
-    let discord = runtime.discord.clone();
-    let scheduler = runtime.scheduler.clone();
-    let agent_runs = runtime.agent_runs.clone();
-    let jobs = runtime.jobs.clone();
-    let history = runtime.history.clone();
-    let live = state.read().await.live.clone();
-    let browser_state = state.clone();
-    let router = router_with_runtime(state, config, runtime, bind_is_loopback);
     let shutdown_live = live.clone();
     let drain_expired = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let workflow_expired = Arc::clone(&drain_expired);

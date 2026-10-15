@@ -766,3 +766,49 @@ async fn coordinator_receipt_failure_stops_model_continuation_and_finishes_faile
     );
     assert!(record.reply_message_id.is_none());
 }
+
+#[tokio::test]
+async fn m47_coding_unproven_effects_keep_started_and_block_later_dispatch() {
+    // Inject only the physical-unknown journal signal. This is not an OS failure
+    // simulation or evidence that any real child was cleaned up.
+    const UNKNOWN: &str = "Command cleanup is uncertain; effects may have occurred. Shell execution is disabled until daemon restart";
+    let fixture = ActionFixture::new("m47-unproven-effects", true).await;
+    let first = write_call();
+    fixture.journal.begin(&first).await.unwrap();
+    fixture.journal.stop_for_unproven_effects(UNKNOWN);
+    assert_eq!(fixture.journal.failure().as_deref(), Some(UNKNOWN));
+    assert_eq!(fixture.journal.revalidate().await, Err(UNKNOWN.to_string()));
+    let outcome = anima_core::TaskResult::error(UNKNOWN, 0);
+    assert_eq!(
+        fixture.journal.finish(&first, &outcome, 0).await,
+        Err(UNKNOWN.to_string())
+    );
+    let mut later = write_call();
+    later.id = "m47-after-unknown".into();
+    let refused = fixture.call(later).await.unwrap();
+    assert_eq!(refused.status, anima_core::TaskStatus::Error);
+    assert_eq!(refused.error.as_deref(), Some(UNKNOWN));
+    assert!(
+        !fixture.root.join(FILE_PATH).exists(),
+        "latched uncertainty must prevent the later real file handler"
+    );
+    for run in [fixture.public_run().await, fixture.saved_run().await] {
+        let receipts = run["actionReceipts"].as_array().unwrap();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0]["status"], "started");
+        assert!(receipts[0].get("finishedAtMs").is_none_or(Value::is_null));
+    }
+    assert!(
+        fixture
+            .coordinator
+            .state
+            .read()
+            .await
+            .runs
+            .get(&fixture.run.run_id)
+            .unwrap()
+            .stop
+            .is_none(),
+        "physical uncertainty must not forge a saved owner Stop"
+    );
+}

@@ -1,0 +1,7 @@
+id,customer,status,amount
+i-1,Cedar,open,12.50
+i-2,Cedar,open,7.05
+i-3,Cedar,void,99.99
+i-4,Orchid,open,0.10
+i-5,Orchid,open,0.20
+i-6,Cedar,open,0.45

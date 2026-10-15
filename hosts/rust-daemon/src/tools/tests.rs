@@ -1601,6 +1601,235 @@ fn execute_bash_command_returns_at_once_when_a_stopped_commands_grandchild_holds
     fs::remove_dir_all(workspace).expect("remove workspace");
 }
 
+#[cfg(windows)]
+#[tokio::test]
+#[ignore = "root-only selected Git Bash and explicit Node, zero providers"]
+async fn m47_coding_windows_shell_stop_timeout_and_leader_exit_join_descendants() {
+    let mut failures = Vec::new();
+    for case in ["stop", "timeout", "leader-exit"] {
+        let mut fixture = ToolExecutionContext::m47_shell_fixture(if case == "leader-exit" {
+            case
+        } else {
+            "live"
+        });
+        let root = fixture.root().to_owned();
+        let command = fixture.command();
+        let cancel = anima_core::CancelSignal::new();
+        let worker_cancel = cancel.clone();
+        let timeout = if case == "timeout" { 1500 } else { 20_000 };
+        let mut worker = tokio::task::spawn_blocking(move || {
+            execute_bash_command_from_root(&root, &command, timeout, ".", Some(&worker_cancel))
+        });
+        let live = fixture.wait_live().await;
+        fixture.witness(case);
+        if case == "stop" {
+            cancel.cancel();
+        }
+        let prompt = tokio::time::timeout(Duration::from_secs(2), &mut worker)
+            .await
+            .ok();
+        let prompt_completion = prompt.is_some();
+        let before = fixture.heartbeat();
+        let neighbor_before = fixture.neighbor_heartbeat();
+        tokio::time::sleep(Duration::from_millis(160)).await;
+        let descendant_stopped_before_ttl = before.is_some() && fixture.heartbeat() == before;
+        let neighbor_untouched =
+            neighbor_before.is_some() && fixture.neighbor_heartbeat() != neighbor_before;
+        println!(
+            "M47_PRIVATE_DISPOSAL {}",
+            json!({"case":case,"observedAtMs":anima_core::primitives::now_millis(),
+            "promptCompletion":prompt_completion,"descendantStoppedBeforeTtl":descendant_stopped_before_ttl,"neighborUntouched":neighbor_untouched})
+        );
+        // Capture the vulnerable outcome now, then cooperatively settle all
+        // fixed peers and wait beyond their expiry BEFORE propagating failure.
+        fixture.cleanup().await;
+        let result = match prompt {
+            Some(result) => result,
+            None => worker.await,
+        };
+        let valid_result = result
+            .ok()
+            .and_then(Result::ok)
+            .is_some_and(|result| match case {
+                "stop" => result.status == "error" && result.output == "Command stopped by owner",
+                "timeout" => result.status == "error" && result.output.contains("timed out"),
+                _ => result.status == "success",
+            });
+        if !live
+            || !prompt_completion
+            || !descendant_stopped_before_ttl
+            || !neighbor_untouched
+            || !valid_result
+        {
+            failures.push((
+                case,
+                live,
+                prompt_completion,
+                descendant_stopped_before_ttl,
+                neighbor_untouched,
+                valid_result,
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "selected shell must join its real descendants/readers before completion: {failures:?}"
+    );
+}
+
+#[cfg(windows)]
+fn m47_shell_call(
+    root: PathBuf,
+    command: String,
+    run_cancel: anima_core::CancelSignal,
+) -> futures::future::BoxFuture<'static, TaskResult<Content>> {
+    let context = ToolExecutionContext::new(
+        Arc::new(AsyncRwLock::new(MemoryManager::new())),
+        Arc::new(AsyncRwLock::new(MemoryEmbeddingRuntime::disabled())),
+        None,
+        ToolRegistry::new(),
+        new_shared_process_manager_with_limit(DEFAULT_MAX_BACKGROUND_PROCESSES),
+        Some(root),
+        None,
+    )
+    .with_cancel(Some(run_cancel));
+    let mut config = crate::agent_runs::test_support::companion_config("M47 shell caller");
+    config.tools = Some(ToolRegistry::new().resolve_descriptors(["bash"]).unwrap());
+    let agent = AgentState {
+        id: "m47-shell-caller".into(),
+        name: config.name.clone(),
+        status: AgentStatus::Running,
+        config,
+        created_at_ms: 1,
+        token_usage: Default::default(),
+    };
+    let message = Message {
+        id: "m47-shell-message".into(),
+        agent_id: agent.id.clone(),
+        room_id: "m47-shell-room".into(),
+        content: Content::default(),
+        role: MessageRole::User,
+        created_at_ms: 1,
+    };
+    let call = ToolCall {
+        id: "m47-shell-drop".into(),
+        name: "bash".into(),
+        args: BTreeMap::from([
+            ("command".into(), DataValue::String(command)),
+            ("timeout".into(), DataValue::Number(20_000.0)),
+        ]),
+    };
+    Box::pin(context.execute_tool(agent, message, call))
+}
+
+#[cfg(windows)]
+#[tokio::test]
+#[ignore = "root-only selected Git Bash and explicit Node, zero providers"]
+async fn m47_coding_windows_shell_caller_drop_cancels_only_its_owned_call() {
+    let mut fixture = ToolExecutionContext::m47_shell_fixture("live");
+    let run_cancel = anima_core::CancelSignal::new();
+    let worker = tokio::spawn(m47_shell_call(
+        fixture.root().to_owned(),
+        fixture.command(),
+        run_cancel.clone(),
+    ));
+    let live = fixture.wait_live().await;
+    fixture.witness("caller-drop");
+    worker.abort();
+    let caller_cancelled = worker.await.is_err_and(|error| error.is_cancelled());
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let before = fixture.heartbeat();
+    let neighbor_before = fixture.neighbor_heartbeat();
+    tokio::time::sleep(Duration::from_millis(160)).await;
+    let stopped_before_ttl = before.is_some() && fixture.heartbeat() == before;
+    let neighbor_untouched =
+        neighbor_before.is_some() && fixture.neighbor_heartbeat() != neighbor_before;
+    println!(
+        "M47_PRIVATE_DISPOSAL {}",
+        json!({"case":"caller-drop","observedAtMs":anima_core::primitives::now_millis(),
+        "settled":caller_cancelled,"descendantStoppedBeforeTtl":stopped_before_ttl,"neighborUntouched":neighbor_untouched})
+    );
+    fixture.cleanup().await;
+    assert!(
+        live && caller_cancelled,
+        "a real live shell call must be dropped"
+    );
+    assert!(
+        !run_cancel.is_cancelled(),
+        "caller drop must not cancel unrelated calls sharing its run token"
+    );
+    assert!(
+        neighbor_untouched,
+        "the independent neighboring process must stay live"
+    );
+    assert!(
+        stopped_before_ttl,
+        "dropping the async caller must retire its owned shell/Node/grandchild before peer TTL"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "root-only selected Git Bash and explicit Node, zero providers"]
+fn m47_coding_windows_shell_drop_during_blocking_startup_never_spawns_late() {
+    // An owned single-slot blocking pool provides a real startup boundary:
+    // the caller submits the shell worker, then drops before that worker runs.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let mut fixture = ToolExecutionContext::m47_shell_fixture("live");
+        let run_cancel = anima_core::CancelSignal::new();
+        let (entered, entered_rx) = tokio::sync::oneshot::channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            let _ = entered.send(());
+            let _ = release_rx.recv();
+        });
+        let _ = entered_rx.await;
+        let submitted = {
+            let mut execution = m47_shell_call(
+                fixture.root().to_owned(),
+                fixture.command(),
+                run_cancel.clone(),
+            );
+            let pending = futures::poll!(execution.as_mut()).is_pending();
+            drop(execution);
+            pending
+        };
+        let _ = release.send(());
+        let _ = blocker.await;
+        let late_started = fixture.wait_live().await;
+        fixture.witness("startup-caller-drop");
+        let neighbor_before = fixture.neighbor_heartbeat();
+        tokio::time::sleep(Duration::from_millis(160)).await;
+        let neighbor_untouched =
+            neighbor_before.is_some() && fixture.neighbor_heartbeat() != neighbor_before;
+        println!(
+            "M47_PRIVATE_DISPOSAL {}",
+            json!({"case":"startup-caller-drop","observedAtMs":anima_core::primitives::now_millis(),
+            "settled":submitted,"noLateSpawn":!late_started,"neighborUntouched":neighbor_untouched})
+        );
+        fixture.cleanup().await;
+        assert!(
+            submitted,
+            "the actual tool future must reach its queued blocking worker"
+        );
+        assert!(
+            !run_cancel.is_cancelled(),
+            "startup drop must use an independent per-call token"
+        );
+        assert!(neighbor_untouched);
+        assert!(
+            !late_started,
+            "a queued shell worker must not launch Node after its caller has dropped"
+        );
+    });
+}
+
 #[test]
 fn background_process_manager_tracks_process_lifecycle() {
     let workspace = create_temp_workspace("bg-process");

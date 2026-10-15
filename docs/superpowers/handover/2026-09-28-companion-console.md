@@ -1,3 +1,20 @@
+# Handover: coding/delegation acceptance (M0–M47)
+
+## Start here (2026-10-15): M47 gates pass; provider coding blocked
+
+M47 source is settled on `g9000/companion-coding-acceptance-m47`, cut from verified M46/PR52 main `0f166fea3e7e33d6b1f79c1d937b73cca61a1e76`. The [M47 plan](../plans/2026-10-14-companion-coding-acceptance-m47.md) records the outcome. Publication, exact source/merge proof and authoritative current resume are `.superpowers/sdd/2026-10-14-companion-coding-acceptance-m47/progress.md`; finish that settlement before cutting the next branch from verified main. Standing reviewed merge-and-continue authorization applies.
+
+- Required gates passed: **2,672 Rust/core tests / 16 intentional ignores / 40 suites / lint / build**, two test threads with explicit native concurrency retained. All 29 source hashes/timestamps stayed frozen, SDK/web/Cargo.lock are unchanged, owned Prettier and five-document path/link checks pass. One native batch, final SDK/web review and combined fix wave were followed by bounded corrections for actually observed compiler, sampling, deadline, startup and test-reader failures; originals are retained.
+- Foreground Windows shell now reuses process-wrap 10.0.1 Job ownership, uncancelled whole-job wait, joined bounded readers and caller-drop retirement. Unproven cleanup retains resources/fuses later shell admission, keeps Started evidence and fails the run before further effects. Non-Windows behavior is preserved without a new containment claim. Four actual physical tests/six cases independently observed 32 kernel identities and zero remaining; all six private fixture roots were removed. The separate actual scripted coding-shell case passed failed-test/repair/pass/CLI/todo/helper/receipt evidence and exact 54-byte output. ScriptedModel is wiring evidence, not model quality.
+- The single actual `gpt-5.5` subscription task `run_c760eca7-1ca4-4603-afa6-628ddc13201a` returned static HTTP 400 before tools. Zero helpers, steps, receipts, approvals, edits, output or usage rows; failed-request billing is unknown. No provider body/cause was recovered, no retry/alternate provider/manual repair occurred. The unchanged buggy candidate still fails 14 independent output checks. PAR-06 useful coding/delegation is **not accepted**.
+- Actual quiet same-store process restart preserved the failed run, original message, empty saved todos/receipts, config/session links, usage and exact candidate/neighbor bytes+times without replay. Canonical memory was absent, so no memory-content recovery claim. Both daemon and both PowerShell-wrapper identities retired; port 18747 is free. Forced quiet restart is not graceful-shutdown proof. Synthetic evidence remains private.
+
+**Next priority is provider compatibility**, with a source-grounded offline diagnostic/controlled-wire RED before any further useful task. The private 327-line native-voice draft at `.superpowers/sdd/2026-10-15-companion-native-voice-m48/plan-held.md` stays held and may be renumbered. Do not manufacture a quality pass with repeated model calls. Keep the broader roadmap's voice, extraction, account/outage/host acceptance and M40 introduction-quality gaps explicit.
+
+Continue cheap Codex delegation and existing-core/host boundaries. Root alone owns Cargo/Nx/fmt/Git/services/models with `CARGO_INCREMENTAL=0`/jobs1. Per-command unsigned commits and context-only updates to “Check Git pull and pending work” remain authorized; leave its separate animaOS repo untouched. Preserve unrelated nx.json SHA256 `3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`. Explicit-file staging only; never nx.json/anima.yaml/private data. No worktree/stash/reset/restore/path checkout, ordinary profiles, connector accounts/sends, DB servers/containers/Docker55432/public deployment. Public Hermes comparison remains pinned at `1fd18277267152893a8a24792b79213e7ca3f899`; preserve notices for actual reuse and Anima naming.
+
+## Historical M46 handover (publication superseded by verified merge above)
+
 # Handover: isolated interactive browser work (M0–M46)
 
 ## Start here (2026-10-14): M46 scoped acceptance complete; publish and verify merge

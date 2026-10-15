@@ -1031,3 +1031,160 @@ async fn a_stop_kills_the_bash_command_its_run_waits_for() {
     drop(guard);
     std::fs::remove_dir_all(workspace).ok();
 }
+
+#[cfg(windows)]
+#[tokio::test]
+#[ignore = "root-only real selected Git Bash descendant Stop; scripted model only"]
+async fn m47_coding_windows_saved_stop_joins_shell_descendants_before_tool_settlement() {
+    let mut fixture = crate::tools::ToolExecutionContext::m47_shell_fixture("live");
+    let bash = ToolCall {
+        id: "m47-bash-stop".into(),
+        name: "bash".into(),
+        args: BTreeMap::from([
+            ("command".into(), DataValue::String(fixture.command())),
+            ("timeout".into(), DataValue::Number(20_000.0)),
+        ]),
+    };
+    let model = ScriptedModel::new(vec![Step::Tools(vec![bash])]);
+    let (coordinator, _) = coordinator_with(model.clone()).await;
+    let store_path = fixture.root().join("control-plane.json");
+    let agent_id = {
+        let mut state = coordinator.state.write().await;
+        state.set_control_plane_store(Some(
+            crate::control_plane_store::ControlPlaneStoreConfig::Json(store_path.clone()),
+        ));
+        state.workspace = Some(crate::control_plane_store::WorkspaceConfig {
+            root_path: fixture.root().to_owned(),
+            company_name: "M47 fixture".into(),
+            mission: "Owned cleanup".into(),
+            values: vec![],
+        });
+        let mut config = super::test_support::companion_config("M47 Shell Stop");
+        config.tools = Some(
+            crate::tools::ToolRegistry::new()
+                .resolve_descriptors(["bash"])
+                .unwrap(),
+        );
+        let id = state.create_agent(config).unwrap().state.id;
+        state.approvals.set_policy(
+            &id,
+            crate::approvals::ApprovalPolicy::default().with(
+                crate::approvals::RiskClass::Exec,
+                crate::approvals::PolicyAction::Allow,
+            ),
+        );
+        id
+    };
+    let mut running = {
+        let coordinator = coordinator.clone();
+        let request = chat_request(&agent_id, "chat:m47-shell-stop", "Run the bounded peer");
+        tokio::spawn(async move { coordinator.run(request).await })
+    };
+    let live = fixture.wait_live().await;
+    fixture.witness("saved-owner-stop");
+    let run_id = coordinator
+        .state
+        .read()
+        .await
+        .runs
+        .active_records()
+        .into_iter()
+        .find(|record| record.agent_id == agent_id)
+        .map(|record| record.id.clone());
+    let stop = if let Some(id) = &run_id {
+        Some(coordinator.stop_run(&agent_id, id).await)
+    } else {
+        None
+    };
+    // Stop acknowledgement is a saved logical cancellation; only subsequent
+    // tool settlement is expected to await whole Job/reader disposal.
+    let prompt = tokio::time::timeout(Duration::from_secs(2), &mut running)
+        .await
+        .ok();
+    let prompt_settlement = prompt.is_some();
+    let before = fixture.heartbeat();
+    let neighbor_before = fixture.neighbor_heartbeat();
+    tokio::time::sleep(Duration::from_millis(160)).await;
+    let stopped_before_ttl = before.is_some() && fixture.heartbeat() == before;
+    let neighbor_untouched =
+        neighbor_before.is_some() && fixture.neighbor_heartbeat() != neighbor_before;
+    println!(
+        "M47_PRIVATE_DISPOSAL {}",
+        serde_json::json!({"case":"saved-owner-stop","observedAtMs":anima_core::primitives::now_millis(),
+        "settled":prompt_settlement,"descendantStoppedBeforeTtl":stopped_before_ttl,"neighborUntouched":neighbor_untouched})
+    );
+    fixture.cleanup().await;
+    let result = match prompt {
+        Some(result) => result,
+        None => running.await,
+    };
+    assert!(
+        live && stop.is_some_and(|result| result.is_ok()),
+        "the actual shell must start before an acknowledged owner Stop"
+    );
+    assert!(
+        prompt_settlement,
+        "the stopped tool must settle before the peer's self-expiry"
+    );
+    assert!(
+        stopped_before_ttl,
+        "settled Stop must not leave Node/grandchild heartbeat effects"
+    );
+    assert!(
+        neighbor_untouched,
+        "Stop must preserve the independent neighboring process"
+    );
+    let envelope = result.unwrap().unwrap();
+    assert_eq!(envelope.result.error.as_deref(), Some("stopped"));
+    assert_eq!(
+        model.requests().len(),
+        1,
+        "no provider or follow-up model call is needed"
+    );
+    let settled = coordinator
+        .state
+        .read()
+        .await
+        .runs
+        .get(run_id.as_ref().unwrap())
+        .unwrap()
+        .clone();
+    assert!(settled.stop.is_some());
+    assert_eq!(settled.status, RunStatus::Cancelled);
+    // Reload actual saved bytes only after the pre-cleanup observations and
+    // owned tool settlement. A Started intent alone is not a settled outcome.
+    let saved_bytes = std::fs::read(&store_path).unwrap();
+    let saved: serde_json::Value = serde_json::from_slice(&saved_bytes).unwrap();
+    let persisted: crate::runs::RunRecord = serde_json::from_value(
+        saved["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|record| record["id"].as_str() == Some(settled.id.as_str()))
+            .unwrap()
+            .clone(),
+    )
+    .unwrap();
+    assert_eq!(persisted.stop, settled.stop);
+    assert_eq!(persisted.status, RunStatus::Cancelled);
+    assert_eq!(persisted.action_receipts, settled.action_receipts);
+    assert_eq!(persisted.action_receipts.len(), 1);
+    let receipt = &persisted.action_receipts[0];
+    assert_eq!(receipt.tool_call_id, "m47-bash-stop");
+    assert_eq!(receipt.name, "bash");
+    assert_eq!(
+        receipt.durability,
+        crate::runs::ActionDurability::Persistent
+    );
+    assert_eq!(
+        receipt.status,
+        crate::runs::ActionStatus::Failed,
+        "a completed stopped handler must save Failed, not leave only Started"
+    );
+    assert_eq!(
+        receipt.result_preview.as_deref(),
+        Some("Command stopped by owner")
+    );
+    assert!(receipt.finished_at_ms.is_some());
+    assert!(receipt.duration_ms.is_some());
+}

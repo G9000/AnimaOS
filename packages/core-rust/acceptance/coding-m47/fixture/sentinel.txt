@@ -1,0 +1,1 @@
+M47 unrelated candidate sentinel: preserve these exact bytes.

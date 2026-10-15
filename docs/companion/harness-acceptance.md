@@ -335,3 +335,77 @@ review/fix wave preceded gates; physical failures produced bounded corrections
 with preserved REDs. Public/account browsing, other hosts/installations, provider
 planning quality and full Hermes parity remain open. See the [M46 plan](../superpowers/plans/2026-10-14-companion-browser-m46.md)
 and [browser guide](browser-work.md); publication and exact source/merge are in the ledger.
+
+## M47 coding, shell ownership and model-call bounds
+
+M47 extends the existing harness rather than adding a second coding engine. The
+[bound plan](../superpowers/plans/2026-10-14-companion-coding-acceptance-m47.md)
+records the frozen offline invoice task, independent oracle, one-helper scope and
+one actual provider attempt. Public Hermes source remains pinned at
+`1fd18277267152893a8a24792b79213e7ca3f899`; behavior informed the acceptance design.
+The synthetic fixture/oracle is new Anima material. Windows ownership reuses the
+already installed process-wrap 10.0.1 Job Object implementation and its `std`
+feature, with no new dependency/version or imported private configuration.
+
+Actual Windows REDs showed continuing descendants after saved Stop/caller Drop,
+late launch after queued Drop, and direct Stop/timeout failing to retire the full
+command tree. The final four physical tests/six cases passed with independently
+sampled kernel PID/image/creation-time/ancestry: 32 controlled identities, none
+remaining, six removed private roots, neighbors preserved. Leader exit already
+passed baseline. A test-only pre-action readiness witness fixed an incomplete OS
+sample without relaxing post-action cleanup requirements. Non-Windows behavior
+is preserved and has no new whole-tree containment claim.
+
+Foreground Windows commands now retain Job ownership and joined bounded readers
+through async caller Drop. Unproven cleanup keeps available resources owned,
+latches a broken-cleanup fuse until restart, retains the durable Started receipt
+and stops further run effects/model continuation. This is an uncertain outcome,
+not a successful disposal, owner Stop or rollback guarantee. Output readers drain
+fixed-size chunks with bounded retained lines/text, including rejected bytes.
+
+Two controlled HTTP REDs proved configured parent model deadlines were missing;
+helpers' whole-run timeout was insufficient. A shared adapter wrapper now applies
+the configured timeout to complete generate/stream calls, including partial
+bodies, preserving unconfigured behavior. Four focused cases pass. The full gate
+also exposed a startup construction race; router installation now precedes
+restored workers/scanner. A separate HTTP timeout test uses a gated model and
+explicit run settlement rather than a 10 ms scheduling race.
+
+Deterministic acceptance passed 11 focused cases, with five intentionally ignored
+actual-shell selectors selected separately. The real-shell coding case observed
+failed tests, correction, passing tests and CLI, todos, helper links, two exact
+Exec approvals and six persistent action receipts. Its 54-byte output SHA256 is
+`fa5a0c0d4f17139c2f8a9dfc60ed771134702954d1b1929f339731f18dc6091e`;
+protected fixture and neighboring files remained unchanged. ScriptedModel chose
+those steps, so this proves native tool wiring, not autonomous model quality.
+The independent oracle self-tests passed 7/7, including deliberately failing
+baseline and semantic mutants; all expected outputs are frozen literal values.
+
+Actual-provider quality, final current-tree gates and real process restart are
+recorded below separately; these synthetic checks do not establish full Hermes
+parity, arbitrary coding quality, account integrations or production uptime.
+
+### Actual provider attempt and restart result
+
+On 2026-10-15 the one permitted `gpt-5.5` subscription task failed with HTTP 400
+before model output or tools. Run `run_c760eca7-1ca4-4603-afa6-628ddc13201a`
+created no helper, action receipt, Exec approval, edit or output file. Zero usage
+rows were recorded; the failed provider request's billed usage is unknown. The
+redacted error does not establish why the endpoint rejected it. No retry,
+alternate provider, verification task or manual repair followed.
+
+The external oracle rejected the unchanged baseline at 14 module/CLI checks.
+Candidate/neighbor bytes and modification times stayed exact. Quiet same-store
+process restart preserved the failed run, original message, empty todos/receipts,
+agent/session links and empty usage with no replay. Canonical memory was absent;
+this case does not test memory-content recovery. Four recorded daemon/wrapper
+kernel identities retired and port 18747 is free; forced quiet restart is not a
+graceful-shutdown result.
+
+Final required gates passed **2,672 Rust/core tests / 16 intentional ignores /
+40 suites / lint / build**, with two full-suite test threads and unchanged
+explicit product-concurrency tests. Owned Prettier and five-document link/path
+checks pass; SDK/web are unchanged and their final affected-source review is
+clean. This accepts the deterministic native fixes and failed-run recovery.
+**Useful provider coding/delegation remains unaccepted.** Subscription request
+compatibility is the next priority; the native-voice draft stays held.

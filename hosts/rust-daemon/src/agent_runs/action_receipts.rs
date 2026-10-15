@@ -72,6 +72,17 @@ impl RunActionJournal {
             .clone()
     }
 
+    /// A dispatched native effect lost physical cleanup proof. Reuse the same
+    /// fail-closed latch as evidence persistence without inventing a save error
+    /// or an owner Stop. The acknowledged Started receipt remains unsettled.
+    pub(crate) fn stop_for_unproven_effects(&self, message: &'static str) {
+        self.failure
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get_or_insert_with(|| message.to_string());
+        self.cancel.cancel();
+    }
+
     pub(crate) fn owns_caller(&self, agent_id: &str, input_agent_id: &str) -> bool {
         self.run.agent_id == agent_id && self.run.agent_id == input_agent_id
     }

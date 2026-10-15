@@ -93,6 +93,7 @@ pub(crate) struct ScriptedModel {
     secondary: StdMutex<VecDeque<Step>>,
     gate: Option<Gate>,
     requests: StdMutex<Vec<ModelGenerateRequest>>,
+    configs: StdMutex<Vec<AgentConfig>>,
     secondary_requests: StdMutex<Vec<ModelGenerateRequest>>,
 }
 
@@ -117,6 +118,7 @@ impl ScriptedModel {
             secondary: StdMutex::new(secondary.into()),
             gate,
             requests: StdMutex::new(Vec::new()),
+            configs: StdMutex::new(Vec::new()),
             secondary_requests: StdMutex::new(Vec::new()),
         })
     }
@@ -124,6 +126,9 @@ impl ScriptedModel {
     /// Every streamed request (the runs' model calls), oldest first.
     pub(crate) fn requests(&self) -> Vec<ModelGenerateRequest> {
         self.requests.lock().unwrap().clone()
+    }
+    pub(crate) fn configs(&self) -> Vec<AgentConfig> {
+        self.configs.lock().unwrap().clone()
     }
 
     /// Every `generate` request (compaction and titles), oldest first.
@@ -205,10 +210,11 @@ impl ModelAdapter for ScriptedModel {
 
     async fn stream(
         &self,
-        _config: &AgentConfig,
+        config: &AgentConfig,
         request: &ModelGenerateRequest,
         sink: &dyn ModelStreamSink,
     ) -> Result<(), String> {
+        self.configs.lock().unwrap().push(config.clone());
         match self.next(request).await {
             Step::Text(chunks) => {
                 for chunk in &chunks {
