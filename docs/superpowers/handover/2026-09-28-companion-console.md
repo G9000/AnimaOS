@@ -1,3 +1,64 @@
+# Handover: selected native voice input (M0–M56)
+
+## Start here (2026-10-16): M55 merged; M56 bound tests-first voice slice
+
+Continue `g9000/companion-native-voice-m56` from verified
+[M55/PR61](https://github.com/G9000/animaOS-SWARM/pull/61) main
+`285cb59813916e3f3a2293fff4b6dbc83f6d404d`. M55 source
+`182c1515638ed798542c65c3b1fd128c8c02f27f` matches tested/merged tree
+`f8a3743fd8360816c0073ef523295732ab2fa2e3`; all37publication/28source/
+77unowned hashes and nx preserved. Rust2788/26intentionalignores/45suites,
+three explicit Windows physical cases/fmt/build, SDK151/3service skips,
+web1370/115files/type/build and eightdocchecks passed. Both review findings,
+the deeper Flate failure and a new compaction-test assumption were resolved
+without weakening old assertions. Binary PDF attributes preserve fixture bytes.
+M55 is committed/pushed/merged; no publication work remains. The selected other
+chat received this context-only settlement. PAR08 remains partial for codecs,
+OCR/visual/other Office/non-Windows/live answer quality; M52 stays PARTIAL.
+
+The [M56 bound plan](../plans/2026-10-16-companion-native-voice-m56.md) adds a
+selected PCM16 WAV file-to-draft path, with a real production adapter and
+fixture/finite-peer-only acceptance. First publish the three plan docs, then
+record a meaningful existing upload-handler RED with independent WAV bytes.
+No new production API/import/dependency feature before RED. Root binds five
+risks directly; no separate preflight audit. Current114 baseline source/boundary
+hashes were checked before any tracked plan change.
+
+WAV input is4MiB/120s with strict bounded RIFF/PCM arithmetic. Reusable Core
+types have no HTTP/env/host authority; model-adapters owns fixed HTTP/body
+leases, host owns selected source/config/scoped ephemeral operation lifecycle.
+Existing server OpenAI API-key configuration plus explicit opt-in is required;
+ChatGPT subscription or generic OAuth credentials are not speech API keys.
+Fixed OpenAI authority/whisper-1/text multipart, no redirects/proxy/retries/
+fallback. Stop/cancel fences local results; remote completion/billing remains
+unknown. No transcript in history/metadata before explicit Use transcript and
+ordinary Send. Upload/chat trigger zero STT calls; no recording/TTS is added.
+
+Root checked current official OpenAI guide before binding and verified clean
+installed public Hermes HEAD1fd18277267152893a8a24792b79213e7ca3f899 selected
+helpers/LICENSE and bytes1.11.1 ownership API. Narrow attributed Rust port retains
+full MIT notice and Anima branding; no Hermes Python process/profile/catalog.
+No API-key helper is available. No actual provider/model/microphone/service/
+account/DB server/container/deploy is released in M56. Its adapter is tested with
+fakes/finite loopback peers; this does not establish voice quality or full parity.
+
+Exact rulings/resume: `.superpowers/sdd/2026-10-16-companion-native-voice-m56/progress.md`.
+Root alone executes/fmts/Git/processes/models; cheap bounded source-only Codex
+lanes, one native/core review/finalSDKwebreview/onefixwave/freshgates. Direct native
+Python subprocess/Nx runner via cmd.exe is reliable after owned PowerShell
+startup sessions were cancelled; do not blindly resume old sessions. Always
+CARGO_INCREMENTAL=0/jobs1/threads2, resolved Nx, cleared provider/service env and
+local gates authoritative. Dependencies with reason and per-command unsigned
+commits/reviewed merge-and-continue remain authorized. Explicit staging only;
+never nx.json/anima.yaml/private. Preserve nx SHA256
+`3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`.
+No stash/reset/restore/path checkout/worktree, ordinary profile/credential copy
+or readout, real accounts, DB servers, containers, Docker55432 or public deployment.
+M47/M52 actual cases and consumed releases stay immutable, without replay/rescue/
+regrade. Historical resumes below are superseded here.
+
+## Historical M55 outcome handover
+
 # Handover: selected PDF text understanding (M0–M55)
 
 ## Start here (2026-10-16): M55 gated; settle publication then continue
