@@ -409,3 +409,34 @@ checks pass; SDK/web are unchanged and their final affected-source review is
 clean. This accepts the deterministic native fixes and failed-run recovery.
 **Useful provider coding/delegation remains unaccepted.** Subscription request
 compatibility is the next priority; the native-voice draft stays held.
+
+## M48: safe subscription diagnostics and exact request handoff
+
+The real synthetic ordinary coordinator's first request, including 14 selected
+and added team descriptors, was exported unchanged to a private versioned fixture
+and imported through the existing subscription serializer and joined loopback.
+The 10,376-byte fixture SHA256 is
+`17a8c79e78738d57b9c27bedee2161cbf287109acd89bdb39cb19a77cf5e15c7`.
+No production seam or API was added. This verifies actual request composition and
+wire conversion locally; the controlled HTTP peer cannot establish backend acceptance.
+
+Two expected classifier REDs preceded the narrow implementation. Known codes,
+retry rules, bounded Zeroizing reader and safe parameter reduction are preserved.
+Four recognized type-only envelopes and the pinned Hermes model-access detail
+marker now produce fixed safe explanations. Unknown/malformed content remains a
+static fallback; provider text, account/model values and credentials are not exposed.
+The existing adapter notice retains the pinned source and full MIT attribution.
+
+Required gates passed **2,681 Rust/core tests / 19 intentional ignores / 40 suites /
+lint / build**, plus exact exporter/importer runs. One native/core batch and final
+affected SDK/web review are clean. SDK/web/contracts/manifests/lockfile are unchanged;
+all six source hashes stayed frozen, and owned formatting/document checks pass.
+
+After gates, one separately released direct zero-tool `M48_ROUTE_OK` request used
+the normal application ChatGPT vault adapter and the same gpt-5.5 model. It was
+rejected in 1.10 seconds with safe category **model_access**: the selected model
+is unsupported for this account. Zero tools/helpers/retries or second request;
+failed-call consumption is unknown. The predeclared request release is consumed.
+This new rejection does not recover M47's historical body/cause or accept its
+coding task. Account-aware subscription model availability/selection is next;
+voice and broader useful-provider parity remain open. See the [M48 plan](../superpowers/plans/2026-10-15-companion-provider-diagnostics-m48.md).

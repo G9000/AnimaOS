@@ -34,6 +34,15 @@ ambiguous sends, terminal codes and stream failures remain terminal. Existing
 API-provider stream retries now honor explicit zero. No upstream credential
 refresh, payload repair, fallback or outer-loop retry framework is copied.
 
+M48 source revision: 1fd18277267152893a8a24792b79213e7ca3f899.
+M48 adapts the exact model-access rejection marker from
+agent/error_classifier.py::CODEX_ACCOUNT_MODEL_ENTITLEMENT_MARKER/_classify_400,
+with tests/agent/test_codex_model_entitlement_rotation.py as its source fixture.
+Anima recognizes only bounded HTTP 400 top-level detail or detail.message with
+absent/null code and absent/null or four recognized types. It emits one fixed
+model-access explanation without provider/model text. No credential rotation,
+fallback, retry, permission change or historical-failure diagnosis is copied.
+
 MIT License
 
 Copyright (c) 2025 Nous Research

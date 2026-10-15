@@ -1538,3 +1538,282 @@ async fn prestream_retry_cancel_signal_drops_backoff_before_the_next_request() {
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     server_task.abort();
 }
+
+// M48 uses only joined loopback fixtures. No production endpoint/credential is
+// selected, and none of the arbitrary upstream strings may become diagnostics.
+async fn m48_http_failure_fixture(
+    status: u16,
+    body: Vec<u8>,
+    content_type: &'static str,
+    chunked: bool,
+) -> HttpFailure {
+    let (endpoint, task) = server(axum::Router::new().route(
+        "/responses",
+        axum::routing::post(move || {
+            let body = body.clone();
+            async move {
+                let body = if chunked {
+                    let chunks = body
+                        .chunks(8192)
+                        .map(|bytes| Ok::<_, std::io::Error>(bytes.to_vec()))
+                        .collect::<Vec<_>>();
+                    axum::body::Body::from_stream(futures::stream::iter(chunks))
+                } else {
+                    axum::body::Body::from(body)
+                };
+                axum::response::Response::builder()
+                    .status(status)
+                    .header("content-type", content_type)
+                    .body(body)
+                    .unwrap()
+            }
+        }),
+    ))
+    .await;
+    let response = reqwest::Client::new().post(endpoint).send().await;
+    let failure = match response {
+        Ok(response) => Some(http_failure(response).await),
+        Err(_) => None,
+    };
+    task.abort();
+    let _ = task.await;
+    failure.expect("the joined synthetic HTTP fixture must return a response")
+}
+
+#[tokio::test]
+async fn m48_provider_diagnostic_type_only_errors_are_bounded_and_parameter_safe() {
+    for (kind, message) in [
+        ("invalid_request_error", "ChatGPT subscription request is invalid; review the request configuration"),
+        ("authentication_error", "ChatGPT subscription authorization was rejected; check the selected account and sign-in"),
+        ("permission_error", "ChatGPT subscription permission was denied; check account and integration access"),
+        ("server_error", "ChatGPT subscription is temporarily unavailable; preserve the connection and try later"),
+    ] {
+        for null_code in [false, true] {
+            for wrapper in ["error", "response", "top"] {
+                let mut error = json!({"type":kind,"param":"tools[12].function.parameters.properties.query.minLength",
+                    "message":"m48-private upstream 🟣 prompt/account/path"});
+                if null_code { error["code"] = Value::Null; }
+                let payload = match wrapper {
+                    "error" => json!({"error":error}),
+                    "response" => json!({"response":{"error":error}}),
+                    _ => error,
+                };
+                let failure = m48_http_failure_fixture(400, payload.to_string().into_bytes(), "application/json", true).await;
+                assert_eq!(failure.diagnostic, format!("{message} (type: {kind}; parameter: tools)"));
+                assert!(failure.diagnostic.len() <= 512);
+                assert!(!failure.diagnostic.contains("m48-private"));
+                assert!(!failure.retryable, "type recognition is not retry authority");
+            }
+        }
+    }
+    let payload = json!({"error":{"type":"invalid_request_error","param":"m48-private/🟣"}});
+    let failure = m48_http_failure_fixture(
+        400,
+        payload.to_string().into_bytes(),
+        "application/json",
+        false,
+    )
+    .await;
+    assert_eq!(failure.diagnostic, "ChatGPT subscription request is invalid; review the request configuration (type: invalid_request_error)");
+}
+
+const M48_MODEL_ACCESS: &str = "ChatGPT subscription selected model is not supported for this account; review the model and account access";
+const M48_ENTITLEMENT_DETAIL: &str = "The 'm48-private-model' model is not supported when using Codex with a ChatGPT account. m48-private/account/🟣";
+
+#[tokio::test]
+async fn m48_provider_diagnostic_http400_detail_model_access_is_closed_and_precedes_type() {
+    for payload in [
+        json!({"detail":M48_ENTITLEMENT_DETAIL}),
+        json!({"detail":{"message":M48_ENTITLEMENT_DETAIL}}),
+        json!({"code":null,"type":null,"detail":M48_ENTITLEMENT_DETAIL.to_ascii_uppercase()}),
+        json!({"error":{"code":null,"type":"invalid_request_error","param":"model"},"detail":M48_ENTITLEMENT_DETAIL}),
+        json!({"response":{"error":{"type":"permission_error"}},"detail":{"message":M48_ENTITLEMENT_DETAIL}}),
+    ] {
+        let failure = m48_http_failure_fixture(
+            400,
+            payload.to_string().into_bytes(),
+            "application/json",
+            true,
+        )
+        .await;
+        assert_eq!(failure.diagnostic, M48_MODEL_ACCESS);
+        assert!(failure.diagnostic.len() <= 512);
+        assert!(!failure.diagnostic.contains("m48-private"));
+        assert!(!failure.retryable);
+    }
+}
+
+#[tokio::test]
+async fn m48_provider_diagnostic_known_code_precedes_type_and_unknown_stays_private() {
+    let known = "ChatGPT subscription request was rejected; review the input and tool configuration (code: invalid_prompt; parameter: model)";
+    let payload = json!({"error":{"code":"invalid_prompt","type":"authentication_error","param":"model","message":"m48-private"},"detail":M48_ENTITLEMENT_DETAIL});
+    let failure = m48_http_failure_fixture(
+        400,
+        payload.to_string().into_bytes(),
+        "application/json",
+        false,
+    )
+    .await;
+    assert_eq!(failure.diagnostic, known);
+    let payload = json!({"response":{"error":{"code":"invalid_prompt","param":"model"}},"error":{"type":"authentication_error"}});
+    let failure = m48_http_failure_fixture(
+        400,
+        payload.to_string().into_bytes(),
+        "application/json",
+        false,
+    )
+    .await;
+    assert_eq!(
+        failure.diagnostic, known,
+        "retain response.error precedence"
+    );
+    let mut rejected = Vec::new();
+    for code in [
+        json!("m48-private-code"),
+        json!(0),
+        json!(false),
+        json!([]),
+        json!({}),
+    ] {
+        rejected.push(json!({"error":{"code":code,"type":"invalid_request_error","message":"m48-private"},"detail":M48_ENTITLEMENT_DETAIL}));
+    }
+    for kind in [
+        json!("m48-private-type"),
+        json!(0),
+        json!(false),
+        json!([]),
+        json!({}),
+        json!("INVALID_REQUEST_ERROR"),
+    ] {
+        rejected.push(json!({"error":{"code":null,"type":kind},"detail":M48_ENTITLEMENT_DETAIL}));
+    }
+    rejected.extend([
+        json!({"type":"error","code":42,"error":{"code":"invalid_prompt"},"detail":M48_ENTITLEMENT_DETAIL}),
+        json!({"type":"error","code":null,"error":{"type":"invalid_request_error"},"detail":M48_ENTITLEMENT_DETAIL}),
+        json!({"error":"m48-private","detail":M48_ENTITLEMENT_DETAIL}),
+        json!({"response":{"error":false},"detail":M48_ENTITLEMENT_DETAIL}),
+        json!({"error":{"param":"model","message":"m48-private"}}),
+    ]);
+    for payload in rejected {
+        let failure = m48_http_failure_fixture(
+            400,
+            payload.to_string().into_bytes(),
+            "application/json",
+            false,
+        )
+        .await;
+        assert_eq!(
+            failure.diagnostic,
+            "ChatGPT subscription request failed (HTTP 400)"
+        );
+        assert!(!failure.retryable);
+    }
+}
+
+#[tokio::test]
+async fn m48_provider_diagnostic_detail_near_misses_and_wrong_status_keep_fallback() {
+    for payload in [
+        json!({"detail":"m48-private invalid field"}),
+        json!({"detail":"model is not supported when using codex with an account"}),
+        json!({"detail":"mοdel is not supported when using codex with a chatgpt account"}),
+        json!({"detail":{"message":[M48_ENTITLEMENT_DETAIL]}}),
+        json!({"detail":[M48_ENTITLEMENT_DETAIL]}),
+        json!({"error":{"detail":M48_ENTITLEMENT_DETAIL}}),
+        json!({"message":M48_ENTITLEMENT_DETAIL}),
+    ] {
+        let failure = m48_http_failure_fixture(
+            400,
+            payload.to_string().into_bytes(),
+            "application/json",
+            false,
+        )
+        .await;
+        assert_eq!(
+            failure.diagnostic,
+            "ChatGPT subscription request failed (HTTP 400)"
+        );
+        assert!(!failure.retryable);
+    }
+    for status in [401, 403, 429, 503] {
+        let failure = m48_http_failure_fixture(
+            status,
+            json!({"detail":M48_ENTITLEMENT_DETAIL})
+                .to_string()
+                .into_bytes(),
+            "application/json",
+            false,
+        )
+        .await;
+        assert_eq!(failure.diagnostic, http_status_failure(status));
+        assert!(!failure.retryable);
+    }
+}
+
+#[tokio::test]
+async fn m48_provider_diagnostic_recognized_shapes_still_obey_the_error_body_cap() {
+    let mut oversized =
+        json!({"error":{"type":"invalid_request_error"},"detail":M48_ENTITLEMENT_DETAIL})
+            .to_string()
+            .into_bytes();
+    oversized.extend(vec![b' '; MAX_ERROR_BODY + 1]);
+    for chunked in [false, true] {
+        let failure =
+            m48_http_failure_fixture(400, oversized.clone(), "application/json", chunked).await;
+        assert_eq!(
+            failure.diagnostic,
+            "ChatGPT subscription request failed (HTTP 400)"
+        );
+        assert!(!failure.retryable);
+    }
+}
+
+#[tokio::test]
+async fn m48_provider_diagnostic_explanations_do_not_enable_retries() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    for (status, payload, retries) in [
+        (503, json!({"error":{"type":"server_error"}}), None),
+        (503, json!({"error":{"type":"server_error"}}), Some(0)),
+        (400, json!({"detail":M48_ENTITLEMENT_DETAIL}), None),
+        (
+            400,
+            json!({"detail":{"message":M48_ENTITLEMENT_DETAIL}}),
+            Some(0),
+        ),
+    ] {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let (endpoint, task) = server(axum::Router::new().route(
+            "/responses",
+            axum::routing::post({
+                let attempts = attempts.clone();
+                move || {
+                    let attempts = attempts.clone();
+                    let payload = payload.clone();
+                    async move {
+                        attempts.fetch_add(1, Ordering::SeqCst);
+                        (
+                            axum::http::StatusCode::from_u16(status).unwrap(),
+                            axum::Json(payload),
+                        )
+                    }
+                }
+            }),
+        ))
+        .await;
+        let mut adapter =
+            ChatGptResponsesAdapter::new("m48-fake-subscription".into(), "m48-fake-account".into())
+                .unwrap();
+        adapter.endpoint = endpoint;
+        let result = adapter.generate(&retry_config(retries), &request()).await;
+        task.abort();
+        let _ = task.await;
+        assert!(result.is_err());
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            1,
+            "diagnostic recognition must preserve one-attempt behavior"
+        );
+    }
+}

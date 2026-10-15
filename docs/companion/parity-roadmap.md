@@ -121,8 +121,14 @@ subscription task failed HTTP 400 before tools: zero helpers/edits/output and no
 recorded usage, with failed-call billing unknown. Exact quiet failed-run restart
 passed without replay; no canonical memory existed in that fresh profile.
 The unchanged buggy candidate still fails the oracle. See the [M47 plan](../superpowers/plans/2026-10-14-companion-coding-acceptance-m47.md).
-Provider compatibility now precedes the held native-voice draft. PAR-06 stays
-partial; deterministic wiring is not successful autonomous task evidence.
+M48 then passed 2,681 Rust/core tests, lint/build and exact synthetic 14-tool
+manager-to-wire handoff, and ported the pinned Hermes model-access classifier
+with MIT attribution. Its one distinct zero-tool same-model diagnostic was rejected
+as **model_access**: gpt-5.5 is unsupported for this account. Failed-call consumption
+is unknown; no retry/model fallback or M47 replay followed. This identifies the
+new diagnostic's rejection, not M47's historical cause. See the [M48 plan](../superpowers/plans/2026-10-15-companion-provider-diagnostics-m48.md).
+Account-aware subscription selection now precedes the held native-voice draft.
+PAR-06 stays partial; deterministic wiring is not successful autonomous task evidence.
 
 ### PAR-07: native voice
 

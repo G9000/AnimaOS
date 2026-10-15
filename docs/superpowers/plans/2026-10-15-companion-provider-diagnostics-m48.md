@@ -3,12 +3,13 @@
 > For agentic workers: use the existing LEAN controller workflow and
 > superpowers:executing-plans; root assigns disjoint ownership and all execution.
 
-Status: bound lean plan active on `g9000/companion-provider-diagnostics-m48`, cut by root
-from verified main `456149927c96e10f1b468e480042d14cb2f8f6e6` (M47/PR53).
-M47 source `11308945e179c33585d012cc028598fd3bb4c4d3` and that merge share tree
-`8f251b01b47436987ebc0a153032aa47d3217905`. No M48 source change, RED, service,
-provider request or production release is implied by this draft.
-The controller rulings below bind the five proposals and released interfaces.
+Status: scoped implementation and controlled wire acceptance complete on
+`g9000/companion-provider-diagnostics-m48`, cut from verified M47/PR53 main
+`456149927c96e10f1b468e480042d14cb2f8f6e6`. The one separately released actual
+zero-tool diagnostic was rejected as model access; its request budget is consumed.
+Exact source/publication/merge and continuation proof is in
+`.superpowers/sdd/2026-10-15-companion-provider-diagnostics-m48/progress.md`.
+The controller rulings below bind the implementation and its evidence boundary.
 
 **Goal:** establish the exact synthetic first-request shape and improve recognized
 subscription error diagnostics without exposing upstream text or inventing M47's cause.
@@ -16,6 +17,38 @@ subscription error diagnostics without exposing upstream text or inventing M47's
 existing ChatGPT request serializer, bounded error reader and fixed allowlists.
 Test-only native-to-core fixture handoff avoids a new production endpoint/debug API.
 **Stack:** existing Rust/serde_json/Axum/Tokio/Nx; no dependency or runtime addition.
+
+## Accepted scope and actual diagnostic (2026-10-15)
+
+- Controlled classifier RED: four pass, two expected failures; narrow implementation
+  then passed seven focused core cases with one intentional importer skip.
+- Native capture passed two cases with two intentional ignored drivers. The exact
+  synthetic ordinary manager request contains 14 tools after real augmentation.
+  Its 10,376 bytes, SHA256
+  `17a8c79e78738d57b9c27bedee2161cbf287109acd89bdb39cb19a77cf5e15c7`,
+  passed separate exporter/importer cases through the existing private serializer
+  and joined loopback. This is wire integration evidence, not backend acceptance.
+- Known code precedence and retry decisions are preserved. Missing/null code can
+  use four known type literals and existing safe parameter labels. Only the exact
+  bounded HTTP 400 model-entitlement detail signature receives fixed model-access
+  guidance. No upstream text, credential, account or model value is emitted.
+- The pinned public Hermes classifier/tests/license were verified at
+  `1fd18277267152893a8a24792b79213e7ca3f899`. The adapter notice retains MIT
+  provenance. No credential rotation, model fallback or automatic retry was ported.
+- One combined native/core review and final affected SDK/web review are clean.
+  Required gates passed **2,681 Rust/core tests / 19 intentional ignores /
+  40 suites / lint / build**. SDK/web/contracts/manifests/lockfile are unchanged;
+  the six reviewed source hashes stayed exact. Owned Prettier and document checks pass.
+- Only after those gates, root released one direct synthetic `M48_ROUTE_OK` request
+  through the normal application vault adapter: same ChatGPT/gpt-5.5 route,
+  zero tools/helpers/retries, 20-second call and 30-second outer bounds. It failed
+  in 1.10 seconds with the closed category **model_access**, identifying the
+  selected model as unsupported for this account. Failed-call consumption is
+  unknown. No second request, alternate model or M47 task replay followed.
+- This diagnoses the new zero-tool request only. M47's original HTTP 400 body was
+  not retained; its specific cause and useful coding/delegation remain unaccepted.
+  Next priority is account-aware subscription model availability/selection. Native
+  voice remains held; no full Hermes, real connector or production claim follows.
 
 ## 1. Evidence and claim boundary
 
@@ -42,7 +75,7 @@ Test-only native-to-core fixture handoff avoids a new production endpoint/debug 
 - No new API, public serialization helper, arbitrary-endpoint option, producer, process or journal.
 - No speculative schema normalization, Harmony rewriting, reserved-name aliasing or validator product.
 - No provider/model switch, auth workaround, new coding task or successful coding/Hermes claim.
-- Any actual diagnostic request needs its own later root release; none is authorized now.
+- The one actual diagnostic followed a separate recorded root release after gates; its budget is consumed. No additional real request is released.
 
 ## 3. Source map and proposed ownership
 
