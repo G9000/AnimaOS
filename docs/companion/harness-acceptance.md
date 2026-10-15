@@ -508,3 +508,38 @@ The one separately released actual check **received and parsed current metadata*
 No model IDs/raw body were retained or model chosen. No retry, fallback query/header/model/provider, generation, helper, daemon, connector, DB server or container followed. The release is consumed. Metadata receipt is not entitlement, tool compatibility or useful coding quality; M47/M49 historical causes are not reconstructed.
 
 See the [M51 outcome](../superpowers/plans/2026-10-15-companion-catalog-budget-m51.md).
+
+## M52: useful repair passes; reporting quality remains partial
+
+The [M52 outcome](../superpowers/plans/2026-10-16-companion-provider-task-acceptance-m52.md)
+records one actual current-account `gpt-6-luna` JSONL repair through the ordinary
+owner SDK. Baseline tests failed, one helper identified both defects, two edits
+repaired the module, final tests passed3/3 and the independent literal module/CLI
+oracle accepted the exact129-byte output. Protected fixture/neighbor bytes and
+write times were retained. Seven recorded calls (five parent/two helper),23,065
+reported tokens and14 durable receipts stayed within the declared boundary; one
+helper/two exact commands used AllowOnce with no standing rules or fallback.
+
+This is qualified evidence, not strict full-quality acceptance: the helper's
+edge explanation contradicted itself, and the parent completed its output-check
+todo while honestly reporting that it had not confirmed the output-file contents.
+Root independently checked the file; no follow-up model task or manual rescue
+repaired the original result. PAR-06/reporting quality and full Hermes parity stay
+open. The one-shot task and metadata releases are consumed.
+
+Quiet forced restart retained exact canonical records/files/todos/receipts/grants
+and usage7to7, including the memory-file hash (two task-result/two reflection
+records, two agent entities, zero temporal Facts). No Fact was seeded and semantic
+retrieval/consolidation quality was not tested. No graceful/in-flight recovery
+claim. All24 recorded owned identities retired and port18752 is free;38of56
+outside observations remained exact,18 retirements are unattributed, none targeted.
+Protected neighbor files and unchanged M47 ownership evidence remain preserved.
+
+Fresh gates:2,725 Rust/core passes,23 intentional ignores,40suites, format/build;
+nine oracle controls and one exact final-tree synthetic shell case pass. Seventeen
+source/34 compatibility hashes were frozen. Combined native/core/fixture review
+and final SDK/web scope check passed after test/controller fixes. SDK/web source
+is unchanged; M49 TypeScript tests are historical evidence. No production runtime,
+API or dependency change and no ordinary profile, real connector, DB server,
+container, Docker55432 or deployment. Exact publication/merge/resume is in the
+private M52 ledger; M47 and this actual case remain immutable.

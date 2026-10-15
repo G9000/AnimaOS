@@ -1,0 +1,5 @@
+{"service":"api","status":"ok","durationMs":40}
+{"service":"worker","status":"error","durationMs":5}
+{"service":"api","status":"error","durationMs":150}
+{"service":"api","status":"ok","durationMs":20}
+{"service":"worker","status":"ok","durationMs":10}
