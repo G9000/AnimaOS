@@ -165,7 +165,7 @@ impl DaemonState {
             &history,
             summary.as_ref(),
             budget
-                .history_tokens(estimator.text_tokens(&input.text))
+                .history_tokens(estimator.content_tokens(input))
                 .saturating_sub(
                     (files.estimated_tokens as f64 * estimator.calibration().max(1.0)).ceil()
                         as u64,
@@ -178,7 +178,7 @@ impl DaemonState {
             .iter()
             .map(TokenEstimator::raw_message_tokens)
             .sum::<u64>()
-            + raw.text_tokens(&input.text)
+            + raw.content_tokens(input)
             + summary
                 .as_ref()
                 .map_or(0, |summary| raw.text_tokens(&summary.text))

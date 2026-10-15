@@ -1,3 +1,49 @@
+# Handover: selected document understanding (M0–M54)
+
+## Start here (2026-10-16): M54 gated; finish publication and continue held PDF slice
+
+Continue `g9000/companion-document-understanding-m54`, cut from verified M53/PR59
+main `c2f25b241049b33ac95beefcc56fea140b047bbd`. The M54 implementation is frozen,
+reviewed and locally gated. Exact current source, PR/merge proof and resume:
+`.superpowers/sdd/2026-10-16-companion-document-understanding-m54/progress.md`.
+Complete authorized push/PR/merge, verify exact source/merge trees and hashes,
+then cut the next branch from updated main. No merge question is required.
+
+[M54](../plans/2026-10-16-companion-document-understanding-m54.md) supplies selected
+own Windows Web DOCX main-body excerpts through a narrow attributed Hermes Rust
+port. Scope/hash/budget-bound private snapshots survive reload and verified
+transient compaction; safe optional message status preserves original downloads.
+Checked Job memory/process limits precede bytes; bounded IPC, Stop/deadline/Drop,
+retained physical slot, four shared read leases and expected-size read caps are
+covered. Parent wall-time limits do not establish OS CPU quotas or a sandbox.
+Rust/core **2,766 passed / 25 intentional ignores / 44 suites**, 12 parser cases, both explicit Windows physical cases, formatting/build; SDK **151 / three intentional service skips**, web **1,366 / 115 files**, and SDK/web typechecks/builds passed. Root semantic RED, independent fixtures,
+review/fix decisions and exact commands remain in the ledger. No actual models,
+metadata refresh, ordinary daemons/accounts/DB servers/containers/deployment.
+
+The next PDF text-layer proposal is private and held at
+`.superpowers/sdd/2026-10-16-companion-pdf-understanding-m55/plan-held.md`.
+Root has checksum-verified public pdf-extract/lopdf source only; transitive
+compatibility, page coverage/schema/protocol and five risk rulings remain to bind.
+Publish the lean plan before its tests/source release. No PDF implementation or
+provider case is released by that proposal. PDF/OCR/other Office/non-Windows and
+broader quality remain queued; scoped DOCX work leaves PAR-08 partial.
+
+M47/M52 cases and releases remain immutable/consumed, without rescue/replay/regrade.
+M52 useful repair/oracle/reload passed but strict reporting/reasoning quality is
+PARTIAL. Retain its exact evidence and retired identities/port18752 status.
+Retain MIT notices with Anima branding. Cheap Codex delegation, per-command
+unsigned commits, reviewed/gated merge-and-continue and context-only updates to
+the selected other chat remain authorized. Root alone runs commands/fmt/Git/
+processes/models. CARGO_INCREMENTAL=0, jobs1/threads2, resolved Nx targets and
+cleared service/provider env. Explicit staging only; never nx.json/anima.yaml/
+private evidence. Preserve nx SHA256
+`3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`.
+No stash/reset/restore/path checkout/worktree, ordinary profile/credential copy
+or readout, real connector accounts, DB servers, containers, Docker55432 or public
+deployment. Historical resumes below are superseded here.
+
+## Historical M53 outcome handover
+
 # Handover: owner-visible completion boundary (M0–M53)
 
 ## Start here (2026-10-16): M53 gated; settle publication then document understanding

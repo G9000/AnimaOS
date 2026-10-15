@@ -20,6 +20,7 @@ pub mod components;
 pub mod connectors;
 pub mod context_window;
 pub mod definition;
+pub mod document_content;
 pub mod engine;
 pub mod events;
 pub mod evidence;

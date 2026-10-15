@@ -119,6 +119,34 @@ export interface SessionMessageAttachment {
   kind?: UploadedAttachment['kind'];
   path?: string;
   createdAtMs?: number;
+  /** Static, content-free extraction evidence for this user-message attachment. */
+  extraction?: SessionMessageDocumentExtraction;
+}
+
+export type DocumentExtractionStatus =
+  | 'ready'
+  | 'partial'
+  | 'unsupported'
+  | 'encrypted'
+  | 'malformed'
+  | 'too_large'
+  | 'no_text'
+  | 'unavailable'
+  | 'cancelled'
+  | 'context_omitted';
+
+export type DocumentOmission =
+  | 'main_body_only'
+  | 'paragraph_limit'
+  | 'text_limit'
+  | 'context_limit'
+  | 'selection_limit';
+
+export interface SessionMessageDocumentExtraction {
+  version: 1;
+  status: DocumentExtractionStatus;
+  paragraphCount: number;
+  omissions: DocumentOmission[];
 }
 
 export interface SessionMessage {

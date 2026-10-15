@@ -363,6 +363,7 @@ pub(crate) struct AgentRunCoordinator {
     learning: crate::learning::LearningService,
     mcp: Option<crate::mcp::McpManager>,
     browser: Option<crate::browser::BrowserService>,
+    document_extractor: Arc<dyn crate::attachments::documents::worker::DocumentExtractor>,
     /// How long a compaction's store read and model call may take.
     compaction_timeout: std::time::Duration,
     /// How long a title call may take before it is treated like a failed
@@ -641,6 +642,7 @@ impl AgentRunCoordinator {
             learning,
             mcp: None,
             browser: None,
+            document_extractor: Arc::new(crate::attachments::documents::worker::DocumentWorker),
             compaction_timeout: std::time::Duration::from_millis(
                 crate::sessions::compaction::COMPACTION_TIMEOUT_MS,
             ),
@@ -650,6 +652,15 @@ impl AgentRunCoordinator {
             approval_waiters: crate::approvals::ApprovalWaiters::default(),
             approval_timeouts: crate::approvals::ApprovalTimeouts::default(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_document_extractor(
+        mut self,
+        extractor: Arc<dyn crate::attachments::documents::worker::DocumentExtractor>,
+    ) -> Self {
+        self.document_extractor = extractor;
+        self
     }
 
     /// A shorter compaction deadline, so tests need not wait two minutes.
@@ -1631,6 +1642,19 @@ impl AgentRunCoordinator {
             )
         });
         let frozen_config = runtime.config().clone();
+        crate::attachments::documents::admission::admit(
+            &self.state,
+            &agent_id,
+            &session_id,
+            &run_id,
+            source,
+            &frozen_config,
+            &mut content,
+            Arc::clone(&self.document_extractor),
+            live_run.control().cancel,
+            helper_deadline.map(|(_, deadline)| deadline),
+        )
+        .await;
         let (admitted, accepted_files) = crate::agent_files::runtime::admit_run(
             &self.state,
             self.control_plane_transactions(),

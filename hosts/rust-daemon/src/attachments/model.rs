@@ -1,11 +1,11 @@
-//! Hydrates only a session's selected, daemon-owned image references at the model boundary.
+//! Hydrates only verified, budgeted user attachment data at the model boundary.
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use anima_core::{
-    AgentConfig, Attachment, AttachmentType, DataValue, MessageRole, ModelAdapter,
+    AgentConfig, Attachment, AttachmentType, DataValue, Message, MessageRole, ModelAdapter,
     ModelGenerateRequest, ModelGenerateResponse, ModelStreamSink, MAX_CONTEXT_IMAGES,
 };
 use anima_model_adapters::{image_reference_text, model_supports_images};
@@ -19,6 +19,9 @@ use super::{
 use crate::history::HistoryStore;
 
 const MAX_ENCODED_IMAGE_BYTES: usize = 4 * MAX_IMAGE_BYTES.div_ceil(3);
+/// Current input first, then newest history. Older snapshots remain saved and
+/// accounted conservatively, but do not trigger more source reads this request.
+const MAX_CONTEXT_DOCUMENTS: usize = 4;
 type AttachmentReader =
     Arc<dyn Fn(&Path, &AttachmentRecord) -> Result<Vec<u8>, AttachmentError> + Send + Sync>;
 
@@ -31,6 +34,22 @@ pub(crate) struct AttachmentModelAdapter {
 }
 
 impl AttachmentModelAdapter {
+    /// Compaction uses the same source authority and four-read ceiling, on a
+    /// transient copy. Put document data first so a long owner message cannot
+    /// silently hide every document fact behind its per-message transcript cap.
+    pub(crate) async fn prepare_compaction_documents(&self, messages: &mut [Message]) {
+        let reader: AttachmentReader = Arc::new(read_attachment_bytes);
+        let mut count = 0;
+        for message in messages.iter_mut().rev() {
+            let original = std::mem::take(&mut message.content.text);
+            self.hydrate_documents(message, &reader, &mut count).await;
+            if !message.content.text.is_empty() {
+                message.content.text.push_str("\nOwner message text:\n");
+            }
+            message.content.text.push_str(&original);
+        }
+    }
+
     pub(crate) fn new(
         inner: Arc<dyn ModelAdapter>,
         store: Arc<dyn HistoryStore>,
@@ -68,8 +87,11 @@ impl AttachmentModelAdapter {
             &config.model,
         );
         let mut image_count = 0;
+        let mut document_count = 0;
         // Match the context selector's cap: newest turns first, declared order within a turn.
         for message in prepared.messages.iter_mut().rev() {
+            self.hydrate_documents(message, &reader, &mut document_count)
+                .await;
             let references = message
                 .content
                 .metadata
@@ -77,6 +99,7 @@ impl AttachmentModelAdapter {
                 .and_then(|metadata| metadata.remove(ATTACHMENT_RECORDS_KEY));
             if let Some(metadata) = &mut message.content.metadata {
                 metadata.remove(ATTACHMENT_INPUT_TEXT_KEY);
+                metadata.remove(anima_core::document_content::DOCUMENT_EXTRACTS_METADATA_KEY);
                 if metadata.is_empty() {
                     message.content.metadata = None;
                 }
@@ -127,6 +150,80 @@ impl AttachmentModelAdapter {
             message.content.attachments = (!retained.is_empty()).then_some(retained);
         }
         Ok(prepared)
+    }
+
+    async fn hydrate_documents(
+        &self,
+        message: &mut Message,
+        reader: &AttachmentReader,
+        count: &mut usize,
+    ) {
+        use anima_core::document_content::{parse_document_snapshots, render_document_snapshots};
+        if message.role != MessageRole::User
+            || message.agent_id != self.agent_id
+            || crate::sessions::session_id_for_room(&message.room_id) != self.session_id
+        {
+            return;
+        }
+        let Some(root) = self.workspace_root.as_ref() else {
+            return;
+        };
+        let Ok(snapshots) = parse_document_snapshots(&message.content) else {
+            return;
+        };
+        let mut verified = Vec::new();
+        for snapshot in snapshots {
+            if snapshot.extraction.blocks.is_empty() || *count >= MAX_CONTEXT_DOCUMENTS {
+                continue;
+            }
+            let selected = message
+                .content
+                .attachments
+                .iter()
+                .flatten()
+                .find_map(|attachment| {
+                    super::metadata::matching_metadata(&message.content, attachment).filter(|row| {
+                        row.id == snapshot.attachment_id && row.kind == AttachmentKind::Document
+                    })
+                });
+            let Some(selected) = selected else { continue };
+            let Ok(Some(record)) = self
+                .store
+                .get_attachment(&self.agent_id, &selected.id)
+                .await
+            else {
+                continue;
+            };
+            if record.agent_id != self.agent_id
+                || record.session_id != self.session_id
+                || record.metadata() != selected
+                || record.sha256 != snapshot.source_sha256
+                || !super::documents::is_docx(&record)
+                || record.size > super::documents::MAX_DOCX_INPUT_BYTES
+            {
+                continue;
+            }
+            // A validated binding consumes one physical-read slot even when
+            // the current file then proves changed/unavailable: bad files
+            // cannot turn the four-document bound into unbounded disk work.
+            *count += 1;
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+            let valid = super::documents::admission::read_source(
+                root.clone(),
+                record,
+                Arc::clone(reader),
+                &anima_core::CancelSignal::new(),
+                deadline,
+            )
+            .await;
+            if valid.is_err() {
+                continue;
+            }
+            verified.push(snapshot);
+        }
+        if let Ok(rendered) = render_document_snapshots(&verified) {
+            message.content.text.push_str(&rendered);
+        }
     }
 
     async fn hydrate(

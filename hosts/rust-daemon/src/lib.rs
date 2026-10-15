@@ -32,6 +32,7 @@ mod usage;
 
 pub mod postgres;
 
+pub use attachments::documents::worker::document_worker_entry;
 pub use logs::init_tracing;
 
 pub use app::{

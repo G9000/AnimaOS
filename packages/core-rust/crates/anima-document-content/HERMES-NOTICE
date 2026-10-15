@@ -1,0 +1,39 @@
+Narrow Rust DOCX semantics port derived from Hermes Agent:
+https://github.com/NousResearch/hermes-agent
+Revision: 1fd18277267152893a8a24792b79213e7ca3f899
+Source: tools/read_extract.py::_extract_docx, _joined, _open_zip, _zip_xml.
+
+Retained behavior: transitional WordprocessingML paragraph/run text in document
+order, tab/break/carriage-return text, and ruby phonetic-guide exclusion.
+Local changes: portable byte-only Rust API, streaming namespace-aware XML,
+closed versioned results, exact source paragraph ordinals, explicit main-body
+coverage, fields/deletions/drawing/textbox exclusions, bounded ZIP/XML expansion,
+entry/path/overlap/encryption/ZIP64/multi-disk policy, checked CRC/size, and
+whole-paragraph text limits only after complete selected XML validation.
+rawzip performs ZIP parsing; fixed unsupported-format policy comparisons use
+only offsets supplied by the checked library because its public API omits the
+EOCD disk fields. No Python runtime, broad converter dispatch, network/OCR,
+installation/self-repair, upstream tests, or private Hermes files are included.
+The local test fixtures and assertions were independently authored.
+
+MIT License
+
+Copyright (c) 2025 Nous Research
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

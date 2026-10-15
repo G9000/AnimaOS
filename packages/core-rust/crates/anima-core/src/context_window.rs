@@ -4,7 +4,8 @@
 
 use std::borrow::Borrow;
 
-use crate::primitives::{AttachmentType, Message, MessageRole};
+use crate::document_content::document_rendered_bytes;
+use crate::primitives::{AttachmentType, Content, Message, MessageRole};
 use crate::runtime_serde::data_value_json;
 
 /// Characters per estimated token (spec §5.2).
@@ -61,9 +62,13 @@ impl TokenEstimator {
 
     /// The uncalibrated estimate of one message.
     pub fn raw_message_tokens(message: &Message) -> u64 {
-        let text = message.content.text.chars().count() as u64;
-        let calls = message
-            .content
+        Self::ordinary_content_tokens(&message.content)
+            .saturating_add(document_rendered_bytes(&message.content) as u64)
+    }
+
+    fn ordinary_content_tokens(content: &Content) -> u64 {
+        let text = content.text.chars().count() as u64;
+        let calls = content
             .metadata
             .as_ref()
             .and_then(|metadata| metadata.get("toolCalls"))
@@ -72,7 +77,15 @@ impl TokenEstimator {
     }
 
     pub fn message_tokens(&self, message: &Message) -> u64 {
-        self.scale(Self::raw_message_tokens(message))
+        self.content_tokens(&message.content)
+    }
+
+    /// Documents reserve their exact rendered UTF-8 bytes, never discounted by calibration.
+    pub fn content_tokens(&self, content: &Content) -> u64 {
+        let ordinary = self.scale(Self::ordinary_content_tokens(content));
+        let documents =
+            (document_rendered_bytes(content) as f64 * self.calibration.max(1.0)).ceil() as u64;
+        ordinary.saturating_add(documents)
     }
 
     /// The estimate of `text` sent as one message (a summary or an input).

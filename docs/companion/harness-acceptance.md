@@ -1,5 +1,27 @@
 # Native harness acceptance
 
+## M54 selected DOCX text (2026-10-16)
+
+Selected own Web DOCX text reaches normal generate and stream requests as
+bounded, quoted user data with attachment/paragraph provenance. The original
+real-handler missing-text assertion failed before implementation and now passes.
+Independent fixtures and negative cases cover archive/XML bounds, wrong scope,
+changed source, budget reservation, selection limits, reload, compaction and
+cancelled/late work. The two explicit Windows process cases cover the production
+CLI, malformed/flooded IPC, pre-byte READY, timeout/CPU-burn/Stop/caller Drop,
+global Busy ownership, eventual retirement, memory/process refusal and a preserved
+unrelated finite neighbor. These are synthetic files and finite helpers, with
+zero actual model calls or daemon services.
+
+Fresh Rust/core **2,766 passed / 25 intentional ignores / 44 suites**, 12 parser cases, both explicit Windows physical cases, formatting/build; SDK **151 / three intentional service skips**, web **1,366 / 115 files**, and SDK/web typechecks/builds passed. A native/core review's four findings were fixed;
+SDK/web review was clean. Initial invalid fixtures and a physical-test retirement
+assumption were corrected and retained in the ledger. No assertions, ownership
+rules or physical retirement conditions were weakened. See the
+[M54 plan](../superpowers/plans/2026-10-16-companion-document-understanding-m54.md)
+and [coverage guide](documents.md). This accepts the scoped DOCX pipeline, without
+claiming live-model answer quality, PDF/OCR, general Office, non-Windows extraction
+or full Hermes parity. M52's consumed case and PARTIAL strict grade are unchanged.
+
 ## M53 saved-reply tool-limit notice (2026-10-16)
 
 The owner console now shows **Tool limit reached** beneath committed Assistant

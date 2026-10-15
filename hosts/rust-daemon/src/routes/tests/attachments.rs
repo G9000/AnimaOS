@@ -1,4 +1,5 @@
 use super::*;
+use crate::agent_runs::test_support::{Gate, ScriptedModel, Step};
 use crate::history::{
     ApprovalPageQuery, HistoryError, HistoryMessage, HistoryService, HistoryStore,
     MemoryHistoryStore, MessagePageQuery, UsagePageQuery,
@@ -91,6 +92,167 @@ fn get(path: &str, owner: bool) -> Request<Body> {
 }
 async fn json_body(response: axum::response::Response) -> Value {
     serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+}
+
+/// In-process route tests use the real parser; fixed executable isolation is
+/// exercised separately by the controller's physical worker tests.
+struct RealDocxExtractor;
+#[async_trait::async_trait]
+impl crate::attachments::documents::worker::DocumentExtractor for RealDocxExtractor {
+    async fn extract(
+        &self,
+        bytes: Vec<u8>,
+        cancel: anima_core::CancelSignal,
+        _deadline: Option<tokio::time::Instant>,
+    ) -> Result<
+        anima_core::document_content::ExtractedDocumentText,
+        crate::attachments::documents::worker::WorkerFailure,
+    > {
+        if cancel.is_cancelled() {
+            return Err(crate::attachments::documents::worker::WorkerFailure::Cancelled);
+        }
+        Ok(anima_document_content::extract_docx(&bytes))
+    }
+}
+
+#[tokio::test]
+async fn docx_selected_text_reaches_model_m54() {
+    let temp = Temp::new();
+    let gate = Gate::new();
+    let model = ScriptedModel::gated(vec![Step::Text(vec!["done"])], gate.clone());
+    let mut daemon = DaemonState::with_model_adapter(model.clone());
+    daemon.workspace = Some(WorkspaceConfig {
+        root_path: temp.0.clone(),
+        company_name: "test".into(),
+        mission: "test".into(),
+        values: vec![],
+    });
+    let agent = daemon
+        .create_agent(test_config("attachments"))
+        .unwrap()
+        .state
+        .id;
+    daemon.sessions.insert(SessionRecord::new(
+        &agent,
+        "chat:files",
+        SessionKind::Chat,
+        SessionOrigin::Web,
+        "Files".into(),
+        TitleSource::FirstMessage,
+        1,
+    ));
+    let state = Arc::new(RwLock::new(daemon));
+    let runs = AgentRunCoordinator::new(state.clone(), Arc::new(Semaphore::new(4)))
+        .with_document_extractor(Arc::new(RealDocxExtractor));
+    let app =
+        crate::routes::router_with_runs(state.clone(), DaemonConfig::default(), |_| runs.clone());
+
+    let selected = app
+        .clone()
+        .oneshot(upload(
+            &uri(&agent),
+            form(
+                "m54-selected.docx",
+                include_bytes!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/tests/fixtures/documents/m54-selected.docx"
+                )),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(selected.status(), StatusCode::CREATED);
+    let selected_id = json_body(selected).await["attachment"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let unselected = app
+        .clone()
+        .oneshot(upload(
+            &uri(&agent),
+            form(
+                "m54-unselected.docx",
+                include_bytes!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/tests/fixtures/documents/m54-unselected.docx"
+                )),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(unselected.status(), StatusCode::CREATED);
+    let unselected_id = json_body(unselected).await["attachment"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/api/agents/{agent}/sessions/chat%3Afiles/runs"))
+        .header("host", "127.0.0.1:8080")
+        .header("origin", OWNER)
+        .header("content-type", "application/json")
+        .header("idempotency-key", "m54-selected-docx")
+        .body(Body::from(
+            json!({
+                "text": "Read the selected document",
+                "attachmentIds": [selected_id],
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let accepted = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(accepted.status(), StatusCode::ACCEPTED);
+    let run_id = json_body(accepted).await["run"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    tokio::time::timeout(Duration::from_secs(15), gate.entered())
+        .await
+        .expect("M54 recording adapter was not reached within the bounded wait");
+    let requests = model.requests();
+    let user_data = requests
+        .iter()
+        .flat_map(|request| request.messages.iter())
+        .filter(|message| message.role == anima_core::MessageRole::User)
+        .map(|message| message.content.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        user_data.contains("M54 selected record: cobalt harbour 7319."),
+        "selected DOCX main-body text must reach model user data: {user_data}"
+    );
+    for excluded in [
+        "NEVER_INLINE_2047",
+        "HEADER_OMITTED_4096",
+        "PHONETIC_GUIDE_NOT_BODY",
+        unselected_id.as_str(),
+    ] {
+        assert!(
+            !user_data.contains(excluded),
+            "unselected or excluded DOCX content reached model user data: {excluded}"
+        );
+    }
+    gate.release();
+    for _ in 0..500 {
+        if state
+            .read()
+            .await
+            .runs
+            .get(&run_id)
+            .is_some_and(|run| run.status == crate::runs::RunStatus::Completed)
+        {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("M54 attachment run did not complete");
 }
 
 #[tokio::test]
@@ -704,6 +866,108 @@ fn attachment_openapi_routes_and_schema_are_registered() {
     assert!(schema["properties"].get("id").is_some());
     assert!(schema["properties"].get("workspaceRoot").is_none());
     assert!(schema["properties"].get("sha256").is_none());
+}
+
+#[test]
+fn document_extraction_projection_is_user_selected_only_and_private_data_never_public() {
+    use anima_core::document_content::*;
+    let mut row = crate::history::conformance::attachment_record("att-doc", "agent", "chat:files");
+    row.name = "selected.docx".into();
+    row.mime = crate::attachments::documents::DOCX_MIME.into();
+    row.kind = crate::attachments::AttachmentKind::Document;
+    row.path = "uploads/2026-10-16/selected.docx".into();
+    row.sha256 = "a".repeat(64);
+    let mut content =
+        crate::agent_runs::attachments::attachment_content("original", &[row.clone()], None);
+    let snapshot = DocumentSnapshot {
+        attachment_id: row.id.clone(),
+        source_sha256: row.sha256.clone(),
+        extraction: ExtractedDocumentText {
+            version: 1,
+            status: DocumentExtractionStatus::Ready,
+            blocks: vec![DocumentBlock {
+                paragraph: 1,
+                text: "private extracted literal".into(),
+            }],
+            omissions: vec![DocumentOmission::MainBodyOnly],
+        },
+    };
+    content.metadata.as_mut().unwrap().insert(
+        DOCUMENT_EXTRACTS_METADATA_KEY.into(),
+        document_snapshots_metadata(&[snapshot]).unwrap(),
+    );
+    let mut message = crate::sessions::test_support::message(
+        "agent",
+        "m",
+        "chat:files",
+        anima_core::MessageRole::User,
+        "",
+        1,
+    );
+    message.content = content.clone();
+    let project = |message| {
+        serde_json::to_value(crate::routes::contracts::SessionMessageResponse::from(
+            &crate::sessions::views::PageMessage {
+                message,
+                hidden: false,
+            },
+        ))
+        .unwrap()
+    };
+    let public = project(message.clone());
+    assert_eq!(
+        public["attachments"][0]["extraction"],
+        json!({"version":1,"status":"ready","paragraphCount":1,"omissions":["main_body_only"]})
+    );
+    for private in [
+        "private extracted literal",
+        &row.sha256,
+        "documentExtracts",
+        "workspaceRoot",
+    ] {
+        assert!(!public.to_string().contains(private));
+    }
+    let generic =
+        serde_json::to_value(crate::routes::contracts::ContentResponse::from(&content)).unwrap();
+    assert!(generic["metadata"]
+        .get(DOCUMENT_EXTRACTS_METADATA_KEY)
+        .is_none());
+    message.role = anima_core::MessageRole::Assistant;
+    assert!(project(message.clone())["attachments"][0]
+        .get("extraction")
+        .is_none());
+    message.role = anima_core::MessageRole::User;
+    message.content.attachments.as_mut().unwrap()[0].data = "uploads/other.docx".into();
+    assert!(project(message)["attachments"][0]
+        .get("extraction")
+        .is_none());
+    for with_retry in [false, true] {
+        let request: crate::routes::contracts::TaskRequest = serde_json::from_value(json!({"text":"hello","metadata":{"documentExtracts":[{"forged":true}],"topic":"keep"}})).unwrap();
+        let admitted = if with_retry {
+            request.into_domain_with_client_retry_key()
+        } else {
+            request.into_domain()
+        }
+        .unwrap();
+        assert!(!admitted
+            .metadata
+            .as_ref()
+            .unwrap()
+            .contains_key(DOCUMENT_EXTRACTS_METADATA_KEY));
+        let reserved = std::collections::BTreeMap::from([(
+            DOCUMENT_EXTRACTS_METADATA_KEY.into(),
+            anima_core::DataValue::String("forged".into()),
+        )]);
+        let attached = crate::agent_runs::attachments::attachment_content(
+            "hello",
+            &[row.clone()],
+            Some(reserved),
+        );
+        assert!(!attached
+            .metadata
+            .unwrap()
+            .contains_key(DOCUMENT_EXTRACTS_METADATA_KEY));
+    }
 }
 #[tokio::test]
 async fn image_magic_owns_mime_and_collision_name_is_server_approved() {
