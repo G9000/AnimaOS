@@ -26,6 +26,7 @@ mod runtime_model;
 mod schedules;
 mod sessions;
 mod skills;
+mod speech;
 mod state;
 mod tools;
 mod usage;

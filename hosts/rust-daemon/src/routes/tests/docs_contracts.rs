@@ -42,7 +42,35 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 197, "complete registered operation count");
+    assert_eq!(actual.len(), 200, "complete registered operation count");
+    let speech_additions = [
+        (
+            "GET",
+            "/api/agents/{agent_id}/sessions/{session_id}/voice/speech",
+        ),
+        (
+            "POST",
+            "/api/agents/{agent_id}/sessions/{session_id}/voice/speech",
+        ),
+        (
+            "DELETE",
+            "/api/agents/{agent_id}/sessions/{session_id}/voice/speech/{operation_id}",
+        ),
+    ];
+    for (method, path) in speech_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "explicit speech operation must be registered"
+        );
+    }
+    assert_eq!(
+        actual
+            .iter()
+            .filter(|(method, path)| !speech_additions.contains(&(method.as_str(), path.as_str())))
+            .count(),
+        197,
+        "all pre-M58 operations remain present"
+    );
     let additions = [
         ("GET", "/api/providers/chatgpt/models"),
         ("POST", "/api/providers/chatgpt/models/refresh"),
@@ -65,7 +93,10 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
     assert_eq!(
         actual
             .iter()
-            .filter(|(method, path)| !additions.contains(&(method.as_str(), path.as_str())))
+            .filter(
+                |(method, path)| !additions.contains(&(method.as_str(), path.as_str()))
+                    && !speech_additions.contains(&(method.as_str(), path.as_str()))
+            )
             .count(),
         192,
         "pre-M49 registered operations remain present"

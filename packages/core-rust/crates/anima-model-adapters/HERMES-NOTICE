@@ -63,6 +63,18 @@ credentials, provider selection, conversion, retries, chunking or logging is
 copied. Local cancellation does not guarantee remote inference or billing stops.
 Upstream selected public files and MIT LICENSE were verified clean at the pin.
 
+M58 source revision: 1fd18277267152893a8a24792b79213e7ca3f899.
+M58 narrowly ports tools/tts_tool_openai.py's direct OpenAI speech request and
+gpt-4o-mini-tts/alloy defaults. Source SHA-256:
+tools/tts_tool_openai.py 76461D00E7082D32CD64B815012FD463FEF5BC2893973261AAC131A00781B713;
+tools/tts_tool.py 3F4F8D607F8F30CEB963581D1F7CDB4E3A72E9130EE7C49B502023153F1780C2;
+LICENSE E29DFAF6905A8D396A58EA4BD84AD27057756BBD9599B5BEC0971AE34D2A2118.
+Anima fixes the canonical OpenAI endpoint, model, voice, speed and PCM format,
+validates exact selected text, bounds the raw output, wraps canonical WAV locally,
+and retains outgoing request bytes through cancellation. No Hermes Python process,
+profiles, credentials, provider breadth, filesystem output, conversion, chunking,
+fallback, retries, or automatic generation is copied. The full MIT notice follows.
+
 MIT License
 
 Copyright (c) 2025 Nous Research

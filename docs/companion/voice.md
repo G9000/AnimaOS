@@ -1,9 +1,20 @@
-# Voice input to a chat draft
+# Voice input and selected reply speech
 
 Anima can upload a selected WAV file and, when the server is explicitly
 configured, transcribe it through the OpenAI Platform API. The console can also
 record a short WAV locally for that same attachment flow. Browser dictation and
-browser read-aloud remain separate controls.
+browser read-aloud remain separate controls. Native speech output can generate
+audio for one selected saved assistant reply with its own server opt-in.
+
+## Speak a selected reply
+
+In your own existing Web Chat, choose an eligible assistant reply and review the
+OpenAI transfer and API charge notice. **Generate speech with OpenAI API** makes
+one request; **Play speech** is a separate explicit action. **Stop speech** stops
+the player, and **Discard speech** clears the local candidate. Nothing plays
+automatically. Configuration, fixed voice, limits and cleanup behavior are in
+[native speech output](speech-output.md). Browser Read aloud remains available
+as a separate action, including for replies beyond the native input limit.
 
 ## Record locally
 
@@ -112,10 +123,12 @@ M56 validation uses synthetic PCM silence, deterministic transcription ports,
 and finite loopback HTTP peers. It can establish request shape, source authority,
 byte limits, lifecycle and draft behavior. It does not establish spoken-audio
 accuracy, live provider availability, billing behavior, microphone support,
-native speech output, connector voice support, or full assistant parity. M57
+connector voice support, or full assistant parity. M57
 adds fake-device lifecycle tests and evaluates the emitted worklet against the
 same independent WAV fixture. It does not activate a microphone or establish
 hardware compatibility, noisy-speech quality or live transcription accuracy.
+M58 adds native output with synthetic PCM/HTTP peers and fake playback tests;
+actual provider voice quality and device playback remain unverified.
 
 The Rust transport narrowly ports useful Hermes behavior with its pinned MIT
 attribution in the model adapter's [notice](../../packages/core-rust/crates/anima-model-adapters/HERMES-NOTICE). Product controls retain Anima

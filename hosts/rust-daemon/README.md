@@ -48,6 +48,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `DELETE` | `/api/agents/{agent_id}/mcp-connections/{connection_id}`                                     |
 | `DELETE` | `/api/agents/{agent_id}/schedules/{schedule_id}`                                             |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}`                                               |
+| `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}/voice/speech/{operation_id}`                   |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}/voice/transcriptions/{operation_id}`           |
 | `DELETE` | `/api/connectors/oauth-apps/{provider}`                                                      |
 | `DELETE` | `/api/memories/entities/{entity_id}`                                                         |
@@ -96,6 +97,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/messages`                                      |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/runs`                                          |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/voice`                                         |
+| `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/voice/speech`                                  |
 | `GET`    | `/api/agents/{agent_id}/tasks`                                                               |
 | `GET`    | `/api/approvals`                                                                             |
 | `GET`    | `/api/capabilities`                                                                          |
@@ -200,6 +202,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/attachments`                                   |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/compact`                                       |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/runs`                                          |
+| `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/voice/speech`                                  |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/voice/transcriptions`                          |
 | `POST`   | `/api/approvals/{approval_id}/decision`                                                      |
 | `POST`   | `/api/goals`                                                                                 |
@@ -458,7 +461,7 @@ Each run sends the model the session's newest whole turns that fit its context b
 
 Before a run whose context leaves out turns no summary covers, the run compacts them unless the agent setting `autoCompact` is `false`, announcing `run.progress` with `phase: "compacting"` after `run.started`: the agent's own provider and model, without tools (at most 1,024 tokens, temperature 0.2), merge the previous summary with those turns (pruned ones read back from the history store, the same turns hidden from the model left out) into a summary of at most 8 KiB, which the run then uses in their place; the session announces it with `session.updated`. If summarizing or saving fails, or the summary is still unwritten after 2 minutes (`The summary took longer than 2 minutes`; a helper's compaction also counts toward its own 2-minute deadline), the session's `compactionError` (`{ message, atMs }`) says why until a later compaction succeeds, and the run goes on with its trimmed context. A stop during compaction ends the run at once and changes neither the summary nor `compactionError`.
 
-### Attachments
+### Attachments and voice
 
 Selected WAV audio remains a File reference unless the owner explicitly requests
 transcription. Native transcription is disabled by default; enable
@@ -467,7 +470,15 @@ It returns an ephemeral editable draft, with separate Use/Send, fixed authority,
 strict bounds and local cancellation. Upload/chat never invoke it automatically.
 ChatGPT subscription/OAuth credentials are excluded. See
 [voice configuration and limits](../../docs/companion/voice.md).
-and browser voice
+
+Native speech output is independently disabled by default. Enable
+`ANIMAOS_TTS_ENABLED=true` with the same server OpenAI Platform API-key
+configuration to generate one selected saved own Web Chat assistant reply.
+Generation and playback require separate explicit actions; chat never invokes
+speech automatically. The fixed gpt-4o-mini-tts/alloy adapter requests bounded
+24kHz PCM and returns a canonical WAV, with retained output-body ownership and
+local cancellation. No generated audio is saved by the daemon. See
+[speech output and limits](../../docs/companion/speech-output.md).
 
 The web console uploads files with `POST /api/agents/{agent_id}/sessions/{session_id}/attachments`: multipart form data containing exactly one `file` part with a filename. The response is `201 { attachment }`, with the saved ID, name, MIME, size, kind, relative path and creation time. Both upload and `GET /api/agents/{agent_id}/attachments/{attachment_id}` require local-owner authorization; downloads return `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`.
 
@@ -477,7 +488,7 @@ Limits are 10 MiB per PNG/JPEG/GIF/WebP image, 1 MiB per supported UTF-8 text/so
 
 Runs and steers accept `attachmentIds` alongside text and skill; attachment-only input is valid. Exact retries preserve raw text, ordered IDs and skill. New consumed steer keys retain that complete input even after transcript pruning. Older consumed keys can replay only while a matching scoped transcript proves equality; otherwise the daemon returns 409. Snapshot version 11 retains attachment-aware pending and consumed steers; its first upgrade writes `<control-plane-file>.pre-attachments.bak` in JSON mode or `control_plane.backup.10` in Postgres mode. For rollback to M8, stop services and restore the complete matching pre-upgrade backup generation with recorded binaries. The snapshot backup is only a component; mixing older JSON with newer history can resurrect rows. Restore history, memory, workspace/uploads and keyring consistently, retaining the original root and vault password. Changes since that backup are lost.
 
-Dictation and read-aloud use browser speech APIs when available, and cancel when their chat becomes inactive. Browser support and microphone permission vary; browsers may use an external speech service. These controls do not add daemon-side speech transcription or synthesis. Local mocked tests do not establish live provider image acceptance or microphone behavior.
+Browser dictation and read-aloud use browser speech APIs when available, and cancel when their chat becomes inactive. Browser support and microphone permission vary; browsers may use an external speech service. These controls remain separate from the opt-in daemon transcription and speech actions described above. Local mocked tests do not establish live provider image acceptance, speech quality or microphone behavior.
 
 ### Live runs
 

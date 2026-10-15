@@ -1,5 +1,48 @@
 # Native harness acceptance
 
+## M58 selected native speech output (2026-10-16)
+
+One selected saved visible assistant reply in an existing own Web Chat can now
+generate bounded native speech. Review the OpenAI transfer/API charge notice,
+choose Generate, then explicitly Play. Stop and Discard remain separate; nothing
+plays or generates automatically. Browser Read aloud, M57 capture and M56 selected
+WAV transcription remain separate actions.
+
+Independent ANIMAOS_TTS_ENABLED opt-in uses the server OpenAI Platform key and
+canonical API base. The narrowly attributed Hermes port fixes gpt-4o-mini-tts,
+alloy, speed1 and raw PCM24k mono16-bit, wrapped locally in canonical WAV. Input
+is exact saved reply text, at most2048 scalars/8192 UTF-8 bytes. Output is bounded
+to120s/5,760,044 WAV bytes. No new dependencies, retries, custom voice, fallback,
+audio persistence or restart replay. Source/scope/store identity is rechecked
+before dispatch and output; pending history reads do not hold daemon locks.
+
+Two physical host output leases follow returned HTTP byte owners; two adapter
+JSON-body leases follow outgoing bytes. The browser retains one global speech
+owner through request, cancellation and play settlement. Unknown cleanup drops
+the candidate and retains ownership visibly. One native batch review and one
+final SDK/web review preceded three genuine browser regression failures and one
+combined fix wave: cancellation is registered before release, cleanup exceptions
+are contained, and replacement panels observe eventual ownership release.
+The full web gate also exposed14 existing chat checks made ambiguous by bare
+speech-option excerpts. Visible reply ordinals fixed that integration issue
+without changing source text or existing assertions; the failed log is retained.
+
+Fresh local gates: **Rust/core 2,855 tests / 26 intentional ignores /
+45 suites / format / build**, **SDK 183 tests / 3 intentional service
+skips**, **web 1,468 tests / 120 files**, SDK/web typecheck/build and owned
+format/docs checks. The actual OpenAPI printer supplies all200 README operations,
+with prior197/192 guards and mounted owner-boundary checks retained. Independent
+synthetic WAV oracle:24kHz mono PCM16,6000 frames,250ms,12,044 bytes.
+
+Acceptance remains synthetic: finite loopback peers, fake speech/playback and no
+actual provider/model/account, speaker/microphone, ordinary daemon, database
+server, container or deployment activation. Actual API/media compatibility,
+spoken quality, connector/local/other speech providers and full Hermes parity
+remain open. M52 strict quality stays PARTIAL; consumed cases are unchanged.
+
+See [native speech usage](speech-output.md) and the
+[M58 plan](../superpowers/plans/2026-10-16-companion-speech-output-m58.md).
+
 ## M57 microphone capture (2026-10-16)
 
 The chat composer can now create one local 16 kHz mono PCM16 WAV, bounded to

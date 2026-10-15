@@ -129,8 +129,12 @@ also attach a supported WAV file. Uploaded WAVs can be explicitly transcribed th
 opt-in OpenAI Platform API into an editable preview. Use transcript appends to
 your current draft; Send stays separate. This requires a server API key, not
 ChatGPT subscription sign-in. Stop is local; remote inference/billing may
-continue. See [selected audio and limits](voice.md). Actual voice quality and
-microphone/native speech output acceptance remain open.
+continue. See [selected audio and limits](voice.md). For output, select a saved
+assistant reply, review the transfer/API notice, choose **Generate speech with
+OpenAI API**, then explicitly **Play speech**. Native output needs its own
+server opt-in and has separate Stop/Discard controls; browser Read aloud remains
+available. See [speech output and limits](speech-output.md). Actual provider voice
+quality and microphone/speaker compatibility remain unverified.
 
 Review tool permission requests in Approvals. Review saved mail drafts and
 Calendar changes in Connectors before sending or applying them. Check the exact

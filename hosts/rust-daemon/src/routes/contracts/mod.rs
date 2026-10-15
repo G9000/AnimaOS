@@ -22,11 +22,13 @@ mod shared;
 #[cfg(test)]
 pub(crate) use shared::ContentResponse;
 mod skills;
+mod speech;
 mod status;
 mod swarms;
 mod usage;
 mod voice;
 mod workspace;
+pub(crate) use speech::*;
 pub(crate) use voice::*;
 
 pub(crate) use agencies::{

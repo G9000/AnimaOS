@@ -1470,6 +1470,7 @@ pub(crate) struct FlakyHistoryStore {
     usage_batches: Mutex<Vec<usize>>,
     panic_on_write: AtomicBool,
     existence_gate: Mutex<Option<StoreGate>>,
+    message_read_gate: Mutex<Option<(usize, StoreGate)>>,
     /// The text of the injected failure; a default when unset.
     failure_text: Mutex<Option<String>>,
 }
@@ -1492,6 +1493,7 @@ impl FlakyHistoryStore {
             usage_batches: Mutex::new(Vec::new()),
             panic_on_write: AtomicBool::new(false),
             existence_gate: Mutex::new(None),
+            message_read_gate: Mutex::new(None),
             failure_text: Mutex::new(None),
         }
     }
@@ -1542,6 +1544,19 @@ impl FlakyHistoryStore {
             .existence_gate
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(gate.clone());
+        gate
+    }
+
+    /// Holds one `get_message` read after the given number of reads complete.
+    pub(crate) fn hold_message_read_after(&self, skip: usize) -> StoreGate {
+        let gate = StoreGate {
+            entered: Arc::new(Semaphore::new(0)),
+            release: Arc::new(Semaphore::new(0)),
+        };
+        *self
+            .message_read_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((skip, gate.clone()));
         gate
     }
 
@@ -1735,6 +1750,28 @@ impl HistoryStore for FlakyHistoryStore {
         message_id: &str,
     ) -> Result<Option<HistoryMessage>, HistoryError> {
         self.check()?;
+        let gate = {
+            let mut pending = self
+                .message_read_gate
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            match pending.as_mut() {
+                Some((skip, _)) if *skip > 0 => {
+                    *skip -= 1;
+                    None
+                }
+                Some(_) => pending.take().map(|(_, gate)| gate),
+                None => None,
+            }
+        };
+        if let Some(gate) = gate {
+            gate.entered.add_permits(1);
+            gate.release
+                .acquire()
+                .await
+                .expect("store gate stays open")
+                .forget();
+        }
         self.inner
             .get_message(agent_id, session_id, message_id)
             .await

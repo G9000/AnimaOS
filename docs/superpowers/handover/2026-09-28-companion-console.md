@@ -1,49 +1,45 @@
-# Handover: native speech output (M0–M58)
+# Handover: selected native speech output (M0–M58)
 
-## Start here (2026-10-16): M57 merged; M58 bound tests-first speech output
+## Start here (2026-10-16): M58 gated; settle publication then schedule recovery
 
-Continue `g9000/companion-speech-output-m58` from verified [M57/PR63](https://github.com/G9000/animaOS-SWARM/pull/63)
-main `f721f91f3081f6b997bc34b6641d52db19099f9b`. M57 source
-`dd04ae906d8b3373622c40581e723c74ee31c337` matches merged/tested tree
-`cca532c9e3344e347365c4fe0f5ae48d26a1332c`. Fresh web1458/119files, SDK172/3service
-skips, type/build/format/seven docs checks and real emitted worklet fixture pass.
-All15publication/8source/134unowned hashes and unrelated nx preserved; local main
-was fast-forwarded before switching, avoiding EOL rewrites. M57 ledger settled
-and selected other chat received context-only update. Actual devices/voice quality
-and full parity remain open; M52 strict quality stays PARTIAL, cases immutable.
+Continue g9000/companion-speech-output-m58 from M57/PR63 main
+f721f91f3081f6b997bc34b6641d52db19099f9b. Plan9d064d04f91e149e3f613618282093239ed816cc
+was pushed before existing SessionView missing-control RED. Both reviews and
+the single combined fix wave are complete, source frozen, local gates pass.
+Finish explicit-path unsigned commit/push/PR, attach, standing authorized merge
+and exact tree/hash proof. Advance local main by nonforced fetch BEFORE switch
+to avoid old-tree EOL rewrites. Preserve unrelated nx.json.
 
-The [M58 bound plan](../plans/2026-10-16-companion-speech-output-m58.md) adds native
-speech output for one owner-selected saved visible Assistant reply. Existing
-browser Read aloud remains separate. Root verified pinned public Hermes TTS code,
-MIT/source hashes and current official OpenAI/MDN contracts, then bound five risks.
-149baseline hashes checked at branch cut and before plan edits. Publish this plan,
-then existing SessionView missing-control RED before production imports/code.
+Fresh Rust/core **2,855/26 ignores/45 suites**, lint/build;
+SDK **183/three service skips**; web **1,468/120 files**; SDK/web
+typechecks/builds. Actual OpenAPI200 matches compiled README and prior197/192
+guards/owner-boundary checks. Independent synthetic WAV12044bytes/6000frames/
+24kHz/250ms; old M56 fixture unchanged. Owned docs/format/hash checks finish
+publication. Zero dependency changes or actual provider/speaker activation.
 
-Independent ANIMAOS_TTS_ENABLED opt-in, server API key/canonical OpenAI base;
-fixed gpt-4o-mini-tts/alloy, PCM24k mono16bit converted to canonical WAV, max120s/
-5,760,044bytes. Max2048scalar/8192byte exact saved reply and pre/post scope/source
-checks. Two retained physical output owners plus two small adapter request-body
-owners,64scoped UUIDv4 map/5min tombstones,45s operation/46s request budget.
-No retries, OAuth/managed gateway, caller provider options, durable audio/replay,
-automatic generation/playback/transcript/send. One selected-reply panel/one browser
-owner; Generate, Play, Stop and Discard remain separate explicit actions. Unknown
-cleanup retains ownership; device/provider quality stays unverified.
+Selected saved visible own Assistant reply, max2048scalar/8192byte, source/store
+pre/post checks, separate opt-in API-key gpt-4o-mini-tts/alloy/PCM24k to WAV120s/
+5,760,044bytes. Two retained host outputs/two small adapter request bodies,
+45s operation/46s request,64 UUIDv4 map/5min tombstones, no replay. One browser
+owner spans GET/POST/DELETE/play; uncertain cleanup drops candidate and stays
+busy. Explicit Generate, Play, Stop, Discard; browser Read aloud stays separate.
+Pinned Hermes MIT adaptation retained with Anima product naming.
 
-No actual provider/model/account, speaker/microphone, ordinary daemon, database
-server, container or deploy is released. Root alone commands/fmts/Git/processes;
-source-only Codex lanes, one native batch review, one final SDK/web review, one
-combined fix wave then required local gates. Cargo CARGO_INCREMENTAL=0/jobs1/
-threads2, serialized. No new dependency planned. Direct native Python/cmd and
-cleared provider/service env; no Nx Cloud success claim. Root owns fixtures and
-compiled README/OpenAPI inventory (expected three new speech routes, actual schema
-printer is authority). Keep all old STT/upload/capture behavior and tests.
+Resume .superpowers/sdd/2026-10-16-companion-speech-output-m58/progress.md.
+Next held brief: .superpowers/sdd/2026-10-16-companion-next-held/plan-held.md,
+one controlled-clock PAR-10 recurrence/outage/restart acceptance using existing
+runtime. Root binds after this merge; no next source/service/model release yet.
+Actual media/provider quality, connectors/local/other providers and full parity
+remain open. M52 strict quality remains PARTIAL; consumed cases immutable.
 
-Resume `.superpowers/sdd/2026-10-16-companion-speech-output-m58/progress.md`.
-Explicit staging only, never nx.json/anima.yaml/.superpowers. Per-command unsigned
-commits, justified dependencies and reviewed merge-and-continue remain authorized.
-No stash/reset/restore/path checkout/worktree, ordinary profiles/credential copy,
-real accounts/DB servers/containers/Docker55432/public deployment. Preserve nx SHA
-`3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`.
+Root owns commands/fmt/Git/processes; source-only Codex delegation, no check-ins.
+Cargo CARGO_INCREMENTAL=0/jobs1/threads2 serialized. Explicit staging only, never
+nx.json/anima.yaml/.superpowers. Unsigned per-command commits, justified
+dependencies and merge-and-continue remain authorized. No stash/reset/restore/
+path checkout/worktree, ordinary profiles/credentials, real accounts/DB servers/
+containers/Docker55432/public deployment. No actual provider/model/account,
+speaker/microphone or ordinary daemon release. nx SHA
+3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90 preserved.
 
 ## Historical M57 gated handover
 

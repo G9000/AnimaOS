@@ -2,6 +2,7 @@ import { AgentsClient } from './agents.js';
 import { AgentFilesClient } from './agent-files.js';
 import { AttachmentsClient } from './attachments.js';
 import { VoiceClient } from './voice.js';
+import { SpeechClient } from './speech.js';
 import { GoalsClient } from './goals.js';
 import { AgenciesClient } from './agencies.js';
 import { WorkspaceClient } from './workspace.js';
@@ -80,6 +81,7 @@ export class DaemonClient {
   readonly agentFiles: AgentFilesClient;
   readonly attachments: AttachmentsClient;
   readonly voice: VoiceClient;
+  readonly speech: SpeechClient;
   readonly agencies: AgenciesClient;
   readonly workspace: WorkspaceClient;
   readonly chatgpt: ChatGptClient;
@@ -117,6 +119,7 @@ export class DaemonClient {
     this.agentFiles = new AgentFilesClient(this);
     this.attachments = new AttachmentsClient(this);
     this.voice = new VoiceClient(this);
+    this.speech = new SpeechClient(this);
     this.agencies = new AgenciesClient(this);
     this.workspace = new WorkspaceClient(this);
     this.agents = new AgentsClient(this);
@@ -218,6 +221,96 @@ export class DaemonClient {
       );
     }
     return this.readWithConnectionErrors(path, () => response.blob());
+  }
+
+  /** Read one binary response with a strict decoded-byte ceiling. */
+  async requestBoundedBlob(
+    path: string,
+    init: RequestInit,
+    limits: { maxBytes: number; contentType: string },
+  ): Promise<Blob> {
+    const { body, isJson } = prepareRequestBody(init.body);
+    const headers: Record<string, string> = {
+      accept: limits.contentType,
+      ...headersToObject(init.headers),
+    };
+    if (isJson && !('content-type' in headers))
+      headers['content-type'] = 'application/json';
+    const response = await this.fetchWithConnectionErrors(path, {
+      ...init,
+      headers,
+      body,
+    });
+    if (!response.ok) {
+      // The status is all the caller needs; never materialize an unbounded error body.
+      await response.body?.cancel().catch(() => undefined);
+      throw new DaemonHttpError(response.status, null);
+    }
+    const declared = response.headers.get('content-length');
+    if (
+      declared !== null &&
+      (!/^\d+$/.test(declared) ||
+        Number(declared) < 1 ||
+        Number(declared) > limits.maxBytes)
+    ) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error('Invalid bounded response length');
+    }
+    const encoding = response.headers
+      .get('content-encoding')
+      ?.trim()
+      .toLowerCase();
+    if (
+      response.headers.get('content-type')?.trim().toLowerCase() !==
+        limits.contentType ||
+      (encoding && encoding !== 'identity') ||
+      !response.body
+    ) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error('Invalid bounded response type');
+    }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    let complete = false;
+    try {
+      while (true) {
+        const { value, done } = await this.readWithConnectionErrors(path, () =>
+          reader.read(),
+        );
+        if (done) break;
+        total += value.byteLength;
+        if (total > limits.maxBytes)
+          throw new Error('Bounded response too large');
+        chunks.push(value);
+      }
+      if (total < 1 || (declared !== null && total !== Number(declared)))
+        throw new Error('Invalid bounded response length');
+      complete = true;
+      const output = new Uint8Array(total);
+      let offset = 0;
+      for (const chunk of chunks) {
+        output.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return new Blob([output.buffer], { type: limits.contentType });
+    } finally {
+      if (!complete)
+        await reader.cancel('bounded response rejected').catch(() => undefined);
+      reader.releaseLock();
+    }
+  }
+
+  /** Status-only operation; response bodies are always discarded. */
+  async requestNoBody(
+    path: string,
+    init: RequestInit,
+    expectedStatus: number,
+  ): Promise<void> {
+    const response = await this.fetchWithConnectionErrors(path, init);
+    await response.body?.cancel().catch(() => undefined);
+    if (response.status !== expectedStatus)
+      throw new DaemonHttpError(response.status, null);
   }
 
   async *subscribe<T = unknown>(
