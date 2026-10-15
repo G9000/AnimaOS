@@ -1,3 +1,50 @@
+# Handover: owner-visible completion boundary (M0–M53)
+
+## Start here (2026-10-16): M52 merged; M53 bound four-file web scope
+
+Continue `g9000/companion-completion-evidence-m53`, cut from verified
+[M52/PR58](https://github.com/G9000/animaOS-SWARM/pull/58) main
+`97258b01ecfdffdfcd782c86b907f8b7d151261b`. Source
+`ce6579fdf9431115baad4f0125b52e5f34f463cb` shares tested tree
+`15192c476987505a982b66ab98a31ccfb3de0436`; all22 owned hashes/nx preserved.
+M52 is committed/pushed/merged and the other chat received context. Exact resume:
+`.superpowers/sdd/2026-10-16-companion-completion-evidence-m53/progress.md`.
+
+The [M53 bound plan](../plans/2026-10-16-companion-completion-evidence-m53.md)
+exposes an existing trusted accepted tool-budget marker in the committed assistant
+reply. M52's useful utility/oracle/quiet restart passed, but its helper explanation
+and completed output-verification todo remain reporting-quality misses. M53 does
+not fix those semantics or authorize another task: the original case/releases
+are immutable/consumed, all24 recorded owned processes retired/port18752free.
+Seven calls/23,065 reported tokens,14 receipts,3todos and quiet usage7to7 remain
+the actual evidence; four task-result/reflection memories/two agents retained
+their hash, with no Fact/retrieval/graceful/in-flight recovery claim.
+
+Root bound five risks and the exact factual text/shape/lifecycle rules. First
+publish this plan/master/handover, then a web author writes missing-notice tests
+only; root records semantic RED before four-file implementation. Source ownership:
+existing ChatScreen.tsx/test and lib/transcript.ts/test, no new schema/receipt
+panel/component/CSS/SDK/native/dependency/config. Existing committed-history caller
+supplies context; strict native boolean marker/Assistant and no stopped/incomplete/
+revised/tool-call content. Live/pending/user data cannot synthesize the notice.
+One combined web+SDK scope review/fix wave and fresh resolved web test/typecheck/
+build/format gates follow. No M53 model/metadata/daemon/browser/deployment release.
+
+Local public Hermes HEAD/selected sources/LICENSE were root-reverified at
+`1fd18277267152893a8a24792b79213e7ca3f899`; reuse is a general reason-to-notice
+pattern, no copied source/text. Keep existing MIT notices and Anima branding.
+Standing cheap Codex delegation, per-command unsigned commits, reviewed
+merge-and-continue and context-only other-chat updates persist. Root alone
+execution/fmt/Git/services/models. CARGO_INCREMENTAL=0 for Rust commands; jobs1/
+threads2 for required Rust suites. Explicit stage only, never nx.json/anima.yaml/
+private evidence. Preserve nx SHA256
+`3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`.
+No stash/reset/restore/path checkout/worktree, ordinary profile/credential copy/
+readout, real connectors, DB servers, containers, Docker55432 or public deployment.
+Older resumes below are historical and superseded here.
+
+## Historical M52 outcome handover
+
 # Handover: useful repair evidence and reporting gaps (M0–M52)
 
 ## Start here (2026-10-16): M52 tested; settle publication then bounded follow-up
