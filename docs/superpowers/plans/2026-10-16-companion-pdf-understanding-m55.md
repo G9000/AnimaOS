@@ -1,5 +1,11 @@
 # M55 selected PDF text understanding implementation plan
 
+Status: implementation locally accepted; settle publication/merge from the exact
+ledger. Rust/core 2,788 passed / 26 intentional ignores / 45 suites; all parser cases and three explicit Windows physical cases, formatting/build; SDK151/three service skips; web1,370/115files; SDK/web typechecks/builds passed. No actual model/service release. Two review findings
+fixed; strict Flate and unknown-count/legacy compatibility regressions retained.
+PAR-08 stays partial; unsupported codecs/OCR/other Office/non-Windows/live quality
+remain open. Bound planning checkpoint below is historical.
+
 Status: controller-bound lean plan on `g9000/companion-pdf-understanding-m55`,
 cut from verified M54/PR60 main `186446cfb996a8f6df085ab6e45eb24c5d0a0b16`.
 M54 source `c1d3a7b895f2eece8c35cf1c88d5f76a5e040fc6` matches tested/merged
@@ -444,7 +450,11 @@ user check-in. It releases no actual model/service/account/deployment case.
    documents in declared selection order consume the attempt allowance even
    when too large or failed; there are never ten parse attempts. Keep at most ten
    status snapshots/two usable excerpts/16KiB combined quoted data, at most four
-   reads of2MiB+one sentinel per request. Preserve DOCX whole-paragraph fitting
+   reads of2MiB+one sentinel per model hydration or compaction invocation.
+   One-time admission separately permits at most four pre/post reads for the
+   first two supported documents; initial admission plus first hydration can
+   total eight reads (16MiB plus eight sentinel bytes). The same four physical
+   leases span both phases. Preserve DOCX whole-paragraph fitting
    and byte-identical V1 rendering; PDF can retain a UTF-8 prefix with explicit
    text_limit/context_limit. No cross-message cache, Fact/knowledge write or
    automatic interrupted replay. Batch native/core review, final SDK/web review,
@@ -452,6 +462,16 @@ user check-in. It releases no actual model/service/account/deployment case.
 
 ### Exact interface refinements
 
+- Ruling: verify present page Contents references/types and supported filter
+  decoding before page output — the pinned library silently skips some missing
+  references and suppresses zlib/LZW/ASCII85 failures — cost if wrong: discard
+  the whole excerpt or report unsupported, with original download retained.
+  Support unfiltered or single FlateDecode main-page streams only, verifying
+  complete zlib input/checksum through the existing flate2 state API without a
+  raw fallback. Known other filters/chains/empty arrays are unsupported; malformed
+  filter shapes and failed supported decoding are malformed. This is a narrow
+  wrapper, not complete PDF/resource/font/form validity certification. The
+  original missing-reference/malformed-Flate regression remains unchanged.
 - Input2MiB, strict maximum100pages: above100 is too_large/no blocks; zero pages
   is no_text/known zero coverage. For1..100 process all pages exactly once, even
   after retained text fills. Each page uses PlainTextOutput::new with an explicit

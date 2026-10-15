@@ -116,10 +116,12 @@ backend. A configured remote backend can make embedding requests during this
 rebuild. This changes the derived cache, not your saved facts or citations.
 
 Use Files to inspect the chosen workspace. Attach text or an image when useful;
-vision requires a compatible model. Selected DOCX attachments in your own Windows
-web chat have bounded main-body text extraction, with a visible outcome and the
-original download retained. See [document coverage and limits](documents.md).
-PDF, OCR and other Office formats remain storage/download only.
+vision requires a compatible model. Selected DOCX and PDF attachments in your own
+Windows web chat have bounded main-body or PDF text-layer extraction, with a
+visible outcome and the original download retained. PDF coverage reports pages
+with text and pages included, without inferring scanned content. See
+[document coverage and limits](documents.md). OCR and other Office formats remain
+storage/download only.
 
 Review tool permission requests in Approvals. Review saved mail drafts and
 Calendar changes in Connectors before sending or applying them. Check the exact

@@ -1,0 +1,2 @@
+# Preserve checked PDF byte offsets and fixed-width xref records.
+hosts/rust-daemon/tests/fixtures/documents/*.pdf binary

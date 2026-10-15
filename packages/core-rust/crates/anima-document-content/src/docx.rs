@@ -2,8 +2,9 @@ use std::collections::BTreeSet;
 use std::io::Read;
 
 use anima_core::document_content::{
-    DocumentBlock, DocumentExtractionStatus as Status, DocumentOmission as Omission,
-    ExtractedDocumentText, MAX_DOCUMENT_PARAGRAPHS, MAX_DOCUMENT_RENDERED_BYTES,
+    DocumentBlock, DocumentExtractionStatus as Status, DocumentFormat, DocumentLocator,
+    DocumentOmission as Omission, ExtractedDocumentText, DOCUMENT_CONTENT_VERSION,
+    MAX_DOCUMENT_PARAGRAPHS, MAX_DOCUMENT_RENDERED_BYTES,
 };
 use quick_xml::{events::Event, name::ResolveResult, NsReader, XmlVersion};
 use rawzip::{
@@ -475,7 +476,7 @@ fn parse_main(xml: &[u8]) -> Result<ExtractedDocumentText, Status> {
                         } else {
                             stored_bytes += cost;
                             blocks.push(DocumentBlock {
-                                paragraph,
+                                locator: DocumentLocator::DocxParagraph { paragraph },
                                 text: text.clone(),
                             });
                         }
@@ -577,10 +578,12 @@ fn parse_main(xml: &[u8]) -> Result<ExtractedDocumentText, Status> {
         Status::Ready
     };
     Ok(ExtractedDocumentText {
-        version: 1,
+        version: DOCUMENT_CONTENT_VERSION,
+        format: DocumentFormat::Docx,
         status,
         blocks,
         omissions,
+        pdf_coverage: None,
     })
 }
 

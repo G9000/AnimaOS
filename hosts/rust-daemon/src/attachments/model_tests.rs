@@ -35,6 +35,28 @@ fn document_record(temp: &Temp, id: &str) -> AttachmentRecord {
     }
 }
 
+fn pdf_record(temp: &Temp, id: &str) -> AttachmentRecord {
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/documents/m55-selected.pdf"
+    ));
+    let name = format!("{id}.pdf");
+    let saved = save_upload(&temp.0, "2026-10-16", &name, bytes).unwrap();
+    AttachmentRecord {
+        id: id.into(),
+        agent_id: "agent".into(),
+        session_id: "chat:session".into(),
+        name,
+        mime: crate::attachments::documents::PDF_MIME.into(),
+        size: bytes.len() as u64,
+        kind: AttachmentKind::Document,
+        path: saved.path,
+        created_at_ms: 0,
+        workspace_root: saved.workspace_root,
+        sha256: saved.sha256,
+    }
+}
+
 fn document_content(rows: &[AttachmentRecord]) -> Content {
     use anima_core::document_content::*;
     let mut content =
@@ -45,13 +67,29 @@ fn document_content(rows: &[AttachmentRecord]) -> Content {
             attachment_id: row.id.clone(),
             source_sha256: row.sha256.clone(),
             extraction: ExtractedDocumentText {
-                version: 1,
+                version: 2,
+                format: crate::attachments::documents::document_format(row).unwrap(),
                 status: DocumentExtractionStatus::Ready,
                 blocks: vec![DocumentBlock {
-                    paragraph: 1,
+                    locator: if row.mime == crate::attachments::documents::PDF_MIME {
+                        DocumentLocator::PdfPage { page: 1 }
+                    } else {
+                        DocumentLocator::DocxParagraph { paragraph: 1 }
+                    },
                     text: format!("derived {}", row.id),
                 }],
-                omissions: vec![DocumentOmission::MainBodyOnly],
+                omissions: vec![if row.mime == crate::attachments::documents::PDF_MIME {
+                    DocumentOmission::TextLayerOnly
+                } else {
+                    DocumentOmission::MainBodyOnly
+                }],
+                pdf_coverage: (row.mime == crate::attachments::documents::PDF_MIME).then_some(
+                    PdfCoverage {
+                        page_count: 2,
+                        text_page_count: 1,
+                        included_page_count: 1,
+                    },
+                ),
             },
         })
         .collect::<Vec<_>>();
@@ -202,30 +240,154 @@ async fn document_snapshot_reloaded_binding_reaches_generate_and_stream_without_
         }
     }
     let temp = Temp::new();
-    let row = document_record(&temp, "doc");
-    let store = Arc::new(MemoryHistoryStore::new());
-    store.upsert_attachments(&[row.clone()]).await.unwrap();
-    let inner = Arc::new(StreamingCapture(Capture::default()));
-    let adapter = AttachmentModelAdapter::new(
-        inner.clone(),
-        store,
-        Some(temp.0.clone()),
-        "agent".into(),
-        "chat:session".into(),
-    );
-    let saved = document_content(&[row]);
-    let reloaded: Content = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
-    let input = request("agent", "chat:session", reloaded.clone());
-    adapter.generate(&config("unknown"), &input).await.unwrap();
-    adapter
-        .stream(&config("unknown"), &input, &Sink)
+    for row in [document_record(&temp, "doc"), pdf_record(&temp, "pdf")] {
+        let store = Arc::new(MemoryHistoryStore::new());
+        store.upsert_attachments(&[row.clone()]).await.unwrap();
+        let inner = Arc::new(StreamingCapture(Capture::default()));
+        let adapter = AttachmentModelAdapter::new(
+            inner.clone(),
+            store,
+            Some(temp.0.clone()),
+            "agent".into(),
+            "chat:session".into(),
+        );
+        let saved = document_content(&[row.clone()]);
+        let reloaded: Content =
+            serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+        let input = request("agent", "chat:session", reloaded.clone());
+        adapter.generate(&config("unknown"), &input).await.unwrap();
+        adapter
+            .stream(&config("unknown"), &input, &Sink)
+            .await
+            .unwrap();
+        let requests = inner.0 .0.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0], requests[1]);
+        assert!(requests[0].messages[0]
+            .content
+            .text
+            .contains(&format!("derived {}", row.id)));
+        assert!(requests[0].messages[0].content.text.contains(
+            if row.mime == crate::attachments::documents::PDF_MIME {
+                "pdf#page=1"
+            } else {
+                "word/document.xml#paragraph=1"
+            }
+        ));
+        assert_eq!(input.messages[0].content, reloaded);
+        drop(requests);
+        let mut compaction = input.messages.clone();
+        adapter.prepare_compaction_documents(&mut compaction).await;
+        assert!(compaction[0]
+            .content
+            .text
+            .starts_with("\n[UNTRUSTED DOCUMENT DATA"));
+        assert!(compaction[0]
+            .content
+            .text
+            .contains(&format!("derived {}", row.id)));
+        assert!(reloaded.text.starts_with("original owner bytes"));
+        assert!(compaction[0].content.text.ends_with(&reloaded.text));
+        assert_eq!(input.messages[0].content, reloaded);
+    }
+}
+
+#[tokio::test]
+async fn mixed_history_hydration_has_four_reads_and_rejects_pdf_source_format_or_hash_mismatch() {
+    use anima_core::document_content::*;
+    let temp = Temp::new();
+    let rows = (0..6)
+        .map(|i| {
+            let id = format!("mixed{i}");
+            if i % 2 == 0 {
+                document_record(&temp, &id)
+            } else {
+                pdf_record(&temp, &id)
+            }
+        })
+        .collect::<Vec<_>>();
+    let adapter = fixture(&rows, Some(temp.0.clone())).await;
+    let mut input = request("agent", "chat:session", document_content(&rows[..2]));
+    for pair in rows[2..].chunks(2) {
+        let mut message = input.messages[0].clone();
+        message.content = document_content(pair);
+        input.messages.push(message);
+    }
+    let original = input.clone();
+    let read_ids = Arc::new(Mutex::new(Vec::new()));
+    let captured = read_ids.clone();
+    let prepared = adapter
+        .prepare_request_using_reader(
+            &config("unknown"),
+            &input,
+            Arc::new(move |root, row| {
+                captured.lock().unwrap().push(row.id.clone());
+                read_attachment_bytes(root, row)
+            }),
+        )
         .await
         .unwrap();
-    let requests = inner.0 .0.lock().unwrap();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0], requests[1]);
-    assert!(requests[0].messages[0].content.text.contains("derived doc"));
-    assert_eq!(input.messages[0].content, reloaded);
+    assert_eq!(
+        *read_ids.lock().unwrap(),
+        ["mixed4", "mixed5", "mixed2", "mixed3"]
+    );
+    assert!(!prepared.messages[0].content.text.contains("derived"));
+    for message in &prepared.messages[1..] {
+        assert!(message.content.text.contains("pdf#page=1"));
+        assert!(message
+            .content
+            .text
+            .contains("word/document.xml#paragraph=1"));
+    }
+    assert_eq!(input, original);
+    let pdf = &rows[1];
+    for scenario in ["foreign", "hash", "source_format"] {
+        let mut input = request("agent", "chat:session", document_content(&[pdf.clone()]));
+        if scenario == "foreign" {
+            input.messages[0].room_id = "chat:foreign".into();
+        } else {
+            let mut snapshots = parse_document_snapshots(&input.messages[0].content).unwrap();
+            if scenario == "hash" {
+                snapshots[0].source_sha256 = "0".repeat(64);
+            } else {
+                // A fully valid DOCX snapshot cannot impersonate this PDF source.
+                snapshots[0].extraction.format = DocumentFormat::Docx;
+                snapshots[0].extraction.blocks[0].locator =
+                    DocumentLocator::DocxParagraph { paragraph: 1 };
+                snapshots[0].extraction.omissions = vec![DocumentOmission::MainBodyOnly];
+                snapshots[0].extraction.pdf_coverage = None;
+            }
+            input.messages[0].content.metadata.as_mut().unwrap().insert(
+                DOCUMENT_EXTRACTS_METADATA_KEY.into(),
+                document_snapshots_metadata(&snapshots).unwrap(),
+            );
+        }
+        let prepared = adapter
+            .prepare_request_using_reader(
+                &config("unknown"),
+                &input,
+                Arc::new(|_, _| panic!("invalid PDF binding must not read source")),
+            )
+            .await
+            .unwrap();
+        assert!(
+            !prepared.messages[0].content.text.contains("derived"),
+            "{scenario}"
+        );
+        let mut compacted = input.messages.clone();
+        adapter.prepare_compaction_documents(&mut compacted).await;
+        assert!(!compacted[0].content.text.contains("derived"), "{scenario}");
+    }
+    std::fs::write(temp.0.join(&pdf.path), b"changed").unwrap();
+    let input = request("agent", "chat:session", document_content(&[pdf.clone()]));
+    let prepared = adapter
+        .prepare_request(&config("unknown"), &input)
+        .await
+        .unwrap();
+    assert!(!prepared.messages[0].content.text.contains("derived"));
+    let mut compacted = input.messages.clone();
+    adapter.prepare_compaction_documents(&mut compacted).await;
+    assert!(!compacted[0].content.text.contains("derived"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

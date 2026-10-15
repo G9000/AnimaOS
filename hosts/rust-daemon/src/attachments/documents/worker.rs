@@ -1,13 +1,15 @@
-//! Fixed, one-shot DOCX worker. The physical owner outlives the calling future.
+//! Fixed, one-shot document worker. The physical owner outlives the calling future.
 //! Jobs constrain resources/lifetime; they are not a filesystem/network sandbox.
 use std::io::{self, Read, Write};
 
-use anima_core::document_content::{validate_document_extraction, ExtractedDocumentText};
+use anima_core::document_content::{
+    validate_document_extraction, DocumentFormat, ExtractedDocumentText,
+};
 use anima_core::CancelSignal;
 use async_trait::async_trait;
 use tokio::time::Instant;
 
-const READY: &[u8] = b"ANIMA-DOCX-READY-v1\n";
+const READY: &[u8] = b"ANIMA-DOCUMENT-READY-v2\n";
 const MAX_INPUT: usize = 2 * 1024 * 1024;
 const MAX_STDOUT: usize = 64 * 1024;
 const MAX_FRAME: usize = MAX_STDOUT - READY.len() - 4;
@@ -26,6 +28,7 @@ pub(crate) enum WorkerFailure {
 pub(crate) trait DocumentExtractor: Send + Sync {
     async fn extract(
         &self,
+        format: DocumentFormat,
         bytes: Vec<u8>,
         cancel: CancelSignal,
         deadline: Option<Instant>,
@@ -39,6 +42,7 @@ pub(crate) struct DocumentWorker;
 impl DocumentExtractor for DocumentWorker {
     async fn extract(
         &self,
+        format: DocumentFormat,
         bytes: Vec<u8>,
         cancel: CancelSignal,
         deadline: Option<Instant>,
@@ -54,12 +58,12 @@ impl DocumentExtractor for DocumentWorker {
         }
         #[cfg(not(windows))]
         {
-            let _ = bytes;
+            let _ = (format, bytes);
             Err(WorkerFailure::Unavailable)
         }
         #[cfg(windows)]
         {
-            physical::extract(bytes, cancel, deadline).await
+            physical::extract(format, bytes, cancel, deadline).await
         }
     }
 }
@@ -68,7 +72,14 @@ fn invalid() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "invalid document worker frame")
 }
 
-fn read_request(reader: &mut impl Read) -> io::Result<Vec<u8>> {
+fn read_request(reader: &mut impl Read) -> io::Result<(DocumentFormat, Vec<u8>)> {
+    let mut format = [0; 1];
+    reader.read_exact(&mut format)?;
+    let format = match format[0] {
+        0 => DocumentFormat::Docx,
+        1 => DocumentFormat::Pdf,
+        _ => return Err(invalid()),
+    };
     let mut header = [0; 4];
     reader.read_exact(&mut header)?;
     let length = u32::from_le_bytes(header) as usize;
@@ -81,7 +92,7 @@ fn read_request(reader: &mut impl Read) -> io::Result<Vec<u8>> {
     if reader.read(&mut trailing)? != 0 {
         return Err(invalid());
     }
-    Ok(bytes)
+    Ok((format, bytes))
 }
 
 fn write_result(writer: &mut impl Write, value: &ExtractedDocumentText) -> io::Result<()> {
@@ -108,9 +119,9 @@ pub fn document_worker_entry() -> io::Result<()> {
         let mut output = io::stdout().lock();
         output.write_all(READY)?;
         output.flush()?;
-        let bytes = read_request(&mut io::stdin().lock())?;
+        let (format, bytes) = read_request(&mut io::stdin().lock())?;
         // Synchronous Rust parser: no runtime, threads, converter, or subprocess.
-        let extracted = anima_document_content::extract_docx(&bytes);
+        let extracted = anima_document_content::extract_document(format, &bytes);
         write_result(&mut output, &extracted)
     }
 }
@@ -134,6 +145,7 @@ fn install_resource_limits() -> io::Result<()> {
 
 #[cfg(any(windows, test))]
 async fn exchange(
+    format: DocumentFormat,
     mut stdin: impl tokio::io::AsyncWrite + Unpin,
     mut stdout: impl tokio::io::AsyncRead + Unpin,
     bytes: Vec<u8>,
@@ -148,6 +160,13 @@ async fn exchange(
         return Err(WorkerFailure::InvalidOutput);
     }
     // The READY check is the only gate to transmitting untrusted document bytes.
+    stdin
+        .write_all(&[match format {
+            DocumentFormat::Docx => 0,
+            DocumentFormat::Pdf => 1,
+        }])
+        .await
+        .map_err(|_| WorkerFailure::Unavailable)?;
     stdin
         .write_all(&(bytes.len() as u32).to_le_bytes())
         .await
@@ -187,6 +206,9 @@ async fn exchange(
     let result: ExtractedDocumentText =
         serde_json::from_slice(&json).map_err(|_| WorkerFailure::InvalidOutput)?;
     validate_document_extraction(&result).map_err(|_| WorkerFailure::InvalidOutput)?;
+    if result.format != format {
+        return Err(WorkerFailure::InvalidOutput);
+    }
     Ok(Some(result))
 }
 
@@ -277,14 +299,16 @@ mod physical {
     }
 
     pub(super) async fn extract(
+        format: DocumentFormat,
         bytes: Vec<u8>,
         cancel: CancelSignal,
         deadline: Option<Instant>,
     ) -> Result<ExtractedDocumentText, WorkerFailure> {
-        extract_with_program(bytes, cancel, deadline, Program::Daemon).await
+        extract_with_program(format, bytes, cancel, deadline, Program::Daemon).await
     }
 
     async fn extract_with_program(
+        format: DocumentFormat,
         bytes: Vec<u8>,
         cancel: CancelSignal,
         deadline: Option<Instant>,
@@ -318,12 +342,21 @@ mod physical {
             }),
         };
         let (sender, receiver) = oneshot::channel();
-        tokio::spawn(owner(lease, bytes, cancel, stop, deadline, sender, program));
+        tokio::spawn(owner(
+            lease,
+            (format, bytes),
+            cancel,
+            stop,
+            deadline,
+            sender,
+            program,
+        ));
         receiver.await.map_err(|_| WorkerFailure::Unavailable)?
     }
 
     fn launch(
         resources: &mut Resources,
+        format: DocumentFormat,
         bytes: Vec<u8>,
         program: Program,
     ) -> Result<(), WorkerFailure> {
@@ -331,7 +364,7 @@ mod physical {
             Program::Daemon => {
                 let executable = std::env::current_exe().map_err(|_| WorkerFailure::Unavailable)?;
                 let mut command = Command::new(executable);
-                command.arg("--document-worker-v1");
+                command.arg("--document-worker-v2");
                 command
             }
             #[cfg(test)]
@@ -371,20 +404,21 @@ mod physical {
         let stdin = child.stdin().take().ok_or(WorkerFailure::Unavailable)?;
         let stdout = child.stdout().take().ok_or(WorkerFailure::Unavailable)?;
         let stderr = child.stderr().take().ok_or(WorkerFailure::Unavailable)?;
-        resources.io = Some(tokio::spawn(exchange(stdin, stdout, bytes)));
+        resources.io = Some(tokio::spawn(exchange(format, stdin, stdout, bytes)));
         resources.stderr = Some(tokio::spawn(drain_stderr(stderr)));
         Ok(())
     }
 
     async fn owner(
         mut lease: Lease,
-        bytes: Vec<u8>,
+        request: (DocumentFormat, Vec<u8>),
         cancel: CancelSignal,
         stop: CancellationToken,
         deadline: Instant,
         sender: oneshot::Sender<Result<ExtractedDocumentText, WorkerFailure>>,
         program: Program,
     ) {
+        let (format, bytes) = request;
         let mut sender = Some(sender);
         if cancel.is_cancelled() || stop.is_cancelled() || Instant::now() >= deadline {
             let failure = if Instant::now() >= deadline {
@@ -397,7 +431,7 @@ mod physical {
             return;
         }
         let resources = lease.resources.as_mut().expect("owner resources");
-        if let Err(failure) = launch(resources, bytes, program) {
+        if let Err(failure) = launch(resources, format, bytes, program) {
             let _ = sender.take().expect("response exists").send(Err(failure));
             // Failed containment/spawn is permanently quarantined, including
             // any owned child and pipe handles, even if cleanup later succeeds.
@@ -532,14 +566,20 @@ mod physical {
         }
 
         async fn available(
+            format: DocumentFormat,
             mode: &'static str,
             bytes: Vec<u8>,
         ) -> Result<ExtractedDocumentText, WorkerFailure> {
             // Finite wait for the previous physical owner to observe retirement.
             for _ in 0..100 {
-                let result =
-                    extract_with_program(bytes.clone(), CancelSignal::new(), None, peer(mode))
-                        .await;
+                let result = extract_with_program(
+                    format,
+                    bytes.clone(),
+                    CancelSignal::new(),
+                    None,
+                    peer(mode),
+                )
+                .await;
                 if result != Err(WorkerFailure::Busy) {
                     return result;
                 }
@@ -551,88 +591,98 @@ mod physical {
         #[tokio::test]
         #[ignore = "physical Windows Job/pipe acceptance: root builds the finite peer and runs explicitly"]
         async fn document_physical_framing_stop_timeout_drop_and_resources() {
-            for mode in [
-                "bad-ready",
-                "oversize",
-                "malformed",
-                "trailing",
-                "stderr-flood",
-                "crash",
-            ] {
-                assert_eq!(
-                    available(mode, Vec::new()).await,
-                    Err(WorkerFailure::InvalidOutput),
-                    "{mode}"
-                );
-            }
-            // An error may return while the independent owner is retiring the
-            // Job. Prove the slot is reusable before starting a deadline case;
-            // never equate a logical failure response with physical retirement.
-            available("valid", Vec::new()).await.unwrap();
-            for mode in [
-                "before-ready",
-                "during-input",
-                "during-output",
-                "late",
-                "cpu-burn",
-            ] {
-                // Empty handshake mode or a full input that fills a closed peer's pipe.
-                let bytes = if mode == "during-input" {
-                    vec![0; MAX_INPUT]
-                } else {
-                    Vec::new()
-                };
-                let result = extract_with_program(
-                    bytes,
-                    CancelSignal::new(),
-                    Some(Instant::now() + Duration::from_millis(300)),
-                    peer(mode),
-                )
-                .await;
-                assert_eq!(result, Err(WorkerFailure::TimedOut), "{mode}");
-                assert_eq!(
-                    available("valid", Vec::new()).await.unwrap().status,
-                    anima_core::document_content::DocumentExtractionStatus::NoText
-                );
-            }
-            for dropped in [false, true] {
-                for mode in ["before-ready", "during-input", "during-output"] {
-                    let primary = CancelSignal::new();
+            for format in [DocumentFormat::Docx, DocumentFormat::Pdf] {
+                for mode in [
+                    "bad-ready",
+                    "old-ready",
+                    "oversize",
+                    "malformed",
+                    "old-version",
+                    "unknown-format",
+                    "wrong-format",
+                    "trailing",
+                    "stderr-flood",
+                    "crash",
+                ] {
+                    assert_eq!(
+                        available(format, mode, Vec::new()).await,
+                        Err(WorkerFailure::InvalidOutput),
+                        "{mode}"
+                    );
+                }
+                // An error may return while the independent owner is retiring the
+                // Job. Prove the slot is reusable before starting a deadline case;
+                // never equate a logical failure response with physical retirement.
+                available(format, "valid", Vec::new()).await.unwrap();
+                for mode in [
+                    "before-ready",
+                    "during-input",
+                    "during-output",
+                    "late",
+                    "cpu-burn",
+                ] {
+                    // Empty handshake mode or a full input that fills a closed peer's pipe.
                     let bytes = if mode == "during-input" {
                         vec![0; MAX_INPUT]
                     } else {
                         Vec::new()
                     };
-                    let task = tokio::spawn(extract_with_program(
+                    let result = extract_with_program(
+                        format,
                         bytes,
-                        primary.clone(),
-                        None,
+                        CancelSignal::new(),
+                        Some(Instant::now() + Duration::from_millis(300)),
                         peer(mode),
-                    ));
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    )
+                    .await;
+                    assert_eq!(result, Err(WorkerFailure::TimedOut), "{mode}");
                     assert_eq!(
-                        DocumentWorker
-                            .extract(Vec::new(), CancelSignal::new(), None)
-                            .await,
-                        Err(WorkerFailure::Busy),
-                        "all extractors share the occupied physical slot"
+                        available(format, "valid", Vec::new()).await.unwrap().status,
+                        anima_core::document_content::DocumentExtractionStatus::NoText
                     );
-                    if dropped {
-                        task.abort();
-                        assert!(task.await.unwrap_err().is_cancelled());
-                        assert!(!primary.is_cancelled());
-                    } else {
-                        primary.cancel();
-                        assert_eq!(
-                            tokio::time::timeout(Duration::from_secs(1), task)
-                                .await
-                                .unwrap()
-                                .unwrap(),
-                            Err(WorkerFailure::Cancelled)
-                        );
-                    }
-                    available("valid", Vec::new()).await.unwrap();
                 }
+                for dropped in [false, true] {
+                    for mode in ["before-ready", "during-input", "during-output"] {
+                        let primary = CancelSignal::new();
+                        let bytes = if mode == "during-input" {
+                            vec![0; MAX_INPUT]
+                        } else {
+                            Vec::new()
+                        };
+                        let task = tokio::spawn(extract_with_program(
+                            format,
+                            bytes,
+                            primary.clone(),
+                            None,
+                            peer(mode),
+                        ));
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        assert_eq!(
+                            DocumentWorker
+                                .extract(format, Vec::new(), CancelSignal::new(), None)
+                                .await,
+                            Err(WorkerFailure::Busy),
+                            "all extractors share the occupied physical slot"
+                        );
+                        if dropped {
+                            task.abort();
+                            assert!(task.await.unwrap_err().is_cancelled());
+                            assert!(!primary.is_cancelled());
+                        } else {
+                            primary.cancel();
+                            assert_eq!(
+                                tokio::time::timeout(Duration::from_secs(1), task)
+                                    .await
+                                    .unwrap()
+                                    .unwrap(),
+                                Err(WorkerFailure::Cancelled)
+                            );
+                        }
+                        available(format, "valid", Vec::new()).await.unwrap();
+                    }
+                }
+                let resources = available(format, "resources", Vec::new()).await.unwrap();
+                assert_eq!(resources.blocks[0].text, "memory-refused child-refused");
             }
 
             // An unrelated, finite source-controlled process is outside every
@@ -657,6 +707,7 @@ mod physical {
             let mut neighbor = wrapped.spawn().unwrap();
             let primary = CancelSignal::new();
             let task = tokio::spawn(extract_with_program(
+                DocumentFormat::Docx,
                 Vec::new(),
                 primary.clone(),
                 None,
@@ -668,11 +719,12 @@ mod physical {
             assert!(matches!(neighbor.inner_mut().try_wait(), Ok(None)));
             neighbor.start_kill().unwrap();
             neighbor.wait().await.unwrap();
-            available("valid", Vec::new()).await.unwrap();
+            available(DocumentFormat::Docx, "valid", Vec::new())
+                .await
+                .unwrap();
 
-            let resources = available("resources", Vec::new()).await.unwrap();
-            assert_eq!(resources.blocks[0].text, "memory-refused child-refused");
             let parsed = available(
+                DocumentFormat::Docx,
                 "real",
                 include_bytes!("../../../tests/fixtures/documents/m54-selected.docx").to_vec(),
             )
@@ -687,6 +739,21 @@ mod physical {
             assert!(text.contains("M54 selected record: cobalt harbour 7319."));
             assert!(!text.contains("HEADER_OMITTED_4096"));
             assert!(!text.contains("PHONETIC_GUIDE_NOT_BODY"));
+            let parsed = available(
+                DocumentFormat::Pdf,
+                "real",
+                include_bytes!("../../../tests/fixtures/documents/m55-selected.pdf").to_vec(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(parsed.format, DocumentFormat::Pdf);
+            assert!(parsed.blocks.iter().any(|block| block
+                .text
+                .contains("M55 selected invoice total: USD 137.42.")));
+            let coverage = parsed.pdf_coverage.unwrap();
+            assert_eq!(coverage.page_count, 2);
+            assert_eq!(coverage.text_page_count, 1);
+            assert_eq!(coverage.included_page_count, 1);
         }
     }
 }

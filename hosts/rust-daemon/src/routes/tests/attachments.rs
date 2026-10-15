@@ -101,6 +101,7 @@ struct RealDocxExtractor;
 impl crate::attachments::documents::worker::DocumentExtractor for RealDocxExtractor {
     async fn extract(
         &self,
+        format: anima_core::document_content::DocumentFormat,
         bytes: Vec<u8>,
         cancel: anima_core::CancelSignal,
         _deadline: Option<tokio::time::Instant>,
@@ -111,7 +112,7 @@ impl crate::attachments::documents::worker::DocumentExtractor for RealDocxExtrac
         if cancel.is_cancelled() {
             return Err(crate::attachments::documents::worker::WorkerFailure::Cancelled);
         }
-        Ok(anima_document_content::extract_docx(&bytes))
+        Ok(anima_document_content::extract_document(format, &bytes))
     }
 }
 
@@ -253,6 +254,193 @@ async fn docx_selected_text_reaches_model_m54() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     panic!("M54 attachment run did not complete");
+}
+
+#[tokio::test]
+async fn pdf_selected_text_reaches_model_m55() {
+    let temp = Temp::new();
+    let gate = Gate::new();
+    let model = ScriptedModel::gated(vec![Step::Text(vec!["done"])], gate.clone());
+    let mut daemon = DaemonState::with_model_adapter(model.clone());
+    daemon.workspace = Some(WorkspaceConfig {
+        root_path: temp.0.clone(),
+        company_name: "test".into(),
+        mission: "test".into(),
+        values: vec![],
+    });
+    let agent = daemon
+        .create_agent(test_config("attachments"))
+        .unwrap()
+        .state
+        .id;
+    daemon.sessions.insert(SessionRecord::new(
+        &agent,
+        "chat:files",
+        SessionKind::Chat,
+        SessionOrigin::Web,
+        "Files".into(),
+        TitleSource::FirstMessage,
+        1,
+    ));
+    let state = Arc::new(RwLock::new(daemon));
+    let runs = AgentRunCoordinator::new(state.clone(), Arc::new(Semaphore::new(4)))
+        .with_document_extractor(Arc::new(RealDocxExtractor));
+    let app =
+        crate::routes::router_with_runs(state.clone(), DaemonConfig::default(), |_| runs.clone());
+
+    let selected = app
+        .clone()
+        .oneshot(upload(
+            &uri(&agent),
+            form(
+                "m55-selected.pdf",
+                include_bytes!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/tests/fixtures/documents/m55-selected.pdf"
+                )),
+                "application/pdf",
+            ),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(selected.status(), StatusCode::CREATED);
+    let selected_id = json_body(selected).await["attachment"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let unselected = app
+        .clone()
+        .oneshot(upload(
+            &uri(&agent),
+            form(
+                "m55-unselected.pdf",
+                include_bytes!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/tests/fixtures/documents/m55-unselected.pdf"
+                )),
+                "application/pdf",
+            ),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(unselected.status(), StatusCode::CREATED);
+    let unselected_id = json_body(unselected).await["attachment"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/api/agents/{agent}/sessions/chat%3Afiles/runs"))
+        .header("host", "127.0.0.1:8080")
+        .header("origin", OWNER)
+        .header("content-type", "application/json")
+        .header("idempotency-key", "m55-selected-pdf")
+        .body(Body::from(
+            json!({
+                "text": "Read the selected PDF",
+                "attachmentIds": [selected_id],
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let accepted = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(accepted.status(), StatusCode::ACCEPTED);
+    let run_id = json_body(accepted).await["run"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    tokio::time::timeout(Duration::from_secs(15), gate.entered())
+        .await
+        .expect("M55 recording adapter was not reached within the bounded wait");
+    let requests = model.requests();
+    let user_data = requests
+        .iter()
+        .flat_map(|request| request.messages.iter())
+        .filter(|message| message.role == anima_core::MessageRole::User)
+        .map(|message| message.content.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        user_data.contains("M55 selected invoice total: USD 137.42."),
+        "selected PDF text must reach model user data: {user_data}"
+    );
+    assert!(
+        user_data.contains("pdf#page=1"),
+        "selected PDF text must retain its page locator: {user_data}"
+    );
+    assert!(user_data.contains("DOCUMENT_DATA_NOT_AUTHORITY_M55"));
+    for excluded in ["NEVER_INLINE_PDF_M55_9081", unselected_id.as_str()] {
+        assert!(
+            !user_data.contains(excluded),
+            "unselected PDF content reached model user data: {excluded}"
+        );
+    }
+    for message in requests
+        .iter()
+        .flat_map(|request| request.messages.iter())
+        .filter(|message| message.role == anima_core::MessageRole::System)
+    {
+        for document_text in [
+            "M55 selected invoice total: USD 137.42.",
+            "DOCUMENT_DATA_NOT_AUTHORITY_M55",
+            "NEVER_INLINE_PDF_M55_9081",
+        ] {
+            assert!(
+                !message.content.text.contains(document_text),
+                "PDF text entered system instructions: {document_text}"
+            );
+        }
+    }
+    gate.release();
+    for _ in 0..500 {
+        if state
+            .read()
+            .await
+            .runs
+            .get(&run_id)
+            .is_some_and(|run| run.status == crate::runs::RunStatus::Completed)
+        {
+            let response = app
+                .clone()
+                .oneshot(get(
+                    &format!("/api/agents/{agent}/sessions/chat%3Afiles/messages"),
+                    true,
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let page = json_body(response).await;
+            let selected_message = page["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|message| {
+                    message["role"] == "user" && message["attachments"][0]["id"] == selected_id
+                })
+                .expect("selected PDF message must survive run wrap-up");
+            let extraction = &selected_message["attachments"][0]["extraction"];
+            assert_eq!(extraction["version"], 2);
+            assert_eq!(extraction["format"], "pdf");
+            assert_eq!(extraction["pageCount"], 2);
+            assert_eq!(extraction["textPageCount"], 1);
+            assert_eq!(extraction["includedPageCount"], 1);
+            assert!(!selected_message
+                .to_string()
+                .contains("M55 selected invoice total: USD 137.42."));
+            assert!(!selected_message
+                .to_string()
+                .contains("DOCUMENT_DATA_NOT_AUTHORITY_M55"));
+            assert!(!selected_message.to_string().contains("documentExtracts"));
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("M55 PDF attachment run did not complete");
 }
 
 #[tokio::test]
@@ -883,13 +1071,15 @@ fn document_extraction_projection_is_user_selected_only_and_private_data_never_p
         attachment_id: row.id.clone(),
         source_sha256: row.sha256.clone(),
         extraction: ExtractedDocumentText {
-            version: 1,
+            version: 2,
+            format: DocumentFormat::Docx,
             status: DocumentExtractionStatus::Ready,
             blocks: vec![DocumentBlock {
-                paragraph: 1,
+                locator: DocumentLocator::DocxParagraph { paragraph: 1 },
                 text: "private extracted literal".into(),
             }],
             omissions: vec![DocumentOmission::MainBodyOnly],
+            pdf_coverage: None,
         },
     };
     content.metadata.as_mut().unwrap().insert(
@@ -919,6 +1109,39 @@ fn document_extraction_projection_is_user_selected_only_and_private_data_never_p
         public["attachments"][0]["extraction"],
         json!({"version":1,"status":"ready","paragraphCount":1,"omissions":["main_body_only"]})
     );
+    let mut legacy_message = message.clone();
+    {
+        use anima_core::DataValue;
+        let DataValue::Array(rows) = legacy_message
+            .content
+            .metadata
+            .as_mut()
+            .unwrap()
+            .get_mut(DOCUMENT_EXTRACTS_METADATA_KEY)
+            .unwrap()
+        else {
+            panic!()
+        };
+        let DataValue::Object(snapshot) = &mut rows[0] else {
+            panic!()
+        };
+        let DataValue::Object(extraction) = snapshot.get_mut("extraction").unwrap() else {
+            panic!()
+        };
+        extraction.insert("version".into(), DataValue::Number(1.0));
+        extraction.remove("format");
+        let DataValue::Array(blocks) = extraction.get_mut("blocks").unwrap() else {
+            panic!()
+        };
+        let DataValue::Object(block) = &mut blocks[0] else {
+            panic!()
+        };
+        block.remove("locator");
+        block.insert("paragraph".into(), DataValue::Number(1.0));
+    }
+    let legacy_bytes = serde_json::to_vec(&legacy_message).unwrap();
+    assert_eq!(project(legacy_message.clone()), public);
+    assert_eq!(serde_json::to_vec(&legacy_message).unwrap(), legacy_bytes);
     for private in [
         "private extracted literal",
         &row.sha256,
@@ -968,6 +1191,118 @@ fn document_extraction_projection_is_user_selected_only_and_private_data_never_p
             .unwrap()
             .contains_key(DOCUMENT_EXTRACTS_METADATA_KEY));
     }
+}
+
+#[test]
+fn pdf_projection_is_closed_has_honest_coverage_and_refuses_mismatched_format() {
+    use anima_core::document_content::*;
+    let mut row = crate::history::conformance::attachment_record("att-pdf", "agent", "chat:files");
+    row.name = "selected.pdf".into();
+    row.mime = crate::attachments::documents::PDF_MIME.into();
+    row.kind = crate::attachments::AttachmentKind::Document;
+    row.path = "uploads/2026-10-16/selected.pdf".into();
+    row.sha256 = "b".repeat(64);
+    let project = |extraction: ExtractedDocumentText| {
+        let mut message = crate::sessions::test_support::message(
+            "agent",
+            "m",
+            "chat:files",
+            anima_core::MessageRole::User,
+            "",
+            1,
+        );
+        message.content =
+            crate::agent_runs::attachments::attachment_content("original", &[row.clone()], None);
+        message.content.metadata.as_mut().unwrap().insert(
+            DOCUMENT_EXTRACTS_METADATA_KEY.into(),
+            document_snapshots_metadata(&[DocumentSnapshot {
+                attachment_id: row.id.clone(),
+                source_sha256: row.sha256.clone(),
+                extraction,
+            }])
+            .unwrap(),
+        );
+        serde_json::to_value(crate::routes::contracts::SessionMessageResponse::from(
+            &crate::sessions::views::PageMessage {
+                message,
+                hidden: false,
+            },
+        ))
+        .unwrap()
+    };
+    for status in [
+        DocumentExtractionStatus::Ready,
+        DocumentExtractionStatus::Partial,
+    ] {
+        let public = project(ExtractedDocumentText {
+            version: 2,
+            format: DocumentFormat::Pdf,
+            status,
+            blocks: vec![DocumentBlock {
+                locator: DocumentLocator::PdfPage { page: 1 },
+                text: "private PDF extracted literal".into(),
+            }],
+            omissions: vec![DocumentOmission::TextLayerOnly],
+            pdf_coverage: Some(PdfCoverage {
+                page_count: 2,
+                text_page_count: 1,
+                included_page_count: 1,
+            }),
+        });
+        assert_eq!(
+            public["attachments"][0]["extraction"],
+            json!({
+                "version": 2, "format": "pdf", "status": serde_json::to_value(status).unwrap(),
+                "pageCount": 2, "textPageCount": 1, "includedPageCount": 1, "omissions": ["text_layer_only"],
+            })
+        );
+        for private in [
+            "private PDF extracted literal",
+            row.sha256.as_str(),
+            "documentExtracts",
+            "pdf_page",
+            "locator",
+            "paragraphCount",
+        ] {
+            assert!(!public.to_string().contains(private), "{private}");
+        }
+    }
+    for status in [
+        DocumentExtractionStatus::Malformed,
+        DocumentExtractionStatus::Unavailable,
+        DocumentExtractionStatus::Cancelled,
+    ] {
+        let public = project(ExtractedDocumentText::empty_for(
+            DocumentFormat::Pdf,
+            status,
+        ));
+        assert_eq!(
+            public["attachments"][0]["extraction"],
+            json!({
+                "version": 2, "format": "pdf", "status": serde_json::to_value(status).unwrap(),
+                "pageCount": null, "textPageCount": null, "includedPageCount": null, "omissions": [],
+            })
+        );
+    }
+    let mut no_text =
+        ExtractedDocumentText::empty_for(DocumentFormat::Pdf, DocumentExtractionStatus::NoText);
+    no_text.pdf_coverage = Some(PdfCoverage {
+        page_count: 2,
+        text_page_count: 0,
+        included_page_count: 0,
+    });
+    no_text.omissions.push(DocumentOmission::TextLayerOnly);
+    assert_eq!(
+        project(no_text)["attachments"][0]["extraction"],
+        json!({
+            "version": 2, "format": "pdf", "status": "no_text", "pageCount": 2,
+            "textPageCount": 0, "includedPageCount": 0, "omissions": ["text_layer_only"],
+        })
+    );
+    let mismatched = project(ExtractedDocumentText::empty(
+        DocumentExtractionStatus::Unavailable,
+    ));
+    assert!(mismatched["attachments"][0].get("extraction").is_none());
 }
 #[tokio::test]
 async fn image_magic_owns_mime_and_collision_name_is_server_approved() {

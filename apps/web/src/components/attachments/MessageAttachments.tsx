@@ -30,10 +30,161 @@ const EXTRACTION_OMISSION_LABELS = {
   selection_limit: 'Additional documents were not included',
 } as const;
 
+const PDF_EXTRACTION_STATUS_LABELS = {
+  ready: 'PDF text layer extracted',
+  partial: 'Some PDF text layer extracted',
+  unsupported: 'PDF text extraction unsupported',
+  encrypted: 'Encrypted PDF',
+  malformed: 'PDF could not be read',
+  too_large: 'PDF too large for text extraction',
+  no_text: 'No PDF text layer text found',
+  unavailable: 'PDF text extraction unavailable',
+  cancelled: 'PDF text extraction cancelled',
+  context_omitted: 'PDF text not included',
+} as const;
+
+const PDF_EXTRACTION_OMISSION_LABELS = {
+  text_layer_only: 'Only the PDF text layer was read',
+  text_limit: 'PDF text limit reached',
+  context_limit: 'Not all PDF text fit in this message context',
+  selection_limit: 'Additional documents were not included',
+} as const;
+
 const MAX_EXTRACTION_PARAGRAPHS = 2000;
+const MAX_PDF_PAGES = 100;
+
+function hasExactKeys(value: object, keys: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return (
+    actual.length === expected.length &&
+    actual.every((key, index) => key === expected[index])
+  );
+}
+
+function isClosedOmissionList(
+  value: unknown,
+  labels: Record<string, string>,
+): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= 5 &&
+    new Set(value).size === value.length &&
+    value.every(
+      (omission) =>
+        typeof omission === 'string' &&
+        Object.prototype.hasOwnProperty.call(labels, omission),
+    )
+  );
+}
 
 export function describeDocumentExtraction(value: unknown): string | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if ('format' in value && (value as { format?: unknown }).format === 'pdf') {
+    const extraction = value as {
+      version?: unknown;
+      format?: unknown;
+      status?: unknown;
+      pageCount?: unknown;
+      textPageCount?: unknown;
+      includedPageCount?: unknown;
+      omissions?: unknown;
+    };
+    if (
+      !hasExactKeys(value, [
+        'version',
+        'format',
+        'status',
+        'pageCount',
+        'textPageCount',
+        'includedPageCount',
+        'omissions',
+      ]) ||
+      extraction.version !== 2 ||
+      extraction.format !== 'pdf' ||
+      typeof extraction.status !== 'string' ||
+      !Object.prototype.hasOwnProperty.call(
+        PDF_EXTRACTION_STATUS_LABELS,
+        extraction.status,
+      ) ||
+      !isClosedOmissionList(
+        extraction.omissions,
+        PDF_EXTRACTION_OMISSION_LABELS,
+      )
+    ) {
+      return null;
+    }
+
+    const { pageCount, textPageCount, includedPageCount } = extraction;
+    const status =
+      extraction.status as keyof typeof PDF_EXTRACTION_STATUS_LABELS;
+    const allNull =
+      pageCount === null &&
+      textPageCount === null &&
+      includedPageCount === null;
+    const knownCounts = [pageCount, textPageCount, includedPageCount].every(
+      (count) =>
+        Number.isInteger(count) &&
+        (count as number) >= 0 &&
+        (count as number) <= MAX_PDF_PAGES,
+    );
+    const countFailure =
+      status === 'unsupported' ||
+      status === 'encrypted' ||
+      status === 'malformed' ||
+      status === 'too_large' ||
+      status === 'unavailable' ||
+      status === 'cancelled';
+    if (
+      countFailure
+        ? !allNull
+        : !(knownCounts || (status === 'context_omitted' && allNull))
+    ) {
+      return null;
+    }
+
+    if (knownCounts) {
+      const pages = pageCount as number;
+      const textPages = textPageCount as number;
+      const includedPages = includedPageCount as number;
+      if (
+        includedPages > textPages ||
+        textPages > pages ||
+        (pages === 0 &&
+          !(status === 'no_text' && textPages === 0 && includedPages === 0)) ||
+        ((status === 'ready' || status === 'partial') &&
+          (pages < 1 || textPages < 1 || includedPages < 1)) ||
+        (status === 'no_text' && (textPages !== 0 || includedPages !== 0)) ||
+        (status === 'context_omitted' && includedPages !== 0)
+      ) {
+        return null;
+      }
+    }
+
+    const details: string[] = [
+      PDF_EXTRACTION_STATUS_LABELS[
+        status as keyof typeof PDF_EXTRACTION_STATUS_LABELS
+      ],
+    ];
+    if (knownCounts) {
+      const pages = pageCount as number;
+      const textPages = textPageCount as number;
+      const includedPages = includedPageCount as number;
+      details.push(
+        `${textPages} of ${pages} ${pages === 1 ? 'page' : 'pages'} with text`,
+        `${includedPages} ${includedPages === 1 ? 'page' : 'pages'} included`,
+      );
+    }
+    for (const omission of extraction.omissions) {
+      details.push(
+        PDF_EXTRACTION_OMISSION_LABELS[
+          omission as keyof typeof PDF_EXTRACTION_OMISSION_LABELS
+        ],
+      );
+    }
+    return details.join(' · ');
+  }
+
   const extraction = value as {
     version?: unknown;
     status?: unknown;
@@ -41,6 +192,12 @@ export function describeDocumentExtraction(value: unknown): string | null {
     omissions?: unknown;
   };
   if (
+    !hasExactKeys(value, [
+      'version',
+      'status',
+      'paragraphCount',
+      'omissions',
+    ]) ||
     extraction.version !== 1 ||
     typeof extraction.status !== 'string' ||
     !Object.prototype.hasOwnProperty.call(
@@ -48,17 +205,7 @@ export function describeDocumentExtraction(value: unknown): string | null {
       extraction.status,
     ) ||
     !Number.isInteger(extraction.paragraphCount) ||
-    !Array.isArray(extraction.omissions) ||
-    extraction.omissions.length > 5 ||
-    new Set(extraction.omissions).size !== extraction.omissions.length ||
-    !extraction.omissions.every(
-      (omission) =>
-        typeof omission === 'string' &&
-        Object.prototype.hasOwnProperty.call(
-          EXTRACTION_OMISSION_LABELS,
-          omission,
-        ),
-    )
+    !isClosedOmissionList(extraction.omissions, EXTRACTION_OMISSION_LABELS)
   ) {
     return null;
   }

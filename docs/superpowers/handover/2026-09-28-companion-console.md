@@ -1,5 +1,56 @@
 # Handover: selected PDF text understanding (M0–M55)
 
+## Start here (2026-10-16): M55 gated; settle publication then continue
+
+Continue `g9000/companion-pdf-understanding-m55` from verified M54/PR60 main
+`186446cfb996a8f6df085ab6e45eb24c5d0a0b16`. The reviewed source is frozen and
+gated. Rust/core 2,788 passed / 26 intentional ignores / 45 suites; all parser cases and three explicit Windows physical cases, formatting/build; SDK151/three service skips; web1,370/115files; SDK/web typechecks/builds passed. Finish explicit-path unsigned commit/push/PR, then the
+standing authorized reviewed merge and exact source/merge tree verification.
+Only cut the next milestone branch from verified main after that settlement.
+Exact current source, PR, tree and resume:
+`.superpowers/sdd/2026-10-16-companion-pdf-understanding-m55/progress.md`.
+
+[M55](../plans/2026-10-16-companion-pdf-understanding-m55.md) adds selected PDF
+text-layer excerpts inside the existing owned Windows worker, with numeric page
+locators, known total/text/included counts and unknown failures. Strict V1 DOCX
+normalizes in memory without saved-byte rewrite; new private V2 and public DOCX
+V1/PDF V2 are separate domains. First two supported documents total share attempts
+(including oversized/failed), ten outcomes and16KiB exact quoted data. Admission
+allows four pre/post source reads; each hydration/compaction separately allows
+four current/newest reads, all with shared four physical leases/2MiB+sentinel.
+
+One native and one finalSDKweb review each found one P2. Both fixes retain genuine
+RED evidence and original assertions. The gate caught additional library Flate
+forgiveness, now checked with existing flate2 completion/checksum; unfiltered or
+singleFlate main-page streams only, other known codecs/chains unsupported.
+Active Contents failures discard all prefix. This does not certify full PDF,
+resource/font/form validity or scanned/image content. The worker self-checks
+256MiB/one-process Job caps before READY; physical ownership survives Stop/drop
+until retirement. V2 framing/format and obsolete CLI modes are checked pre-host.
+No kernel CPU quota, sandbox, OCR or actual answer-quality claim. PAR08partial.
+
+All cases use synthetic files/recording adapters and finite workers, no actual
+model/service/metadata refresh/account/DB server/container/deployment. M47/M52
+actual cases/releases remain immutable/consumed; M52 strict grade stays PARTIAL.
+Preserve MIT notices/Anima naming. Dependencies with a reason, cheap Codex
+delegation, unsigned per-command commits, reviewed merge-and-continue and
+context-only updates to the selected other chat remain authorized.
+
+Root alone executes/fmts/Git/processes/models; CARGO_INCREMENTAL=0/jobs1/threads2,
+resolved Nx targets, cleared provider/service env and local gates authoritative.
+PowerShell startup stalled during verification; owned pending sessions were
+cancelled, and direct native Python subprocess/Nx runner completed the checks.
+Do not blindly resume old PowerShell sessions or replay a model case.
+Explicit staging only; never nx.json/anima.yaml/private. Preserve nx SHA256
+`3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`.
+No stash/reset/restore/path checkout/worktree, ordinary profile/credential copy
+or readout, real connector accounts, DB servers, containers, Docker55432 or public
+deployment. Historical resumes below are superseded here.
+
+## Historical M55 planning checkpoint
+
+# Handover: selected PDF text understanding (M0–M55)
+
 ## Start here (2026-10-16): M54 merged; M55 bound tests-first PDF slice
 
 Continue `g9000/companion-pdf-understanding-m55` from verified

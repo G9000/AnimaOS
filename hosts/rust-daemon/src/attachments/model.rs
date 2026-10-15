@@ -198,8 +198,8 @@ impl AttachmentModelAdapter {
                 || record.session_id != self.session_id
                 || record.metadata() != selected
                 || record.sha256 != snapshot.source_sha256
-                || !super::documents::is_docx(&record)
-                || record.size > super::documents::MAX_DOCX_INPUT_BYTES
+                || super::documents::document_format(&record) != Some(snapshot.extraction.format)
+                || record.size > super::documents::MAX_DOCUMENT_INPUT_BYTES
             {
                 continue;
             }

@@ -233,12 +233,31 @@ pub(crate) struct SessionAttachmentResponse {
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(untagged)]
+pub(crate) enum DocumentExtractionResponse {
+    Docx(DocxExtractionResponse),
+    Pdf(PdfExtractionResponse),
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct DocumentExtractionResponse {
+pub(crate) struct DocxExtractionResponse {
     pub(crate) version: u32,
     /// Closed values from the core contract, kept HTTP-independent there.
     pub(crate) status: String,
     pub(crate) paragraph_count: usize,
+    pub(crate) omissions: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PdfExtractionResponse {
+    pub(crate) version: u32,
+    pub(crate) format: String,
+    pub(crate) status: String,
+    pub(crate) page_count: Option<u32>,
+    pub(crate) text_page_count: Option<u32>,
+    pub(crate) included_page_count: Option<u32>,
     pub(crate) omissions: Vec<String>,
 }
 
@@ -256,22 +275,56 @@ fn extraction_response(
         .into_iter()
         .find(|snapshot| snapshot.attachment_id == selected.id)?;
     let extraction = snapshot.extraction;
+    use anima_core::document_content::DocumentFormat;
+    let extension = selected.name.rsplit_once('.').map(|(_, ext)| ext);
+    let expected_format = match selected.mime.as_str() {
+        crate::attachments::documents::DOCX_MIME
+            if extension.is_some_and(|ext| ext.eq_ignore_ascii_case("docx")) =>
+        {
+            DocumentFormat::Docx
+        }
+        crate::attachments::documents::PDF_MIME
+            if extension.is_some_and(|ext| ext.eq_ignore_ascii_case("pdf")) =>
+        {
+            DocumentFormat::Pdf
+        }
+        _ => DocumentFormat::Docx,
+    };
+    if extraction.format != expected_format {
+        return None;
+    }
     let string = |value| match serde_json::to_value(value).ok()? {
         Value::String(s) => Some(s),
         _ => None,
     };
-    Some(DocumentExtractionResponse {
-        version: extraction.version,
-        status: string(extraction.status)?,
-        paragraph_count: extraction.blocks.len(),
-        omissions: extraction
-            .omissions
-            .into_iter()
-            .map(|v| match serde_json::to_value(v) {
-                Ok(Value::String(s)) => s,
-                _ => String::new(),
-            })
-            .collect(),
+    let status = string(extraction.status)?;
+    let omissions = extraction
+        .omissions
+        .into_iter()
+        .map(|v| match serde_json::to_value(v) {
+            Ok(Value::String(s)) => s,
+            _ => String::new(),
+        })
+        .collect();
+    Some(match extraction.format {
+        DocumentFormat::Docx => DocumentExtractionResponse::Docx(DocxExtractionResponse {
+            version: 1,
+            status,
+            paragraph_count: extraction.blocks.len(),
+            omissions,
+        }),
+        DocumentFormat::Pdf => DocumentExtractionResponse::Pdf(PdfExtractionResponse {
+            version: 2,
+            format: "pdf".into(),
+            status,
+            page_count: extraction.pdf_coverage.as_ref().map(|c| c.page_count),
+            text_page_count: extraction.pdf_coverage.as_ref().map(|c| c.text_page_count),
+            included_page_count: extraction
+                .pdf_coverage
+                .as_ref()
+                .map(|c| c.included_page_count),
+            omissions,
+        }),
     })
 }
 

@@ -49,6 +49,23 @@ describe('sessions client', () => {
         omissions: ['main_body_only', 'context_limit'],
       },
     };
+    const pdf: SessionMessageAttachment = {
+      type: 'file',
+      name: 'selected.pdf',
+      id: 'att_pdf',
+      mime: 'application/pdf',
+      size: 240,
+      kind: 'document',
+      extraction: {
+        version: 2,
+        format: 'pdf',
+        status: 'partial',
+        pageCount: 2,
+        textPageCount: 1,
+        includedPageCount: 1,
+        omissions: ['text_layer_only'],
+      },
+    };
     const { sessions } = transport(() =>
       Response.json({
         messages: [
@@ -56,7 +73,7 @@ describe('sessions client', () => {
             id: 'message',
             role: 'user',
             text: '',
-            attachments: [legacy, uploaded],
+            attachments: [legacy, uploaded, pdf],
             metadata: {},
             createdAtMs: 1,
           },
@@ -65,11 +82,12 @@ describe('sessions client', () => {
       }),
     );
     const page = await sessions.messages('agent', 'session');
-    expect(page.messages[0].attachments).toEqual([legacy, uploaded]);
+    expect(page.messages[0].attachments).toEqual([legacy, uploaded, pdf]);
     expect(page.messages[0].attachments[0]).not.toHaveProperty('id');
     expect(page.messages[0].attachments[1].extraction).toEqual(
       uploaded.extraction,
     );
+    expect(page.messages[0].attachments[2].extraction).toEqual(pdf.extraction);
   });
   it('lists sessions with encoded filters', async () => {
     const page = { sessions: [session], nextCursor: 'next' };
