@@ -128,3 +128,39 @@ only; never nx.json/anima.yaml/.superpowers. Per-command unsigned commits and
 merge-and-continue are already authorized. No stash/reset/restore/path checkout/
 worktree, ordinary profiles/credentials, actual models/accounts/devices/services,
 database servers/containers/Docker55432/public deployment. Preserve unrelated nx.
+
+## Gated outcome (2026-10-16)
+
+The Memory page now has an explicit Check memory search status action. It reuses
+the existing typed readiness SDK/API and presents a daemon-wide index snapshot:
+enabled/disabled, bounded configured provider/model, dimension/vector count,
+disk cache configured and separate local fixture check counts. Zero checks are
+not called a pass. Saved memory and lexical search remain separate from vectors.
+
+This is configuration/status, not a provider health probe, per-agent vector
+coverage, semantic recall/answer-quality proof or evidence of a successful disk
+write. The server's fixed checks use a fresh local fixture MemoryManager; they
+do not evaluate or mutate the owner's saved memories. There is no automatic
+request on render, search, tab/Refresh changes or resync, and no provider call,
+memory mutation, index rebuild, grant change or service start.
+
+One retained browser read spans unsettled promises and replacement panels.
+Actual native FastEmbed namespace/model identifiers are accepted while absolute
+paths, URLs and controls remain excluded; both compatibility regressions pass.
+Committed agent/epoch/offline/unmount boundaries fence stale results; pending
+requests do not queue or retry automatically. Safe metadata projection excludes
+storageFile, raw diagnostics and errors; malformed data is generic unavailable.
+Memory content, search, filters, tabs and editing controls remain independent.
+
+The existing-page missing-action RED preceded production (48 existing tests
+passed). One final web/SDK review and one bounded fix wave are settled. Fresh
+local gates: **web 1,491 tests / 121 files**, **SDK 183 tests / 3
+intentional service skips**, SDK/web typecheck/build, owned formatting/docs and
+hash preservation. Native/SDK/config/dependency inputs are unchanged; current
+M59 **Rust/core 2,856 / 26 intentional ignores / 45 suites / format / build**
+evidence is retained for identical inputs without a redundant Cargo run.
+
+Acceptance uses mocked metadata/deferred requests, not actual providers, model
+accounts, semantic quality or a running normal profile. No real devices, ordinary
+daemons, database servers, containers or deployment are activated. No dependency.
+M52 remains PARTIAL; see [harness evidence](../../companion/harness-acceptance.md).

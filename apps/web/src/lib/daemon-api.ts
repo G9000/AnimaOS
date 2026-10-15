@@ -549,6 +549,7 @@ export const daemon = {
     setupClient.approvals.removeRule(agentId, ruleId),
   /** Memory (spec §10). Reads take no signal: the SDK memory calls do not;
    *  the hook ignores stale answers by sequence number. */
+  memoryReadiness: () => setupClient.memories.readiness(),
   recentMemories: (agentId: string, limit: number) =>
     setupClient.memories.recent({ agentId, limit }),
   searchMemories: (query: string, agentId: string, limit: number) =>

@@ -1,33 +1,36 @@
-# Handover: memory index status (M0–M60)
+# Handover: explicit memory index status (M0–M60)
 
-## Start here (2026-10-16): M59 merged; M60 bound explicit status read
+## Start here (2026-10-16): M60 gated; settle publication then isolated console smoke
 
-Continue g9000/companion-memory-status-m60 from verified [M59/PR65](https://github.com/G9000/animaOS-SWARM/pull/65)
-main1eabbd186c3e61b329dface7d1884daccacba614, source3dbd4882670ed2c189ff8cbc970c1ec823e83166,
-identical tested/merge treefeb17df0628b093f73498632b34ef3a51ef0af71. Fresh Rust2856/
-26 ignores/45 suites/lint/build; one finite unresolved JSON claim into fresh states
-and second reload passes, zero model calls after all joins. No production changes.
-All7 publication/1 source/165 unowned hashes and nx exact. M58 SDK183/three service
-skips, web1468/120files/type/build remain evidence for unchanged source. M59 settled.
+Continue g9000/companion-memory-status-m60 from M59/PR65 main
+1eabbd186c3e61b329dface7d1884daccacba614. Bound plan bf05498f4a40d4aa5acfa8a4c88d128256c26b5a
+was pushed before missing-control RED (48 existing passes). Six web-only paths,
+final web/SDK review and one fix wave settled. Fresh SDK183/three service skips,
+web1491/121 files/type/build pass. Finish docs/format/hash/publication, explicit
+unsigned commit/push/PR/attach, standing merge and exact tree/hash proof. Advance
+main by nonforced fetch before switch to preserve EOL/raw hashes; leave nx.json.
 
-The [M60 bound plan](../plans/2026-10-16-companion-memory-status-m60.md) reuses the
-existing local-only readiness SDK/API on explicit owner click. Show daemon-wide
-index configuration/counts, disk cache configured and separate fixed fixture
-checks; no overall semantic-ready or durability/provider-health claim. No raw path,
-diagnostic payload or error display, memory mutation, provider probe or auto read.
-One retained pending request, commit-time scope fences, replacement-view release.
-Six web-only paths; native/SDK/core/manifests unchanged. Publish plan, then existing
-MemoryPage missing-action RED before production. One final web/SDK review/fix wave,
-local gates/docs and standing authorized publication/merge.
+Explicit readiness read only, daemon-wide vector/config/cache snapshot and separate
+local fixture counts; no semantic-ready, per-agent coverage, provider health or
+disk-write durability claim. One retained pending read, commit-time scope fences,
+replacement-view release, safe metadata/no raw paths/errors. No auto read, rebuild,
+memory write, provider request or grant change. Memory workflows unchanged.
+Native/SDK/config/dependencies unchanged: M59 Rust2856/26 ignores/45 suites/lint/
+build retained for identical inputs, without a redundant Cargo run.
 
 Resume .superpowers/sdd/2026-10-16-companion-memory-status-m60/progress.md.
-Root owns commands/fmt/Git; source-only Codex delegation. Cargo if ever required:
-CARGO_INCREMENTAL=0/jobs1/threads2 serialized. Clear provider/service env; no actual
-models/providers/accounts/devices/ordinary daemons/DB servers/containers/deploy.
-M52 PARTIAL/cases immutable; broader parity remains open. Explicit paths only,
-never nx.json/anima.yaml/.superpowers; per-command unsigned commits and justified
-dependencies allowed. No stash/reset/restore/path checkout/worktree or profiles/
-credentials. nx SHA3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90.
+Held next proposal only: .superpowers/sdd/2026-10-16-companion-isolated-console-held/plan-held.md,
+reuse an existing isolated built-console memory/status/restart runner with synthetic
+data and zero provider/model/account/connector calls. Root must verify all startup/
+profile/cleanup boundaries after merge before activation. Ordinary profiles stay off.
+
+Root commands/fmt/Git; source-only Codex delegation, no check-ins. Explicit paths
+only, never nx.json/anima.yaml/.superpowers. Per-command unsigned commits and
+merge-and-continue authorized; justified dependencies allowed. No stash/reset/
+restore/path checkout/worktree, ordinary credentials/profiles, actual models/
+accounts/devices/ordinary services/DB servers/containers/Docker55432/deploy.
+M52 PARTIAL/cases immutable; full parity unclaimed. nx SHA
+3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90 preserved.
 
 ## Historical M59 gated handover
 

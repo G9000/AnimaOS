@@ -167,6 +167,18 @@ provide interactive browser or desktop control. Preserve custom connector/web
 permissions when changing access profiles: a standard profile replaces custom
 tool selections, as the settings warning explains.
 
+## Check memory search status
+
+In Memory, choose **Check memory search status** for a daemon-wide vector-index
+snapshot. Index disabled or empty does not disable saved memory or lexical search.
+Provider/model labels describe configuration, and disk cache configured does not
+prove its latest write succeeded or that your saved memories are durable. Local
+fixture checks use synthetic records, not your memories; they do not establish
+semantic answer quality or provider reachability. No status check happens until
+you click. If a previous request is still finishing, wait for it or reload; no
+automatic retry or index rebuild runs. Your memory tabs, search and edits stay
+separate from this status read.
+
 ## When the tool budget runs out
 
 The tool budget counts rounds, so a parallel batch uses one round. The default

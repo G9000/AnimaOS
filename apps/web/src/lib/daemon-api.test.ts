@@ -766,6 +766,22 @@ describe('daemon session requests', () => {
 });
 
 describe('daemon memory requests', () => {
+  it('forwards the explicit readiness read to the existing SDK GET route', async () => {
+    const response = { passed: false, embeddings: {}, evaluation: {} };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify(response), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect(await daemon.memoryReadiness()).toEqual(response);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/memories/readiness');
+    expect(fetchMock.mock.calls[0][1]?.method ?? 'GET').toBe('GET');
+  });
+
   it('reads and changes memories, facts, and entities through the SDK routes', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
