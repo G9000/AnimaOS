@@ -146,7 +146,7 @@ impl AgentRunCoordinator {
         run: Option<&RunCompaction<'_>>,
         cancel: Option<CancelSignal>,
     ) -> Compacted {
-        let (adapter, config, previous, pruned, store, through) = {
+        let (adapter, config, previous, pruned, store, through, documents) = {
             let guard = self.state.read().await;
             let Some(runtime) = guard.agents.get(agent_id) else {
                 return Compacted::Failed("The companion no longer exists".into());
@@ -175,6 +175,13 @@ impl AgentRunCoordinator {
                 pruned,
                 guard.history.store(),
                 through,
+                crate::attachments::model::AttachmentModelAdapter::new(
+                    Arc::clone(&guard.model_adapter),
+                    guard.history.store(),
+                    guard.workspace.as_ref().map(|w| w.root_path.clone()),
+                    agent_id.into(),
+                    session_id.into(),
+                ),
             )
         };
         let budget_tokens = ContextBudget::for_config(&config).budget_tokens;
@@ -205,6 +212,8 @@ impl AgentRunCoordinator {
             if turns.is_empty() {
                 return Err(NO_EARLIER_TURNS.to_string());
             }
+            let mut turns = turns.into_owned();
+            documents.prepare_compaction_documents(&mut turns).await;
             let text = summarize(
                 &meter,
                 &config,

@@ -1,18 +1,39 @@
 # M54 selected DOCX text understanding implementation plan
 
-Status: controller-bound lean plan on `g9000/companion-document-understanding-m54`,
-cut from verified M53/PR59 main `c2f25b241049b33ac95beefcc56fea140b047bbd`.
-M53 source `526b81b1e67c198fc89526c768f8261b6add0343` shares tested tree
-`9dcde91a9924285208d4141d07ca6de293d3ff51`; ten owned/four source/61 boundary
-hashes and unrelated nx.json bytes were preserved. M53 web 1,361 tests in 115
-files, typecheck/build/format/docs passed. This is M53 evidence, not M54 gates.
+Status: implemented and locally gated on `g9000/companion-document-understanding-m54`,
+from verified M53/PR59 main `c2f25b241049b33ac95beefcc56fea140b047bbd`.
+Exact source, publication/merge proof and resume are in
+`.superpowers/sdd/2026-10-16-companion-document-understanding-m54/progress.md`.
 
-Root has selected the narrow DOCX slice, checked public dependency source/APIs
-and bound five risks below. Publish plan/master/handover before the tests-only
-semantic RED release; implementation follows demonstrated missing context.
-No actual model, metadata refresh, ordinary daemon/account or deployment case.
-M47/M52 cases remain immutable/consumed; M52 strict quality remains PARTIAL.
-Exact resume: `.superpowers/sdd/2026-10-16-companion-document-understanding-m54/progress.md`.
+Selected own Web DOCX main-body text now reaches generate/stream user data through
+bounded, persisted, source-hash-bound snapshots. Current/history/file context
+reserves its cost before selection. Reload reuses settled results; manual/automatic
+compaction hydrate verified transient copies without changing saved messages.
+The optional message summary exposes finite extraction status/count/omissions;
+private text/hash/metadata stay private and originals remain downloadable.
+
+The fixed Windows worker establishes checked 256 MiB process/job memory and
+one-process limits before READY and document bytes, with a ten-second parent wall
+deadline, bounded IPC and independent physical retirement. Stop/deadline/caller
+Drop cannot release its slot early. Shared source reads retain four nonqueued
+leases until the OS read ends; async waits yield to cancellation/deadline, and
+each accepted DOCX read probes at most 2 MiB plus one sentinel. No kernel CPU
+quota, filesystem/network sandbox, graceful-shutdown or exactly-once claim.
+
+The original real-handler missing-excerpt RED was semantic, then became GREEN.
+One combined native/core review and final SDK/web review preceded one fix wave
+for compaction, read lifetime/cap and XML placement. Root corrected invalid test
+construction and physical-test retirement synchronization without weakening
+authority or assertions. Bare compound-file magic now reports unsupported rather
+than guessing encryption, with a separate failing-then-passing regression.
+Fresh gates: Rust/core **2,766 passed / 25 intentional ignores / 44 suites**, 12 parser cases, both explicit Windows physical cases, formatting/build; SDK **151 / three intentional service skips**, web **1,366 / 115 files**, and SDK/web typechecks/builds. Independent root DOCX
+fixtures remain byte-identical; 44 owned source and 58 prior boundary hashes
+are recorded. Owned formatting/diff and eight-document checks passed at publication.
+
+No actual model, metadata refresh, ordinary daemon, account, database server,
+container or deployment ran. PDF/OCR/other Office/non-Windows and general answer
+quality remain open; PAR-08 is partial. M47/M52 cases remain immutable/consumed,
+and M52 strict quality remains PARTIAL. See [coverage](../../companion/documents.md).
 
 The original proposal is design context. Final controller rulings supersede its
 candidate dependencies, OS CPU-limit proposal and any differing interfaces.
@@ -293,3 +314,18 @@ Primary dependency evidence: [rawzip tagged manifest](https://github.com/nickbab
 [win-custody pinned Job implementation](https://github.com/115dkk/Win-Custody.rs/blob/ea96b2b8633dfa0e9a5f29e2b000aea11c565798/src/job.rs),
 and [Microsoft Job limits](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_basic_limit_information).
 Registry checksums and exact source-inspection receipts are retained privately.
+
+### Interface refinement after semantic RED
+
+Root observed the exact selected-text absence with successful upload/admission and
+the recording adapter; native compilation succeeded. In-process handler tests may
+inject a test-only extractor bridge that runs the real parser on the selected bytes.
+Physical CLI/transport tests separately prove the actual fixed worker. This avoids
+using a libtest executable as the daemon and does not replace physical evidence.
+No user-configurable worker program or paid provider call is introduced.
+
+### Bounded status and history refinements
+
+A message may persist at most ten status snapshots, with at most two usable DOCX excerpts. Further selected DOCX files receive an explicit selection omission. Hydration reads at most four current/newest owned document sources, each at most 2 MiB, after scope/hash binding; older excerpts are omitted without reparsing or changing saved snapshots. Conservative reservation can overestimate omitted history, never undercount admitted document text.
+
+Unsupported ZIP policy checks use only checked fields at rawzip-validated EOCD and entry positions to reject multidisk/ZIP64 forms. Archive discovery and decompression remain library-owned; no custom ZIP reader or FFI is introduced.

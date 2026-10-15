@@ -1206,3 +1206,144 @@ async fn agent_files_compaction_keeps_admitted_workspace_tools_and_attachment_ad
         .contains("Workspace A identity"));
     assert!(adapter.inner.requests()[0].system.contains("Summary"));
 }
+
+async fn document_compaction_case(automatic: bool, source: &str) {
+    use crate::agent_files::{AcceptedAgentFiles, Availability};
+    use crate::attachments::{files::save_upload, AttachmentKind, AttachmentRecord};
+    use anima_core::document_content::*;
+    let model = ScriptedModel::with_secondary(vec![], vec![Step::Text(vec!["document summary"])]);
+    let (coordinator, agent_id) = long_session(model.clone(), true).await;
+    let root = crate::skills::test_support::temp_workspace("document-compaction-m54");
+    coordinator.state.write().await.workspace = Some(crate::control_plane_store::WorkspaceConfig {
+        root_path: root.clone(),
+        ..Default::default()
+    });
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/documents/m54-selected.docx"
+    ));
+    let saved = save_upload(&root, "2026-10-16", "selected.docx", bytes).unwrap();
+    let row = AttachmentRecord {
+        id: "att-doc-compaction".into(),
+        agent_id: agent_id.clone(),
+        session_id: if source == "foreign" {
+            "chat:foreign"
+        } else {
+            "chat:long"
+        }
+        .into(),
+        name: "selected.docx".into(),
+        mime: crate::attachments::documents::DOCX_MIME.into(),
+        size: bytes.len() as u64,
+        kind: AttachmentKind::Document,
+        path: saved.path,
+        created_at_ms: 1,
+        workspace_root: saved.workspace_root,
+        sha256: saved.sha256,
+    };
+    let store = coordinator.state.read().await.history.store();
+    store.upsert_attachments(&[row.clone()]).await.unwrap();
+    let mut document = message(&agent_id, "u-doc", MessageRole::User, "");
+    document.content =
+        super::attachments::attachment_content(&"owner text ".repeat(600), &[row.clone()], None);
+    let snapshot = DocumentSnapshot {
+        attachment_id: row.id.clone(),
+        source_sha256: row.sha256.clone(),
+        extraction: anima_document_content::extract_docx(bytes),
+    };
+    document.content.metadata.as_mut().unwrap().insert(
+        DOCUMENT_EXTRACTS_METADATA_KEY.into(),
+        document_snapshots_metadata(&[snapshot]).unwrap(),
+    );
+    if source == "changed" {
+        std::fs::write(root.join(&row.path), b"modified source").unwrap();
+    }
+    let saved_messages = vec![
+        document,
+        message(&agent_id, "a-doc", MessageRole::Assistant, "ok"),
+        message(&agent_id, "u-latest", MessageRole::User, "next"),
+    ];
+    {
+        let mut guard = coordinator.state.write().await;
+        let runtime = guard.agents.get_mut(&agent_id).unwrap();
+        runtime.retain_messages(|_| false);
+        runtime.apply_run_delta(&RuntimeRunDelta {
+            messages: saved_messages.clone(),
+            events: Vec::new(),
+            event_total: 0,
+            token_usage: TokenUsage::default(),
+            step_count: 0,
+            last_task: None,
+            status: AgentStatus::Idle,
+        });
+    }
+    if automatic {
+        let input = book_one();
+        let (build, live, run) = run_parts(&coordinator, &agent_id, &input).await;
+        let mut context = build.context;
+        assert!(!context.dropped.is_empty());
+        coordinator
+            .compact_before_run(
+                &live,
+                &run,
+                RunCompaction {
+                    room_id: "chat:long",
+                    input: &input,
+                    config: build.runtime.config(),
+                    files: &Arc::new(AcceptedAgentFiles::empty(Availability::Available)),
+                    tools: &build.tools,
+                    adapter: &build.adapter,
+                    deadline: None,
+                },
+                &mut context,
+            )
+            .await;
+    } else {
+        let dropped = crate::sessions::compaction::manual_compaction_input(&saved_messages, None);
+        coordinator
+            .compact_session(&agent_id, "chat:long", &dropped)
+            .await
+            .unwrap();
+    }
+    let requests = model.secondary_requests();
+    assert_eq!(requests.len(), 1);
+    let sent = &requests[0].messages[0].content.text;
+    assert_eq!(
+        sent.contains("M54 selected record: cobalt harbour 7319."),
+        source == "valid",
+        "{automatic} {source}: {sent}"
+    );
+    if source == "valid" {
+        assert!(sent.contains("word/document.xml#paragraph=1"));
+        assert!(sent.contains("message truncated for compaction"));
+    }
+    assert!(!sent.contains("HEADER_OMITTED_4096"));
+    assert_eq!(
+        coordinator
+            .state
+            .read()
+            .await
+            .agents
+            .get(&agent_id)
+            .unwrap()
+            .messages(),
+        saved_messages.as_slice()
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn manual_and_automatic_compaction_receive_verified_document_only_facts() {
+    for automatic in [false, true] {
+        document_compaction_case(automatic, "valid").await;
+    }
+}
+
+#[tokio::test]
+async fn compaction_never_replays_foreign_or_changed_document_sources() {
+    for automatic in [false, true] {
+        for source in ["foreign", "changed"] {
+            document_compaction_case(automatic, source).await;
+        }
+    }
+}

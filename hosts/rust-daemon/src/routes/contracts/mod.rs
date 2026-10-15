@@ -19,6 +19,8 @@ mod runs;
 mod schedules;
 mod sessions;
 mod shared;
+#[cfg(test)]
+pub(crate) use shared::ContentResponse;
 mod skills;
 mod status;
 mod swarms;

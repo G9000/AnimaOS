@@ -7,6 +7,7 @@ authors.workspace = true
 
 [dependencies]
 anima-core = { path = "../../packages/core-rust/crates/anima-core" }
+anima-document-content = { path = "../../packages/core-rust/crates/anima-document-content" }
 anima-model-adapters = { path = "../../packages/core-rust/crates/anima-model-adapters" }
 anima-memory = { path = "../../packages/core-rust/crates/anima-memory", features = ["locomo-eval"] }
 anima-schedule = { path = "../../packages/core-rust/crates/anima-schedule" }
@@ -48,9 +49,14 @@ zeroize = "1.8"
 
 [target.'cfg(windows)'.dependencies]
 rfd = "0.17.2"
+win-custody = "=0.1.1"
 
 [dev-dependencies]
 http-body-util = "0.1"
+
+[[example]]
+name = "document_worker_peer"
+path = "tests/fixtures/document_worker_peer.rs"
 
 [[example]]
 name = "mcp_stdio_peer"

@@ -13,6 +13,221 @@ use std::{
 
 const GIF: &[u8] = b"GIF89a\x01\x00\x01\x00\x00\x00\x00\x2c\x3b";
 
+fn document_record(temp: &Temp, id: &str) -> AttachmentRecord {
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/documents/m54-selected.docx"
+    ));
+    let name = format!("{id}.docx");
+    let saved = save_upload(&temp.0, "2026-10-16", &name, bytes).unwrap();
+    AttachmentRecord {
+        id: id.into(),
+        agent_id: "agent".into(),
+        session_id: "chat:session".into(),
+        name,
+        mime: crate::attachments::documents::DOCX_MIME.into(),
+        size: bytes.len() as u64,
+        kind: AttachmentKind::Document,
+        path: saved.path,
+        created_at_ms: 0,
+        workspace_root: saved.workspace_root,
+        sha256: saved.sha256,
+    }
+}
+
+fn document_content(rows: &[AttachmentRecord]) -> Content {
+    use anima_core::document_content::*;
+    let mut content =
+        crate::agent_runs::attachments::attachment_content("original owner bytes", rows, None);
+    let snapshots = rows
+        .iter()
+        .map(|row| DocumentSnapshot {
+            attachment_id: row.id.clone(),
+            source_sha256: row.sha256.clone(),
+            extraction: ExtractedDocumentText {
+                version: 1,
+                status: DocumentExtractionStatus::Ready,
+                blocks: vec![DocumentBlock {
+                    paragraph: 1,
+                    text: format!("derived {}", row.id),
+                }],
+                omissions: vec![DocumentOmission::MainBodyOnly],
+            },
+        })
+        .collect::<Vec<_>>();
+    content.metadata.as_mut().unwrap().insert(
+        DOCUMENT_EXTRACTS_METADATA_KEY.into(),
+        document_snapshots_metadata(&snapshots).unwrap(),
+    );
+    content
+}
+
+#[tokio::test]
+async fn document_snapshots_hydrate_newest_four_only_and_preserve_saved_history() {
+    let temp = Temp::new();
+    let rows = (0..6)
+        .map(|i| document_record(&temp, &format!("doc{i}")))
+        .collect::<Vec<_>>();
+    let adapter = fixture(&rows, Some(temp.0.clone())).await;
+    let mut input = request("agent", "chat:session", document_content(&rows[..2]));
+    for pair in rows[2..].chunks(2) {
+        let mut message = input.messages[0].clone();
+        message.content = document_content(pair);
+        input.messages.push(message);
+    }
+    let original = input.clone();
+    let read_ids = Arc::new(Mutex::new(Vec::new()));
+    let captured = read_ids.clone();
+    let prepared = adapter
+        .prepare_request_using_reader(
+            &config("unknown"),
+            &input,
+            Arc::new(move |root, row| {
+                captured.lock().unwrap().push(row.id.clone());
+                read_attachment_bytes(root, row)
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(*read_ids.lock().unwrap(), ["doc4", "doc5", "doc2", "doc3"]);
+    assert!(!prepared.messages[0].content.text.contains("derived"));
+    assert!(prepared.messages[2].content.text.contains("derived doc4"));
+    assert!(prepared.messages[2]
+        .content
+        .text
+        .contains("word/document.xml#paragraph=1"));
+    assert_eq!(input, original);
+    for message in &prepared.messages {
+        for key in [
+            ATTACHMENT_RECORDS_KEY,
+            ATTACHMENT_INPUT_TEXT_KEY,
+            anima_core::document_content::DOCUMENT_EXTRACTS_METADATA_KEY,
+        ] {
+            assert!(!message
+                .content
+                .metadata
+                .as_ref()
+                .is_some_and(|m| m.contains_key(key)));
+        }
+    }
+}
+
+#[tokio::test]
+async fn document_snapshots_foreign_role_bad_metadata_and_changed_source_fail_closed() {
+    let temp = Temp::new();
+    let row = document_record(&temp, "doc");
+    let adapter = fixture(&[row.clone()], Some(temp.0.clone())).await;
+    for scenario in ["assistant", "foreign", "missing", "malformed", "hash"] {
+        let mut input = request("agent", "chat:session", document_content(&[row.clone()]));
+        match scenario {
+            "assistant" => input.messages[0].role = MessageRole::Assistant,
+            "foreign" => input.messages[0].room_id = "chat:foreign".into(),
+            "missing" => {
+                input.messages[0].content.metadata = None;
+            }
+            "malformed" => {
+                input.messages[0].content.metadata.as_mut().unwrap().insert(
+                    anima_core::document_content::DOCUMENT_EXTRACTS_METADATA_KEY.into(),
+                    DataValue::String("forged".into()),
+                );
+            }
+            "hash" => {
+                use anima_core::document_content::*;
+                let mut snapshots = parse_document_snapshots(&input.messages[0].content).unwrap();
+                snapshots[0].source_sha256 = "0".repeat(64);
+                input.messages[0].content.metadata.as_mut().unwrap().insert(
+                    DOCUMENT_EXTRACTS_METADATA_KEY.into(),
+                    document_snapshots_metadata(&snapshots).unwrap(),
+                );
+            }
+            _ => unreachable!(),
+        }
+        let prepared = adapter
+            .prepare_request_using_reader(
+                &config("unknown"),
+                &input,
+                Arc::new(|_, _| panic!("ineligible document must not be read")),
+            )
+            .await
+            .unwrap();
+        assert!(
+            !prepared.messages[0].content.text.contains("derived"),
+            "{scenario}"
+        );
+    }
+    std::fs::write(temp.0.join(&row.path), b"changed").unwrap();
+    let prepared = adapter
+        .prepare_request(
+            &config("unknown"),
+            &request("agent", "chat:session", document_content(&[row])),
+        )
+        .await
+        .unwrap();
+    assert!(!prepared.messages[0].content.text.contains("derived"));
+}
+
+#[tokio::test]
+async fn document_snapshot_reloaded_binding_reaches_generate_and_stream_without_reparse() {
+    use anima_core::{ModelStreamFrame, ModelStreamSink};
+    struct StreamingCapture(Capture);
+    #[async_trait]
+    impl ModelAdapter for StreamingCapture {
+        fn provider(&self) -> &str {
+            "test"
+        }
+        async fn generate(
+            &self,
+            config: &AgentConfig,
+            input: &ModelGenerateRequest,
+        ) -> Result<ModelGenerateResponse, String> {
+            self.0.generate(config, input).await
+        }
+        async fn stream(
+            &self,
+            config: &AgentConfig,
+            input: &ModelGenerateRequest,
+            sink: &dyn ModelStreamSink,
+        ) -> Result<(), String> {
+            sink.emit(ModelStreamFrame::Final(
+                self.0.generate(config, input).await?,
+            ))
+            .await
+        }
+    }
+    struct Sink;
+    #[async_trait]
+    impl ModelStreamSink for Sink {
+        async fn emit(&self, _frame: ModelStreamFrame) -> Result<(), String> {
+            Ok(())
+        }
+    }
+    let temp = Temp::new();
+    let row = document_record(&temp, "doc");
+    let store = Arc::new(MemoryHistoryStore::new());
+    store.upsert_attachments(&[row.clone()]).await.unwrap();
+    let inner = Arc::new(StreamingCapture(Capture::default()));
+    let adapter = AttachmentModelAdapter::new(
+        inner.clone(),
+        store,
+        Some(temp.0.clone()),
+        "agent".into(),
+        "chat:session".into(),
+    );
+    let saved = document_content(&[row]);
+    let reloaded: Content = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    let input = request("agent", "chat:session", reloaded.clone());
+    adapter.generate(&config("unknown"), &input).await.unwrap();
+    adapter
+        .stream(&config("unknown"), &input, &Sink)
+        .await
+        .unwrap();
+    let requests = inner.0 .0.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0], requests[1]);
+    assert!(requests[0].messages[0].content.text.contains("derived doc"));
+    assert_eq!(input.messages[0].content, reloaded);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn attachment_model_cancellation_finishes_before_a_blocked_reader_is_released() {
     let temp = Temp::new();

@@ -5,8 +5,27 @@ use anima_daemon::{serve, DaemonConfig, PersistenceMode};
 use tokio::net::TcpListener;
 use tracing::info;
 
-#[tokio::main]
-async fn main() -> io::Result<()> {
+fn main() -> io::Result<()> {
+    let mut arguments = std::env::args_os().skip(1);
+    if arguments
+        .next()
+        .is_some_and(|argument| argument == "--document-worker-v1")
+    {
+        if arguments.next().is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "document worker accepts no additional arguments",
+            ));
+        }
+        return anima_daemon::document_worker_entry();
+    }
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(daemon_main())
+}
+
+async fn daemon_main() -> io::Result<()> {
     anima_daemon::init_tracing();
 
     let host = std::env::var("ANIMAOS_RS_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());

@@ -84,10 +84,7 @@ pub(crate) fn read_attachment_bytes(
     if workspace.canonical_root.to_str() != Some(record.workspace_root.as_str()) {
         return Err(AttachmentError::WorkspaceChanged);
     }
-    let limit = record.kind.max_bytes();
-    if record.size > limit as u64 {
-        return Err(AttachmentError::TooLarge);
-    }
+    let limit = attachment_read_limit(record)?;
     let bytes = workspace
         .read_bounded(&record.path, limit, record.size)
         .map_err(io_error)?;
@@ -102,6 +99,16 @@ pub(crate) fn read_attachment_bytes(
         return Err(AttachmentError::Changed);
     }
     Ok(bytes)
+}
+
+fn attachment_read_limit(record: &AttachmentRecord) -> Result<usize, AttachmentError> {
+    let maximum = record.kind.max_bytes();
+    if record.size > maximum as u64 {
+        return Err(AttachmentError::TooLarge);
+    }
+    // read_bounded probes at most limit + 1 bytes. Even a file that grows
+    // after its metadata check cannot spend the family's larger allowance.
+    Ok(maximum.min(record.size as usize))
 }
 
 #[cfg(test)]
@@ -220,6 +227,29 @@ mod tests {
         assert_eq!(
             read_attachment_bytes(&temp.0, &row).unwrap_err(),
             AttachmentError::Unavailable
+        );
+    }
+
+    #[test]
+    fn document_physical_read_ceiling_is_expected_size_plus_one_sentinel() {
+        let temp = Temp::new();
+        let saved = save_upload(&temp.0, "2026-10-16", "notes.txt", b"small").unwrap();
+        let mut row = record(&temp.0, saved, b"small");
+        row.kind = AttachmentKind::Document;
+        row.size = 2 * 1024 * 1024;
+        assert_eq!(
+            attachment_read_limit(&row).unwrap() + 1,
+            2 * 1024 * 1024 + 1
+        );
+        row.size = MAX_DOCUMENT_BYTES as u64 + 1;
+        assert_eq!(attachment_read_limit(&row), Err(AttachmentError::TooLarge));
+        row.kind = AttachmentKind::Text;
+        row.size = 5;
+        assert_eq!(attachment_read_limit(&row), Ok(5));
+        std::fs::write(temp.0.join(&row.path), b"grown beyond expected").unwrap();
+        assert_eq!(
+            read_attachment_bytes(&temp.0, &row),
+            Err(AttachmentError::TooLarge)
         );
     }
 

@@ -91,6 +91,7 @@ pub(crate) fn attachment_content(
     let mut metadata = existing_metadata.unwrap_or_default();
     metadata.remove(ATTACHMENT_RECORDS_KEY);
     metadata.remove(ATTACHMENT_INPUT_TEXT_KEY);
+    metadata.remove(anima_core::document_content::DOCUMENT_EXTRACTS_METADATA_KEY);
     if records.is_empty() {
         return Content {
             text: text.into(),
@@ -117,7 +118,7 @@ pub(crate) fn attachment_content(
                 row.name, row.path
             ),
             AttachmentKind::Document => format!(
-                "Attached document: {} ({}). Saved; its contents cannot be read automatically yet.",
+                "Attached document: {} ({}). Original saved; any admitted text excerpt covers main-body text only.",
                 row.name, row.path
             ),
             AttachmentKind::Image => format!("Attached image: {} ({}).", row.name, row.path),

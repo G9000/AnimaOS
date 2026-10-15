@@ -152,7 +152,7 @@ where
                 .map_or(1.0, |p| f64::from(p) / 1000.0);
             let estimator = TokenEstimator::new(factor.max(1.0));
             let available = crate::sessions::context::ContextBudget::for_config(config)
-                .history_tokens(estimator.text_tokens(&input.text))
+                .history_tokens(estimator.content_tokens(input))
                 .saturating_sub(
                     guard
                         .sessions

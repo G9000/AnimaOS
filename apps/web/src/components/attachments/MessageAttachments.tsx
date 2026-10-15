@@ -9,6 +9,91 @@ import {
 import { revealInvisible } from '../../lib/skills';
 import { formatAttachmentSize } from './AttachmentChips';
 
+const EXTRACTION_STATUS_LABELS = {
+  ready: 'Main body text extracted',
+  partial: 'Some main body text extracted',
+  unsupported: 'Text extraction unsupported',
+  encrypted: 'Encrypted document',
+  malformed: 'Document could not be read',
+  too_large: 'Document too large for text extraction',
+  no_text: 'No main body text found',
+  unavailable: 'Text extraction unavailable',
+  cancelled: 'Text extraction cancelled',
+  context_omitted: 'Document text not included',
+} as const;
+
+const EXTRACTION_OMISSION_LABELS = {
+  main_body_only: 'Only main body text was read',
+  paragraph_limit: 'Paragraph limit reached',
+  text_limit: 'Text limit reached',
+  context_limit: 'Not all text fit in this message context',
+  selection_limit: 'Additional documents were not included',
+} as const;
+
+const MAX_EXTRACTION_PARAGRAPHS = 2000;
+
+export function describeDocumentExtraction(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const extraction = value as {
+    version?: unknown;
+    status?: unknown;
+    paragraphCount?: unknown;
+    omissions?: unknown;
+  };
+  if (
+    extraction.version !== 1 ||
+    typeof extraction.status !== 'string' ||
+    !Object.prototype.hasOwnProperty.call(
+      EXTRACTION_STATUS_LABELS,
+      extraction.status,
+    ) ||
+    !Number.isInteger(extraction.paragraphCount) ||
+    !Array.isArray(extraction.omissions) ||
+    extraction.omissions.length > 5 ||
+    new Set(extraction.omissions).size !== extraction.omissions.length ||
+    !extraction.omissions.every(
+      (omission) =>
+        typeof omission === 'string' &&
+        Object.prototype.hasOwnProperty.call(
+          EXTRACTION_OMISSION_LABELS,
+          omission,
+        ),
+    )
+  ) {
+    return null;
+  }
+
+  const paragraphCount = extraction.paragraphCount as number;
+  const hasExtractedText =
+    extraction.status === 'ready' || extraction.status === 'partial';
+  if (
+    (hasExtractedText &&
+      (paragraphCount < 1 || paragraphCount > MAX_EXTRACTION_PARAGRAPHS)) ||
+    (!hasExtractedText && paragraphCount !== 0)
+  ) {
+    return null;
+  }
+
+  const status =
+    EXTRACTION_STATUS_LABELS[
+      extraction.status as keyof typeof EXTRACTION_STATUS_LABELS
+    ];
+  const details: string[] = [status];
+  if (hasExtractedText) {
+    details.push(
+      `${paragraphCount} ${paragraphCount === 1 ? 'paragraph' : 'paragraphs'}`,
+    );
+  }
+  for (const omission of extraction.omissions as string[]) {
+    details.push(
+      EXTRACTION_OMISSION_LABELS[
+        omission as keyof typeof EXTRACTION_OMISSION_LABELS
+      ],
+    );
+  }
+  return details.join(' · ');
+}
+
 function AttachmentFile({
   agentId,
   attachment,
@@ -20,6 +105,9 @@ function AttachmentFile({
   const image =
     attachment.type === 'image' &&
     Boolean(attachment.mime && IMAGE_ATTACHMENT_MIMES.has(attachment.mime));
+  const extractionDescription = describeDocumentExtraction(
+    attachment.kind === 'document' ? attachment.extraction : undefined,
+  );
   const preview = useAttachmentPreview(
     agentId,
     attachment.id,
@@ -106,6 +194,7 @@ function AttachmentFile({
           {attachment.size !== undefined
             ? ` · ${formatAttachmentSize(attachment.size)}`
             : ''}
+          {extractionDescription ? ` · ${extractionDescription}` : ''}
         </small>
       </span>
       {attachment.id && (

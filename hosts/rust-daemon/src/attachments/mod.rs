@@ -1,3 +1,4 @@
+pub(crate) mod documents;
 pub(crate) mod files;
 pub(crate) mod metadata;
 pub(crate) mod model;

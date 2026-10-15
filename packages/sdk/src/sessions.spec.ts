@@ -34,14 +34,20 @@ describe('sessions client', () => {
       name: 'legacy.txt',
     };
     const uploaded: SessionMessageAttachment = {
-      type: 'image',
-      name: 'photo.png',
+      type: 'file',
+      name: 'selected.docx',
       id: 'att_1',
-      mime: 'image/png',
-      size: 3,
-      kind: 'image',
-      path: 'attachments/photo.png',
+      mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      size: 120,
+      kind: 'document',
+      path: 'attachments/selected.docx',
       createdAtMs: 1,
+      extraction: {
+        version: 1,
+        status: 'partial',
+        paragraphCount: 2,
+        omissions: ['main_body_only', 'context_limit'],
+      },
     };
     const { sessions } = transport(() =>
       Response.json({
@@ -61,6 +67,9 @@ describe('sessions client', () => {
     const page = await sessions.messages('agent', 'session');
     expect(page.messages[0].attachments).toEqual([legacy, uploaded]);
     expect(page.messages[0].attachments[0]).not.toHaveProperty('id');
+    expect(page.messages[0].attachments[1].extraction).toEqual(
+      uploaded.extraction,
+    );
   });
   it('lists sessions with encoded filters', async () => {
     const page = { sessions: [session], nextCursor: 'next' };

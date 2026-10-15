@@ -132,6 +132,7 @@ impl TaskRequest {
                         key != crate::skills::SKILL_METADATA_KEY
                             && key != crate::attachments::ATTACHMENT_RECORDS_KEY
                             && key != crate::attachments::ATTACHMENT_INPUT_TEXT_KEY
+                            && key != anima_core::document_content::DOCUMENT_EXTRACTS_METADATA_KEY
                     })
                     .map(|(key, value)| {
                         Ok::<(String, DataValue), &'static str>((key, json_to_data_value(value)?))
@@ -206,6 +207,9 @@ impl From<&Content> for ContentResponse {
             metadata: value.metadata.as_ref().map(|metadata| {
                 metadata
                     .iter()
+                    .filter(|(key, _)| {
+                        key.as_str() != anima_core::document_content::DOCUMENT_EXTRACTS_METADATA_KEY
+                    })
                     .map(|(key, value)| (key.clone(), data_value_to_json(value)))
                     .collect()
             }),

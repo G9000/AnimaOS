@@ -116,8 +116,10 @@ backend. A configured remote backend can make embedding requests during this
 rebuild. This changes the derived cache, not your saved facts or citations.
 
 Use Files to inspect the chosen workspace. Attach text or an image when useful;
-vision requires a compatible model. PDF/Office attachments can be stored and
-retrieved, but their contents are not parsed by this feature set.
+vision requires a compatible model. Selected DOCX attachments in your own Windows
+web chat have bounded main-body text extraction, with a visible outcome and the
+original download retained. See [document coverage and limits](documents.md).
+PDF, OCR and other Office formats remain storage/download only.
 
 Review tool permission requests in Approvals. Review saved mail drafts and
 Calendar changes in Connectors before sending or applying them. Check the exact

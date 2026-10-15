@@ -227,6 +227,52 @@ pub(crate) struct SessionAttachmentResponse {
     pub(crate) path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) created_at_ms: Option<u64>,
+    /// Evidence for this selected user message only; no raw text or source hash.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) extraction: Option<DocumentExtractionResponse>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DocumentExtractionResponse {
+    pub(crate) version: u32,
+    /// Closed values from the core contract, kept HTTP-independent there.
+    pub(crate) status: String,
+    pub(crate) paragraph_count: usize,
+    pub(crate) omissions: Vec<String>,
+}
+
+fn extraction_response(
+    message: &anima_core::Message,
+    selected: Option<&crate::attachments::AttachmentMetadata>,
+) -> Option<DocumentExtractionResponse> {
+    if message.role != MessageRole::User {
+        return None;
+    }
+    let selected =
+        selected.filter(|row| row.kind == crate::attachments::AttachmentKind::Document)?;
+    let snapshot = anima_core::document_content::parse_document_snapshots(&message.content)
+        .ok()?
+        .into_iter()
+        .find(|snapshot| snapshot.attachment_id == selected.id)?;
+    let extraction = snapshot.extraction;
+    let string = |value| match serde_json::to_value(value).ok()? {
+        Value::String(s) => Some(s),
+        _ => None,
+    };
+    Some(DocumentExtractionResponse {
+        version: extraction.version,
+        status: string(extraction.status)?,
+        paragraph_count: extraction.blocks.len(),
+        omissions: extraction
+            .omissions
+            .into_iter()
+            .map(|v| match serde_json::to_value(v) {
+                Ok(Value::String(s)) => s,
+                _ => String::new(),
+            })
+            .collect(),
+    })
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -285,6 +331,7 @@ impl From<&PageMessage> for SessionMessageResponse {
                         kind: metadata.as_ref().map(|row| row.kind.as_str().into()),
                         path: metadata.as_ref().map(|row| row.path.clone()),
                         created_at_ms: metadata.as_ref().map(|row| row.created_at_ms),
+                        extraction: extraction_response(message, metadata.as_ref()),
                     }
                 })
                 .collect(),
