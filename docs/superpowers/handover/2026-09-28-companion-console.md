@@ -1,3 +1,53 @@
+# Handover: selected document understanding (M0–M54)
+
+## Start here (2026-10-16): M53 merged; M54 bound DOCX first slice
+
+Continue `g9000/companion-document-understanding-m54` from verified
+[M53/PR59](https://github.com/G9000/animaOS-SWARM/pull/59) main
+`c2f25b241049b33ac95beefcc56fea140b047bbd`. M53 source
+`526b81b1e67c198fc89526c768f8261b6add0343` matches tested tree
+`9dcde91a9924285208d4141d07ca6de293d3ff51`; ten owned/four source/61 boundary
+hashes and nx.json were preserved. Focused 110 tests and full web 1,361 tests in
+115 files/typecheck/build/format/docs passed; clean review, no new model/service.
+The other chat received the context-only M53 merge update.
+
+The [M54 bound plan](../plans/2026-10-16-companion-document-understanding-m54.md)
+reuses the pinned public Hermes DOCX paragraph/run extraction in a reusable Rust
+parser. Only selected own DOCX main-body text enters bounded/accounted user data;
+originals remain downloadable. Root verified published rawzip0.5.2 and
+win-custody0.1.1 checksums/APIs/licenses, existing quick-xml0.41/flate2 1.1.9 and
+process-wrap10.0.1, with current compiler1.93. Hard Job memory/process limits and
+query-before-bytes, owned retirement and a 10-second parent wall deadline are
+bound. The unsupported draft 5-second kernel CPU quota is withdrawn; no kernel
+CPU/security-sandbox claim. PDF/OCR/other Office/non-Windows remain queued.
+
+First publish this plan/master/handover, then author a meaningful tests-only
+real-handler/recording-adapter missing-excerpt RED without unimplemented imports.
+Root records it before dependency/source implementation. Freeze core contracts,
+then disjoint parser/worker/host lanes; SDK/web follows the optional safe native
+projection. One native batch review, final SDK/web review, one fix wave and fresh
+required gates follow. No actual provider/model, metadata refresh, ordinary daemon,
+account, DB server, container or deployment release. Exact current resume:
+`.superpowers/sdd/2026-10-16-companion-document-understanding-m54/progress.md`.
+
+M47/M52 actual cases and releases remain immutable/consumed. M52 useful repair/
+oracle/reload passed but helper wording and completed verification todo leave
+strict quality PARTIAL. M53 only exposes an accepted tool-limit notice; it does
+not repair those semantics. All 24 M52 recorded owned identities retired and
+port18752 is free. Retain evidence and notices, Anima branding and no rescue/replay.
+
+Cheap Codex delegation, dependencies with a reason, per-command unsigned commits,
+reviewed/gated merge-and-continue and context-only other-chat updates remain
+authorized. Root alone executes/fmts/Git/processes/models. CARGO_INCREMENTAL=0,
+Rust jobs1/threads2, resolved Nx targets and cleared real-service environment.
+Explicit staging only; never nx.json/anima.yaml/private evidence. Preserve nx
+SHA256 `3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`.
+No stash/reset/restore/path checkout/worktree, ordinary profile/credential copy or
+readout, real connector accounts, DB servers, containers, Docker55432 or public
+deployment. Historical resumes below are superseded here.
+
+## Historical M53 outcome handover
+
 # Handover: owner-visible completion boundary (M0–M53)
 
 ## Start here (2026-10-16): M53 gated; settle publication then document understanding
