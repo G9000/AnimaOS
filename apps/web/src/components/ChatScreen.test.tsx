@@ -1098,6 +1098,61 @@ describe('Composer commands and live replies', () => {
     };
   }
 
+  it('shows Record audio for an attach-capable composer without requesting microphone access', () => {
+    const getUserMedia = vi.fn();
+    vi.stubGlobal('navigator', {
+      ...navigator,
+      mediaDevices: { getUserMedia },
+    });
+    try {
+      render(
+        <Composer
+          {...composerProps({
+            attachments: { items: [], onAdd: vi.fn(), onRemove: vi.fn() },
+          })}
+        />,
+      );
+
+      expect(
+        screen.getByRole('button', { name: 'Record audio' }),
+      ).toBeVisible();
+      expect(getUserMedia).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('shows an inert Record control without a known conversation and enables it only in an active scoped composer', () => {
+    const onAdd = vi.fn();
+    const onSend = vi.fn();
+    const attachments = { items: [], onAdd, onRemove: vi.fn() };
+    const props = composerProps({ attachments, onSend });
+    const view = render(<Composer {...props} />);
+    expect(screen.getByRole('button', { name: 'Record audio' })).toBeDisabled();
+
+    view.rerender(<Composer {...props} conversationKey="conversation-a" />);
+    expect(screen.getByRole('button', { name: 'Record audio' })).toBeEnabled();
+
+    view.rerender(
+      <Composer {...props} conversationKey="conversation-a" offline />,
+    );
+    expect(screen.getByRole('button', { name: 'Record audio' })).toBeDisabled();
+    view.rerender(
+      <Composer {...props} conversationKey="conversation-a" sending />,
+    );
+    expect(screen.getByRole('button', { name: 'Record audio' })).toBeDisabled();
+    view.rerender(
+      <Composer {...props} conversationKey="conversation-a" disabled />,
+    );
+    expect(screen.getByRole('button', { name: 'Record audio' })).toBeDisabled();
+    view.rerender(
+      <Composer {...props} conversationKey="conversation-a" voiceDisabled />,
+    );
+    expect(screen.getByRole('button', { name: 'Record audio' })).toBeDisabled();
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it('offers the matching commands and runs one with Enter', () => {
     const props = composerProps({ draft: '/co' });
     render(<Composer {...props} />);

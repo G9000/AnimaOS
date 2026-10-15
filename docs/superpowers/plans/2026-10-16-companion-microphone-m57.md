@@ -6,14 +6,14 @@ Bound lean plan after verified M56/PR62 merge. Root rulings below supersede held
 
 In a chat composer, the owner can explicitly start microphone capture, stop it, and get a bounded PCM16 WAV. That WAV enters the existing upload flow as a selected, ready audio attachment. The owner can then use the existing separately named OpenAI API transcription action, inspect/edit the returned preview, and separately choose Use transcript or Discard. Ordinary send stays separate.
 
-This is one small browser capture step on top of M56's selected-file path. It does not replace browser dictation, silently invoke transcription, send speech, or add a second transcription route. PAR-07 remains open for playback, connector voice attachments, other providers, and real-device acceptance.
+This is one small browser capture step on top of M56's selected-file path. It does not replace browser dictation, silently invoke transcription, send speech, or add a second transcription route. PAR-07 remains open for native speech output, connector voice attachments, other providers, and real-device acceptance.
 
 ## Repository fit and reuse decision
 
-- The roadmap leaves PAR-07 planned and explicitly distinguishes browser speech convenience from daemon-native transcription. Its acceptance requires synthetic/mock evidence before any separately consented device case.
+- The M56 baseline roadmap leaves PAR-07 partial and explicitly distinguishes browser speech convenience from daemon-native transcription. Its acceptance requires synthetic/mock evidence before any separately consented device case.
 - Current `NativeTranscription.tsx` only offers a named action for a selected ready `audio` attachment. It uses the session scope, fences late results, warns about transfer/charges, and keeps text in an editable preview until Use. `attachments.ts` already uploads `File` values and classifies `.wav`; the host validates actual format and caps audio at 4 MiB/120 seconds.
 - Existing `useBrowserDictation` uses browser speech recognition to produce text. It is not an audio capture/encoding implementation and must remain its own convenience.
-- No current `MediaRecorder`, `AudioWorklet`, or `getUserMedia` capture implementation was found under `apps/web/src`.
+- At the M56 baseline, no `MediaRecorder`, `AudioWorklet`, or `getUserMedia` capture implementation was found under `apps/web/src`.
 - Reuse existing composer attachment lifecycle, upload progress/errors/removal, and M56 selection/transcription/review. Do not copy Hermes's Python tool or add a browser speech-recognition substitute. No new dependency is proposed.
 
 ## Candidate capture approach
@@ -371,3 +371,44 @@ nxSHA3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90.
 No stash/reset/restore/path checkout/worktree, ordinary profiles/credentials,
 real accounts/DB servers/containers/Docker55432/public deployment. M47/M52 actual
 cases/releases immutable, no replay/rescue/regrade; M52 strict grade PARTIAL.
+
+## Gated outcome (2026-10-16)
+
+The chat composer can now create one local 16 kHz mono PCM16 WAV, bounded to
+120 seconds and 4 MiB. Record requests permission; Stop yields metadata and a
+local candidate; Add recording hands one File to the existing attachment hook.
+It does not automatically upload, select audio, transcribe, insert text or send.
+After Add, the existing M56 selected-WAV/API/review/Use/Send actions stay separate.
+Without a known conversation the Record control is visible and disabled.
+
+One page-wide retained owner spans ignored permission, module/resume and context
+close promises. Cancel/unmount stops late-granted tracks; unknown cleanup keeps
+the lease. Ready metadata waits for known cleanup to settle. One fixed worklet
+buffer and one terminal transfer bound retained PCM; a valid sample cap finishes
+the candidate. Output is silent, with no monitoring or persisted local audio.
+Browser scheduling and shared tracks prevent a physical-microphone-off promise.
+
+The independent missing-control RED preceded source. One capture/worklet review
+and one final UI/SDK review found normal inactive input was incorrectly rejected
+and UI cancellation waited for passive effects. The combined run also caught the
+optional conversation-key visibility gap. Seven compiled regression failures
+preceded the single fix wave; all now pass. The worklet accepts inactive blocks
+without writing samples, and UI layout cleanup fences committed boundaries and
+late events, including disabled/re-enabled scope and StrictMode.
+
+Fresh local gates: **1,458 web tests / 119 files**, **172 SDK tests / 3
+intentional service skips**, SDK/web typechecks/builds, owned formatting/diff and
+documentation scans. The real build emits one standalone same-origin worklet
+asset, referenced by the app bundle. Evaluation under fake worklet globals yields
+the exact independent M56 **8,044-byte / 4,000-frame** WAV fixture with one terminal
+transfer. Native source, SDK contracts, dependency manifests and fixture bytes
+remain unchanged from M56; no redundant Cargo run was required.
+
+Acceptance is synthetic: zero actual microphone/provider/model/account/service,
+database server, container or deployment activation. Hardware/browser capture
+compatibility, noise/speech quality, native speech output, connectors/local and
+other providers remain open. M52 strict quality stays PARTIAL and consumed cases
+are unchanged. M56's attributed Hermes STT path is reused; no Python microphone
+implementation or personal profile is imported. No new dependency.
+
+See the [voice guide](../../companion/voice.md).

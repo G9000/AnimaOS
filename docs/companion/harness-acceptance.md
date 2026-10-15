@@ -1,5 +1,47 @@
 # Native harness acceptance
 
+## M57 microphone capture (2026-10-16)
+
+The chat composer can now create one local 16 kHz mono PCM16 WAV, bounded to
+120 seconds and 4 MiB. Record requests permission; Stop yields metadata and a
+local candidate; Add recording hands one File to the existing attachment hook.
+It does not automatically upload, select audio, transcribe, insert text or send.
+After Add, the existing M56 selected-WAV/API/review/Use/Send actions stay separate.
+Without a known conversation the Record control is visible and disabled.
+
+One page-wide retained owner spans ignored permission, module/resume and context
+close promises. Cancel/unmount stops late-granted tracks; unknown cleanup keeps
+the lease. Ready metadata waits for known cleanup to settle. One fixed worklet
+buffer and one terminal transfer bound retained PCM; a valid sample cap finishes
+the candidate. Output is silent, with no monitoring or persisted local audio.
+Browser scheduling and shared tracks prevent a physical-microphone-off promise.
+
+The independent missing-control RED preceded source. One capture/worklet review
+and one final UI/SDK review found normal inactive input was incorrectly rejected
+and UI cancellation waited for passive effects. The combined run also caught the
+optional conversation-key visibility gap. Seven compiled regression failures
+preceded the single fix wave; all now pass. The worklet accepts inactive blocks
+without writing samples, and UI layout cleanup fences committed boundaries and
+late events, including disabled/re-enabled scope and StrictMode.
+
+Fresh local gates: **1,458 web tests / 119 files**, **172 SDK tests / 3
+intentional service skips**, SDK/web typechecks/builds, owned formatting/diff and
+documentation scans. The real build emits one standalone same-origin worklet
+asset, referenced by the app bundle. Evaluation under fake worklet globals yields
+the exact independent M56 **8,044-byte / 4,000-frame** WAV fixture with one terminal
+transfer. Native source, SDK contracts, dependency manifests and fixture bytes
+remain unchanged from M56; no redundant Cargo run was required.
+
+Acceptance is synthetic: zero actual microphone/provider/model/account/service,
+database server, container or deployment activation. Hardware/browser capture
+compatibility, noise/speech quality, native speech output, connectors/local and
+other providers remain open. M52 strict quality stays PARTIAL and consumed cases
+are unchanged. M56's attributed Hermes STT path is reused; no Python microphone
+implementation or personal profile is imported. No new dependency.
+
+See [voice usage](voice.md) and the
+[M57 plan](../superpowers/plans/2026-10-16-companion-microphone-m57.md).
+
 ## M56 selected audio draft (2026-10-16)
 
 Selected PCM16 WAV attachments now feed one explicitly consented OpenAI API
