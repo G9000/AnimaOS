@@ -1,3 +1,40 @@
+# Handover: persisted schedule recovery (M0–M59)
+
+## Start here (2026-10-16): M59 gated; settle publication then continue parity
+
+Continue g9000/companion-schedule-recovery-m59 from M58/PR64 main
+119ab161902ca840eb57003c6545d1cb21bfe6ce. Bound plan c6d0ab7b1861517f6abcde3331b2d015326b8e25
+was pushed before test source. One finite fresh-state JSON claim case and native
+batch review settled; local gates pass. Finish explicit-path unsigned commit/push/
+PR, attach and standing authorized merge, exact tree/hash proof. Advance local
+main by nonforced fetch before switch to avoid EOL rewrites; preserve nx.json.
+
+Fresh Rust/core **2,856/26 ignores/45 suites**, lint/build. One
+test-only source path; all30 M58 source hashes unchanged. M58 SDK183/three service
+skips, web1468/120files/type/build and actual200-operation API inventory remain
+revision-specific evidence for identical inputs; no redundant browser test claim.
+Docs/format/hash publication checks finish the milestone. No dependencies.
+
+The actual first JSON snapshot has one enabled unresolved claim at T, next due
+T+60,000. Restore into a new daemon, startup reconcile disabled/local Failed /
+schedule_run_interrupted, explicit later tick refuses, disk equals memory;
+second fresh restore is quiet/stable. Zero fake-model calls and no messages/
+duplicate occurrence. Existing scheduler policy/owner controls are unchanged.
+No external exactly-once claim or complete PAR-10/11 acceptance. M52 PARTIAL
+and consumed cases remain unchanged; actual models/providers/accounts/services/
+devices/database servers/containers/deployment remain unactivated.
+
+Resume .superpowers/sdd/2026-10-16-companion-schedule-recovery-m59/progress.md.
+Root owns commands/fmt/Git; source-only Codex delegation, no check-ins. Cargo
+CARGO_INCREMENTAL=0/jobs1/threads2 serialized, cleared provider/service env.
+Explicit paths only, never nx.json/anima.yaml/.superpowers. Per-command unsigned
+commits, justified dependencies and reviewed merge-and-continue remain authorized.
+No stash/reset/restore/path checkout/worktree, ordinary profiles/credentials,
+real accounts/DB servers/containers/Docker55432/public deployment. nx SHA
+3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90 preserved.
+
+## Historical M58 gated handover
+
 # Handover: selected native speech output (M0–M58)
 
 ## Start here (2026-10-16): M58 gated; settle publication then schedule recovery
