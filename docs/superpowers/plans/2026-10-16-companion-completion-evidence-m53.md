@@ -1,13 +1,26 @@
 # M53 owner-visible completion boundary implementation plan
 
-Status: controller-bound plan on `g9000/companion-completion-evidence-m53`, cut
-from verified M52/PR58 main `97258b01ecfdffdfcd782c86b907f8b7d151261b`.
-M52 source `ce6579fdf9431115baad4f0125b52e5f34f463cb` shares gated tree
-`15192c476987505a982b66ab98a31ccfb3de0436`; all22 owned hashes/nx preserved.
-M52 is committed/pushed/merged and strict quality stays partial. All actual
-releases are consumed and test services are retired. M53 releases deterministic
-source/tests only after root publishes this plan; no model, metadata or service.
-Exact resume: `.superpowers/sdd/2026-10-16-companion-completion-evidence-m53/progress.md`.
+Status: implemented and deterministic web acceptance passed on
+`g9000/companion-completion-evidence-m53`, from verified M52/PR58 main
+`97258b01ecfdffdfcd782c86b907f8b7d151261b`. Exact publication/merge proof and
+resume: `.superpowers/sdd/2026-10-16-companion-completion-evidence-m53/progress.md`.
+
+The existing committed message entry now displays **Tool limit reached** for a
+strict accepted Assistant marker, without a loaded Run requirement. Live,
+pending, revised, stopped, incomplete, non-assistant and tool-call content remain
+excluded. Copy/read-aloud/memory-save text, existing history identity and tool/
+helper navigation stay unchanged. Four existing web files changed; no native,
+SDK, schema, dependency, configuration or runtime/model/service change.
+
+The missing-notice semantic RED was one failed/one passed test. Focused final
+chat/transcript/memo tests passed 110 tests in three files. One combined web correctness
+and SDK/native scope review preceded the final fix-wave decision and fresh gates:
+**1,361 web tests in 115 files**, typecheck/build, explicit formatting/diff and six
+docs checks passed. The ledger records any review correction and exact commands.
+These are deterministic presentation checks, not a real browser/model trial.
+M52's strict quality remains **PARTIAL**, its task/releases immutable/consumed;
+this notice does not repair the helper explanation or completed verification todo.
+All prior test services remain retired. No M53 actual provider case was admitted.
 
 The original proposal below remains design context; the final rulings are binding.
 

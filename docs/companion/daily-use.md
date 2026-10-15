@@ -158,6 +158,12 @@ report confirmed results and unfinished work. A zero-round setting allows only
 that text reply. Stop, provider errors and failed action-record saves still end
 the run; an empty, truncated or rejected wrap-up does not retry. A completed
 wrap-up means its reply was saved, not that every requested action succeeded.
+
+Those saved replies show **Tool limit reached** beneath the message, including
+older replies after reopening a chat. Review the tool results and remaining work;
+the notice does not establish that the task succeeded. It leaves the saved reply,
+copy/read-aloud text and memory-save action unchanged.
+
 Accepted wrap-ups carry `budgetWrapup: true` in message metadata. The original
 tool permissions remain available for the next independent run.
 

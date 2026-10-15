@@ -1,5 +1,21 @@
 # Native harness acceptance
 
+## M53 saved-reply tool-limit notice (2026-10-16)
+
+The owner console now shows **Tool limit reached** beneath committed Assistant
+replies carrying the existing accepted budget marker. It needs no loaded Run and
+does not appear for live/pending/revised/stopped/incomplete/non-assistant/tool-call
+content. Existing message actions use the original text; no tool, task, memory,
+grant, budget or native result is changed. The missing-notice UI test first failed;
+focused 110 tests in three files and fresh full 1,361 web tests in 115 files, typecheck/build and
+format checks passed after combined web review/SDK-native scope checks.
+
+This is deterministic presentation acceptance, with zero actual generations or
+services. M52's useful repair evidence and **PARTIAL** strict reporting/reasoning
+grade are unchanged. Its consumed case and all previous actual cases remain
+immutable. No generalized task verifier or full Hermes parity is claimed. See
+[M53 plan](../superpowers/plans/2026-10-16-companion-completion-evidence-m53.md).
+
 ## M39 reviewed procedural reuse (2026-10-13)
 
 One retained M38 lesson was explicitly edited into a pending skill draft, deduplicated and approved through the ordinary skill route. Standard SKILL.md bytes and the approved SHA-256 matched. Two fresh empty synthetic sessions selected and loaded that skill without a slug in their prompts, then wrote and read back different proof files in separate rounds. Both final answers quoted the correct path and contents; independent file-byte checks and durable tool details matched. Each task used four model steps: 6,118 and 6,179 reported tokens, **12,297 total**. No new review generation, evaluator probe, repair prompt or model-task retry was submitted.

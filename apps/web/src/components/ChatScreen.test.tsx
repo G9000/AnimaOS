@@ -1,12 +1,12 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentDetail } from '../lib/types';
+import type { AgentDetail, ChatMessage } from '../lib/types';
 import type { LearningReview, Run } from '@animaOS-SWARM/sdk';
 import { formatTime } from './ui-bits';
 import { Composer, MessageList } from './ChatScreen';
 import { SLASH_COMMANDS } from '../lib/slash-commands';
-import { emptyLiveRun } from '../lib/session-events';
+import { emptyLiveRun, type LiveRun } from '../lib/session-events';
 import { buildTranscript } from '../lib/transcript';
 import { runFixture } from '../test/live';
 
@@ -668,6 +668,310 @@ describe('MessageList', () => {
         'max-w-[85%]',
         'min-w-0',
       );
+    }
+  });
+});
+
+describe('M53 accepted budget wrap-up notice', () => {
+  it('shows the tool limit beside its committed saved reply without a loaded run', () => {
+    render(
+      <MessageList
+        agent={{
+          ...agent,
+          messages: [
+            {
+              ...messages[1],
+              id: 'm53-saved-reply',
+              content: {
+                text: 'I checked the draft and saved the current reply.',
+                metadata: { budgetWrapup: true },
+              },
+            },
+          ],
+        }}
+        sending={false}
+        scrollerRef={{ current: null }}
+        onSuggestion={vi.fn()}
+      />,
+    );
+
+    const reply = screen.getByText(
+      'I checked the draft and saved the current reply.',
+    );
+    expect(reply).toBeVisible();
+    const anchor = reply.closest<HTMLElement>('.studio-message-anchor');
+    expect(anchor).not.toBeNull();
+    const heading = within(anchor!).getByRole('heading', {
+      name: 'Tool limit reached',
+      exact: true,
+    });
+    expect(heading).toBeVisible();
+    expect(
+      within(anchor!).getByText(
+        'This saved reply could not run further tools. Review the tool results and any remaining work.',
+        { exact: true },
+      ),
+    ).toBeVisible();
+    expect(
+      reply.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('keeps an ordinary saved assistant reply quiet', () => {
+    render(
+      <MessageList
+        agent={{ ...agent, messages: [messages[1]] }}
+        sending={false}
+        scrollerRef={{ current: null }}
+        onSuggestion={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Heading' })).toBeVisible();
+    expect(
+      screen.queryByRole('heading', { name: 'Tool limit reached' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        'This saved reply could not run further tools. Review the tool results and any remaining work.',
+        { exact: true },
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  const excludedReplies: Array<
+    [string, ChatMessage['role'], Record<string, unknown>]
+  > = [
+    ['user metadata', 'User', { budgetWrapup: true }],
+    ['tool metadata', 'Tool', { budgetWrapup: true }],
+    ['stopped content', 'Assistant', { budgetWrapup: true, stopped: true }],
+    [
+      'incomplete content',
+      'Assistant',
+      { budgetWrapup: true, incomplete: true },
+    ],
+    [
+      'assistant tool calls',
+      'Assistant',
+      {
+        budgetWrapup: true,
+        toolCalls: [{ id: 'm53-call', name: 'search', args: {} }],
+      },
+    ],
+  ];
+
+  it.each(excludedReplies)(
+    'does not show a notice for %s',
+    (_, role, metadata) => {
+      render(
+        <MessageList
+          agent={{
+            ...agent,
+            messages: [
+              {
+                ...messages[1],
+                role,
+                content: { text: 'Saved content', metadata },
+              },
+            ],
+          }}
+          sending={false}
+          scrollerRef={{ current: null }}
+          onSuggestion={vi.fn()}
+        />,
+      );
+      expect(
+        screen.queryByRole('heading', {
+          name: 'Tool limit reached',
+          hidden: true,
+        }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it('keeps revised, live and pending paths quiet even with lookalike content', () => {
+    const revised: ChatMessage = {
+      ...messages[1],
+      id: 'm53-revised',
+      content: {
+        text: 'Earlier saved draft',
+        metadata: { budgetWrapup: true },
+      },
+    };
+    const live = {
+      ...emptyLiveRun(
+        runFixture('m53-live', { status: 'running', startedAtMs: 1 }),
+      ),
+      steps: [
+        {
+          stepId: 'm53-live:1',
+          text: 'Tool limit reached. budgetWrapup: true',
+          textOffset: 0,
+        },
+      ],
+    };
+    render(
+      <MessageList
+        agent={{ ...agent, messages: [] }}
+        sending={false}
+        scrollerRef={{ current: null }}
+        onSuggestion={vi.fn()}
+        items={[
+          { kind: 'revised', key: revised.id, message: revised },
+          ...buildTranscript({
+            messages: [],
+            runs: [live],
+            pending: [
+              {
+                key: 'm53-pending',
+                text: 'budgetWrapup: true',
+                createdAtMs: 2,
+                status: 'sending',
+              },
+            ],
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Earlier draft (revised)')).toBeVisible();
+    expect(
+      screen.getByText('Tool limit reached. budgetWrapup: true'),
+    ).toBeVisible();
+    expect(screen.getByText('Sending…')).toBeVisible();
+    expect(
+      screen.queryByRole('heading', {
+        name: 'Tool limit reached',
+        hidden: true,
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each(['run-first', 'message-first'])(
+    'keeps one saved reply and notice through %s hydration and repeated snapshots',
+    (arrival) => {
+      const run = runFixture('m53-hydration', {
+        status: 'completed',
+        startedAtMs: 1,
+        finishedAtMs: 2,
+        replyMessageId: 'm53-hydrated-reply',
+      });
+      const live = {
+        ...emptyLiveRun(run),
+        steps: [
+          {
+            stepId: `${run.id}:1`,
+            text: 'The current draft is saved.',
+            textOffset: 0,
+          },
+        ],
+      };
+      const saved: ChatMessage = {
+        ...messages[1],
+        id: run.replyMessageId!,
+        content: {
+          text: 'The current draft is saved.',
+          metadata: { runId: run.id, budgetWrapup: true },
+        },
+      };
+      const list = (history: ChatMessage[], runs: LiveRun[]) => (
+        <MessageList
+          agent={{ ...agent, messages: history }}
+          sending={false}
+          scrollerRef={{ current: null }}
+          onSuggestion={vi.fn()}
+          items={buildTranscript({ messages: history, runs })}
+        />
+      );
+      const view = render(
+        arrival === 'run-first' ? list([], [live]) : list([saved], []),
+      );
+      expect(
+        screen.queryAllByRole('heading', { name: 'Tool limit reached' }),
+      ).toHaveLength(arrival === 'run-first' ? 0 : 1);
+      view.rerender(list([saved], [live]));
+      const notice = screen.getByRole('heading', {
+        name: 'Tool limit reached',
+      });
+      view.rerender(list([structuredClone(saved)], [structuredClone(live)]));
+
+      expect(screen.getAllByText('The current draft is saved.')).toHaveLength(
+        1,
+      );
+      expect(
+        screen.getAllByRole('heading', { name: 'Tool limit reached' }),
+      ).toEqual([notice]);
+    },
+  );
+
+  it('keeps copy, read-aloud and memory actions on the original text without automatic effects', async () => {
+    const user = userEvent.setup();
+    const saved: ChatMessage = {
+      ...messages[1],
+      id: 'm53-original',
+      content: {
+        text: '**Finished**, but the draft contents remain unconfirmed.',
+        metadata: { budgetWrapup: true },
+      },
+    };
+    const before = JSON.stringify(saved);
+    const onSaveToMemory = vi
+      .fn()
+      .mockResolvedValue({ kind: 'saved', shortened: false });
+    const onRequestLearningReview = vi.fn();
+    const onOpenSession = vi.fn();
+    const readAloud = {
+      supported: true,
+      speakingMessageId: null,
+      error: null,
+      read: vi.fn(),
+      stop: vi.fn(),
+    };
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('Unexpected network request'));
+    const props = {
+      agent: { ...agent, messages: [saved] },
+      sending: false,
+      scrollerRef: { current: null },
+      onSuggestion: vi.fn(),
+      actions: { onSaveToMemory, onRequestLearningReview, onOpenSession },
+      readAloud,
+    };
+    try {
+      const view = render(<MessageList {...props} />);
+      view.rerender(
+        <MessageList
+          {...props}
+          agent={{ ...props.agent, messages: [saved] }}
+        />,
+      );
+      const notice = screen.getByRole('heading', {
+        name: 'Tool limit reached',
+      }).parentElement!;
+      expect(within(notice).queryByRole('button')).not.toBeInTheDocument();
+      expect(
+        notice.closest('[aria-live], [role="status"], [role="alert"]'),
+      ).toBeNull();
+      expect(fetch).not.toHaveBeenCalled();
+      expect(onSaveToMemory).not.toHaveBeenCalled();
+      expect(readAloud.read).not.toHaveBeenCalled();
+      expect(onRequestLearningReview).not.toHaveBeenCalled();
+      expect(onOpenSession).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole('button', { name: 'Copy message' }));
+      expect(await navigator.clipboard.readText()).toBe(saved.content.text);
+      await user.click(screen.getByRole('button', { name: 'Read aloud' }));
+      expect(readAloud.read).toHaveBeenCalledWith(saved.id, saved.content.text);
+      await user.click(screen.getByRole('button', { name: 'Save to memory' }));
+      expect(onSaveToMemory.mock.calls[0][0]).toBe(saved);
+      expect(
+        await screen.findByRole('button', { name: '✓ Saved to memory' }),
+      ).toBeDisabled();
+      expect(JSON.stringify(saved)).toBe(before);
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      fetch.mockRestore();
     }
   });
 });

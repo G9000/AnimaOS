@@ -1,47 +1,49 @@
 # Handover: owner-visible completion boundary (M0–M53)
 
-## Start here (2026-10-16): M52 merged; M53 bound four-file web scope
+## Start here (2026-10-16): M53 gated; settle publication then document understanding
 
-Continue `g9000/companion-completion-evidence-m53`, cut from verified
-[M52/PR58](https://github.com/G9000/animaOS-SWARM/pull/58) main
-`97258b01ecfdffdfcd782c86b907f8b7d151261b`. Source
-`ce6579fdf9431115baad4f0125b52e5f34f463cb` shares tested tree
-`15192c476987505a982b66ab98a31ccfb3de0436`; all22 owned hashes/nx preserved.
-M52 is committed/pushed/merged and the other chat received context. Exact resume:
+Continue `g9000/companion-completion-evidence-m53`, from verified M52/PR58 main
+`97258b01ecfdffdfcd782c86b907f8b7d151261b`. The four-file web implementation is
+frozen/reviewed/gated. Exact source, PR, verified merge and next resume are in
 `.superpowers/sdd/2026-10-16-companion-completion-evidence-m53/progress.md`.
+Finish the authorized publication/merge and verify its tree before cutting the
+next milestone branch from main. The held PAR-08 document-understanding proposal
+is private plan-only; root must choose its narrow slice and bind risks before
+any next source release. No additional model or service activation is released.
 
-The [M53 bound plan](../plans/2026-10-16-companion-completion-evidence-m53.md)
-exposes an existing trusted accepted tool-budget marker in the committed assistant
-reply. M52's useful utility/oracle/quiet restart passed, but its helper explanation
-and completed output-verification todo remain reporting-quality misses. M53 does
-not fix those semantics or authorize another task: the original case/releases
-are immutable/consumed, all24 recorded owned processes retired/port18752free.
-Seven calls/23,065 reported tokens,14 receipts,3todos and quiet usage7to7 remain
-the actual evidence; four task-result/reflection memories/two agents retained
-their hash, with no Fact/retrieval/graceful/in-flight recovery claim.
+[M53](../plans/2026-10-16-companion-completion-evidence-m53.md) shows the existing
+accepted tool-limit marker beside its committed saved Assistant reply, including
+older history without a loaded Run. Strict shape and caller exclusions keep
+live/pending/revised/non-assistant/partial/tool-call paths quiet. Copy, speech,
+memory-save and stored reply bytes, history keys/reconciliation and tool/helper
+navigation are retained. No new component, CSS, transcript kind, fetch, action,
+schema, native, SDK, dependency or configuration change. Missing-notice RED was
+one failed/one passed; focused 110 tests in three files, fresh 1,361 web tests in 115 files,
+typecheck/build/format/diff and six docs checks passed after one combined
+web correctness/SDK-native scope review. Exact review/fix decisions are in ledger.
+These are deterministic presentation checks; no browser/model/provider trial.
 
-Root bound five risks and the exact factual text/shape/lifecycle rules. First
-publish this plan/master/handover, then a web author writes missing-notice tests
-only; root records semantic RED before four-file implementation. Source ownership:
-existing ChatScreen.tsx/test and lib/transcript.ts/test, no new schema/receipt
-panel/component/CSS/SDK/native/dependency/config. Existing committed-history caller
-supplies context; strict native boolean marker/Assistant and no stopped/incomplete/
-revised/tool-call content. Live/pending/user data cannot synthesize the notice.
-One combined web+SDK scope review/fix wave and fresh resolved web test/typecheck/
-build/format gates follow. No M53 model/metadata/daemon/browser/deployment release.
+M52 remains **strict quality PARTIAL**: useful utility/oracle/quiet restart passed,
+but helper edge wording contradicted itself and the output-verification todo was
+completed while the final reply left contents unconfirmed. Seven calls / 23,065
+reported tokens, 14 receipts / 3 todos and quiet usage 7 to 7 remain the actual evidence.
+Four task-result/reflection memories/two agent entities retained their hash, with
+no Fact/retrieval/graceful/in-flight exactly-once claim. M47/M52 actual cases and
+all releases are immutable/consumed; all 24 M52 recorded owned identities retired,
+port 18752 free. Do not replay, repair or regrade those cases to manufacture a pass.
 
-Local public Hermes HEAD/selected sources/LICENSE were root-reverified at
-`1fd18277267152893a8a24792b79213e7ca3f899`; reuse is a general reason-to-notice
-pattern, no copied source/text. Keep existing MIT notices and Anima branding.
-Standing cheap Codex delegation, per-command unsigned commits, reviewed
-merge-and-continue and context-only other-chat updates persist. Root alone
-execution/fmt/Git/services/models. CARGO_INCREMENTAL=0 for Rust commands; jobs1/
-threads2 for required Rust suites. Explicit stage only, never nx.json/anima.yaml/
-private evidence. Preserve nx SHA256
+Hermes public HEAD/selected source/LICENSE was root-reverified at
+`1fd18277267152893a8a24792b79213e7ca3f899`; M53 uses a general reason-to-notice
+pattern without copied source/text. Retain existing MIT notices and Anima naming.
+Cheap Codex delegation, per-command unsigned commits, reviewed merge-and-continue
+and context-only other-chat updates remain authorized. Root alone runs tests/fmt/
+Git/services/models. CARGO_INCREMENTAL=0 for Cargo; Rust jobs 1 / threads 2.
+Stage explicit owned paths only; never nx.json/anima.yaml/private evidence.
+Preserve nx SHA256
 `3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`.
 No stash/reset/restore/path checkout/worktree, ordinary profile/credential copy/
-readout, real connectors, DB servers, containers, Docker55432 or public deployment.
-Older resumes below are historical and superseded here.
+readout, real connector accounts, DB servers, containers, Docker55432 or public
+deployment. Older resumes below are historical and superseded here.
 
 ## Historical M52 outcome handover
 
