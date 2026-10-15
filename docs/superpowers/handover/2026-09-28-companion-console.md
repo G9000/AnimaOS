@@ -1,3 +1,19 @@
+# Handover: provider-request diagnostics (M0–M48)
+
+## Start here (2026-10-15): M48 gates pass; account model access blocks generation
+
+M48 is settled on `g9000/companion-provider-diagnostics-m48`, cut from verified [M47/PR53](https://github.com/G9000/animaOS-SWARM/pull/53) main `456149927c96e10f1b468e480042d14cb2f8f6e6`. The [M48 plan](../plans/2026-10-15-companion-provider-diagnostics-m48.md) records its scoped outcome. Exact source/PR/verified merge and authoritative continuation are `.superpowers/sdd/2026-10-15-companion-provider-diagnostics-m48/progress.md`; finish that publication settlement before cutting the next branch from main. Standing reviewed merge-and-continue applies.
+
+Required gates passed **2,681 Rust/core tests / 19 intentional ignores / 40 suites / lint / build**, with two full-suite test threads. Both native/core and final affected SDK/web reviews are clean. Six reviewed source files stayed frozen; SDK/web/contracts/manifests/lockfile are unchanged. Owned Prettier and document link/path checks pass. Actual coordinator capture handed the exact 10,376-byte, 14-tool synthetic request to the existing private ChatGPT serializer and joined loopback; this proves integration, not backend acceptance.
+
+The narrow classifier preserves known-code precedence/retries and adds four known type-only diagnostics plus one fixed HTTP 400 model-access signature reused from pinned public Hermes source, with MIT notice. Unknown/malformed/raw text remains redacted. After gates, the single distinct direct zero-tool ChatGPT/gpt-5.5 diagnostic failed in 1.10 seconds with **model_access**: this account does not support the selected model. Failed-call consumption is unknown; no retry, alternate model or second shape followed. No daemon, connector, tool, helper or ordinary profile was involved. The one-request release is consumed.
+
+M47's historical body/cause was not recovered, and its candidate must not be replayed/repaired to manufacture a pass. Useful provider coding/delegation stays unaccepted. Next is account-aware subscription model availability/selection using the normal application adapter; its lean plan may be prepared privately, but implementation requires root binding on a new branch after M48 merge. Preserve explicit owner choice, no silent fallback or speculative supported-model literal. Native voice stays held/renumberable; the broader parity gaps remain visible.
+
+Root owns commands, formatting, Git, services and models (`CARGO_INCREMENTAL=0`, jobs1, two test threads for full native gates). Standing Codex delegation, per-command unsigned commits, reviewed merge-and-continue and context-only updates persist. Preserve unrelated nx.json SHA256 `3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`; stage explicit files only, never nx.json/anima.yaml/private evidence. No worktree/stash/reset/restore/path checkout, ordinary profiles/accounts/connector sends, DB servers/containers/Docker55432 or public deployment. Retain MIT provenance and Anima product names. Historical resumes below are superseded here.
+
+## Historical M47 handover
+
 # Handover: coding/delegation acceptance (M0–M47)
 
 ## Start here (2026-10-15): M47 gates pass; provider coding blocked

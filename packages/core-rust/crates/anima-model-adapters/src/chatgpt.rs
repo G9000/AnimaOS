@@ -285,9 +285,12 @@ fn structured_failure(payload: &Value) -> Option<String> {
     // response.error. Upstream agent/codex_runtime.py::_raise_stream_error also
     // prefers top-level error fields. Here only whitelisted constants escape.
     let error = failure_payload(payload);
-    let code = error.get("code")?.as_str()?;
+    let (source, code) = match error.get("code") {
+        None | Some(Value::Null) => ("type", known_failure_type(error.get("type")?)?),
+        Some(code) => ("code", code.as_str()?),
+    };
     let &(safe_code, message) = KNOWN_FAILURES.iter().find(|(known, _)| *known == code)?;
-    let mut diagnostic = format!("{message} (code: {safe_code}");
+    let mut diagnostic = format!("{message} ({source}: {safe_code}");
     if let Some(param) = error
         .get("param")
         .and_then(Value::as_str)
@@ -298,6 +301,41 @@ fn structured_failure(payload: &Value) -> Option<String> {
     }
     diagnostic.push(')');
     Some(diagnostic)
+}
+
+fn known_failure_type(value: &Value) -> Option<&'static str> {
+    match value.as_str()? {
+        "invalid_request_error" => Some("invalid_request_error"),
+        "authentication_error" => Some("authentication_error"),
+        "permission_error" => Some("permission_error"),
+        "server_error" => Some("server_error"),
+        _ => None,
+    }
+}
+
+fn http_model_access_failure(status: u16, payload: &Value) -> Option<&'static str> {
+    if status != 400 {
+        return None;
+    }
+    let error = failure_payload(payload);
+    if !error.is_object() {
+        return None;
+    }
+    if error.get("code").is_some_and(|value| !value.is_null()) {
+        return None;
+    }
+    if let Some(kind) = error.get("type").filter(|value| !value.is_null()) {
+        known_failure_type(kind)?;
+    }
+    let detail = payload.get("detail")?;
+    let text = detail
+        .as_str()
+        .or_else(|| detail.get("message")?.as_str())?;
+    // Pinned Hermes model-entitlement marker, restricted to this HTTP shape.
+    // ASCII comparison keeps provider/model text out of diagnostic allocation.
+    const MARKER: &[u8] = b"model is not supported when using codex with a chatgpt account";
+    text.as_bytes().windows(MARKER.len()).any(|part| part.eq_ignore_ascii_case(MARKER))
+        .then_some("ChatGPT subscription selected model is not supported for this account; review the model and account access")
 }
 
 fn http_status_failure(status: u16) -> String {
@@ -362,7 +400,12 @@ async fn http_failure(response: reqwest::Response) -> HttpFailure {
     }
     let parsed = serde_json::from_slice::<Value>(&bytes).ok();
     let structured = parsed.as_ref().and_then(structured_failure);
-    let diagnostic = structured.clone().unwrap_or(fallback);
+    let diagnostic = parsed
+        .as_ref()
+        .and_then(|payload| http_model_access_failure(status.as_u16(), payload))
+        .map(str::to_owned)
+        .or(structured)
+        .unwrap_or(fallback);
     let structured_retryable = parsed.as_ref().and_then(failure_code).map(|code| {
         matches!(
             code,
@@ -585,5 +628,7 @@ async fn consume(response: reqwest::Response, sink: &dyn ModelStreamSink) -> Res
     Err("ChatGPT stream ended without a completed response".into())
 }
 
+#[cfg(test)]
+mod request_fixture_tests;
 #[cfg(test)]
 mod tests;
