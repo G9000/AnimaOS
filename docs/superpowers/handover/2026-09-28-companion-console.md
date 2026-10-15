@@ -1,3 +1,32 @@
+# Handover: interval outage recovery (M0–M62)
+
+## Start here (2026-10-16): M61 merged; M62 bound controlled-clock interval outage recovery
+
+Continue g9000/companion-interval-outage-m62 from [M61/PR67](https://github.com/G9000/animaOS-SWARM/pull/67)
+main61af5dca33799c53e191736bf1f2676800068c9e, source2448040f3bc60b778494059ae914163cf267e9e3,
+identical treeda3f6a2d0ff1b0e39b160d4d7350b5fc22c314ae. M61 actual selective memory HTTP
+create/UI edit/status/search/delete across one quiet forced restart passed; all24
+owned identities retired, isolated ports free.18 offline browser tests/type/build/
+format/docs pass. Four earlier failed fresh cases remain immutable, unreplayed.
+Shell/bootstrap/SSE/account/provider/connector APIs stayed mocked; no full parity.
+
+The [M62 bound plan](../plans/2026-10-16-companion-interval-outage-m62.md) adds one
+test in schedules/shutdown_tests.rs: persisted enabled unclaimed interval, five
+missed periods, controlled ticks [1,0,0,1], exact two fake-model calls after joins,
+same saved schedule/occurrence fields across fresh reload and resumed cadence.
+No worker start, real wall-time wait or production change unless a concrete gap.
+Root five risk rulings; plan push before source-only Sol implementation; one
+native concurrency review/fix wave, focused and full Rust test/lint/build gates.
+
+Resume .superpowers/sdd/2026-10-16-companion-interval-outage-m62/progress.md.
+Root commands/fmt/Git; Cargo CARGO_INCREMENTAL=0/jobs1/threads2 serialized. No real
+models/providers/accounts/devices/ordinary services/profiles/credentials/DB servers/
+containers/Docker55432/deployment. Explicit-path unsigned push/PR/standing merge;
+never stage nx.json/anima.yaml/.superpowers. No stash/reset/restore/path checkout/
+worktree. M47/M52 cases immutable, M52 PARTIAL; full parity unclaimed.
+
+## Historical M61 gated handover
+
 # Handover: isolated memory HTTP acceptance (M0–M61)
 
 ## Start here (2026-10-16): M61 gated; publish and merge, then interval outage recovery
