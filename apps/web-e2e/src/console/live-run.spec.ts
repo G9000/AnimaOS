@@ -59,7 +59,7 @@ test('accepted run streams UTF-16 deltas, tools and one persisted reply', async 
   await expect(
     page.getByText('Your day is planned.', { exact: true }),
   ).toHaveCount(1);
-  await page.getByRole('button', { name: /Used 1 tool/ }).click();
+  await page.getByRole('button', { name: /1 tool request/ }).click();
   await expect(page.getByRole('button', { name: /read_file/ })).toBeVisible();
   expect(
     fixture.calls.filter(

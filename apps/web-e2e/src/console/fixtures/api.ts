@@ -1,6 +1,15 @@
-import { expect, type Page, type Route } from '@playwright/test';
+import {
+  expect,
+  type Page,
+  type Request as PlaywrightRequest,
+  type Route,
+} from '@playwright/test';
 import type {
   AgentEvent,
+  AgentFilesPreview,
+  DiscordConnector,
+  LearningPolicy,
+  LearningReview,
   Run,
   SessionMessage,
   SnapshotRun,
@@ -14,10 +23,138 @@ export interface FixtureCall {
   body: unknown;
   key: string | null;
 }
-export async function installConsoleFixture(page: Page, state = createState()) {
+export interface ConsoleFixtureOptions {
+  origin?: string;
+  realStatic?: boolean;
+  realMemory?: boolean;
+}
+export interface RealMemoryResponse {
+  method: string;
+  path: string;
+  status: number;
+  body: unknown;
+}
+export async function installMemoryRedirectGuard(page: Page, origin: string) {
+  await page.addInitScript((allowedOrigin) => {
+    const previousFetch = globalThis.fetch.bind(globalThis);
+    globalThis.fetch = (input, init) => {
+      let url: URL;
+      try {
+        url = new URL(
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.href
+              : input.url,
+          location.href,
+        );
+      } catch {
+        return previousFetch(input, init);
+      }
+      return previousFetch(
+        input,
+        url.origin === allowedOrigin &&
+          (url.pathname === '/api/memories' ||
+            url.pathname.startsWith('/api/memories/'))
+          ? { ...init, redirect: 'manual' }
+          : init,
+      );
+    };
+  }, origin);
+}
+export async function installConsoleFixture(
+  page: Page,
+  state = createState(),
+  options: ConsoleFixtureOptions = {},
+) {
+  const origin = options.origin ?? ORIGIN;
+  if (
+    (options.realStatic || options.realMemory) &&
+    origin !== 'http://127.0.0.1:18753'
+  ) {
+    throw new Error(
+      'The real console fixture requires its isolated loopback origin',
+    );
+  }
   const calls: FixtureCall[] = [],
     unexpected: string[] = [],
     errors: string[] = [];
+  const realResponses: RealMemoryResponse[] = [];
+  const realCounts = new Map<string, number>();
+  const realResponseCounts = { success: 0, redirects: 0, errors: 0, bytes: 0 };
+  const pendingRealResponses = new Set<Promise<null>>();
+  const admitted = new Map<
+    PlaywrightRequest,
+    {
+      method: string;
+      path: string;
+      done: Promise<null>;
+      finish(failure?: string): void;
+    }
+  >();
+  const admit = (request: PlaywrightRequest, method: string, path: string) => {
+    let resolve!: (value: null) => void;
+    const done = new Promise<null>((complete) => {
+      resolve = complete;
+    });
+    const finish = (failure?: string) => {
+      if (!admitted.delete(request)) return;
+      clearTimeout(timer);
+      if (failure) {
+        realResponseCounts.errors++;
+        unexpected.push(`${failure}: ${method} ${path}`);
+      }
+      pendingRealResponses.delete(done);
+      resolve(null);
+    };
+    const timer = setTimeout(
+      () => finish('Timed out real memory response'),
+      5000,
+    );
+    admitted.set(request, { method, path, done, finish });
+    pendingRealResponses.add(done);
+  };
+  page.on('requestfailed', (request) => {
+    admitted.get(request)?.finish('Failed real memory request');
+  });
+  page.on('response', (response) => {
+    const entry = admitted.get(response.request());
+    if (!entry) return;
+    const status = response.status();
+    if (status >= 200 && status < 300) realResponseCounts.success++;
+    if (status >= 300 && status < 400) {
+      realResponseCounts.redirects++;
+      entry.finish('Refused real memory redirect');
+      return;
+    }
+    void (async () => {
+      if (Number(response.headers()['content-length']) > 262_144)
+        return entry.finish('Oversized real memory response');
+      const bytes = await Promise.race([response.body(), entry.done]);
+      if (bytes === null) return;
+      realResponseCounts.bytes += bytes.length;
+      if (bytes.length > 262_144)
+        return entry.finish('Oversized real memory response');
+      let body: unknown;
+      try {
+        body = JSON.parse(bytes.toString('utf8'));
+      } catch {
+        return entry.finish('Non-JSON real memory response');
+      }
+      realResponses.push({
+        method: entry.method,
+        path: entry.path,
+        status,
+        body,
+      });
+      entry.finish(
+        status < 200 || status >= 300
+          ? 'Unsuccessful real memory response'
+          : undefined,
+      );
+    })().catch(() => entry.finish('Failed real memory response'));
+  });
+  let realMemoryId: string | null = null;
   const expectedHttpErrors: string[] = [];
   const refusedUrls = new Set<string>();
   let connections = 0,
@@ -48,10 +185,16 @@ export async function installConsoleFixture(page: Page, state = createState()) {
       expectedHttpErrors.push(message.text());
     else errors.push(message.text());
   });
-  await installStreams(page, state, () => {
-    connections++;
-    seq = 1;
-  });
+  await installStreams(
+    page,
+    state,
+    () => {
+      connections++;
+      seq = 1;
+    },
+    origin,
+  );
+  if (options.realMemory) await installMemoryRedirectGuard(page, origin);
   const json = (route: Route, body: unknown, status = 200) =>
     route.fulfill({
       status,
@@ -61,15 +204,22 @@ export async function installConsoleFixture(page: Page, state = createState()) {
   await page.route('**/*', async (route) => {
     const request = route.request(),
       url = new URL(request.url());
-    if (url.origin !== ORIGIN) {
+    if (url.origin !== origin) {
       unexpected.push(`External ${url.origin}${url.pathname}`);
       return route.abort('blockedbyclient');
     }
     if (!url.pathname.startsWith('/api/')) {
       try {
+        if (options.realStatic) {
+          // The same contained built asset must exist locally before preview
+          // is permitted to serve it; /health and unknown paths are refused.
+          await staticAsset(url.pathname);
+          return route.continue();
+        }
         return await route.fulfill(await staticAsset(url.pathname));
       } catch (error) {
         unexpected.push(String(error));
+        if (options.realStatic) return route.abort('blockedbyclient');
         return route.fulfill({ status: 404, body: 'Fixture asset missing' });
       }
     }
@@ -87,6 +237,35 @@ export async function installConsoleFixture(page: Page, state = createState()) {
       body,
       key: request.headers()['idempotency-key'] ?? null,
     });
+    if (options.realMemory && path.startsWith('/api/memories')) {
+      const key = `${method} ${path}`;
+      const limits: Record<string, number> = {
+        'POST /api/memories': 1,
+        'GET /api/memories/recent': 16,
+        'GET /api/memories/search': 2,
+        'GET /api/memories/facts': 16,
+        'GET /api/memories/entities': 16,
+        'GET /api/memories/relationships': 16,
+        'GET /api/memories/readiness': 2,
+      };
+      if (realMemoryId !== null) {
+        limits[`PATCH /api/memories/${realMemoryId}`] = 1;
+        limits[`DELETE /api/memories/${realMemoryId}`] = 1;
+      }
+      const next = (realCounts.get(key) ?? 0) + 1;
+      if (limits[key] === undefined || next > limits[key]) {
+        unexpected.push(`Refused real memory request: ${key}`);
+        return route.abort('blockedbyclient');
+      }
+      realCounts.set(key, next);
+      admit(request, method, path);
+      try {
+        return await route.continue();
+      } catch {
+        admitted.get(request)?.finish('Failed real memory request');
+      }
+      return;
+    }
     const persistent = persistentFailures.get(`${method} ${path}`);
     if (persistent) {
       refusedUrls.add(request.url());
@@ -102,6 +281,37 @@ export async function installConsoleFixture(page: Page, state = createState()) {
     }
     const get = method === 'GET';
     if (get && path === '/api/health') return json(route, { status: 'ok' });
+    if (get && path === `/api/agents/${AGENT}/connectors/discord`) {
+      const dormant: { connectors: DiscordConnector[] } = { connectors: [] };
+      return json(route, dormant);
+    }
+    if (get && path === `/api/agents/${AGENT}/agent-files`) {
+      const preview: AgentFilesPreview = {
+        mode: 'current_preview',
+        availability: 'unavailable_workspace',
+        capturedAtMs: 1,
+        snapshotDigest: '0'.repeat(64),
+        identitySource: 'legacy',
+        projectSourceKind: null,
+        estimatedTokens: 0,
+        entries: [],
+      };
+      return json(route, preview);
+    }
+    if (get && path === `/api/agents/${AGENT}/learning-policy`) {
+      const policy: LearningPolicy = {
+        autoEnabled: false,
+        dailyLimit: 2,
+        pendingLimit: 10,
+        timeoutMs: 20_000,
+        physicalReviewerActive: false,
+      };
+      return json(route, policy);
+    }
+    if (get && path === `/api/agents/${AGENT}/learning-reviews`) {
+      const dormant: { reviews: LearningReview[] } = { reviews: [] };
+      return json(route, dormant);
+    }
     if (get && path === '/api/status') return json(route, state.status);
     if (get && path === '/api/providers')
       return json(route, {
@@ -294,6 +504,22 @@ export async function installConsoleFixture(page: Page, state = createState()) {
   return {
     state,
     calls,
+    realResponses,
+    realCounts,
+    realResponseCounts,
+    async waitForRealResponses() {
+      // Every admitted request owns a five-second timer, including no-response failures.
+      await Promise.all([...pendingRealResponses]);
+    },
+    setRealMemoryId(id: string) {
+      if (
+        !options.realMemory ||
+        realMemoryId !== null ||
+        !/^[A-Za-z0-9_-]{1,100}$/.test(id)
+      )
+        throw new Error('Invalid or repeated real memory ID');
+      realMemoryId = id;
+    },
     expectedHttpErrors,
     unexpected,
     connections: () => connections,

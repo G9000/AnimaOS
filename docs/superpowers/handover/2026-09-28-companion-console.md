@@ -1,30 +1,36 @@
 # Handover: isolated memory HTTP acceptance (M0–M61)
 
-## Start here (2026-10-16): M60 merged; M61 bound selective memory acceptance
+## Start here (2026-10-16): M61 gated; publish and merge, then interval outage recovery
 
-Continue g9000/companion-memory-http-m61 from verified [M60/PR66](https://github.com/G9000/animaOS-SWARM/pull/66)
-main c0ebc9f89afb797826a293245880ff76abe1d858, source 521e09bb2be4f9441e3a961501bbcfd052cc6ab0,
-identical tested/merge tree 192cb6087f4f645a79fede8b3ed114688ad43560. Fresh web1491/121files,
-SDK183/three service skips/type/build/docs/format pass; unchanged native inputs retain
-M59 Rust2856/26 ignores/45 suites/lint/build. Protected hashes and nx exact.
+Continue g9000/companion-memory-http-m61 from M60/PR66 main
+c0ebc9f89afb797826a293245880ff76abe1d858. Plan ee88fc4d71a6476157d8a118438754b9561d1825
+was pushed before source. Four e2e-only paths; source-only lanes, one process batch
+and final web/SDK review, bounded fixes and fresh gates settled. Accepted case
+5bef15c3-d184-446d-bfab-c03550af69f4: actual memory HTTP create/UI edit/status/search/delete and
+same saved ID/bytes across one quiet forced restart. 18 offline cases pass with
+one intentional live skip; type/build/format and process ownership checks pass.
+Four earlier failed fresh cases remain immutable and were not replayed/regraded.
 
-The [M61 bound plan](../plans/2026-10-16-companion-memory-http-m61.md) tests the built
-Memory page against actual isolated Rust memory HTTP, fresh synthetic stores and one
-quiet forced restart. Shell/bootstrap/SSE/provider/account endpoints remain mocked.
-Only two e2e source paths; no product/runtime/SDK/config/dependency changes. Source
-authors never run commands; root owns process guards, reviews, tests and release.
-Existing explicit isolated-local-testing approval applies. No actual startup before
-private startup-release.json, frozen inputs and harmless owned-child self-test.
-Never call actual /api/status; provider-free /metrics supplies quiet-state evidence.
+No product/native/SDK/configuration change: M60 web1491/121files, SDK183/three service
+skips and M59 Rust2856/26 ignores/45 suites/lint/build remain revision-specific
+evidence for identical inputs. Shell/bootstrap/SSE/provider/account/connector APIs
+stay mocked; the actual daemon has no configured companion. Both explicit reads
+show disabled vectors and 14/14 local fixtures; no semantic/provider quality claim.
+All owned processes retired and isolated ports18752/18753 are free. Ordinary
+profiles/services untouched; no devices/accounts/models/DB servers/containers/deploy.
 
-Resume .superpowers/sdd/2026-10-16-companion-memory-http-m61/progress.md. Keep private
-release/stores/proofs unstaged. Publish plan, implement two lanes, batch process and
-web reviews, one fix wave, gates, explicit-path unsigned push/PR/standing merge.
+Resume .superpowers/sdd/2026-10-16-companion-memory-http-m61/progress.md. Finish final
+docs/hash freeze, explicit-path unsigned commit/push/PR/attach and standing merge;
+verify identical source/merge tree and raw hashes, then cut the next branch from
+main. Held next brief: .superpowers/sdd/2026-10-16-companion-recurrence-held/plan-held.md
+for controlled-clock enabled interval recovery after an unclaimed outage, with
+four ticks [1,0,0,1] and exactly two fake-model calls. No new real startup release.
+
 Never stage nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/
-worktree, ordinary profile/credential/account/model/device activation, databases,
-containers, Docker55432 or deployment. M47/M52 cases immutable, M52 PARTIAL; this
-selective memory test does not establish full shell/provider/semantic-quality parity.
-Cargo if needed: CARGO_INCREMENTAL=0/jobs1/threads2, serialized.
+worktree. Root commands/Git; workers source-only. Cargo if required:
+CARGO_INCREMENTAL=0/jobs1/threads2 serialized. Preserve M47/M52 consumed cases;
+M52 PARTIAL and full parity remain open. Existing merge-and-continue and isolated
+testing authorization persist; per-command unsigned commits allowed.
 
 ## Historical M60 gated handover
 
