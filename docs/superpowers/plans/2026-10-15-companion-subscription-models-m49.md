@@ -24,7 +24,7 @@ No dependencies, CLI bridge, new runtime, OAuth flow, durable catalog DB or inst
 
 | Source                                        | Current behavior                                                   | Proposed M49 consequence                                                    |
 | --------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| `apps/web/src/lib/daemon-api.ts`          | MODEL_SUGGESTIONS adds two static ChatGPT IDs                      | Stop treating either literal as an account-available/default choice         |
+| `apps/web/src/lib/daemon-api.ts`              | MODEL_SUGGESTIONS adds two static ChatGPT IDs                      | Stop treating either literal as an account-available/default choice         |
 | `components/onboarding/CompanionSetup.tsx:68` | Connected ChatGPT selected, then suggestions[0] becomes model      | Provider may be selected; model stays empty until owner chooses             |
 | `components/onboarding/OnboardingFlow.tsx:92` | defaultModel returns first static suggestion                       | Subscription default becomes no selection; other providers unchanged        |
 | `components/onboarding/ModelStep.tsx:62`      | Shared model select reads static suggestions                       | Supply account metadata state and explicit custom/current options           |
