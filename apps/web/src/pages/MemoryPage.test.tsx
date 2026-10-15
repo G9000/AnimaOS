@@ -1416,6 +1416,70 @@ describe('MemoryPage: People & things', () => {
 });
 
 describe('MemoryPage: page', () => {
+  it('offers a memory search status check on the online page', () => {
+    renderPage();
+
+    const checkStatus = screen.getByRole('button', {
+      name: 'Check memory search status',
+    });
+
+    expect(checkStatus).toBeVisible();
+    expect(checkStatus).toBeEnabled();
+  });
+
+  it('keeps search, tab, and Refresh separate from the explicit index check', async () => {
+    const read = vi.spyOn(daemon, 'memoryReadiness').mockResolvedValue({
+      passed: false,
+      embeddings: {
+        enabled: false,
+        provider: 'local',
+        model: 'small-embed',
+        dimension: 384,
+        vectorCount: 0,
+        persisted: false,
+      },
+      evaluation: {
+        passed: false,
+        totalChecks: 0,
+        passedChecks: 0,
+        failureMessages: [],
+        cases: [],
+      },
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText(MEMORY_EMPTY);
+    await user.type(
+      screen.getByRole('searchbox', { name: 'Search memories' }),
+      'tea',
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Search', exact: true }),
+    );
+    await user.click(screen.getByRole('tab', { name: 'About you' }));
+    await user.click(screen.getByRole('tab', { name: 'Memories' }));
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(read).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole('searchbox', { name: 'Search memories' }),
+    ).toHaveValue('tea');
+
+    await user.click(
+      screen.getByRole('button', { name: 'Check memory search status' }),
+    );
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(
+      await screen.findByText(/Daemon-wide vector index: disabled/),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('searchbox', { name: 'Search memories' }),
+    ).toHaveValue('tea');
+    expect(screen.getByRole('tab', { name: 'Memories' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
   it('offline shows the unreachable text and no lists', () => {
     renderPage({ online: false });
     expect(screen.getByText(COMPANION_UNREACHABLE)).toBeVisible();

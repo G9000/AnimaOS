@@ -1,0 +1,243 @@
+import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import type { MemoryReadiness } from '@animaOS-SWARM/sdk';
+
+import { daemon } from '../../lib/daemon-api';
+
+interface Props {
+  agentId: string;
+  online: boolean;
+  epoch: number;
+}
+
+interface Snapshot {
+  enabled: boolean;
+  provider: string;
+  model: string;
+  dimension: number;
+  vectorCount: number;
+  persisted: boolean;
+  totalChecks: number;
+  passedChecks: number;
+}
+
+type Boundary = Props;
+
+// The SDK readiness method has no abort signal. An unmounted panel cannot free
+// its read: only the actual settlement admits another check on this page.
+let pendingRead: Promise<MemoryReadiness> | null = null;
+const ownerListeners = new Set<() => void>();
+
+function subscribeOwner(listener: () => void) {
+  ownerListeners.add(listener);
+  return () => ownerListeners.delete(listener);
+}
+
+function ownerBusy() {
+  return pendingRead !== null;
+}
+
+function notifyOwner() {
+  for (const listener of ownerListeners) listener();
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function count(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+// Only short configuration identifiers are displayable. In particular, paths,
+// URLs, controls, and the diagnostic storageFile never enter rendered state.
+function name(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 80 &&
+    /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value)
+  );
+}
+
+function modelName(value: unknown): value is string {
+  return (
+    name(value) ||
+    (typeof value === 'string' &&
+      value.length > 0 &&
+      value.length <= 80 &&
+      /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value))
+  );
+}
+
+function projectReadiness(value: unknown): Snapshot | null {
+  const top = record(value);
+  const embeddings = record(top?.embeddings);
+  const evaluation = record(top?.evaluation);
+  if (
+    !embeddings ||
+    !evaluation ||
+    typeof embeddings.enabled !== 'boolean' ||
+    !name(embeddings.provider) ||
+    !modelName(embeddings.model) ||
+    !count(embeddings.dimension) ||
+    !count(embeddings.vectorCount) ||
+    typeof embeddings.persisted !== 'boolean' ||
+    !count(evaluation.totalChecks) ||
+    !count(evaluation.passedChecks) ||
+    evaluation.passedChecks > evaluation.totalChecks
+  ) {
+    return null;
+  }
+  return {
+    enabled: embeddings.enabled,
+    provider: embeddings.provider,
+    model: embeddings.model,
+    dimension: embeddings.dimension,
+    vectorCount: embeddings.vectorCount,
+    persisted: embeddings.persisted,
+    totalChecks: evaluation.totalChecks,
+    passedChecks: evaluation.passedChecks,
+  };
+}
+
+export function MemorySearchStatus({ agentId, online, epoch }: Props) {
+  const boundaryRef = useRef<Boundary | null>(null);
+  const [result, setResult] = useState<{
+    boundary: Boundary;
+    snapshot: Snapshot | null;
+  } | null>(null);
+  const busy = useSyncExternalStore(subscribeOwner, ownerBusy, ownerBusy);
+
+  useLayoutEffect(() => {
+    const boundary = { agentId, online, epoch };
+    boundaryRef.current = boundary;
+    return () => {
+      if (boundaryRef.current === boundary) boundaryRef.current = null;
+    };
+  }, [agentId, online, epoch]);
+
+  const boundary = boundaryRef.current;
+  const visible =
+    boundary?.agentId === agentId &&
+    boundary.online === online &&
+    boundary.epoch === epoch &&
+    result?.boundary === boundary
+      ? result.snapshot
+      : undefined;
+
+  const check = () => {
+    const owner = boundaryRef.current;
+    if (
+      !online ||
+      !owner ||
+      owner.agentId !== agentId ||
+      owner.epoch !== epoch ||
+      !owner.online ||
+      pendingRead !== null
+    ) {
+      return;
+    }
+    setResult(null);
+    let request: Promise<MemoryReadiness>;
+    try {
+      request = daemon.memoryReadiness();
+    } catch {
+      setResult({ boundary: owner, snapshot: null });
+      return;
+    }
+    pendingRead = request;
+    notifyOwner();
+    const settle = (snapshot: Snapshot | null) => {
+      try {
+        if (boundaryRef.current === owner) {
+          setResult({ boundary: owner, snapshot });
+        }
+      } finally {
+        if (pendingRead === request) {
+          pendingRead = null;
+          notifyOwner();
+        }
+      }
+    };
+    void request.then(
+      (value) => {
+        let snapshot: Snapshot | null = null;
+        try {
+          snapshot = projectReadiness(value);
+        } catch {
+          // The response is diagnostic data; keep failures generic.
+        }
+        settle(snapshot);
+      },
+      () => settle(null),
+    );
+  };
+
+  return (
+    <section className="memory-section" aria-label="Memory search status">
+      <h3>Memory search status</h3>
+      <p className="memory-meta">
+        Check a daemon-wide vector-index snapshot. These are not counts of this
+        companion’s saved facts.
+      </p>
+      <button
+        type="button"
+        className="studio-tool-button"
+        disabled={!online || busy}
+        onClick={check}
+      >
+        Check memory search status
+      </button>
+      {busy && (
+        <p className="memory-meta" role="status">
+          A memory search status check is pending. Reload if it does not finish.
+        </p>
+      )}
+      {visible === null && !busy && (
+        <p className="memory-error" role="status">
+          Memory search status is unavailable.
+        </p>
+      )}
+      {visible && !busy && (
+        <div aria-live="polite">
+          <p>
+            Daemon-wide vector index: {visible.enabled ? 'enabled' : 'disabled'}
+            .
+          </p>
+          <p>Configured provider: {visible.provider}.</p>
+          <p>Configured model: {visible.model}.</p>
+          <p>
+            Dimension: {visible.dimension}. Vectors: {visible.vectorCount}.
+          </p>
+          <p>
+            Disk cache: {visible.persisted ? 'configured' : 'not configured'}.
+            This does not confirm a recent write or canonical memory durability.
+          </p>
+          {visible.totalChecks === 0 ? (
+            <p>No local fixture checks reported.</p>
+          ) : (
+            <>
+              <p>
+                Local fixture checks: {visible.passedChecks} of{' '}
+                {visible.totalChecks} passed.
+              </p>
+              {visible.passedChecks < visible.totalChecks && (
+                <p>
+                  {visible.totalChecks - visible.passedChecks} local fixture
+                  checks failed.
+                </p>
+              )}
+            </>
+          )}
+          <p>
+            Saved memories and keyword search remain separate from vector
+            indexing. This snapshot does not verify provider reachability or
+            semantic answer quality.
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}

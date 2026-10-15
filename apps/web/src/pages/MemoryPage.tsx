@@ -4,6 +4,7 @@ import type { MemoryType } from '@animaOS-SWARM/sdk';
 import { EntityList, entityKey } from '../components/memory/EntityList';
 import { FactList } from '../components/memory/FactList';
 import { MemoryList } from '../components/memory/MemoryList';
+import { MemorySearchStatus } from '../components/memory/MemorySearchStatus';
 import { ProfileMemoryPanel } from '../components/memory/ProfileMemoryPanel';
 import { useMemory } from '../hooks/useMemory';
 import { COMPANION_UNREACHABLE } from '../lib/approvals';
@@ -125,6 +126,7 @@ export function MemoryPage({ agentId, online, epoch }: MemoryPageProps) {
           </button>
         )}
       </div>
+      <MemorySearchStatus agentId={agentId} online={online} epoch={epoch} />
       {headerError && (
         <div className="memory-header">
           <p className="memory-error" role="alert">

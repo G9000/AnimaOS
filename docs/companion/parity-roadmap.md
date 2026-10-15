@@ -42,7 +42,7 @@ Each PAR ID is stable. Milestone numbers after M38 are assigned when its detaile
 | PAR-09 | Selected real connector workflows                            | Telegram/Discord/Google code exists; real-account acceptance unverified                                                               | Current connector code; later relevant media/browser changes                 |
 | PAR-10 | Recurring schedules, outages and interrupted-work acceptance | M59 fresh-state JSON claim recovery fixture accepted; broader recurrence/outage evidence incomplete                                   | Current scheduler; optional PAR-06 acceptance fixtures                       |
 | PAR-11 | Always-on single-owner installation and recovery             | Deployment instructions/offline checks exist; target-host acceptance missing                                                          | Release with required capabilities; deployment/operator lane                 |
-| PAR-12 | Clear capability controls and daily-use status               | Settings/approvals/catalog exist; cross-capability lifecycle UI incomplete                                                            | Add incrementally with PAR-01/04/05/07/08/09                                 |
+| PAR-12 | Clear capability controls and daily-use status               | M60 explicit memory index snapshot plus existing settings/approvals/catalog; broader lifecycle UI incomplete                          | Add incrementally with PAR-01/04/05/07/08/09                                 |
 
 ### PAR-01: budgeted post-task learning (M38)
 
@@ -221,6 +221,8 @@ M59 adds a finite unresolved-claim JSON load into a new daemon and a second fres
 - Public deployment, real containers/database servers and normal-profile credentials remain outside current activation authority. Code/package preparation and offline fixtures continue; actual activation waits for concrete target approval.
 
 ### PAR-12: a usable owner console
+
+M60 adds an explicit Memory-page index snapshot through the existing readiness endpoint, with daemon-wide counts, disk cache configuration and separate fixed local fixture results. It makes no semantic-quality/provider-health/durability claim and does not trigger inference or writes. Other capability controls stay in their owning pages; broader lifecycle integration remains open.
 
 - [ ] Integrate controls with each feature: off/not configured/enabled/needs review/degraded/unavailable, meaningful reason, effective grants and active work.
 - [ ] Add Learning advice review/adoption, MCP/package lifecycle, browser/media controls and connector health where the underlying behavior exists.
