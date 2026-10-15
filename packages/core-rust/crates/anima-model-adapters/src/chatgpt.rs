@@ -628,7 +628,11 @@ async fn consume(response: reqwest::Response, sink: &dyn ModelStreamSink) -> Res
     Err("ChatGPT stream ended without a completed response".into())
 }
 
+mod models;
+#[cfg(test)]
+mod models_tests;
 #[cfg(test)]
 mod request_fixture_tests;
 #[cfg(test)]
 mod tests;
+pub use models::ChatGptModelsAdapter;

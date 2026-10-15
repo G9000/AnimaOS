@@ -90,7 +90,9 @@ const NAME_ERROR_ID = 'onboarding-agent-name-error';
 const CUSTOM_MODEL_ERROR_ID = 'onboarding-custom-model-error';
 
 function defaultModel(provider: string): string {
-  return MODEL_SUGGESTIONS[provider]?.[0] ?? '__custom__';
+  return provider === 'chatgpt'
+    ? ''
+    : (MODEL_SUGGESTIONS[provider]?.[0] ?? '__custom__');
 }
 
 function errorMessage(error: unknown): string {
@@ -577,31 +579,45 @@ export function OnboardingFlow({
   };
 
   const syncTeamNames = () => {
-    const names = [draft.name, ...workers.map((worker) => worker.name)]
-      .map((name) => name.trim().toLowerCase());
+    const names = [draft.name, ...workers.map((worker) => worker.name)].map(
+      (name) => name.trim().toLowerCase(),
+    );
     // Keep the original references through blank or duplicate intermediate
     // input, so a completed rename (including a swap) can be applied safely.
-    if (names.some((name) => !name) || new Set(names).size !== names.length) return;
+    if (names.some((name) => !name) || new Set(names).size !== names.length)
+      return;
     const renames: [string, string][] = [
       [draft.referenceName ?? draft.name, draft.name],
-      ...workers.map((worker): [string, string] => [worker.referenceName ?? worker.name, worker.name]),
+      ...workers.map((worker): [string, string] => [
+        worker.referenceName ?? worker.name,
+        worker.name,
+      ]),
     ];
-    if (!renames.some(([before, after]) => before.trim() !== after.trim())) return;
+    if (!renames.some(([before, after]) => before.trim() !== after.trim()))
+      return;
     applyTeamRenames(renames);
   };
 
   const applyTeamRenames = (renames: [string, string][]) => {
     const references = teamNameRenames(renames);
     const rename = (text: string) => renameTeamReferences(text, references);
-    setWorkers((current) => current.map((worker) => ({
-      ...worker, referenceName: undefined,
-      bio: rename(worker.bio), system: rename(worker.system),
-    })));
+    setWorkers((current) =>
+      current.map((worker) => ({
+        ...worker,
+        referenceName: undefined,
+        bio: rename(worker.bio),
+        system: rename(worker.system),
+      })),
+    );
     setDraft((current) => ({
-      ...current, referenceName: undefined,
+      ...current,
+      referenceName: undefined,
       agencyBrief: rename(current.agencyBrief),
       priorities: rename(current.priorities),
-      workspace: { ...current.workspace, mission: rename(current.workspace.mission) },
+      workspace: {
+        ...current.workspace,
+        mission: rename(current.workspace.mission),
+      },
     }));
     setFirstTask(rename);
   };
@@ -1182,11 +1198,18 @@ export function OnboardingFlow({
                 onChange={(index, field, value) => {
                   setWorkers((current) =>
                     current.map((worker, i) =>
-                      i === index ? {
-                        ...worker,
-                        ...(field === 'name' ? { referenceName: worker.referenceName ?? worker.name } : {}),
-                        [field]: value,
-                      } : worker,
+                      i === index
+                        ? {
+                            ...worker,
+                            ...(field === 'name'
+                              ? {
+                                  referenceName:
+                                    worker.referenceName ?? worker.name,
+                                }
+                              : {}),
+                            [field]: value,
+                          }
+                        : worker,
                     ),
                   );
                   setBlockingError(null);
@@ -1194,24 +1217,54 @@ export function OnboardingFlow({
                 onNameCommit={syncTeamNames}
                 onRepairName={(index, previousName) => {
                   const previous = previousName.trim();
-                  if (!previous) return 'Enter the old name appearing in the text.';
-                  const others = [draft.name, ...workers.filter((_, i) => i !== index).map((worker) => worker.name)];
-                  if (others.some((name) => name.trim().toLowerCase() === previous.toLowerCase() ||
-                    name.trim().split(/\s+/)[0].toLowerCase() === previous.toLowerCase()))
+                  if (!previous)
+                    return 'Enter the old name appearing in the text.';
+                  const others = [
+                    draft.name,
+                    ...workers
+                      .filter((_, i) => i !== index)
+                      .map((worker) => worker.name),
+                  ];
+                  if (
+                    others.some(
+                      (name) =>
+                        name.trim().toLowerCase() === previous.toLowerCase() ||
+                        name.trim().split(/\s+/)[0].toLowerCase() ===
+                          previous.toLowerCase(),
+                    )
+                  )
                     return 'That name belongs to another team member. Edit the text directly to resolve the reference.';
-                  const names = [draft.name, ...workers.map((worker) => worker.name)].map((name) => name.trim().toLowerCase());
-                  if (names.some((name) => !name) || new Set(names).size !== names.length)
+                  const names = [
+                    draft.name,
+                    ...workers.map((worker) => worker.name),
+                  ].map((name) => name.trim().toLowerCase());
+                  if (
+                    names.some((name) => !name) ||
+                    new Set(names).size !== names.length
+                  )
                     return 'Finish entering the team names first.';
                   const renames: [string, string][] = [
                     [draft.referenceName ?? draft.name, draft.name],
                     ...workers.map((worker, i): [string, string] => [
-                      i === index ? previous : worker.referenceName ?? worker.name, worker.name,
+                      i === index
+                        ? previous
+                        : (worker.referenceName ?? worker.name),
+                      worker.name,
                     ]),
                   ];
                   const references = teamNameRenames(renames);
-                  const texts = [draft.agencyBrief, draft.priorities, draft.workspace.mission, firstTask,
-                    ...workers.flatMap((worker) => [worker.bio, worker.system])];
-                  if (!texts.some((text) => renameTeamReferences(text, references) !== text))
+                  const texts = [
+                    draft.agencyBrief,
+                    draft.priorities,
+                    draft.workspace.mission,
+                    firstTask,
+                    ...workers.flatMap((worker) => [worker.bio, worker.system]),
+                  ];
+                  if (
+                    !texts.some(
+                      (text) => renameTeamReferences(text, references) !== text,
+                    )
+                  )
                     return 'No matching old-name references found. Check the spelling in the text.';
                   applyTeamRenames(renames);
                   return null;
@@ -1270,9 +1323,13 @@ export function OnboardingFlow({
             communication={draft.communication}
             priorities={draft.priorities}
             instructions={managerProfile.system}
-            onNameChange={(name) => setDraft((current) => ({
-              ...current, referenceName: current.referenceName ?? current.name, name,
-            }))}
+            onNameChange={(name) =>
+              setDraft((current) => ({
+                ...current,
+                referenceName: current.referenceName ?? current.name,
+                name,
+              }))
+            }
             onNameCommit={syncTeamNames}
             onInitiativeChange={(initiative) =>
               updateDraft('initiative', initiative)

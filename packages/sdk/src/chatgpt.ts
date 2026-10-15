@@ -15,8 +15,57 @@ export interface ChatGptStatus {
   error: string | null;
 }
 
+export interface ChatGptModelEntry {
+  id: string;
+}
+
+/** Account-scoped catalog metadata; presence does not prove generation access. */
+export interface ChatGptModelsSnapshot {
+  state:
+    | 'unrequested'
+    | 'ready'
+    | 'empty'
+    | 'stale'
+    | 'unavailable'
+    | 'disconnected';
+  connectionRevision: string | null;
+  catalogRevision: string | null;
+  fetchedAtMs: number | null;
+  expiresAtMs: number | null;
+  models: ChatGptModelEntry[];
+  error:
+    | 'Model metadata is unavailable.'
+    | 'Model metadata request timed out.'
+    | 'Model metadata response is invalid.'
+    | null;
+}
+
+export interface ChatGptModelsOptions {
+  signal?: AbortSignal;
+}
+
 export class ChatGptClient {
   constructor(private readonly client: DaemonClient) {}
+
+  /** Reads the daemon cache only; never requests upstream metadata. */
+  models(options: ChatGptModelsOptions = {}): Promise<ChatGptModelsSnapshot> {
+    return this.client.requestJson('/api/providers/chatgpt/models', {
+      headers: { 'cache-control': 'no-store' },
+      signal: options.signal,
+    });
+  }
+
+  /** One explicit metadata refresh. No automatic retry or model selection. */
+  refreshModels(
+    options: ChatGptModelsOptions = {},
+  ): Promise<ChatGptModelsSnapshot> {
+    return this.client.requestJson('/api/providers/chatgpt/models/refresh', {
+      method: 'POST',
+      headers: { 'cache-control': 'no-store' },
+      body: {},
+      signal: options.signal,
+    });
+  }
 
   status(): Promise<ChatGptStatus> {
     return this.client.requestJson('/api/providers/chatgpt/status', {

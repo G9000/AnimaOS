@@ -17,6 +17,7 @@ import {
 } from '../lib/daemon-api';
 import { AlertIcon, TrashIcon, XIcon } from './icons';
 import { ChatGptConnection } from './ChatGptConnection';
+import { ChatGptModelSelect } from './ChatGptModelSelect';
 import { AgentProfileDetails, AgentMemoryView } from './AgentProfileDetails';
 import { AgentFilesPanel } from './AgentFilesPanel';
 import { AgentTasksView, AgentProactiveView } from './AgentWork';
@@ -124,6 +125,7 @@ export function SettingsPanel({
   onOpenSkills?: () => void;
 }) {
   const seedModel = useMemo(() => {
+    if (agent.provider === 'chatgpt') return agent.model;
     const options = MODEL_SUGGESTIONS[agent.provider] ?? [];
     return options.includes(agent.model) ? agent.model : '__custom__';
   }, [agent.provider, agent.model]);
@@ -152,6 +154,7 @@ export function SettingsPanel({
   const [customModel, setCustomModel] = useState(
     seedModel === '__custom__' ? agent.model : '',
   );
+  const [modelScope, setModelScope] = useState({ revision: 0, pending: false });
   const [system, setSystem] = useState(agent.system ?? '');
   const [accessSelection, setAccessSelection] = useState<AccessProfile | null>(
     derivedAccess === 'custom' ? null : derivedAccess,
@@ -182,7 +185,10 @@ export function SettingsPanel({
   // order alone is not a config change and must not clobber an in-progress draft.
   useEffect(() => {
     const options = MODEL_SUGGESTIONS[agent.provider] ?? [];
-    const seeded = options.includes(agent.model) ? agent.model : '__custom__';
+    const seeded =
+      agent.provider === 'chatgpt' || options.includes(agent.model)
+        ? agent.model
+        : '__custom__';
     setName(agent.name);
     setProvider(agent.provider);
     setModel(seeded);
@@ -588,7 +594,9 @@ export function SettingsPanel({
                       const next = e.target.value;
                       setProvider(next);
                       const options = MODEL_SUGGESTIONS[next] ?? [];
-                      setModel(options[0] ?? '__custom__');
+                      setModel(
+                        next === 'chatgpt' ? '' : (options[0] ?? '__custom__'),
+                      );
                     }}
                     className="field"
                   >
@@ -620,35 +628,59 @@ export function SettingsPanel({
                     </p>
                   )}
                 </div>
-                <div>
-                  <label className={labelCls}>Model</label>
-                  <select
-                    aria-label="Model"
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
+                {provider === 'chatgpt' ? (
+                  <ChatGptModelSelect
+                    id="settings-chatgpt-model"
+                    scopeKey={JSON.stringify([agent.id, modelScope.revision])}
+                    connectionPending={modelScope.pending}
+                    model={model}
+                    customModel={customModel}
+                    onModelChange={setModel}
+                    onCustomModelChange={setCustomModel}
                     disabled={controlsDisabled}
-                    className="field"
-                  >
-                    {(MODEL_SUGGESTIONS[provider] ?? []).map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                    <option value="__custom__">custom…</option>
-                  </select>
-                </div>
-                {model === '__custom__' && (
-                  <input
-                    aria-label="Custom model"
-                    value={customModel}
-                    onChange={(e) => setCustomModel(e.target.value)}
-                    disabled={controlsDisabled}
-                    placeholder="model id, e.g. llama3.1"
-                    className="field animate-fade-in"
                   />
+                ) : (
+                  <>
+                    <div>
+                      <label className={labelCls}>Model</label>
+                      <select
+                        aria-label="Model"
+                        value={model}
+                        onChange={(e) => setModel(e.target.value)}
+                        disabled={controlsDisabled}
+                        className="field"
+                      >
+                        {(MODEL_SUGGESTIONS[provider] ?? []).map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                        <option value="__custom__">custom…</option>
+                      </select>
+                    </div>
+                    {model === '__custom__' && (
+                      <input
+                        aria-label="Custom model"
+                        value={customModel}
+                        onChange={(e) => setCustomModel(e.target.value)}
+                        disabled={controlsDisabled}
+                        placeholder="model id, e.g. llama3.1"
+                        className="field animate-fade-in"
+                      />
+                    )}
+                  </>
                 )}
                 {provider === 'chatgpt' && (
-                  <ChatGptConnection onConnectionChange={refreshProviders} />
+                  <ChatGptConnection
+                    key={agent.id}
+                    onConnectionChange={refreshProviders}
+                    onModelScopeChange={(pending) =>
+                      setModelScope((current) => ({
+                        revision: current.revision + 1,
+                        pending,
+                      }))
+                    }
+                  />
                 )}
               </section>
 

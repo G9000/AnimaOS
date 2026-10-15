@@ -1,12 +1,14 @@
 import {
   fireEvent,
+  act,
   render,
   screen,
   waitFor,
   within,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ChatGptClient, type ChatGptModelsSnapshot } from '@animaOS-SWARM/sdk';
 
 import {
   ACCESS_PROFILES,
@@ -144,6 +146,206 @@ const configuredWorkspace: DaemonWorkspaceState = {
   },
   defaultRoot: '/workspaces',
 };
+
+describe('M49 Settings subscription models', () => {
+  function metadata(
+    overrides: Partial<ChatGptModelsSnapshot> = {},
+  ): ChatGptModelsSnapshot {
+    return {
+      state: 'ready',
+      connectionRevision: 'connection-a',
+      catalogRevision: 'catalog-a',
+      fetchedAtMs: Date.now(),
+      expiresAtMs: Date.now() + 300_000,
+      models: [{ id: 'synthetic-model-a' }],
+      error: null,
+      ...overrides,
+    };
+  }
+  beforeEach(() => {
+    vi.spyOn(ChatGptClient.prototype, 'status').mockResolvedValue({
+      connected: true,
+      accountId: 'synthetic-account',
+      planType: null,
+      login: null,
+      error: null,
+    });
+    vi.spyOn(ChatGptClient.prototype, 'models').mockResolvedValue(metadata());
+    vi.spyOn(ChatGptClient.prototype, 'refreshModels').mockResolvedValue(
+      metadata(),
+    );
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('m49_chatgpt_models_settings_keeps_saved_model_dirty_fields_and_grants_during_refresh', async () => {
+    const external = `mcp_${'1'.repeat(32)}_${'a'.repeat(16)}`;
+    const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+    const user = userEvent.setup();
+    renderPanel(
+      agent({
+        provider: 'chatgpt',
+        model: 'Saved.Exact/Model',
+        toolNames: ['read_file', external, 'browser_observe'],
+      }),
+      { saveSettings },
+    );
+    await screen.findByText(/Received model metadata/);
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue(
+      'Saved.Exact/Model',
+    );
+    expect(screen.getByRole('button', { name: 'No changes' })).toBeDisabled();
+    let complete!: (value: ChatGptModelsSnapshot) => void;
+    vi.mocked(ChatGptClient.prototype.refreshModels).mockReturnValue(
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Refresh models' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Unsaved name' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'System prompt' }), {
+      target: { value: 'Unsaved system' },
+    });
+    await act(async () =>
+      complete(metadata({ models: [{ id: 'different-model' }] })),
+    );
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue(
+      'Unsaved name',
+    );
+    expect(screen.getByRole('textbox', { name: 'System prompt' })).toHaveValue(
+      'Unsaved system',
+    );
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue(
+      'Saved.Exact/Model',
+    );
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(saveSettings).toHaveBeenCalledWith({
+      name: 'Unsaved name',
+      system: 'Unsaved system',
+    });
+    expect(saveSettings.mock.calls[0][0]).not.toHaveProperty('tools');
+    expect(saveSettings.mock.calls[0][0]).not.toHaveProperty('model');
+  });
+
+  it('m49_chatgpt_models_settings_clears_only_new_subscription_default_and_retains_api_defaults', async () => {
+    const user = userEvent.setup();
+    const view = renderPanel(agent());
+    view.rerender(
+      <SettingsPanel
+        {...view.props}
+        providers={[
+          ...providers,
+          {
+            id: 'chatgpt',
+            label: 'ChatGPT subscription',
+            configured: true,
+            requiresKey: false,
+            apiKeyEnvs: [],
+          },
+        ]}
+      />,
+    );
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Provider' }),
+      'chatgpt',
+    );
+    await screen.findByText(/Received model metadata/);
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Model' }),
+      '__custom__',
+    );
+    await user.type(
+      screen.getByRole('textbox', { name: 'Custom model' }),
+      'Owner.Custom/Exact',
+    );
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(view.props.saveSettings).toHaveBeenCalledWith({
+      provider: 'chatgpt',
+      model: 'Owner.Custom/Exact',
+    });
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Provider' }),
+      'openai',
+    );
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue(
+      'gpt-4o',
+    );
+    expect(ChatGptClient.prototype.refreshModels).not.toHaveBeenCalled();
+  });
+
+  it('m49_chatgpt_models_settings_auth_and_owner_changes_fence_late_refresh_without_losing_custom_draft', async () => {
+    const user = userEvent.setup();
+    const view = renderPanel(
+      agent({ provider: 'chatgpt', model: 'Saved.Exact' }),
+    );
+    await screen.findByText(/Received model metadata/);
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Model' }),
+      '__custom__',
+    );
+    await user.type(
+      screen.getByRole('textbox', { name: 'Custom model' }),
+      'Unsaved.Custom',
+    );
+    let complete!: (value: ChatGptModelsSnapshot) => void;
+    vi.mocked(ChatGptClient.prototype.refreshModels).mockReturnValue(
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Refresh models' }));
+    vi.mocked(ChatGptClient.prototype.models).mockResolvedValue(
+      metadata({
+        state: 'disconnected',
+        models: [],
+        connectionRevision: null,
+        catalogRevision: null,
+      }),
+    );
+    vi.spyOn(ChatGptClient.prototype, 'disconnect').mockResolvedValue({
+      connected: false,
+      accountId: null,
+      planType: null,
+      login: null,
+      error: null,
+    });
+    await user.click(
+      screen.getByRole('button', { name: 'Disconnect ChatGPT' }),
+    );
+    await screen.findByText(/Connect ChatGPT to refresh model metadata/);
+    expect(screen.getByRole('textbox', { name: 'Custom model' })).toHaveValue(
+      'Unsaved.Custom',
+    );
+    view.rerender(
+      <SettingsPanel
+        {...view.props}
+        agent={agent({
+          id: 'agent-b',
+          name: 'Other owner',
+          provider: 'chatgpt',
+          model: 'Other.Exact',
+        })}
+      />,
+    );
+    await act(async () =>
+      complete(metadata({ models: [{ id: 'old-account-model' }] })),
+    );
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue(
+      'Other owner',
+    );
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue(
+      'Other.Exact',
+    );
+    expect(
+      screen.queryByRole('option', { name: 'old-account-model' }),
+    ).not.toBeInTheDocument();
+    expect(ChatGptClient.prototype.refreshModels).toHaveBeenCalledOnce();
+    expect(view.props.saveSettings).not.toHaveBeenCalled();
+  });
+});
 
 describe('SettingsPanel workspace section', () => {
   it('shows the configured workspace as read-only company, mission, and folder rows', () => {

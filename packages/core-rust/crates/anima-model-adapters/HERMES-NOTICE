@@ -43,6 +43,16 @@ absent/null code and absent/null or four recognized types. It emits one fixed
 model-access explanation without provider/model text. No credential rotation,
 fallback, retry, permission change or historical-failure diagnosis is copied.
 
+M49 source revision: 1fd18277267152893a8a24792b79213e7ca3f899.
+M49 adapts subscription catalog slug/visibility/priority ordering and exact-ID
+deduplication intent from hermes_cli/codex_models.py::_ranked_slugs, including
+retaining supported_in_api:false rows, with the fixed client_version query
+demonstrated by agent/model_metadata.py::fetch_codex_catalog_entries and
+tests/hermes_cli/test_codex_models.py. Anima validates all consumed fields,
+bounds body/rows/IDs, preserves literal IDs and refuses redirects/retries.
+No curated fallback, private cache/profile import, account rotation, context
+calibration or inference behavior is copied. Catalog presence is metadata only.
+
 MIT License
 
 Copyright (c) 2025 Nous Research

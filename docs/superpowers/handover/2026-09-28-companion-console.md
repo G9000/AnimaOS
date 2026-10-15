@@ -1,3 +1,68 @@
+# Handover: subscription model selection (M0–M49)
+
+## Start here (2026-10-15): M49 local gates pass; actual metadata unavailable
+
+M49 is settled on `g9000/companion-subscription-models-m49`, cut from verified
+[M48/PR54](https://github.com/G9000/animaOS-SWARM/pull/54) main
+`317792304772f8cf203f6d6335a1d4a95d4c5cf1`. The
+[M49 plan](../plans/2026-10-15-companion-subscription-models-m49.md) records the
+scoped outcome. Exact committed source/PR/verified merge and current resume are
+`.superpowers/sdd/2026-10-15-companion-subscription-models-m49/progress.md`.
+Finish that publication settlement before cutting the next branch from verified
+main. Standing reviewed merge-and-continue authorization applies.
+
+Account-bound catalog/cache, owner GET/explicit Refresh, SDK and deliberate web
+selection are implemented. Preserve saved/dirty/custom models and grants; metadata
+is not entitlement or a runtime model gate. New ChatGPT setup has no auto-default.
+Pinned public Hermes query/ranking behavior is reused with MIT provenance.
+
+Required local gates passed **2,709 Rust/core / 20 intentional ignores / 40 suites /
+formatting / build**, **151 SDK / three real-service skips**, and **1,320 web /
+115 files**, plus both type checks/builds. Final SDK/web review was clean; the
+native/core review's single deadline gap was fixed after two observed REDs, now
+GREEN in the full suite. All 29 reviewed source/README hashes stayed frozen.
+The compiled README/OpenAPI inventory is 194 operations. No dependency was added.
+
+The one separately released actual metadata-only driver failed in **1.45 seconds**:
+state unavailable, zero IDs, fixed `Model metadata is unavailable.`. It is not an
+empty current catalog; transport/HTTP/auth/size cause is unknown. The one-shot
+release is consumed: no retry, alternative query/model/provider or generation
+followed. M48's unsupported-model rejection does not establish M47's historical
+cause, and neither earlier generation release may be reused. Real coding/delegation
+is still unaccepted; do not repair/replay M47's original failed candidate.
+
+Next: prepare the distinct useful JSONL task/literal oracle and resolve the bounded
+metadata diagnostic gap from source. Actual generation stays held without a
+current-account selection; never fill it with a guessed model. A private useful-task proposal stays held/renumberable; the next
+small step is closed stage/status diagnostics, not a guessed compatibility fix.
+Root binds its five risks on a new branch only after verified M49 merge. Native voice remains held/renumberable; broad Hermes parity is not claimed.
+
+Root owns commands/fmt/Git/services/models with `CARGO_INCREMENTAL=0`/jobs1/two
+full-suite test threads. Standing cheap Codex delegation, per-command unsigned
+commits, reviewed merge-and-continue and context-only chat updates persist.
+Preserve nx.json SHA256
+`3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`;
+explicit files only, never nx.json/anima.yaml/private evidence. No worktree/stash/
+reset/restore/path checkout, ordinary profiles/accounts/connector sends, DB servers/
+containers/Docker55432/public deployment or credential/profile copying/readout.
+Retain MIT provenance and Anima naming. Historical resumes below are superseded here.
+
+## Historical M49 planning handover
+
+# Handover: subscription model selection (M0–M49)
+
+## Start here (2026-10-15): M48 merged; M49 bound plan active
+
+Continue `g9000/companion-subscription-models-m49`, cut from verified [M48/PR54](https://github.com/G9000/animaOS-SWARM/pull/54) main `317792304772f8cf203f6d6335a1d4a95d4c5cf1`. Its source `cc5c2bba03323b2889c6132d1fbd681f4a72b4fc` shares tested tree `729a71aea0e8d5153142afa2fec0dbb049f4f19f`; M48 is committed/pushed/merged. All owned hashes and unrelated nx.json were preserved. Exact resume is `.superpowers/sdd/2026-10-15-companion-subscription-models-m49/progress.md`; authorized context-only status was sent to the other chat.
+
+The [M49 lean plan](../plans/2026-10-15-companion-subscription-models-m49.md) binds five controller risks and three disjoint test-first lanes. Reuse pinned public Hermes catalog behavior with notices: fixed single metadata GET, bounded parser and ephemeral auth-generation/vault-generation scoped cache. Cache-only owner GET and explicit owner POST Refresh, no retry/redirect/fallback/background fetch. New ChatGPT setup leaves model empty for deliberate selection; preserve saved/dirty/custom strings and grants, with unverified status when metadata is absent/stale. Existing inference, API-provider defaults, context/vision/pricing and auth contracts remain intact.
+
+M48 passed Rust2681/19intentional-ignores/40suites/lint/build and exact14-tool synthetic wire handoff, both reviews clean. Its only distinct real zero-tool gpt-5.5 request rejected **model_access** in1.10s: the selected model is unsupported for this account. Consumption is unknown; its release is exhausted. No M49 generation or M47 retry is authorized. At most one actual metadata refresh may be separately root-released after M49 gates; receipt cannot prove generation acceptance. M47's original body/cause and useful coding/delegation stay open. Native voice stays held/renumberable.
+
+Root owns commands/fmt/Git/services/models with `CARGO_INCREMENTAL=0`/jobs1/two full-suite test threads. Standing Codex delegation, per-command unsigned commits, reviewed merge-and-continue and context-only updates persist. Preserve nx.json SHA256 `3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`; explicit files only, never nx.json/anima.yaml/private evidence. No worktree/stash/reset/restore/path checkout, ordinary profiles/accounts/connector sends, DB servers/containers/Docker55432/public deployment or credential/profile copying/readout. Retain MIT provenance and Anima naming. Historical resumes below are superseded here.
+
+## Historical M48 handover
+
 # Handover: provider-request diagnostics (M0–M48)
 
 ## Start here (2026-10-15): M48 gates pass; account model access blocks generation

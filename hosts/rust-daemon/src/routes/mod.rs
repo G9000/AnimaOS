@@ -152,6 +152,7 @@ use crate::runtime_model::provider_summaries;
         swarm_events_entry,
         list_providers_entry,
         chatgpt::status, chatgpt::login, chatgpt::cancel, chatgpt::disconnect,
+        chatgpt::models, chatgpt::refresh_models,
         get_workspace_entry,
         put_workspace_entry,
         get_workspace_avatar_entry,
@@ -225,6 +226,7 @@ use crate::runtime_model::provider_summaries;
         attachments::upload, attachments::serve,
     ),
     components(schemas(self::contracts::AgentSummariesEnvelope, self::contracts::AttachmentEnvelope, self::contracts::AttachmentResponse,
+        crate::chatgpt_auth::ChatGptModelsSnapshot,crate::chatgpt_auth::ChatGptModelEntry,chatgpt::ModelsRefreshRequest,
         self::contracts::mcp::McpToolDescriptorResponse, self::contracts::mcp::ReviewedMcpToolResponse,
         self::contracts::mcp::McpStaticErrorResponse,
         self::contracts::mcp::McpStdioRequest, self::contracts::mcp::McpStdioResponse,
@@ -1104,6 +1106,8 @@ fn router_with_services_with_policies_and_integrations(
         .route("/api/swarms/{swarm_id}", get(get_swarm_entry))
         .route("/api/providers", get(list_providers_entry))
         .route("/api/providers/chatgpt/status", get(chatgpt::status))
+        .route("/api/providers/chatgpt/models",get(chatgpt::models))
+        .route("/api/providers/chatgpt/models/refresh",axum::routing::post(chatgpt::refresh_models))
         .route(
             "/api/providers/chatgpt/login",
             axum::routing::post(chatgpt::login).delete(chatgpt::cancel),

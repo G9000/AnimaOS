@@ -58,6 +58,9 @@ use std::{sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use zeroize::Zeroizing;
 
+mod models;
+pub(crate) use models::{ChatGptModelEntry, ChatGptModelsSnapshot, ModelsError};
+
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const SERVICE: &str = "anima.chatgpt.subscription.v1";
 const ACCOUNT: &str = "account";
@@ -292,10 +295,17 @@ pub(crate) struct ChatGptAuth {
     start_lock: Arc<Mutex<()>>,
     vault: Arc<dyn OAuthVaultBackend>,
     transport: Arc<dyn AuthTransport>,
+    models_cache: Arc<Mutex<models::ModelsCache>>,
+    models_epoch: Arc<std::sync::atomic::AtomicU64>,
+    models_refresh: Arc<Mutex<()>>,
+    models_transport: Arc<dyn models::ModelsTransport>,
 }
 impl ChatGptAuth {
     pub fn new() -> Self {
-        Self::with_dependencies(Arc::new(OsOAuthVault), Arc::new(OfficialTransport::new()))
+        let mut service =
+            Self::with_dependencies(Arc::new(OsOAuthVault), Arc::new(OfficialTransport::new()));
+        service.models_transport = Arc::new(models::OfficialModelsTransport);
+        service
     }
     pub fn in_memory() -> Self {
         Self::with_dependencies(
@@ -313,6 +323,10 @@ impl ChatGptAuth {
             lifecycle: Arc::new(Mutex::new(Lifecycle::default())),
             refresh_lock: Arc::new(Mutex::new(())),
             start_lock: Arc::new(Mutex::new(())),
+            models_cache: Arc::new(Mutex::new(models::ModelsCache::default())),
+            models_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            models_refresh: Arc::new(Mutex::new(())),
+            models_transport: Arc::new(models::UnavailableModelsTransport),
         }
     }
     fn manifest(&self) -> Result<Option<Manifest>, String> {
@@ -334,6 +348,11 @@ impl ChatGptAuth {
             .transpose()
     }
     fn load(&self) -> Result<Option<Credential>, String> {
+        Ok(self.load_with_manifest()?.map(|(_, credential)| credential))
+    }
+    // Return the manifest actually used for the immutable chunk reads. Never
+    // associate a loaded credential with a second, potentially newer manifest.
+    fn load_with_manifest(&self) -> Result<Option<(Manifest, Credential)>, String> {
         let Some(m) = self.manifest()? else {
             return Ok(None);
         };
@@ -357,7 +376,7 @@ impl ChatGptAuth {
         {
             return Err(VAULT_ERROR.into());
         }
-        Ok(Some(credential))
+        Ok(Some((m, credential)))
     }
     fn clean_chunks(&self, m: &Manifest) -> Result<(), String> {
         for index in 0..m.chunks {
@@ -403,6 +422,9 @@ impl ChatGptAuth {
             .map_err(|_| VAULT_ERROR.to_string())
     }
     fn save(&self, c: &Credential) -> Result<(), String> {
+        self.save_with_manifest(c).map(|_| ())
+    }
+    fn save_with_manifest(&self, c: &Credential) -> Result<Manifest, String> {
         self.recover_cleanup()?;
         let previous = self.manifest()?;
         let payload =
@@ -444,7 +466,8 @@ impl ChatGptAuth {
         if self.vault.put(SERVICE, ACCOUNT, &serialized).is_err() {
             return Err(VAULT_ERROR.into());
         }
-        self.recover_cleanup()
+        self.recover_cleanup()?;
+        Ok(manifest)
     }
     fn disconnect_vault(&self) -> Result<(), String> {
         self.recover_cleanup()?;
@@ -555,28 +578,43 @@ impl ChatGptAuth {
         self.status().await
     }
     pub async fn usable_credential(&self) -> Result<(String, String), String> {
+        let context = self
+            .usable_context(false)
+            .await?
+            .ok_or("ChatGPT is disconnected; sign in in settings")?;
+        Ok((
+            context.credential.access_token.clone(),
+            context.credential.account_id.clone(),
+        ))
+    }
+    async fn usable_context(
+        &self,
+        fence_manifest: bool,
+    ) -> Result<Option<models::AuthorizedModels>, String> {
         let _refresh = self.refresh_lock.lock().await;
-        let (generation, c) = {
+        let (generation, manifest, c) = {
             let l = self.lifecycle.lock().await;
-            (
-                l.generation,
-                self.load()?
-                    .ok_or("ChatGPT is disconnected; sign in in settings")?,
-            )
+            let Some((manifest, credential)) = self.load_with_manifest()? else {
+                return Ok(None);
+            };
+            (l.generation, manifest, credential)
         };
         if c.expires_at_ms > now_ms() + 60_000 {
-            return Ok((c.access_token.clone(), c.account_id.clone()));
+            return Ok(Some(models::AuthorizedModels::new(generation, manifest, c)));
         }
         let refreshed = self.transport.refresh(&c).await;
         let mut l = self.lifecycle.lock().await;
-        if l.generation != generation {
+        if l.generation != generation
+            || (fence_manifest
+                && self.manifest()?.as_ref().map(|m| &m.generation) != Some(&manifest.generation))
+        {
             return Err("ChatGPT authorization changed; retry".into());
         }
         match refreshed {
             Ok(c) => {
-                self.save(&c)?;
+                let manifest = self.save_with_manifest(&c)?;
                 l.error = None;
-                Ok((c.access_token.clone(), c.account_id.clone()))
+                Ok(Some(models::AuthorizedModels::new(generation, manifest, c)))
             }
             Err(e) => {
                 l.error = Some(e.clone());

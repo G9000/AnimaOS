@@ -240,7 +240,13 @@ export type {
   StatusStorage,
 } from './status.js';
 export { ChatGptClient } from './chatgpt.js';
-export type { ChatGptLogin, ChatGptStatus } from './chatgpt.js';
+export type {
+  ChatGptLogin,
+  ChatGptStatus,
+  ChatGptModelEntry,
+  ChatGptModelsSnapshot,
+  ChatGptModelsOptions,
+} from './chatgpt.js';
 export type {
   CalendarConnector,
   CalendarConnectResult,

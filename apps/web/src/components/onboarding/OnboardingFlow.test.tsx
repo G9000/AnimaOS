@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ChatGptClient } from '@animaOS-SWARM/sdk';
 
 import { toolNamesForProfile } from '../../lib/agent-access';
 import {
@@ -132,6 +133,22 @@ async function goToReview(user: ReturnType<typeof userEvent.setup>) {
 }
 
 beforeEach(() => {
+  vi.spyOn(ChatGptClient.prototype, 'status').mockResolvedValue({
+    connected: true,
+    accountId: 'synthetic-account',
+    planType: null,
+    login: null,
+    error: null,
+  });
+  vi.spyOn(ChatGptClient.prototype, 'models').mockResolvedValue({
+    state: 'ready',
+    connectionRevision: 'connection-a',
+    catalogRevision: 'catalog-a',
+    fetchedAtMs: Date.now(),
+    expiresAtMs: Date.now() + 300_000,
+    models: [{ id: 'synthetic-model-a' }],
+    error: null,
+  });
   vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
     configured: false,
     workspace: null,
@@ -144,6 +161,54 @@ afterEach(() => {
 });
 
 describe('OnboardingFlow', () => {
+  it('m49_chatgpt_models_workspace_setup_requires_explicit_subscription_model_without_changing_api_defaults', async () => {
+    const user = userEvent.setup();
+    const bootstrap = vi.spyOn(daemon, 'bootstrapWorkspace');
+    const create = vi.spyOn(daemon, 'createAgent');
+    const view = renderFlow({
+      providers: [
+        {
+          id: 'chatgpt',
+          label: 'ChatGPT subscription',
+          configured: true,
+          requiresKey: false,
+          apiKeyEnvs: [],
+        },
+        ...configuredProviders,
+      ],
+    });
+    await goToIntelligence(user);
+    await screen.findByRole('option', { name: 'synthetic-model-a' });
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue('');
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByRole('heading', { name: 'Model' })).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent('Enter a model.');
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveFocus();
+    expect(
+      screen.queryByRole('textbox', { name: 'Office location' }),
+    ).not.toBeInTheDocument();
+    expect(bootstrap).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Model' }),
+      'synthetic-model-a',
+    );
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByRole('heading', { name: 'Workspace' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue(
+      'synthetic-model-a',
+    );
+    await user.click(screen.getByText('Other AI providers (optional)'));
+    await user.click(
+      screen.getByRole('button', { name: /OpenAI.*Configured/ }),
+    );
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue(
+      'gpt-4o',
+    );
+    expect(view.onCreated).not.toHaveBeenCalled();
+  });
+
   it('connects intelligence before requiring a workspace folder', async () => {
     const user = userEvent.setup();
     renderFlow();
@@ -1129,7 +1194,9 @@ describe('OnboardingFlow', () => {
       name: /Ollama.*configured/i,
     });
     expect(ollama).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue('gpt-4o');
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue(
+      'gpt-4o',
+    );
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
     expect(
       screen.queryByRole('button', { name: 'Create workspace' }),
@@ -1140,32 +1207,58 @@ describe('OnboardingFlow', () => {
   it('retains the chosen subscription and custom model through disconnect and reconnect', async () => {
     const user = userEvent.setup();
     const chatgpt: DaemonProvider = {
-      id: 'chatgpt', label: 'ChatGPT subscription', configured: true,
-      requiresKey: false, apiKeyEnvs: [],
+      id: 'chatgpt',
+      label: 'ChatGPT subscription',
+      configured: true,
+      requiresKey: false,
+      apiKeyEnvs: [],
     };
     const catalog = [...configuredProviders, chatgpt];
     const view = renderFlow({ providers: catalog });
     await goToIntelligence(user);
-    await user.click(screen.getByRole('button', { name: 'Use ChatGPT subscription' }));
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Model' }), '__custom__');
-    await user.type(screen.getByRole('textbox', { name: 'Custom model' }), 'my-selected-model');
-    const refresh = (providers: DaemonProvider[] | null) => view.rerender(
-      <OnboardingFlow providers={providers} providersError={null}
-        retryProviders={view.retryProviders} onCreated={view.onCreated} />,
+    await user.click(
+      screen.getByRole('button', { name: 'Use ChatGPT subscription' }),
     );
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Model' }),
+      '__custom__',
+    );
+    await user.type(
+      screen.getByRole('textbox', { name: 'Custom model' }),
+      'my-selected-model',
+    );
+    const refresh = (providers: DaemonProvider[] | null) =>
+      view.rerender(
+        <OnboardingFlow
+          providers={providers}
+          providersError={null}
+          retryProviders={view.retryProviders}
+          onCreated={view.onCreated}
+        />,
+      );
     refresh([...configuredProviders, { ...chatgpt, configured: false }]);
-    expect(screen.getByRole('button', { name: 'ChatGPT subscription selected' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('textbox', { name: 'Custom model' })).toHaveValue('my-selected-model');
+    expect(
+      screen.getByRole('button', { name: 'ChatGPT subscription selected' }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('textbox', { name: 'Custom model' })).toHaveValue(
+      'my-selected-model',
+    );
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
     refresh(null);
     refresh(catalog);
     expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
-    await user.click(screen.getByRole('button', { name: 'ChatGPT subscription selected' }));
-    expect(screen.getByRole('textbox', { name: 'Custom model' })).toHaveValue('my-selected-model');
+    await user.click(
+      screen.getByRole('button', { name: 'ChatGPT subscription selected' }),
+    );
+    expect(screen.getByRole('textbox', { name: 'Custom model' })).toHaveValue(
+      'my-selected-model',
+    );
     await user.click(screen.getByRole('button', { name: 'Next' }));
     await fillFolder(user);
     await user.click(screen.getByRole('button', { name: 'Next' }));
-    expect(screen.getByText('ChatGPT subscription / my-selected-model')).toBeVisible();
+    expect(
+      screen.getByText('ChatGPT subscription / my-selected-model'),
+    ).toBeVisible();
   });
 });
 
