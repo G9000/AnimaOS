@@ -35,6 +35,7 @@ import type { AttachmentDraft } from '../../lib/attachments';
 import type { KnownRunAttachments } from '../../lib/run-attachments';
 import { BrowserTaskControls } from './BrowserTaskControls';
 import type { NativeVoiceScope } from '../voice/NativeTranscription';
+import { NativeSpeech } from '../voice/NativeSpeech';
 
 export interface SessionComposerState {
   draft: string;
@@ -443,6 +444,24 @@ export function SessionView({
           onSelection={browserTask.onSelection}
         />
       )}
+      {session?.kind === 'chat' &&
+        composer.nativeVoice?.agentId === session.agentId &&
+        composer.nativeVoice.sessionId === session.id && (
+          <NativeSpeech
+            agentId={session.agentId}
+            sessionId={session.id}
+            conversationKey={voiceKey}
+            messages={messages}
+            disabled={
+              missing ||
+              composer.disabled ||
+              composer.offline ||
+              composer.sending ||
+              Boolean(composer.runActive) ||
+              composer.voiceDisabled === true
+            }
+          />
+        )}
       {footer.kind === 'composer' ? (
         <Composer
           agentName={agent.name}

@@ -100,6 +100,109 @@ fn transcription_service_for_config(base: &str, key: Option<String>) -> crate::v
 }
 
 #[cfg(test)]
+mod speech_configuration_tests {
+    use super::*;
+    use anima_core::SpeechAvailability as Availability;
+
+    #[test]
+    fn speech_requires_independent_opt_in_and_only_canonical_platform_configuration() {
+        for enabled in [None, Some("false"), Some("TRUE"), Some("0"), Some(" true")] {
+            assert_eq!(
+                speech_service_for_config(
+                    enabled,
+                    "https://api.openai.com/v1",
+                    Some("synthetic-key".into())
+                )
+                .availability(),
+                Availability::Disabled
+            );
+        }
+        for enabled in ["true", "1"] {
+            for base in [
+                "https://api.openai.com/v1",
+                "https://api.openai.com/v1/",
+                "https://api.openai.com:443/v1",
+                "https://api.openai.com:443/v1/",
+            ] {
+                assert_eq!(
+                    speech_service_for_config(Some(enabled), base, None).availability(),
+                    Availability::MissingCredentials
+                );
+                assert_eq!(
+                    speech_service_for_config(Some(enabled), base, Some("synthetic-key".into()))
+                        .availability(),
+                    Availability::Available
+                );
+            }
+            for base in [
+                "http://api.openai.com/v1",
+                "https://other.test/v1",
+                "https://api.openai.com:444/v1",
+                "https://@api.openai.com/v1",
+                "https://user@api.openai.com/v1",
+                "https://api.openai.com/v1/../v1",
+                "https://api.openai.com/./v1/",
+                "https://api.openai.com/v1?key=x",
+                "https://api.openai.com/v1#x",
+            ] {
+                assert_eq!(
+                    speech_service_for_config(Some(enabled), base, Some("synthetic-key".into()))
+                        .availability(),
+                    Availability::UnsupportedConfiguration,
+                    "{base}"
+                );
+            }
+        }
+    }
+}
+
+/// Speech has independent explicit API charge consent. Never read STT enablement,
+/// OAuth credentials, model subscriptions, or connector profiles here.
+pub(crate) fn speech_service_from_env() -> crate::speech::SpeechService {
+    let enabled = std::env::var("ANIMAOS_TTS_ENABLED").ok();
+    if !matches!(enabled.as_deref(), Some("true" | "1")) {
+        return crate::speech::SpeechService::disabled();
+    }
+    let Some(definition) = provider_definitions().iter().find(|d| d.id == "openai") else {
+        return crate::speech::SpeechService::configured(
+            anima_core::SpeechAvailability::Unavailable,
+            None,
+        );
+    };
+    let base = first_env_value(definition.base_url_envs)
+        .unwrap_or_else(|| definition.default_base_url.to_owned());
+    speech_service_for_config(
+        enabled.as_deref(),
+        &base,
+        first_env_value(definition.api_key_envs),
+    )
+}
+
+fn speech_service_for_config(
+    enabled: Option<&str>,
+    base: &str,
+    key: Option<String>,
+) -> crate::speech::SpeechService {
+    use crate::speech::SpeechService;
+    use anima_core::SpeechAvailability as Availability;
+    if !matches!(enabled, Some("true" | "1")) {
+        return SpeechService::disabled();
+    }
+    if !canonical_transcription_base(base) {
+        return SpeechService::configured(Availability::UnsupportedConfiguration, None);
+    }
+    let Some(key) = key.filter(|key| !key.trim().is_empty()) else {
+        return SpeechService::configured(Availability::MissingCredentials, None);
+    };
+    match anima_model_adapters::OpenAiSpeechAdapter::new(key) {
+        Ok(port) => {
+            SpeechService::configured(Availability::Available, Some(std::sync::Arc::new(port)))
+        }
+        Err(_) => SpeechService::configured(Availability::Unavailable, None),
+    }
+}
+
+#[cfg(test)]
 mod transcription_configuration_tests {
     use super::*;
     use anima_core::audio_content::TranscriptionAvailability as Availability;

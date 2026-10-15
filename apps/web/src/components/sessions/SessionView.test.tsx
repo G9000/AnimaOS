@@ -83,6 +83,50 @@ afterEach(() => {
 });
 
 describe('SessionView', () => {
+  it('offers native speech for a saved assistant reply without starting playback', () => {
+    const ensureSession = vi.fn().mockResolvedValue('room-7');
+    const audio = vi.fn();
+    vi.stubGlobal('Audio', audio);
+    try {
+      renderView({
+        session: sessionFixture('room-7'),
+        messages: [
+          {
+            id: 'assistant-saved',
+            role: 'Assistant',
+            content: { text: 'A saved reply to speak.' },
+            created_at_ms: 1,
+          },
+        ],
+        composer: {
+          draft: '',
+          setDraft: vi.fn(),
+          sending: false,
+          disabled: false,
+          offline: false,
+          onSend: vi.fn(),
+          error: null,
+          onDismissError: vi.fn(),
+          nativeVoice: {
+            agentId: 'agent-main',
+            sessionId: 'room-7',
+            ensureSession,
+          },
+        },
+      });
+
+      expect(
+        screen.getByRole('button', {
+          name: 'Generate speech with OpenAI API',
+        }),
+      ).toBeVisible();
+      expect(ensureSession).not.toHaveBeenCalled();
+      expect(audio).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('uses a single read-aloud controller for assistant replies and cancels on session changes', async () => {
     class Utterance {
       onstart: (() => void) | null = null;

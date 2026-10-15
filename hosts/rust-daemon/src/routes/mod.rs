@@ -38,6 +38,7 @@ mod runs;
 mod schedules;
 mod sessions;
 mod skills;
+mod speech;
 mod status;
 mod swarms;
 mod usage;
@@ -226,8 +227,9 @@ use crate::runtime_model::provider_summaries;
         status::get_status,
         attachments::upload, attachments::serve,
         voice::capabilities, voice::transcribe, voice::cancel,
+        speech::capabilities, speech::generate, speech::cancel,
     ),
-    components(schemas(self::contracts::VoiceCapabilities, self::contracts::VoiceReason, self::contracts::VoiceProvider, self::contracts::TranscriptionRequest, self::contracts::TranscriptionResponse, self::contracts::AgentSummariesEnvelope, self::contracts::AttachmentEnvelope, self::contracts::AttachmentResponse,
+    components(schemas(self::contracts::SpeechCapabilities, self::contracts::SpeechReason, self::contracts::SpeechRequest, self::contracts::VoiceCapabilities, self::contracts::VoiceReason, self::contracts::VoiceProvider, self::contracts::TranscriptionRequest, self::contracts::TranscriptionResponse, self::contracts::AgentSummariesEnvelope, self::contracts::AttachmentEnvelope, self::contracts::AttachmentResponse,
         crate::chatgpt_auth::ChatGptModelsSnapshot,crate::chatgpt_auth::ChatGptModelEntry,chatgpt::ModelsRefreshRequest,
         self::contracts::mcp::McpToolDescriptorResponse, self::contracts::mcp::ReviewedMcpToolResponse,
         self::contracts::mcp::McpStaticErrorResponse,
@@ -256,7 +258,7 @@ use crate::runtime_model::provider_summaries;
         (name="community-bundles",description="Owner-reviewed declarative content and disabled MCP metadata"),
         (name = "mcp", description = "Owner-scoped reviewed external tools"),
         (name = "attachments", description = "Owner-authorized session uploads and downloads"),
-        (name = "voice", description = "Explicit owner-scoped ephemeral audio transcription drafts"),
+        (name = "voice", description = "Explicit owner-scoped ephemeral transcription drafts and selected reply speech"),
         (name = "health", description = "Daemon health endpoints"),
         (name = "agencies", description = "Agency generation and team drafting"),
         (name = "agents", description = "Agent management and execution"),
@@ -282,6 +284,7 @@ struct ApiDoc;
 #[derive(Clone)]
 struct AppState {
     voice: crate::voice::VoiceService,
+    speech: crate::speech::SpeechService,
     browser: crate::browser::BrowserService,
     pub(crate) mcp: crate::mcp::McpManager,
     mail: crate::connectors::mail::MailManager,
@@ -588,6 +591,7 @@ pub(crate) fn router_with_all_services_and_discord(
         discord,
         drive,
         crate::voice::VoiceService::disabled(),
+        crate::speech::SpeechService::disabled(),
     )
 }
 
@@ -608,6 +612,7 @@ pub(crate) fn router_with_all_integrations(
     discord: crate::connectors::discord::DiscordManager,
     drive: crate::connectors::drive::DriveManager,
     voice: crate::voice::VoiceService,
+    speech: crate::speech::SpeechService,
 ) -> Router {
     router_with_services_with_policies_and_integrations(
         state,
@@ -627,6 +632,7 @@ pub(crate) fn router_with_all_integrations(
         discord,
         drive,
         voice,
+        speech,
     )
 }
 
@@ -709,6 +715,7 @@ fn router_with_services_with_policies_and_discord(
         discord,
         drive,
         crate::voice::VoiceService::disabled(),
+        crate::speech::SpeechService::disabled(),
     )
 }
 
@@ -730,6 +737,7 @@ fn router_with_services_with_policies_and_integrations(
     discord: crate::connectors::discord::DiscordManager,
     drive: crate::connectors::drive::DriveManager,
     voice: crate::voice::VoiceService,
+    speech: crate::speech::SpeechService,
 ) -> Router {
     if let Ok(mut guard) = state.try_write() {
         guard.mail_manager = Some(mail.clone());
@@ -770,8 +778,10 @@ fn router_with_services_with_policies_and_integrations(
     // Finish synchronous runtime installation before starting that work.
     mail.start();
     let voice_request_timeout = voice.request_timeout();
+    let speech_request_timeout = speech.request_timeout();
     let app_state = AppState {
         voice,
+        speech,
         browser,
         mcp,
         mail,
@@ -1290,10 +1300,28 @@ fn router_with_services_with_policies_and_integrations(
             |response: AxumResponse| async move { jobs::no_store(response) },
         ));
 
+    let speech_routes = Router::new()
+        .route(
+            "/api/agents/{agent_id}/sessions/{session_id}/voice/speech",
+            get(speech::capabilities).post(speech::generate),
+        )
+        .route(
+            "/api/agents/{agent_id}/sessions/{session_id}/voice/speech/{operation_id}",
+            axum::routing::delete(speech::cancel),
+        )
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            speech_request_timeout,
+        ))
+        .layer(axum::middleware::map_response(
+            |response: AxumResponse| async move { jobs::no_store(response) },
+        ));
+
     Router::new()
         .merge(timed_routes)
         .merge(run_routes)
         .merge(voice_routes)
+        .merge(speech_routes)
         .route("/api/connectors/gdrive/callback", get(gdrive::callback))
         // A native dialog waits for the user, rather than the API request timeout.
         .route(

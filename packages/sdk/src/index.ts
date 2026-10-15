@@ -2,6 +2,13 @@ export { AgentsClient, action, agent, plugin } from './agents.js';
 export { AgentFilesClient } from './agent-files.js';
 export { AttachmentsClient } from './attachments.js';
 export { VoiceClient } from './voice.js';
+export { SpeechClient, speechTextIsValid } from './speech.js';
+export type {
+  SpeechAvailabilityReason,
+  SpeechCapabilities,
+  SpeechGenerateInput,
+  SpeechRequestOptions,
+} from './speech.js';
 export type {
   VoiceAvailabilityReason,
   VoiceCapabilities,

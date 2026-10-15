@@ -44,6 +44,7 @@ pub mod policy;
 pub mod primitives;
 pub mod runtime;
 mod runtime_serde;
+pub mod speech;
 
 pub use agent::{
     tool_not_configured_error, AgentConfig, AgentConfigUpdate, AgentSettings, AgentState,
@@ -148,4 +149,8 @@ pub use runtime::{
     MAX_RETAINED_EVENTS, MODEL_STREAM_WITHOUT_FINAL, REVISED_METADATA_KEY, RUN_ID_METADATA_KEY,
     RUN_STOPPED_ERROR, STEER_METADATA_KEY, STEP_ID_METADATA_KEY, STOPPED_METADATA_KEY,
     TOOL_DURATION_METADATA_KEY, TOOL_STATUS_METADATA_KEY,
+};
+pub use speech::{
+    SpeechAudio, SpeechAvailability, SpeechError, SpeechPort, SpeechText, MAX_SPEECH_DURATION_MS,
+    MAX_SPEECH_INPUT_BYTES, MAX_SPEECH_INPUT_CHARS, MAX_SPEECH_PCM_BYTES, MAX_SPEECH_WAV_BYTES,
 };

@@ -1,3 +1,48 @@
+# Handover: selected native speech output (M0–M58)
+
+## Start here (2026-10-16): M58 gated; settle publication then schedule recovery
+
+Continue g9000/companion-speech-output-m58 from M57/PR63 main
+f721f91f3081f6b997bc34b6641d52db19099f9b. Plan9d064d04f91e149e3f613618282093239ed816cc
+was pushed before existing SessionView missing-control RED. Both reviews and
+the single combined fix wave are complete, source frozen, local gates pass.
+Finish explicit-path unsigned commit/push/PR, attach, standing authorized merge
+and exact tree/hash proof. Advance local main by nonforced fetch BEFORE switch
+to avoid old-tree EOL rewrites. Preserve unrelated nx.json.
+
+Fresh Rust/core **2,855/26 ignores/45 suites**, lint/build;
+SDK **183/three service skips**; web **1,468/120 files**; SDK/web
+typechecks/builds. Actual OpenAPI200 matches compiled README and prior197/192
+guards/owner-boundary checks. Independent synthetic WAV12044bytes/6000frames/
+24kHz/250ms; old M56 fixture unchanged. Owned docs/format/hash checks finish
+publication. Zero dependency changes or actual provider/speaker activation.
+
+Selected saved visible own Assistant reply, max2048scalar/8192byte, source/store
+pre/post checks, separate opt-in API-key gpt-4o-mini-tts/alloy/PCM24k to WAV120s/
+5,760,044bytes. Two retained host outputs/two small adapter request bodies,
+45s operation/46s request,64 UUIDv4 map/5min tombstones, no replay. One browser
+owner spans GET/POST/DELETE/play; uncertain cleanup drops candidate and stays
+busy. Explicit Generate, Play, Stop, Discard; browser Read aloud stays separate.
+Pinned Hermes MIT adaptation retained with Anima product naming.
+
+Resume .superpowers/sdd/2026-10-16-companion-speech-output-m58/progress.md.
+Next held brief: .superpowers/sdd/2026-10-16-companion-next-held/plan-held.md,
+one controlled-clock PAR-10 recurrence/outage/restart acceptance using existing
+runtime. Root binds after this merge; no next source/service/model release yet.
+Actual media/provider quality, connectors/local/other providers and full parity
+remain open. M52 strict quality remains PARTIAL; consumed cases immutable.
+
+Root owns commands/fmt/Git/processes; source-only Codex delegation, no check-ins.
+Cargo CARGO_INCREMENTAL=0/jobs1/threads2 serialized. Explicit staging only, never
+nx.json/anima.yaml/.superpowers. Unsigned per-command commits, justified
+dependencies and merge-and-continue remain authorized. No stash/reset/restore/
+path checkout/worktree, ordinary profiles/credentials, real accounts/DB servers/
+containers/Docker55432/public deployment. No actual provider/model/account,
+speaker/microphone or ordinary daemon release. nx SHA
+3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90 preserved.
+
+## Historical M57 gated handover
+
 # Handover: microphone capture and native voice (M0–M57)
 
 ## Start here (2026-10-16): M57 gated; settle publication then continue

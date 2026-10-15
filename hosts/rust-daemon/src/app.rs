@@ -37,6 +37,7 @@ pub(crate) type SharedDaemonState = Arc<RwLock<DaemonState>>;
 
 struct DaemonRuntime {
     voice: crate::voice::VoiceService,
+    speech: crate::speech::SpeechService,
     run_limiter: Arc<Semaphore>,
     agent_runs: AgentRunCoordinator,
     connectors: ConnectorManager,
@@ -173,6 +174,17 @@ pub(crate) fn app_with_state_and_voice(
     app_with_runtime(state, config, runtime)
 }
 
+#[cfg(test)]
+pub(crate) fn app_with_state_and_speech(
+    state: SharedDaemonState,
+    config: DaemonConfig,
+    speech: crate::speech::SpeechService,
+) -> Router {
+    let mut runtime = deterministic_daemon_runtime(Arc::clone(&state), &config);
+    runtime.speech = speech;
+    app_with_runtime(state, config, runtime)
+}
+
 /// The router `app_with_state` builds, over a prepared runtime.
 fn app_with_runtime(
     state: SharedDaemonState,
@@ -264,6 +276,7 @@ pub async fn serve(listener: TcpListener, config: DaemonConfig) -> io::Result<()
         config,
         shutdown_signal(),
         crate::runtime_model::transcription_service_from_env(),
+        crate::runtime_model::speech_service_from_env(),
     )
     .await
 }
@@ -283,6 +296,7 @@ pub(crate) async fn serve_with_state(
         config,
         shutdown,
         crate::voice::VoiceService::disabled(),
+        crate::speech::SpeechService::disabled(),
     )
     .await
 }
@@ -293,10 +307,12 @@ async fn serve_with_state_and_voice(
     config: DaemonConfig,
     shutdown: impl Future<Output = ()> + Send + 'static,
     voice: crate::voice::VoiceService,
+    speech: crate::speech::SpeechService,
 ) -> io::Result<()> {
     let bind_is_loopback = listener.local_addr()?.ip().is_loopback();
     let mut runtime = daemon_runtime(Arc::clone(&state), &config)?;
     runtime.voice = voice;
+    runtime.speech = speech;
     state
         .write()
         .await
@@ -458,6 +474,7 @@ fn daemon_runtime(state: SharedDaemonState, config: &DaemonConfig) -> io::Result
     let scheduler = SchedulerService::new(state, agent_runs.clone(), connectors.clone());
     Ok(DaemonRuntime {
         voice: crate::voice::VoiceService::disabled(),
+        speech: crate::speech::SpeechService::disabled(),
         run_limiter,
         agent_runs,
         connectors,
@@ -547,6 +564,7 @@ fn deterministic_daemon_runtime_with_mail_transport(
     let scheduler = SchedulerService::new(state, agent_runs.clone(), connectors.clone());
     DaemonRuntime {
         voice: crate::voice::VoiceService::disabled(),
+        speech: crate::speech::SpeechService::disabled(),
         run_limiter,
         agent_runs,
         connectors,
@@ -590,6 +608,7 @@ fn router_with_runtime(
         runtime.discord,
         runtime.drive,
         runtime.voice,
+        runtime.speech,
     );
     if tokio::runtime::Handle::try_current().is_ok() {
         history.start(&history_owner);
