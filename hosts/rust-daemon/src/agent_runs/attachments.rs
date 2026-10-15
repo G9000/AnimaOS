@@ -131,6 +131,10 @@ pub(crate) fn attachment_content(
                 row.name, row.path
             ),
             AttachmentKind::Image => format!("Attached image: {} ({}).", row.name, row.path),
+            AttachmentKind::Audio => format!(
+                "Attached audio: {} ({}). Original saved; audio has not been transcribed and the model cannot hear this file.",
+                row.name, row.path
+            ),
         });
     }
     Content {

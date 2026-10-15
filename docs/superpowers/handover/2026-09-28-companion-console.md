@@ -1,3 +1,86 @@
+# Handover: selected native voice input (M0–M56)
+
+## Start here (2026-10-16): M56 gated; settle publication then continue
+
+Continue `g9000/companion-native-voice-m56` from verified M55/PR61 main
+`285cb59813916e3f3a2293fff4b6dbc83f6d404d`. The bound plan was committed/pushed
+at09c788762b9fd6c75d600fe475e1c10d6bdd5ee8 before the independent existing-handler
+WAV RED400vs201. Reviewed implementation and the single fix wave are now frozen
+and gated. Finish explicit-path per-command unsigned commit/push/PR, then the
+standing authorized reviewed merge and exact source/merge tree verification.
+Cut a next branch only from verified main after settlement. Exact source/PR/tree
+and resume: `.superpowers/sdd/2026-10-16-companion-native-voice-m56/progress.md`.
+
+Selected PCM16 WAV attachments now feed one explicitly consented OpenAI API
+transcription into an editable ephemeral preview. Use transcript appends to the
+current same-scope draft; Send stays separate. Upload and ordinary chat request
+zero transcription calls. Audio remains a File reference with original download.
+
+WAV is bounded to4MiB/120s with strict RIFF/PCM validation; transcript16KiB.
+The host has two nonqueued operations, a64-entry scoped UUIDv4 map and terminal
+tombstones up to5min, shared four retained physical source-read leases and two
+retained outgoing byte-body leases. Pre/post record/hash/scope checks, Stop,
+drop, duplicate, cancel-before-admission, deadline and restart-no-replay are
+fixture-tested. The45s operation has a46s outer request/no-store timeout, including
+slow bodies and scope-lock waits. Local cancellation does not establish remote
+inference stopped or billing was prevented; ephemeral IDs are not durable
+exactly-once delivery.
+
+The real adapter is disabled by default (`ANIMAOS_STT_ENABLED`), uses only the
+existing server OpenAI Platform API-key configuration and four canonical base
+spellings, and fixes OpenAI authority/whisper-1/text multipart. No subscription
+OAuth reuse, redirects, ambient proxy, retries, fallback or automatic replay.
+Hermes's narrow multipart/trim behavior is ported into Rust with pin/full MIT
+notice; product controls retain Anima naming.
+
+Rust/core 2,829 passed / 26 intentional ignores / 45 suites; Rust formatting/build; SDK172/three service skips; web1,387/116files; SDK/web typechecks/builds passed. Exact42source/92unowned baseline hashes and nx are checked.
+
+One combined native/core review found the unbounded pre-operation body wait;
+the final SDK/web review had no actionable P0-P2 findings. Three new regressions
+first failed without compile errors, then passed after the single host fix wave:
+outer timeout, closed WAV errors415/422/413, and canonical base rejection. A new
+test fixture was corrected to assert immutable-record overwrite rejection before
+explicit deletion/rebinding; the production guard and late-source assertions
+were preserved. No second audit or actual provider release was added.
+
+During the full gates a fragmented-request regression also proved that the
+finite Windows peer could publish a partial request. Its test helper now
+explicitly normalizes accepted sockets to blocking mode, retaining the same
+socket timeouts and every request assertion. Production transport is unchanged.
+The [Windows accept contract](https://learn.microsoft.com/en-us/windows/win32/api/winsock2/nf-winsock2-accept)
+and installed Rust implementation informed this bounded correction.
+The final gate also caught the old194-operation documentation count. The marked
+README inventory was regenerated from actualOpenAPI197, with explicit checks for
+the three newvoiceoperations and the unchanged pre-M49 legacy192-operation guard.
+Runtime behavior and the complete table-to-schema equality assertion remain.
+
+These are synthetic PCM silence, deterministic ports and finite loopback peers,
+with zero actual provider/model/microphone/ordinary daemon/account/DB server/
+container/deployment activation. They establish lifecycle, wire and draft
+contracts, not speech accuracy or live provider/billing quality. PAR-07 remains
+partial for microphone capture, native speech output, connector voice, local/
+other providers and actual-device/account acceptance. M47/M52 actual cases and
+consumed releases remain immutable; M52 strict grade stays PARTIAL.
+
+The private M57 microphone proposal is held/renumberable only, awaiting verified
+M56 merge and root binding/API verification. No recording implementation or
+actual microphone/provider release is implied. See [voice](../../companion/voice.md)
+and [M56 plan](../plans/2026-10-16-companion-native-voice-m56.md).
+
+Root alone executes/fmts/Git/processes/models; cheap bounded source-only Codex
+lanes, one combined native review/finalSDKwebreview/onefixwave/freshgates. Direct
+native Python subprocess/Nx through cmd.exe is reliable; PowerShell startup
+sessions stalled and were cancelled. CARGO_INCREMENTAL=0/jobs1/threads2, cleared
+provider/service env, no Nx Cloud claim. Dependencies with reason, per-command
+unsigned commits and reviewed merge-and-continue remain authorized. Explicit
+staging only; never nx.json/anima.yaml/private. Preserve nx SHA256
+`3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`.
+No stash/reset/restore/path checkout/worktree, ordinary profile/credential copy or
+readout, real accounts, DB servers, containers, Docker55432 or public deployment.
+Historical resumes below are superseded here.
+
+## Historical M55 outcome handover
+
 # Handover: selected PDF text understanding (M0–M55)
 
 ## Start here (2026-10-16): M55 gated; settle publication then continue

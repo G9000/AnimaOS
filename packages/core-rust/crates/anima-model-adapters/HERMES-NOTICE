@@ -53,6 +53,16 @@ bounds body/rows/IDs, preserves literal IDs and refuses redirects/retries.
 No curated fallback, private cache/profile import, account rotation, context
 calibration or inference behavior is copied. Catalog presence is metadata only.
 
+M56 source revision: 1fd18277267152893a8a24792b79213e7ca3f899.
+M56 narrowly ports tools/transcription_cloud.py::_transcribe_openai request
+semantics: whisper-1, multipart audio, response_format=text and outer whitespace
+trimming. Anima uses a fixed OpenAI Platform endpoint, explicit opt-in and owner
+consent, strict bounded WAV/text validation, retained byte leases, absolute local
+deadlines and ephemeral cancellation/deduplication. No Python runtime, profiles,
+credentials, provider selection, conversion, retries, chunking or logging is
+copied. Local cancellation does not guarantee remote inference or billing stops.
+Upstream selected public files and MIT LICENSE were verified clean at the pin.
+
 MIT License
 
 Copyright (c) 2025 Nous Research

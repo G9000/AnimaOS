@@ -25,6 +25,7 @@ pub(crate) enum AttachmentKind {
     Image,
     Text,
     Document,
+    Audio,
 }
 impl AttachmentKind {
     pub(crate) fn as_str(self) -> &'static str {
@@ -32,6 +33,7 @@ impl AttachmentKind {
             Self::Image => "image",
             Self::Text => "text",
             Self::Document => "document",
+            Self::Audio => "audio",
         }
     }
     pub(crate) fn max_bytes(self) -> usize {
@@ -39,6 +41,7 @@ impl AttachmentKind {
             Self::Image => MAX_IMAGE_BYTES,
             Self::Text => MAX_TEXT_BYTES,
             Self::Document => MAX_DOCUMENT_BYTES,
+            Self::Audio => anima_core::audio_content::MAX_AUDIO_INPUT_BYTES,
         }
     }
 }
@@ -103,6 +106,8 @@ mod tests {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AttachmentError {
     Invalid,
+    AudioInvalid,
+    AudioUnsupported,
     TooLarge,
     Unavailable,
     WorkspaceChanged,
@@ -113,6 +118,8 @@ impl std::fmt::Display for AttachmentError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::Invalid => "Attachment filename or content is not supported",
+            Self::AudioInvalid => "WAV audio is malformed or exceeds its duration limit",
+            Self::AudioUnsupported => "WAV audio format is not supported",
             Self::TooLarge => "Attachment exceeds its size limit",
             Self::Unavailable => "Attachment file is unavailable or unreadable",
             Self::WorkspaceChanged => "Attachment belongs to a different workspace",

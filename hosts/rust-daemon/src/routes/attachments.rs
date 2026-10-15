@@ -46,14 +46,24 @@ fn invalid(error: AttachmentError) -> ApiError {
             status: StatusCode::PAYLOAD_TOO_LARGE,
             message: ATTACHMENT_TOO_LARGE.into(),
         },
+        AttachmentError::AudioInvalid => ApiError {
+            kind: crate::routes::ApiErrorKind::General,
+            status: StatusCode::UNPROCESSABLE_ENTITY,
+            message: "WAV audio is malformed or exceeds its duration limit".into(),
+        },
+        AttachmentError::AudioUnsupported => ApiError {
+            kind: crate::routes::ApiErrorKind::General,
+            status: StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            message: "WAV audio format is not supported".into(),
+        },
         _ => ApiError::bad_request_static(ATTACHMENT_INVALID),
     }
 }
 
 #[utoipa::path(post,path="/api/agents/{agent_id}/sessions/{session_id}/attachments",tag="attachments",
     params(("agent_id"=String,Path),("session_id"=String,Path)),
-    request_body(content=String,content_type="multipart/form-data",description="Exactly one file part; image10MiB, UTF-8text1MiB, document25MiB. Client MIME is advisory."),
-    responses((status=201,description="Durably saved attachment metadata",body=AttachmentEnvelope),(status=400,description="Invalid form, filename, or content"),(status=403,description="Owner authorization required"),(status=404,description="Agent or session not found"),(status=409,description="Workspace missing or session read-only"),(status=413,description="Body or classified file exceeds its bound"),(status=503,description="Storage unavailable")))]
+    request_body(content=String,content_type="multipart/form-data",description="Exactly one file part; image10MiB, UTF-8text1MiB, document25MiB, PCM16 WAV audio4MiB/120s. Client MIME is advisory."),
+    responses((status=201,description="Durably saved attachment metadata",body=AttachmentEnvelope),(status=400,description="Invalid form, filename, or non-audio content"),(status=403,description="Owner authorization required"),(status=404,description="Agent or session not found"),(status=409,description="Workspace missing or session read-only"),(status=413,description="Body or classified file exceeds its bound"),(status=415,description="Unsupported WAV format"),(status=422,description="Malformed WAV or excessive audio duration"),(status=503,description="Storage unavailable")))]
 pub(super) async fn upload(
     State(state): State<AppState>,
     Path((agent_id, session_id)): Path<(String, String)>,

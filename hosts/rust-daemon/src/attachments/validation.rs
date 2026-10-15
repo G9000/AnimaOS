@@ -66,6 +66,7 @@ pub(crate) fn validate_upload(
         "jpg" | "jpeg" => (AttachmentKind::Image, "image/jpeg"),
         "gif" => (AttachmentKind::Image, "image/gif"),
         "webp" => (AttachmentKind::Image, "image/webp"),
+        "wav" => (AttachmentKind::Audio, "audio/wav"),
         "txt" => (AttachmentKind::Text, "text/plain"),
         "md" | "markdown" => (AttachmentKind::Text, "text/markdown"),
         "csv" => (AttachmentKind::Text, "text/csv"),
@@ -96,6 +97,17 @@ pub(crate) fn validate_upload(
         return Err(AttachmentError::TooLarge);
     }
     let valid = match extension.as_str() {
+        "wav" => {
+            use anima_core::audio_content::{AudioValidationError, WavAudio};
+            WavAudio::parse(bytes.to_vec()).map_err(|error| match error {
+                AudioValidationError::Unsupported => AttachmentError::AudioUnsupported,
+                AudioValidationError::TooLarge => AttachmentError::TooLarge,
+                AudioValidationError::Malformed | AudioValidationError::TooLong => {
+                    AttachmentError::AudioInvalid
+                }
+            })?;
+            true
+        }
         "png" => valid_png(bytes),
         "jpg" | "jpeg" => valid_jpeg(bytes),
         "gif" => {

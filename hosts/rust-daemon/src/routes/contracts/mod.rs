@@ -25,7 +25,9 @@ mod skills;
 mod status;
 mod swarms;
 mod usage;
+mod voice;
 mod workspace;
+pub(crate) use voice::*;
 
 pub(crate) use agencies::{
     AgencyCreateRequest, AgencyCreateResponse, AgencyGenerateRequest, AgencyGenerateResponse,

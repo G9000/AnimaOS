@@ -34,6 +34,7 @@ import { useReadAloud } from '../../hooks/useReadAloud';
 import type { AttachmentDraft } from '../../lib/attachments';
 import type { KnownRunAttachments } from '../../lib/run-attachments';
 import { BrowserTaskControls } from './BrowserTaskControls';
+import type { NativeVoiceScope } from '../voice/NativeTranscription';
 
 export interface SessionComposerState {
   draft: string;
@@ -57,6 +58,7 @@ export interface SessionComposerState {
   onSteer?: () => void;
   conversationKey?: string | null;
   voiceDisabled?: boolean;
+  nativeVoice?: NativeVoiceScope;
   savedAttachmentCount?: number;
   attachments?: {
     items: readonly AttachmentDraft[];
@@ -464,6 +466,11 @@ export function SessionView({
           onSteer={composer.onSteer}
           conversationKey={voiceKey}
           voiceDisabled={composer.voiceDisabled}
+          nativeVoice={
+            !session || session.kind === 'chat'
+              ? composer.nativeVoice
+              : undefined
+          }
           attachments={
             session?.kind === 'discord' ? undefined : composer.attachments
           }

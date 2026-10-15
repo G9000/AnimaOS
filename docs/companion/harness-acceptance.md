@@ -1,5 +1,60 @@
 # Native harness acceptance
 
+## M56 selected audio draft (2026-10-16)
+
+Selected PCM16 WAV attachments now feed one explicitly consented OpenAI API
+transcription into an editable ephemeral preview. Use transcript appends to the
+current same-scope draft; Send stays separate. Upload and ordinary chat request
+zero transcription calls. Audio remains a File reference with original download.
+
+WAV is bounded to4MiB/120s with strict RIFF/PCM validation; transcript16KiB.
+The host has two nonqueued operations, a64-entry scoped UUIDv4 map and terminal
+tombstones up to5min, shared four retained physical source-read leases and two
+retained outgoing byte-body leases. Pre/post record/hash/scope checks, Stop,
+drop, duplicate, cancel-before-admission, deadline and restart-no-replay are
+fixture-tested. The45s operation has a46s outer request/no-store timeout, including
+slow bodies and scope-lock waits. Local cancellation does not establish remote
+inference stopped or billing was prevented; ephemeral IDs are not durable
+exactly-once delivery.
+
+The real adapter is disabled by default (`ANIMAOS_STT_ENABLED`), uses only the
+existing server OpenAI Platform API-key configuration and four canonical base
+spellings, and fixes OpenAI authority/whisper-1/text multipart. No subscription
+OAuth reuse, redirects, ambient proxy, retries, fallback or automatic replay.
+Hermes's narrow multipart/trim behavior is ported into Rust with pin/full MIT
+notice; product controls retain Anima naming.
+
+Rust/core 2,829 passed / 26 intentional ignores / 45 suites; Rust formatting/build; SDK172/three service skips; web1,387/116files; SDK/web typechecks/builds passed.
+
+One combined native/core review found the unbounded pre-operation body wait;
+the final SDK/web review had no actionable P0-P2 findings. Three new regressions
+first failed without compile errors, then passed after the single host fix wave:
+outer timeout, closed WAV errors415/422/413, and canonical base rejection. A new
+test fixture was corrected to assert immutable-record overwrite rejection before
+explicit deletion/rebinding; the production guard and late-source assertions
+were preserved. No second audit or actual provider release was added.
+
+During the full gates a fragmented-request regression also proved that the
+finite Windows peer could publish a partial request. Its test helper now
+explicitly normalizes accepted sockets to blocking mode, retaining the same
+socket timeouts and every request assertion. Production transport is unchanged.
+The [Windows accept contract](https://learn.microsoft.com/en-us/windows/win32/api/winsock2/nf-winsock2-accept)
+and installed Rust implementation informed this bounded correction.
+The final gate also caught the old194-operation documentation count. The marked
+README inventory was regenerated from actualOpenAPI197, with explicit checks for
+the three newvoiceoperations and the unchanged pre-M49 legacy192-operation guard.
+Runtime behavior and the complete table-to-schema equality assertion remain.
+
+These are synthetic PCM silence, deterministic ports and finite loopback peers,
+with zero actual provider/model/microphone/ordinary daemon/account/DB server/
+container/deployment activation. They establish lifecycle, wire and draft
+contracts, not speech accuracy or live provider/billing quality. PAR-07 remains
+partial for microphone capture, native speech output, connector voice, local/
+other providers and actual-device/account acceptance. M47/M52 actual cases and
+consumed releases remain immutable; M52 strict grade stays PARTIAL.
+
+See [voice usage](voice.md) and the [M56 plan](../superpowers/plans/2026-10-16-companion-native-voice-m56.md).
+
 ## M55 selected PDF text (2026-10-16)
 
 Selected own Windows Web PDFs now supply bounded text-layer excerpts as quoted

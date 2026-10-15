@@ -36,6 +36,7 @@ use crate::tools::DEFAULT_MAX_BACKGROUND_PROCESSES;
 pub(crate) type SharedDaemonState = Arc<RwLock<DaemonState>>;
 
 struct DaemonRuntime {
+    voice: crate::voice::VoiceService,
     run_limiter: Arc<Semaphore>,
     agent_runs: AgentRunCoordinator,
     connectors: ConnectorManager,
@@ -161,6 +162,17 @@ pub(crate) fn app_with_state(state: SharedDaemonState, config: DaemonConfig) -> 
     app_with_runtime(state, config, runtime)
 }
 
+#[cfg(test)]
+pub(crate) fn app_with_state_and_voice(
+    state: SharedDaemonState,
+    config: DaemonConfig,
+    voice: crate::voice::VoiceService,
+) -> Router {
+    let mut runtime = deterministic_daemon_runtime(Arc::clone(&state), &config);
+    runtime.voice = voice;
+    app_with_runtime(state, config, runtime)
+}
+
 /// The router `app_with_state` builds, over a prepared runtime.
 fn app_with_runtime(
     state: SharedDaemonState,
@@ -246,19 +258,45 @@ pub async fn serve(listener: TcpListener, config: DaemonConfig) -> io::Result<()
         // model call.
         guard.set_generated_titles(true);
     }
-    serve_with_state(listener, state, config, shutdown_signal()).await
+    serve_with_state_and_voice(
+        listener,
+        state,
+        config,
+        shutdown_signal(),
+        crate::runtime_model::transcription_service_from_env(),
+    )
+    .await
 }
 
 /// Serves until `shutdown` resolves (Ctrl+C for [`serve`]), then shuts down
 /// gracefully.
+#[cfg(test)]
 pub(crate) async fn serve_with_state(
     listener: TcpListener,
     state: SharedDaemonState,
     config: DaemonConfig,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
+    serve_with_state_and_voice(
+        listener,
+        state,
+        config,
+        shutdown,
+        crate::voice::VoiceService::disabled(),
+    )
+    .await
+}
+
+async fn serve_with_state_and_voice(
+    listener: TcpListener,
+    state: SharedDaemonState,
+    config: DaemonConfig,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+    voice: crate::voice::VoiceService,
+) -> io::Result<()> {
     let bind_is_loopback = listener.local_addr()?.ip().is_loopback();
-    let runtime = daemon_runtime(Arc::clone(&state), &config)?;
+    let mut runtime = daemon_runtime(Arc::clone(&state), &config)?;
+    runtime.voice = voice;
     state
         .write()
         .await
@@ -419,6 +457,7 @@ fn daemon_runtime(state: SharedDaemonState, config: &DaemonConfig) -> io::Result
     );
     let scheduler = SchedulerService::new(state, agent_runs.clone(), connectors.clone());
     Ok(DaemonRuntime {
+        voice: crate::voice::VoiceService::disabled(),
         run_limiter,
         agent_runs,
         connectors,
@@ -507,6 +546,7 @@ fn deterministic_daemon_runtime_with_mail_transport(
     );
     let scheduler = SchedulerService::new(state, agent_runs.clone(), connectors.clone());
     DaemonRuntime {
+        voice: crate::voice::VoiceService::disabled(),
         run_limiter,
         agent_runs,
         connectors,
@@ -549,6 +589,7 @@ fn router_with_runtime(
         bind_is_loopback,
         runtime.discord,
         runtime.drive,
+        runtime.voice,
     );
     if tokio::runtime::Handle::try_current().is_ok() {
         history.start(&history_owner);

@@ -11,6 +11,7 @@ mod models;
 mod ollama;
 mod openai_compatible;
 mod stream;
+mod transcription;
 mod transport;
 
 pub use adapter::ProviderModelAdapter;
@@ -25,6 +26,7 @@ pub use models::{
     CostEstimate, ModelInfo, ModelPricing, PRICING_TABLE_DATE,
 };
 pub use stream::DeterministicModelAdapter;
+pub use transcription::OpenAiTranscriptionAdapter;
 
 #[derive(Clone)]
 pub struct ProviderCredential {
