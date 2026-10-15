@@ -1,3 +1,33 @@
+# Handover: isolated memory HTTP acceptance (M0–M61)
+
+## Start here (2026-10-16): M60 merged; M61 bound selective memory acceptance
+
+Continue g9000/companion-memory-http-m61 from verified [M60/PR66](https://github.com/G9000/animaOS-SWARM/pull/66)
+main c0ebc9f89afb797826a293245880ff76abe1d858, source 521e09bb2be4f9441e3a961501bbcfd052cc6ab0,
+identical tested/merge tree 192cb6087f4f645a79fede8b3ed114688ad43560. Fresh web1491/121files,
+SDK183/three service skips/type/build/docs/format pass; unchanged native inputs retain
+M59 Rust2856/26 ignores/45 suites/lint/build. Protected hashes and nx exact.
+
+The [M61 bound plan](../plans/2026-10-16-companion-memory-http-m61.md) tests the built
+Memory page against actual isolated Rust memory HTTP, fresh synthetic stores and one
+quiet forced restart. Shell/bootstrap/SSE/provider/account endpoints remain mocked.
+Only two e2e source paths; no product/runtime/SDK/config/dependency changes. Source
+authors never run commands; root owns process guards, reviews, tests and release.
+Existing explicit isolated-local-testing approval applies. No actual startup before
+private startup-release.json, frozen inputs and harmless owned-child self-test.
+Never call actual /api/status; provider-free /metrics supplies quiet-state evidence.
+
+Resume .superpowers/sdd/2026-10-16-companion-memory-http-m61/progress.md. Keep private
+release/stores/proofs unstaged. Publish plan, implement two lanes, batch process and
+web reviews, one fix wave, gates, explicit-path unsigned push/PR/standing merge.
+Never stage nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/
+worktree, ordinary profile/credential/account/model/device activation, databases,
+containers, Docker55432 or deployment. M47/M52 cases immutable, M52 PARTIAL; this
+selective memory test does not establish full shell/provider/semantic-quality parity.
+Cargo if needed: CARGO_INCREMENTAL=0/jobs1/threads2, serialized.
+
+## Historical M60 gated handover
+
 # Handover: explicit memory index status (M0–M60)
 
 ## Start here (2026-10-16): M60 gated; settle publication then isolated console smoke
