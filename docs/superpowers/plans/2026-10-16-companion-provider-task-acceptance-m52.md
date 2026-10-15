@@ -1,6 +1,67 @@
 # M52 useful provider task and bounded delegation implementation plan
 
-Status: controller-bound plan active on
+Status: evidence complete; actual repair/oracle/reload pass, reporting quality partial.
+
+## Validated outcome (2026-10-16)
+
+M52's evidence work is complete; strict autonomous-quality acceptance is **partial**.
+One actual `gpt-6-luna` owner-SDK task repaired the distinct JSONL utility, used one
+advisory helper and passed the independent literal module/CLI oracle. The visible
+baseline genuinely failed, both seeded defects were repaired by the model, final
+tests passed3/3 and the CLI produced the exact129-byte output with SHA-256
+`962ade20375900282b997951482d0bf0f61da2c1fe8488a42579e46638d95d39`.
+Protected tests/CLI/data/README/sentinel/neighbor bytes and write times were retained.
+
+The helper correctly identified both defects with paths, but its edge-case wording
+contradicted itself about the128-nonblank-row limit. The parent completed all three
+todos while its final reply explicitly said output-file contents were unconfirmed.
+Root independently verified those contents; no follow-up generation, manual repair
+or replay was used to turn these reporting misses into a pass. Useful repair and
+bounded delegation now have actual evidence; full reporting quality and PAR-06
+remain open. This is not full Hermes parity or arbitrary coding acceptance.
+
+Seven inference calls were recorded (five parent, two helper), within the declared
+ten-attempt ceiling, with23,065 reported tokens and75.950s server run duration.
+One helper and two exact Exec requests received AllowOnce; no standing/session
+rules, retry, fallback, extra helper or secondary usage source was observed.
+These settings/accounting are not a hard billing cap. Metadata was refreshed once
+through the ordinary owner SDK; the freshly listed exact ID was deliberately
+chosen for parent/helper. All metadata/task releases are consumed.
+
+One forced quiet same-store restart preserved canonical runs, links, messages,
+todos, receipts, configs, grants, files and usage exactly, with seven calls before
+and after. The canonical memory file hash survived: two task-result records, two
+reflection records and two agent entities; no Fact was seeded and temporal Facts
+were zero. This does not test semantic retrieval/consolidation quality, graceful
+shutdown or in-flight exactly-once recovery.
+
+All24 recorded owned identities retired:14 launcher/daemon ancestry identities,
+nine observed task children and the deadline watcher. Port18752 is free. Of56
+outside process observations,38 retained exact identities; no action targeted any
+outside identity, and18 retirements are unattributed. This is not an all-neighbor
+survival claim. Protected neighbor files were retained; M47's unchanged Windows
+Job/whole-job/IO ownership proof was reused.
+
+Fresh required gates passed **2,725 Rust/core tests /23 intentional ignores /
+40 suites**, formatting and build. Nine oracle controls passed. The one exact
+final-tree ignored synthetic Node/Bash journey passed in0.68s; no other ignored
+case ran. Seventeen source and34 unchanged compatibility hashes stayed frozen.
+One combined native/core/fixture review and final SDK/web scope check preceded the
+fix wave/gates. Fixes were test approval-batch/denial-receipt expectations and
+private-controller DTO/session-owner/freshness handling; no production runtime,
+API, SDK/web or dependency changed. Original REDs and the consumed actual case
+are retained in the private ledger. No ordinary profile/connector account, DB
+server, container, Docker55432 or public deployment was used.
+
+Publication source/PR/verified merge and exact next resume are recorded in
+`.superpowers/sdd/2026-10-15-companion-provider-task-acceptance-m52/progress.md`.
+M47 and all earlier failed cases remain immutable. The next held proposal must
+address these quality gaps or justify a separate parity scope without replaying
+M52, granting more provider trials or inventing a general claim-checking framework.
+
+## Initial controller-bound execution plan (historical)
+
+Initial bound status: controller-bound plan active on
 `g9000/companion-provider-task-acceptance-m52`, cut from verified M51/PR57 main
 `0e8118ca376354c9ff69d7110c43a0d78f75bab3`. Source
 `d53a1000ccbaa33638d549f988ae29b72636c7a5` shares tested tree
@@ -113,13 +174,8 @@ Primary root-frozen input, with final LF:
 
 Exact primary UTF-8 output, including final LF:
 
-```json
-{
-  "services": [
-    { "service": "api", "count": 3, "errors": 1, "durationMs": 210 },
-    { "service": "worker", "count": 2, "errors": 1, "durationMs": 15 }
-  ]
-}
+```text
+{"services":[{"service":"api","count":3,"errors":1,"durationMs":210},{"service":"worker","count":2,"errors":1,"durationMs":15}]}
 ```
 
 Additional frozen literal oracles, never candidate-computed expectations:

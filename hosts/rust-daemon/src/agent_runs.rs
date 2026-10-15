@@ -2434,6 +2434,8 @@ mod live_tests;
 #[cfg(test)]
 mod provider_request_tests;
 #[cfg(test)]
+mod provider_task_tests;
+#[cfg(test)]
 mod queue_tests;
 #[cfg(test)]
 mod skill_tests;

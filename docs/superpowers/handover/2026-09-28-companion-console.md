@@ -1,3 +1,62 @@
+# Handover: useful repair evidence and reporting gaps (M0–M52)
+
+## Start here (2026-10-16): M52 tested; settle publication then bounded follow-up
+
+Continue `g9000/companion-provider-task-acceptance-m52`, from verified M51/PR57
+main `0e8118ca376354c9ff69d7110c43a0d78f75bab3`. M52 implementation/evidence is
+settled; exact committed source/PR/verified merge and authoritative next resume
+are `.superpowers/sdd/2026-10-15-companion-provider-task-acceptance-m52/progress.md`.
+Finish publication/authorized reviewed merge before cutting another branch from
+verified main. The [M52 outcome](../plans/2026-10-16-companion-provider-task-acceptance-m52.md)
+records the actual evidence and limits; this heading supersedes older resumes.
+
+One actual current-catalog `gpt-6-luna` task repaired the distinct JSONL utility:
+initial tests failed, one helper found both defects, model edits/final tests3/3
+and independent literal module/CLI oracle passed, exact129byte output/protected
+bytes+times retained. Seven recorded calls (five parent/two helper),23,065 reported
+tokens,75.950s server duration,14 persistent receipts, three completed todos,
+one Delegate/two Exec AllowOnce, no rules/retry/fallback or secondary usage source.
+The parent reported unconfirmed output contents despite its completed verification
+todo; helper edge-case wording was contradictory. **Strict quality is partial**:
+accept useful repair/bounded mechanics, retain reporting/reasoning gaps and no
+full Hermes parity claim. M52 case and all earlier cases are immutable; metadata
+and task releases consumed. No new task/replay/manual rescue to manufacture a pass.
+
+Quiet same-store forced restart retained exact canonical records/files/todos/
+receipts/grants/usage7to7 and memory hash: two task-result/two reflection records,
+two agent entities, zero temporal Facts. No Fact seeded/retrieval quality/graceful
+or in-flight exactly-once claim. All24 recorded owned identities retired and
+port18752 is free. Of56 outside observations38 remained exact;18 retirements are
+unattributed, no outside identity was targeted. Protected neighbors and M47's
+unchanged Windows Job/IO proof are retained; no all-neighbor-survival claim.
+
+Fresh gates passed Rust2725/23intentionalignores/40suites/format/build, nine oracle
+controls and one exact final-tree ignored synthetic Node/Bash case (0.68s).
+Seventeen source/34 compatibility hashes remained frozen; combined native/core/
+fixture review and final SDK/web scopecheck preceded fixes/gates. Original test
+REDs and private-controller DTO/session-owner repairs are retained. No production
+runtime/API/SDK/web/dependency change; TypeScript evidence remains historical M49.
+
+Next held proposal: completion-evidence/reporting quality. Root delegated only a
+private lean proposal under `.superpowers/sdd/2026-10-16-companion-completion-evidence-m53/`;
+it grants no implementation, model, metadata or process release. Diagnose an
+actual fixable gap, compare narrow public Hermes reuse, bind five risks and
+use a new branch only after M52 merged. Do not invent blanket claim checking,
+another global budget framework or replay this case. Native voice/broader parity
+remain open; isolated services are now retired.
+
+Standing cheap Codex delegation, per-command unsigned commits, reviewed merge-and-
+continue and context-only other-chat updates persist. Root alone commands/fmt/
+Git/services/models; CARGO_INCREMENTAL=0/jobs1/two full-suite threads. Explicit
+stage paths only, never nx.json/anima.yaml/private evidence. Preserve nx SHA256
+`3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`.
+No worktree/stash/reset/restore/path checkout, ordinary profile/credential copy/
+readout, real connector accounts, DB servers, containers, Docker55432 or public
+deployment. Keep Anima branding/MIT attribution. Historical resumes below are
+superseded by this section and the private ledger.
+
+## Historical M52 bound-plan handover
+
 # Handover: useful coding and delegation (M0–M52)
 
 ## Start here (2026-10-16): M51 merged; M52 bound plan active

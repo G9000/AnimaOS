@@ -29,20 +29,20 @@ All PAR-01–PAR-12 implementer and reviewer briefs inherit this policy; their d
 
 Each PAR ID is stable. Milestone numbers after M38 are assigned when its detailed plan is cut from then-current main. File/API names below are candidates; capability, authority, scope and evidence requirements are binding.
 
-| ID     | Deliverable                                                  | Current state                                                                                                                                  | Dependency / accountable lane                                  |
-| ------ | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| PAR-01 | Budgeted post-task learning and durable advice               | M38 implemented; one real anchored review and quiet restart accepted; advice only                                                              | M38 native learning + SDK/web; PAR-02 closes adoption/reuse    |
-| PAR-02 | Apply reviewed lessons to memory/skills and prove reuse      | M39 skill reuse and M40 profile/correction effects accepted; broader quality open                                                              | PAR-01; native skills/memory + owner UI                        |
-| PAR-03 | Rich own-history discovery and anchored reading              | M41 filtered anchors/window, optional owner grant and one source-cited task accepted                                                           | Existing history; native history + tool contracts              |
-| PAR-04 | Dynamic MCP tools and installable community extensions       | M42–M45 HTTP/Windows MCP and reviewed MCP/skill bundles locally accepted; auth/selected servers/non-Windows/contributions open                 | Existing tool policy; native protocol + SDK/web                |
-| PAR-05 | Interactive browser work                                     | Scoped Windows loopback browser locally accepted in M46; public/account/other-host/provider quality remains open                               | Narrow BrowserPort, owned worker and owner UI                  |
-| PAR-06 | Longer coding and delegated-task acceptance                  | M47 deterministic coding/restart pass; M48 model-access rejection; M49 selection implemented, actual metadata unavailable; useful quality open | Current harness; optional PAR-02/PAR-04 adapters               |
-| PAR-07 | Native voice input/output                                    | Browser speech conveniences only                                                                                                               | Attachment lifecycle; native audio + composer                  |
-| PAR-08 | Text/image acceptance and PDF/Office understanding           | Upload/storage exists; vision conditional; format extraction missing                                                                           | Existing attachments/model adapters; document worker + SDK/web |
-| PAR-09 | Selected real connector workflows                            | Telegram/Discord/Google code exists; real-account acceptance unverified                                                                        | Current connector code; later relevant media/browser changes   |
-| PAR-10 | Recurring schedules, outages and interrupted-work acceptance | Scheduler/receipts/recovery exist; recurrence/outage evidence incomplete                                                                       | Current scheduler; optional PAR-06 acceptance fixtures         |
-| PAR-11 | Always-on single-owner installation and recovery             | Deployment instructions/offline checks exist; target-host acceptance missing                                                                   | Release with required capabilities; deployment/operator lane   |
-| PAR-12 | Clear capability controls and daily-use status               | Settings/approvals/catalog exist; cross-capability lifecycle UI incomplete                                                                     | Add incrementally with PAR-01/04/05/07/08/09                   |
+| ID     | Deliverable                                                  | Current state                                                                                                                  | Dependency / accountable lane                                  |
+| ------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| PAR-01 | Budgeted post-task learning and durable advice               | M38 implemented; one real anchored review and quiet restart accepted; advice only                                              | M38 native learning + SDK/web; PAR-02 closes adoption/reuse    |
+| PAR-02 | Apply reviewed lessons to memory/skills and prove reuse      | M39 skill reuse and M40 profile/correction effects accepted; broader quality open                                              | PAR-01; native skills/memory + owner UI                        |
+| PAR-03 | Rich own-history discovery and anchored reading              | M41 filtered anchors/window, optional owner grant and one source-cited task accepted                                           | Existing history; native history + tool contracts              |
+| PAR-04 | Dynamic MCP tools and installable community extensions       | M42–M45 HTTP/Windows MCP and reviewed MCP/skill bundles locally accepted; auth/selected servers/non-Windows/contributions open | Existing tool policy; native protocol + SDK/web                |
+| PAR-05 | Interactive browser work                                     | Scoped Windows loopback browser locally accepted in M46; public/account/other-host/provider quality remains open               | Narrow BrowserPort, owned worker and owner UI                  |
+| PAR-06 | Longer coding and delegated-task acceptance                  | M52 actual utility/oracle/reload pass with seven calls; helper/reporting quality partial, broader coding open                  | Current harness; optional PAR-02/PAR-04 adapters               |
+| PAR-07 | Native voice input/output                                    | Browser speech conveniences only                                                                                               | Attachment lifecycle; native audio + composer                  |
+| PAR-08 | Text/image acceptance and PDF/Office understanding           | Upload/storage exists; vision conditional; format extraction missing                                                           | Existing attachments/model adapters; document worker + SDK/web |
+| PAR-09 | Selected real connector workflows                            | Telegram/Discord/Google code exists; real-account acceptance unverified                                                        | Current connector code; later relevant media/browser changes   |
+| PAR-10 | Recurring schedules, outages and interrupted-work acceptance | Scheduler/receipts/recovery exist; recurrence/outage evidence incomplete                                                       | Current scheduler; optional PAR-06 acceptance fixtures         |
+| PAR-11 | Always-on single-owner installation and recovery             | Deployment instructions/offline checks exist; target-host acceptance missing                                                   | Release with required capabilities; deployment/operator lane   |
+| PAR-12 | Clear capability controls and daily-use status               | Settings/approvals/catalog exist; cross-capability lifecycle UI incomplete                                                     | Add incrementally with PAR-01/04/05/07/08/09                   |
 
 ### PAR-01: budgeted post-task learning (M38)
 
@@ -108,6 +108,24 @@ M46's [bound lean plan](../superpowers/plans/2026-10-14-companion-browser-m46.md
 
 ### PAR-06: coding and delegation that finishes real work
 
+M52 now supplies actual useful repair evidence on one distinct JSONL task:
+current-account `gpt-6-luna`, one helper, initial failing tests, model repair,
+final tests3/3 and an independent exact129-byte module/CLI oracle pass. Seven
+recorded calls/23,065 reported tokens,14 durable receipts and quiet restart7to7
+were verified. Four canonical task-result/reflection records and two agent
+entities retained their memory-file hash; no Fact/retrieval-quality claim.
+
+Strict autonomous-quality acceptance remains partial: the helper's edge-case
+explanation was contradictory, and the parent completed an output-verification
+todo while reporting that it had not confirmed the file contents. Root verified
+the artifact independently. No replay, follow-up generation or manual rescue is
+allowed for this consumed case. Required gates passed Rust2725/23intentional-
+ignores/40suites/format/build, nine oracle controls and the exact synthetic shell
+case. All24 recorded owned identities retired/port18752free. See the
+[M52 outcome](../superpowers/plans/2026-10-16-companion-provider-task-acceptance-m52.md).
+Reporting/helper reasoning quality, arbitrary coding, broader accounts/hosts and
+full Hermes parity remain open. Historical results below stay immutable.
+
 M51 implements the bounded8MiB catalog-envelope correction with fresh required
 Rust gates and unchanged inference/public contracts. The one separately released actual check **received and parsed current metadata** in **0.29s**: state **ready**, count **7**, stage **complete**, dispatch **response_received**, reason **none**, HTTP status **not retained**. No model IDs/raw body were retained or model chosen. No retry, fallback query/header/model/provider, generation, helper, daemon, connector, DB server or container followed. The release is consumed. Metadata receipt is not entitlement, tool compatibility or useful coding quality; M47/M49 historical causes are not reconstructed.
 See the [M51 outcome](../superpowers/plans/2026-10-15-companion-catalog-budget-m51.md).
@@ -128,10 +146,10 @@ unchanged. A distinct JSONL acceptance fixture may be prepared, but current-acco
 selection and independently correct provider coding/delegation stay open. See the
 [M49 outcome](../superpowers/plans/2026-10-15-companion-subscription-models-m49.md).
 
-- [ ] Run a small synthetic repository bug-fix task through actual read/edit/test tools, saved todos and one bounded helper; independently check produced code against the predeclared oracle and preserve neighbors.
+- [x] M52 repaired one small synthetic repository through actual read/edit/test tools, saved todos and one bounded helper; independent code/output oracle and protected-file/time checks passed. Helper edge-case and verification-reporting quality remain open.
 - [x] M47 deterministic cases include correction, tool failure, budget exhaustion and Stop/recovery, with paired results and honest wrap-up; actual useful-provider recovery remains separate.
 - [ ] Plan any external coding-worker adapter through the reviewed capability bridge. Evaluate helper terminal access only as a separate explicit grant/scope change; retain bounded workers and no self-granting/recursive runaway by default.
-- [ ] Declare an aggregate request/helper/time ceiling before each real case, including child calls; no unlimited-default or repeated-provider testing to manufacture a pass.
+- [x] M52 declared parent/helper ten-attempt, one-helper/two-Exec, four-round/zero-retry/30s-call/180s-root boundaries before its one case; seven calls were recorded. Every future case still needs its own bound/release, with no repeated-provider pass hunting.
 - Owners: native harness/helper adapters when an actual gap is demonstrated; otherwise isolated acceptance driver and docs. Reuse existing loop, task, shell and filesystem implementations.
 - Acceptance: actual fixed tests/output, correct delegated result, limited calls, no unrelated edit, truthful unfinished work and recorded recovery. Full arbitrary coding quality is not inferred from one task.
 
