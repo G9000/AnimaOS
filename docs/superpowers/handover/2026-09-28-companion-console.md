@@ -1,3 +1,47 @@
+# Handover: closed catalog diagnostics (M0–M50)
+
+## Start here (2026-10-15): M49 merged; M50 bound plan active
+
+Continue `g9000/companion-catalog-diagnostics-m50`, cut from verified
+[M49/PR55](https://github.com/G9000/animaOS-SWARM/pull/55) main
+`67f047d6d657145b57d8e22c75da216ae0e83e90`. Source
+`621fac543114c5366f91fb37a85b0092f4701246` shares gated tree
+`fcf3c29a9256b7b96731f18c28893906b38052e1`; M49 is committed/pushed/merged.
+All34 owned working hashes and unrelated nx.json bytes survived settlement.
+Exact resume/release is
+`.superpowers/sdd/2026-10-15-companion-catalog-diagnostics-m50/progress.md`.
+
+The [M50 lean plan](../plans/2026-10-15-companion-catalog-diagnostics-m50.md)
+binds five controller risks: closed typed core failure, private request-local
+native outcome, honest local-dispatch/response certainty and numeric HTTP status,
+unchanged fixed query/cache/public contracts, semantic RED/review/fix wave/gates.
+No raw errors/bodies/headers/credentials/accounts or new telemetry/cache/UI fields.
+One author owns the small core/native seam; root owns all commands/publication.
+
+M49 gates passed Rust2709/20intentional-ignores/40suites/format/build,
+SDK151/3service-skips and web1320/115files/typechecks/builds. Its single actual
+metadata-only check failed unavailable/count0 in1.45s; it cannot establish catalog
+dispatch or cause. No retry/generation followed. All M47/M48 generation and M49
+metadata releases remain consumed. Do not recover/repair/replay M47's failed task
+or guess a compatible model. Useful coding/delegation and full parity stay open.
+
+Only after M50 gates may root separately release one diagnostic metadata operation
+through the normal application vault adapter, zero-or-one fixed GET, ten-second
+async deadline/fifteen-second outer driver, no retries/fallback/generation. The
+private useful JSONL task proposal stays held/renumberable; native voice stays held.
+
+Standing cheap Codex delegation, per-command unsigned commits, reviewed merge-and-
+continue and context-only chat updates persist. CARGO_INCREMENTAL=0/jobs1/two full-
+suite threads. Explicit paths only, never nx.json/anima.yaml/private evidence;
+preserve nx SHA256
+`3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`.
+No worktree/stash/reset/restore/path checkout, ordinary profiles/accounts/connector
+sends, DB servers/containers/Docker55432/public deployment or credential/profile
+copy/readout. Preserve MIT notices and Anima branding. Historical resumes below
+are superseded here.
+
+## Historical M49 handover
+
 # Handover: subscription model selection (M0–M49)
 
 ## Start here (2026-10-15): M49 local gates pass; actual metadata unavailable
