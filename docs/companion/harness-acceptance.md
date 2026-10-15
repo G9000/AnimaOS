@@ -466,3 +466,22 @@ remain unknown. No retry, alternate query/version/model/provider, generation,
 helper, daemon, real connector, DB server or container followed. Its release is
 consumed. No useful provider task, memory-content recovery or broader parity is
 accepted by this check; M47's failed candidate/result remains immutable.
+
+## M50: closed catalog diagnostics identify the body budget
+
+The [M50 plan](../superpowers/plans/2026-10-15-companion-catalog-diagnostics-m50.md)
+records six-file typed core/private native diagnostics under unchanged public
+metadata, inference, protocol, cache and auth contracts. Fresh required gates:
+**2,719 Rust/core / 21 intentional ignores / 40 suites / formatting / build**;
+all ten default M50 cases passed. The original403 semantic RED is now GREEN.
+One combined review/final SDK-web scope check found no production issue; a new
+Windows timing assumption was replaced by a deterministic local resolver failure.
+Six source and25 compatibility hashes stayed frozen; TypeScript gates are M49's
+prior evidence, not rerun here.
+
+The one actual diagnostic failed availability in **0.84s** after observing HTTP200:
+closed stage body/reason declared_limit/response_received, unavailable/count0.
+This current response's declared size exceeds the **512KiB** cap. No catalog was
+parsed or IDs/raw body retained; no retry/generation or services followed, release
+consumed. This does not reconstruct the missing cause of M49 or M47. Next is a
+bounded catalog-size correction; useful provider coding/delegation remains open.

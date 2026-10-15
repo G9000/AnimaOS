@@ -635,4 +635,7 @@ mod models_tests;
 mod request_fixture_tests;
 #[cfg(test)]
 mod tests;
-pub use models::ChatGptModelsAdapter;
+pub use models::{
+    ChatGptCatalogDispatch, ChatGptModelsAdapter, ChatGptModelsFailure, ChatGptModelsReason,
+    ChatGptModelsStage,
+};

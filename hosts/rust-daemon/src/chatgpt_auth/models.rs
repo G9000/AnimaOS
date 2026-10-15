@@ -1,5 +1,9 @@
 //! Ephemeral current-principal catalog. Metadata never selects a model or runs tools.
 use super::{ChatGptAuth, Credential, Manifest, VAULT_ERROR};
+use anima_model_adapters::{
+    ChatGptCatalogDispatch as Dispatch, ChatGptModelsFailure, ChatGptModelsReason as Reason,
+    ChatGptModelsStage as Stage,
+};
 use async_trait::async_trait;
 use serde::Serialize;
 use std::{sync::atomic::Ordering, time::Duration};
@@ -10,6 +14,100 @@ const TIMEOUT: &str = "Model metadata request timed out.";
 const INVALID: &str = "Model metadata response is invalid.";
 const TTL: Duration = Duration::from_secs(300);
 const DEADLINE: Duration = Duration::from_secs(10);
+
+// Returned only to this invocation, never retained in a cache or public DTO.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ModelsDiagnostic {
+    stage: Stage,
+    catalog_dispatch: Dispatch,
+    reason: Reason,
+    http_status: Option<u16>,
+}
+impl ModelsDiagnostic {
+    fn new(
+        stage: Stage,
+        catalog_dispatch: Dispatch,
+        reason: Reason,
+        http_status: Option<u16>,
+    ) -> Self {
+        Self {
+            stage,
+            catalog_dispatch,
+            reason,
+            http_status,
+        }
+    }
+    fn before(stage: Stage, reason: Reason) -> Self {
+        Self::new(stage, Dispatch::NotStarted, reason, None)
+    }
+    fn complete() -> Self {
+        Self::new(
+            Stage::Complete,
+            Dispatch::ResponseReceived,
+            Reason::None,
+            None,
+        )
+    }
+    fn deadline() -> Self {
+        Self::new(Stage::Deadline, Dispatch::Unknown, Reason::Timeout, None)
+    }
+    fn scope(mut self, reason: Reason) -> Self {
+        self.stage = Stage::Scope;
+        self.reason = reason;
+        self
+    }
+    fn public_message(self) -> &'static str {
+        match self.reason {
+            Reason::Timeout => TIMEOUT,
+            Reason::InvalidCatalog => INVALID,
+            _ => UNAVAILABLE,
+        }
+    }
+}
+impl From<ChatGptModelsFailure> for ModelsDiagnostic {
+    fn from(failure: ChatGptModelsFailure) -> Self {
+        Self::new(
+            failure.stage(),
+            failure.catalog_dispatch(),
+            failure.reason(),
+            failure.http_status(),
+        )
+    }
+}
+struct ModelsOutcome {
+    result: Result<ChatGptModelsSnapshot, ModelsError>,
+    diagnostic: ModelsDiagnostic,
+}
+impl ModelsOutcome {
+    fn new(
+        result: Result<ChatGptModelsSnapshot, ModelsError>,
+        diagnostic: ModelsDiagnostic,
+    ) -> Self {
+        Self { result, diagnostic }
+    }
+    fn timeout() -> Self {
+        Self::new(
+            Ok(ChatGptAuth::models_timeout_snapshot()),
+            ModelsDiagnostic::deadline(),
+        )
+    }
+}
+pub(super) enum ModelsFetchFailure {
+    Core(ChatGptModelsFailure),
+    Unavailable,
+    #[cfg(test)]
+    Synthetic(ModelsDiagnostic),
+}
+impl ModelsFetchFailure {
+    fn diagnostic(self) -> ModelsDiagnostic {
+        match self {
+            Self::Core(failure) => failure.into(),
+            Self::Unavailable => ModelsDiagnostic::before(Stage::Control, Reason::None),
+            #[cfg(test)]
+            Self::Synthetic(diagnostic) => diagnostic,
+        }
+    }
+}
 
 #[derive(Clone, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -118,22 +216,32 @@ impl ModelsCache {
 
 #[async_trait]
 pub(super) trait ModelsTransport: Send + Sync {
-    async fn fetch(&self, token: String, account: String) -> Result<Vec<String>, String>;
+    async fn fetch(
+        &self,
+        token: String,
+        account: String,
+    ) -> Result<Vec<String>, ModelsFetchFailure>;
 }
 pub(super) struct OfficialModelsTransport;
 #[async_trait]
 impl ModelsTransport for OfficialModelsTransport {
-    async fn fetch(&self, token: String, account: String) -> Result<Vec<String>, String> {
-        anima_model_adapters::ChatGptModelsAdapter::new(token, account)?
-            .fetch()
+    async fn fetch(
+        &self,
+        token: String,
+        account: String,
+    ) -> Result<Vec<String>, ModelsFetchFailure> {
+        anima_model_adapters::ChatGptModelsAdapter::new_detailed(token, account)
+            .map_err(ModelsFetchFailure::Core)?
+            .fetch_detailed()
             .await
+            .map_err(ModelsFetchFailure::Core)
     }
 }
 pub(super) struct UnavailableModelsTransport;
 #[async_trait]
 impl ModelsTransport for UnavailableModelsTransport {
-    async fn fetch(&self, _: String, _: String) -> Result<Vec<String>, String> {
-        Err(UNAVAILABLE.into())
+    async fn fetch(&self, _: String, _: String) -> Result<Vec<String>, ModelsFetchFailure> {
+        Err(ModelsFetchFailure::Unavailable)
     }
 }
 
@@ -199,8 +307,15 @@ impl ChatGptAuth {
         operation: Option<&str>,
         result: Result<Vec<String>, &'static str>,
     ) -> Result<ChatGptModelsSnapshot, ModelsError> {
-        self.finish_models_checked(expected, operation, result, None)
-            .await
+        self.finish_models_checked(
+            expected,
+            operation,
+            result,
+            None,
+            ModelsDiagnostic::complete(),
+        )
+        .await
+        .result
     }
     async fn finish_models_checked(
         &self,
@@ -208,24 +323,25 @@ impl ChatGptAuth {
         operation: Option<&str>,
         result: Result<Vec<String>, &'static str>,
         deadline: Option<Instant>,
-    ) -> Result<ChatGptModelsSnapshot, ModelsError> {
+        diagnostic: ModelsDiagnostic,
+    ) -> ModelsOutcome {
         let lifecycle = self.lifecycle.lock().await;
         let current = match self.models_stamp(lifecycle.generation) {
             Ok(current) => current,
             Err(error) => {
                 *self.models_cache.lock().await = ModelsCache::default();
-                return Err(error);
+                return ModelsOutcome::new(Err(error), diagnostic.scope(Reason::Vault));
             }
         };
         let mut cache = self.models_cache.lock().await;
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-            return Ok(Self::models_timeout_snapshot());
+            return ModelsOutcome::timeout();
         }
         cache.reconcile(self.models_epoch.load(Ordering::Acquire), current.clone());
         if current.as_ref() != Some(expected)
             || operation.is_some_and(|op| cache.operation.as_deref() != Some(op))
         {
-            return Ok(cache.view());
+            return ModelsOutcome::new(Ok(cache.view()), diagnostic.scope(Reason::ScopeChanged));
         }
         match result {
             Ok(ids) => {
@@ -242,7 +358,7 @@ impl ChatGptAuth {
             }
             Err(error) => cache.fail(error),
         }
-        Ok(cache.view())
+        ModelsOutcome::new(Ok(cache.view()), diagnostic)
     }
     pub(crate) async fn refresh_models(&self) -> Result<ChatGptModelsSnapshot, ModelsError> {
         self.refresh_models_until(Instant::now() + DEADLINE).await
@@ -251,10 +367,25 @@ impl ChatGptAuth {
         &self,
         deadline: Instant,
     ) -> Result<ChatGptModelsSnapshot, ModelsError> {
-        let _single = self
-            .models_refresh
-            .try_lock()
-            .map_err(|_| ModelsError::Busy)?;
+        let outcome = self.refresh_models_diagnostic_until(deadline).await;
+        let _ = outcome.diagnostic; // Ordinary refresh deliberately discards request-local evidence.
+        outcome.result
+    }
+    #[cfg(test)]
+    async fn refresh_models_diagnostic(&self) -> ModelsOutcome {
+        self.refresh_models_diagnostic_until(Instant::now() + DEADLINE)
+            .await
+    }
+    async fn refresh_models_diagnostic_until(&self, deadline: Instant) -> ModelsOutcome {
+        let _single = match self.models_refresh.try_lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return ModelsOutcome::new(
+                    Err(ModelsError::Busy),
+                    ModelsDiagnostic::before(Stage::Control, Reason::Busy),
+                )
+            }
+        };
         let result = tokio::time::timeout_at(deadline, self.refresh_models_work(deadline)).await;
         match result {
             Ok(result) if Instant::now() < deadline => result,
@@ -263,7 +394,7 @@ impl ChatGptAuth {
                 // next cache access discards uncertain rows under its own lock;
                 // no cleanup future can later erase a newer explicit refresh.
                 self.models_epoch.fetch_add(1, Ordering::AcqRel);
-                Ok(Self::models_timeout_snapshot())
+                ModelsOutcome::timeout()
             }
         }
     }
@@ -273,12 +404,9 @@ impl ChatGptAuth {
         snapshot.error = Some(TIMEOUT);
         snapshot
     }
-    async fn refresh_models_work(
-        &self,
-        deadline: Instant,
-    ) -> Result<ChatGptModelsSnapshot, ModelsError> {
+    async fn refresh_models_work(&self, deadline: Instant) -> ModelsOutcome {
         if Instant::now() >= deadline {
-            return Ok(Self::models_timeout_snapshot());
+            return ModelsOutcome::timeout();
         }
         let initial = {
             let lifecycle = self.lifecycle.lock().await;
@@ -286,34 +414,72 @@ impl ChatGptAuth {
                 Ok(stamp) => stamp,
                 Err(error) => {
                     *self.models_cache.lock().await = ModelsCache::default();
-                    return Err(error);
+                    return ModelsOutcome::new(
+                        Err(error),
+                        ModelsDiagnostic::before(Stage::Authorization, Reason::Vault),
+                    );
                 }
             }
         };
         let Some(initial) = initial else {
-            return self.models().await;
+            return self
+                .reconcile_models_outcome(ModelsDiagnostic::before(
+                    Stage::Authorization,
+                    Reason::Disconnected,
+                ))
+                .await;
         };
         if Instant::now() >= deadline {
-            return Ok(Self::models_timeout_snapshot());
+            return ModelsOutcome::timeout();
         }
         let context = match self.usable_context(true).await {
             Ok(Some(context)) => context,
-            Ok(None) => return self.models().await,
+            Ok(None) => {
+                return self
+                    .reconcile_models_outcome(ModelsDiagnostic::before(
+                        Stage::Authorization,
+                        Reason::Disconnected,
+                    ))
+                    .await
+            }
             Err(error) if error == VAULT_ERROR => {
                 *self.models_cache.lock().await = ModelsCache::default();
-                return Err(ModelsError::Vault);
+                return ModelsOutcome::new(
+                    Err(ModelsError::Vault),
+                    ModelsDiagnostic::before(Stage::Authorization, Reason::Vault),
+                );
             }
             Err(_) => {
                 return self
-                    .finish_models_checked(&initial, None, Err(UNAVAILABLE), Some(deadline))
+                    .finish_models_checked(
+                        &initial,
+                        None,
+                        Err(UNAVAILABLE),
+                        Some(deadline),
+                        ModelsDiagnostic::before(Stage::Authorization, Reason::Credential),
+                    )
                     .await
             }
         };
-        let Some(operation) = self.begin_models(&context.stamp).await? else {
-            return self.models().await;
+        let operation = match self.begin_models(&context.stamp).await {
+            Ok(Some(operation)) => operation,
+            Ok(None) => {
+                return self
+                    .reconcile_models_outcome(ModelsDiagnostic::before(
+                        Stage::Scope,
+                        Reason::ScopeChanged,
+                    ))
+                    .await
+            }
+            Err(error) => {
+                return ModelsOutcome::new(
+                    Err(error),
+                    ModelsDiagnostic::before(Stage::Scope, Reason::Vault),
+                )
+            }
         };
         if Instant::now() >= deadline {
-            return Ok(Self::models_timeout_snapshot());
+            return ModelsOutcome::timeout();
         }
         let fetched = self
             .models_transport
@@ -322,14 +488,35 @@ impl ChatGptAuth {
                 context.credential.account_id.clone(),
             )
             .await;
-        let result = match fetched {
-            Ok(ids) => Ok(ids),
-            Err(error) if error == INVALID => Err(INVALID),
-            Err(error) if error == TIMEOUT => Err(TIMEOUT),
-            Err(_) => Err(UNAVAILABLE),
+        let (result, diagnostic) = match fetched {
+            Ok(ids) => (Ok(ids), ModelsDiagnostic::complete()),
+            Err(failure) => {
+                let diagnostic = failure.diagnostic();
+                (Err(diagnostic.public_message()), diagnostic)
+            }
         };
-        self.finish_models_checked(&context.stamp, Some(&operation), result, Some(deadline))
-            .await
+        self.finish_models_checked(
+            &context.stamp,
+            Some(&operation),
+            result,
+            Some(deadline),
+            diagnostic,
+        )
+        .await
+    }
+    async fn reconcile_models_outcome(&self, mut diagnostic: ModelsDiagnostic) -> ModelsOutcome {
+        let result = self.models().await;
+        match &result {
+            Err(_) => diagnostic = diagnostic.scope(Reason::Vault),
+            Ok(snapshot)
+                if diagnostic.reason == Reason::Disconnected
+                    && snapshot.state != "disconnected" =>
+            {
+                diagnostic = diagnostic.scope(Reason::ScopeChanged)
+            }
+            _ => {}
+        }
+        ModelsOutcome::new(result, diagnostic)
     }
 }
 

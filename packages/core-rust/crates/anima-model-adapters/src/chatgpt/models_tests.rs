@@ -1,4 +1,7 @@
-use super::models::{decode_models, ChatGptModelsAdapter, MODELS_ENDPOINT};
+use super::models::{
+    decode_models, ChatGptCatalogDispatch, ChatGptModelsAdapter, ChatGptModelsReason,
+    ChatGptModelsStage, MODELS_ENDPOINT,
+};
 use serde_json::json;
 use std::{
     sync::{
@@ -168,6 +171,61 @@ impl CatalogPeer {
             "synthetic catalog peer must join before test assertions"
         );
     }
+}
+
+#[tokio::test]
+async fn m50_catalog_diagnostics_http_403_retains_closed_response_evidence() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let peer = CatalogPeer::start(axum::Router::new().route(
+        "/backend-api/codex/models",
+        axum::routing::get({
+            let attempts = attempts.clone();
+            move || {
+                let attempts = attempts.clone();
+                async move {
+                    attempts.fetch_add(1, Ordering::SeqCst);
+                    (
+                        axum::http::StatusCode::FORBIDDEN,
+                        [("x-m50-private", "m50-private-header-marker")],
+                        "m50-private-body-marker",
+                    )
+                }
+            }
+        }),
+    ))
+    .await;
+    let adapter = ChatGptModelsAdapter::new_detailed(
+        "m50-private-token-marker".into(),
+        "m50-private-account-marker".into(),
+    )
+    .unwrap()
+    .at_test_origin(peer.origin.clone(), Duration::from_secs(2))
+    .unwrap();
+    let result = adapter.fetch_detailed().await;
+    peer.join().await;
+    assert_eq!(
+        attempts.load(Ordering::SeqCst),
+        1,
+        "one controlled response, without retry"
+    );
+    let failure = result.unwrap_err();
+    assert_eq!(failure.stage(), ChatGptModelsStage::HttpStatus);
+    assert_eq!(
+        failure.catalog_dispatch(),
+        ChatGptCatalogDispatch::ResponseReceived
+    );
+    assert_eq!(failure.reason(), ChatGptModelsReason::HttpStatus);
+    assert_eq!(failure.http_status(), Some(403));
+    assert_eq!(failure.public_message(), "Model metadata is unavailable.");
+    let safe = format!("{failure:?}|{failure}");
+    assert!(
+        !safe.contains("m50-private"),
+        "closed diagnostics retain no synthetic sensitive marker"
+    );
+    assert!(
+        !safe.contains("http://"),
+        "closed diagnostics retain no endpoint"
+    );
 }
 
 #[tokio::test]
@@ -436,4 +494,345 @@ async fn m49_chatgpt_models_timeout_is_closed_and_does_not_retry() {
         "Model metadata request timed out."
     );
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
+}
+
+fn assert_m50_closed(failure: &super::models::ChatGptModelsFailure) {
+    let safe = format!("{failure:?}|{failure}");
+    assert!(!safe.contains("m50-private"));
+    assert!(!safe.contains("m49-private"));
+    assert!(!safe.contains("http://"));
+    assert!(std::error::Error::source(failure).is_none());
+}
+
+#[tokio::test]
+async fn m50_catalog_diagnostics_local_build_and_connect_have_honest_dispatch() {
+    use ChatGptCatalogDispatch::*;
+    use ChatGptModelsReason::{ClientBuild, Connect, Credential, RequestBuild};
+    use ChatGptModelsStage::*;
+    let failure =
+        match ChatGptModelsAdapter::new_detailed(String::new(), "m50-private-account".into()) {
+            Err(error) => error,
+            Ok(_) => panic!("empty credential must fail"),
+        };
+    assert_eq!(
+        (
+            failure.stage(),
+            failure.catalog_dispatch(),
+            failure.reason(),
+            failure.http_status()
+        ),
+        (Client, NotStarted, Credential, None)
+    );
+    assert_m50_closed(&failure);
+    let failure = super::models::build_client(reqwest::Client::builder().user_agent("\n"))
+        .err()
+        .expect("invalid local client header");
+    assert_eq!(
+        (
+            failure.stage(),
+            failure.catalog_dispatch(),
+            failure.reason(),
+            failure.http_status()
+        ),
+        (Client, NotStarted, ClientBuild, None)
+    );
+    assert_m50_closed(&failure);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let adapter = ChatGptModelsAdapter::new_detailed(
+        "m50-private-token".into(),
+        "m50-private-account\n".into(),
+    )
+    .unwrap()
+    .at_test_origin(origin.clone(), Duration::from_secs(1))
+    .unwrap();
+    let failure = adapter.fetch_detailed().await.unwrap_err();
+    assert_eq!(
+        (
+            failure.stage(),
+            failure.catalog_dispatch(),
+            failure.reason(),
+            failure.http_status()
+        ),
+        (Request, NotStarted, RequestBuild, None)
+    );
+    assert_m50_closed(&failure);
+    drop(listener);
+    struct FailingResolver(Arc<AtomicUsize>);
+    impl reqwest::dns::Resolve for FailingResolver {
+        fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+            assert_eq!(name.as_str(), "m50-catalog.invalid");
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Err(std::io::Error::other("m50-private-resolver-marker").into()) })
+        }
+    }
+    let resolutions = Arc::new(AtomicUsize::new(0));
+    let controlled_client = super::models::build_client(
+        reqwest::Client::builder()
+            .no_proxy()
+            .dns_resolver(Arc::new(FailingResolver(resolutions.clone())))
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(1)),
+    )
+    .unwrap();
+    let failure = ChatGptModelsAdapter::new_detailed(
+        "m50-private-token".into(),
+        "m50-private-account".into(),
+    )
+    .unwrap()
+    .at_test_origin("http://m50-catalog.invalid".into(), Duration::from_secs(1))
+    .unwrap()
+    .with_test_client(controlled_client)
+    .fetch_detailed()
+    .await
+    .unwrap_err();
+    assert_eq!(
+        (
+            failure.stage(),
+            failure.catalog_dispatch(),
+            failure.reason(),
+            failure.http_status()
+        ),
+        (Request, Attempted, Connect, None)
+    );
+    assert_eq!(
+        resolutions.load(Ordering::SeqCst),
+        1,
+        "one controlled resolver failure without DNS or socket I/O"
+    );
+    assert_m50_closed(&failure);
+}
+
+#[tokio::test]
+async fn m50_catalog_diagnostics_status_body_limit_and_decode_are_distinct() {
+    use ChatGptModelsReason as R;
+    use ChatGptModelsStage as S;
+    let mut cases = vec![];
+    for status in [302, 401, 403, 429, 500, 503] {
+        cases.push((
+            status,
+            b"m50-private-body-marker".to_vec(),
+            S::HttpStatus,
+            R::HttpStatus,
+        ));
+    }
+    cases.push((200, vec![b'x'; 512 * 1024 + 1], S::Body, R::DeclaredLimit));
+    for body in [
+        b"{".to_vec(),
+        vec![0xff],
+        br#"{"models":[{"slug":"m50-private invalid"}]}"#.to_vec(),
+    ] {
+        cases.push((200, body, S::Decode, R::InvalidCatalog));
+    }
+    for (status, body, stage, reason) in cases {
+        let peer = CatalogPeer::start(axum::Router::new().route(
+            "/backend-api/codex/models",
+            axum::routing::get(move || {
+                let body = body.clone();
+                async move { (axum::http::StatusCode::from_u16(status).unwrap(), body) }
+            }),
+        ))
+        .await;
+        let result = peer.adapter().fetch_detailed().await;
+        peer.join().await;
+        let failure = result.unwrap_err();
+        assert_eq!(
+            (
+                failure.stage(),
+                failure.catalog_dispatch(),
+                failure.reason(),
+                failure.http_status()
+            ),
+            (
+                stage,
+                ChatGptCatalogDispatch::ResponseReceived,
+                reason,
+                Some(status)
+            )
+        );
+        assert_eq!(
+            failure.public_message(),
+            if reason == R::InvalidCatalog {
+                "Model metadata response is invalid."
+            } else {
+                "Model metadata is unavailable."
+            }
+        );
+        assert_m50_closed(&failure);
+    }
+    for body in [
+        json!({"models":[]}),
+        json!({"models":[{"slug":"synthetic-model-a"}]}),
+    ] {
+        let expected = if body["models"].as_array().unwrap().is_empty() {
+            vec![]
+        } else {
+            vec!["synthetic-model-a".to_owned()]
+        };
+        let peer = CatalogPeer::start(axum::Router::new().route(
+            "/backend-api/codex/models",
+            axum::routing::get(move || {
+                let body = body.clone();
+                async move { axum::Json(body) }
+            }),
+        ))
+        .await;
+        let result = peer.adapter().fetch_detailed().await;
+        peer.join().await;
+        assert_eq!(result.unwrap(), expected);
+    }
+    let peer = CatalogPeer::start(axum::Router::new().route(
+        "/backend-api/codex/models",
+        axum::routing::get(|| async {
+            axum::body::Body::from_stream(futures::stream::iter(vec![
+                Ok::<_, std::io::Error>(vec![b' '; 256 * 1024]),
+                Ok(vec![b' '; 256 * 1024 + 1]),
+            ]))
+        }),
+    ))
+    .await;
+    let result = peer.adapter().fetch_detailed().await;
+    peer.join().await;
+    let failure = result.unwrap_err();
+    assert_eq!(
+        (failure.stage(), failure.reason(), failure.http_status()),
+        (S::Body, R::StreamedLimit, Some(200))
+    );
+    assert_m50_closed(&failure);
+}
+
+#[tokio::test]
+async fn m50_catalog_diagnostics_request_transport_and_body_read_do_not_retain_errors() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    for body_read in [false, true] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            tokio::time::timeout(Duration::from_secs(2),async move {
+            let(mut socket,_)=listener.accept().await?;let mut headers=Vec::new();
+            while !headers.ends_with(b"\r\n\r\n") {if headers.len()>=16384{return Err(std::io::Error::other("synthetic header bound"));}let mut byte=[0];socket.read_exact(&mut byte).await?;headers.push(byte[0]);}
+            let bytes=if body_read{b"HTTP/1.1 200 OK\r\nContent-Length: 128\r\nConnection: close\r\n\r\nm50-private-incomplete".as_slice()}else{b"m50-private-invalid-http\r\n".as_slice()};
+            socket.write_all(bytes).await?;socket.shutdown().await
+        }).await
+        });
+        let result = ChatGptModelsAdapter::new_detailed(
+            "m50-private-token".into(),
+            "m50-private-account".into(),
+        )
+        .unwrap()
+        .at_test_origin(origin, Duration::from_secs(1))
+        .unwrap()
+        .fetch_detailed()
+        .await;
+        let joined = task.await;
+        assert!(
+            matches!(joined, Ok(Ok(Ok(())))),
+            "finite synthetic response peer must join"
+        );
+        let failure = result.unwrap_err();
+        assert_eq!(
+            (
+                failure.stage(),
+                failure.catalog_dispatch(),
+                failure.reason(),
+                failure.http_status()
+            ),
+            if body_read {
+                (
+                    ChatGptModelsStage::Body,
+                    ChatGptCatalogDispatch::ResponseReceived,
+                    ChatGptModelsReason::BodyRead,
+                    Some(200),
+                )
+            } else {
+                (
+                    ChatGptModelsStage::Request,
+                    ChatGptCatalogDispatch::Attempted,
+                    ChatGptModelsReason::Transport,
+                    None,
+                )
+            }
+        );
+        assert_m50_closed(&failure);
+    }
+}
+
+#[tokio::test]
+async fn m50_catalog_diagnostics_request_and_body_timeouts_preserve_timeout_message() {
+    use futures::StreamExt;
+    for body_timeout in [false, true] {
+        let entered = Arc::new(tokio::sync::Semaphore::new(0));
+        let release = Arc::new(tokio::sync::Semaphore::new(0));
+        let peer = CatalogPeer::start(axum::Router::new().route(
+            "/backend-api/codex/models",
+            axum::routing::get({
+                let entered = entered.clone();
+                let release = release.clone();
+                move || {
+                    let entered = entered.clone();
+                    let release = release.clone();
+                    async move {
+                        entered.add_permits(1);
+                        if body_timeout {
+                            axum::body::Body::from_stream(
+                                futures::stream::once(async {
+                                    Ok::<_, std::io::Error>(b"{\"models\":[".to_vec())
+                                })
+                                .chain(futures::stream::once(
+                                    async move {
+                                        release.acquire().await.unwrap().forget();
+                                        Ok::<_, std::io::Error>(b"]}".to_vec())
+                                    },
+                                )),
+                            )
+                        } else {
+                            release.acquire().await.unwrap().forget();
+                            axum::body::Body::from("{\"models\":[]}")
+                        }
+                    }
+                }
+            }),
+        ))
+        .await;
+        let adapter = peer
+            .adapter()
+            .at_test_origin(peer.origin.clone(), Duration::from_millis(150))
+            .unwrap();
+        let mut fetch = Box::pin(adapter.fetch_detailed());
+        tokio::select! {_ = entered.acquire()=>{},_ = &mut fetch=>panic!("controlled response must wait")};
+        let result = tokio::time::timeout(Duration::from_secs(2), &mut fetch).await;
+        drop(fetch);
+        release.add_permits(1);
+        peer.join().await;
+        let failure = result.unwrap().unwrap_err();
+        assert_eq!(
+            (
+                failure.stage(),
+                failure.catalog_dispatch(),
+                failure.reason(),
+                failure.http_status()
+            ),
+            if body_timeout {
+                (
+                    ChatGptModelsStage::Body,
+                    ChatGptCatalogDispatch::ResponseReceived,
+                    ChatGptModelsReason::Timeout,
+                    Some(200),
+                )
+            } else {
+                (
+                    ChatGptModelsStage::Request,
+                    ChatGptCatalogDispatch::Attempted,
+                    ChatGptModelsReason::Timeout,
+                    None,
+                )
+            }
+        );
+        assert_eq!(
+            failure.public_message(),
+            "Model metadata request timed out."
+        );
+        assert_m50_closed(&failure);
+    }
 }
