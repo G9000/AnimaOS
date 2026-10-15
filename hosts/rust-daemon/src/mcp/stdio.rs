@@ -863,6 +863,23 @@ mod tests {
         .await
         .expect("owned child cleanup must finish before its slot is reused");
     }
+    async fn wait_heartbeat(path: &Path, after: Option<u64>) -> u64 {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                // The fixture's truncating write briefly exposes empty text.
+                if let Ok(text) = std::fs::read_to_string(path) {
+                    if let Ok(ticks) = text.parse::<u64>() {
+                        if ticks > 0 && after.is_none_or(|before| ticks > before) {
+                            return ticks;
+                        }
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("actual descendant heartbeat must reach a valid advancing count")
+    }
     async fn joined(session: &Arc<dyn McpTransportSession>) {
         tokio::time::timeout(Duration::from_secs(3), session.close())
             .await
@@ -1042,15 +1059,9 @@ mod tests {
             .unwrap();
         let peer = wait_marker(&marker, Some("initialize")).await;
         assert!(peer["childPid"].as_u64().is_some_and(|pid| pid > 0));
-        let before: u64 = std::fs::read_to_string(&heartbeat)
-            .unwrap()
-            .parse()
-            .unwrap();
+        let before = wait_heartbeat(&heartbeat, None).await;
         tokio::time::sleep(Duration::from_millis(80)).await;
-        let live: u64 = std::fs::read_to_string(&heartbeat)
-            .unwrap()
-            .parse()
-            .unwrap();
+        let live = wait_heartbeat(&heartbeat, Some(before)).await;
         assert!(
             live > before,
             "the actual descendant must be alive before the leader exits"

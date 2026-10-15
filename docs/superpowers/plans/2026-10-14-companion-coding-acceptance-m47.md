@@ -1,6 +1,6 @@
 # M47 coding and delegated-task acceptance: implementation plan
 
-Status: active on g9000/companion-coding-acceptance-m47, cut from verified M46/PR52 main0f166fea3e7e33d6b1f79c1d937b73cca61a1e76. M46 sourcee43bd63b1aa2f76c6d5b0cb78ac07d7af86865ad and merge share exact tested tree db7d9b8894f57e44cd740b3e39e1a99e662c7c3b. This plan was delegated and its five risks are bound below; individual test/production release and disjoint ownership remain controller decisions. No M47 implementation or provider acceptance is claimed.
+Status: runtime and deterministic acceptance implemented on `g9000/companion-coding-acceptance-m47`, from verified M46/PR52 main `0f166fea3e7e33d6b1f79c1d937b73cca61a1e76`. Current gates pass. The single actual provider attempt failed with HTTP 400 before tools; useful coding/delegation quality is not accepted. Its quiet process restart passed without replay. Publication and exact source/merge verification are recorded in the milestone ledger.
 
 **Goal:** Prove one useful small repository repair through Anima's ordinary tools,
 saved tasks and one bounded helper, with independently checked code and effects.
@@ -13,7 +13,7 @@ M46 gates are not evidence for an M47 implementation.
 
 ## 1. Scope and success claims
 
-- PAR-06 is currently unchecked in `docs/companion/parity-roadmap.md`.
+- PAR-06 remains partial in `docs/companion/parity-roadmap.md`; deterministic cases do not close the failed actual-provider case.
 - Deliver an isolated coding fixture, independent oracle, native acceptance cases,
   and concise evidence. A narrow Windows shell Job/IO/caller-drop fix is mandatory
   before live coding; other runtime changes still require a demonstrated gap.
@@ -29,7 +29,7 @@ M46 gates are not evidence for an M47 implementation.
 
 ## 2. Evidence baseline and source map
 
-| Current source                                           | Reuse / boundary                                                                                |
+| M46 baseline source                                      | Reuse / boundary                                                                                |
 | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `docs/companion/harness-acceptance.md`                   | M17 report/helper and M21/M23/M28 effect, budget and recovery evidence remain revision-specific |
 | `docs/companion/harness-acceptance.md`                   | M40 corrected-name oracle passed while whole introduction quality failed                        |
@@ -44,7 +44,7 @@ M46 gates are not evidence for an M47 implementation.
 | `hosts/rust-daemon/src/agent_runs/action_receipts.rs`    | Persisted begin/outcome witnesses; evidence failure stops later actions                         |
 | `hosts/rust-daemon/src/agent_runs/stop.rs`               | Saved Stop fans out to linked children; no new approval needed                                  |
 | `hosts/rust-daemon/src/runs/ledger.rs`                   | Restart interrupts unfinished runs; no automatic execution resume                               |
-| `packages/sdk/src/runs.ts:103–167`                       | Existing start/get/list/stop, encoded owner paths and stable request key                        |
+| [SDK run operations](../../../packages/sdk/src/runs.ts)  | Existing start/get/list/stop, encoded owner paths and stable request key                        |
 
 The separate `anima-core/src/engine.rs` durable-engine abstractions are not evidence
 that this daemon uses every portable recovery primitive. Follow actual coordinator
@@ -326,6 +326,12 @@ The binding controller rulings below supersede these proposals.
 
 The five proposals above are bound by root. M46 merge and this milestone branch are verified; execute only the individually released ownership slice.
 
+Additional implementation rulings: enable only the existing process-wrap 10.0.1 `std` feature, with no new version or dependency. A genuinely unproven Windows Job/IO retirement retains available resources on its owner thread and latches a minimal shared broken-cleanup fuse before reporting uncertainty. Later shell admissions are refused until daemon restart; this is not a process registry, lease, reaper or retry. The existing run-action failure/cancel seam retains the durable Started receipt and stops further effects/model continuation, without forging an owner Stop or a successful outcome.
+
+The todo sidecar under `.animaos-swarm/agent-tasks/` is separately declared host-owned runtime evidence; `out.csv` remains the sole model-generated artifact. The actual coding-shell test has a distinct ignored `m47_coding_real_shell_` selector so the `m47_coding_windows_` prerequisite cannot execute it early. Baseline leader-exit coverage already passed on the installed Git Bash; only demonstrated Stop/drop/startup/timeout failures count as fixed gaps.
+
+`maxTokens=2048` is requested runtime configuration. The current ChatGPT subscription adapter deliberately omits output-token controls for reasoning models, so it is not a provider output or billing cap. The one-task, per-call/root deadlines, observed helper count, reported usage and no-retry rules remain binding; a failed quality/cost result stays visible.
+
 Ruling: Freeze a controller-owned independent cents/void/sort/module/CLI oracle and candidate/neighbor hashes before the single useful task — a transcript, helper summary or model-edited tests cannot establish repaired behavior — cost if wrong: the task remains a visible failed-quality case, no reset/manual repair/pass hunting attributed to the model.
 
 Ruling: Use exactly one observed advisory helper with current filtered inherited permissions, record its actual grants, and fail/Stop on helper edits or observed extra helpers — an instruction to inspect only is not a native read-only permission boundary — cost if wrong: failed acceptance and truthful inherited-write capability, no unsupported isolation claim or new permission engine for this case.
@@ -345,3 +351,89 @@ Ruling: Reuse current runtime/tools/todos/receipts/helper links and exact quiet 
 - Native acceptance author owns only `hosts/rust-daemon/src/agent_runs/coding_tests.rs`, `agent_runs.rs` test registration and necessary small `agent_runs/test_support.rs` helpers. Reuse current real handlers/model test support. No production runtime fixes without a concrete RED and controller ruling.
 - Root owns the existing-core Nx target, all commands/formatting/Git/services/models, plan/handover/master/ledger and final review settlement. No worker commands, compiler, browser, daemon, model or external messages.
 - Real shell RED fixtures must have self-expiring owned children and guaranteed cleanup before assertion propagation; prove the vulnerable behavior before waiting out the cleanup TTL. Never terminate a PID without exact owned process identity. A passing synthetic baseline is not useful-task quality acceptance.
+
+## Demonstrated gaps and bounded corrections
+
+The existing selected Git Bash path failed actual saved Stop, live caller Drop,
+queued caller Drop and direct Stop/timeout cases before cleanup. Windows now uses
+maintained process-wrap Job ownership, an uncancelled whole-job wait and joined
+bounded readers. A caller dropping its future cannot abandon the owner or cancel
+an unrelated shared run. Leader-exit coverage already passed at baseline and is
+retained without claiming it as a newly fixed defect. Non-Windows behavior is
+preserved; Windows whole-tree evidence does not establish portable containment.
+
+The configured model timeout previously bounded helpers but not parent adapter
+calls. Two controlled loopback tests demonstrated the missing generate/stream
+deadline. The small shared adapter wrapper now bounds the complete configured
+call, including credential acquisition and partial response bodies, and keeps
+`None` unchanged. Four focused cases pass, with no retry or new dependency.
+Dropping an HTTP future does not establish remote-provider cancellation or a
+billing refund.
+
+The full gate also exposed startup producers contending with synchronous router
+installation. Both real startup paths now finish construction before starting
+restored jobs/connectors/scheduler/scanner workers. The independent HTTP timeout
+regression test now uses a gated model and an explicit completed/zero-in-flight
+barrier, retaining first 408 / retry 200 evidence without a 10 ms scheduling assumption.
+The original failures remain in the private ledger.
+
+Focused native acceptance passed 11 cases with five intentionally ignored real
+shell selectors. The separately selected real-shell coding case passed actual
+failed tests, repair, passing tests/CLI, exact approvals and six persistent paired
+action receipts. Its 54-byte output SHA256 is
+`fa5a0c0d4f17139c2f8a9dfc60ed771134702954d1b1929f339731f18dc6091e`.
+ScriptedModel selected those steps; this proves wiring rather than model quality.
+
+Four physical tests cover six lifecycle cases. Independent Windows kernel
+PID/image/creation-time/ancestry sampling observed 32 controlled identities and
+none remaining; all six private roots were removed and neighbors survived the
+relevant observations. Optional test-only readiness acknowledgements capture live
+kernel identities before Stop/drop, without delaying post-action assertions. An
+earlier functional pass missed a short-lived child in OS sampling and is retained
+as incomplete physical evidence, superseded by the final witness run.
+
+The independent oracle self-tests passed 7/7: reject the buggy baseline, accept
+an independently implemented reference and reject four semantic mutants. Literal
+cases cover eight valid inputs, 18 malformed inputs and four invalid CLI argument
+shapes. Actual provider quality, complete current gates and quiet process restart
+are recorded separately after the single authorized task; no blanket parity
+claim follows from these deterministic checks.
+
+## Final current-tree gates and actual outcome (2026-10-15)
+
+Required local gates passed: **2,672 Rust/core tests, 16 intentional ignores,
+40 suites, lint and build**. The final full suite used two test threads; native
+concurrency tests retain their explicitly spawned concurrency. Owned Prettier and
+five-document link/path checks pass. SDK/web and Cargo.lock remain unchanged;
+the final affected SDK/web review found no actionable issue. Windows physical
+and real-shell coding selectors were also run separately as described above.
+
+Exactly one real primary task was admitted through the ordinary ChatGPT
+subscription adapter (`gpt-5.5`). Run
+`run_c760eca7-1ca4-4603-afa6-628ddc13201a` failed after approximately 1.1 seconds with
+static `ChatGPT subscription request failed (HTTP 400)`. The server's detailed
+body was not retained or exposed; the underlying rejection cause is unproven.
+There were **zero helpers, model steps, action receipts, Exec approvals or output
+files**, and zero usage rows. One failed provider attempt occurred; zero recorded
+tokens do not establish zero billed tokens. No retry, alternate provider, second
+verification request or manual candidate repair was performed.
+
+All six candidate files and both neighbor files retained exact bytes and
+modification times. The independent oracle rejected the unchanged buggy source
+at 14 module/CLI output checks, identically before and after restart. This is a
+failed useful-task attempt, not autonomous coding or delegation quality evidence.
+
+An actual quiet same-store process restart retained the failed run, its one
+original user message, empty saved todos/receipts, agent configuration, session
+links and empty usage exactly, without replay. Canonical memory was absent in
+this fresh profile; no memory-content recovery is claimed. Both recorded daemon
+and PowerShell-wrapper identities retired and port 18747 is free. This forced
+quiet restart is not graceful-shutdown proof. The synthetic evidence remains
+private and is never committed.
+
+**Next priority:** diagnose subscription request compatibility with controlled
+wire fixtures and safe static errors before another useful provider task. The
+327-line native-voice draft remains held; it does not supersede this blocker.
+No general Hermes parity claim or supported-provider removal follows from one
+HTTP 400. M40 introduction quality, broader coding, accounts and host acceptance
+remain open.

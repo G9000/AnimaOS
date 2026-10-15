@@ -2420,6 +2420,8 @@ mod attachment_tests;
 #[cfg(test)]
 mod automation_tests;
 #[cfg(test)]
+mod coding_tests;
+#[cfg(test)]
 mod compaction_tests;
 #[cfg(test)]
 mod context_tests;

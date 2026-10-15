@@ -5,19 +5,36 @@ use anima_core::{AgentState, Content, DataValue, Message, TaskResult, ToolCall};
 use futures::future::BoxFuture;
 use std::path::Path;
 
-use self::{
-    background::{
-        list_background_processes, read_background_process_output, start_background_process,
-        stop_background_process,
-    },
-    shell::execute_bash_command,
+use self::background::{
+    list_background_processes, read_background_process_output, start_background_process,
+    stop_background_process,
 };
+#[cfg(not(windows))]
+use self::shell::execute_bash_command;
 use super::{ctx_workspace_root, ToolExecutionContext};
+
+#[cfg(all(test, windows))]
+impl ToolExecutionContext {
+    /// Shares one controlled fixture with shell and coordinator regressions
+    /// without exporting the private process module or changing runtime APIs.
+    pub(crate) fn m47_shell_fixture(mode: &str) -> shell::M47ShellFixture {
+        shell::M47ShellFixture::new(mode)
+    }
+}
 
 pub(crate) use self::background::{
     background_process_count, new_shared_process_manager_with_limit, SharedProcessManager,
     DEFAULT_MAX_BACKGROUND_PROCESSES,
 };
+
+#[cfg(windows)]
+struct BashCallCancellation(anima_core::CancelSignal);
+#[cfg(windows)]
+impl Drop for BashCallCancellation {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
 
 pub(super) fn execute_bash(
     context: ToolExecutionContext,
@@ -53,18 +70,57 @@ pub(super) fn execute_bash(
         // execute_bash_command spawns a child + polls in a busy-loop on a
         // worker thread; running it directly on a tokio worker would block the
         // entire runtime. spawn_blocking moves it onto the blocking pool.
+        #[cfg(windows)]
+        if let Some(error) = shell::cleanup_disabled() {
+            return TaskResult::error(error, 0);
+        }
         let configured_root = ctx_workspace_root(&context).map(Path::to_path_buf);
         let cancel = context.cancel.clone();
+        #[cfg(windows)]
+        let call = BashCallCancellation(anima_core::CancelSignal::new());
+        #[cfg(windows)]
+        let worker_cancel = call.0.clone();
+        #[cfg(windows)]
+        let unproven_journal = context.action_journal.clone();
+        #[cfg(windows)]
+        let unproven_run_cancel = context.cancel.clone();
         let result = tokio::task::spawn_blocking(move || {
-            execute_bash_command(
-                configured_root.as_deref(),
-                &command,
-                timeout_ms,
-                &cwd,
-                cancel.as_ref(),
-            )
+            #[cfg(windows)]
+            {
+                shell::execute_bash_command_owned(
+                    configured_root.as_deref(),
+                    &command,
+                    timeout_ms,
+                    &cwd,
+                    cancel,
+                    worker_cancel,
+                )
+            }
+            #[cfg(not(windows))]
+            {
+                execute_bash_command(
+                    configured_root.as_deref(),
+                    &command,
+                    timeout_ms,
+                    &cwd,
+                    cancel.as_ref(),
+                )
+            }
         })
         .await;
+        #[cfg(windows)]
+        if result.as_ref().is_ok_and(|result| {
+            result
+                .as_ref()
+                .err()
+                .is_some_and(|error| error == shell::BASH_CLEANUP_UNKNOWN)
+        }) {
+            if let Some(journal) = unproven_journal {
+                journal.stop_for_unproven_effects(shell::BASH_CLEANUP_UNKNOWN);
+            } else if let Some(cancel) = unproven_run_cancel {
+                cancel.cancel();
+            }
+        }
         match result {
             Ok(Ok(result)) if result.status == "success" => TaskResult::success(
                 Content {

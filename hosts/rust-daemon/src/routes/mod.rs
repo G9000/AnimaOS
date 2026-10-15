@@ -3964,12 +3964,16 @@ mod tests {
     }
     #[tokio::test(flavor = "multi_thread")]
     async fn run_routes_respect_run_request_timeout() {
-        let state = Arc::new(RwLock::new(DaemonState::with_model_adapter(Arc::new(
-            SlowModelAdapter {
-                delay: Duration::from_millis(50),
-                calls: AtomicUsize::new(0),
-            },
-        ))));
+        let entered = Arc::new(Semaphore::new(0));
+        let release = Arc::new(Semaphore::new(0));
+        let adapter = Arc::new(GateFirstModelAdapter {
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+            calls: AtomicUsize::new(0),
+        });
+        let state = Arc::new(RwLock::new(DaemonState::with_model_adapter(
+            adapter.clone(),
+        )));
         let agent_id = {
             let mut guard = state.write().await;
             guard
@@ -3981,37 +3985,57 @@ mod tests {
         let app = router(
             Arc::clone(&state),
             DaemonConfig {
-                run_request_timeout: Duration::from_millis(10),
+                run_request_timeout: Duration::from_secs(1),
                 ..DaemonConfig::default()
             },
         );
 
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri(format!("/api/agents/{agent_id}/run"))
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"text":"run pending task"}"#))
-                    .expect("request builds"),
-            )
-            .await
+        let running_app = app.clone();
+        let run_uri = format!("/api/agents/{agent_id}/run");
+        let running = tokio::spawn(async move {
+            running_app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(run_uri)
+                        .header("content-type", "application/json")
+                        .body(Body::from(r#"{"text":"run pending task"}"#))
+                        .expect("request builds"),
+                )
+                .await
+        });
+        let model_entered = tokio::time::timeout(Duration::from_secs(2), entered.acquire()).await;
+        let response = tokio::time::timeout(Duration::from_secs(2), running).await;
+        // The model stays blocked beyond the HTTP deadline; release it before
+        // assertions so even a failed timeout witness can settle its task.
+        release.add_permits(1);
+        model_entered
+            .expect("the admitted run enters the model")
+            .expect("entry gate stays open")
+            .forget();
+        let response = response
+            .expect("the HTTP deadline returns while the model is blocked")
+            .expect("request task joins")
             .expect("app responds");
-
         assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
 
-        for _ in 0..100 {
-            if state
-                .read()
-                .await
-                .get_agent(&agent_id)
-                .is_some_and(|snapshot| snapshot.state.status.as_str() == "completed")
-            {
-                break;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let settled = {
+                    let guard = state.read().await;
+                    guard.in_flight_runs(&agent_id) == 0
+                        && guard
+                            .get_agent(&agent_id)
+                            .is_some_and(|snapshot| snapshot.state.status.as_str() == "completed")
+                };
+                if settled {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
             }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
+        })
+        .await
+        .expect("the timed-out HTTP caller does not cancel the admitted run's commit");
 
         let retry = app
             .oneshot(
@@ -4025,6 +4049,7 @@ mod tests {
             .await
             .expect("retry response should be returned");
         assert_eq!(retry.status(), StatusCode::OK);
+        assert_eq!(adapter.calls.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test(flavor = "multi_thread")]

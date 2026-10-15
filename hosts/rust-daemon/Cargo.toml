@@ -27,7 +27,7 @@ meval = "0.2"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "stream"] }
 rmcp = { version = "=3.5.1", default-features = false, features = ["client", "transport-streamable-http-client", "transport-async-rw"] }
-process-wrap = { version = "=10.0.1", default-features = false, features = ["tokio1", "creation-flags", "job-object", "kill-on-drop", "process-group"] }
+process-wrap = { version = "=10.0.1", default-features = false, features = ["std", "tokio1", "creation-flags", "job-object", "kill-on-drop", "process-group"] }
 sse-stream = "=0.2.4"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
