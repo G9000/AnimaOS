@@ -108,6 +108,10 @@ M46's [bound lean plan](../superpowers/plans/2026-10-14-companion-browser-m46.md
 
 ### PAR-06: coding and delegation that finishes real work
 
+M51 implements the bounded8MiB catalog-envelope correction with fresh required
+Rust gates and unchanged inference/public contracts. The one separately released actual check **received and parsed current metadata** in **0.29s**: state **ready**, count **7**, stage **complete**, dispatch **response_received**, reason **none**, HTTP status **not retained**. No model IDs/raw body were retained or model chosen. No retry, fallback query/header/model/provider, generation, helper, daemon, connector, DB server or container followed. The release is consumed. Metadata receipt is not entitlement, tool compatibility or useful coding quality; M47/M49 historical causes are not reconstructed.
+See the [M51 outcome](../superpowers/plans/2026-10-15-companion-catalog-budget-m51.md).
+
 M50 adds closed private catalog diagnostics with fresh Rust2719/21intentional-ignores/
 40suites/format/build and unchanged SDK/web contracts. Its single actual check
 received HTTP200 but rejected the declared body above512KiB in0.84s; no catalog,
