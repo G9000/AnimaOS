@@ -6,7 +6,7 @@ use zeroize::Zeroizing;
 
 pub(super) const MODELS_ENDPOINT: &str =
     "https://chatgpt.com/backend-api/codex/models?client_version=99.0.0";
-const MAX_BODY: usize = 512 * 1024;
+const MAX_BODY: usize = 8 * 1024 * 1024;
 const MAX_ROWS: usize = 512;
 const JS_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 const UNAVAILABLE: &str = "Model metadata is unavailable.";

@@ -1293,3 +1293,56 @@ async fn m50_catalog_diagnostics_real_metadata_refresh() {
         "M50 metadata did not return a current catalog; no retry or generation is authorized"
     );
 }
+
+fn m51_actual_metadata_service(flag: Option<OsString>) -> Result<ChatGptAuth, &'static str> {
+    if flag.as_deref() != Some(OsStr::new("1")) {
+        return Err("M51 actual metadata is held; exact root opt-in is required");
+    }
+    Ok(ChatGptAuth::new())
+}
+#[test]
+fn m51_catalog_budget_actual_driver_refuses_missing_or_inexact_opt_in_before_auth() {
+    for flag in [
+        None,
+        Some(OsString::from("")),
+        Some(OsString::from("0")),
+        Some(OsString::from("true")),
+        Some(OsString::from("1 ")),
+        Some(OsString::from("01")),
+    ] {
+        assert!(m51_actual_metadata_service(flag).is_err());
+    }
+}
+#[tokio::test]
+#[ignore = "HELD: separate M51 root release required for one fixed metadata diagnostic; no generation"]
+async fn m51_catalog_budget_real_metadata_refresh() {
+    let outcome =
+        match m51_actual_metadata_service(std::env::var_os("ANIMAOS_M51_RUN_REAL_METADATA")) {
+            Ok(service) => match tokio::time::timeout(
+                Duration::from_secs(15),
+                service.refresh_models_diagnostic(),
+            )
+            .await
+            {
+                Ok(outcome) => outcome,
+                Err(_) => ModelsOutcome::timeout(),
+            },
+            Err(_) => {
+                let mut snapshot = ModelsCache::default().snapshot;
+                snapshot.state = "unavailable";
+                snapshot.error = Some(UNAVAILABLE);
+                ModelsOutcome::new(
+                    Ok(snapshot),
+                    ModelsDiagnostic::before(Stage::Control, Reason::None),
+                )
+            }
+        };
+    println!(
+        "M51_METADATA_DIAGNOSTIC {}",
+        m50_diagnostic_report(&outcome)
+    );
+    assert!(
+        matches!(&outcome.result,Ok(snapshot) if matches!(snapshot.state,"ready"|"empty") && outcome.diagnostic.stage==Stage::Complete),
+        "M51 metadata did not return a current catalog; no retry or generation is authorized"
+    );
+}

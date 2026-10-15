@@ -1,5 +1,47 @@
 # Handover: bounded catalog envelope (M0–M51)
 
+## Start here (2026-10-15): M51 gates pass; settle publication
+
+M51 is settled on `g9000/companion-catalog-budget-m51`, from verified
+[M50/PR56](https://github.com/G9000/animaOS-SWARM/pull/56) main
+`16a89eb4a857ec4c5898f7ff04179de8a153c086`. The
+[M51 plan](../plans/2026-10-15-companion-catalog-budget-m51.md) records the outcome.
+Exact committed source/PR/verified merge and authoritative resume are
+`.superpowers/sdd/2026-10-15-companion-catalog-budget-m51/progress.md`.
+Finish that publication settlement before cutting another branch from verified main.
+Standing reviewed merge-and-continue applies.
+
+Fresh required gates passed **2,724 Rust/core tests / 22 intentional ignores / 40 suites**, formatting and build. All five default M51 cases passed; focused catalog tests passed19. Three source and30compatibility hashes remained frozen. The one combined core/native review and final SDK/web scope check were clean; no fix wave was necessary. Unchanged TypeScript retains M49 evidence, not a fresh M51 test claim.
+
+The one separately released actual check **received and parsed current metadata** in **0.29s**: state **ready**, count **7**, stage **complete**, dispatch **response_received**, reason **none**, HTTP status **not retained**.
+
+No model IDs/raw body were retained or model chosen. No retry, fallback query/header/model/provider, generation, helper, daemon, connector, DB server or container followed. The release is consumed. Metadata receipt is not entitlement, tool compatibility or useful coding quality; M47/M49 historical causes are not reconstructed.
+
+The production diff is the one8MiB body constant; other protocol/parser/row/scope/
+deadline/public/inference behavior stays unchanged. No dependency. The older M50
+HTTP200/512KiB declared-limit failure remains intact; this new observation does
+not recover M49 or M47 missing bodies or permit replay/repair of M47's failed task.
+
+Next: bind the private M52 distinct JSONL task/literal oracle proposal on a new
+branch after verified M51 merge. It is unexecuted/held, requiring deliberate fresh
+catalog selection, frozen exact Exec approvals/budgets and independent quality,
+receipt/todo/helper/quiet-restart/process cleanup checks. No generation is released
+by this handover. Native voice and broader account/host/quality parity stay open.
+
+Root owns commands/fmt/Git/services/models, CARGO_INCREMENTAL=0/jobs1/two full-suite
+workers. Standing cheap Codex delegation, per-command unsigned commits, reviewed
+merge-and-continue and context-only updates persist. Explicit paths only, never
+nx.json/anima.yaml/private evidence; preserve nx SHA256
+`3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`.
+No worktree/stash/reset/restore/path checkout, ordinary profiles/accounts/connector
+sends, DB servers/containers/Docker55432/public deployment or credential/profile
+copy/readout. Preserve MIT notices and Anima naming. Historical resumes below
+are superseded here.
+
+## Historical M51 planning handover
+
+# Handover: bounded catalog envelope (M0–M51)
+
 ## Start here (2026-10-15): M50 merged; M51 bound plan active
 
 Continue `g9000/companion-catalog-budget-m51`, cut from verified

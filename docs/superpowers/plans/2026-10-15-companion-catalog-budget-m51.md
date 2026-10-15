@@ -1,13 +1,11 @@
 # M51 bounded catalog body budget implementation plan
 
-Status: controller-bound plan active on `g9000/companion-catalog-budget-m51`,
-cut from verified M50/PR56 main `16a89eb4a857ec4c5898f7ff04179de8a153c086`.
-M50 source `64b19994de530129691ac8cca4944ee4122cc33e` shares tested tree
-`f3d4e4bab81d2e25b9186ebecc3ef534d5ebb210`; it is committed/pushed/merged.
-Exact release/resume:
+Status: scoped catalog-budget correction complete; required local gates pass on
+`g9000/companion-catalog-budget-m51`, from verified M50/PR56 main
+`16a89eb4a857ec4c5898f7ff04179de8a153c086`. One distinct actual check received and parsed current metadata.
+Exact source/PR/verified merge and resume are in
 `.superpowers/sdd/2026-10-15-companion-catalog-budget-m51/progress.md`.
-The useful JSONL fixture remains unexecuted/HELD/renumberableM52. No generation,
-model choice, useful task or actual metadata request is released by this plan.
+Useful task/generation remain held pending their own plan/selection/release.
 
 **Goal:** Accept a bounded larger catalog envelope without changing its authority,
 decoded model rules, public contract or single explicit request behavior.
@@ -208,3 +206,29 @@ joined synthetic HTTP and literal singleton expected output. Production cap/sour
 and native tests remain unchanged until root observes RED. Then root may release
 the minimal budget/test matrix plus a distinct ignored native M51 driver/opt-in.
 No other source writer, new project/dependency or actual operation is released.
+
+## Recorded outcome (2026-10-15)
+
+The sole production change raises the collected catalog-body budget from512KiB
+to8,388,608bytes. Known-length and streamed limits still fail before exceeding that
+bound;512input rows, exact decoder semantics, typed errors, fixed query/headers,
+native cache/principal/operation/deadline fences, public contracts and inference
+are unchanged. This is a finite engineering envelope, not measured upstream size
+or a hard RSS cap. No dependency/manifest/lockfile or new parsing framework.
+
+The valid exactly614400-byte known-length catalog was observed RED against the old
+cap (HTTP200/Body/DeclaredLimit), then passed unchanged. Exact8,388,607/8,388,608/
+8,388,609-byte known/chunked/pure cases and old524289-byte valid input pass. Earlier
+overflow fixtures were rebased to8MiB+1 without changing512/513-row checks. Native
+changes append only the exact-opt-in M51 guard/ignored driver to existing tests.
+
+Fresh required gates passed **2,724 Rust/core tests / 22 intentional ignores / 40 suites**, formatting and build. All five default M51 cases passed; focused catalog tests passed19. Three source and30compatibility hashes remained frozen. The one combined core/native review and final SDK/web scope check were clean; no fix wave was necessary. Unchanged TypeScript retains M49 evidence, not a fresh M51 test claim.
+
+The one separately released actual check **received and parsed current metadata** in **0.29s**: state **ready**, count **7**, stage **complete**, dispatch **response_received**, reason **none**, HTTP status **not retained**.
+
+No model IDs/raw body were retained or model chosen. No retry, fallback query/header/model/provider, generation, helper, daemon, connector, DB server or container followed. The release is consumed. Metadata receipt is not entitlement, tool compatibility or useful coding quality; M47/M49 historical causes are not reconstructed.
+
+Next: bind the distinct useful JSONL task/independent oracle proposal only after
+verified M51 merge. Its fixture remains unexecuted and generation held until a
+fresh deliberate current-account selection and its own exact release. Native voice
+stays held; full Hermes parity and useful coding/delegation remain open.

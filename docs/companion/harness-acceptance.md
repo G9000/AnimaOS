@@ -485,3 +485,26 @@ This current response's declared size exceeds the **512KiB** cap. No catalog was
 parsed or IDs/raw body retained; no retry/generation or services followed, release
 consumed. This does not reconstruct the missing cause of M49 or M47. Next is a
 bounded catalog-size correction; useful provider coding/delegation remains open.
+
+## M51: bounded catalog envelope
+
+The sole production change raises the collected catalog-body budget from512KiB
+to8,388,608bytes. Known-length and streamed limits still fail before exceeding that
+bound;512input rows, exact decoder semantics, typed errors, fixed query/headers,
+native cache/principal/operation/deadline fences, public contracts and inference
+are unchanged. This is a finite engineering envelope, not measured upstream size
+or a hard RSS cap. No dependency/manifest/lockfile or new parsing framework.
+
+The valid exactly614400-byte known-length catalog was observed RED against the old
+cap (HTTP200/Body/DeclaredLimit), then passed unchanged. Exact8,388,607/8,388,608/
+8,388,609-byte known/chunked/pure cases and old524289-byte valid input pass. Earlier
+overflow fixtures were rebased to8MiB+1 without changing512/513-row checks. Native
+changes append only the exact-opt-in M51 guard/ignored driver to existing tests.
+
+Fresh required gates passed **2,724 Rust/core tests / 22 intentional ignores / 40 suites**, formatting and build. All five default M51 cases passed; focused catalog tests passed19. Three source and30compatibility hashes remained frozen. The one combined core/native review and final SDK/web scope check were clean; no fix wave was necessary. Unchanged TypeScript retains M49 evidence, not a fresh M51 test claim.
+
+The one separately released actual check **received and parsed current metadata** in **0.29s**: state **ready**, count **7**, stage **complete**, dispatch **response_received**, reason **none**, HTTP status **not retained**.
+
+No model IDs/raw body were retained or model chosen. No retry, fallback query/header/model/provider, generation, helper, daemon, connector, DB server or container followed. The release is consumed. Metadata receipt is not entitlement, tool compatibility or useful coding quality; M47/M49 historical causes are not reconstructed.
+
+See the [M51 outcome](../superpowers/plans/2026-10-15-companion-catalog-budget-m51.md).

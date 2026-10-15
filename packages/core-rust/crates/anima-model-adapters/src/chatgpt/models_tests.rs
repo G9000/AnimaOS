@@ -118,7 +118,7 @@ fn m49_chatgpt_models_byte_row_id_and_priority_boundaries_are_exact() {
         }
     }
     let mut body = br#"{"models":[]}"#.to_vec();
-    body.resize(512 * 1024, b' ');
+    body.resize(8_388_608, b' ');
     assert_eq!(decode_models(&body).unwrap(), Vec::<String>::new());
     body.push(b' ');
     assert!(decode_models(&body).is_err());
@@ -317,11 +317,7 @@ async fn m49_chatgpt_models_status_invalid_and_known_length_overflow_errors_are_
             b"{\"models\":null,\"detail\":\"m49-private\"}".to_vec(),
             "Model metadata response is invalid.",
         ),
-        (
-            200,
-            vec![b'x'; 512 * 1024 + 1],
-            "Model metadata is unavailable.",
-        ),
+        (200, vec![b'x'; 8_388_609], "Model metadata is unavailable."),
     ] {
         let attempts = Arc::new(AtomicUsize::new(0));
         let peer = CatalogPeer::start(axum::Router::new().route(
@@ -360,8 +356,8 @@ async fn m49_chatgpt_models_streamed_overflow_is_unavailable_without_retry() {
                 async move {
                     attempts.fetch_add(1, Ordering::SeqCst);
                     let chunks = vec![
-                        Ok::<_, std::io::Error>(vec![b' '; 256 * 1024]),
-                        Ok(vec![b' '; 256 * 1024 + 1]),
+                        Ok::<_, std::io::Error>(vec![b' '; 4_194_304]),
+                        Ok(vec![b' '; 4_194_305]),
                     ];
                     axum::body::Body::from_stream(futures::stream::iter(chunks))
                 }
@@ -617,7 +613,7 @@ async fn m50_catalog_diagnostics_status_body_limit_and_decode_are_distinct() {
             R::HttpStatus,
         ));
     }
-    cases.push((200, vec![b'x'; 512 * 1024 + 1], S::Body, R::DeclaredLimit));
+    cases.push((200, vec![b'x'; 8_388_609], S::Body, R::DeclaredLimit));
     for body in [
         b"{".to_vec(),
         vec![0xff],
@@ -686,8 +682,8 @@ async fn m50_catalog_diagnostics_status_body_limit_and_decode_are_distinct() {
         "/backend-api/codex/models",
         axum::routing::get(|| async {
             axum::body::Body::from_stream(futures::stream::iter(vec![
-                Ok::<_, std::io::Error>(vec![b' '; 256 * 1024]),
-                Ok(vec![b' '; 256 * 1024 + 1]),
+                Ok::<_, std::io::Error>(vec![b' '; 4_194_304]),
+                Ok(vec![b' '; 4_194_305]),
             ]))
         }),
     ))
@@ -834,5 +830,189 @@ async fn m50_catalog_diagnostics_request_and_body_timeouts_preserve_timeout_mess
             "Model metadata request timed out."
         );
         assert_m50_closed(&failure);
+    }
+}
+
+#[tokio::test]
+async fn m51_catalog_budget_known_length_600_kib_valid_catalog_is_accepted() {
+    let mut body = b"{\"models\":[{\"slug\":\"synthetic-budget-model\"}],\"padding\":\"".to_vec();
+    let suffix = b"\"}";
+    body.resize(614400 - suffix.len(), b'a');
+    body.extend_from_slice(suffix);
+    assert_eq!(
+        body.len(),
+        614400,
+        "fixture is exactly 600 KiB of valid JSON with ignored ASCII padding"
+    );
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let peer = CatalogPeer::start(axum::Router::new().route(
+        "/backend-api/codex/models",
+        axum::routing::get({
+            let attempts = attempts.clone();
+            move || {
+                let attempts = attempts.clone();
+                let body = body.clone();
+                async move {
+                    attempts.fetch_add(1, Ordering::SeqCst);
+                    (
+                        axum::http::StatusCode::OK,
+                        [(axum::http::header::CONTENT_LENGTH, "614400")],
+                        body,
+                    )
+                }
+            }
+        }),
+    ))
+    .await;
+    let result = peer.adapter().fetch_detailed().await;
+    peer.join().await;
+    assert_eq!(
+        attempts.load(Ordering::SeqCst),
+        1,
+        "one known-length response without retry"
+    );
+    assert_eq!(
+        result.expect("the valid 600 KiB catalog must fit the bound budget"),
+        vec!["synthetic-budget-model"]
+    );
+}
+
+fn m51_padded_catalog(length: usize) -> Vec<u8> {
+    let mut body = b"{\"models\":[{\"slug\":\"synthetic-budget-model\"}],\"padding\":\"".to_vec();
+    let suffix = b"\"}";
+    body.resize(length - suffix.len(), b'a');
+    body.extend_from_slice(suffix);
+    assert_eq!(
+        body.len(),
+        length,
+        "ASCII fixture has exactly the requested literal byte length"
+    );
+    body
+}
+
+#[test]
+fn m51_catalog_budget_decoder_accepts_old_512_kib_plus_one_and_checks_8_mib_edges() {
+    for length in [524_289, 8_388_607, 8_388_608, 8_388_609] {
+        let body = m51_padded_catalog(length);
+        let result = decode_models(&body);
+        if length == 8_388_609 {
+            assert_eq!(result.unwrap_err(), "Model metadata response is invalid.");
+        } else {
+            assert_eq!(result.unwrap(), vec!["synthetic-budget-model"]);
+        }
+    }
+}
+
+#[tokio::test]
+async fn m51_catalog_budget_known_length_below_at_above_8_mib() {
+    for length in [8_388_607, 8_388_608, 8_388_609] {
+        let body = m51_padded_catalog(length);
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let peer = CatalogPeer::start(axum::Router::new().route(
+            "/backend-api/codex/models",
+            axum::routing::get({
+                let attempts = attempts.clone();
+                move || {
+                    let attempts = attempts.clone();
+                    let body = body.clone();
+                    async move {
+                        attempts.fetch_add(1, Ordering::SeqCst);
+                        (
+                            axum::http::StatusCode::OK,
+                            [(axum::http::header::CONTENT_LENGTH, length.to_string())],
+                            body,
+                        )
+                    }
+                }
+            }),
+        ))
+        .await;
+        let result = peer.adapter().fetch_detailed().await;
+        peer.join().await;
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            1,
+            "one known-length request at each literal boundary"
+        );
+        if length == 8_388_609 {
+            let failure = result.unwrap_err();
+            assert_eq!(
+                (
+                    failure.stage(),
+                    failure.catalog_dispatch(),
+                    failure.reason(),
+                    failure.http_status()
+                ),
+                (
+                    ChatGptModelsStage::Body,
+                    ChatGptCatalogDispatch::ResponseReceived,
+                    ChatGptModelsReason::DeclaredLimit,
+                    Some(200)
+                )
+            );
+            assert_eq!(failure.public_message(), "Model metadata is unavailable.");
+            assert_m50_closed(&failure);
+        } else {
+            assert_eq!(result.unwrap(), vec!["synthetic-budget-model"]);
+        }
+    }
+}
+
+#[tokio::test]
+async fn m51_catalog_budget_chunked_below_at_above_8_mib() {
+    for length in [8_388_607, 8_388_608, 8_388_609] {
+        let body = m51_padded_catalog(length);
+        let chunks = body
+            .chunks(65_536)
+            .map(|chunk| chunk.to_vec())
+            .collect::<Vec<_>>();
+        assert!(chunks.len() > 1);
+        assert_eq!(chunks.iter().map(Vec::len).sum::<usize>(), length);
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let peer = CatalogPeer::start(axum::Router::new().route(
+            "/backend-api/codex/models",
+            axum::routing::get({
+                let attempts = attempts.clone();
+                move || {
+                    let attempts = attempts.clone();
+                    let chunks = chunks.clone();
+                    async move {
+                        attempts.fetch_add(1, Ordering::SeqCst);
+                        axum::body::Body::from_stream(futures::stream::iter(
+                            chunks.into_iter().map(Ok::<_, std::io::Error>),
+                        ))
+                    }
+                }
+            }),
+        ))
+        .await;
+        let result = peer.adapter().fetch_detailed().await;
+        peer.join().await;
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            1,
+            "one no-length chunked request at each literal boundary"
+        );
+        if length == 8_388_609 {
+            let failure = result.unwrap_err();
+            assert_eq!(
+                (
+                    failure.stage(),
+                    failure.catalog_dispatch(),
+                    failure.reason(),
+                    failure.http_status()
+                ),
+                (
+                    ChatGptModelsStage::Body,
+                    ChatGptCatalogDispatch::ResponseReceived,
+                    ChatGptModelsReason::StreamedLimit,
+                    Some(200)
+                )
+            );
+            assert_eq!(failure.public_message(), "Model metadata is unavailable.");
+            assert_m50_closed(&failure);
+        } else {
+            assert_eq!(result.unwrap(), vec!["synthetic-budget-model"]);
+        }
     }
 }
