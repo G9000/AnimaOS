@@ -1,14 +1,12 @@
 # M50 closed catalog diagnostics implementation plan
 
-Status: controller-bound plan active on
-`g9000/companion-catalog-diagnostics-m50`, cut from verified M49/PR55 main
-`67f047d6d657145b57d8e22c75da216ae0e83e90`. Source
-`621fac543114c5366f91fb37a85b0092f4701246` and merge share tested tree
-`fcf3c29a9256b7b96731f18c28893906b38052e1`; M49 is committed/pushed/merged.
-Exact release/resume is
+Status: scoped diagnostics complete; fresh Rust gates pass on
+`g9000/companion-catalog-diagnostics-m50`, from verified M49/PR55 main
+`67f047d6d657145b57d8e22c75da216ae0e83e90`. One distinct actual diagnostic
+observed HTTP200 rejected by the declared body limit; no catalog was parsed.
+Exact source/PR/verified merge and resume are in
 `.superpowers/sdd/2026-10-15-companion-catalog-diagnostics-m50/progress.md`.
-The distinct useful JSONL task proposal stays HELD/renumberable; no generation,
-model choice, useful task or actual metadata operation is released by this plan.
+Useful task/generation and the renumberable JSONL proposal remain held.
 
 **Goal:** Distinguish the next explicitly released catalog failure by safe category,
 stage, dispatch certainty and HTTP/body-limit evidence without changing owner UX.
@@ -282,3 +280,41 @@ is detailed-type/test stub plus one synthetic 403 semantic RED only, while exist
 fetch behavior stays exact. Root observes RED and freezes assertions before full
 production release. The independent reviewer is source-only and root owns public
 docs/ledger/commands/Git. No other source writer or actual operation is released.
+
+## Recorded outcome (2026-10-15)
+
+Six source files implement a closed detailed core failure and private request-local
+native outcome. Existing constructor/fetch String wrappers share that implementation;
+public snapshots, routes, SDK/web, inference, fixed query/headers/parser, auth path,
+cache/principal/operation fences and asynchronous deadline remain unchanged.
+No dependency, manifest/lockfile, telemetry/cache schema or raw error capture.
+Existing MIT notices remain intact; no substantial upstream code copy was added.
+
+The original synthetic HTTP403 test was observed RED after one controlled response
+lost its stage/status, then GREEN unchanged in the full suite. The combined native/
+core review and final SDK/web scope check found no production issue. One P2 test
+assumed a closed Windows port would refuse within one second; the run correctly
+returned Timeout. The one fix wave replaced that assumption with a local no-proxy
+failing resolver and counter, preserving exact Connect/Timeout assertions. Stripping
+the cfg(test) setter reproduces the reviewed production-source hash.
+
+Fresh required gates passed **2,719 Rust/core tests / 21 intentional ignores /
+40 suites**, formatting and build, including all ten default M50 cases. Six source
+hashes and 25 SDK/web/routes/README/manifest/lock boundary hashes stayed frozen.
+Those unchanged TypeScript paths retain M49's evidence; no fresh M50 SDK/web run is
+claimed. Final owned Prettier/document/diff checks are recorded in the ledger.
+
+After gates, exactly one separately released actual driver failed availability in
+**0.84 seconds** with closed evidence: stage **body**, reason **declared_limit**,
+catalogDispatch **response_received**, HTTP **200**, state unavailable and count0.
+The current response's declared body exceeds the existing **512KiB** cap; the
+adapter discarded it before catalog parsing. No model IDs or raw body were retained.
+This is a concrete limit blocker for this new request, not a recovered explanation
+of M49's historical unavailable result. No retry, second query/header/model/provider,
+generation, helper, daemon, connector, DB server or container followed. Release consumed.
+
+Next is a narrow bounded catalog-budget correction using synthetic valid padded
+catalogs and exact boundary checks, then a separately released metadata observation.
+Keep the fixed route/query and explicit selection; no speculative inference/model
+fallback. The distinct useful JSONL task and native voice stay held/renumberable.
+M47's original failed candidate/result remains immutable; full parity is not claimed.

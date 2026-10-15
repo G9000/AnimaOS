@@ -16,7 +16,10 @@ mod transport;
 pub use adapter::ProviderModelAdapter;
 pub use attachments::{image_reference_text, model_supports_images};
 pub use catalog::provider_definitions;
-pub use chatgpt::{ChatGptModelsAdapter, ChatGptResponsesAdapter};
+pub use chatgpt::{
+    ChatGptCatalogDispatch, ChatGptModelsAdapter, ChatGptModelsFailure, ChatGptModelsReason,
+    ChatGptModelsStage, ChatGptResponsesAdapter,
+};
 pub use models::{
     canonical_provider_id, estimate_cost_micros, model_info, model_table, price_usage,
     CostEstimate, ModelInfo, ModelPricing, PRICING_TABLE_DATE,

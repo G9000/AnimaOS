@@ -108,6 +108,13 @@ M46's [bound lean plan](../superpowers/plans/2026-10-14-companion-browser-m46.md
 
 ### PAR-06: coding and delegation that finishes real work
 
+M50 adds closed private catalog diagnostics with fresh Rust2719/21intentional-ignores/
+40suites/format/build and unchanged SDK/web contracts. Its single actual check
+received HTTP200 but rejected the declared body above512KiB in0.84s; no catalog,
+retry or generation. This identifies the next bounded catalog-budget fix for that
+new request, without reconstructing M49/M47 history or accepting coding quality.
+See the [M50 outcome](../superpowers/plans/2026-10-15-companion-catalog-diagnostics-m50.md).
+
 M49 implements deliberate current-account subscription selection and preserves
 saved/custom models. Its local gates passed Rust2709, SDK151 and web1320 with
 required formatting/type checks/builds. The single metadata-only actual check

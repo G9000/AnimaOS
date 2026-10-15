@@ -35,6 +35,7 @@ struct FakeModels {
     release: Semaphore,
     blocked: AtomicBool,
     answers: StdMutex<VecDeque<Result<Vec<String>, String>>>,
+    diagnostics: StdMutex<VecDeque<ModelsDiagnostic>>,
 }
 impl FakeModels {
     fn new() -> Arc<Self> {
@@ -45,6 +46,7 @@ impl FakeModels {
             release: Semaphore::new(0),
             blocked: AtomicBool::new(false),
             answers: StdMutex::new(VecDeque::new()),
+            diagnostics: StdMutex::new(VecDeque::new()),
         })
     }
     async fn entered(&self) {
@@ -57,6 +59,9 @@ impl FakeModels {
     fn answer(&self, value: Result<Vec<String>, String>) {
         self.answers.lock().unwrap().push_back(value);
     }
+    fn answer_diagnostic(&self, diagnostic: ModelsDiagnostic) {
+        self.diagnostics.lock().unwrap().push_back(diagnostic);
+    }
 }
 struct Active<'a>(&'a AtomicUsize);
 impl Drop for Active<'_> {
@@ -66,7 +71,7 @@ impl Drop for Active<'_> {
 }
 #[async_trait]
 impl ModelsTransport for FakeModels {
-    async fn fetch(&self, _: String, _: String) -> Result<Vec<String>, String> {
+    async fn fetch(&self, _: String, _: String) -> Result<Vec<String>, ModelsFetchFailure> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.active.fetch_add(1, Ordering::SeqCst);
         let _active = Active(&self.active);
@@ -74,11 +79,38 @@ impl ModelsTransport for FakeModels {
         if self.blocked.load(Ordering::SeqCst) {
             self.release.acquire().await.unwrap().forget();
         }
+        if let Some(diagnostic) = self.diagnostics.lock().unwrap().pop_front() {
+            return Err(ModelsFetchFailure::Synthetic(diagnostic));
+        }
         self.answers
             .lock()
             .unwrap()
             .pop_front()
             .unwrap_or_else(|| Ok(vec!["synthetic-model-a".into(), "synthetic-model-b".into()]))
+            .map_err(|error| {
+                ModelsFetchFailure::Synthetic(if error == TIMEOUT {
+                    ModelsDiagnostic::new(
+                        Stage::Request,
+                        Dispatch::Attempted,
+                        Reason::Timeout,
+                        None,
+                    )
+                } else if error == INVALID {
+                    ModelsDiagnostic::new(
+                        Stage::Decode,
+                        Dispatch::ResponseReceived,
+                        Reason::InvalidCatalog,
+                        Some(200),
+                    )
+                } else {
+                    ModelsDiagnostic::new(
+                        Stage::Request,
+                        Dispatch::Attempted,
+                        Reason::Transport,
+                        None,
+                    )
+                })
+            })
     }
 }
 fn service() -> (ChatGptAuth, Arc<FakeModels>) {
@@ -956,4 +988,308 @@ async fn m49_chatgpt_models_real_metadata_refresh() {
             panic!("M49 metadata deadline expired; no retry is authorized");
         }
     }
+}
+
+fn m50_diagnostic_report(outcome: &ModelsOutcome) -> serde_json::Value {
+    let (state, count, error) = match &outcome.result {
+        Ok(snapshot) => (snapshot.state, snapshot.models.len(), snapshot.error),
+        Err(ModelsError::Busy) => (
+            "unavailable",
+            0,
+            Some("Model metadata refresh is already in progress."),
+        ),
+        Err(ModelsError::Vault) => ("unavailable", 0, Some(VAULT_ERROR)),
+    };
+    let diagnostic = outcome.diagnostic;
+    json!({"state":state,"count":count,"stage":diagnostic.stage.as_str(),"catalogDispatch":diagnostic.catalog_dispatch.as_str(),"reason":diagnostic.reason.as_str(),"httpStatus":diagnostic.http_status,"error":error})
+}
+fn assert_m50_private(outcome: &ModelsOutcome) {
+    let output = format!(
+        "{}|{:?}",
+        m50_diagnostic_report(outcome),
+        outcome.diagnostic
+    );
+    for marker in [
+        "m50-private",
+        "secret-token",
+        "secret-refresh",
+        "account-a",
+        "account-b",
+        "manifest",
+        "generation",
+        "http://",
+        "https://",
+    ] {
+        assert!(
+            !output.contains(marker),
+            "closed diagnostic must omit every sensitive marker"
+        );
+    }
+    assert_eq!(m50_diagnostic_report(outcome).as_object().unwrap().len(), 7);
+    if let Ok(snapshot) = &outcome.result {
+        assert_private(snapshot);
+        assert_eq!(
+            serde_json::to_value(snapshot)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .len(),
+            7,
+            "public snapshot never grows diagnostics"
+        );
+    }
+}
+struct SecretAuth;
+#[async_trait]
+impl AuthTransport for SecretAuth {
+    async fn start(&self) -> Result<Device, String> {
+        panic!("M50 must not start device authorization")
+    }
+    async fn poll(&self, _: &Device) -> Result<Option<Credential>, String> {
+        panic!("M50 must not poll device authorization")
+    }
+    async fn refresh(&self, _: &Credential) -> Result<Credential, String> {
+        Err("m50-private-auth-error".into())
+    }
+}
+#[tokio::test]
+async fn m50_catalog_diagnostics_authorization_and_control_fail_before_catalog() {
+    let (service, fake) = service();
+    let outcome = service.refresh_models_diagnostic().await;
+    assert_eq!(
+        outcome.diagnostic,
+        ModelsDiagnostic::before(Stage::Authorization, Reason::Disconnected)
+    );
+    assert_m50_private(&outcome);
+    assert_eq!(fake.calls.load(Ordering::SeqCst), 0);
+    let held = service.models_refresh.lock().await;
+    let busy = service.refresh_models_diagnostic().await;
+    assert!(matches!(busy.result, Err(ModelsError::Busy)));
+    assert_eq!(
+        busy.diagnostic,
+        ModelsDiagnostic::before(Stage::Control, Reason::Busy)
+    );
+    assert_m50_private(&busy);
+    drop(held);
+    let mut service = ChatGptAuth::with_dependencies(
+        Arc::new(InMemoryOAuthAppVault::default()),
+        Arc::new(SecretAuth),
+    );
+    service.models_transport = fake.clone();
+    service.save(&credential("account-a", true)).unwrap();
+    let outcome = service.refresh_models_diagnostic().await;
+    assert_eq!(
+        outcome.diagnostic,
+        ModelsDiagnostic::before(Stage::Authorization, Reason::Credential)
+    );
+    assert_eq!(outcome.result.as_ref().unwrap().error, Some(UNAVAILABLE));
+    assert_m50_private(&outcome);
+    assert_eq!(fake.calls.load(Ordering::SeqCst), 0);
+    let vault = Arc::new(ReadFailureVault {
+        inner: InMemoryOAuthAppVault::default(),
+        fail: AtomicBool::new(true),
+    });
+    let mut service = ChatGptAuth::with_dependencies(vault, Arc::new(UnavailableTransport));
+    service.models_transport = fake.clone();
+    let outcome = service.refresh_models_diagnostic().await;
+    assert!(matches!(outcome.result, Err(ModelsError::Vault)));
+    assert_eq!(
+        outcome.diagnostic,
+        ModelsDiagnostic::before(Stage::Authorization, Reason::Vault)
+    );
+    assert_m50_private(&outcome);
+    assert_eq!(fake.calls.load(Ordering::SeqCst), 0);
+}
+#[tokio::test]
+async fn m50_catalog_diagnostics_typed_fetch_mapping_preserves_static_snapshots() {
+    let failure = match anima_model_adapters::ChatGptModelsAdapter::new_detailed(
+        String::new(),
+        "m50-private-account".into(),
+    ) {
+        Err(failure) => failure,
+        Ok(_) => panic!("empty credential must fail locally"),
+    };
+    assert_eq!(
+        ModelsFetchFailure::Core(failure).diagnostic(),
+        ModelsDiagnostic::before(Stage::Client, Reason::Credential)
+    );
+    for diagnostic in [
+        ModelsDiagnostic::new(
+            Stage::HttpStatus,
+            Dispatch::ResponseReceived,
+            Reason::HttpStatus,
+            Some(403),
+        ),
+        ModelsDiagnostic::new(Stage::Request, Dispatch::Attempted, Reason::Connect, None),
+        ModelsDiagnostic::new(
+            Stage::Body,
+            Dispatch::ResponseReceived,
+            Reason::DeclaredLimit,
+            Some(200),
+        ),
+        ModelsDiagnostic::new(
+            Stage::Body,
+            Dispatch::ResponseReceived,
+            Reason::Timeout,
+            Some(200),
+        ),
+        ModelsDiagnostic::new(
+            Stage::Decode,
+            Dispatch::ResponseReceived,
+            Reason::InvalidCatalog,
+            Some(200),
+        ),
+    ] {
+        let (service, fake) = service();
+        service.save(&credential("account-a", false)).unwrap();
+        fake.answer_diagnostic(diagnostic);
+        let outcome = service.refresh_models_diagnostic().await;
+        assert_eq!(outcome.diagnostic, diagnostic);
+        let snapshot = outcome.result.as_ref().unwrap();
+        assert_eq!(snapshot.state, "unavailable");
+        assert_eq!(snapshot.error, Some(diagnostic.public_message()));
+        assert!(snapshot.models.is_empty());
+        assert_m50_private(&outcome);
+        assert_eq!(fake.calls.load(Ordering::SeqCst), 1);
+    }
+}
+#[tokio::test]
+async fn m50_catalog_diagnostics_scope_aba_and_overlapping_calls_keep_their_own_evidence() {
+    for failure in [false, true] {
+        let (first, first_fake) = service();
+        first.save(&credential("account-a", false)).unwrap();
+        first_fake.blocked.store(true, Ordering::SeqCst);
+        if failure {
+            first_fake.answer_diagnostic(ModelsDiagnostic::new(
+                Stage::HttpStatus,
+                Dispatch::ResponseReceived,
+                Reason::HttpStatus,
+                Some(403),
+            ));
+        }
+        let mut pending = Box::pin(first.refresh_models_diagnostic());
+        tokio::select! {_ = first_fake.entered()=>{},_ = &mut pending=>panic!("first diagnostic must wait for its controlled response")};
+        let (second, second_fake) = service();
+        second.save(&credential("account-b", false)).unwrap();
+        second_fake.answer_diagnostic(ModelsDiagnostic::new(
+            Stage::HttpStatus,
+            Dispatch::ResponseReceived,
+            Reason::HttpStatus,
+            Some(429),
+        ));
+        let independent = second.refresh_models_diagnostic().await;
+        assert_eq!(independent.diagnostic.http_status, Some(429));
+        assert_m50_private(&independent);
+        let busy = first.refresh_models_diagnostic().await;
+        assert_eq!(
+            busy.diagnostic,
+            ModelsDiagnostic::before(Stage::Control, Reason::Busy)
+        );
+        assert_m50_private(&busy);
+        first.cancel(false).await.unwrap();
+        first.save(&credential("account-b", false)).unwrap();
+        first.save(&credential("account-a", false)).unwrap();
+        first_fake.release.add_permits(1);
+        let late = tokio::time::timeout(Duration::from_secs(1), &mut pending)
+            .await
+            .unwrap();
+        drop(pending);
+        assert_eq!(
+            late.diagnostic,
+            ModelsDiagnostic::new(
+                Stage::Scope,
+                Dispatch::ResponseReceived,
+                Reason::ScopeChanged,
+                if failure { Some(403) } else { None }
+            )
+        );
+        assert_eq!(late.result.as_ref().unwrap().state, "unrequested");
+        assert!(late.result.as_ref().unwrap().models.is_empty());
+        assert_m50_private(&late);
+        assert_eq!(independent.diagnostic.stage, Stage::HttpStatus);
+        assert_eq!(independent.diagnostic.http_status, Some(429));
+        assert_eq!(first_fake.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(second_fake.calls.load(Ordering::SeqCst), 1);
+    }
+}
+#[tokio::test]
+async fn m50_catalog_diagnostics_outer_deadline_retains_unknown_dispatch_certainty() {
+    for before_dispatch in [true, false] {
+        let (service, fake) = service();
+        service.save(&credential("account-a", false)).unwrap();
+        fake.blocked.store(true, Ordering::SeqCst);
+        let held = if before_dispatch {
+            Some(service.lifecycle.lock().await)
+        } else {
+            None
+        };
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(1),
+            service.refresh_models_diagnostic_until(Instant::now() + Duration::from_millis(100)),
+        )
+        .await
+        .expect("outer deadline is finite despite lock or transport contention");
+        assert_eq!(outcome.diagnostic, ModelsDiagnostic::deadline());
+        assert_scope_free_timeout(outcome.result.as_ref().unwrap());
+        assert_m50_private(&outcome);
+        assert_eq!(
+            fake.calls.load(Ordering::SeqCst),
+            usize::from(!before_dispatch)
+        );
+        assert_eq!(fake.active.load(Ordering::SeqCst), 0);
+        assert!(service.models_refresh.try_lock().is_ok());
+        drop(held);
+    }
+}
+fn m50_actual_metadata_service(flag: Option<OsString>) -> Result<ChatGptAuth, &'static str> {
+    if flag.as_deref() != Some(OsStr::new("1")) {
+        return Err("M50 actual metadata is held; exact root opt-in is required");
+    }
+    Ok(ChatGptAuth::new())
+}
+#[test]
+fn m50_catalog_diagnostics_actual_driver_refuses_missing_or_inexact_opt_in_before_auth() {
+    for flag in [
+        None,
+        Some(OsString::from("")),
+        Some(OsString::from("0")),
+        Some(OsString::from("true")),
+        Some(OsString::from("1 ")),
+        Some(OsString::from("01")),
+    ] {
+        assert!(m50_actual_metadata_service(flag).is_err());
+    }
+}
+#[tokio::test]
+#[ignore = "HELD: separate M50 root release required for one fixed metadata diagnostic; no generation"]
+async fn m50_catalog_diagnostics_real_metadata_refresh() {
+    let outcome =
+        match m50_actual_metadata_service(std::env::var_os("ANIMAOS_M50_RUN_REAL_METADATA")) {
+            Ok(service) => match tokio::time::timeout(
+                Duration::from_secs(15),
+                service.refresh_models_diagnostic(),
+            )
+            .await
+            {
+                Ok(outcome) => outcome,
+                Err(_) => ModelsOutcome::timeout(),
+            },
+            Err(_) => {
+                let mut snapshot = ModelsCache::default().snapshot;
+                snapshot.state = "unavailable";
+                snapshot.error = Some(UNAVAILABLE);
+                ModelsOutcome::new(
+                    Ok(snapshot),
+                    ModelsDiagnostic::before(Stage::Control, Reason::None),
+                )
+            }
+        };
+    println!(
+        "M50_METADATA_DIAGNOSTIC {}",
+        m50_diagnostic_report(&outcome)
+    );
+    assert!(
+        matches!(&outcome.result,Ok(snapshot) if matches!(snapshot.state,"ready"|"empty") && outcome.diagnostic.stage==Stage::Complete),
+        "M50 metadata did not return a current catalog; no retry or generation is authorized"
+    );
 }
