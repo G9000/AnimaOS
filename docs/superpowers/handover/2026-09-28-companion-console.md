@@ -1,3 +1,51 @@
+# Handover: useful coding and delegation (M0–M52)
+
+## Start here (2026-10-16): M51 merged; M52 bound plan active
+
+Continue `g9000/companion-provider-task-acceptance-m52`, cut from verified
+[M51/PR57](https://github.com/G9000/animaOS-SWARM/pull/57) main
+`0e8118ca376354c9ff69d7110c43a0d78f75bab3`. Source
+`d53a1000ccbaa33638d549f988ae29b72636c7a5` shares gated tree
+`769db1d8c80031787f9773d8b8316b1d918ddb2b`; M51 is committed/pushed/merged.
+All8owned hashes/unrelatednx preserved and context-only update sent. Exact resume:
+`.superpowers/sdd/2026-10-15-companion-provider-task-acceptance-m52/progress.md`.
+The private folder/branch started before midnight; public M52 plan is dated16MYT.
+
+The [M52 lean plan](../plans/2026-10-16-companion-provider-task-acceptance-m52.md)
+binds five risks: fresh deliberate model selection, distinct literal JSONL oracle,
+one DelegateAsk helper AllowOnce and two exact Exec AllowOnce actions, conditional
+parent/helper ten-attempt bound with zero secondary producers, independent output/
+todo/receipt/helper evidence and quiet same-store no-replay restart. Root bound
+trim/BOM/duplicate-key/raw-byte semantics. Promote private fixture preparation and
+real-handler scripted tests first; missing behavior needs semantic RED before fix.
+One combined review/finalSDK-web scopecheck/fix wave/gates before actual releases.
+
+M51 passed Rust2724/22intentional-ignores/40suites/format/build, focused19catalog
+cases, clean review and3source/30boundary hashes. Its one distinct metadata check
+was ready/count7 in0.29s, no retained IDs/raw body/model selection/generation/retry.
+The eight-MiB fix addresses M50's evidenced limit; M49/M47 history is not recovered.
+All prior actual releases are consumed. M47 failed candidate/profile stays immutable.
+
+No M52 service, metadata, Exec or generation is released yet. Only after gates may
+root separately bind the isolated process/port/profile/commands, one fresh metadata
+selection and one useful task. Parent+one advisory helper need exact same chosen
+model; no guess/fallback/retry/manual rescue. Default profile has no seeded Fact,
+so quiet restart proves records/files/todos/receipts/no-replay, not memory content
+or graceful/in-flight recovery. Native voice and broader quality/account/host parity
+stay open. Keep the old private M50 proposal unchanged; M52 is its distinct copy.
+
+Standing cheap Codex delegation, per-command unsigned commits, reviewed merge-and-
+continue and context-only updates persist. Root alone commands/fmt/Git/services/
+models, CARGO_INCREMENTAL=0/jobs1/two full-suite workers. Explicit paths only,
+never nx.json/anima.yaml/private evidence. Preserve nx SHA256
+`3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`.
+No worktree/stash/reset/restore/path checkout, ordinary profiles/accounts/connector
+sends, DB servers/containers/Docker55432/public deployment or credential/profile
+copy/readout. Preserve MIT notices and Anima naming. Historical resumes below
+are superseded here.
+
+## Historical M51 handover
+
 # Handover: bounded catalog envelope (M0–M51)
 
 ## Start here (2026-10-15): M51 gates pass; settle publication
