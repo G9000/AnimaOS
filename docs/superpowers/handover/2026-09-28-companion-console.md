@@ -1,3 +1,59 @@
+# Handover: microphone capture and native voice (M0–M57)
+
+## Start here (2026-10-16): M56 merged; M57 bound tests-first capture
+
+Continue `g9000/companion-microphone-m57` from verified [M56/PR62](https://github.com/G9000/animaOS-SWARM/pull/62) main
+`23f780a2d024924922b0f18a7f66db9313f17cc7`. M56 source `8959b07587fbdfbbdf127142429cda1fd9c9ac77`
+matches merged/tested tree `2eab189cb9aa1d4ed4bb9ac740277fe32c45e2ba`. All50publication/
+42gated-input/92unowned hashes and nx preserved. Rust2829/26intentionalignores/
+45suites/fmt/build; SDK172/3service skips; web1387/116files/type/build and ten
+docchecks passed. Full gate peer and documentation drift were resolved without
+weakening original assertions or altering production retries/deadlines. Git's
+checkout EOL normalization was restored only to exact verified owned hashes;
+index tree remained unchanged. M56 publication is complete and selected other
+chat received context-only settlement. M52 stays PARTIAL; consumed cases immutable.
+
+The [M57 bound plan](../plans/2026-10-16-companion-microphone-m57.md) adds local
+browser microphone-to-WAV capture. Publish this plan, then record the missing
+Record audio control through existing Composer APIs before any production source.
+Current142baseline hashes were checked before tracked plan edits. Root five
+rulings are binding, with no separate preflight audit. No real microphone,
+provider/model, ordinary daemon, account, database/container or deploy is released.
+
+One16kHz mono PCM16 WAV, max120s/4MiB, fixed worklet buffer and one terminal
+transfer. A retained global capture lease survives pending permission/cleanup;
+late grants are stopped, context/node/port ownership is explicit and no timer
+pretends an unsettled resource retired. Valid cap produces a local candidate;
+malformed/empty/uncertain cleanup discards it. Record/Stop stay local until Add
+recording transfers one File to the existing upload hook. Then choose the ready
+WAV in M56: explicit OpenAI API action, editable preview, Use and separate Send.
+No automatic upload/transcription/send, Blob script, storage or microphone data
+logging. Browser dictation/read-aloud persist; actual capture/noise/STT quality
+and native output/connector/local-provider parity remain open.
+
+Root verified MDN browser permissions/rate/close/track/worklet contracts and
+official installed Vite8.0.10 asset URL/no-inline behavior before binding. Fake
+devices/worklet globals and emitted-asset inspection only; no device permission
+is invoked by tests. Exact rulings/resume:
+`.superpowers/sdd/2026-10-16-companion-microphone-m57/progress.md`.
+
+Root alone executes/fmts/Git/processes; bounded source-only Codex lanes, one
+capture/worklet batch review, one final UI/SDK interaction review, one fix wave
+and relevant Nx web/SDK/format/docs/hash gates. Rust/SDK source is not planned;
+keep its verified M56 hashes and avoid redundant Cargo absent changes/failures.
+If Cargo is needed always CARGO_INCREMENTAL=0/jobs1/threads2. Direct native
+Python/cmd runner and cleared provider/service env; local gates, no Cloud claim.
+Per-command unsigned commits, justified dependencies and reviewed merge-and-
+continue remain authorized. Explicit staging only; never nx.json/anima.yaml/
+.superpowers. Preserve nx SHA
+`3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`.
+No stash/reset/restore/path checkout/worktree, profile/credential copy/readout,
+real accounts/DB servers/containers/Docker55432/public deployment. Future branch
+handoff should fast-forward local main by nonforced fetch before switching to
+avoid the old-main roundtrip checkout. Historical resumes are superseded here.
+
+## Historical M56 gated handover
+
 # Handover: selected native voice input (M0–M56)
 
 ## Start here (2026-10-16): M56 gated; settle publication then continue
