@@ -62,7 +62,7 @@ retirement is proved.
 
 OCR, other Office formats and native extraction on other operating systems
 remain unsupported in this slice; their originals can still be stored and
-downloaded. Browser dictation, compatible-model image input and native voice are
+downloaded. Browser dictation, compatible-model image input and [selected audio transcription](voice.md) are
 separate capabilities. Extraction itself makes no model request, enables no
 tool permission and writes no Fact or knowledge collection. Compaction can
 summarize verified excerpts as untrusted conversation data under its existing

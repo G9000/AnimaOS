@@ -3,6 +3,7 @@ import { DaemonHttpError } from '@animaOS-SWARM/sdk';
 import {
   attachmentMetadata,
   classifyAttachmentFile,
+  messageAttachment,
   uploadAttachmentWithProgress,
   ATTACHMENT_ERRORS,
 } from './attachments';
@@ -79,6 +80,41 @@ it('uses encoded relative multipart route and real byte progress, resolving only
   await expect(pending).resolves.toEqual(metadata);
   expect(xhr.onload).toBeNull();
   expect(xhr.upload.onprogress).toBeNull();
+});
+
+it('classifies bounded WAV by extension only and keeps audio as an ordinary file reference', () => {
+  const audio = {
+    ...metadata,
+    name: 'voice.WAV',
+    mime: 'audio/wav',
+    kind: 'audio' as const,
+    size: 4 * 1024 * 1024,
+  };
+  const file = new File(['not browser-decoded'], 'voice.WAV', {
+    type: 'application/octet-stream',
+  });
+  Object.defineProperty(file, 'size', {
+    value: audio.size,
+    configurable: true,
+  });
+  expect(classifyAttachmentFile(file)).toEqual({ kind: 'audio' });
+  expect(attachmentMetadata(audio)).toEqual(audio);
+  expect(messageAttachment(audio)).toMatchObject({
+    type: 'file',
+    kind: 'audio',
+  });
+  Object.defineProperty(file, 'size', { value: audio.size + 1 });
+  expect(classifyAttachmentFile(file)).toEqual({
+    error: ATTACHMENT_ERRORS.tooLarge,
+  });
+  expect(attachmentMetadata({ ...audio, size: audio.size + 1 })).toBeNull();
+  expect(attachmentMetadata({ ...audio, mime: 'audio/mpeg' })).toBeNull();
+  expect(
+    classifyAttachmentFile(new File(['x'], 'voice.mp3', { type: 'audio/wav' })),
+  ).toEqual({ error: ATTACHMENT_ERRORS.unsupported });
+  expect(classifyAttachmentFile(new File([], 'empty.wav'))).toEqual({
+    error: ATTACHMENT_ERRORS.empty,
+  });
 });
 
 it('maps HTTP failure before accepting metadata', async () => {

@@ -42,21 +42,30 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 194, "complete registered operation count");
-    for (method, path) in [
+    assert_eq!(actual.len(), 197, "complete registered operation count");
+    let additions = [
         ("GET", "/api/providers/chatgpt/models"),
         ("POST", "/api/providers/chatgpt/models/refresh"),
-    ] {
+        ("GET", "/api/agents/{agent_id}/sessions/{session_id}/voice"),
+        (
+            "POST",
+            "/api/agents/{agent_id}/sessions/{session_id}/voice/transcriptions",
+        ),
+        (
+            "DELETE",
+            "/api/agents/{agent_id}/sessions/{session_id}/voice/transcriptions/{operation_id}",
+        ),
+    ];
+    for (method, path) in additions {
         assert!(
             actual.contains(&(method.to_string(), path.to_string())),
-            "model metadata operation must be registered"
+            "model metadata and explicit voice operations must be registered"
         );
     }
     assert_eq!(
         actual
             .iter()
-            .filter(|(_, path)| path != "/api/providers/chatgpt/models"
-                && path != "/api/providers/chatgpt/models/refresh")
+            .filter(|(method, path)| !additions.contains(&(method.as_str(), path.as_str())))
             .count(),
         192,
         "pre-M49 registered operations remain present"

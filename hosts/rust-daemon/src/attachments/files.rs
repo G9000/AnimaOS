@@ -253,6 +253,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn audio_physical_read_ceiling_uses_four_mib_record_size_and_sentinel() {
+        let temp = Temp::new();
+        let saved = save_upload(&temp.0, "2026-10-16", "notes.txt", b"small").unwrap();
+        let mut row = record(&temp.0, saved, b"small");
+        row.kind = AttachmentKind::Audio;
+        row.size = anima_core::audio_content::MAX_AUDIO_INPUT_BYTES as u64;
+        assert_eq!(
+            attachment_read_limit(&row).unwrap() + 1,
+            4 * 1024 * 1024 + 1
+        );
+        row.size += 1;
+        assert_eq!(attachment_read_limit(&row), Err(AttachmentError::TooLarge));
+        row.size = 5;
+        assert_eq!(attachment_read_limit(&row), Ok(5));
+    }
+
     #[cfg(windows)]
     #[test]
     fn attachment_windows_junction_parents_and_final_replacement_are_refused() {

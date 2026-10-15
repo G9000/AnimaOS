@@ -123,6 +123,13 @@ with text and pages included, without inferring scanned content. See
 [document coverage and limits](documents.md). OCR and other Office formats remain
 storage/download only.
 
+Selected WAV files can also be uploaded, then explicitly transcribed through the
+opt-in OpenAI Platform API into an editable preview. Use transcript appends to
+your current draft; Send stays separate. This requires a server API key, not
+ChatGPT subscription sign-in. Stop is local; remote inference/billing may
+continue. See [selected audio and limits](voice.md). Actual voice quality and
+microphone/native speech output acceptance remain open.
+
 Review tool permission requests in Approvals. Review saved mail drafts and
 Calendar changes in Connectors before sending or applying them. Check the exact
 request before allowing it. Configure a small schedule in Automations and inspect its

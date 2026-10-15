@@ -47,6 +47,109 @@ pub(crate) struct ProviderSummary {
     pub api_key_envs: &'static [&'static str],
 }
 
+/// Opt-in API-key use only. No OAuth/subscription token lookup or network
+/// request occurs while resolving capability or constructing this adapter.
+pub(crate) fn transcription_service_from_env() -> crate::voice::VoiceService {
+    if !std::env::var("ANIMAOS_STT_ENABLED").is_ok_and(|value| value == "true" || value == "1") {
+        return crate::voice::VoiceService::disabled();
+    }
+    let Some(definition) = provider_definitions().iter().find(|d| d.id == "openai") else {
+        return crate::voice::VoiceService::configured(
+            anima_core::audio_content::TranscriptionAvailability::Unavailable,
+            None,
+        );
+    };
+    let base = first_env_value(definition.base_url_envs)
+        .unwrap_or_else(|| definition.default_base_url.to_owned());
+    if !canonical_transcription_base(&base) {
+        return crate::voice::VoiceService::configured(
+            anima_core::audio_content::TranscriptionAvailability::UnsupportedConfiguration,
+            None,
+        );
+    }
+    transcription_service_for_config(&base, first_env_value(definition.api_key_envs))
+}
+
+fn canonical_transcription_base(base: &str) -> bool {
+    matches!(
+        base,
+        "https://api.openai.com/v1"
+            | "https://api.openai.com/v1/"
+            | "https://api.openai.com:443/v1"
+            | "https://api.openai.com:443/v1/"
+    )
+}
+fn transcription_service_for_config(base: &str, key: Option<String>) -> crate::voice::VoiceService {
+    use anima_core::audio_content::TranscriptionAvailability as Availability;
+    if !canonical_transcription_base(base) {
+        return crate::voice::VoiceService::configured(
+            Availability::UnsupportedConfiguration,
+            None,
+        );
+    }
+    let Some(key) = key.filter(|key| !key.trim().is_empty()) else {
+        return crate::voice::VoiceService::configured(Availability::MissingCredentials, None);
+    };
+    match anima_model_adapters::OpenAiTranscriptionAdapter::new(key) {
+        Ok(port) => crate::voice::VoiceService::configured(
+            Availability::Available,
+            Some(std::sync::Arc::new(port)),
+        ),
+        Err(_) => crate::voice::VoiceService::configured(Availability::Unavailable, None),
+    }
+}
+
+#[cfg(test)]
+mod transcription_configuration_tests {
+    use super::*;
+    use anima_core::audio_content::TranscriptionAvailability as Availability;
+    #[test]
+    fn only_canonical_openai_api_configuration_is_eligible_without_discovery() {
+        for base in [
+            "https://api.openai.com/v1",
+            "https://api.openai.com:443/v1/",
+        ] {
+            assert_eq!(
+                transcription_service_for_config(base, None).availability(),
+                Availability::MissingCredentials
+            );
+            assert_eq!(
+                transcription_service_for_config(base, Some("synthetic-key".into())).availability(),
+                Availability::Available
+            );
+        }
+        for base in [
+            "http://api.openai.com/v1",
+            "https://elsewhere.test/v1",
+            "https://api.openai.com:444/v1",
+            "https://user@api.openai.com/v1",
+            "https://api.openai.com/v1?key=x",
+            "https://api.openai.com/v1#fragment",
+            "https://api.openai.com/other",
+        ] {
+            assert_eq!(
+                transcription_service_for_config(base, Some("synthetic-key".into())).availability(),
+                Availability::UnsupportedConfiguration
+            );
+        }
+    }
+
+    #[test]
+    fn m56_review_regression_noncanonical_openai_base_spellings_are_unavailable() {
+        for base in [
+            "https://@api.openai.com/v1",
+            "https://api.openai.com/v1/../v1",
+            "https://api.openai.com/./v1/",
+        ] {
+            assert_eq!(
+                transcription_service_for_config(base, Some("synthetic-key".into())).availability(),
+                Availability::UnsupportedConfiguration,
+                "{base}"
+            );
+        }
+    }
+}
+
 pub(crate) fn provider_summaries() -> Vec<ProviderSummary> {
     provider_summaries_for_config(&provider_config_from_env())
 }

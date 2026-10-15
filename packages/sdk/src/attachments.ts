@@ -6,7 +6,7 @@ export interface UploadedAttachment {
   name: string;
   mime: string;
   size: number;
-  kind: 'image' | 'text' | 'document';
+  kind: 'image' | 'text' | 'document' | 'audio';
   path: string;
   createdAtMs: number;
 }

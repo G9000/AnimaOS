@@ -5,9 +5,9 @@ export const MAX_DRAFT_ATTACHMENTS = 10;
 export const ATTACHMENT_ERRORS = {
   empty: 'This file is empty. Choose a file with content.',
   tooLarge:
-    'This file is too large. Images allow 10 MiB, text 1 MiB, and documents 25 MiB.',
+    'This file is too large. Images allow 10 MiB, text 1 MiB, documents 25 MiB, and WAV audio 4 MiB.',
   unsupported:
-    'This file type is not supported. Choose an image, text/source file, PDF, or Office document.',
+    'This file type is not supported. Choose an image, text/source file, PDF, Office document, or PCM16 WAV audio (up to 120 seconds).',
   limit: 'You can attach at most 10 files to a message.',
   upload: 'The file could not upload. Remove it and try again.',
   invalidResponse: 'The daemon returned invalid attachment details. Try again.',
@@ -125,9 +125,15 @@ export function classifyAttachmentFile(
       ? 'text'
       : DOCUMENT_EXTENSIONS.has(extension)
         ? 'document'
-        : null;
+        : extension === 'wav'
+          ? 'audio'
+          : null;
   if (!kind) return { error: ATTACHMENT_ERRORS.unsupported };
-  const max = (kind === 'image' ? 10 : kind === 'text' ? 1 : 25) * 1024 * 1024;
+  // The host validates the actual WAV container, PCM format and duration.
+  const max =
+    (kind === 'image' ? 10 : kind === 'text' ? 1 : kind === 'audio' ? 4 : 25) *
+    1024 *
+    1024;
   return file.size > max ? { error: ATTACHMENT_ERRORS.tooLarge } : { kind };
 }
 
@@ -155,7 +161,9 @@ export function attachmentMetadata(value: unknown): UploadedAttachment | null {
     !Number.isSafeInteger(item.size) ||
     (item.size as number) < 1 ||
     (item.size as number) > 25 * 1024 * 1024 ||
-    !['image', 'text', 'document'].includes(String(item.kind)) ||
+    !['image', 'text', 'document', 'audio'].includes(String(item.kind)) ||
+    (item.kind === 'audio' &&
+      (item.mime !== 'audio/wav' || (item.size as number) > 4 * 1024 * 1024)) ||
     typeof item.path !== 'string' ||
     !item.path ||
     item.path.length > 1024 ||

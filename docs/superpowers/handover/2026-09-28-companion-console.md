@@ -1,61 +1,83 @@
 # Handover: selected native voice input (M0–M56)
 
-## Start here (2026-10-16): M55 merged; M56 bound tests-first voice slice
+## Start here (2026-10-16): M56 gated; settle publication then continue
 
-Continue `g9000/companion-native-voice-m56` from verified
-[M55/PR61](https://github.com/G9000/animaOS-SWARM/pull/61) main
-`285cb59813916e3f3a2293fff4b6dbc83f6d404d`. M55 source
-`182c1515638ed798542c65c3b1fd128c8c02f27f` matches tested/merged tree
-`f8a3743fd8360816c0073ef523295732ab2fa2e3`; all37publication/28source/
-77unowned hashes and nx preserved. Rust2788/26intentionalignores/45suites,
-three explicit Windows physical cases/fmt/build, SDK151/3service skips,
-web1370/115files/type/build and eightdocchecks passed. Both review findings,
-the deeper Flate failure and a new compaction-test assumption were resolved
-without weakening old assertions. Binary PDF attributes preserve fixture bytes.
-M55 is committed/pushed/merged; no publication work remains. The selected other
-chat received this context-only settlement. PAR08 remains partial for codecs,
-OCR/visual/other Office/non-Windows/live answer quality; M52 stays PARTIAL.
+Continue `g9000/companion-native-voice-m56` from verified M55/PR61 main
+`285cb59813916e3f3a2293fff4b6dbc83f6d404d`. The bound plan was committed/pushed
+at09c788762b9fd6c75d600fe475e1c10d6bdd5ee8 before the independent existing-handler
+WAV RED400vs201. Reviewed implementation and the single fix wave are now frozen
+and gated. Finish explicit-path per-command unsigned commit/push/PR, then the
+standing authorized reviewed merge and exact source/merge tree verification.
+Cut a next branch only from verified main after settlement. Exact source/PR/tree
+and resume: `.superpowers/sdd/2026-10-16-companion-native-voice-m56/progress.md`.
 
-The [M56 bound plan](../plans/2026-10-16-companion-native-voice-m56.md) adds a
-selected PCM16 WAV file-to-draft path, with a real production adapter and
-fixture/finite-peer-only acceptance. First publish the three plan docs, then
-record a meaningful existing upload-handler RED with independent WAV bytes.
-No new production API/import/dependency feature before RED. Root binds five
-risks directly; no separate preflight audit. Current114 baseline source/boundary
-hashes were checked before any tracked plan change.
+Selected PCM16 WAV attachments now feed one explicitly consented OpenAI API
+transcription into an editable ephemeral preview. Use transcript appends to the
+current same-scope draft; Send stays separate. Upload and ordinary chat request
+zero transcription calls. Audio remains a File reference with original download.
 
-WAV input is4MiB/120s with strict bounded RIFF/PCM arithmetic. Reusable Core
-types have no HTTP/env/host authority; model-adapters owns fixed HTTP/body
-leases, host owns selected source/config/scoped ephemeral operation lifecycle.
-Existing server OpenAI API-key configuration plus explicit opt-in is required;
-ChatGPT subscription or generic OAuth credentials are not speech API keys.
-Fixed OpenAI authority/whisper-1/text multipart, no redirects/proxy/retries/
-fallback. Stop/cancel fences local results; remote completion/billing remains
-unknown. No transcript in history/metadata before explicit Use transcript and
-ordinary Send. Upload/chat trigger zero STT calls; no recording/TTS is added.
+WAV is bounded to4MiB/120s with strict RIFF/PCM validation; transcript16KiB.
+The host has two nonqueued operations, a64-entry scoped UUIDv4 map and terminal
+tombstones up to5min, shared four retained physical source-read leases and two
+retained outgoing byte-body leases. Pre/post record/hash/scope checks, Stop,
+drop, duplicate, cancel-before-admission, deadline and restart-no-replay are
+fixture-tested. The45s operation has a46s outer request/no-store timeout, including
+slow bodies and scope-lock waits. Local cancellation does not establish remote
+inference stopped or billing was prevented; ephemeral IDs are not durable
+exactly-once delivery.
 
-Root checked current official OpenAI guide before binding and verified clean
-installed public Hermes HEAD1fd18277267152893a8a24792b79213e7ca3f899 selected
-helpers/LICENSE and bytes1.11.1 ownership API. Narrow attributed Rust port retains
-full MIT notice and Anima branding; no Hermes Python process/profile/catalog.
-No API-key helper is available. No actual provider/model/microphone/service/
-account/DB server/container/deploy is released in M56. Its adapter is tested with
-fakes/finite loopback peers; this does not establish voice quality or full parity.
+The real adapter is disabled by default (`ANIMAOS_STT_ENABLED`), uses only the
+existing server OpenAI Platform API-key configuration and four canonical base
+spellings, and fixes OpenAI authority/whisper-1/text multipart. No subscription
+OAuth reuse, redirects, ambient proxy, retries, fallback or automatic replay.
+Hermes's narrow multipart/trim behavior is ported into Rust with pin/full MIT
+notice; product controls retain Anima naming.
 
-Exact rulings/resume: `.superpowers/sdd/2026-10-16-companion-native-voice-m56/progress.md`.
+Rust/core 2,829 passed / 26 intentional ignores / 45 suites; Rust formatting/build; SDK172/three service skips; web1,387/116files; SDK/web typechecks/builds passed. Exact42source/92unowned baseline hashes and nx are checked.
+
+One combined native/core review found the unbounded pre-operation body wait;
+the final SDK/web review had no actionable P0-P2 findings. Three new regressions
+first failed without compile errors, then passed after the single host fix wave:
+outer timeout, closed WAV errors415/422/413, and canonical base rejection. A new
+test fixture was corrected to assert immutable-record overwrite rejection before
+explicit deletion/rebinding; the production guard and late-source assertions
+were preserved. No second audit or actual provider release was added.
+
+During the full gates a fragmented-request regression also proved that the
+finite Windows peer could publish a partial request. Its test helper now
+explicitly normalizes accepted sockets to blocking mode, retaining the same
+socket timeouts and every request assertion. Production transport is unchanged.
+The [Windows accept contract](https://learn.microsoft.com/en-us/windows/win32/api/winsock2/nf-winsock2-accept)
+and installed Rust implementation informed this bounded correction.
+The final gate also caught the old194-operation documentation count. The marked
+README inventory was regenerated from actualOpenAPI197, with explicit checks for
+the three newvoiceoperations and the unchanged pre-M49 legacy192-operation guard.
+Runtime behavior and the complete table-to-schema equality assertion remain.
+
+These are synthetic PCM silence, deterministic ports and finite loopback peers,
+with zero actual provider/model/microphone/ordinary daemon/account/DB server/
+container/deployment activation. They establish lifecycle, wire and draft
+contracts, not speech accuracy or live provider/billing quality. PAR-07 remains
+partial for microphone capture, native speech output, connector voice, local/
+other providers and actual-device/account acceptance. M47/M52 actual cases and
+consumed releases remain immutable; M52 strict grade stays PARTIAL.
+
+The private M57 microphone proposal is held/renumberable only, awaiting verified
+M56 merge and root binding/API verification. No recording implementation or
+actual microphone/provider release is implied. See [voice](../../companion/voice.md)
+and [M56 plan](../plans/2026-10-16-companion-native-voice-m56.md).
+
 Root alone executes/fmts/Git/processes/models; cheap bounded source-only Codex
-lanes, one native/core review/finalSDKwebreview/onefixwave/freshgates. Direct native
-Python subprocess/Nx runner via cmd.exe is reliable after owned PowerShell
-startup sessions were cancelled; do not blindly resume old sessions. Always
-CARGO_INCREMENTAL=0/jobs1/threads2, resolved Nx, cleared provider/service env and
-local gates authoritative. Dependencies with reason and per-command unsigned
-commits/reviewed merge-and-continue remain authorized. Explicit staging only;
-never nx.json/anima.yaml/private. Preserve nx SHA256
+lanes, one combined native review/finalSDKwebreview/onefixwave/freshgates. Direct
+native Python subprocess/Nx through cmd.exe is reliable; PowerShell startup
+sessions stalled and were cancelled. CARGO_INCREMENTAL=0/jobs1/threads2, cleared
+provider/service env, no Nx Cloud claim. Dependencies with reason, per-command
+unsigned commits and reviewed merge-and-continue remain authorized. Explicit
+staging only; never nx.json/anima.yaml/private. Preserve nx SHA256
 `3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`.
-No stash/reset/restore/path checkout/worktree, ordinary profile/credential copy
-or readout, real accounts, DB servers, containers, Docker55432 or public deployment.
-M47/M52 actual cases and consumed releases stay immutable, without replay/rescue/
-regrade. Historical resumes below are superseded here.
+No stash/reset/restore/path checkout/worktree, ordinary profile/credential copy or
+readout, real accounts, DB servers, containers, Docker55432 or public deployment.
+Historical resumes below are superseded here.
 
 ## Historical M55 outcome handover
 

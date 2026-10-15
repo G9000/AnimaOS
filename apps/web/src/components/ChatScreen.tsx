@@ -38,6 +38,10 @@ import { AttachmentChips } from './attachments/AttachmentChips';
 import { MessageAttachments } from './attachments/MessageAttachments';
 import type { AttachmentDraft } from '../lib/attachments';
 import { DictationControl } from './voice/DictationControl';
+import {
+  NativeTranscription,
+  type NativeVoiceScope,
+} from './voice/NativeTranscription';
 import { ReadAloud } from './voice/ReadAloud';
 import type { ReadAloudController } from '../hooks/useReadAloud';
 import { revealInvisible } from '../lib/skills';
@@ -580,6 +584,7 @@ export function Composer({
   conversationKey,
   savedAttachmentCount = 0,
   voiceDisabled = false,
+  nativeVoice,
 }: {
   agentName: string;
   /** The textarea's name and placeholder; defaults to "Message <agent>". */
@@ -608,6 +613,7 @@ export function Composer({
   onSteer?: () => void;
   conversationKey?: string | null;
   voiceDisabled?: boolean;
+  nativeVoice?: NativeVoiceScope;
   savedAttachmentCount?: number;
   attachments?: {
     items: readonly AttachmentDraft[];
@@ -828,6 +834,20 @@ export function Composer({
           conversationKey={conversationKey}
           onTranscript={appendDictation}
         />
+        {nativeVoice && attachments && (
+          <NativeTranscription
+            key={JSON.stringify([
+              conversationKey,
+              nativeVoice.agentId,
+              nativeVoice.sessionId,
+            ])}
+            scope={nativeVoice}
+            conversationKey={conversationKey}
+            items={attachments.items}
+            disabled={!canPick || voiceDisabled}
+            onUse={appendDictation}
+          />
+        )}
         <div className="mt-2 flex items-center justify-between px-2 font-mono text-[10px] text-ink-3">
           <span>
             {steerable

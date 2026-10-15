@@ -29,6 +29,7 @@ mod skills;
 mod state;
 mod tools;
 mod usage;
+mod voice;
 
 pub mod postgres;
 

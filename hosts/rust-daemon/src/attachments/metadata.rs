@@ -67,6 +67,9 @@ pub(crate) fn matching_metadata(
                 "document" if attachment.attachment_type == AttachmentType::File => {
                     AttachmentKind::Document
                 }
+                "audio" if attachment.attachment_type == AttachmentType::File => {
+                    AttachmentKind::Audio
+                }
                 _ => return None,
             };
             let id = string(row, "id")?;

@@ -1,6 +1,14 @@
 export { AgentsClient, action, agent, plugin } from './agents.js';
 export { AgentFilesClient } from './agent-files.js';
 export { AttachmentsClient } from './attachments.js';
+export { VoiceClient } from './voice.js';
+export type {
+  VoiceAvailabilityReason,
+  VoiceCapabilities,
+  VoiceTranscriptionInput,
+  VoiceTranscription,
+  VoiceRequestOptions,
+} from './voice.js';
 export { BrowserScopesClient } from './browser.js';
 export type {
   BrowserSelection,

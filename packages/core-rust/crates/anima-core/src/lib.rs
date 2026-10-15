@@ -4,6 +4,12 @@ pub use agent_files::{
     AgentFileRenderBudget, AgentFileSection, RenderedAgentFiles, RuntimePromptIdentity,
 };
 pub mod agent;
+pub mod audio_content;
+pub use audio_content::{
+    validate_transcript_text, AudioValidationError, TranscriptionAvailability, TranscriptionError,
+    TranscriptionPort, WavAudio, WavInfo, MAX_AUDIO_DURATION_MS, MAX_AUDIO_INPUT_BYTES,
+    MAX_TRANSCRIPT_BYTES,
+};
 pub mod browser;
 pub use browser::{
     decode_observation, decode_operation, decode_scope, operation_digest, scope_digest,

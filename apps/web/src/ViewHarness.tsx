@@ -1247,6 +1247,17 @@ export function ViewHarness() {
         draft,
         conversationKey: activeChatKey,
         voiceDisabled: showSettings || conversationHidden,
+        nativeVoice:
+          agentId && (!activeSession || activeSession.kind === 'chat')
+            ? {
+                agentId: activeSession?.agentId ?? agentId,
+                ...(routeSessionId ? { sessionId: routeSessionId } : {}),
+                ensureSession: () =>
+                  attachmentSession
+                    .ensureSession()
+                    .then((session) => session.id),
+              }
+            : undefined,
         attachments: {
           items: attachments.items,
           onAdd: attachments.add,

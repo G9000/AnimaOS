@@ -1350,3 +1350,43 @@ async fn image_magic_owns_mime_and_collision_name_is_server_approved() {
         png.as_slice()
     );
 }
+
+#[tokio::test]
+async fn selected_wav_upload_is_owned_and_downloadable_m56() {
+    let (_temp, state, agent) = fixture();
+    let app = router(state, DaemonConfig::default());
+    let wav = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/audio/m56-selected.wav"
+    ));
+    let response = app
+        .clone()
+        .oneshot(upload(
+            &uri(&agent),
+            form("selected.wav", wav, "audio/wav"),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let value = json_body(response).await;
+    let row = &value["attachment"];
+    assert_eq!(row["mime"], "audio/wav");
+    assert_eq!(row["kind"], "audio");
+    for key in ["workspaceRoot", "sha256", "bytes", "agentId", "sessionId"] {
+        assert!(row.get(key).is_none(), "{key}");
+    }
+    let id = row["id"].as_str().unwrap();
+    let serve = format!("/api/agents/{agent}/attachments/{id}");
+    let response = app.clone().oneshot(get(&serve, true)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "audio/wav");
+    assert_eq!(
+        &to_bytes(response.into_body(), usize::MAX).await.unwrap()[..],
+        wav.as_slice()
+    );
+    assert_eq!(
+        app.oneshot(get(&serve, false)).await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
+}

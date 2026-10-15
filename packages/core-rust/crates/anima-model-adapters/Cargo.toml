@@ -8,10 +8,12 @@ authors.workspace = true
 [dependencies]
 anima-core = { path = "../anima-core" }
 async-trait = "0.1"
+bytes = "=1.11.1"
 futures = "0.3"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "multipart"] }
 serde_json = "1"
 tracing = "0.1"
+tokio = { version = "1", features = ["macros", "sync", "time"] }
 zeroize = "1.8"
 
 [dev-dependencies]

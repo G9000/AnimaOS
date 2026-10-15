@@ -40,18 +40,19 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `DELETE` | `/api/agents/{agent_id}/approval-rules/{rule_id}`                                            |
 | `DELETE` | `/api/agents/{agent_id}/avatar`                                                              |
 | `DELETE` | `/api/agents/{agent_id}/community-bundles/{bundle_id}`                                       |
-| `DELETE` | `/api/agents/{agent_id}/connectors/{connector_id}`                                           |
 | `DELETE` | `/api/agents/{agent_id}/connectors/discord/{connector_id}`                                   |
 | `DELETE` | `/api/agents/{agent_id}/connectors/gcalendar/{connector_id}`                                 |
 | `DELETE` | `/api/agents/{agent_id}/connectors/gdrive/{connector_id}`                                    |
 | `DELETE` | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}`                           |
+| `DELETE` | `/api/agents/{agent_id}/connectors/{connector_id}`                                           |
 | `DELETE` | `/api/agents/{agent_id}/mcp-connections/{connection_id}`                                     |
 | `DELETE` | `/api/agents/{agent_id}/schedules/{schedule_id}`                                             |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}`                                               |
+| `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}/voice/transcriptions/{operation_id}`           |
 | `DELETE` | `/api/connectors/oauth-apps/{provider}`                                                      |
-| `DELETE` | `/api/memories/{memory_id}`                                                                  |
 | `DELETE` | `/api/memories/entities/{entity_id}`                                                         |
 | `DELETE` | `/api/memories/facts/{fact_id}`                                                              |
+| `DELETE` | `/api/memories/{memory_id}`                                                                  |
 | `DELETE` | `/api/providers/chatgpt`                                                                     |
 | `DELETE` | `/api/providers/chatgpt/login`                                                               |
 | `DELETE` | `/api/skills/{slug}`                                                                         |
@@ -67,7 +68,6 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/community-bundles`                                                   |
 | `GET`    | `/api/agents/{agent_id}/community-bundles/{bundle_id}`                                       |
 | `GET`    | `/api/agents/{agent_id}/connectors`                                                          |
-| `GET`    | `/api/agents/{agent_id}/connectors/{connector_id}/messages`                                  |
 | `GET`    | `/api/agents/{agent_id}/connectors/discord`                                                  |
 | `GET`    | `/api/agents/{agent_id}/connectors/gcalendar`                                                |
 | `GET`    | `/api/agents/{agent_id}/connectors/gcalendar/{connector_id}/writes`                          |
@@ -75,6 +75,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/connectors/mail/{provider}`                                          |
 | `GET`    | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/drafts`                    |
 | `GET`    | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/messages`                  |
+| `GET`    | `/api/agents/{agent_id}/connectors/{connector_id}/messages`                                  |
 | `GET`    | `/api/agents/{agent_id}/events`                                                              |
 | `GET`    | `/api/agents/{agent_id}/jobs`                                                                |
 | `GET`    | `/api/agents/{agent_id}/learning-policy`                                                     |
@@ -94,6 +95,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/export`                                        |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/messages`                                      |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/runs`                                          |
+| `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/voice`                                         |
 | `GET`    | `/api/agents/{agent_id}/tasks`                                                               |
 | `GET`    | `/api/approvals`                                                                             |
 | `GET`    | `/api/capabilities`                                                                          |
@@ -106,7 +108,6 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/health`                                                                                |
 | `GET`    | `/api/logs`                                                                                  |
 | `GET`    | `/api/logs/stream`                                                                           |
-| `GET`    | `/api/memories/{memory_id}/trace`                                                            |
 | `GET`    | `/api/memories/entities`                                                                     |
 | `GET`    | `/api/memories/facts`                                                                        |
 | `GET`    | `/api/memories/readiness`                                                                    |
@@ -114,6 +115,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/memories/recent`                                                                       |
 | `GET`    | `/api/memories/relationships`                                                                |
 | `GET`    | `/api/memories/search`                                                                       |
+| `GET`    | `/api/memories/{memory_id}/trace`                                                            |
 | `GET`    | `/api/providers`                                                                             |
 | `GET`    | `/api/providers/chatgpt/models`                                                              |
 | `GET`    | `/api/providers/chatgpt/status`                                                              |
@@ -146,19 +148,17 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `PATCH`  | `/api/agents/{agent_id}/memory-views/sources/{memory_id}`                                    |
 | `PATCH`  | `/api/agents/{agent_id}/schedules/{schedule_id}`                                             |
 | `PATCH`  | `/api/agents/{agent_id}/sessions/{session_id}`                                               |
-| `PATCH`  | `/api/memories/{memory_id}`                                                                  |
 | `PATCH`  | `/api/memories/facts/{fact_id}`                                                              |
+| `PATCH`  | `/api/memories/{memory_id}`                                                                  |
 | `PATCH`  | `/api/skills/{slug}`                                                                         |
 | `POST`   | `/api/agencies/create`                                                                       |
 | `POST`   | `/api/agencies/generate`                                                                     |
 | `POST`   | `/api/agents`                                                                                |
+| `POST`   | `/api/agents/generate-profile`                                                               |
 | `POST`   | `/api/agents/{agent_id}/approval-rules`                                                      |
 | `POST`   | `/api/agents/{agent_id}/community-bundles`                                                   |
-| `POST`   | `/api/agents/{agent_id}/community-bundles/{bundle_id}/update`                                |
 | `POST`   | `/api/agents/{agent_id}/community-bundles/reviews`                                           |
-| `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/messages`                                  |
-| `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/pairings/{chat_id}/approve`                |
-| `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/restart`                                   |
+| `POST`   | `/api/agents/{agent_id}/community-bundles/{bundle_id}/update`                                |
 | `POST`   | `/api/agents/{agent_id}/connectors/discord`                                                  |
 | `POST`   | `/api/agents/{agent_id}/connectors/discord/{connector_id}/activate`                          |
 | `POST`   | `/api/agents/{agent_id}/connectors/discord/{connector_id}/outbound/suppress`                 |
@@ -173,6 +173,9 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/drafts/{draft_id}/approve` |
 | `POST`   | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/drafts/{draft_id}/reject`  |
 | `POST`   | `/api/agents/{agent_id}/connectors/telegram`                                                 |
+| `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/messages`                                  |
+| `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/pairings/{chat_id}/approve`                |
+| `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/restart`                                   |
 | `POST`   | `/api/agents/{agent_id}/jobs`                                                                |
 | `POST`   | `/api/agents/{agent_id}/jobs/{job_id}/approve`                                               |
 | `POST`   | `/api/agents/{agent_id}/jobs/{job_id}/cancel`                                                |
@@ -191,13 +194,13 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/runs/{run_id}/learning-review`                                       |
 | `POST`   | `/api/agents/{agent_id}/runs/{run_id}/stop`                                                  |
 | `POST`   | `/api/agents/{agent_id}/schedules`                                                           |
-| `POST`   | `/api/agents/{agent_id}/schedules/{schedule_id}/run`                                         |
 | `POST`   | `/api/agents/{agent_id}/schedules/import`                                                    |
+| `POST`   | `/api/agents/{agent_id}/schedules/{schedule_id}/run`                                         |
 | `POST`   | `/api/agents/{agent_id}/sessions`                                                            |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/attachments`                                   |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/compact`                                       |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/runs`                                          |
-| `POST`   | `/api/agents/generate-profile`                                                               |
+| `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/voice/transcriptions`                          |
 | `POST`   | `/api/approvals/{approval_id}/decision`                                                      |
 | `POST`   | `/api/goals`                                                                                 |
 | `POST`   | `/api/goals/{goal_id}/status`                                                                |
@@ -212,8 +215,8 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/schedules/preview`                                                                     |
 | `POST`   | `/api/skill-drafts/{draft_id}/approve`                                                       |
 | `POST`   | `/api/skill-drafts/{draft_id}/reject`                                                        |
-| `POST`   | `/api/skills/{slug}/approve`                                                                 |
 | `POST`   | `/api/skills/import`                                                                         |
+| `POST`   | `/api/skills/{slug}/approve`                                                                 |
 | `POST`   | `/api/swarms`                                                                                |
 | `POST`   | `/api/swarms/{swarm_id}/run`                                                                 |
 | `POST`   | `/api/workspace/bootstrap`                                                                   |
@@ -221,8 +224,8 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/workspace/resume`                                                                      |
 | `PUT`    | `/api/agents/{agent_id}/approval-policy`                                                     |
 | `PUT`    | `/api/agents/{agent_id}/avatar`                                                              |
-| `PUT`    | `/api/agents/{agent_id}/connectors/{connector_id}/credential`                                |
 | `PUT`    | `/api/agents/{agent_id}/connectors/discord/{connector_id}/credential`                        |
+| `PUT`    | `/api/agents/{agent_id}/connectors/{connector_id}/credential`                                |
 | `PUT`    | `/api/agents/{agent_id}/runs/{run_id}/browser-scope`                                         |
 | `PUT`    | `/api/agents/{agent_id}/tasks`                                                               |
 | `PUT`    | `/api/connectors/oauth-apps/{provider}`                                                      |
@@ -421,7 +424,7 @@ Refresh has a ten-second total bound, returns `409` while another refresh is act
 and reports metadata failure as unavailable/stale without changing saved agents.
 Catalog presence is metadata, not proof of model/tool acceptance. New selection is
 deliberate; existing/custom model strings and grants remain unchanged until Save.
-The registered OpenAPI inventory now contains 194 operations.
+The registered OpenAPI inventory now contains 197 operations, including the three explicit owner-scoped voice operations.
 
 ### Agents
 
@@ -455,13 +458,22 @@ Each run sends the model the session's newest whole turns that fit its context b
 
 Before a run whose context leaves out turns no summary covers, the run compacts them unless the agent setting `autoCompact` is `false`, announcing `run.progress` with `phase: "compacting"` after `run.started`: the agent's own provider and model, without tools (at most 1,024 tokens, temperature 0.2), merge the previous summary with those turns (pruned ones read back from the history store, the same turns hidden from the model left out) into a summary of at most 8 KiB, which the run then uses in their place; the session announces it with `session.updated`. If summarizing or saving fails, or the summary is still unwritten after 2 minutes (`The summary took longer than 2 minutes`; a helper's compaction also counts toward its own 2-minute deadline), the session's `compactionError` (`{ message, atMs }`) says why until a later compaction succeeds, and the run goes on with its trimmed context. A stop during compaction ends the run at once and changes neither the summary nor `compactionError`.
 
-### Attachments and browser voice
+### Attachments
 
-The web console uploads files with `POST /api/agents/{agent_id}/sessions/{session_id}/attachments`: multipart form data containing exactly one `file` part with a filename. The response is `201 { attachment }`, with the saved ID, name, MIME, size, kind, relative path and creation time. Both upload and `GET /api/agents/{agent_id}/sessions/{session_id}/attachments/{attachment_id}` require local-owner authorization; downloads return `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`.
+Selected WAV audio remains a File reference unless the owner explicitly requests
+transcription. Native transcription is disabled by default; enable
+`ANIMAOS_STT_ENABLED=true` with the server OpenAI Platform API-key configuration.
+It returns an ephemeral editable draft, with separate Use/Send, fixed authority,
+strict bounds and local cancellation. Upload/chat never invoke it automatically.
+ChatGPT subscription/OAuth credentials are excluded. See
+[voice configuration and limits](../../docs/companion/voice.md).
+and browser voice
+
+The web console uploads files with `POST /api/agents/{agent_id}/sessions/{session_id}/attachments`: multipart form data containing exactly one `file` part with a filename. The response is `201 { attachment }`, with the saved ID, name, MIME, size, kind, relative path and creation time. Both upload and `GET /api/agents/{agent_id}/attachments/{attachment_id}` require local-owner authorization; downloads return `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`.
 
 Configure the agent's workspace before uploading. Files are saved there through exclusive creation, with safe collision suffixes. Each ID belongs to its original agent and session, canonical workspace root and content digest. Moving the workspace or changing/removing the file makes that ID unavailable. Session/agent deletion removes attachment metadata; it does not delete workspace files. Failed persistence may leave an unreferenced file but never reports a successful upload.
 
-Limits are 10 MiB per PNG/JPEG/GIF/WebP image, 1 MiB per supported UTF-8 text/source file, 25 MiB per PDF/Office document, and ten unique ordered attachment IDs per input. Client MIME declarations do not establish file type. Office ZIP envelopes are checked without extraction; legacy compound Office files receive envelope-only validation and extension-derived MIME, without Office-family parsing. Text attachments tell the companion to use read_file for the saved relative path; documents are saved and download-only, with an honest unread-file note. Known vision models receive at most four selected images, hydrated only for the model request. Unknown or non-vision models receive text references. Transcripts, snapshots and public metadata retain references rather than encoded image bytes.
+Limits are 10 MiB per PNG/JPEG/GIF/WebP image, 1 MiB per supported UTF-8 text/source file, 25 MiB per PDF/Office document, 4 MiB/120 seconds per supported PCM16 WAV, and ten unique ordered attachment IDs per input. Client MIME declarations do not establish file type. Office ZIP envelopes are checked without extraction; legacy compound Office files receive envelope-only validation and extension-derived MIME, without Office-family parsing. Text attachments tell the companion to use read_file for the saved relative path; selected own Windows Web Chat DOCX/PDF can supply bounded quoted text, while other document formats remain saved/download-only with an honest unread-file note. Known vision models receive at most four selected images, hydrated only for the model request. Unknown or non-vision models receive text references. Transcripts, snapshots and public metadata retain references rather than encoded image bytes.
 
 Runs and steers accept `attachmentIds` alongside text and skill; attachment-only input is valid. Exact retries preserve raw text, ordered IDs and skill. New consumed steer keys retain that complete input even after transcript pruning. Older consumed keys can replay only while a matching scoped transcript proves equality; otherwise the daemon returns 409. Snapshot version 11 retains attachment-aware pending and consumed steers; its first upgrade writes `<control-plane-file>.pre-attachments.bak` in JSON mode or `control_plane.backup.10` in Postgres mode. For rollback to M8, stop services and restore the complete matching pre-upgrade backup generation with recorded binaries. The snapshot backup is only a component; mixing older JSON with newer history can resurrect rows. Restore history, memory, workspace/uploads and keyring consistently, retaining the original root and vault password. Changes since that backup are lost.
 
@@ -924,7 +936,13 @@ Project instruction priority at the configured root is:
 1. `.anima.md`, then `ANIMA.md`; complete initial YAML frontmatter is stripped
    from these files without granting it configuration authority.
 2. `AGENTS.override.md`, then `AGENTS.md`, then `agents.md`.
-3. `CLAUDE.md`, then `claude.md`.
+3. Optional Claude instruction filenames, tried in this order:
+
+   ```text
+   CLAUDE.md
+   claude.md
+   ```
+
 4. `.cursorrules`.
 
 The loader implements a bounded root-to-project AGENTS chain for internal scoped
