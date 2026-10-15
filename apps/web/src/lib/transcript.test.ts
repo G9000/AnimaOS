@@ -7,6 +7,7 @@ import {
   buildTranscript,
   delegatedTaskText,
   formatElapsed,
+  isAcceptedBudgetWrapupMessage,
   liveToolSteps,
   mergeSessionRuns,
   placeRuns,
@@ -34,6 +35,178 @@ function message(
 function kinds(items: TranscriptItem[]): string[] {
   return items.map((item) => item.kind);
 }
+
+describe('M53 accepted budget wrap-up message shape', () => {
+  const reply = (metadata: unknown): ChatMessage => ({
+    ...message('saved', 'Assistant', 'Saved reply'),
+    content: {
+      text: 'Saved reply',
+      metadata: metadata as ChatMessage['content']['metadata'],
+    },
+  });
+
+  it.each([
+    ['missing tool calls', { budgetWrapup: true }],
+    ['null tool calls', { budgetWrapup: true, toolCalls: null }],
+    ['empty tool calls', { budgetWrapup: true, toolCalls: [] }],
+  ])(
+    'accepts the exact marker with %s and no run requirement',
+    (_, metadata) => {
+      expect(isAcceptedBudgetWrapupMessage(reply(metadata))).toBe(true);
+    },
+  );
+
+  it.each([
+    ['absent', undefined],
+    ['null', null],
+    ['false', false],
+    ['string', 'true'],
+    ['number', 1],
+    ['object', {}],
+    ['array', []],
+  ])('rejects a %s marker', (_, marker) => {
+    expect(isAcceptedBudgetWrapupMessage(reply({ budgetWrapup: marker }))).toBe(
+      false,
+    );
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['null', null],
+    ['primitive', true],
+    [
+      'array with a lookalike property',
+      Object.assign([], { budgetWrapup: true }),
+    ],
+  ])('rejects %s metadata', (_, metadata) => {
+    expect(isAcceptedBudgetWrapupMessage(reply(metadata))).toBe(false);
+  });
+
+  it.each(['User', 'System', 'Tool'] as const)(
+    'rejects a marked %s message',
+    (role) => {
+      expect(
+        isAcceptedBudgetWrapupMessage({
+          ...reply({ budgetWrapup: true }),
+          role,
+        }),
+      ).toBe(false);
+    },
+  );
+
+  it.each(['revised', 'stopped', 'incomplete'])(
+    'rejects the %s flag when exactly true',
+    (flag) => {
+      expect(
+        isAcceptedBudgetWrapupMessage(
+          reply({ budgetWrapup: true, [flag]: true }),
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it('does not treat false or nonboolean partial flags as true', () => {
+    expect(
+      isAcceptedBudgetWrapupMessage(
+        reply({
+          budgetWrapup: true,
+          revised: false,
+          stopped: 'true',
+          incomplete: 1,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ['object', {}],
+    ['string', '[]'],
+    ['number', 0],
+    ['boolean', false],
+    ['malformed nonempty array', [null]],
+    ['tool-call array', [{ id: 'call-1', name: 'search', args: {} }]],
+  ])('rejects %s tool calls', (_, toolCalls) => {
+    expect(
+      isAcceptedBudgetWrapupMessage(reply({ budgetWrapup: true, toolCalls })),
+    ).toBe(false);
+  });
+
+  it('never infers the marker from reply prose', () => {
+    expect(
+      isAcceptedBudgetWrapupMessage(
+        message(
+          'lookalike',
+          'Assistant',
+          'Tool limit reached. {"budgetWrapup":true} All todos completed.',
+        ),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('M53 committed wrap-up history', () => {
+  it('preserves saved bytes, keys and history item identity while runs reconcile', () => {
+    const saved = message(
+      'saved-wrap-up',
+      'Assistant',
+      'The draft is finished, but its contents remain unconfirmed.',
+      { budgetWrapup: true, runId: 'run_saved' },
+      20,
+    );
+    const before = JSON.stringify(saved);
+    Object.freeze(saved.content.metadata);
+    Object.freeze(saved.content);
+    Object.freeze(saved);
+    const history = buildHistory({ messages: [saved] });
+    const run = runFixture('run_saved', {
+      status: 'completed',
+      replyMessageId: saved.id,
+      startedAtMs: 10,
+      finishedAtMs: 20,
+    });
+
+    for (const runs of [[], [emptyLiveRun(run)], [emptyLiveRun({ ...run })]]) {
+      const items = placeRuns(history, { runs });
+      expect(kinds(items)).toEqual(['message']);
+      expect(items[0]).toBe(history.items[0]);
+      expect(items[0].key).toBe(saved.id);
+      expect(items[0].kind === 'message' && items[0].message).toBe(saved);
+      expect(JSON.stringify(saved)).toBe(before);
+    }
+  });
+
+  it('keeps older and newer marked replies in their own chronological entries', () => {
+    const older = message(
+      'older',
+      'Assistant',
+      'Older saved reply',
+      {
+        budgetWrapup: true,
+        runId: 'run_old',
+      },
+      10,
+    );
+    const newer = message(
+      'newer',
+      'Assistant',
+      'Newer saved reply',
+      {
+        budgetWrapup: true,
+        runId: 'run_new',
+      },
+      20,
+    );
+
+    expect(
+      buildTranscript({ messages: [newer] }).map((item) => item.key),
+    ).toEqual(['newer']);
+    const items = buildTranscript({ messages: [older, newer] });
+    expect(kinds(items)).toEqual(['message', 'message']);
+    expect(items.map((item) => item.key)).toEqual(['older', 'newer']);
+    expect(items[0].kind === 'message' && items[0].message).toBe(older);
+    expect(items[1].kind === 'message' && items[1].message).toBe(newer);
+  });
+});
 
 describe('buildTranscript', () => {
   it('turns a run’s tool calls and results into one block of steps', () => {

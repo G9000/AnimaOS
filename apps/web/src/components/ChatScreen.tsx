@@ -20,6 +20,7 @@ import { ErrorBanner, formatTime } from './ui-bits';
 import { isMacPlatform } from '../lib/platform';
 import {
   buildTranscript,
+  isAcceptedBudgetWrapupMessage,
   type TranscriptActions,
   type TranscriptItem,
 } from '../lib/transcript';
@@ -306,13 +307,24 @@ const TranscriptEntry = memo(function TranscriptEntry({
   switch (item.kind) {
     case 'message':
       return (
-        <Bubble
-          message={item.message}
-          onSave={actions?.onSaveToMemory}
-          savedLookup={actions?.savedToMemory}
-          agentId={agentId}
-          readAloud={readAloud}
-        />
+        <>
+          <Bubble
+            message={item.message}
+            onSave={actions?.onSaveToMemory}
+            savedLookup={actions?.savedToMemory}
+            agentId={agentId}
+            readAloud={readAloud}
+          />
+          {isAcceptedBudgetWrapupMessage(item.message) && (
+            <div className="mt-2 max-w-[85%] rounded-xl border border-line bg-panel-2/90 px-4 py-3 text-sm text-ink-2">
+              <h3 className="font-medium text-ink">Tool limit reached</h3>
+              <p className="mt-1">
+                This saved reply could not run further tools. Review the tool
+                results and any remaining work.
+              </p>
+            </div>
+          )}
+        </>
       );
     case 'revised':
       return (

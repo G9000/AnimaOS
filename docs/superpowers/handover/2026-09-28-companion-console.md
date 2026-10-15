@@ -1,3 +1,52 @@
+# Handover: owner-visible completion boundary (M0–M53)
+
+## Start here (2026-10-16): M53 gated; settle publication then document understanding
+
+Continue `g9000/companion-completion-evidence-m53`, from verified M52/PR58 main
+`97258b01ecfdffdfcd782c86b907f8b7d151261b`. The four-file web implementation is
+frozen/reviewed/gated. Exact source, PR, verified merge and next resume are in
+`.superpowers/sdd/2026-10-16-companion-completion-evidence-m53/progress.md`.
+Finish the authorized publication/merge and verify its tree before cutting the
+next milestone branch from main. The held PAR-08 document-understanding proposal
+is private plan-only; root must choose its narrow slice and bind risks before
+any next source release. No additional model or service activation is released.
+
+[M53](../plans/2026-10-16-companion-completion-evidence-m53.md) shows the existing
+accepted tool-limit marker beside its committed saved Assistant reply, including
+older history without a loaded Run. Strict shape and caller exclusions keep
+live/pending/revised/non-assistant/partial/tool-call paths quiet. Copy, speech,
+memory-save and stored reply bytes, history keys/reconciliation and tool/helper
+navigation are retained. No new component, CSS, transcript kind, fetch, action,
+schema, native, SDK, dependency or configuration change. Missing-notice RED was
+one failed/one passed; focused 110 tests in three files, fresh 1,361 web tests in 115 files,
+typecheck/build/format/diff and six docs checks passed after one combined
+web correctness/SDK-native scope review. Exact review/fix decisions are in ledger.
+These are deterministic presentation checks; no browser/model/provider trial.
+
+M52 remains **strict quality PARTIAL**: useful utility/oracle/quiet restart passed,
+but helper edge wording contradicted itself and the output-verification todo was
+completed while the final reply left contents unconfirmed. Seven calls / 23,065
+reported tokens, 14 receipts / 3 todos and quiet usage 7 to 7 remain the actual evidence.
+Four task-result/reflection memories/two agent entities retained their hash, with
+no Fact/retrieval/graceful/in-flight exactly-once claim. M47/M52 actual cases and
+all releases are immutable/consumed; all 24 M52 recorded owned identities retired,
+port 18752 free. Do not replay, repair or regrade those cases to manufacture a pass.
+
+Hermes public HEAD/selected source/LICENSE was root-reverified at
+`1fd18277267152893a8a24792b79213e7ca3f899`; M53 uses a general reason-to-notice
+pattern without copied source/text. Retain existing MIT notices and Anima naming.
+Cheap Codex delegation, per-command unsigned commits, reviewed merge-and-continue
+and context-only other-chat updates remain authorized. Root alone runs tests/fmt/
+Git/services/models. CARGO_INCREMENTAL=0 for Cargo; Rust jobs 1 / threads 2.
+Stage explicit owned paths only; never nx.json/anima.yaml/private evidence.
+Preserve nx SHA256
+`3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90`.
+No stash/reset/restore/path checkout/worktree, ordinary profile/credential copy/
+readout, real connector accounts, DB servers, containers, Docker55432 or public
+deployment. Older resumes below are historical and superseded here.
+
+## Historical M52 outcome handover
+
 # Handover: useful repair evidence and reporting gaps (M0–M52)
 
 ## Start here (2026-10-16): M52 tested; settle publication then bounded follow-up

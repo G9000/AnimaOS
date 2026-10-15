@@ -148,6 +148,23 @@ function metadataOf(message: ChatMessage): Fields {
   return fieldsOf(message.content.metadata);
 }
 
+/** Shape check for a saved reply from committed session history. The caller
+ *  supplies that history context; live and pending content is not eligible. */
+export function isAcceptedBudgetWrapupMessage(message: ChatMessage): boolean {
+  const metadata = metadataOf(message);
+  const calls = metadata.toolCalls;
+  return (
+    message.role === 'Assistant' &&
+    metadata.budgetWrapup === true &&
+    metadata.revised !== true &&
+    metadata.stopped !== true &&
+    metadata.incomplete !== true &&
+    (calls === undefined ||
+      calls === null ||
+      (Array.isArray(calls) && calls.length === 0))
+  );
+}
+
 /** The run a committed message belongs to. */
 export function messageRunId(message: ChatMessage): string | null {
   const metadata = metadataOf(message);
