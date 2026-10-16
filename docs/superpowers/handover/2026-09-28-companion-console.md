@@ -1,6 +1,38 @@
+# Handover: M71 versioned process guard repair bound
+
+## Start here (2026-10-16): M70 merged PARTIAL; execute M71 lean plan
+
+M70 PR76 merged sourcea308d0b7273cd3deab2774902e113fc876d31085,
+mainb94878c010cf61a35febdd6ac7c2d389b962bde4,
+tree4c7bb8f625b9b5f7b9733b58ac6562c743bba022;6publication/1source,
+618unowned hashes+nx preserved. Profile18/policy47/console65pass3liveskips/typecheck pass.
+Actual db8c54c7-0756-404f-8a83-2f09783c8947 failed supervisor process capture,
+no browser witness/save; known14retired/portsfree/profilestable, finalcapturefailed.
+Complete cleanup/profile-fix/save acceptance NOT proven; exact initial error unknown.
+
+Continue g9000/companion-process-guard-m71 from that verified main; read
+[the M71 plan](../plans/2026-10-16-companion-process-guard-m71.md), then AGENTS.md.
+New public Windows test guard and deterministic fake-API tests: narrow retired-only
+error31 image-null witness, strict live/launch/time/identity checks, existing handle
+transfer, bounded diagnostics and retained Job termination/zero-active proof.
+Earlier ordinary validation proves the31race; do not attribute the lost M70 cause.
+Meaningful unit RED before fix, then new M71 supervisor/spec with same short private
+profile, frozen images/oracle/transport. No fresh live case before reviewed
+unit/profile/policy/fullconsole/typecheck/manifest gates. At most one new UUID
+case<=300s/cleanupreserve30s/5minexpiry/exclusiveconsume, never retry/regrade.
+
+Resume .superpowers/sdd/2026-10-16-companion-process-guard-m71/progress.md.
+M61/M69/M70 sources, original cases, seals and runtime hashes remain unchanged;
+M64 NOT RUN/M52 PARTIAL. Root commands/fmt/Git/activation; source-only disjoint
+workers. No ordinary profiles/services/accounts/providers/models/DB/containers/
+Docker55432/public network. Cargo incremental0/jobs1/threads2 if needed; explicit
+stage only, never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path
+checkout/worktree. Standing delegation/context-only selected-chat updates/per-command
+unsigned commits and merge-and-continue apply. No fresh actual case released.
+
 # Handover: M70 isolated browser profile repair PARTIAL
 
-## Start here (2026-10-16): publish M70; diagnose versioned process guard next
+## Historical M70 PARTIAL handover
 
 M70 branch g9000/companion-browser-profile-m70 from verified M69main
 3b2bc6c0ccd9e3079887233229667cd0b795ef06, plan0af6dd4 before source.
