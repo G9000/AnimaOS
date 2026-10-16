@@ -14,6 +14,8 @@ does not provide OS network isolation or bound the browser engine's internal mem
 
 ## One pinned public HTTPS site
 
+M64 prepared an ignored real-page test with offline admission checks. Its single independent source read did not establish the required heading, so no pin lookup or real browser case ran. Public rendering remains unverified; ordinary unit-test success does not change that status.
+
 M63 adds an optional static-page mode. It is tested with synthetic local TLS
 peers; actual public browsing/rendering remains unverified. Keep the complete
 installation/template fields below, replacing the destination fields with:

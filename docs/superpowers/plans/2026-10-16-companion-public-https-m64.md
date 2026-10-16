@@ -1,6 +1,6 @@
 # M64 one pinned public HTTPS DOM acceptance
 
-Status: bound from verified M63/PR69 main; publish before source-only implementation. No actual case is released until root freezes the new executable, inputs and one-shot manifest.
+Status: partial; source-only driver gated, actual public acceptance NOT RUN after independent heading precondition failure.
 
 ## Proposed acceptance rules and interfaces
 
@@ -233,3 +233,24 @@ account writes, devices, DB servers/containers/Docker55432 or deployment. Preser
 M47/M52 and all four failed M61 cases; M52 PARTIAL. Update master/parity/harness/
 handover/operator evidence, push/PR/attach/standing merge and exact tree/raw hashes.
 Resume .superpowers/sdd/2026-10-16-companion-public-https-m64/progress.md.
+
+## Recorded outcome
+
+**Partial: real public browser acceptance was not run.** A single independent
+bounded HTTPS source read returned200 and577bytes with normal certificate checks,
+but did not establish the required heading oracle. No DNS pin lookup, startup
+release, browser launch, replacement request or relaxed oracle followed.
+
+The native test module now contains deterministic child-contract/config/oracle
+admission checks and a separate ignored public-page driver. It validates fixed
+case paths and hashes, refuses invalid or replayed admission, retains ordinary
+owner grants and per-action approval, and keeps zero-model and shutdown assertions.
+This prepares a possible future explicitly bound case; it proves no public DOM,
+live TLS/browser result or autonomous task quality.
+
+Fresh local gates: Rust/core **2,866/27 intentional ignores/45
+suites**, native lint/build, **52 worker tests**, driver refusal checks and owned
+docs/format/hash checks. All7 recorded worker-job identities retired.
+Production, SDK, web, dependencies and standing grants are unchanged; their M63
+evidence remains historical. M47/M52/four failed M61 cases stay immutable and M52
+strict quality stays PARTIAL. See [harness evidence](../../companion/harness-acceptance.md).

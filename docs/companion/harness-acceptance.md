@@ -1,5 +1,26 @@
 # Native harness acceptance
 
+## M64 public browser acceptance preparation (2026-10-16)
+
+**Partial: real public browser acceptance was not run.** A single independent
+bounded HTTPS source read returned200 and577bytes with normal certificate checks,
+but did not establish the required heading oracle. No DNS pin lookup, startup
+release, browser launch, replacement request or relaxed oracle followed.
+
+The native test module now contains deterministic child-contract/config/oracle
+admission checks and a separate ignored public-page driver. It validates fixed
+case paths and hashes, refuses invalid or replayed admission, retains ordinary
+owner grants and per-action approval, and keeps zero-model and shutdown assertions.
+This prepares a possible future explicitly bound case; it proves no public DOM,
+live TLS/browser result or autonomous task quality.
+
+Fresh local gates: Rust/core **2,866/27 intentional ignores/45
+suites**, native lint/build, **52 worker tests**, driver refusal checks and owned
+docs/format/hash checks. All7 recorded worker-job identities retired.
+Production, SDK, web, dependencies and standing grants are unchanged; their M63
+evidence remains historical. M47/M52/four failed M61 cases stay immutable and M52
+strict quality stays PARTIAL. See the [M64 plan](../superpowers/plans/2026-10-16-companion-public-https-m64.md).
+
 ## M63 pinned public HTTPS browser policy (2026-10-16)
 
 An operator can now install one canonical ASCII HTTPS hostname on port443 with
