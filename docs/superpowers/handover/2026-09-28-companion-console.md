@@ -1,6 +1,20 @@
+# Handover: M87 coding-task and helper reliability
+
+## Start here (2026-10-17): publish M87 and use the checked task workflow
+
+One distinct actual duplicate-inventory repair is FAILED: gpt-6-luna made5parent +3helper subscription calls,25249reportedtokens in95.9seconds. One read-only helper identified both defects and the zero-byte edge case. Parent ran the expected failing baseline (3/6 passed), repaired only the module and saved one CAS task list. Owner denied the next save because its third row omitted content, then cancelled once. Root independent six-test and literal candidate checks pass. The repaired file, partial progress, history, usage and memory survived five quiet same-store seconds unchanged; both owned daemons retired and18787 was free.
+
+Fresh Rust test/lint/build, SDK/web typecheck/build, public coding oracle, retained legacy oracle targets, private policy/type/bundle/Python checks, touched formatting/docs and one batch/final SDK review with one combined fix wave pass. No production Rust/SDK/web/dependency change; this milestone adds the reusable offline coding acceptance fixture/oracle and target.
+
+The actual workflow FAILED before model final verification, report creation/read-back, completed progress or final reply; supplemental root tests do not turn it into acceptance. Quiet recovery proves retained terminal state, not in-flight recovery, indefinite uptime, browser interaction, broad repository quality or full Hermes parity. The frozen projector also reports semantically equal approval DTOs as different because JSON key order differs; this separate private-verifier limitation is diagnosed without changing or regrading the case. No retry, rescue, manual model/output repair, fallback, profile/account/login/connector/DB server/container/Docker55432 activity or historical replay. Settings and reported tokens are not hard billing caps.
+
+Read the [M87 plan](../plans/2026-10-17-companion-coding-acceptance-m87.md), then AGENTS.md. Exact resume .superpowers/sdd/2026-10-17-companion-coding-acceptance-m87/progress.md. Finish explicit unsigned commit/push/PR/attach/standing merge/exact-tree and raw preservation checks if pending. The actual case is consumed; no more model task, replay, regrading or report repair for M87. Use the retained task/output for inspection. Broader daily-repository work, in-flight recovery and selected real connector accounts remain separately scoped acceptance gaps.
+
+Keep standing lean Codex delegation, unsigned per-command commits and merge-and-continue. Explicit stage only, never nx.json/anima.yaml/.superpowers/uploads/generated Astro settings. No stash/reset/restore/path checkout/worktree. Cargo incremental0/jobs1/threads2, serialized/root-only. Isolated local testing and existing app-owned subscription resolver remain authorized; no login/raw credential/profile copying/account change, ordinary service/connector/database server/container/Docker55432 action.
+
 # Handover: M86 coding-task and helper reliability
 
-## Start here (2026-10-17): publish M86 and use the checked task workflow
+## Historical M86 settled handover
 
 One distinct actual snapshot-comparison repair is FAILED: gpt-6-luna made3parent +2helper subscription calls,12542reportedtokens in116.4seconds. One helper completed three read-only inspections and returned grounded advice. The driver withheld the first Exec after seeing linked helper frames; zero shell commands/module writes/todo saves/output files. Owner cancelled once; five quiet same-store seconds preserved all observed state, both owned daemons retired and18786 was free.
 

@@ -4,6 +4,16 @@
   "root": "packages/core-rust",
   "projectType": "library",
   "targets": {
+    "coding-acceptance-m87-test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --test packages/core-rust/acceptance/coding-m87/oracle.test.mjs"
+      },
+      "inputs": ["default", "{projectRoot}/acceptance/coding-m87/**/*"],
+      "cache": false,
+      "parallelism": false
+    },
     "coding-acceptance-test": {
       "executor": "nx:run-commands",
       "options": {
