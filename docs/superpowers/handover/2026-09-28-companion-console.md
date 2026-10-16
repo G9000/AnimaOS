@@ -1,20 +1,19 @@
 # Handover: M82 logical swarm task ownership
 
-## Start here (2026-10-16): M81 merged; execute M82
+## Start here (2026-10-16): publish M82 and continue selected parity
 
-M81 PR87 merged at c90946ffe0726f43d7c29af64f2e6449e8ad3621, exact tested tree 874908a892ba28393d207e500fe2dd8350df01af.
-Fresh web1579/122files, typecheck/build/format/docs and final combined review passed.
-M80 task preservation, M79 scheduler recovery, M78 Memory freshness, M77 public page and M74 Files stay settled. No case replay or regrading.
+After M82 publication, prioritize one useful daily workflow through the existing console/harness and independently check its output, cancellation and recovery. Choose its bounded success criteria before another implementation milestone; add reliability fixes only when that workflow demonstrates a concrete blocker. The core feature surface is implemented, while selected real connector accounts, broader autonomous work quality and target-host acceptance remain open. No new account/message/provider/host activation is implied.
 
-Continue g9000/companion-swarm-tasks-m82. Read the [M82 plan](../plans/2026-10-16-companion-swarm-tasks-m82.md), then AGENTS.md.
+M82 binds legacy swarm task tools and their per-run baseline to the host-generated coordinator/member identity instead of the fresh runtime ID. Later dispatches by that member can read the same saved tasks while runtime, memory and database identities retain their existing behavior. Default companion task ownership, failed-read refusal and revision-conflict merge recovery remain intact. Fresh Rust 2965 passed/29 ignored across 46 suites, lint/build/format/docs and one daemon batch review pass.
+
+Deterministic logical-owner and coordinator-reset evidence only. No automatic adoption or migration of old ephemeral task files, universal daemon-restart restoration, model-quality or full Hermes-parity claim. No web, SDK, schema, dependency, account/provider/device/ordinary-service, database or container change and no new actual acceptance case. Historical raw/Git/runtime evidence stays unchanged.
+
 Resume .superpowers/sdd/2026-10-16-companion-swarm-tasks-m82/progress.md.
-Tests-first host-owned task scope, one daemon batch review/fix wave, required Rust test/lint/build/format/docs, explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof. No actual acceptance case.
-Do not change runtime/memory/database identity or infer a migration from orphan task files. Cross-process restoration requires the same logical swarm identity; no universal restart claim.
-
+The ledger records exact publication state. Finish pending docs/format/explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof before selecting another demonstrated gap. M81 Tasks reconnect, M80 task preservation, M79 scheduler recovery, M78 Memory freshness, M77 public page and M74 Files remain settled. No consumed-case replay or regrading.
 Standing Codex delegation, unsigned per-command commits and merge-and-continue apply.
 No ordinary profiles/accounts/providers/devices/services/DBs/containers/Docker55432.
 Explicit stage only; never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
-Cargo incremental0/jobs1/threads2, serialized. Preserve unrelated work and historical raw/Git/runtime versions.
+Cargo incremental0/jobs1/threads2, serialized; preserve unrelated work and historical versions.
 
 # Handover: M81 Tasks reconnect freshness
 

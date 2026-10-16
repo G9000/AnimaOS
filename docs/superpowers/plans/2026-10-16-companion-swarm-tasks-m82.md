@@ -69,13 +69,13 @@ The exact identifier spelling can be adjusted consistently. This is host context
 
 ## Legacy binding and timing
 
-- Build a task-only owner from the factory context's coordinator IDs, for example `format!("swarm:{}:member:{}", context.swarm_id, context.agent_id)`.
+- Build a bounded task-only owner from the factory context's opaque coordinator IDs: `swarm:` followed by the full SHA-256 hex digest of the UTF-8 tagged tuple `swarm:{swarm_id}:member:{member_id}`. Use the existing `sha2` dependency. The raw tuple can exceed the filesystem component limit after task-path hex encoding for accepted long member names; the digest keeps the existing task filename format bounded.
 - Keep this assembly in one small host helper, such as `swarm_task_owner_id(swarm_id, member_id)`, used by the factory and its in-module tests.
 - Pass that owned value to `with_todo_owner` before the shell captures its tool context.
 - Keep the separate name-derived `persistence_agent_id` and all `build_swarm_runtime` database arguments unchanged.
 - Do not change the format or visibility of `stable_swarm_persistence_agent_id` merely for testing. Do not change core coordinator identity allocation or pooling.
 - Keep baseline capture after acquiring the runtime mutex and processing `needs_reset`, before `run_with_tools`.
-- Capture from `tool_context.todo_owner_id(runtime.state())`, under the existing `allows_tool("todo_write")` condition.
+- Capture from `tool_context.todo_owner_id(&runtime.state())`, under the existing `allows_tool("todo_write")` condition.
 - Convert read failure to `None` as today. Do not disable the run, repair the file, seed an empty baseline or retry the read automatically.
 - Make a fresh run-local baseline context and pass its clones to the tool executor as today.
 - For read-only task tools, explicit `todo_read` resolves the stable owner and may populate the run-local revision normally.
@@ -225,6 +225,7 @@ Direct reuse of the current Rust store is smaller than adapting Hermes persisten
 - Final source freeze and one daemon batch review/fix-wave outcome.
 - Fresh focused tests and required full Rust test/lint/build/format/docs receipts.
 - Stable logical member continuity and isolation demonstrated through real deterministic coordinator dispatch.
+- A valid 100-character member name remains usable through real task reads/writes and a later dispatch. Preserve the review-found length failure before applying the bounded namespace.
 - M80 refusal, owner/internal writer authority and explicit CAS recovery retained.
 - No provider/account/host acceptance claim, orphan migration, dependency or protocol change.
 
@@ -237,3 +238,9 @@ Direct reuse of the current Rust store is smaller than adapting Hermes persisten
 5. Ruling: do not adopt or migrate old ephemeral task files or claim daemon-level swarm restoration — source inspection proves dispatch-time runtime replacement, not persisted coordinator membership — cost if wrong: arbitrary orphan files could be attributed to the wrong member or unsupported recovery promised. Test real coordinator resets plus same-name/member isolation without changing historical fixtures or activating accounts/services.
 
 Ruling: reuse the current Rust task store and revision API — the pinned public Hermes per-session in-memory TODO store does not solve this host identity mismatch — cost if wrong: a needed contract change must be demonstrated and reviewed before widening scope. No upstream code port or dependency is needed.
+
+## Recorded outcome
+
+M82 binds legacy swarm task tools and their per-run baseline to the host-generated coordinator/member identity instead of the fresh runtime ID. Later dispatches by that member can read the same saved tasks while runtime, memory and database identities retain their existing behavior. Default companion task ownership, failed-read refusal and revision-conflict merge recovery remain intact. Fresh Rust 2965 passed/29 ignored across 46 suites, lint/build/format/docs and one daemon batch review pass.
+
+Deterministic logical-owner and coordinator-reset evidence only. No automatic adoption or migration of old ephemeral task files, universal daemon-restart restoration, model-quality or full Hermes-parity claim. No web, SDK, schema, dependency, account/provider/device/ordinary-service, database or container change and no new actual acceptance case. Historical raw/Git/runtime evidence stays unchanged.

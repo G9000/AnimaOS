@@ -58,7 +58,8 @@ pub(super) fn execute_todo_write(
                 0,
             );
         };
-        match write_agent_todos(root, &agent.id, &todos, Some(&observed_revision)) {
+        let owner_id = context.todo_owner_id(&agent);
+        match write_agent_todos(root, owner_id, &todos, Some(&observed_revision)) {
             Ok(saved) => {
                 *context
                     .todo_revision
@@ -81,7 +82,7 @@ pub(super) fn execute_todo_write(
             // Another room updated the list since this run saw it: save nothing,
             // show the latest list, and let a merged retry succeed.
             Err(error) if error.starts_with(TASKS_CHANGED_PREFIX) => {
-                match read_agent_todos(root, &agent.id) {
+                match read_agent_todos(root, owner_id) {
                     Ok(latest) => {
                         let message = format!(
                             "Tasks changed since this run last saw them, so nothing was saved. The latest tasks are:\n{}\nMerge your changes into this list and call todo_write again with the complete list.",
@@ -109,7 +110,7 @@ pub(super) fn execute_todo_read(
     _tool_call: ToolCall,
 ) -> BoxFuture<'static, TaskResult<Content>> {
     Box::pin(async move {
-        match read_agent_todos(ctx_workspace_root(&context), &agent.id) {
+        match read_agent_todos(ctx_workspace_root(&context), context.todo_owner_id(&agent)) {
             Ok(snapshot) => {
                 *context
                     .todo_revision

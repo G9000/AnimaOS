@@ -93,6 +93,8 @@ pub(crate) struct ToolExecutionContext {
     pub(super) calendar: Option<CalendarManager>,
     pub(super) mail: Option<MailManager>,
     pub(super) drive: Option<crate::connectors::drive::DriveManager>,
+    /// Host-owned task scope; ordinary contexts use the runtime agent ID.
+    todo_owner_id: Option<String>,
     /// Task-list revision this run last saw; `todo_write` only replaces the
     /// list it saw (spec §4.4 item 8). Shared by clones within one run.
     pub(super) todo_revision: Arc<std::sync::Mutex<Option<String>>>,
@@ -138,6 +140,7 @@ impl ToolExecutionContext {
             calendar,
             mail: None,
             drive: None,
+            todo_owner_id: None,
             todo_revision: Arc::new(std::sync::Mutex::new(None)),
             cancel: None,
             approvals: None,
@@ -194,6 +197,18 @@ impl ToolExecutionContext {
     pub(crate) fn with_run_link(mut self, link: Option<crate::runs::RunLink>) -> Self {
         self.run_link = link;
         self
+    }
+
+    /// Binds a host task scope without carrying revision authority from a
+    /// different owner. Existing clones retain their own scope and baseline.
+    pub(crate) fn with_todo_owner(mut self, owner_id: String) -> Self {
+        self.todo_owner_id = Some(owner_id);
+        self.todo_revision = Arc::new(std::sync::Mutex::new(None));
+        self
+    }
+
+    pub(crate) fn todo_owner_id<'a>(&'a self, agent: &'a AgentState) -> &'a str {
+        self.todo_owner_id.as_deref().unwrap_or(&agent.id)
     }
 
     /// Starts this run's compare-and-swap baseline for `todo_write`.
