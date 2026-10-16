@@ -135,13 +135,15 @@ export function SettingsPanel({
   const hasConversationRead = agent.toolNames.includes(
     'read_conversation_window',
   );
+  const hasDocumentRead = agent.toolNames.includes('read_document');
   const derivedAccess = deriveAccessProfile(
     agent.toolNames.filter(
       (tool) =>
         tool !== 'memory_remove' &&
         tool !== 'memory_consolidate' &&
         !isBrowserTool(tool) &&
-        tool !== 'read_conversation_window',
+        tool !== 'read_conversation_window' &&
+        tool !== 'read_document',
     ),
   );
 
@@ -168,6 +170,7 @@ export function SettingsPanel({
     useState(hasMemoryConsolidate);
   const [allowConversationRead, setAllowConversationRead] =
     useState(hasConversationRead);
+  const [allowDocumentRead, setAllowDocumentRead] = useState(hasDocumentRead);
   const [savedFlash, setSavedFlash] = useState(false);
   const saveErrorRef = useRef<HTMLDivElement>(null);
   const resetErrorRef = useRef<HTMLDivElement>(null);
@@ -200,6 +203,7 @@ export function SettingsPanel({
     setAllowMemoryRemove(hasMemoryRemove);
     setAllowMemoryConsolidate(hasMemoryConsolidate);
     setAllowConversationRead(hasConversationRead);
+    setAllowDocumentRead(hasDocumentRead);
   }, [
     agent.id,
     agent.name,
@@ -210,6 +214,7 @@ export function SettingsPanel({
     hasMemoryRemove,
     hasMemoryConsolidate,
     hasConversationRead,
+    hasDocumentRead,
     derivedAccess,
   ]);
 
@@ -286,7 +291,8 @@ export function SettingsPanel({
     ) ||
     allowMemoryRemove !== hasMemoryRemove ||
     allowMemoryConsolidate !== hasMemoryConsolidate ||
-    allowConversationRead !== hasConversationRead;
+    allowConversationRead !== hasConversationRead ||
+    allowDocumentRead !== hasDocumentRead;
   const dirty =
     name.trim() !== agent.name ||
     provider !== agent.provider ||
@@ -312,7 +318,8 @@ export function SettingsPanel({
           (tool !== 'memory_remove' || allowMemoryRemove) &&
           !isBrowserTool(tool) &&
           (tool !== 'memory_consolidate' || allowMemoryConsolidate) &&
-          (tool !== 'read_conversation_window' || allowConversationRead),
+          (tool !== 'read_conversation_window' || allowConversationRead) &&
+          (tool !== 'read_document' || allowDocumentRead),
       );
       if (allowMemoryRemove && !patch.tools.includes('memory_remove')) {
         patch.tools.push('memory_remove');
@@ -328,6 +335,9 @@ export function SettingsPanel({
         !patch.tools.includes('read_conversation_window')
       ) {
         patch.tools.push('read_conversation_window');
+      }
+      if (allowDocumentRead && !patch.tools.includes('read_document')) {
+        patch.tools.push('read_document');
       }
       patch.tools.push(
         ...BROWSER_TOOL_ACCESS.filter(({ name }) =>
@@ -741,6 +751,7 @@ export function SettingsPanel({
                             setAllowMemoryRemove(false);
                             setAllowMemoryConsolidate(false);
                             setAllowConversationRead(false);
+                            setAllowDocumentRead(false);
                             setBrowserGrants([]);
                           }}
                           className="mr-3 h-4 w-4 align-top"
@@ -788,6 +799,34 @@ export function SettingsPanel({
                         {label}
                       </label>
                     ))}
+                  </div>
+                  <div className="rounded-xl border border-line bg-white/[0.015] p-3.5">
+                    <div className="flex items-start gap-3">
+                      <input
+                        id="settings-document-read"
+                        type="checkbox"
+                        aria-describedby="settings-document-read-help"
+                        checked={allowDocumentRead}
+                        onChange={(event) =>
+                          setAllowDocumentRead(event.target.checked)
+                        }
+                        className="mt-0.5 h-4 w-4 shrink-0"
+                      />
+                      <label
+                        htmlFor="settings-document-read"
+                        className="cursor-pointer font-medium text-ink"
+                      >
+                        Allow reading workspace documents
+                      </label>
+                    </div>
+                    <p
+                      id="settings-document-read-help"
+                      className="mt-1 pl-7 text-sm text-ink-2"
+                    >
+                      Allows this agent to read a selected DOCX, PDF, or XLSX as
+                      bounded untrusted content. The original file is not
+                      uploaded.
+                    </p>
                   </div>
                   <div className="rounded-xl border border-line bg-white/[0.015] p-3.5">
                     <div className="flex items-start gap-3">

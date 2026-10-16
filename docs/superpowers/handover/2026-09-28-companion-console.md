@@ -1,6 +1,70 @@
+# Handover: workspace document reads locally gated (M0–M67)
+
+## Start here (2026-10-16): M67 gates pass; finish publication and continue
+
+Branch g9000/companion-workspace-documents-m67 from M66/PR72 main
+98a7b2cd860246b1e505a0fd9128bdd0e332f22b; bound plan
+7da06d322313797facf64904c143dd26800c05c8 preceded source. Explicitly granted
+read_document reads workspace DOCX/PDF/XLSX through existing safe byte capture and
+owned Windows parser worker. Source path/hash snapshot, quoted16KiB envelope,
+2MiB input, four retained read leases/single worker and absolute10s deadline;
+existing helper/connector grants apply with required cancellation. One Settings
+opt-in preserves defaults/custom neighbors. No new API/SDK/parser/dependencies.
+
+Fresh Rust/core2935/28 ignores/46 suites/lint/build/17 focused,
+web1512/121files/typecheck/build and shared-reader regressions pass. One native
+batch/final changed-web review and exact source hashes/docs/format recorded.
+Synthetic recording-model/tool/history evidence only; M66 finite physical worker
+CLI evidence retained. No personal file/profile/provider/model/account/ordinary
+daemon/DB/container/deployment activation. M64 browser NOT RUN, M52 PARTIAL and
+consumed cases unchanged. OCR/editing/visual fidelity/non-Windows worker and
+independent answer quality remain open.
+
+Resume .superpowers/sdd/2026-10-16-companion-workspace-documents-m67/progress.md.
+Finish exact explicit-path per-command unsigned commit/push/PR/attach/standing
+merge and tree/hash proof, then select next concrete useful scope from verified
+main. Root commands/fmt/Git, Cargo incremental0/jobs1/threads2 serialized; never
+stage nx.json/anima.yaml/.superpowers, no stash/reset/restore/path checkout/worktree.
+Preserve ordinary services/profiles/Docker55432. Delegation, context-only updates
+to the already selected chat, and merge-and-continue remain authorized.
+
+# Handover: workspace document reads bound (M0–M67)
+
+## Historical M67 bound-plan handover
+
+M66 PR72 is merged. Source 3716c4478c29b058b78aeae66ee55cab6a55ea49; main merge
+98a7b2cd860246b1e505a0fd9128bdd0e332f22b; exact source/merge tree f96256f0c1d967127ac8128b0967722bdc53a15c.
+Fresh local Rust/core2918/28 intentional ignores/46 suites/lint/build, SDK186/3
+intentional service skips/typecheck/build, web1508/121files/typecheck/build and one
+finite synthetic Windows XLSX worker CLI case passed. No new dependencies;
+28 publication paths/20 source inputs and581 unowned baseline hashes plus unrelated
+nx.json stayed exact. XLSX is bounded stored-cell reading; formulas are not
+calculated and caches may be stale. Real workbook/answer-quality acceptance remains open.
+
+Continue M67 on g9000/companion-workspace-documents-m67, cut from that verified main. Read
+[the bound lean plan](../plans/2026-10-16-companion-workspace-documents-m67.md),
+then AGENTS.md. The concrete gap is that read_file reads UTF-8 text only; existing
+workspace PDF/DOCX/XLSX files require re-upload. Add explicitly granted read_document
+through existing nofollow bounded byte capture and owned parser worker, with source
+path/hash snapshot semantics, a fully serialized16KiB untrusted ordinary tool
+envelope and one explicit Settings opt-in. Preserve current grant/default/helper/
+connector authority and require run cancellation; no owner-web-only restriction.
+Reuse existing parsers/dependencies and retained physical capacity. No OCR/editing/
+new public routes/provider/account/service activation. First meaningful RED, one
+native batch/final changed-web review, one fix wave and required fresh gates.
+
+Resume .superpowers/sdd/2026-10-16-companion-workspace-documents-m67/progress.md.
+Root commands/fmt/Git, serialized Cargo CARGO_INCREMENTAL=0/jobs1/threads2; no
+stash/reset/restore/path checkout/worktree. Explicit stage only; never nx.json,
+anima.yaml or .superpowers. Per-command unsigned commit/push/PR/attach/standing
+merge remains authorized. Isolated synthetic tests only; preserve ordinary services,
+profiles and Docker55432. M64 public browser NOT RUN, M52 strict quality PARTIAL,
+and consumed acceptance cases remain unchanged. Selected-other-chat context update
+is authorized and M66 settlement was sent; no new chat or reply is requested.
+
 # Handover: selected XLSX extraction locally gated (M0–M66)
 
-## Start here (2026-10-16): M66 gates pass; finish publication and continue
+## Historical M66 locally gated handover
 
 Branch g9000/companion-xlsx-m66 from M65/PR71 main
 3390e30c95e80b672bd1735a18b1a4da3e6f26b0; planbc78ef5cbe5dd87f149ab5df44b38ca2b04178a1

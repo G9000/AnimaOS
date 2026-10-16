@@ -13,6 +13,7 @@ use super::{
 /// arrive in M5 and M6.
 const READ_TOOLS: &[&str] = &[
     "read_file",
+    "read_document",
     "list_dir",
     "glob",
     "grep",
@@ -546,6 +547,7 @@ mod tests {
                 RiskClass::Read,
                 &[
                     "read_file",
+                    "read_document",
                     "list_dir",
                     "glob",
                     "grep",

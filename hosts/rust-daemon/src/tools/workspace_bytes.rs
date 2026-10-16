@@ -90,6 +90,15 @@ impl WorkspaceBytes {
         relative: &str,
         max: usize,
     ) -> Result<Vec<u8>, InstructionReadError> {
+        self.read_file_snapshot(relative, max)
+    }
+    /// Capture one bounded regular-file snapshot under this held root. Instruction
+    /// reads retain their exact checks and error categories through this helper.
+    pub(crate) fn read_file_snapshot(
+        &self,
+        relative: &str,
+        max: usize,
+    ) -> Result<Vec<u8>, InstructionReadError> {
         let parts = components(relative)?;
         let mut directory = self.directory.try_clone()?;
         for component in &parts[..parts.len() - 1] {

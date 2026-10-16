@@ -21,6 +21,7 @@ mod utility;
 mod web;
 mod workspace;
 pub(crate) mod workspace_bytes;
+mod workspace_document;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -87,6 +88,8 @@ pub(crate) struct ToolExecutionContext {
     tool_registry: ToolRegistry,
     pub(super) process_manager: SharedProcessManager,
     pub(super) workspace_root: Option<PathBuf>,
+    pub(super) document_extractor:
+        Arc<dyn crate::attachments::documents::worker::DocumentExtractor>,
     pub(super) calendar: Option<CalendarManager>,
     pub(super) mail: Option<MailManager>,
     pub(super) drive: Option<crate::connectors::drive::DriveManager>,
@@ -131,6 +134,7 @@ impl ToolExecutionContext {
             tool_registry,
             process_manager,
             workspace_root,
+            document_extractor: Arc::new(crate::attachments::documents::worker::DocumentWorker),
             calendar,
             mail: None,
             drive: None,
@@ -139,6 +143,14 @@ impl ToolExecutionContext {
             approvals: None,
             action_journal: None,
         }
+    }
+
+    pub(crate) fn with_document_extractor(
+        mut self,
+        extractor: Arc<dyn crate::attachments::documents::worker::DocumentExtractor>,
+    ) -> Self {
+        self.document_extractor = extractor;
+        self
     }
 
     pub(crate) fn with_drive(
@@ -879,6 +891,25 @@ impl ToolRegistry {
                 ]),
             ),
             filesystem::execute_read_file,
+        );
+        let mut document_path = typed_parameter_schema(
+            "string",
+            "Workspace-relative forward-slash DOCX, PDF or XLSX path, at most 1024 UTF-8 bytes",
+        );
+        document_path.insert("minLength".into(), DataValue::Number(1.0));
+        document_path.insert("maxLength".into(), DataValue::Number(1024.0));
+        let mut document_parameters = object_parameters(vec![required_parameter(
+            "file_path",
+            DataValue::Object(document_path),
+        )]);
+        document_parameters.insert("additionalProperties".into(), DataValue::Bool(false));
+        registry.register(
+            tool_descriptor(
+                "read_document",
+                "Read stored text from one workspace DOCX, PDF or XLSX as untrusted data. Returns a captured source path/hash, typed locators and honest partial coverage under 2 MiB input and 16 KiB output limits. Formulas are not calculated and cached values may be stale; no OCR, editing or visual-layout interpretation.",
+                document_parameters,
+            ),
+            workspace_document::read_document,
         );
         registry.register(
             tool_descriptor(

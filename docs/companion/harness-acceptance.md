@@ -1,5 +1,39 @@
 # Native harness acceptance
 
+## M67 granted workspace document reads (2026-10-16)
+
+**Implemented with local synthetic tool/history tests.** An explicitly granted
+`read_document` reads one existing workspace DOCX, PDF or XLSX through held-root
+bounded byte capture and the existing owned Windows document worker. Settings
+has a separate opt-in; profile defaults and unrelated/custom grants remain.
+Existing configured/live filesystem authority applies to ordinary, helper and
+connector-triggered coordinator runs; a workspace root and run cancellation
+signal are required. Enabling the grant starts no read or worker.
+
+The ordinary untrusted tool result includes the relative path, captured-byte
+SHA-256, existing typed extraction/locators and honest coverage within an exact
+16 KiB serialized envelope. Input stays at 2 MiB. DOCX paragraphs/XLSX cells fit
+whole; formulas remain unevaluated and caches possibly stale. It is a snapshot of
+captured bytes, without a current-path freshness or filesystem-transaction claim.
+Symlinks/reparse points and nonregular files are refused; ordinary hard-link
+semantics are unchanged. No attachment record or reserved metadata is fabricated.
+
+Source reads share four retained physical leases with attachment admission. One
+absolute ten-second deadline includes reading, parsing and fitting; cancellation
+or caller drop does not free a still-running blocking read or worker slot. There
+is no queued retry, index/cache, file mutation or automatic reparse after restart.
+Synthetic recording-model tests inspect real next-model tool evidence; their
+scripted replies establish plumbing, not independent model answer quality. M66's
+finite actual Windows worker CLI acceptance is retained, not rerun or regraded.
+
+Fresh gates: Rust/core **2,935 passed / 28 intentional ignores / 46 suites / lint/build**, including **17 focused M67 cases**; web **1,512 passed / 121 files / typecheck/build**. SDK/API, core parsers and dependency hashes are unchanged. Focused shared-document/byte-reader regressions, one native
+batch, one final changed-web/SDK review, docs/format/frozen hashes are recorded.
+No real personal file/profile/model/provider/account/ordinary daemon/DB server/
+container/deployment was activated by this milestone. No new parser/dependency,
+OCR, workbook calculation, editing, visual fidelity or non-Windows physical-worker
+support. M64 public browser remains NOT RUN, M52 strict quality PARTIAL, and
+consumed cases are unchanged. See the [M67 plan](../superpowers/plans/2026-10-16-companion-workspace-documents-m67.md).
+
 ## M66 selected XLSX stored-cell extraction (2026-10-16)
 
 **Implemented with synthetic parser/selection tests and one finite Windows worker

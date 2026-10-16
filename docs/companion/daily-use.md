@@ -276,3 +276,9 @@ Long-running means durable identity, memory, schedules, progress and recovery.
 It does not mean a model process runs forever or an interrupted network action
 can resume halfway through. The daemon must remain available, credentials must
 be valid, and the owner must review uncertain effects.
+
+For files already in the workspace, enable **Allow reading workspace documents**
+in the agent Settings, save, then ask it to read a relative DOCX/PDF/XLSX path.
+This separate opt-in uses bounded `read_document` source snapshots with locators
+and coverage; extracted text can enter the selected model context. It does not
+calculate formulas, add OCR or modify the file. See [document use](documents.md).
