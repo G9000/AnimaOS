@@ -1976,3 +1976,784 @@ async fn m46_windows_real_browser_quote_oracle() {
         std::panic::resume_unwind(panic);
     }
 }
+
+// M64's live case stays ignored and cannot launch until its private child
+// contract is admitted. These finite checks run without a browser or network.
+#[cfg(windows)]
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct M64ChildContract {
+    version: u8,
+    milestone: String,
+    case_id: String,
+    nonce: String,
+    expires_at_ms: u64,
+    public_ipv4_pin: String,
+    operator_config_sha256: String,
+    oracle: Vec<M64OracleNode>,
+}
+
+#[cfg(windows)]
+struct M64Admission {
+    contract: M64ChildContract,
+    // FILE_SHARE_READ only: setup may reopen this exact file for reading, but
+    // neither its bytes nor directory entry can be replaced before retirement.
+    _config_guard: std::fs::File,
+}
+
+#[cfg(windows)]
+#[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct M64OracleNode {
+    role: String,
+    label: String,
+}
+
+#[cfg(windows)]
+fn m64_lower_hex(value: &str, len: usize) -> bool {
+    value.len() == len
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+}
+
+#[cfg(windows)]
+fn m64_uuid_v4(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 36
+        && [8, 13, 18, 23].iter().all(|&index| bytes[index] == b'-')
+        && bytes[14] == b'4'
+        && matches!(bytes[19], b'8' | b'9' | b'a' | b'b')
+        && bytes.iter().enumerate().all(|(index, byte)| {
+            [8, 13, 18, 23].contains(&index) || byte.is_ascii_digit() || matches!(byte, b'a'..=b'f')
+        })
+}
+
+#[cfg(windows)]
+fn m64_public_scope(pin: &str) -> BrowserScope {
+    BrowserScope {
+        id: "m64-example-scope".into(),
+        revision: 1,
+        origin: "https://example.com".into(),
+        public_ipv4_pin: Some(pin.into()),
+        routes: vec![BrowserRoute {
+            id: "page".into(),
+            method: BrowserMethod::Get,
+            path: "/".into(),
+        }],
+        input_ids: vec![],
+        limits: BrowserLimits {
+            actions: 2,
+            requests: 1,
+            scope_ms: 60_000,
+            frame_bytes: 64 * 1024,
+            wire_bytes: 1024 * 1024,
+            observation_nodes: 128,
+            observation_text_bytes: 8 * 1024,
+            input_bytes: 16 * 1024,
+            output_bytes: 16 * 1024,
+            screenshot_bytes: 256 * 1024,
+        },
+    }
+}
+
+#[cfg(windows)]
+fn m64_parse_child_contract(
+    bytes: &[u8],
+    now_ms: u64,
+    expected_nonce: &str,
+) -> Result<M64ChildContract, &'static str> {
+    if bytes.is_empty() || bytes.len() > 4096 {
+        return Err("invalid M64 child contract");
+    }
+    let contract: M64ChildContract =
+        serde_json::from_slice(bytes).map_err(|_| "invalid M64 child contract")?;
+    if contract.version != 1
+        || contract.milestone != "M64"
+        || !m64_uuid_v4(&contract.case_id)
+        || !m64_lower_hex(&contract.nonce, 64)
+        || contract.nonce != expected_nonce
+        || !m64_lower_hex(&contract.operator_config_sha256, 64)
+        || now_ms > 9_007_199_254_740_991
+        || contract.expires_at_ms > 9_007_199_254_740_991
+        || contract.expires_at_ms <= now_ms
+        || contract.expires_at_ms - now_ms > 180_000
+        || contract.oracle.is_empty()
+        || contract.oracle.len() > 3
+    {
+        return Err("invalid M64 child contract");
+    }
+    let address = contract
+        .public_ipv4_pin
+        .parse::<std::net::Ipv4Addr>()
+        .map_err(|_| "invalid M64 child contract")?;
+    if address.to_string() != contract.public_ipv4_pin
+        || validate_scope(&m64_public_scope(&contract.public_ipv4_pin)).is_err()
+    {
+        return Err("invalid M64 child contract");
+    }
+    let mut seen = std::collections::HashSet::new();
+    for node in &contract.oracle {
+        if !matches!(node.role.as_str(), "heading" | "text" | "link")
+            || node.label.is_empty()
+            || node.label.len() > 256
+            || node.label.trim() != node.label
+            || node.label.chars().any(char::is_control)
+            || !seen.insert((node.role.as_str(), node.label.as_str()))
+        {
+            return Err("invalid M64 child contract");
+        }
+    }
+    Ok(contract)
+}
+
+#[cfg(windows)]
+fn m64_child_paths(
+    case_dir: &std::path::Path,
+    contract_path: &std::path::Path,
+    case_id: &str,
+) -> Result<std::path::PathBuf, &'static str> {
+    if !case_dir.is_absolute()
+        || case_dir.file_name().and_then(|name| name.to_str()) != Some(case_id)
+        || case_dir
+            .parent()
+            .and_then(|path| path.file_name())
+            .and_then(|name| name.to_str())
+            != Some("live")
+        || case_dir.components().any(|part| {
+            matches!(
+                part,
+                std::path::Component::CurDir | std::path::Component::ParentDir
+            )
+        })
+        || contract_path != case_dir.join("case-contract.json")
+    {
+        return Err("invalid M64 child path");
+    }
+    Ok(case_dir.join("operator-config.json"))
+}
+
+#[cfg(windows)]
+fn m64_check_operator_config(
+    contract: &M64ChildContract,
+    bytes: &[u8],
+) -> Result<(), &'static str> {
+    if bytes.is_empty()
+        || bytes.len() > 64 * 1024
+        || digest(bytes) != contract.operator_config_sha256
+    {
+        return Err("invalid M64 operator config");
+    }
+    let config: Value = serde_json::from_slice(bytes).map_err(|_| "invalid M64 operator config")?;
+    let policies = config
+        .get("policies")
+        .and_then(Value::as_array)
+        .ok_or("invalid M64 operator config")?;
+    if config.get("schemaVersion") != Some(&json!(1)) || policies.len() != 1 {
+        return Err("invalid M64 operator config");
+    }
+    let policy = &policies[0];
+    let template = policy
+        .get("template")
+        .ok_or("invalid M64 operator config")?;
+    let template_bytes = serde_json::to_vec(template).map_err(|_| "invalid M64 operator config")?;
+    let decoded = decode_scope(&template_bytes).map_err(|_| "invalid M64 operator config")?;
+    if policy.get("id") != Some(&json!("m64-public-example"))
+        || template.get("origin") != Some(&json!("https://example.com"))
+        || template.get("publicIpv4Pin") != Some(&json!(contract.public_ipv4_pin))
+        || template.get("inputIds") != Some(&json!([]))
+        || template.get("routes") != Some(&json!([{"id":"page","method":"GET","path":"/"}]))
+        || template
+            .get("limits")
+            .and_then(|limits| limits.get("actions"))
+            != Some(&json!(2))
+        || template
+            .get("limits")
+            .and_then(|limits| limits.get("requests"))
+            != Some(&json!(1))
+        || decoded.limits.scope_ms > 60_000
+    {
+        return Err("invalid M64 operator config");
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn m64_test_config() -> Value {
+    json!({
+        "schemaVersion": 1,
+        "installation": {},
+        "policies": [{
+            "id": "m64-public-example",
+            "template": m64_public_scope("93.184.216.34")
+        }]
+    })
+}
+
+#[cfg(windows)]
+fn m64_admit_child(
+    case_dir: &std::path::Path,
+    contract_path: &std::path::Path,
+    now_ms: u64,
+    expected_nonce: &str,
+) -> Result<M64Admission, &'static str> {
+    use std::io::{Read, Write};
+    use std::os::windows::fs::OpenOptionsExt;
+    let expected = case_dir.join("case-contract.json");
+    if contract_path != expected || !case_dir.is_absolute() {
+        return Err("invalid M64 child path");
+    }
+    let live = case_dir.parent().ok_or("invalid M64 child path")?;
+    for directory in [live, case_dir] {
+        let metadata =
+            std::fs::symlink_metadata(directory).map_err(|_| "invalid M64 child path")?;
+        use std::os::windows::fs::MetadataExt;
+        if !metadata.is_dir() || metadata.file_attributes() & 0x400 != 0 {
+            return Err("invalid M64 child path");
+        }
+    }
+    let canonical_case = std::fs::canonicalize(case_dir).map_err(|_| "invalid M64 child path")?;
+    let read_file = |path: &std::path::Path,
+                     maximum: u64,
+                     lock: bool|
+     -> Result<(Vec<u8>, std::fs::File), &'static str> {
+        let metadata = std::fs::symlink_metadata(path).map_err(|_| "invalid M64 child file")?;
+        use std::os::windows::fs::MetadataExt;
+        if !metadata.is_file() || metadata.file_attributes() & 0x400 != 0 {
+            return Err("invalid M64 child file");
+        }
+        let canonical = std::fs::canonicalize(path).map_err(|_| "invalid M64 child file")?;
+        if canonical.parent() != Some(canonical_case.as_path()) || metadata.len() > maximum {
+            return Err("invalid M64 child file");
+        }
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        if lock {
+            options.share_mode(0x0000_0001); // FILE_SHARE_READ, no write/delete sharing.
+        }
+        let mut file = options.open(path).map_err(|_| "invalid M64 child file")?;
+        let mut bytes = Vec::new();
+        (&mut file)
+            .take(maximum + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| "invalid M64 child file")?;
+        if bytes.is_empty() || bytes.len() as u64 > maximum || bytes.len() as u64 != metadata.len()
+        {
+            return Err("invalid M64 child file");
+        }
+        Ok((bytes, file))
+    };
+    let (contract_bytes, _contract_guard) = read_file(contract_path, 4096, false)?;
+    let contract = m64_parse_child_contract(&contract_bytes, now_ms, expected_nonce)?;
+    let config_path = m64_child_paths(case_dir, contract_path, &contract.case_id)?;
+    let (config_bytes, config_guard) = read_file(&config_path, 64 * 1024, true)?;
+    m64_check_operator_config(&contract, &config_bytes)?;
+    let marker = case_dir.join("child-started.json");
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(marker)
+        .map_err(|_| "M64 child already started")?;
+    let marker_bytes =
+        serde_json::to_vec(&json!({"caseId":&contract.case_id,"nonce":&contract.nonce}))
+            .map_err(|_| "invalid M64 child marker")?;
+    file.write_all(&marker_bytes)
+        .and_then(|_| file.sync_all())
+        .map_err(|_| "invalid M64 child marker")?;
+    Ok(M64Admission {
+        contract,
+        _config_guard: config_guard,
+    })
+}
+
+#[cfg(windows)]
+fn m64_observation_matches(observation: &BrowserObservation, oracle: &[M64OracleNode]) -> bool {
+    observation.route_id == "page"
+        && observation.document_generation > 0
+        && !observation.shortened
+        && observation.omitted_nodes == 0
+        && observation.artifacts.is_empty()
+        && oracle.iter().all(|expected| {
+            observation
+                .nodes
+                .iter()
+                .filter(|node| node.role == expected.role && node.label == expected.label)
+                .count()
+                == 1
+        })
+}
+
+#[cfg(windows)]
+#[test]
+fn m64_child_contract_refuses_bad_release_oracle_and_config_without_launch() {
+    let case_id = "123e4567-e89b-42d3-a456-426614174000";
+    let nonce = "a".repeat(64);
+    let now = 1_800_000_000_000u64;
+    let mut config = m64_test_config();
+    let config_bytes = serde_json::to_vec(&config).unwrap();
+    let mut release = json!({
+        "version":1,
+        "milestone":"M64",
+        "caseId":case_id,
+        "nonce":nonce,
+        "expiresAtMs":now + 60_000,
+        "publicIpv4Pin":"93.184.216.34",
+        "operatorConfigSha256":digest(&config_bytes),
+        "oracle":[{"role":"heading","label":"Example Domain"}]
+    });
+    let original = release.clone();
+    let bytes = serde_json::to_vec(&release).unwrap();
+    let parsed = m64_parse_child_contract(&bytes, now, &nonce).unwrap();
+    assert_eq!(parsed.oracle[0].role, "heading");
+    assert_eq!(parsed.oracle[0].label, "Example Domain");
+    m64_check_operator_config(&parsed, &config_bytes).unwrap();
+    let case_dir = std::path::PathBuf::from(format!(r"C:\m64\live\{case_id}"));
+    let contract_path = case_dir.join("case-contract.json");
+    assert_eq!(
+        m64_child_paths(&case_dir, &contract_path, case_id).unwrap(),
+        case_dir.join("operator-config.json")
+    );
+    for (key, bad) in [
+        ("version", json!(2)),
+        ("milestone", json!("M63")),
+        ("caseId", json!("123e4567-e89b-12d3-a456-426614174000")),
+        ("nonce", json!("b".repeat(64))),
+        ("expiresAtMs", json!(now)),
+        ("publicIpv4Pin", json!("127.0.0.1")),
+        ("oracle", json!([])),
+        ("oracle", json!([{"role":"title","label":"Example Domain"}])),
+        (
+            "oracle",
+            json!([{"role":"link","label":"Learn","href":"/"}]),
+        ),
+    ] {
+        release = original.clone();
+        release[key] = bad;
+        assert!(
+            m64_parse_child_contract(&serde_json::to_vec(&release).unwrap(), now, &nonce).is_err(),
+            "{key} must refuse"
+        );
+    }
+    release = original.clone();
+    release["oracle"] = json!([
+        {"role":"heading","label":"Example Domain"},
+        {"role":"heading","label":"Example Domain"}
+    ]);
+    assert!(m64_parse_child_contract(&serde_json::to_vec(&release).unwrap(), now, &nonce).is_err());
+    release = original.clone();
+    release["unexpected"] = json!(true);
+    assert!(m64_parse_child_contract(&serde_json::to_vec(&release).unwrap(), now, &nonce).is_err());
+    assert!(m64_parse_child_contract(&bytes, now + 60_000, &nonce).is_err());
+    assert!(m64_parse_child_contract(&bytes, now, &"b".repeat(64)).is_err());
+    assert!(m64_parse_child_contract(br#"{"version":1,"version":1}"#, now, &nonce).is_err());
+    assert!(m64_child_paths(&case_dir, &case_dir.join("other.json"), case_id).is_err());
+    assert!(m64_child_paths(&case_dir.join("other"), &contract_path, case_id).is_err());
+
+    for change in [
+        ("origin", json!("https://other.example.com")),
+        ("publicIpv4Pin", json!("93.184.216.35")),
+        ("inputIds", json!(["local-file"])),
+        ("routes", json!([{"id":"page","method":"POST","path":"/"}])),
+    ] {
+        let mut wrong = config.clone();
+        wrong["policies"][0]["template"][change.0] = change.1;
+        let wrong_bytes = serde_json::to_vec(&wrong).unwrap();
+        let mut bound = parsed.clone();
+        bound.operator_config_sha256 = digest(&wrong_bytes);
+        assert!(m64_check_operator_config(&bound, &wrong_bytes).is_err());
+    }
+    let second_policy = config["policies"][0].clone();
+    config["policies"]
+        .as_array_mut()
+        .unwrap()
+        .push(second_policy);
+    let two = serde_json::to_vec(&config).unwrap();
+    let mut bound = parsed.clone();
+    bound.operator_config_sha256 = digest(&two);
+    assert!(m64_check_operator_config(&bound, &two).is_err());
+    assert!(m64_check_operator_config(&parsed, b"{}").is_err());
+}
+
+#[cfg(windows)]
+#[test]
+fn m64_valid_child_contract_requires_admission_before_any_public_action() {
+    let case_id = "123e4567-e89b-42d3-a456-426614174000";
+    let nonce = "a".repeat(64);
+    let now = 1_800_000_000_000u64;
+    let config = m64_test_config();
+    let config_bytes = serde_json::to_vec(&config).unwrap();
+    let contract = json!({
+        "version":1,
+        "milestone":"M64",
+        "caseId":case_id,
+        "nonce":nonce,
+        "expiresAtMs":now + 60_000,
+        "publicIpv4Pin":"93.184.216.34",
+        "operatorConfigSha256":digest(&config_bytes),
+        "oracle":[{"role":"heading","label":"Example Domain"}]
+    });
+    let root = tempfile::tempdir().unwrap();
+    let case_dir = root.path().join("live").join(case_id);
+    std::fs::create_dir_all(&case_dir).unwrap();
+    let contract_path = case_dir.join("case-contract.json");
+    std::fs::write(&contract_path, serde_json::to_vec(&contract).unwrap()).unwrap();
+    std::fs::write(case_dir.join("operator-config.json"), &config_bytes).unwrap();
+    let admission = m64_admit_child(&case_dir, &contract_path, now, &nonce)
+        .expect("a valid frozen contract must be admitted before constructing a browser service");
+    assert!(case_dir.join("child-started.json").is_file());
+    let config_path = case_dir.join("operator-config.json");
+    assert!(
+        std::fs::write(&config_path, b"replacement").is_err(),
+        "admitted config cannot be overwritten before setup loads"
+    );
+    assert!(
+        std::fs::rename(&config_path, case_dir.join("replacement.json")).is_err(),
+        "admitted config cannot be renamed before setup loads"
+    );
+    assert!(
+        m64_admit_child(&case_dir, &contract_path, now, &nonce).is_err(),
+        "the exclusive child-start marker prevents a replay"
+    );
+    drop(admission);
+}
+
+#[cfg(windows)]
+#[test]
+fn m64_missing_or_changed_child_files_never_publish_a_start_marker() {
+    let case_id = "123e4567-e89b-42d3-a456-426614174000";
+    let nonce = "a".repeat(64);
+    let now = 1_800_000_000_000u64;
+    let root = tempfile::tempdir().unwrap();
+    let case_dir = root.path().join("live").join(case_id);
+    std::fs::create_dir_all(&case_dir).unwrap();
+    let contract_path = case_dir.join("case-contract.json");
+    let config_path = case_dir.join("operator-config.json");
+    let marker = case_dir.join("child-started.json");
+    assert!(m64_admit_child(&case_dir, &contract_path, now, &nonce).is_err());
+    assert!(!marker.exists());
+    let config_bytes = serde_json::to_vec(&m64_test_config()).unwrap();
+    let contract = json!({
+        "version":1,
+        "milestone":"M64",
+        "caseId":case_id,
+        "nonce":nonce,
+        "expiresAtMs":now + 60_000,
+        "publicIpv4Pin":"93.184.216.34",
+        "operatorConfigSha256":digest(&config_bytes),
+        "oracle":[{"role":"heading","label":"Example Domain"}]
+    });
+    std::fs::write(&contract_path, serde_json::to_vec(&contract).unwrap()).unwrap();
+    std::fs::write(&config_path, b"{}").unwrap();
+    assert!(m64_admit_child(&case_dir, &contract_path, now, &nonce).is_err());
+    assert!(!marker.exists());
+    std::fs::write(&config_path, config_bytes).unwrap();
+    assert!(m64_admit_child(&case_dir, &case_dir.join("foreign.json"), now, &nonce).is_err());
+    assert!(!marker.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn m64_oracle_compares_only_declared_observation_roles_and_labels() {
+    let oracle = vec![M64OracleNode {
+        role: "heading".into(),
+        label: "Example Domain".into(),
+    }];
+    let mut observation = BrowserObservation {
+        document_generation: 1,
+        route_id: "page".into(),
+        nodes: vec![BrowserNode {
+            node: BrowserNodeRef {
+                token: "node-1".into(),
+            },
+            role: "heading".into(),
+            label: "Example Domain".into(),
+        }],
+        shortened: false,
+        omitted_nodes: 0,
+        artifacts: vec![],
+    };
+    assert!(m64_observation_matches(&observation, &oracle));
+    observation.nodes[0].label = "Changed page".into();
+    assert!(!m64_observation_matches(&observation, &oracle));
+    observation.nodes[0].label = "Example Domain".into();
+    observation.shortened = true;
+    observation.omitted_nodes = 1;
+    assert!(!m64_observation_matches(&observation, &oracle));
+}
+
+#[cfg(windows)]
+async fn m64_allow(
+    context: &ToolExecutionContext,
+    agent: &AgentState,
+    run: &crate::runs::RunLink,
+    coordinator: &crate::agent_runs::AgentRunCoordinator,
+    call: ToolCall,
+    tasks: &mut Vec<Option<tokio::task::JoinHandle<TaskResult<Content>>>>,
+) -> TaskResult<Content> {
+    let id = call.id.clone();
+    let c = context.clone();
+    let a = agent.clone();
+    let input = tool_input(&a.id, &run.session_id);
+    tasks.push(Some(tokio::spawn(async move {
+        c.execute_tool(a, input, call).await
+    })));
+    let slot = tasks.len() - 1;
+    let request = pending_approvals(coordinator, 1)
+        .await
+        .into_iter()
+        .find(|approval| approval.tool_call_id == id)
+        .expect("one ordinary approval for the admitted browser action");
+    coordinator
+        .decide_approval(
+            &request.id,
+            decision(ApprovalDecisionKind::AllowOnce, request.revision),
+        )
+        .await
+        .expect("ordinary owner approval is accepted");
+    let joined = tokio::time::timeout(Duration::from_secs(30), tasks[slot].as_mut().unwrap())
+        .await
+        .expect("browser action must settle within its declared inner deadline");
+    tasks[slot] = None; // A completed handle cannot be awaited again during cleanup.
+    joined.expect("owned browser action task joined")
+}
+
+#[cfg(windows)]
+#[tokio::test]
+#[ignore = "root-only one-shot M64 public HTTPS case; no release after failed source oracle"]
+async fn m64_windows_public_example_dom_oracle() {
+    use futures::FutureExt;
+    use std::panic::AssertUnwindSafe;
+    let case_dir = std::path::PathBuf::from(
+        std::env::var_os("M64_CASE_DIR").expect("M64 child requires a root-owned case directory"),
+    );
+    let contract_path = std::path::PathBuf::from(
+        std::env::var_os("M64_CHILD_CONTRACT_FILE")
+            .expect("M64 child requires its fixed case contract path"),
+    );
+    let nonce = std::env::var("M64_NONCE").expect("M64 child requires its one-shot nonce");
+    assert!(std::env::var_os("ANIMA_BROWSER_ACCEPTANCE_CONFIG_FILE").is_none());
+    assert!(std::env::var_os("ANIMAOS_RS_BROWSER_CONFIG_FILE").is_none());
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock must be valid")
+        .as_millis() as u64;
+    // This reads only two contained, bounded files and publishes a create-new
+    // marker. Every refusal above/below occurs before setup/service/worker use.
+    let admitted = m64_admit_child(&case_dir, &contract_path, now_ms, &nonce)
+        .expect("root's frozen M64 child contract must admit exactly once");
+    let setup = browser::config::load_startup_setup(&case_dir.join("operator-config.json"))
+        .expect("installed M64 programs and single public policy revalidate");
+    let model = ScriptedModel::new(vec![]);
+    let mut cleanup_service = None;
+    let mut tool_tasks: Vec<Option<tokio::task::JoinHandle<TaskResult<Content>>>> = Vec::new();
+    let mut grant_witness = None;
+    let mut result_witness = None;
+    let outcome = AssertUnwindSafe(async {
+        let base = MetadataFixture::with_tools_model(
+            60_000,
+            model.clone(),
+            &["browser_navigate", "browser_observe"],
+        )
+        .await;
+        let service = browser::BrowserService::new_with_factory(
+            &base.state,
+            base.coordinator.control_plane_transactions(),
+            setup.policies.clone(),
+            setup.factory.clone(),
+        );
+        cleanup_service = Some(service.clone());
+        base.state.write().await.browser_service = Some(service.clone());
+        let coordinator = base.coordinator.clone().with_browser(service.clone());
+        let agent_id = base.run.agent_id.clone();
+        base.state.write().await.approvals.set_policy(
+            &agent_id,
+            ApprovalPolicy::default().with(RiskClass::Exec, PolicyAction::Ask),
+        );
+        service
+            .save(
+                &agent_id,
+                &base.run.run_id,
+                SaveBrowserScope {
+                    policy_id: "m64-public-example".into(),
+                    selected_input_ids: vec![],
+                    enabled: true,
+                    expected_version: None,
+                },
+            )
+            .await
+            .expect("one run-owned public policy is selected without inputs");
+        let agent = base.state.read().await.get_agent(&agent_id).unwrap().state;
+        let grants = agent.config.tools.clone();
+        grant_witness = Some((base.state.clone(), agent_id.clone(), grants.clone()));
+        let cancel = base
+            .state
+            .read()
+            .await
+            .live
+            .runs()
+            .control(&base.run.run_id)
+            .unwrap()
+            .cancel;
+        let context = gated_context(&coordinator, &base.run, cancel.clone())
+            .await
+            .with_browser(Some(service.clone()))
+            .with_action_journal(RunActionJournal::new(
+                &base.state,
+                coordinator.control_plane_transactions(),
+                base.run.clone(),
+                cancel,
+                None,
+            ));
+        let (_, navigate) = evidence(
+            m64_allow(
+                &context,
+                &agent,
+                &base.run,
+                &coordinator,
+                call("m64-navigate", "browser_navigate", json!({"routeId":"page"})),
+                &mut tool_tasks,
+            )
+            .await,
+        );
+        assert_eq!(navigate.route_id, "page");
+        let witness = service
+            .private_witness(&base.run.run_id)
+            .expect("real transport exposes its owned process witness");
+        assert!(witness.node_pid > 0);
+        println!(
+            "M64_PRIVATE_PROCESS {}",
+            json!({"nodePid":witness.node_pid,"spawnStartedAtMs":witness.spawn_started_at_ms,"spawnReturnedAtMs":witness.spawn_returned_at_ms,"privateRoot":witness.private_root,"nodeExecutable":witness.node_executable,"browserExecutable":witness.browser_executable})
+        );
+        let (_, observed) = evidence(
+            m64_allow(
+                &context,
+                &agent,
+                &base.run,
+                &coordinator,
+                call("m64-observe", "browser_observe", json!({"screenshot":false})),
+                &mut tool_tasks,
+            )
+            .await,
+        );
+        assert!(
+            m64_observation_matches(&observed, &admitted.contract.oracle),
+            "public DOM differs from the independently frozen role/label oracle"
+        );
+        let scope = service.get(&agent_id, &base.run.run_id).await.unwrap().unwrap();
+        assert_eq!(scope.origin, "https://example.com");
+        assert_eq!(scope.selected_input_ids, Vec::<String>::new());
+        assert_eq!((scope.actions_used, scope.requests_used), (2, 1));
+        assert!(scope.artifacts.is_empty());
+        assert_eq!(
+            base.state
+                .read()
+                .await
+                .runs
+                .get(&base.run.run_id)
+                .unwrap()
+                .action_receipts
+                .iter()
+                .filter(|receipt| receipt.status == ActionStatus::Succeeded)
+                .count(),
+            2,
+        );
+        let stopped = service.stop(&agent_id, &base.run.run_id, scope.version).await.unwrap();
+        assert_eq!(stopped.state, BrowserScopeState::Closed);
+        assert!(!stopped.physical_lease_held);
+        assert_eq!(base.state.read().await.agents[&agent_id].config().tools, grants);
+        result_witness = Some(json!({
+            "caseId": admitted.contract.case_id,
+            "publicIpv4Pin": admitted.contract.public_ipv4_pin,
+            "routeId": observed.route_id,
+            "oracle": admitted.contract.oracle.iter().map(|node| json!({"role":node.role,"label":node.label})).collect::<Vec<_>>(),
+            "actionsUsed": scope.actions_used,
+            "requestsUsed": scope.requests_used,
+            "artifacts": scope.artifacts.len(),
+        }));
+    })
+    .catch_unwind()
+    .await;
+    let service_cleanup = AssertUnwindSafe(async {
+        if let Some(service) = cleanup_service {
+            service.shutdown().await;
+        }
+    })
+    .catch_unwind()
+    .await;
+    let mut task_settlement_uncertain = false;
+    let task_cleanup = AssertUnwindSafe(async {
+        for slot in &mut tool_tasks {
+            if let Some(mut task) = slot.take() {
+                match tokio::time::timeout(Duration::from_secs(10), &mut task).await {
+                    Ok(joined) => {
+                        if joined.is_err() {
+                            task_settlement_uncertain = true;
+                        }
+                    }
+                    Err(_) => {
+                        task_settlement_uncertain = true;
+                        task.abort();
+                        if tokio::time::timeout(Duration::from_secs(10), &mut task)
+                            .await
+                            .is_err()
+                        {
+                            // Keep the uncertainty visible; the root job deadline
+                            // retires a task that cannot settle after abort.
+                            task_settlement_uncertain = true;
+                        }
+                    }
+                }
+            }
+        }
+    })
+    .catch_unwind()
+    .await;
+    let grants_equal = if let Some((state, agent_id, grants)) = &grant_witness {
+        state
+            .read()
+            .await
+            .agents
+            .get(agent_id)
+            .map(|agent| agent.config().tools == *grants)
+    } else {
+        None
+    };
+    let model_calls = model.requests().len();
+    let cleanup_uncertain =
+        service_cleanup.is_err() || task_cleanup.is_err() || task_settlement_uncertain;
+    println!(
+        "M64_CLEANUP {}",
+        json!({
+            "bodyPanicked": outcome.is_err(),
+            "serviceCleanupPanicked": service_cleanup.is_err(),
+            "taskCleanupPanicked": task_cleanup.is_err(),
+            "taskSettlementUncertain": task_settlement_uncertain,
+            "cleanupUncertain": cleanup_uncertain,
+            "modelCalls": model_calls,
+            "grantsEqual": grants_equal,
+        })
+    );
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+    if let Err(panic) = service_cleanup {
+        std::panic::resume_unwind(panic);
+    }
+    if let Err(panic) = task_cleanup {
+        std::panic::resume_unwind(panic);
+    }
+    assert!(
+        !task_settlement_uncertain,
+        "browser action settlement remained uncertain after shutdown"
+    );
+    assert_eq!(
+        grants_equal,
+        Some(true),
+        "browser grants must remain unchanged"
+    );
+    assert!(model_calls == 0, "no provider/model calls occurred");
+    println!(
+        "M64_ORACLE {}",
+        result_witness.expect("accepted case has a finite oracle")
+    );
+}

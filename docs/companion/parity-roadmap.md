@@ -97,6 +97,8 @@ CP19 has an independent pre-community backup. Live uncertain 503 fails closed; i
 
 ### PAR-05: interactive browser tasks
 
+M64 adds an offline-tested ignored public-page driver, but its independent source read did not establish the heading oracle. No DNS pin lookup or real public browser case was released; public rendering acceptance remains open. See [harness evidence](harness-acceptance.md).
+
 M63 adds one operator-configured pinned public HTTPS static-page policy with normal TLS identity, exact GET routes, disabled page scripts and physically retained connection cleanup. Native/worker/web fixtures pass, including local TLS peers; no actual public site/browser/account is activated. See [browser setup](browser-work.md) and [harness evidence](harness-acceptance.md). Broader public destinations and dynamic/account workflows remain open.
 
 - [x] M46 exposes a narrow reusable BrowserPort and reviewed host-owned worker for ordinary owner chat, with separate native grants, Exec approval and action receipts.

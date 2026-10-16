@@ -1,3 +1,31 @@
+# Handover: public browser preparation partial; authenticated MCP next (M0–M64)
+
+## Start here (2026-10-16): M64 source-only gates pass; public case NOT RUN
+
+Continue g9000/companion-public-https-m64 from M63/PR69 main
+4da796e02190cd351f2f5fc1dd0cbbdcc429c114. Plan4be993a24ee55c90c473c87c1335bba5cf4ee76e
+preceded source. One native test module adds safe admission checks and an ignored
+public browser driver. Fresh Rust/core2866/27 ignores/45 suites/lint/build,
+worker52 and docs/format/hash gates pass. Production/SDK/web/dependencies unchanged.
+
+Actual public acceptance is NOT RUN: independent HTTPS source200/577bytes failed
+the heading precondition. The original receipt is retained. Zero DNS metadata
+lookup, pin/startup release or browser cases; no retry/fallback/rebaseline. Public
+DOM and full parity remain open. M52 strict quality remains PARTIAL; M47/M52/four
+failed M61 cases unchanged. No provider/account/ordinary profile/daemon/device/
+DB server/container/deployment release.
+
+Resume .superpowers/sdd/2026-10-16-companion-public-https-m64/progress.md. Finish
+explicit-path unsigned commit/push/PR/attach and standing authorized merge with
+exact tree/protected hashes. Next held plan investigates explicit bearer-auth
+HTTP MCP using existing credential infrastructure: transport currently refuses
+authentication. Bind that feature from verified main before implementation.
+Root commands/fmt/Git, source-only workers; Cargo CARGO_INCREMENTAL=0/jobs1/threads2
+serialized. Never stage nx.json/anima.yaml/.superpowers; no stash/reset/restore/
+path checkout/worktree. Isolated testing and merge-and-continue remain authorized.
+
+## Historical M63 gated handover
+
 # Handover: pinned public HTTPS browser policy (M0–M63)
 
 ## Start here (2026-10-16): M63 gated; settle publication then actual browser scope
