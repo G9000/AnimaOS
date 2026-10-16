@@ -1,6 +1,16 @@
+# Handover: M85 live-evidence research acceptance
+
+## Start here (2026-10-17): execute the bound M85 delta
+
+M84 PR90 merged at579549d4dd253f6f30dc7dcdd5e66687394a59c8. Its77 offline oracle tests pass, but the sole actual Rust2024 task remains FAILED:1modelcall/1,417reportedtokens/zero remote search or write. The private verifier required saved calls during pending approval; source confirms those messages commit only after execution. Quiet cancelled-run recovery/cleanup passed. Preserve all original raw evidence, source/runtime snapshots and preflight failures without replay/regrade.
+
+Read the [M85 plan](../plans/2026-10-17-companion-live-research-m85.md), then AGENTS.md. Branch g9000/companion-live-research-m85 starts from that merged main; exact resume .superpowers/sdd/2026-10-17-companion-live-research-m85/progress.md. Implement only live typed event/full pending-argument admission, immutable decisions and minimal root-frozen oracle parameters; no production runtime/SDK/web/dependency change. Root owns commands, source/model/task releases and one distinct Rust2018 report task on18785 after tests/review/gates. Expected answer values stay outside prompts.
+
+Keep standing lean Codex delegation, unsigned per-command commits and merge-and-continue. Explicit stage only, never nx.json/anima.yaml/.superpowers/uploads/generated Astro settings. Preserve onboarding and all unrelated work. No stash/reset/restore/path checkout/worktree. Cargo incremental0/jobs1/threads2, serialized/root-only. Isolated tests with existing app-owned subscription resolver only; no login/raw credentials/profile copying/account change, ordinary services/connectors/DB servers/containers/Docker55432. No model retry/helper/fallback/steering/old-case replay.
+
 # Handover: M84 research oracle and retained actual failure
 
-## Start here (2026-10-17): settle M84, then fix live-event admission
+## Historical M84 settled handover
 
 M84 adds an offline cited-report oracle and77 positive/negative controls, plus an existing-project Nx target; no production runtime, SDK, web or dependency change. Fresh Rust2989passed/31ignored across46suites, lint/build, SDK/web typecheck/build and10 private-driver tests pass. One daemon/oracle batch review, final SDK/web-driver review and one reviewed fix wave are complete.
 
