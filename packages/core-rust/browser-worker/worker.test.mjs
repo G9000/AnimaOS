@@ -13,6 +13,11 @@ import {
 } from 'node:http';
 import { createConnection } from 'node:net';
 import {
+  createServer as createHttpsServer,
+  request as httpsRequest,
+} from 'node:https';
+import * as worker from './worker.mjs';
+import {
   boundObservation,
   BrowserWorkerError,
   canonicalDigest,
@@ -63,6 +68,700 @@ function scope() {
     },
   };
 }
+
+function publicScope() {
+  return {
+    ...scope(),
+    origin: 'https://m63-browser.anima.tools',
+    publicIpv4Pin: '93.184.216.34',
+    inputIds: [],
+    routes: [
+      { id: 'index', method: 'GET', path: '/' },
+      { id: 'csv', method: 'GET', path: '/quote.csv' },
+    ],
+  };
+}
+
+test('m63_public_scope_and_bootstrap_admit_only_the_operator_pin_and_preserve_loopback', () => {
+  assert.deepEqual(validateScope(publicScope()), publicScope());
+  assert.equal(
+    validateScope({ ...publicScope(), origin: 'https://host.0xyz' }).origin,
+    'https://host.0xyz',
+  );
+  const supplied = { ...bootstrap(), scope: publicScope(), inputs: [] };
+  assert.deepEqual(
+    parseBootstrap(Buffer.from(JSON.stringify(supplied)), supplied.privateRoot),
+    supplied,
+  );
+  const old = scope();
+  assert.deepEqual(validateScope(old), old);
+  assert.equal(Object.hasOwn(old, 'publicIpv4Pin'), false);
+  assert.notEqual(
+    canonicalDigest(publicScope()),
+    canonicalDigest({ ...publicScope(), publicIpv4Pin: '93.184.216.35' }),
+  );
+  for (const extra of [
+    { ca: 'fixture' },
+    { dialHost: '127.0.0.1' },
+    { requestImpl: 'override' },
+  ]) {
+    rejected(() =>
+      parseBootstrap(
+        Buffer.from(JSON.stringify({ ...supplied, ...extra })),
+        supplied.privateRoot,
+      ),
+    );
+    rejected(() => validateScope({ ...publicScope(), ...extra }));
+  }
+});
+
+test('m63_public_pin_matches_the_complete_bound_special_use_prefix_edges', () => {
+  // Independent literal endpoints, not values derived from the production table.
+  const denied = [
+    '0.0.0.0',
+    '0.255.255.255',
+    '10.0.0.0',
+    '10.255.255.255',
+    '100.64.0.0',
+    '100.127.255.255',
+    '127.0.0.0',
+    '127.255.255.255',
+    '169.254.0.0',
+    '169.254.255.255',
+    '172.16.0.0',
+    '172.31.255.255',
+    '192.0.0.0',
+    '192.0.0.255',
+    '192.0.0.9',
+    '192.0.0.10',
+    '192.0.2.0',
+    '192.0.2.255',
+    '192.31.196.0',
+    '192.31.196.255',
+    '192.52.193.0',
+    '192.52.193.255',
+    '192.88.99.0',
+    '192.88.99.255',
+    '192.168.0.0',
+    '192.168.255.255',
+    '192.175.48.0',
+    '192.175.48.255',
+    '198.18.0.0',
+    '198.19.255.255',
+    '198.51.100.0',
+    '198.51.100.255',
+    '203.0.113.0',
+    '203.0.113.255',
+    '224.0.0.0',
+    '239.255.255.255',
+    '240.0.0.0',
+    '255.255.255.255',
+    '168.63.129.16',
+  ];
+  for (const pin of denied)
+    rejected(() => validateScope({ ...publicScope(), publicIpv4Pin: pin }));
+  const accepted = [
+    '1.0.0.0',
+    '9.255.255.255',
+    '11.0.0.0',
+    '100.63.255.255',
+    '100.128.0.0',
+    '126.255.255.255',
+    '128.0.0.0',
+    '169.253.255.255',
+    '169.255.0.0',
+    '172.15.255.255',
+    '172.32.0.0',
+    '191.255.255.255',
+    '192.0.1.0',
+    '192.0.1.255',
+    '192.0.3.0',
+    '192.31.195.255',
+    '192.31.197.0',
+    '192.52.192.255',
+    '192.52.194.0',
+    '192.88.98.255',
+    '192.88.100.0',
+    '192.167.255.255',
+    '192.169.0.0',
+    '192.175.47.255',
+    '192.175.49.0',
+    '198.17.255.255',
+    '198.20.0.0',
+    '198.51.99.255',
+    '198.51.101.0',
+    '203.0.112.255',
+    '203.0.114.0',
+    '223.255.255.255',
+    '168.63.129.15',
+    '168.63.129.17',
+  ];
+  for (const pin of accepted)
+    assert.equal(
+      validateScope({ ...publicScope(), publicIpv4Pin: pin }).publicIpv4Pin,
+      pin,
+    );
+});
+
+test('m63_public_policy_refuses_malformed_hosts_pins_post_and_selected_inputs', () => {
+  for (const origin of [
+    'https://M63-browser.anima.tools',
+    'https://localhost',
+    'https://127.0.0.1',
+    'https://[::1]',
+    'https://2130706433',
+    'https://host.123',
+    'https://host.0x',
+    'https://host.0x7f',
+    'https://xn--a.tools',
+    'https://xn--bcher-kva.example.com',
+    'https://host.anima.tools:443',
+    'https://host.anima.tools/',
+    'https://host.anima.tools.',
+    'https://user@host.anima.tools',
+    'https://host.anima.tools?x',
+    'https://host.anima.tools#x',
+    'https://%68ost.anima.tools',
+    'https://é.anima.tools',
+    'https://-host.anima.tools',
+    'https://host-.anima.tools',
+    'https://host..anima.tools',
+    'https://host_name.anima.tools',
+    'https://host.anima.tools\n',
+    'http://host.anima.tools',
+    `https://${'a'.repeat(64)}.tools`,
+    `https://${('a'.repeat(63) + '.').repeat(4)}tools`,
+    ...[
+      'localhost',
+      'local',
+      'internal',
+      'lan',
+      'home',
+      'onion',
+      'test',
+      'invalid',
+      'example',
+      'arpa',
+    ].map((suffix) => `https://host.${suffix}`),
+  ])
+    rejected(() => validateScope({ ...publicScope(), origin }));
+  for (const publicIpv4Pin of [
+    undefined,
+    null,
+    '',
+    '93.184.216',
+    '93.184.216.34.1',
+    '093.184.216.34',
+    '+93.184.216.34',
+    '0x5d.184.216.34',
+    '93.184.216.256',
+    '93.184.216.-1',
+    '93.184.216.34\n',
+    ' 93.184.216.34',
+    '1572395042',
+    '::ffff:93.184.216.34',
+  ]) {
+    rejected(() => validateScope({ ...publicScope(), publicIpv4Pin }));
+  }
+  const noPin = publicScope();
+  delete noPin.publicIpv4Pin;
+  rejected(() => validateScope(noPin));
+  rejected(() => validateScope({ ...scope(), publicIpv4Pin: '93.184.216.34' }));
+  for (const publicIpv4Pin of [null, undefined])
+    rejected(() => validateScope({ ...scope(), publicIpv4Pin }));
+  rejected(() => validateScope({ ...publicScope(), routes: scope().routes }));
+  rejected(() => validateScope({ ...publicScope(), inputIds: ['input-1'] }));
+});
+
+test('m63_public_guard_charges_refusals_and_only_admits_exact_navigation_or_typed_download', () => {
+  const window = () => ({
+    requestsUsed: 0,
+    blockedRequests: 0,
+    pageId: 'page-1',
+    effectActive: true,
+    navigationRemaining: 1,
+    navigationRouteId: 'index',
+    nowMs: 1,
+    expiresAtMs: 1000,
+  });
+  const request = {
+    pageId: 'page-1',
+    isMainFrame: true,
+    channel: 'http',
+    method: 'GET',
+    url: publicScope().origin + '/',
+    navigation: true,
+    download: false,
+    bodyBytes: 0,
+    headerBytes: 0,
+  };
+  const admitted = window();
+  assert.deepEqual(
+    guardRequest(publicScope(), request, admitted),
+    publicScope().routes[0],
+  );
+  assert.equal(admitted.requestsUsed, 1);
+  assert.equal(admitted.navigationRemaining, 0);
+  const csvWindow = {
+    ...window(),
+    downloadRouteId: 'csv',
+    navigationRemaining: 0,
+  };
+  assert.equal(
+    guardRequest(
+      publicScope(),
+      {
+        ...request,
+        url: publicScope().origin + '/quote.csv',
+        navigation: false,
+        download: true,
+      },
+      csvWindow,
+    ).id,
+    'csv',
+  );
+  for (const change of [
+    { method: 'POST' },
+    { isMainFrame: false },
+    { pageId: 'popup' },
+    { channel: 'websocket' },
+    { navigation: false },
+    { url: publicScope().origin + '/other' },
+    { url: publicScope().origin.replace('https:', 'http:') + '/' },
+    { url: publicScope().origin + ':443/' },
+    { url: 'https://other.anima.tools/' },
+  ]) {
+    const state = window();
+    rejected(
+      () => guardRequest(publicScope(), { ...request, ...change }, state),
+      'denied',
+    );
+    assert.equal(state.requestsUsed, 1);
+    assert.equal(state.blockedRequests, 1);
+  }
+});
+
+function m63Owner(scopeValue, options) {
+  assert.equal(
+    typeof worker.createPinnedHttpsRequest,
+    'function',
+    'public transport owner must exist',
+  );
+  return worker.createPinnedHttpsRequest(
+    scopeValue,
+    scopeValue.routes[0],
+    options,
+  );
+}
+
+async function m63Read(owner, controller = new AbortController()) {
+  return readBoundedResponse(
+    await owner.response,
+    {
+      kind: 'asset',
+      bodyBytes: 65536,
+      totalBytes: 1048576,
+      allowAttachment: false,
+    },
+    {
+      aggregateBytes: 0,
+      deadlineMs: Date.now() + 2000,
+      now: Date.now,
+      signal: controller.signal,
+      abort: () => controller.abort(),
+    },
+  );
+}
+
+function m63HeldRequest() {
+  const request = new EventEmitter(),
+    socket = new EventEmitter();
+  const captured = [];
+  let destroys = 0,
+    socketCloses = 0;
+  socket.destroyed = false;
+  socket.destroy = () => {
+    socket.destroyed = true;
+    return socket;
+  };
+  request.destroyed = false;
+  request.destroy = () => {
+    destroys++;
+    request.destroyed = true;
+    socket.destroy();
+    return request;
+  };
+  request.end = () => {
+    queueMicrotask(() => request.emit('socket', socket));
+    return request;
+  };
+  return {
+    request,
+    socket,
+    captured,
+    requestImpl(options) {
+      captured.push(options);
+      return request;
+    },
+    release() {
+      request.emit('close');
+      socketCloses++;
+      socket.emit('close');
+    },
+    destroys: () => destroys,
+    socketCloses: () => socketCloses,
+  };
+}
+
+test(
+  'm63_pinned_request_options_fail_once_without_dns_fetch_or_identity_override',
+  { timeout: 3000 },
+  async () => {
+    const fake = m63HeldRequest();
+    const owner = m63Owner(publicScope(), { requestImpl: fake.requestImpl });
+    const refusal = assert.rejects(
+      owner.response,
+      (error) =>
+        error instanceof BrowserWorkerError &&
+        !error.message.includes('private-sentinel'),
+    );
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(fake.captured.length, 1);
+      assert.deepEqual(fake.captured[0], {
+        hostname: '93.184.216.34',
+        port: 443,
+        path: '/',
+        method: 'GET',
+        servername: 'm63-browser.anima.tools',
+        headers: {
+          Host: 'm63-browser.anima.tools',
+          'Accept-Encoding': 'identity',
+        },
+        rejectUnauthorized: true,
+        agent: false,
+        maxHeaderSize: 8192,
+      });
+      fake.request.emit('error', new Error('private-sentinel'));
+      await refusal;
+      assert.equal(fake.captured.length, 1, 'no retry or fallback');
+    } finally {
+      fake.release();
+      await owner.close();
+    }
+  },
+);
+
+test(
+  'm63_preaborted_request_never_dispatches_and_late_socket_close_retains_owner',
+  { timeout: 3000 },
+  async () => {
+    const pre = m63HeldRequest();
+    const preOwner = m63Owner(publicScope(), {
+      signal: AbortSignal.abort(),
+      requestImpl: pre.requestImpl,
+    });
+    await assert.rejects(
+      preOwner.response,
+      (error) => error.code === 'cancelled',
+    );
+    await preOwner.close();
+    assert.equal(pre.captured.length, 0);
+    const fake = m63HeldRequest(),
+      controller = new AbortController();
+    const owner = m63Owner(publicScope(), {
+      signal: controller.signal,
+      requestImpl: fake.requestImpl,
+    });
+    const refusal = assert.rejects(
+      owner.response,
+      (error) => error.code === 'cancelled',
+    );
+    try {
+      controller.abort(); // Socket delivery is still queued: closure must account for it.
+      let retired = false;
+      const closing = owner.close().then(() => {
+        retired = true;
+      });
+      await refusal;
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(fake.socket.destroyed, true);
+      assert.equal(retired, false);
+      fake.request.emit('close');
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(
+        retired,
+        false,
+        'request close alone is not socket retirement',
+      );
+      fake.release();
+      await closing;
+      await owner.close();
+      assert.equal(fake.socketCloses(), 1);
+      assert.ok(fake.destroys() >= 1);
+    } finally {
+      fake.release();
+      await owner.close();
+    }
+  },
+);
+
+async function m63TlsPeer(t, certificate, handler) {
+  const directory = new URL('./fixtures/m63/', import.meta.url);
+  const [key, cert, ca] = await Promise.all(
+    ['server-key.pem', certificate, 'ca.pem'].map((name) =>
+      filesystem.readFile(new URL(name, directory)),
+    ),
+  );
+  const sockets = new Set();
+  let connections = 0,
+    retired = 0;
+  const server = createHttpsServer({ key, cert }, handler);
+  server.on('tlsClientError', () => {});
+  server.on('connection', (socket) => {
+    connections++;
+    sockets.add(socket);
+    socket.once('close', () => {
+      retired++;
+      sockets.delete(socket);
+    });
+  });
+  t.after(async () => {
+    for (const socket of sockets) socket.destroy();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const captured = [];
+  return {
+    captured,
+    connections: () => connections,
+    retired: () => retired,
+    requestImpl(options) {
+      captured.push(options);
+      // The only dial/CA substitution is this test-owned factory, never bootstrap/CLI.
+      return httpsRequest({
+        ...options,
+        hostname: '127.0.0.1',
+        port: server.address().port,
+        ca,
+      });
+    },
+  };
+}
+
+test(
+  'm63_local_tls_verifies_logical_name_and_trust_without_a_public_dial',
+  { timeout: 8000 },
+  async (t) => {
+    assert.equal(typeof worker.createPinnedHttpsRequest, 'function');
+    for (const certificate of [
+      'server.pem',
+      'wrong-name.pem',
+      'untrusted.pem',
+    ]) {
+      let replies = 0;
+      const peer = await m63TlsPeer(t, certificate, (request, response) => {
+        replies++;
+        assert.equal(request.socket.servername, 'm63-browser.anima.tools');
+        assert.equal(request.headers.host, 'm63-browser.anima.tools');
+        assert.equal(request.headers['accept-encoding'], 'identity');
+        response.writeHead(200, { 'content-type': 'text/html' });
+        response.end('bounded fixture');
+      });
+      const owner = m63Owner(publicScope(), {
+        requestImpl: peer.requestImpl,
+        signal: t.signal,
+      });
+      try {
+        if (certificate === 'server.pem')
+          assert.equal(
+            (await m63Read(owner)).body.toString(),
+            'bounded fixture',
+          );
+        else
+          await assert.rejects(
+            owner.response,
+            (error) => error.code === 'unavailable',
+          );
+      } finally {
+        await owner.close();
+      }
+      assert.equal(peer.captured.length, 1);
+      assert.equal(peer.captured[0].hostname, '93.184.216.34');
+      assert.equal(peer.captured[0].rejectUnauthorized, true);
+      assert.equal(replies, certificate === 'server.pem' ? 1 : 0);
+      assert.equal(peer.connections(), 1);
+    }
+  },
+);
+
+test(
+  'm63_local_tls_rejects_redirect_encoding_and_chunked_overrun_without_retry',
+  { timeout: 8000 },
+  async (t) => {
+    assert.equal(typeof worker.createPinnedHttpsRequest, 'function');
+    for (const mode of ['redirect', 'encoding', 'overrun']) {
+      let requests = 0;
+      const peer = await m63TlsPeer(t, 'server.pem', (_request, response) => {
+        requests++;
+        if (mode === 'redirect') {
+          response.writeHead(302, { location: 'https://other.anima.tools/' });
+          response.end();
+        } else if (mode === 'encoding') {
+          response.writeHead(200, { 'content-encoding': 'gzip' });
+          response.end('not decoded');
+        } else {
+          response.writeHead(200);
+          response.write(Buffer.alloc(32768));
+          response.write(Buffer.alloc(32768));
+          response.end('x');
+        }
+      });
+      const controller = new AbortController();
+      const owner = m63Owner(publicScope(), {
+        requestImpl: peer.requestImpl,
+        signal: controller.signal,
+      });
+      try {
+        await assert.rejects(
+          m63Read(owner, controller),
+          (error) => error instanceof BrowserWorkerError,
+        );
+      } finally {
+        await owner.close();
+      }
+      assert.equal(requests, 1);
+      assert.equal(peer.captured.length, 1);
+    }
+  },
+);
+
+test(
+  'm63_local_tls_abort_during_headers_or_body_joins_owned_transport',
+  { timeout: 8000 },
+  async (t) => {
+    assert.equal(typeof worker.createPinnedHttpsRequest, 'function');
+    for (const phase of ['headers', 'body']) {
+      let entered;
+      const started = new Promise((resolve) => {
+        entered = resolve;
+      });
+      const peer = await m63TlsPeer(t, 'server.pem', (_request, response) => {
+        if (phase === 'body') {
+          response.writeHead(200);
+          response.write('partial');
+        }
+        entered();
+      });
+      const controller = new AbortController();
+      const owner = m63Owner(publicScope(), {
+        requestImpl: peer.requestImpl,
+        signal: controller.signal,
+      });
+      const reading = m63Read(owner, controller);
+      const refusal = assert.rejects(
+        reading,
+        (error) => error instanceof BrowserWorkerError,
+      );
+      try {
+        await started;
+        controller.abort();
+        await refusal;
+      } finally {
+        controller.abort();
+        await owner.close();
+      }
+      assert.equal(peer.captured.length, 1);
+    }
+  },
+);
+
+test(
+  'm63_session_never_uses_fetch_and_close_waits_for_the_public_socket',
+  { timeout: 4000 },
+  async () => {
+    assert.equal(typeof worker.createPinnedHttpsRequest, 'function');
+    for (const phase of ['headers', 'body']) {
+      const fake = m63HeldRequest();
+      let fetches = 0,
+        entered;
+      const dispatched = new Promise((resolve) => {
+        entered = resolve;
+      });
+      const setup = adapterSetupSpy(
+        {
+          httpsRequestImpl(options) {
+            entered();
+            return fake.requestImpl(options);
+          },
+          async fetchImpl() {
+            fetches++;
+            throw new Error('ordinary fetch forbidden');
+          },
+        },
+        true,
+      );
+      const supplied = { ...bootstrap(), scope: publicScope(), inputs: [] };
+      const session = await createMaintainedSession(
+        supplied,
+        setup.dependencies,
+      );
+      assert.equal(setup.hooks.contextOptions.javaScriptEnabled, false);
+      let attempt;
+      setup.page.goto = async (url) => {
+        attempt = simulatedRoute(setup, url, true);
+        await setup.hooks.http(attempt.route);
+      };
+      const message = executeMessage({ kind: 'navigate', routeId: 'index' });
+      message.payload.contextId = session.contextId;
+      const execution = session.execute(message);
+      execution.catch(() => {});
+      try {
+        await Promise.race([
+          dispatched,
+          execution.then(() => assert.fail('expected a pinned request')),
+        ]);
+        if (phase === 'body') {
+          const response = new PassThrough();
+          response.statusCode = 200;
+          response.rawHeaders = ['Content-Type', 'text/html'];
+          fake.request.emit('response', response);
+          response.end('bounded body already read before Stop');
+          const end = Date.now() + 1000;
+          while (!fake.destroys() && Date.now() < end)
+            await new Promise((resolve) => setImmediate(resolve));
+          assert.ok(
+            fake.destroys() > 0,
+            'body completion must enter physical close',
+          );
+        }
+        session.cancel();
+        let closed = false;
+        const closing = session.close().then((result) => {
+          closed = true;
+          return result;
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(fetches, 0);
+        assert.equal(closed, false);
+        assert.equal(attempt.fulfilled(), 0);
+        fake.release();
+        assert.equal((await closing).engineClosed, true);
+        await assert.rejects(execution);
+        assert.equal(fake.captured.length, 1);
+        assert.equal(session.counters().requestsUsed, 1);
+      } finally {
+        fake.release();
+        await session.close();
+        await execution.catch(() => {});
+      }
+    }
+  },
+);
 
 function bootstrap() {
   return {
@@ -1424,7 +2123,7 @@ test('m46_pinned_yaml_snapshot_adaptation_preserves_names_refs_and_honest_omissi
   );
 });
 
-function adapterSetupSpy(overrides = {}) {
+function adapterSetupSpy(overrides = {}, publicPolicy = false) {
   const order = [];
   const hooks = {};
   const page = new EventEmitter();
@@ -1484,6 +2183,7 @@ function adapterSetupSpy(overrides = {}) {
         permissions: [],
         ignoreHTTPSErrors: false,
         bypassCSP: false,
+        ...(publicPolicy ? { javaScriptEnabled: false } : {}),
       });
       return context;
     },

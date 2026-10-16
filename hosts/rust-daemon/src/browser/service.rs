@@ -218,6 +218,9 @@ impl BrowserService {
             .policies
             .get(&selection.policy_id)
             .ok_or(BrowserServiceError::Unavailable)?;
+        if policy.template.public_ipv4_pin.is_some() && !selection.selected_input_ids.is_empty() {
+            return Err(BrowserServiceError::Invalid);
+        }
         let state = self.state()?;
         let (admission, store) = {
             let guard = state.read().await;
@@ -563,6 +566,9 @@ impl BrowserService {
             .policies
             .get(&input.policy_id)
             .ok_or(BrowserServiceError::Unavailable)?;
+        if policy.template.public_ipv4_pin.is_some() && !input.selected_input_ids.is_empty() {
+            return Err(BrowserServiceError::Invalid);
+        }
         let installation = self
             .inner
             .policies

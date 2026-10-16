@@ -1,3 +1,37 @@
+# Handover: pinned public HTTPS browser policy (M0–M63)
+
+## Start here (2026-10-16): M63 gated; settle publication then actual browser scope
+
+Continue g9000/companion-public-browser-m63 from M62/PR68 main
+22a732316a5a6073f7030b6af752740372923a07. Bound plan6c2c15187674f9c0e80e7b6597e5667fbfc4319c
+was pushed before source. One operator HTTPS443 hostname/public IPv4 pin/exact GET
+policy now crosses core/host/worker validation with normal TLS identity and retained
+request/socket cleanup. Public page JS/upload sharing off; existing loopback,
+tool grants and approvals stay. No new SDK/API schema/dependency/account grant.
+
+One independent native/worker batch and final web/SDK scope review settled; one
+fix wave aligns xn-- rejection and public file-picker affordance. Fresh Rust/core
+2,862/26 ignores/45 suites/lint/build, worker52, web1493/121/type/build
+and local TLS trusted/wrong-name/untrusted/abort/close evidence pass. All7 recorded
+final worker-job identities retired. No actual public site, browser, DNS, account,
+provider, ordinary profile/daemon/DB server/container/deploy activation. Dynamic
+sites/IDN/IPv6/CDN rotation and actual public rendering remain open.
+
+Resume .superpowers/sdd/2026-10-16-companion-public-browser-m63/progress.md. Finish
+owned docs/format/hash checks, explicit-path unsigned commit/push/PR/attach and
+standing authorized merge; verify identical source/merge tree and raw hashes,
+nonforced fetch main before switch. Next useful scope is one separately bounded
+isolated actual browser-rendering/public-read acceptance, not another duplicate
+memory wiring test. No release is implied until its new root-bound case exists.
+
+Root commands/fmt/Git, source-only workers; Cargo CARGO_INCREMENTAL=0/jobs1/threads2
+serialized. Never stage nx.json/anima.yaml/.superpowers; no stash/reset/restore/
+path checkout/worktree. No ordinary profiles/credentials, account writes, devices,
+DB servers/containers/Docker55432/deployment. M47/M52 and four failed M61 cases
+immutable; M52 PARTIAL. No OS-egress isolation, full public or full parity claim.
+
+## Historical M62 gated handover
+
 # Handover: interval outage recovery (M0–M62)
 
 ## Start here (2026-10-16): M62 gated; publish/merge then continue parity

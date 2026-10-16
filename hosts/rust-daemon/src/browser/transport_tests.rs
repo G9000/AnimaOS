@@ -9,6 +9,7 @@ fn scope() -> BrowserScope {
         id: "scope_1".into(),
         revision: 1,
         origin: "http://127.0.0.1:43220".into(),
+        public_ipv4_pin: None,
         routes: vec![BrowserRoute {
             id: "home".into(),
             method: BrowserMethod::Get,
