@@ -1,6 +1,46 @@
+# Handover: M77 public-page case ACCEPTED
+
+## Start here (2026-10-16): publish M77 and continue selected parity
+
+M77 adds a separate ignored Windows public-page driver and offline contract/oracle controls. Fresh Rust 2949 passed/29 ignored across 46 suites, lint/build/format and 21 supervisor tests pass. One native batch review, one final supervisor review and one combined fix wave are recorded. The single case f9e26a1d-c9a5-4dbf-a98d-57bf9ca469fd is ACCEPTED. It matched the exact H1 and whole normalized 3568-byte paragraph digest through ordinary BrowserPort approvals, two actions/one request, zero model calls, reported shortening=True and omittedNodes=2, and retired 8 known processes with Job active0/errors0.
+
+This is selected read-only public static-page content and process-ownership evidence. It does not establish arbitrary sites, complete DOM coverage, model reasoning, account/provider readiness or full Hermes parity. M64 remains NOT RUN, M52 remains PARTIAL and all earlier cases keep their original outcomes. No production transport, web/SDK, dependency, account, provider, ordinary service, database or container change.
+
+Resume .superpowers/sdd/2026-10-16-companion-public-page-m77/progress.md.
+Raw case/release/results/logs and 8 raw source snapshots are sealed; finish docs/format/explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof. Pin source Git provenance before advancing reusable inputs. Never replay or regrade a consumed case.
+Standing Codex delegation, unsigned per-command commits and merge-and-continue apply.
+No ordinary profiles, accounts, providers, devices, services, DBs, containers or Docker55432.
+Explicit stage only; never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+Cargo incremental0/jobs1/threads2; serialize Cargo.
+
+# Handover: M77 one public static-page case
+
+## Start here (2026-10-16): M76 merged; prepare M77
+
+M76 PR82 merged at 999e6c385e2c51682c777a49e36f7c8e467f627f,
+tested tree e9c50bd72a5aa10a557a625f3cd9b0becdaeb29a. Fresh web1533/122files,
+typecheck/build/format/docs pass; final review P2 fixed in one wave with actual
+no-derived-thread RED then29focused pass. Interrupted review is read-only and
+scope/version/offline-safe. M75 PR81 and M74 strict Files save remain settled.
+
+Continue g9000/companion-public-page-m77. Read the
+[M77 plan](../plans/2026-10-16-companion-public-page-m77.md), then AGENTS.md.
+Resume .superpowers/sdd/2026-10-16-companion-public-page-m77/progress.md.
+Root independently read current httpbin.org/html and its primary source template;
+bounded raw-source oracle and explicit DNS pin lookup remain pending. The only
+candidate is that page. If source/pin preconditions fail, record NOT RUN and do
+not activate a browser or choose a fallback. M64's failed precondition stays exact.
+Only after frozen tests/review/fix wave/full Rust gates may root release one fresh
+ignored Windows BrowserPort case: two approved actions, one public GET, zero models,
+complete named heading/paragraph evidence and retained process cleanup. No ordinary
+services, profiles, accounts, providers, devices, DBs, containers or Docker55432.
+Standing Codex delegation, unsigned per-command commits and merge-and-continue apply.
+Cargo incremental0/jobs1/threads2, serialized; explicit staging only; never
+nx.json/anima.yaml/.superpowers. No stash/reset/restore/path checkout/worktree.
+
 # Handover: M76 interrupted automation review verified
 
-## Start here (2026-10-16): publish M76 and continue selected parity
+## Historical M76 settled handover
 
 M76 implements read-only review for exact interrupted automation outcomes, preserved historical uncertainty and recorded-thread navigation, with no fabricated thread when absent. History rows/errors are fenced by agent/schedule/version/connectivity, offline opens no request and reconnect reads fresh data. Existing explicit Run now/Resume remain unchanged. Fresh web 1533 tests/122 files, typecheck/build, touched formatting and final web/SDK-contract review pass.
 

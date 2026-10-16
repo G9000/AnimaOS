@@ -1190,3 +1190,11 @@ is unchanged; M49 TypeScript tests are historical evidence. No production runtim
 API or dependency change and no ordinary profile, real connector, DB server,
 container, Docker55432 or deployment. Exact publication/merge/resume is in the
 private M52 ledger; M47 and this actual case remain immutable.
+
+## M77 public static page acceptance (2026-10-16)
+
+M77 adds a separate ignored Windows public-page driver and offline contract/oracle controls. Fresh Rust 2949 passed/29 ignored across 46 suites, lint/build/format and 21 supervisor tests pass. One native batch review, one final supervisor review and one combined fix wave are recorded. The single case f9e26a1d-c9a5-4dbf-a98d-57bf9ca469fd is ACCEPTED. It matched the exact H1 and whole normalized 3568-byte paragraph digest through ordinary BrowserPort approvals, two actions/one request, zero model calls, reported shortening=True and omittedNodes=2, and retired 8 known processes with Job active0/errors0.
+
+This is selected read-only public static-page content and process-ownership evidence. It does not establish arbitrary sites, complete DOM coverage, model reasoning, account/provider readiness or full Hermes parity. M64 remains NOT RUN, M52 remains PARTIAL and all earlier cases keep their original outcomes. No production transport, web/SDK, dependency, account, provider, ordinary service, database or container change.
+
+See the [M77 plan](../superpowers/plans/2026-10-16-companion-public-page-m77.md).
