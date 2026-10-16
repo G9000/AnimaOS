@@ -1,6 +1,21 @@
+# Handover: M81 Tasks reconnect freshness
+
+## Start here (2026-10-16): M80 merged; execute M81
+
+M80 PR86 merged at 1073dbb499954289bdf1d049f0793900783ceed8, exact tested tree b37293f065bf50be8138600fe442274bd578b7d7.
+Task preservation, M79 scheduler recovery, M78 Memory freshness, M77 public page and M74 Files cases stay settled; no case replay/regrading.
+
+Continue g9000/companion-tasks-reconnect-m81. Read the [M81 plan](../plans/2026-10-16-companion-tasks-reconnect-m81.md), then AGENTS.md.
+Resume .superpowers/sdd/2026-10-16-companion-tasks-reconnect-m81/progress.md.
+Two disjoint tests-first lanes, one web/SDK-contract review/fix wave, required web test/typecheck/build/format/docs, explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof. No actual acceptance case.
+
+Standing Codex delegation/unsigned commits/merge-and-continue apply. No ordinary profiles/accounts/providers/devices/services/DBs/containers/Docker55432.
+Explicit stage only; never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+No Cargo needed; any later Cargo incremental0/jobs1/threads2 and serialized. Preserve unrelated work and historical raw/Git/runtime versions.
+
 # Handover: M80 observed task revision
 
-## Start here (2026-10-16): publish M80 and continue selected parity
+## Historical M80 settled handover
 
 M80 requires an observed task-list revision before model-driven todo_write. A failed initial read can no longer turn into an unconditional overwrite: refusal preserves bytes and the missing baseline until an explicit successful todo_read. Ordinary missing-file empty reads, explicit owner/internal writes and stale-CAS merged recovery remain supported. Legacy swarm runs now capture their own fresh baseline before execution; failed reads still refuse. Fresh Rust 2959 passed/29 ignored across 46 suites, lint/build/format, docs, daemon review and the gate-found caller follow-up pass.
 
