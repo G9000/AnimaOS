@@ -50,8 +50,32 @@ const PDF_EXTRACTION_OMISSION_LABELS = {
   selection_limit: 'Additional documents were not included',
 } as const;
 
+const XLSX_EXTRACTION_STATUS_LABELS = {
+  partial: 'Some XLSX stored cells extracted',
+  unsupported: 'XLSX text extraction unsupported',
+  encrypted: 'Encrypted XLSX workbook',
+  malformed: 'XLSX workbook could not be read',
+  too_large: 'XLSX workbook too large for text extraction',
+  no_text: 'No readable XLSX stored cells found',
+  unavailable: 'XLSX text extraction unavailable',
+  cancelled: 'XLSX text extraction cancelled',
+  context_omitted: 'XLSX cell text not included',
+} as const;
+
+const XLSX_EXTRACTION_OMISSION_LABELS = {
+  stored_cells_only:
+    'Stored cells only; formulas were not evaluated and cached values may be stale',
+  cell_limit: 'Cell limit reached',
+  cell_text_limit: 'Cell text limit reached',
+  text_limit: 'XLSX text limit reached',
+  context_limit: 'Not all XLSX cell text fit in this message context',
+  selection_limit: 'Additional documents were not included',
+} as const;
+
 const MAX_EXTRACTION_PARAGRAPHS = 2000;
 const MAX_PDF_PAGES = 100;
+const MAX_XLSX_SHEETS = 16;
+const MAX_XLSX_CELLS = 2000;
 
 function hasExactKeys(value: object, keys: readonly string[]): boolean {
   const actual = Object.keys(value).sort();
@@ -80,6 +104,9 @@ function isClosedOmissionList(
 
 export function describeDocumentExtraction(value: unknown): string | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if ('format' in value && (value as { format?: unknown }).format === 'xlsx') {
+    return describeXlsxExtraction(value);
+  }
   if ('format' in value && (value as { format?: unknown }).format === 'pdf') {
     const extraction = value as {
       version?: unknown;
@@ -235,6 +262,97 @@ export function describeDocumentExtraction(value: unknown): string | null {
     details.push(
       EXTRACTION_OMISSION_LABELS[
         omission as keyof typeof EXTRACTION_OMISSION_LABELS
+      ],
+    );
+  }
+  return details.join(' · ');
+}
+
+function describeXlsxExtraction(value: object): string | null {
+  const extraction = value as {
+    version?: unknown;
+    format?: unknown;
+    status?: unknown;
+    sheetCount?: unknown;
+    observedCellCount?: unknown;
+    includedCellCount?: unknown;
+    hiddenSheetCount?: unknown;
+    omissions?: unknown;
+  };
+  if (
+    !hasExactKeys(value, [
+      'version',
+      'format',
+      'status',
+      'sheetCount',
+      'observedCellCount',
+      'includedCellCount',
+      'hiddenSheetCount',
+      'omissions',
+    ]) ||
+    extraction.version !== 2 ||
+    extraction.format !== 'xlsx' ||
+    typeof extraction.status !== 'string' ||
+    !Object.prototype.hasOwnProperty.call(
+      XLSX_EXTRACTION_STATUS_LABELS,
+      extraction.status,
+    ) ||
+    !isClosedOmissionList(extraction.omissions, XLSX_EXTRACTION_OMISSION_LABELS)
+  ) {
+    return null;
+  }
+
+  const status =
+    extraction.status as keyof typeof XLSX_EXTRACTION_STATUS_LABELS;
+  const { sheetCount, observedCellCount, includedCellCount, hiddenSheetCount } =
+    extraction;
+  const counts = [
+    sheetCount,
+    observedCellCount,
+    includedCellCount,
+    hiddenSheetCount,
+  ];
+  const allNull = counts.every((count) => count === null);
+  const knownCounts = counts.every(
+    (count, index) =>
+      Number.isInteger(count) &&
+      (count as number) >= 0 &&
+      (count as number) <=
+        (index === 0 || index === 3 ? MAX_XLSX_SHEETS : MAX_XLSX_CELLS),
+  );
+  if (
+    (!allNull && !knownCounts) ||
+    ((status === 'partial' || status === 'no_text') && !knownCounts) ||
+    (status === 'partial' &&
+      !extraction.omissions.includes('stored_cells_only'))
+  ) {
+    return null;
+  }
+
+  const details: string[] = [XLSX_EXTRACTION_STATUS_LABELS[status]];
+  if (knownCounts) {
+    const sheets = sheetCount as number;
+    const observed = observedCellCount as number;
+    const included = includedCellCount as number;
+    const hidden = hiddenSheetCount as number;
+    if (
+      included > observed ||
+      hidden > sheets ||
+      (sheets === 0 && observed !== 0) ||
+      (status === 'partial' ? included === 0 : included !== 0)
+    ) {
+      return null;
+    }
+    details.push(
+      `${sheets} ${sheets === 1 ? 'sheet' : 'sheets'}`,
+      `${included} of ${observed} cells included`,
+      `${hidden} hidden ${hidden === 1 ? 'sheet' : 'sheets'}`,
+    );
+  }
+  for (const omission of extraction.omissions) {
+    details.push(
+      XLSX_EXTRACTION_OMISSION_LABELS[
+        omission as keyof typeof XLSX_EXTRACTION_OMISSION_LABELS
       ],
     );
   }

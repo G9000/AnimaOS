@@ -1,3 +1,32 @@
+# Handover: selected XLSX extraction locally gated (M0–M66)
+
+## Start here (2026-10-16): M66 gates pass; finish publication and continue
+
+Branch g9000/companion-xlsx-m66 from M65/PR71 main
+3390e30c95e80b672bd1735a18b1a4da3e6f26b0; planbc78ef5cbe5dd87f149ab5df44b38ca2b04178a1
+preceded source. Bounded selected-XLSX stored cells now use the existing reusable
+ZIP/XML document crate and owned Windows worker, with typed locators/coverage,
+explicit hidden sheets, unevaluated formulas and possibly stale cached values.
+Safe SDK/web badges expose only counts/status/limitations. Old DOCX/PDF bytes and
+original downloads remain; no larger budgets or dependencies.
+
+Fresh Rust/core2918/28 ignores/46 suites/lint/build, SDK186/3 service skips,
+web1508/121files/typecheck/build, focused native/core and one finite synthetic
+Windows CLI worker case pass; reviews/docs/format/hash are recorded. CLI runs
+before host config initialization and retires its owned child. No actual personal
+workbook/profile/model/provider/account/daemon/DB server/container/deployment was
+activated. Larger workbook, visual/calculation and answer quality remain open.
+M64 public browser NOT RUN; M52 strict quality PARTIAL; consumed cases unchanged.
+
+Resume .superpowers/sdd/2026-10-16-companion-xlsx-m66/progress.md. Finish explicit
+source/doc-path unsigned commit/push/PR/attach/standing merge with exact tree and
+protected hashes. Then select/bind the next concrete parity scope from verified
+main. Root commands/fmt/Git, Cargo CARGO_INCREMENTAL=0/jobs1/threads2 serialized;
+never stage nx.json/anima.yaml/.superpowers or use stash/reset/restore/path checkout/
+worktree. Source/fixtures and selected-other-chat updates remain authorized.
+
+## Historical M65 locally gated handover
+
 # Handover: owner-managed HTTPS MCP credentials locally gated (M0–M65)
 
 ## Start here (2026-10-16): M65 source gates pass; finish publication then continue

@@ -5,6 +5,7 @@ import {
   DaemonHttpError,
   DaemonTooOldError,
   type SessionMessageAttachment,
+  type SessionMessageXlsxExtraction,
 } from './index.js';
 
 function transport(respond: (url: string) => Response) {
@@ -28,6 +29,55 @@ const session = {
 };
 
 describe('sessions client', () => {
+  it('preserves the exported counts-only XLSX extraction in selected message attachments', async () => {
+    const extraction: SessionMessageXlsxExtraction = {
+      version: 2,
+      format: 'xlsx',
+      status: 'partial',
+      sheetCount: 2,
+      observedCellCount: 6,
+      includedCellCount: 4,
+      hiddenSheetCount: 1,
+      omissions: ['stored_cells_only', 'cell_limit', 'cell_text_limit'],
+    };
+    const attachment: SessionMessageAttachment = {
+      type: 'file',
+      kind: 'document',
+      id: 'att_xlsx',
+      name: 'selected.xlsx',
+      mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      extraction,
+    };
+    const { sessions, requests } = transport(() =>
+      Response.json({
+        messages: [
+          {
+            id: 'message',
+            role: 'user',
+            text: '',
+            attachments: [attachment],
+            metadata: {},
+            createdAtMs: 1,
+          },
+        ],
+        nextBefore: null,
+      }),
+    );
+
+    const page = await sessions.messages('agent/a', 'chat:1');
+    const summary = page.messages[0].attachments[0].extraction;
+    expect(summary).toEqual(extraction);
+    if (summary && 'format' in summary && summary.format === 'xlsx') {
+      const xlsx: SessionMessageXlsxExtraction = summary;
+      expect(xlsx.includedCellCount).toBe(4);
+    } else {
+      throw new Error('Expected the XLSX extraction variant');
+    }
+    expect(requests[0].url).toBe(
+      '/api/agents/agent%2Fa/sessions/chat%3A1/messages',
+    );
+  });
+
   it('preserves legacy and uploaded message attachments in the same page', async () => {
     const legacy: SessionMessageAttachment = {
       type: 'file',

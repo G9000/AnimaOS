@@ -1,12 +1,12 @@
 # Selected documents in chat
 
-On Windows, send a DOCX or PDF attachment with a message in your own web chat.
-Anima extracts bounded DOCX main-body text or PDF text-layer content for that
-message. The saved attachment shows the outcome and keeps its original download.
+On Windows, send a DOCX, PDF or XLSX attachment with a message in your own web chat.
+Anima extracts bounded DOCX main-body text, PDF text-layer content or XLSX
+stored-cell data for that message. The saved attachment shows the outcome and keeps its original download.
 The original message and document bytes are preserved.
 
 The first two supported documents in selected order can be parsed, each up to
-2 MiB, counting both formats together. A failed or oversized supported file
+2 MiB, counting all three formats together. A failed or oversized supported file
 still consumes an attempt. Together their quoted excerpts and locators fit within
 16 KiB, and may be reduced further to fit the chat context. At most ten selected
 documents retain an outcome; extra originals remain downloadable.
@@ -38,6 +38,30 @@ Other filters, chains and empty filter arrays are unsupported in this slice.
 The library can tolerate malformed unused objects and some resource/font/form
 data, so success does not certify that every PDF object is valid or every visual
 element produced text.
+
+XLSX coverage is **stored cells only**, in workbook sheet order with numeric
+sheet/row/column locators. Visible, hidden and very-hidden sheets are labeled and
+included within the limits. Sheet names are quoted as untrusted source metadata.
+Shared/inline strings and scalar values are read; formulas are literal text labeled
+not evaluated, and cached values are labeled possibly stale or missing. Anima does
+not calculate formulas, resolve external relationships, run macros or open workbook
+connections. Raw numbers/date serials do not imply formatted dates, currencies or
+visual layout. Charts, pivots, images, comments and merged-cell presentation are
+outside this text view. The reader supports transitional OOXML; shared/array
+formulas, date-string cell types and additional relationship-bearing features are
+unsupported. OOXML `_xNNNN_` escape tokens remain literal stored text.
+
+The XLSX reader caps 512 archive entries, 16 sheets, 8 MiB expanded relevant XML,
+2 MiB per XML part, 4,096 shared strings, 2,000 observed cells, 250,000 XML events
+and depth 64. Individual cell text is limited to 1,024 UTF-8 bytes and is omitted
+whole if too long. Over-limit workbooks can be refused without text; sparse
+dimensions never cause iteration over an empty grid. Malformed supported parts,
+including late invalid cells, discard the excerpt; ignored drawing/style payloads
+are not validated. Usable results are partial; the chat badge shows
+counts and limitations without exposing names or cell contents. Context fitting
+drops whole cells, preserving observed totals and updating included totals. The
+original remains downloadable. This is bounded fixture-tested reading, not complete
+workbook fidelity or independently verified answer quality.
 
 “Main body text extracted” means extraction succeeded. “Some main body text
 extracted” means a known limit shortened coverage. Other outcomes explain an
@@ -74,4 +98,4 @@ Hermes source, with its MIT notice retained. See the
 and [M55 PDF plan](../superpowers/plans/2026-10-16-companion-pdf-understanding-m55.md)
 for scope, limits and verification. PDF extraction directly uses pinned Rust
 libraries rather than a converter process. See the
-[parity roadmap](parity-roadmap.md) for the remaining media work.
+[M66 XLSX plan](../superpowers/plans/2026-10-16-companion-xlsx-m66.md) for the stored-cell reader. Public Hermes XLSX informed the behavior; its Python runtime was not imported. See the [parity roadmap](parity-roadmap.md) for the remaining media work.

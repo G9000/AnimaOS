@@ -1,5 +1,8 @@
 use super::*;
-use anima_core::document_content::{DocumentExtractionStatus, DocumentOmission, PdfCoverage};
+use anima_core::document_content::{
+    DocumentExtractionStatus, DocumentOmission, PdfCoverage, XlsxCoverage, XlsxSheetCoverage,
+    XlsxSheetVisibility,
+};
 use std::io::Cursor;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -25,13 +28,31 @@ fn no_text(format: DocumentFormat) -> ExtractedDocumentText {
             included_page_count: 0,
         });
     }
+    if format == DocumentFormat::Xlsx {
+        value.xlsx_coverage = Some(XlsxCoverage {
+            sheet_count: 1,
+            observed_cell_count: 0,
+            included_cell_count: 0,
+            sheets: vec![XlsxSheetCoverage {
+                index: 1,
+                name: "Ledger".into(),
+                visibility: XlsxSheetVisibility::Visible,
+                observed_cell_count: 0,
+                included_cell_count: 0,
+            }],
+        });
+    }
     value
 }
 
 #[test]
 fn worker_request_rejects_oversize_short_and_trailing_input() {
     let payload = b"selected bytes";
-    for (byte, format) in [(0, DocumentFormat::Docx), (1, DocumentFormat::Pdf)] {
+    for (byte, format) in [
+        (0, DocumentFormat::Docx),
+        (1, DocumentFormat::Pdf),
+        (2, DocumentFormat::Xlsx),
+    ] {
         assert_eq!(
             read_request(&mut Cursor::new(request(byte, payload))).unwrap(),
             (format, payload.to_vec())
@@ -40,7 +61,7 @@ fn worker_request_rejects_oversize_short_and_trailing_input() {
         oversize.extend((MAX_INPUT as u32 + 1).to_le_bytes());
         assert!(read_request(&mut Cursor::new(oversize)).is_err());
     }
-    for byte in [2, 127, 255] {
+    for byte in [3, 127, 255] {
         assert!(read_request(&mut Cursor::new(request(byte, payload))).is_err());
     }
     assert!(read_request(&mut Cursor::new(vec![0, 1, 0, 0, 0])).is_err());
@@ -72,7 +93,11 @@ fn worker_result_is_strict_and_bounded_before_emission() {
 
 #[tokio::test]
 async fn no_document_bytes_are_written_before_exact_ready() {
-    for (byte, format) in [(0, DocumentFormat::Docx), (1, DocumentFormat::Pdf)] {
+    for (byte, format) in [
+        (0, DocumentFormat::Docx),
+        (1, DocumentFormat::Pdf),
+        (2, DocumentFormat::Xlsx),
+    ] {
         let (parent, peer) = tokio::io::duplex(256);
         let (parent_read, parent_write) = tokio::io::split(parent);
         let (mut peer_read, mut peer_write) = tokio::io::split(peer);
@@ -157,7 +182,11 @@ async fn response(
         assert_eq!(
             request,
             [
-                if format == DocumentFormat::Docx { 0 } else { 1 },
+                match format {
+                    DocumentFormat::Docx => 0,
+                    DocumentFormat::Pdf => 1,
+                    DocumentFormat::Xlsx => 2,
+                },
                 0,
                 0,
                 0,
@@ -181,11 +210,12 @@ async fn response(
 
 #[tokio::test]
 async fn malformed_unknown_extra_crashed_and_flooded_results_are_rejected() {
-    for format in [DocumentFormat::Docx, DocumentFormat::Pdf] {
-        let valid = serde_json::to_vec(&ExtractedDocumentText::empty(
-            DocumentExtractionStatus::NoText,
-        ))
-        .unwrap();
+    for format in [
+        DocumentFormat::Docx,
+        DocumentFormat::Pdf,
+        DocumentFormat::Xlsx,
+    ] {
+        let valid = serde_json::to_vec(&no_text(format)).unwrap();
         let mut trailing = frame(&valid);
         trailing.push(b'x');
         for bad in [
@@ -209,10 +239,9 @@ async fn malformed_unknown_extra_crashed_and_flooded_results_are_rejected() {
             response(format, frame(&serde_json::to_vec(&expected).unwrap())).await,
             Ok(Some(expected))
         );
-        let wrong_format = if format == DocumentFormat::Docx {
-            DocumentFormat::Pdf
-        } else {
-            DocumentFormat::Docx
+        let wrong_format = match format {
+            DocumentFormat::Docx => DocumentFormat::Pdf,
+            DocumentFormat::Pdf | DocumentFormat::Xlsx => DocumentFormat::Docx,
         };
         assert_eq!(
             response(

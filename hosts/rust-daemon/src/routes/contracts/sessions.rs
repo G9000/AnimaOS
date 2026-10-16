@@ -237,6 +237,7 @@ pub(crate) struct SessionAttachmentResponse {
 pub(crate) enum DocumentExtractionResponse {
     Docx(DocxExtractionResponse),
     Pdf(PdfExtractionResponse),
+    Xlsx(XlsxExtractionResponse),
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -258,6 +259,19 @@ pub(crate) struct PdfExtractionResponse {
     pub(crate) page_count: Option<u32>,
     pub(crate) text_page_count: Option<u32>,
     pub(crate) included_page_count: Option<u32>,
+    pub(crate) omissions: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct XlsxExtractionResponse {
+    pub(crate) version: u32,
+    pub(crate) format: String,
+    pub(crate) status: String,
+    pub(crate) sheet_count: Option<u32>,
+    pub(crate) observed_cell_count: Option<u32>,
+    pub(crate) included_cell_count: Option<u32>,
+    pub(crate) hidden_sheet_count: Option<u32>,
     pub(crate) omissions: Vec<String>,
 }
 
@@ -288,7 +302,12 @@ fn extraction_response(
         {
             DocumentFormat::Pdf
         }
-        _ => DocumentFormat::Docx,
+        crate::attachments::documents::XLSX_MIME
+            if extension.is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx")) =>
+        {
+            DocumentFormat::Xlsx
+        }
+        _ => return None,
     };
     if extraction.format != expected_format {
         return None;
@@ -325,6 +344,32 @@ fn extraction_response(
                 .map(|c| c.included_page_count),
             omissions,
         }),
+        DocumentFormat::Xlsx => {
+            let coverage = extraction.xlsx_coverage.as_ref();
+            let hidden_sheet_count = coverage.map(|coverage| {
+                coverage
+                    .sheets
+                    .iter()
+                    .filter(|sheet| {
+                        matches!(
+                            sheet.visibility,
+                            anima_core::document_content::XlsxSheetVisibility::Hidden
+                                | anima_core::document_content::XlsxSheetVisibility::VeryHidden
+                        )
+                    })
+                    .count() as u32
+            });
+            DocumentExtractionResponse::Xlsx(XlsxExtractionResponse {
+                version: 2,
+                format: "xlsx".into(),
+                status,
+                sheet_count: coverage.map(|coverage| coverage.sheet_count),
+                observed_cell_count: coverage.map(|coverage| coverage.observed_cell_count),
+                included_cell_count: coverage.map(|coverage| coverage.included_cell_count),
+                hidden_sheet_count,
+                omissions,
+            })
+        }
     })
 }
 

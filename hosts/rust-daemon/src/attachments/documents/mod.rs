@@ -5,6 +5,8 @@ pub(crate) mod worker;
 pub(crate) const DOCX_MIME: &str =
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 pub(crate) const PDF_MIME: &str = "application/pdf";
+pub(crate) const XLSX_MIME: &str =
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 pub(crate) const MAX_DOCUMENT_INPUT_BYTES: u64 = 2 * 1024 * 1024;
 #[allow(dead_code)]
 pub(crate) const MAX_DOCX_INPUT_BYTES: u64 = MAX_DOCUMENT_INPUT_BYTES;
@@ -25,6 +27,7 @@ pub(crate) fn document_format(
     match record.mime.as_str() {
         DOCX_MIME if extension.eq_ignore_ascii_case("docx") => Some(DocumentFormat::Docx),
         PDF_MIME if extension.eq_ignore_ascii_case("pdf") => Some(DocumentFormat::Pdf),
+        XLSX_MIME if extension.eq_ignore_ascii_case("xlsx") => Some(DocumentFormat::Xlsx),
         _ => None,
     }
 }
