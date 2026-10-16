@@ -39,12 +39,14 @@ checks, actual anonymous endpoint compatibility and unverified model research
 quality. This complements PAR-04/PAR-05; it does not close interactive arbitrary
 website or account acceptance.
 
-M84 adds77 offline research-oracle controls, but its sole actual task failed at
-the private approval verifier before any search or report. One subscription call
-reported1,417tokens; cancelled-run quiet recovery/cleanup passed. Model research
-quality remains unassessed. The next distinct task first needs live-event
-admission and faithful terminal-result projection. See the
-[M84 outcome](../superpowers/plans/2026-10-16-companion-research-acceptance-m84.md).
+M85 accepts one distinct actual Rust2018 research/report/read-back case after
+correcting the private live-approval verifier. One anonymous search, two official
+page reads, three independently checked cited answers, complete saved read-back,
+five-second quiet recovery and owned cleanup pass. Five subscription calls
+reported17,129tokens;60captured-artifact console checks pass. M84's earlier failed
+actual task remains unchanged. This adds narrow research-quality evidence;
+broader autonomous/coding, selected-account and target-host acceptance remain open.
+See the [M85 outcome](../superpowers/plans/2026-10-17-companion-live-research-m85.md).
 
 Each PAR ID is stable. Milestone numbers after M38 are assigned when its detailed plan is cut from then-current main. File/API names below are candidates; capability, authority, scope and evidence requirements are binding.
 

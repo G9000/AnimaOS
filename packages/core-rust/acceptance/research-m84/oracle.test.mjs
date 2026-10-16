@@ -663,3 +663,124 @@ for (const [label, value] of [
     assert.equal(status(input), 'partial');
   });
 }
+
+function rust2018() {
+  const input = valid();
+  const newUrl = 'https://doc.rust-lang.org/edition-guide/rust-2018/index.html';
+  const newPath = 'rust-2018-research.md';
+  const newQuery =
+    'site:doc.rust-lang.org/edition-guide Rust 2018 first stable release edition Cargo.toml cargo fix migration';
+  input.expectations = {
+    query: newQuery,
+    path: newPath,
+    minimumStable: '1.31.0',
+    manifestEntry: 'edition = "2018"',
+    migrationCommand: 'cargo fix --edition',
+  };
+  setReport(
+    input,
+    report
+      .replace('Rust 2024 research', 'Rust 2018 research')
+      .replaceAll('1.85.0', '1.31.0')
+      .replaceAll('edition = "2024"', 'edition = "2018"')
+      .replace('2024 edition', '2018 edition')
+      .replaceAll(index, newUrl),
+  );
+  op(input, 'web_search').args.query = newQuery;
+  op(input, 'web_search').output.urls[0] = newUrl;
+  const fetches = input.operations.filter(
+    (entry) => entry.name === 'web_fetch',
+  );
+  fetches[0].args.url = newUrl;
+  fetches[0].output.text =
+    'The Rust 2018 Edition was stabilized in Rust 1.31.0.';
+  fetches[1].output.text =
+    'Run cargo fix --edition, then change Cargo.toml to edition = "2018".';
+  op(input, 'write_file').args.file_path = newPath;
+  op(input, 'read_file').args.file_path = newPath;
+  input.operations.at(-1).text = `Saved ${newPath} and read it back.`;
+  input.restart.before.sources[0] = newUrl;
+  input.restart.after.sources[0] = newUrl;
+  return input;
+}
+
+test('a second frozen Rust 2018 report uses its own path, version and edition', () => {
+  assert.equal(status(rust2018()), 'pass');
+});
+test('the second frozen version rejects a wrong answer in its designated cell', () => {
+  const input = rust2018();
+  setReport(
+    input,
+    input.report.text.replace('Rust 1.31.0 is', 'Rust 1.30.0 is'),
+  );
+  assert.equal(status(input), 'fail');
+});
+test('the second frozen version rejects a negated answer in its designated cell', () => {
+  const input = rust2018();
+  setReport(
+    input,
+    input.report.text.replace('Rust 1.31.0 is', 'Rust 1.31.0 is not'),
+  );
+  assert.equal(status(input), 'fail');
+});
+test('dynamic negation fails even when the old filename is frozen', () => {
+  const input = rust2018();
+  input.expectations.path = 'rust-2024-research.md';
+  op(input, 'write_file').args.file_path = input.expectations.path;
+  op(input, 'read_file').args.file_path = input.expectations.path;
+  input.operations.at(-1).text =
+    `Saved ${input.expectations.path} and read it back.`;
+  setReport(
+    input,
+    input.report.text.replace('Rust 1.31.0 is', 'Rust 1.31.0 is not'),
+  );
+  assert.equal(status(input), 'fail');
+});
+
+for (const [label, field, value] of [
+  ['non-string path', 'path', { name: 'report.md' }],
+  ['empty path', 'path', ''],
+  ['parent traversal', 'path', '../report.md'],
+  ['forward separator', 'path', 'sub/report.md'],
+  ['back separator', 'path', 'sub\\report.md'],
+  ['absolute path', 'path', '/tmp/report.md'],
+  ['drive prefix', 'path', 'C:\\report.md'],
+  ['alternate data stream', 'path', 'report.md:stream'],
+  ['NUL control', 'path', 'report\0.md'],
+  ['newline control', 'path', 'report\n.md'],
+  ['wrong extension', 'path', 'report.txt'],
+  ['overlong filename', 'path', `${'r'.repeat(130)}.md`],
+  ['non-string version', 'minimumStable', { major: 1, minor: 31, patch: 0 }],
+  ['empty version', 'minimumStable', ''],
+  ['short version', 'minimumStable', '1.31'],
+  ['version suffix', 'minimumStable', '1.31.0beta'],
+  ['version newline', 'minimumStable', '1.31.0\n'],
+]) {
+  test(`frozen expectations reject ${label}`, () => {
+    const input = rust2018();
+    input.expectations[field] = value;
+    const verdict = evaluateResearch(input);
+    assert.notEqual(verdict.status, 'pass');
+    assert.ok(
+      verdict.reasons.some((reason) => reason.boundary === 'expectations'),
+    );
+  });
+}
+
+for (const [label, name] of [
+  ['write', 'write_file'],
+  ['read-back', 'read_file'],
+]) {
+  test(`actual ${label} path must equal the second frozen filename`, () => {
+    const input = rust2018();
+    op(input, name).args.file_path = 'rust-2024-research.md';
+    const verdict = evaluateResearch(input);
+    if (name === 'write_file') assert.equal(verdict.status, 'fail');
+    else {
+      assert.notEqual(verdict.status, 'pass');
+      assert.ok(
+        verdict.reasons.some((reason) => reason.boundary === 'readback'),
+      );
+    }
+  });
+}

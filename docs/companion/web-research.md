@@ -45,13 +45,16 @@ not imply general autonomous research quality or full browser automation.
 
 ## Recorded research acceptance
 
-M84 adds a reproducible offline report/provenance/read-back oracle. Its one actual
-subscription task stopped at the first approval because the private verifier
-expected full saved calls before terminal history was available. One model call
-reported1,417tokens; no search, page read or report write ran. Quiet cancelled-run
-recovery and cleanup passed. This does not assess answer quality or change the
-working search setup above. See the [M84 outcome](../superpowers/plans/2026-10-16-companion-research-acceptance-m84.md).
+M85 accepted one actual model-driven official Rust2018 research task: one search,
+two page reads, a cited report, full native read-back and linked final response.
+Independent fact/prose/provenance checks, five quiet same-store seconds and owned
+cleanup passed. The captured live/history sources passed60console component
+checks. Five subscription model calls reported17,129tokens; no retry, helper or
+fallback was used. See the [M85 outcome](../superpowers/plans/2026-10-17-companion-live-research-m85.md).
 
-The next distinct acceptance must use live typed tool/approval evidence for
-approval-time identity and chronology, then saved full history for final grading.
-The consumed M84 task will not be retried or regraded.
+This is one finite workflow, not general answer-quality, browser-interaction,
+coding, always-on or full-parity acceptance. The M84 task remains failed at its
+private history-based verifier: one model call, no remote search or report.
+M85 used live typed tool/approval events for pending-call verification and saved
+full history for final grading on a distinct task. Neither case will be replayed
+or regraded.
