@@ -1,6 +1,17 @@
+# Handover: M83 web search with citations
+
+## Start here (2026-10-16): M82 merged; execute M83
+
+M82 PR88 merged at b71c351cbf60983c928fe2eb803b2b93336cb7be; exact tested tree a89cb45ffb4d6344195ef5afc8da155771e6134b. Rust2965/29intentionalignores/46suites, lint/build/format/docs pass. M81 Tasks reconnect and all historical consumed cases remain settled.
+
+User now explicitly requests web search end to end with citations. Continue g9000/companion-web-search-m83; read the [M83 plan](../plans/2026-10-16-companion-web-search-m83.md), then AGENTS.md. Resume .superpowers/sdd/2026-10-16-companion-web-search-m83/progress.md.
+Use native keyless Exa MCP through the existing bounded transport, explicit independent search/page-read grants and typed returned source links across live/history/SDK/console. Keyed exa_search remains explicit and separate. One native batch review, one final web/SDK review and one fix wave; required affected gates, controlled chain and one bounded anonymous public search with zero paid generation. Record actual limits and preserve old cases. No normal profiles/accounts/providers/services/DBs/containers/Docker55432; only the newly authorized bounded anonymous search check after gates.
+
+Preserve unrelated generated Astro settings, nx.json, anima.yaml and uploads. Explicit staging only; never those paths or .superpowers. No stash/reset/restore/path checkout/worktree. Cargo incremental0/jobs1/threads2, serialized/root-only. Standing Codex delegation, per-command unsigned commits and merge-and-continue apply.
+
 # Handover: M82 logical swarm task ownership
 
-## Start here (2026-10-16): publish M82 and continue selected parity
+## Historical M82 settled handover
 
 After M82 publication, prioritize one useful daily workflow through the existing console/harness and independently check its output, cancellation and recovery. Choose its bounded success criteria before another implementation milestone; add reliability fixes only when that workflow demonstrates a concrete blocker. The core feature surface is implemented, while selected real connector accounts, broader autonomous work quality and target-host acceptance remain open. No new account/message/provider/host activation is implied.
 
