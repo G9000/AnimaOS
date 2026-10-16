@@ -1,6 +1,52 @@
+# Handover: M73 paired Chromium; browser save PARTIAL
+
+## Start here (2026-10-16): publish M73 and continue selected parity
+
+Offline paired-runtime admission10 passed; Guard 28, profile 18, policy 47 and offline console gates/typecheck passed. One ownership review, one final E2E review, one combined fix wave and mechanical case reuse are recorded. Fresh case 615aa155-ad14-4a3c-8217-e82f28afd7b8 completed in 13.063s: browser save PARTIAL, 1 saved reports, 11 known identities retired, 0 discovery gaps covered by zero-error Job drain, active count zero before close, ports free, stable private profile and exact 84-byte source preserved. Exact browser failure logs are sealed; no retry or regrade. The installed engine1.59.1/headless-shell1217 was used with the original single-page, route/save and cleanup assertions. Old M72 remains PARTIAL; no cause is inferred for its second page. The browser test/result itself passed all strict checks, including single-page and post-context closure; overall supervisor acceptance remains PARTIAL. Its exact failure was process-image error5/PID26340 with creation134366078117796641 and initial wait258, before retaining that identity; whether the process retired during image query is unknown. Final known11 identities retired with active0/errors0. Next use deterministic tests for a same-retained-handle post-error wait; never assume an active inaccessible child is retired or weaken primary-image admission.
+
+Resume .superpowers/sdd/2026-10-16-companion-paired-browser-m73/progress.md.
+Seal and preserve case/release/results/logs plus eight raw source snapshots, then
+docs/format/explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof.
+Pin committed source versions. Never replay or regrade a consumed case. M71 raw
+snapshots/Git blobs and M61/M69/M70 one-offs remain exact. Reusable guard/tests
+may advance normally with historical version provenance.
+
+Next use the parity roadmap to choose a concrete remaining agent-loop gap; avoid
+claiming synthetic browser evidence proves model reasoning or full Hermes parity.
+Standing merge-and-continue, Codex delegation and isolated synthetic testing apply.
+No ordinary services/profiles/accounts/providers/models/databases/containers or
+Docker55432. Cargo incremental0/jobs1/threads2 if needed; explicit staging only,
+never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+
+# Handover: M73 use accepted paired Chromium
+
+## Start here (2026-10-16): M72 merged; execute M73
+
+M72 PR78 merged c285bec407a50b42698dba7765c9f61c5e9272c6,
+tree a008c3acbd618b7255a039a737665ebe8f004b5d. Its one case saved the exact84byte
+report and passed ordered three real GET/download checks before spec414 rejected
+a second context page, causeunknown.20knownretired/active0/errors0/portsfree in17.312s.
+Overall browser acceptance remains PARTIAL. M72 error87 behavior has28unit tests;
+no gap occurred in that actual case. Preserve raw eight snapshots, Git versions/case.
+
+Continue g9000/companion-paired-browser-m73; read
+[M73 plan](../plans/2026-10-16-companion-paired-browser-m73.md), then AGENTS.md.
+Resume .superpowers/sdd/2026-10-16-companion-paired-browser-m73/progress.md.
+Use the already accepted installed Playwright1.59.1/headless-shell1217 pair;
+browser-work guide already marks Edge155 unaccepted for this workflow. Verify
+offline metadata/canonical regular executable/SHA before release and launch.
+No browser installation, version-probe launch, fallback or dependency change.
+Root mechanically copies finalM72 supervisor/spec, preserving single-page and all
+route/save/cleanup assertions. One fresh finite case only after reviews/local gates.
+
+Standing Codex delegation, merge-and-continue, unsigned commits and isolated testing
+apply. No ordinary services/profiles/providers/models/accounts/DB/containers/55432.
+Explicit staging only, never nx.json/anima.yaml/.superpowers; no stash/reset/restore/
+path checkout/worktree. Cargo incremental0/jobs1/threads2 if needed. Old cases immutable.
+
 # Handover: M72 discovery gaps; browser save PARTIAL
 
-## Start here (2026-10-16): publish M72 and continue selected parity
+## Historical M72 settled handover
 
 Guard 28, profile 18, policy 47 and offline console gates/typecheck passed. One ownership review, one final E2E review, one combined fix wave and mechanical case reuse are recorded. Fresh case e73821b6-dad1-41c7-96d3-33fe497f76b0 completed in 17.312s: browser save PARTIAL, 1 saved reports, 20 known identities retired, 0 discovery gaps covered by zero-error Job drain, active count zero before close, ports free, stable private profile and exact 84-byte source preserved. The browser passed the three ordered real Files GETs, explicit click, one download event, filename/blob URL and exact saved/source byte checks, then failed the single-context-page assertion at spec line414: a second page was present. Its cause is unknown. The full browser case remains PARTIAL; it was not retried or regraded. No discovery gap occurred in this actual case; error87 coverage is deterministic unit evidence.
 
