@@ -1,5 +1,7 @@
 # M84 public research acceptance oracle
 
+Later cases can reuse this offline oracle with a root-frozen single filename (at most 64 characters, simple relative `.md` basename) and a bounded numeric `major.minor.patch` stable-version expectation. The actual write/read paths must equal that frozen filename. These parameters do not change the three-row report, source, chronology, read-back, restart, or cleanup checks; substantive prose review stays with the controller.
+
 This offline oracle grades one bounded Rust 2024 report from controller-collected evidence. It never invokes a provider, searches the web, opens an account, or authorizes a tool. The model-written report has no authority to declare its own tool outcomes. The root controller separately reviews substantive prose and freezes official-source observations before the one actual task.
 
 `evaluateResearch({ report, expectations, operations, restart, cleanup })` returns `{ status, checks, reasons }`, with `status` `pass`, `partial`, or `fail`. `expectations` supplies the root-frozen exact query, output path, and three verified values (`minimumStable`, `manifestEntry`, `migrationCommand`). Never put those values in the model task. `report` is an independent capture: UTF-8 `text` at write, final `fileText`, `fileSha256`, and `fileBytes`. The report must be no more than 8192 bytes and 100 lines, with a short title, three-row `Question | Answer | Source` table, and limitations paragraph.

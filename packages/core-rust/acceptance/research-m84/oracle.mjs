@@ -7,6 +7,14 @@ const labels = [
   ['Automatic migration command', 'migrationCommand'],
 ];
 const toolNames = ['web_search', 'web_fetch', 'write_file', 'read_file'];
+const validReportPath = (value) =>
+  typeof value === 'string' &&
+  value.length <= 64 &&
+  /^[A-Za-z0-9][A-Za-z0-9._-]*\.md$/.test(value) &&
+  !/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])\./i.test(value);
+const validVersion = (value) =>
+  typeof value === 'string' &&
+  /^(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d{0,2})$/.test(value);
 const sha256 = (text) => createHash('sha256').update(text).digest('hex');
 const numbered = (text) =>
   text
@@ -25,7 +33,11 @@ function hasFact(text, key, expected, fetched = false) {
       new RegExp(
         `(?:^|[^0-9A-Za-z.])${escapeRegex(expected)}(?![0-9A-Za-z]|\\.[0-9]|-[A-Za-z0-9])`,
       ).test(visible) &&
-      (fetched || !/1\.85\.0\s+(?:is|was)\s+not\b/i.test(visible))
+      (fetched ||
+        !new RegExp(
+          `${escapeRegex(expected)}\\s+(?:is|was)\\s+not\\b`,
+          'i',
+        ).test(visible))
     );
   if (key === 'manifestEntry') {
     const parsed = /^edition\s*=\s*"(\d{4})"$/.exec(expected);
@@ -132,7 +144,8 @@ export function evaluateResearch(input) {
   if (
     !expectations ||
     typeof expectations.query !== 'string' ||
-    expectations.path !== 'rust-2024-research.md' ||
+    !validReportPath(expectations.path) ||
+    !validVersion(expectations.minimumStable) ||
     labels.some(
       ([, key]) => typeof expectations[key] !== 'string' || !expectations[key],
     )

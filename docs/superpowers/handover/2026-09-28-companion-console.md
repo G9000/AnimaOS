@@ -1,6 +1,24 @@
+# Handover: M85 actual cited research accepted
+
+## Start here (2026-10-17): publish M85 and use the accepted research workflow
+
+M85 minimally parameterizes the existing offline oracle for a root-frozen simple Markdown filename and numeric stable version. Its private driver now verifies approvals from contiguous typed live events/full pending arguments, retains complete immutable decision witnesses, correlates unapproved Read arguments and refuses known-ended streams or uncorroborated competing fetches. No production runtime, SDK, web or dependency change.
+
+One distinct actual Rust2018 task is ACCEPTED: gpt-6-luna made5primary subscription calls with17,129reportedtokens in89.5seconds, one anonymous search, two selected official page reads, one1,281-byte cited report write and one complete nine-line native read-back before its linked final reply. Root independently checked all three answer cells and substantive migration limitations against the actual fetched official evidence. The offline oracle had zero discrepancies. Four exact AllowOnce decisions retain full DTO/prefix/prior/case/release/hash witnesses. Five quiet same-store seconds preserved report bytes/mtime, messages, sources, receipts, usage, config/grants and memory with no replay; both owned daemons retired and18785 was free. Captured live/reloaded source links passed60console component checks.
+
+Fresh Rust2989passed/31ignored across46suites, lint/build,100offline oracle tests,21private-driver tests, driver type/bundle/Python checks and touched formatting/docs pass. One public batch plus final SDK/web-driver review and one combined fix wave resolved six findings. SDK/web production source is unchanged from the M84-tested revision;60actual-artifact console checks are fresh M85 evidence.
+
+This accepts one bounded official-source research/report/read-back and quiet recovery case. It does not establish general autonomous/coding quality, internal comprehension, actual browser interaction, in-flight exactly-once recovery, indefinite uptime or full Hermes parity. Settings/accounting are not hard billing caps. No retry/helper/fallback/steering/manual report repair, new account/login/raw credential or profile copy, ordinary service/connector/DB server/container/Docker55432 action or historical-case replay. Original M84 actualFAIL and two zero-dispatch preflight failures, M52PARTIAL and M83 revision-specific results stay immutable.
+
+Resume ordinary user testing with Settings Allow web search and, when needed, Allow web page reads. The next substantial acceptance gap is a separately scoped real daily workflow or target-host/selected-account case; choose its actual resource and success criteria before activating anything. Do not replay M84/M85 or add another model trial merely to improve their scores.
+
+Read the [M85 plan](../plans/2026-10-17-companion-live-research-m85.md), then AGENTS.md. Exact resume .superpowers/sdd/2026-10-17-companion-live-research-m85/progress.md. Finish explicit unsigned commit/push/PR/attach/standing merge/exact-tree and raw preservation checks if pending. No further model task is needed for this milestone. The1,281-byte report is retained in its private live/workspace folder with sealed raw source/runtime/authority evidence.
+
+Keep standing lean Codex delegation, unsigned per-command commits and merge-and-continue. Explicit stage only, never nx.json/anima.yaml/.superpowers/uploads/generated Astro settings. Preserve onboarding/unrelated work. No stash/reset/restore/path checkout/worktree. Cargo incremental0/jobs1/threads2, serialized/root-only. Isolated local testing with existing app-owned subscription resolver remains authorized; no login/raw credential/profile copying/account change, normal services/connectors/DB servers/containers/Docker55432. Consumed cases remain closed.
+
 # Handover: M84 research oracle and retained actual failure
 
-## Start here (2026-10-17): settle M84, then fix live-event admission
+## Historical M84 settled handover
 
 M84 adds an offline cited-report oracle and77 positive/negative controls, plus an existing-project Nx target; no production runtime, SDK, web or dependency change. Fresh Rust2989passed/31ignored across46suites, lint/build, SDK/web typecheck/build and10 private-driver tests pass. One daemon/oracle batch review, final SDK/web-driver review and one reviewed fix wave are complete.
 
