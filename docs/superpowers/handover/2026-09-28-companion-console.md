@@ -1,6 +1,24 @@
+# Handover: M80 observed task revision
+
+## Start here (2026-10-16): M79 merged; execute M80
+
+M79 PR85 merged at ab215434df14db7da18268b7a498089aeace1028, exact tested tree 8a767aa01deff4ce69745dc03a019e466d3ad3f8.
+Its local gates and scheduler outcome are recorded in the M79 plan/ledger. M77 public-page and M74 Files cases remain settled and immutable.
+
+Continue g9000/companion-task-revision-m80. Read the [M80 plan](../plans/2026-10-16-companion-task-revision-m80.md), then AGENTS.md.
+Resume .superpowers/sdd/2026-10-16-companion-task-revision-m80/progress.md.
+Tests first, narrow model todo-write refusal, one daemon batch review/fix wave,
+required Rust test/lint/build/format/docs, explicit unsigned commit/push/PR/attach,
+standing merge and exact-tree proof. No actual acceptance case or normal activation.
+
+Standing Codex delegation, unsigned per-command commits and merge-and-continue apply.
+No ordinary profiles/services/providers/accounts/devices/DBs/containers/Docker55432.
+Explicit stage only; never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+Cargo incremental0/jobs1/threads2, serialized. Preserve historical raw/Git/runtime versions.
+
 # Handover: M79 automatic recovery respects active hours
 
-## Start here (2026-10-16): publish M79 and continue selected parity
+## Historical M79 settled handover
 
 M79 makes automatic overdue recovery respect the owner's active hours at claim admission. An occurrence due at21:30 with an08:00–22:00 window stays unclaimed and unchanged at23:00, then runs once at a permitted opening through the existing skip-missed planner. Explicit manual Run now, malformed-record error isolation and already-claimed work retain their existing behavior. Controlled-clock regressions cover boundary, overnight/weekend/DST, trigger, peer and manual paths. Fresh Rust 2954 passed/29 ignored across 46 suites, lint/build/format, docs and one daemon batch review pass.
 
