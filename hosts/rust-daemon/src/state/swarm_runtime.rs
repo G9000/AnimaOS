@@ -162,6 +162,17 @@ impl DaemonState {
                                     }
                                     *runtime = new_runtime;
                                 }
+                                let todo_baseline = if runtime.config().allows_tool("todo_write") {
+                                    crate::tools::todo::read_agent_todos(
+                                        crate::tools::ctx_workspace_root(&tool_context),
+                                        &runtime.state().id,
+                                    )
+                                    .ok()
+                                    .map(|todos| todos.revision)
+                                } else {
+                                    None
+                                };
+                                let tool_context = tool_context.with_todo_baseline(todo_baseline);
                                 let result = runtime
                                     .run_with_tools(input, |agent, user_message, tool_call| {
                                         let delegate_task = delegate_task.clone();

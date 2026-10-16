@@ -1,6 +1,21 @@
+# Handover: M80 observed task revision
+
+## Start here (2026-10-16): publish M80 and continue selected parity
+
+M80 requires an observed task-list revision before model-driven todo_write. A failed initial read can no longer turn into an unconditional overwrite: refusal preserves bytes and the missing baseline until an explicit successful todo_read. Ordinary missing-file empty reads, explicit owner/internal writes and stale-CAS merged recovery remain supported. Legacy swarm runs now capture their own fresh baseline before execution; failed reads still refuse. Fresh Rust 2959 passed/29 ignored across 46 suites, lint/build/format, docs, daemon review and the gate-found caller follow-up pass.
+
+This is deterministic task-preservation evidence. It does not establish model planning quality, account workflows, target-host uptime or full Hermes parity. No web, SDK, schema, dependency, provider/account/device/ordinary-service, database or container change and no new actual acceptance case. Historical raw/Git/runtime evidence remains unchanged. Legacy swarm runtime identity across dispatches is unchanged; cross-dispatch task continuity is not accepted by this milestone.
+
+Resume .superpowers/sdd/2026-10-16-companion-task-revision-m80/progress.md.
+The ledger records exact publication state. Finish pending docs/format/explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof before selecting another concrete gap. M79 scheduler recovery, M78 Memory freshness, M77 public page and M74 Files save remain settled. No replay or regrading of consumed cases.
+Standing Codex delegation, unsigned per-command commits and merge-and-continue apply.
+No ordinary profiles/accounts/providers/devices/services/DBs/containers/Docker55432.
+Explicit stage only; never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+Cargo incremental0/jobs1/threads2, serialized; preserve unrelated edits and historical versions.
+
 # Handover: M79 automatic recovery respects active hours
 
-## Start here (2026-10-16): publish M79 and continue selected parity
+## Historical M79 settled handover
 
 M79 makes automatic overdue recovery respect the owner's active hours at claim admission. An occurrence due at21:30 with an08:00–22:00 window stays unclaimed and unchanged at23:00, then runs once at a permitted opening through the existing skip-missed planner. Explicit manual Run now, malformed-record error isolation and already-claimed work retain their existing behavior. Controlled-clock regressions cover boundary, overnight/weekend/DST, trigger, peer and manual paths. Fresh Rust 2954 passed/29 ignored across 46 suites, lint/build/format, docs and one daemon batch review pass.
 
