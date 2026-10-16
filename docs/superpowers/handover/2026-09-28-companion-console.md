@@ -1,6 +1,44 @@
+# Handover: M76 interrupted automation review verified
+
+## Start here (2026-10-16): publish M76 and continue selected parity
+
+M76 implements read-only review for exact interrupted automation outcomes, preserved historical uncertainty and recorded-thread navigation, with no fabricated thread when absent. History rows/errors are fenced by agent/schedule/version/connectivity, offline opens no request and reconnect reads fresh data. Existing explicit Run now/Resume remain unchanged. Fresh web 1533 tests/122 files, typecheck/build, touched formatting and final web/SDK-contract review pass.
+
+Web-only local fixture evidence; no daemon/SDK/dependency change or new execution/acknowledgement action. This does not prove broad recurrence, exactly-once effects, target-host recovery or full Hermes parity. No actual providers, accounts, devices or ordinary services were activated. Historical raw cases and version provenance remain unchanged.
+
+Resume .superpowers/sdd/2026-10-16-companion-automation-review-m76/progress.md.
+Finish docs/format/explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof.
+Next select a concrete remaining daily-use gap from the locked parity roadmap and current source.
+M74 browser save and M75 capability inventory are settled; preserve historical evidence.
+Standing Codex delegation, unsigned per-command commits and merge-and-continue apply.
+No ordinary profiles, accounts, providers, devices, services, DBs, containers or Docker55432.
+Explicit stage only; never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+Cargo incremental0/jobs1/threads2 if Cargo is later needed.
+
+# Handover: M76 interrupted automation review
+
+## Historical M76 bound-plan handover
+
+M75 PR81 merged at 5ed33d61d39d445512e7b4362e9b84fa4b90eb7d,
+tested tree 79bb8cac76888a5f5710dc3c6fa2f8f3decc1bf0. Rust2943/28 ignores/
+46 suites, SDK201/3 service skips, web1519, formatting/typecheck/build and reviews pass.
+M74 strict isolated browser-save acceptance remains settled; historical cases stay immutable.
+
+Continue g9000/companion-automation-review-m76. Read the
+[M76 plan](../plans/2026-10-16-companion-automation-review-m76.md), then AGENTS.md.
+Resume .superpowers/sdd/2026-10-16-companion-automation-review-m76/progress.md.
+Add read-only interrupted-schedule guidance and recorded-session review; fix stale
+drawer scope/version/offline data. Existing Run now/Resume remain separate actions.
+Web-only, no SDK/daemon/dependency changes; root commands, meaningful RED, one final
+web/SDK-contract review, one fix wave and web test/type/build/format/docs gates.
+No real runtime case or ordinary services/accounts/providers/devices/DBs/containers.
+Standing Codex delegation, per-command unsigned commits and merge-and-continue apply.
+Explicit stage only; never nx.json/anima.yaml/.superpowers. No stash/reset/restore/
+path checkout/worktree. Cargo incremental0/jobs1/threads2 if any Cargo is later needed.
+
 # Handover: M75 capability inventory verified
 
-## Start here (2026-10-16): publish M75 and continue useful parity work
+## Historical M75 settled handover
 
 M75 implemented truthful capability discovery: voice, bounded document reads and reviewed community bundles are partial; camera, smart home and external coding workers remain planned. Browser/document tools are searchable, and unknown status stays unknown. Fresh Rust 2943 passed/28 intentional ignores/46 suites, lint/build/format; SDK 201 passed/3 service skips; web 1519 passed; SDK/web typecheck/build and both reviews passed.
 
