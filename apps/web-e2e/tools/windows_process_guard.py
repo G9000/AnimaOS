@@ -148,7 +148,17 @@ def _identity(k, handle, pid, allow_retired_image=False):
     error = None
     if not k.QueryFullProcessImageNameW(handle, 0, image, C.byref(size)):
         error = C.get_last_error()  # Preserve before any subsequent native call.
-        if not (allow_retired_image and state == WAIT_OBJECT_0 and error == 31):
+        if allow_retired_image and error in (5, 31) and state == WAIT_TIMEOUT:
+            # Observe retirement once on the same retained handle. Never retry
+            # the image query or infer retirement from an image error alone.
+            state = k.WaitForSingleObject(handle, 0)
+            if state not in (WAIT_OBJECT_0, WAIT_TIMEOUT):
+                wait_error = C.get_last_error() if state == 0xFFFFFFFF else None
+                failure = GuardError("process post-image wait", win32_error=wait_error,
+                                     pid=int(pid), creation=creation, wait_state=state)
+                failure.diagnostic["originalImageError"] = error
+                raise failure
+        if not (allow_retired_image and state == WAIT_OBJECT_0 and error in (5, 31)):
             raise GuardError("process image", win32_error=error, pid=int(pid), creation=creation, wait_state=state)
     elif not image.value:
         raise GuardError("process image empty", pid=int(pid), creation=creation, wait_state=state)

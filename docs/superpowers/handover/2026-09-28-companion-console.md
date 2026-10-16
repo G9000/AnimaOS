@@ -1,6 +1,52 @@
+# Handover: M74 retained-handle retirement; browser save ACCEPTED
+
+## Start here (2026-10-16): publish M74 and continue selected parity
+
+Offline paired-runtime admission10 passed; Guard 34, profile 18, policy 47 and offline console gates/typecheck passed. One ownership review, one final E2E review, one combined fix wave and mechanical case reuse are recorded. Fresh case 2de6769f-ecbe-4969-862c-d004469a5dcf completed in 14.391s: browser save ACCEPTED, 1 saved reports, 11 known identities retired, 0 discovery gaps covered by zero-error Job drain, active count zero before close, ports free, stable private profile and exact 84-byte source preserved. The installed engine1.59.1/headless-shell1217 was used with the original single-page, route/save and cleanup assertions. Old M72 remains PARTIAL; no cause is inferred for its second page. M73 browser flow passed but its overall supervisor case remains historical PARTIAL; this new case never regrades it. Descendant image5/31 now requires a confirmed signaled observation on the same retained handle; still-active, unknown-error and primary-image paths remain strict.
+
+Resume .superpowers/sdd/2026-10-16-companion-retirement-observation-m74/progress.md.
+Seal and preserve case/release/results/logs plus ten raw source snapshots, then
+docs/format/explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof.
+Pin committed source versions. Never replay or regrade a consumed case. M71 raw
+snapshots/Git blobs and M61/M69/M70 one-offs remain exact. Reusable guard/tests
+may advance normally with historical version provenance.
+
+Next use the parity roadmap to choose a concrete remaining agent-loop gap; avoid
+claiming synthetic browser evidence proves model reasoning or full Hermes parity.
+Standing merge-and-continue, Codex delegation and isolated synthetic testing apply.
+No ordinary services/profiles/accounts/providers/models/databases/containers or
+Docker55432. Cargo incremental0/jobs1/threads2 if needed; explicit staging only,
+never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+
+# Handover: M74 confirm retained-handle retirement
+
+## Start here (2026-10-16): M73 merged; execute M74
+
+M73 PR79 merged af04621aee0f73918047de6f49ecb28cdbd2f031,
+tree e5b25c349fa84f5fee95c381deb1875c3ff4f29a. Its paired Chromium browser test/result
+PASSED all strict1page/3GET/84byte/download/post-context checks. Overall case stays
+PARTIAL: process-image5/PID26340/creation134366078117796641/initialwait258, with no
+post-error wait witness. Cause unknown;11knownretired/Jobactive0/errors0/portsfree
+in13.063s. M71/M72/M73 originalcases/rawsnapshots/Gitversions remain immutable.
+
+Continue g9000/companion-retirement-observation-m74; read
+[M74 plan](../plans/2026-10-16-companion-retirement-observation-m74.md), then AGENTS.md.
+Resume .superpowers/sdd/2026-10-16-companion-retirement-observation-m74/progress.md.
+Fake-API RED before guard change: image5or31 descendant can be image-null only
+with successful creation time and same retained handle signaled0; initial258 gets
+one nonblocking post-error wait. Stillactive258/failed/unknown/missingtimes and all
+primary image checks stay fatal. No image/open retry, sleep or PID inference.
+Keep prior-image/creation/Job/gap/drain rules and paired Chromium/browser assertions.
+One ownership batch/finalE2E review/fix wave/local gates before one fresh finite case.
+
+Standing Codex delegation, unsigned commits, merge-and-continue and isolated testing
+apply. No ordinary services/profiles/providers/models/accounts/DB/containers/55432.
+Explicit staging only, never nx.json/anima.yaml/.superpowers; no stash/reset/restore/
+path checkout/worktree. Cargo incremental0/jobs1/threads2 if needed. No M74release.
+
 # Handover: M73 paired Chromium; browser save PARTIAL
 
-## Start here (2026-10-16): publish M73 and continue selected parity
+## Historical M73 settled handover
 
 Offline paired-runtime admission10 passed; Guard 28, profile 18, policy 47 and offline console gates/typecheck passed. One ownership review, one final E2E review, one combined fix wave and mechanical case reuse are recorded. Fresh case 615aa155-ad14-4a3c-8217-e82f28afd7b8 completed in 13.063s: browser save PARTIAL, 1 saved reports, 11 known identities retired, 0 discovery gaps covered by zero-error Job drain, active count zero before close, ports free, stable private profile and exact 84-byte source preserved. Exact browser failure logs are sealed; no retry or regrade. The installed engine1.59.1/headless-shell1217 was used with the original single-page, route/save and cleanup assertions. Old M72 remains PARTIAL; no cause is inferred for its second page. The browser test/result itself passed all strict checks, including single-page and post-context closure; overall supervisor acceptance remains PARTIAL. Its exact failure was process-image error5/PID26340 with creation134366078117796641 and initial wait258, before retaining that identity; whether the process retired during image query is unknown. Final known11 identities retired with active0/errors0. Next use deterministic tests for a same-retained-handle post-error wait; never assume an active inaccessible child is retired or weaken primary-image admission.
 

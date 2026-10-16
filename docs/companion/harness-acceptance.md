@@ -1,5 +1,21 @@
 # Native harness acceptance
 
+## M74 retained-handle retirement and report-save acceptance (2026-10-16)
+
+The Windows acceptance guard confirms retirement on the same retained process
+handle when a descendant image lookup returns5or31. An initial active observation
+allows one nonblocking post-error wait; still-active, failed and unexpected waits,
+other image errors, missing creation time and primary launches remain strict.
+Original image errors and valid failed-wait diagnostics are retained. No retries,
+sleep, invented images, PID-only identity or production/dependency changes.
+
+Offline paired-runtime admission10 passed; Guard 34, profile 18, policy 47 and offline console gates/typecheck passed. One ownership review, one final E2E review, one combined fix wave and mechanical case reuse are recorded. Fresh case 2de6769f-ecbe-4969-862c-d004469a5dcf completed in 14.391s: browser save ACCEPTED, 1 saved reports, 11 known identities retired, 0 discovery gaps covered by zero-error Job drain, active count zero before close, ports free, stable private profile and exact 84-byte source preserved. The installed engine1.59.1/headless-shell1217 was used with the original single-page, route/save and cleanup assertions. Old M72 remains PARTIAL; no cause is inferred for its second page. M73 browser flow passed but its overall supervisor case remains historical PARTIAL; this new case never regrades it. Descendant image5/31 now requires a confirmed signaled observation on the same retained handle; still-active, unknown-error and primary-image paths remain strict.
+
+This is synthetic owner HTTP/browser evidence, not model reasoning, report quality,
+provider readiness or complete Hermes parity. Previous M69/M70/M71/M72/M73 failed cases,
+M64 NOT RUN and M52 PARTIAL remain unchanged. See the
+[M74 plan](../superpowers/plans/2026-10-16-companion-retirement-observation-m74.md).
+
 ## M73 paired Chromium report-save acceptance (2026-10-16)
 
 M73 uses the already accepted installed Playwright1.59.1/Chromium headless-shell1217
