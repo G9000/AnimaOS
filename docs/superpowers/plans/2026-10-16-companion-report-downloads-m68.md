@@ -1,6 +1,6 @@
 # M68 download a workspace report from Files — lean plan
 
-**Status:** bound before source on `g9000/companion-report-downloads-m68`, from verified M67 main `6e9250a5a117aaddda621af7a056fd1f0f75ff56` (tree `59074edcdd5e510008bf36699ff139d53b28c3d0`). Root commands and source-only disjoint workers; meaningful RED before implementation. No services/models/accounts activated.
+**Status:** implemented and locally synthetic-tested through normal report writes, owner Files HTTP and SDK/web lifecycle. Actual browser save and independent report quality remain unverified.
 
 ## Concrete missing path
 
@@ -74,3 +74,21 @@ These rulings are bound for the prospective scope; source release and a new bran
 - Phase2 after each lane's meaningful RED: implement the fixed interfaces and focused exact-byte/authority/bounds/ownership/lifecycle cases above. One synthetic normally granted/approved write_file coordinator run creates a report; actual owner Files list and in-process HTTP download return exact original bytes, with durable normal write receipt and no extra model/download mutation. Scripted answers are plumbing evidence only.
 - Freeze all source; one native batch and one final SDK/web review; root combines confirmed fixes in one wave, focused GREEN then required native/core test/lint/build and changed SDK/web test/typecheck/build through Nx, with service tests intentionally skipped where already established. No browser save, account/provider or service activation is inferred.
 - Update daily-use/document/delivery evidence, master status and exact resume handover; docs/format/protected hashes, explicit per-command unsigned commit/push/PR/attach/standing merge and exact source/merge tree verification. Continue from verified main only after settlement. M64 browser NOT RUN, M52 strict quality PARTIAL and consumed acceptance cases stay unchanged.
+
+## Reuse decision/provenance and recorded outcome
+
+The public Hermes source at `1fd18277267152893a8a24792b79213e7ca3f899`,
+[public download source](https://github.com/NousResearch/hermes-agent/blob/1fd18277267152893a8a24792b79213e7ca3f899/apps/desktop/electron/gateway-file-download.ts) in the
+[upstream repository](https://github.com/NousResearch/hermes-agent), was inspected
+read-only with its MIT license. It binds file requests to the owning gateway,
+encodes paths, aborts cancellation and saves complete bodies through an Electron
+dialog and native temporary-file process. This console reuses its existing Rust
+held-root reader/retained pool, authenticated bounded-Blob SDK and web object-URL
+lifecycle. Direct copying or process integration would add Electron/native disk
+authority outside this bounded web feature; no literal code was copied and no
+new dependency/notice change was needed. This does not establish native desktop
+save/atomic-overwrite parity. Provenance hashes and source are cached in the ledger.
+
+Rust/core **2,942 passed / 28 intentional ignores / 46 suites / lint/build**, including **7 focused M68 cases**; SDK **200 passed / 3 intentional service skips / typecheck/build**; web **1,518 passed / 121 files / typecheck/build**.
+
+Meaningful native/SDK/UI RED preceded lane implementation. One native batch and final SDK/web review, combined fix wave, fresh local gates, docs/format/frozen hashes pass. Failed attempts remain recorded; current-file semantics, heuristic exclusions and broader parity limits are retained. See [harness evidence](../../companion/harness-acceptance.md).

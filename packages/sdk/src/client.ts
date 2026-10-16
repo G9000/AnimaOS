@@ -227,8 +227,9 @@ export class DaemonClient {
   async requestBoundedBlob(
     path: string,
     init: RequestInit,
-    limits: { maxBytes: number; contentType: string },
+    limits: { maxBytes: number; contentType: string; allowEmpty?: boolean },
   ): Promise<Blob> {
+    const minimumBytes = limits.allowEmpty === true ? 0 : 1;
     const { body, isJson } = prepareRequestBody(init.body);
     const headers: Record<string, string> = {
       accept: limits.contentType,
@@ -250,7 +251,7 @@ export class DaemonClient {
     if (
       declared !== null &&
       (!/^\d+$/.test(declared) ||
-        Number(declared) < 1 ||
+        Number(declared) < minimumBytes ||
         Number(declared) > limits.maxBytes)
     ) {
       await response.body?.cancel().catch(() => undefined);
@@ -264,10 +265,14 @@ export class DaemonClient {
       response.headers.get('content-type')?.trim().toLowerCase() !==
         limits.contentType ||
       (encoding && encoding !== 'identity') ||
-      !response.body
+      (!response.body &&
+        (minimumBytes > 0 || (declared !== null && Number(declared) !== 0)))
     ) {
       await response.body?.cancel().catch(() => undefined);
       throw new Error('Invalid bounded response type');
+    }
+    if (!response.body) {
+      return new Blob([], { type: limits.contentType });
     }
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = [];
@@ -284,7 +289,10 @@ export class DaemonClient {
           throw new Error('Bounded response too large');
         chunks.push(value);
       }
-      if (total < 1 || (declared !== null && total !== Number(declared)))
+      if (
+        total < minimumBytes ||
+        (declared !== null && total !== Number(declared))
+      )
         throw new Error('Invalid bounded response length');
       complete = true;
       const output = new Uint8Array(total);

@@ -1,5 +1,41 @@
 # Native harness acceptance
 
+## M68 explicit workspace report downloads (2026-10-16)
+
+**Implemented with local synthetic write/list/HTTP and SDK/web tests.** Files now
+offers **Download current file** for a selected text, Markdown or CSV report.
+The owner-authenticated GET returns captured raw UTF-8 bytes up to 1 MiB, including
+empty files, BOM, Unicode and CRLF, without truncating or changing the source.
+The click downloads current captured bytes; listing/preview is not a version lock.
+
+The server applies component, hidden-entry and complete-content exclusions through
+held nofollow regular-file reads. Symlinks/reparse and nonregular entries are
+refused; hard-link semantics are unchanged. Existing credential/control checks
+are heuristics, not a universal secrecy guarantee. Four physically retained read
+leases and one ten-second absolute deadline bound work without a queued retry;
+cancellation/drop does not free capacity until the blocking read retires.
+
+Safe attachment basename, octet-stream, nosniff, exact length and no-store accompany
+the response. The authenticated SDK independently caps bytes and opts into empty
+files without relaxing existing nonempty callers. Selection/offline/unmount
+invalidate and abort stale web requests; object URLs retire, and preview/download
+errors stay separate. Mounting/selecting alone never downloads.
+
+One normally granted synthetic write_file coordinator flow saves a report, then
+the real in-process owner Files listing/download returns exact bytes with normal
+write evidence and no download model call or source mutation. Scripted model
+output proves plumbing, not independent report quality. No actual browser save,
+personal file/profile/model/provider/account/ordinary daemon/DB/container/deploy.
+
+Fresh gates: Rust/core **2,942 passed / 28 intentional ignores / 46 suites / lint/build**, including **7 focused M68 cases**; SDK **200 passed / 3 intentional service skips / typecheck/build**; web **1,518 passed / 121 files / typecheck/build**. One native batch/final SDK-web review, one combined fix
+wave, docs/format/frozen hashes are recorded. Reused existing Anima reader/pool,
+SDK and web lifecycle components. Public Hermes download behavior was checked at
+the pinned revision; its Electron native save process was not copied or activated.
+No artifact store, chat-link authority, writer-grant change, binary/Office delivery,
+external formula-safety or immutable-artifact claim. M64 browser remains NOT RUN,
+M52 strict quality PARTIAL, and consumed cases unchanged. See the
+[M68 plan](../superpowers/plans/2026-10-16-companion-report-downloads-m68.md).
+
 ## M67 granted workspace document reads (2026-10-16)
 
 **Implemented with local synthetic tool/history tests.** An explicitly granted

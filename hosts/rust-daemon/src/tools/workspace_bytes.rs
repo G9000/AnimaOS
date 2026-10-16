@@ -99,10 +99,27 @@ impl WorkspaceBytes {
         relative: &str,
         max: usize,
     ) -> Result<Vec<u8>, InstructionReadError> {
+        self.read_file_snapshot_with_policy(relative, max, |_, _| true)
+    }
+    /// Apply a caller's stricter browsing policy to metadata observed through
+    /// held capabilities, including after opening and after the bounded read.
+    /// Existing instruction/document callers keep their original policy.
+    pub(crate) fn read_file_snapshot_with_policy(
+        &self,
+        relative: &str,
+        max: usize,
+        policy: impl Fn(&str, &Metadata) -> bool,
+    ) -> Result<Vec<u8>, InstructionReadError> {
         let parts = components(relative)?;
         let mut directory = self.directory.try_clone()?;
+        if !policy("", &directory.dir_metadata()?) {
+            return Err(InstructionReadError::Unreadable);
+        }
         for component in &parts[..parts.len() - 1] {
             let metadata = directory.symlink_metadata(component)?;
+            if !policy(component, &metadata) {
+                return Err(InstructionReadError::Unreadable);
+            }
             if linked(&metadata) {
                 return Err(InstructionReadError::Linked);
             }
@@ -111,6 +128,9 @@ impl WorkspaceBytes {
             }
             directory = directory.open_dir_nofollow(component)?;
             let metadata = directory.dir_metadata()?;
+            if !policy(component, &metadata) {
+                return Err(InstructionReadError::Unreadable);
+            }
             if linked(&metadata) {
                 return Err(InstructionReadError::Linked);
             }
@@ -120,6 +140,9 @@ impl WorkspaceBytes {
         }
         let name = parts.last().expect("validated components");
         let metadata = directory.symlink_metadata(name)?;
+        if !policy(name, &metadata) {
+            return Err(InstructionReadError::Unreadable);
+        }
         if linked(&metadata) {
             return Err(InstructionReadError::Linked);
         }
@@ -127,7 +150,11 @@ impl WorkspaceBytes {
             return Err(InstructionReadError::NonRegular);
         }
         let file = open_regular_file(&directory, name)?;
-        let expected = file.metadata()?.len();
+        let opened = file.metadata()?;
+        if !policy(name, &opened) {
+            return Err(InstructionReadError::Unreadable);
+        }
+        let expected = opened.len();
         if expected > max as u64 {
             return Err(InstructionReadError::Oversized);
         }
@@ -138,7 +165,11 @@ impl WorkspaceBytes {
         if bytes.len() > max {
             return Err(InstructionReadError::Oversized);
         }
-        if bytes.len() as u64 != expected || file.metadata()?.len() != expected {
+        let final_metadata = file.metadata()?;
+        if bytes.len() as u64 != expected
+            || final_metadata.len() != expected
+            || !policy(name, &final_metadata)
+        {
             return Err(InstructionReadError::Unreadable);
         }
         Ok(bytes)

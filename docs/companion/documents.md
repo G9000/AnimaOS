@@ -1,5 +1,21 @@
 # Reading documents
 
+## Download a generated report
+
+Ask the companion to save a text, Markdown or CSV report using its existing
+file-write permission and approvals. Open **Files**, refresh, select the report,
+then click **Download current file**. The authenticated action saves the selected
+basename and accepts complete UTF-8 files up to 1 MiB, including empty files, BOM
+and CRLF. Oversized, excluded or unsupported files are refused, rather than
+truncated. A preview can be shorter or unavailable independently of download.
+
+This captures current bytes at the click; it does not lock an earlier preview or
+create a chat attachment/artifact. Downloading leaves the workspace file intact.
+It supports `.txt`, `.md` and `.csv` only. Existing Files hidden/name/credential
+exclusions apply to the whole captured file, as heuristics rather than a complete
+secrecy guarantee. No PDF/Office conversion, public sharing or external spreadsheet
+formula-safety promise is added. See the [M68 plan](../superpowers/plans/2026-10-16-companion-report-downloads-m68.md).
+
 ## Documents already in the workspace
 
 In the agent's Settings, enable **Allow reading workspace documents**, save, then

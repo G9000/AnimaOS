@@ -451,6 +451,8 @@ export const daemon = {
   capabilities: () => setupClient.capabilities(),
   listWorkspaceFiles: () => setupClient.workspace.listFiles(),
   readWorkspaceFile: (path: string) => setupClient.workspace.readFile(path),
+  downloadWorkspaceFile: (path: string, signal?: AbortSignal): Promise<Blob> =>
+    setupClient.workspace.downloadFile(path, { signal }),
   agentTasks: (id: string) =>
     request<AgentTasks>(`/agents/${encodeURIComponent(id)}/tasks`),
   agentJobs: (id: string, options?: { signal?: AbortSignal }) =>

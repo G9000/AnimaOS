@@ -80,6 +80,115 @@ describe('daemon response bodies', () => {
   });
 });
 
+describe('m68_explicit_empty_bounded_downloads', () => {
+  it.each([undefined, false])(
+    'keeps_the_existing_nonempty_default_%s',
+    async (allowEmpty) => {
+      const client = createDaemonClient({
+        fetch: async () =>
+          new Response(new Uint8Array(0), {
+            headers: { 'content-type': 'audio/wav', 'content-length': '0' },
+          }),
+      });
+      await expect(
+        client.requestBoundedBlob(
+          '/voice-fixture',
+          {},
+          {
+            maxBytes: 16,
+            contentType: 'audio/wav',
+            ...(allowEmpty === undefined ? {} : { allowEmpty }),
+          },
+        ),
+      ).rejects.toThrow('Invalid bounded response length');
+    },
+  );
+
+  it.each(['empty stream', 'null body'])(
+    'allows_an_explicit_zero_byte_%s',
+    async (kind) => {
+      const client = createDaemonClient({
+        fetch: async () =>
+          new Response(kind === 'null body' ? null : new Uint8Array(0), {
+            headers: {
+              'content-type': 'application/octet-stream',
+              'content-length': '0',
+            },
+          }),
+      });
+      const blob = await client.requestBoundedBlob(
+        '/report-fixture',
+        {},
+        {
+          maxBytes: 16,
+          contentType: 'application/octet-stream',
+          allowEmpty: true,
+        },
+      );
+      expect(blob.size).toBe(0);
+      expect(blob.type).toBe('application/octet-stream');
+    },
+  );
+
+  it.each([
+    { length: '1', body: null, type: 'application/octet-stream' },
+    {
+      length: '0',
+      body: new Uint8Array([120]),
+      type: 'application/octet-stream',
+    },
+    { length: '0', body: null, type: 'application/json' },
+  ])(
+    'does_not_relax_length_or_type_validation_$length_$type',
+    async ({ length, body, type }) => {
+      const client = createDaemonClient({
+        fetch: async () =>
+          new Response(body, {
+            headers: { 'content-type': type, 'content-length': length },
+          }),
+      });
+      await expect(
+        client.requestBoundedBlob(
+          '/report-fixture',
+          {},
+          {
+            maxBytes: 16,
+            contentType: 'application/octet-stream',
+            allowEmpty: true,
+          },
+        ),
+      ).rejects.toThrow();
+    },
+  );
+
+  it('still_bounds_decoded_stream_bytes_and_cancels_rejected_bodies', async () => {
+    const cancelled = vi.fn();
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(17));
+        },
+        cancel: cancelled,
+      }),
+      { headers: { 'content-type': 'application/octet-stream' } },
+    );
+    const client = createDaemonClient({ fetch: async () => response });
+    await expect(
+      client.requestBoundedBlob(
+        '/report-fixture',
+        {},
+        {
+          maxBytes: 16,
+          contentType: 'application/octet-stream',
+          allowEmpty: true,
+        },
+      ),
+    ).rejects.toThrow('Bounded response too large');
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    expect(response.body?.locked).toBe(false);
+  });
+});
+
 describe('daemon binary responses', () => {
   it('retains caller headers and request options without credentials in the URL', async () => {
     const fetch = vi.fn(

@@ -1,6 +1,35 @@
+# Handover: report downloads locally gated (M0–M68)
+
+## Start here (2026-10-16): M68 gates pass; finish publication and continue
+
+Branch g9000/companion-report-downloads-m68 from M67/PR73 main
+6e9250a5a117aaddda621af7a056fd1f0f75ff56; bound plan
+9f8e53e747f44c8e48dd9f515800261da447662e preceded source. Files explicitly
+downloads owner-selected current text/Markdown/CSV, raw UTF8 up to1MiB including
+empty/BOM/CRLF. Full Files exclusions through held-root capture, shared4retained
+readleases/10s, strict query/auth/no-store, safe headers and bounded SDK/web
+abort/stale-selection/URL lifecycle. No writer grant, artifact or model-link change.
+
+Fresh Rust/core2942/28ignores/46suites/lint/build/7focused,
+SDK200/3serviceSkips, web1518/121files/typecheck/build. One native
+batch/final SDK-web review and combined fix wave, docs/format/hashes recorded.
+Synthetic normally granted report-write→Files→HTTP exactbyte evidence only; no
+actual browser save, personal files/profiles/models/providers/accounts/ordinary
+daemon/DB/container/deployment. Existing Anima components reused; public pinned
+Hermes Electron download behavior checked without copying/starting that process.
+M64 browser NOT RUN, M52 PARTIAL and consumed cases unchanged.
+
+Resume .superpowers/sdd/2026-10-16-companion-report-downloads-m68/progress.md.
+Finish explicit-path per-command unsigned commit/push/PR/attach/standing merge
+and exact tree/hash proof, then bind the next concrete useful scope from verified
+main. Root commands/fmt/Git; Cargo incremental0/jobs1/threads2 serialized. Never
+stage nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+Preserve ordinary services/profiles/Docker55432. Delegation, selected-chat context
+updates and merge-and-continue remain authorized.
+
 # Handover: report downloads bound (M0–M68)
 
-## Start here (2026-10-16): M67 merged; execute M68 from its bound lean plan
+## Historical M68 bound-plan handover
 
 M67 source 95ff29d518936691e3933d00c90af0efba9b62b6; main merge 6e9250a5a117aaddda621af7a056fd1f0f75ff56;
 exact source/merge tree 59074edcdd5e510008bf36699ff139d53b28c3d0. PR73 is merged,
