@@ -1,3 +1,27 @@
+# Handover: selected XLSX extraction bound (M0–M66)
+
+## Start here (2026-10-16): M65 merged; M66 source-only plan bound
+
+Continue g9000/companion-xlsx-m66 from M65/PR71 main3390e30c95e80b672bd1735a18b1a4da3e6f26b0,
+sourcef9ac596e97f4e72a4047881e854bf56c156a279c, exact tree2bed04a252db80c94a1a10afe9bc6bd911beece3. M65 local native/SDK/web
+gates pass; real OS-vault/remote MCP acceptance remains open. The
+[M66 plan](../plans/2026-10-16-companion-xlsx-m66.md) extends selected-attachment
+document extraction to bounded XLSX stored cells using existing ZIP/XML deps and
+owned worker. No formula execution, external resolution, macros, editing or new
+global budgets. Hidden sheets and cached formula values are explicitly labeled.
+Hermes public XLSX is a behavioral reference, not copied Python or private config.
+
+Resume .superpowers/sdd/2026-10-16-companion-xlsx-m66/progress.md. Publish this plan,
+then source-only contract/RED and disjoint parser/daemon integration. Root alone
+commands/fmt/Git; CARGO_INCREMENTAL=0/jobs1/threads2 serialized, one native batch/
+one fix wave/fresh Nx gates. No real workbook/profile/model/provider/account/
+daemon/device/DB server/container/deployment activation. M64 public browser NOT RUN,
+M52 strict quality PARTIAL and consumed cases unchanged. Per-command unsigned
+commit/push/PR/attach/standing merge, exact tree/hash proof; never stage nx.json/
+anima.yaml/.superpowers or use stash/reset/restore/path checkout/worktree.
+
+## Historical M65 locally gated handover
+
 # Handover: owner-managed HTTPS MCP credentials locally gated (M0–M65)
 
 ## Start here (2026-10-16): M65 source gates pass; finish publication then continue
