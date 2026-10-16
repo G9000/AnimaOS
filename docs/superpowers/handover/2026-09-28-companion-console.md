@@ -1,6 +1,54 @@
+# Handover: M72 discovery gaps; browser save PARTIAL
+
+## Start here (2026-10-16): publish M72 and continue selected parity
+
+Guard 28, profile 18, policy 47 and offline console gates/typecheck passed. One ownership review, one final E2E review, one combined fix wave and mechanical case reuse are recorded. Fresh case e73821b6-dad1-41c7-96d3-33fe497f76b0 completed in 17.312s: browser save PARTIAL, 1 saved reports, 20 known identities retired, 0 discovery gaps covered by zero-error Job drain, active count zero before close, ports free, stable private profile and exact 84-byte source preserved. The browser passed the three ordered real Files GETs, explicit click, one download event, filename/blob URL and exact saved/source byte checks, then failed the single-context-page assertion at spec line414: a second page was present. Its cause is unknown. The full browser case remains PARTIAL; it was not retried or regraded. No discovery gap occurred in this actual case; error87 coverage is deterministic unit evidence.
+
+Resume .superpowers/sdd/2026-10-16-companion-discovery-gap-m72/progress.md.
+Seal and preserve case/release/results/logs plus eight raw source snapshots, then
+docs/format/explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof.
+Pin committed source versions. Never replay or regrade a consumed case. M71 raw
+snapshots/Git blobs and M61/M69/M70 one-offs remain exact. Reusable guard/tests
+may advance normally with historical version provenance.
+
+Next use the parity roadmap to choose a concrete remaining agent-loop gap; avoid
+claiming synthetic browser evidence proves model reasoning or full Hermes parity.
+Standing merge-and-continue, Codex delegation and isolated synthetic testing apply.
+No ordinary services/profiles/accounts/providers/models/databases/containers or
+Docker55432. Cargo incremental0/jobs1/threads2 if needed; explicit staging only,
+never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+
+# Handover: M72 bounded discovery-gap repair
+
+## Historical M72 bound-plan handover
+
+M71 PR 77 merged at ca733936e55833a4e1859f6d72f2250d320f98f3,
+tree f6cb62df2737af994f50b5a2e56373ea100ba4d2. Its browser-save remains PARTIAL:
+OpenProcess error 87/PID568 without a retained identity; cause unproven. Seven
+Edge images existed, but no browser result/navigation/save witness. Whole-Job
+cleanup accepted: 14 known retired, active zero before close, zero errors/ports free.
+
+Continue branch g9000/companion-discovery-gap-m72. Read
+[the bound M72 plan](../plans/2026-10-16-companion-discovery-gap-m72.md), then AGENTS.md.
+Resume .superpowers/sdd/2026-10-16-companion-discovery-gap-m72/progress.md.
+First publish plan, then fake-API meaningful RED; workers own only reusable guard
+and tests. Root derives supervisor and browser spec mechanically from final M71.
+Only exact error87 plus one same-retained-Job requery omitting PID permits a
+bounded gap. No identity/individual retirement invention, no OpenProcess retry.
+Unresolved gaps or any cleanup errors block acceptance; require zero-active Job.
+One reviewed fresh finite browser-save case after offline gates, no old-case replay.
+
+Preserve M71 sealed case, eight raw snapshots and pinned historical Git blobs.
+The current reusable guard/tests may advance normally; old one-off sources/specs
+and M61/M69/M70 cases remain exact. Standing merge-and-continue, Codex delegation,
+per-command unsigned commits and isolated testing are authorized. No ordinary
+services, profiles, providers, models, accounts, databases, containers or port55432.
+Root commands/Git; Cargo incremental0/jobs1/threads2 if needed; explicit stage only,
+never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+
 # Handover: M71 Job cleanup proved; report save PARTIAL
 
-## Start here (2026-10-16): publish M71; fix exact discovery gap next
+## Historical M71 settled handover
 
 Branch g9000/companion-process-guard-m71 from M70main
 b94878c010cf61a35febdd6ac7c2d389b962bde4; planb1fb34b before source.

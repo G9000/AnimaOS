@@ -213,6 +213,7 @@ class OwnedJob:
         self.k = api if api is not None else _api()
         self.handle = _ok(self.k.CreateJobObjectW(None, None), "job creation")
         self.processes, self.logs = [], []
+        self.discovery_gaps = []
         limits = EXTENDED_LIMIT()
         limits.BasicLimitInformation.LimitFlags = 0x2000 | 0x8  # kill-on-close, active-process cap
         limits.BasicLimitInformation.ActiveProcessLimit = 64
@@ -294,21 +295,42 @@ class OwnedJob:
                 if handle and handle != C.c_void_p(-1).value:
                     self.k.CloseHandle(handle)
 
-    def capture_descendants(self):
-        """PID discovery is read-only; all retirement uses the retained job/handles."""
-        if not self.handle:
-            return
+    def _member_ids(self):
+        """One bounded snapshot of the same retained Job's current members."""
         class IDS(C.Structure):
             _fields_ = [("assigned", W.DWORD), ("count", W.DWORD), ("ids", ULONG_PTR * 128)]
         ids = IDS()
         _ok(self.k.QueryInformationJobObject(self.handle, 3, C.byref(ids), C.sizeof(ids), None), "job member query")
         if ids.count > 128 or ids.assigned > 128:
             raise GuardError("job member bound exceeded")
-        for pid in ids.ids[:ids.count]:
+        return list(ids.ids[:ids.count])
+
+    def capture_descendants(self):
+        """PID discovery is read-only; all retirement uses the retained job/handles."""
+        if not self.handle:
+            return
+        for pid in self._member_ids():
             handle = self.k.OpenProcess(0x1000 | 0x100000, False, pid)
             if not handle:
                 code = C.get_last_error()
-                raise GuardError("job member open", win32_error=code, pid=int(pid))
+                if code != 87:
+                    raise GuardError("job member open", win32_error=code, pid=int(pid))
+                try:
+                    remaining = self._member_ids()  # Exactly one requery; never retry the open.
+                    if pid in remaining:
+                        raise GuardError("unopened job member remains present", win32_error=code, pid=int(pid))
+                    if len(self.discovery_gaps) >= 128:
+                        raise GuardError("discovery gap bound exceeded", win32_error=code, pid=int(pid))
+                except GuardError as failure:
+                    # A query failure keeps its own native error, not the open's.
+                    failure.diagnostic["originalOpenError"] = code
+                    failure.diagnostic["pid"] = int(pid)
+                    raise
+                self.discovery_gaps.append({"pid": int(pid), "openError": code,
+                                            "absentOnRequery": True, "image": None,
+                                            "creationTime100ns": None, "individualRetirement": "unknown",
+                                            "coveredByJobDrain": False})
+                continue
             inside = W.BOOL()
             try:
                 _ok(self.k.IsProcessInJob(handle, self.handle, C.byref(inside)), "job membership")
@@ -398,8 +420,14 @@ class OwnedJob:
                 except BaseException as exc:
                     failure("job handle close failed", exc)
                 self.handle = None
+        # Only the final whole-Job outcome covers discovery gaps. In particular,
+        # absence from a member snapshot never proves an individual's retirement.
+        gaps_covered = empty and active == 0 and not errors and not any(
+            log["failed"] or log["truncated"] for log in self.logs)
+        gaps = [{**gap, "coveredByJobDrain": gaps_covered} for gap in self.discovery_gaps]
         return {"identities": proof, "logs": self.logs, "errors": errors, "diagnostics": diagnostics,
-                "jobEmptyBeforeClose": empty, "activeProcessesBeforeClose": active}
+                "jobEmptyBeforeClose": empty, "activeProcessesBeforeClose": active,
+                "discoveryGaps": gaps, "unresolvedDiscoveryGaps": sum(not gap["coveredByJobDrain"] for gap in gaps)}
 
 
 def listeners():

@@ -1,5 +1,19 @@
 # Native harness acceptance
 
+## M72 bounded discovery gaps and browser save (2026-10-16)
+
+The Windows acceptance guard captures exact OpenProcess error 87 and queries the
+same retained Job once. Only an absent PID becomes a separate bounded gap with
+unknown individual identity/retirement. Other errors and incomplete queries fail.
+Gaps require zero-error whole-Job drain; they never satisfy executable admission.
+
+Guard 28, profile 18, policy 47 and offline console gates/typecheck passed. One ownership review, one final E2E review, one combined fix wave and mechanical case reuse are recorded. Fresh case e73821b6-dad1-41c7-96d3-33fe497f76b0 completed in 17.312s: browser save PARTIAL, 1 saved reports, 20 known identities retired, 0 discovery gaps covered by zero-error Job drain, active count zero before close, ports free, stable private profile and exact 84-byte source preserved. The browser passed the three ordered real Files GETs, explicit click, one download event, filename/blob URL and exact saved/source byte checks, then failed the single-context-page assertion at spec line414: a second page was present. Its cause is unknown. The full browser case remains PARTIAL; it was not retried or regraded. No discovery gap occurred in this actual case; error87 coverage is deterministic unit evidence.
+
+This is synthetic owner HTTP/browser evidence, not model reasoning, report quality,
+provider readiness or complete Hermes parity. Previous M69/M70/M71 failed cases,
+M64 NOT RUN and M52 PARTIAL remain unchanged. See the
+[M72 plan](../superpowers/plans/2026-10-16-companion-discovery-gap-m72.md).
+
 ## M71 process guard and actual report-save acceptance (2026-10-16)
 
 **Guard retirement repair and whole-Job cleanup proved; browser save PARTIAL.**
