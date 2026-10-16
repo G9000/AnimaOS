@@ -364,6 +364,8 @@ pub(crate) struct AgentRunCoordinator {
     mcp: Option<crate::mcp::McpManager>,
     browser: Option<crate::browser::BrowserService>,
     document_extractor: Arc<dyn crate::attachments::documents::worker::DocumentExtractor>,
+    #[cfg(test)]
+    web_search: Option<Arc<crate::tools::web_search::SearchExecutor>>,
     /// How long a compaction's store read and model call may take.
     compaction_timeout: std::time::Duration,
     /// How long a title call may take before it is treated like a failed
@@ -643,6 +645,8 @@ impl AgentRunCoordinator {
             mcp: None,
             browser: None,
             document_extractor: Arc::new(crate::attachments::documents::worker::DocumentWorker),
+            #[cfg(test)]
+            web_search: None,
             compaction_timeout: std::time::Duration::from_millis(
                 crate::sessions::compaction::COMPACTION_TIMEOUT_MS,
             ),
@@ -1822,6 +1826,12 @@ impl AgentRunCoordinator {
                 live_run.control().cancel,
             )));
         let history = runtime.messages().to_vec();
+        #[cfg(test)]
+        let tool_context = {
+            let mut tool_context = tool_context;
+            tool_context.web_search = self.web_search.clone();
+            tool_context
+        };
         let execution = async {
             runtime
                 .run_in_room_with_context_and_tools(
@@ -2479,5 +2489,7 @@ mod title_tests;
 
 #[cfg(test)]
 mod agent_files_tests;
+#[cfg(test)]
+mod web_search_tests;
 #[cfg(test)]
 mod workspace_document_tests;

@@ -29,6 +29,47 @@ const session = {
 };
 
 describe('sessions client', () => {
+  it('m83 preserves the narrow saved source projection and legacy messages without searching on reload', async () => {
+    const sources = [
+      { title: 'Returned source', url: 'https://example.com/exact?x=1&y=2' },
+    ];
+    const { sessions, requests } = transport(() =>
+      Response.json({
+        messages: [
+          {
+            id: 'tool',
+            role: 'tool',
+            text: 'canonical native result',
+            attachments: [],
+            metadata: {
+              runId: 'run',
+              stepId: 'run:1',
+              toolCallId: 'call',
+              toolStatus: 'success',
+              webSources: sources,
+            },
+            createdAtMs: 1,
+          },
+          {
+            id: 'legacy',
+            role: 'tool',
+            text: 'legacy result',
+            attachments: [],
+            metadata: {},
+            createdAtMs: 2,
+          },
+        ],
+        nextBefore: null,
+      }),
+    );
+    const page = await sessions.messages('agent', 'session');
+    expect(page.messages[0].metadata.webSources).toEqual(sources);
+    expect(page.messages[1].metadata).not.toHaveProperty('webSources');
+    expect(requests.map((request) => request.url)).toEqual([
+      '/api/agents/agent/sessions/session/messages',
+    ]);
+  });
+
   it('preserves the exported counts-only XLSX extraction in selected message attachments', async () => {
     const extraction: SessionMessageXlsxExtraction = {
       version: 2,

@@ -220,6 +220,7 @@ impl RunObserver for RunEvents {
                         duration_ms: None,
                         result_preview: None,
                         truncated: false,
+                        sources: Vec::new(),
                     },
                 );
                 inner.publish_after_flush(Some(inner.event(LiveEventBody::ToolStarted {
@@ -239,6 +240,11 @@ impl RunObserver for RunEvents {
                 result,
                 recovered,
             } => {
+                let sources = if name == "web_search" && status == anima_core::TaskStatus::Success {
+                    crate::tools::web_search::sources_from_envelope(&result).unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
                 let (result_preview, truncated) = preview(&result);
                 inner.hub.runs().tool_finished(
                     &inner.run_id,
@@ -249,6 +255,12 @@ impl RunObserver for RunEvents {
                     result_preview.clone(),
                     truncated,
                 );
+                inner.hub.runs().tool_sources(
+                    &inner.run_id,
+                    &step_id,
+                    &tool_call_id,
+                    sources.clone(),
+                );
                 inner.publish_after_flush(Some(inner.event(LiveEventBody::ToolFinished {
                     step_id,
                     tool_call_id,
@@ -258,6 +270,7 @@ impl RunObserver for RunEvents {
                     result_preview,
                     truncated,
                     recovered,
+                    sources,
                 })));
             }
             RunFrame::Steered {

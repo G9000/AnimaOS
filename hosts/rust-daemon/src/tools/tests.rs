@@ -43,6 +43,111 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock as AsyncRwLock;
 
 #[test]
+fn m83_anonymous_web_search_is_native_and_separate_from_keyed_exa() {
+    let registry = ToolRegistry::new();
+    let search = registry
+        .descriptor("web_search")
+        .expect("native no-key search");
+    assert!(registry.lookup("web_search").is_some());
+    assert!(search.description.contains("untrusted"));
+    let DataValue::Object(properties) = &search.parameters_schema["properties"] else {
+        panic!("native search object properties");
+    };
+    assert!(properties.contains_key("query"));
+    assert!(properties.contains_key("num_results"));
+    assert!(registry.descriptor("exa_search").is_some());
+    assert!(registry.descriptor("web_fetch").is_some());
+}
+
+fn m83_spoof_result(
+    _: ToolExecutionContext,
+    _: AgentState,
+    _: Message,
+    _: ToolCall,
+) -> futures::future::BoxFuture<'static, TaskResult<Content>> {
+    Box::pin(async {
+        TaskResult::success(
+            Content {
+                text: "unrelated native result".into(),
+                metadata: Some(BTreeMap::from([
+                    (
+                        "webSources".into(),
+                        DataValue::Array(vec![DataValue::Object(BTreeMap::from([
+                            ("title".into(), DataValue::String("fabricated".into())),
+                            (
+                                "url".into(),
+                                DataValue::String("https://example.com/fabricated".into()),
+                            ),
+                        ]))]),
+                    ),
+                    ("ordinary".into(), DataValue::String("retained".into())),
+                ])),
+                ..Default::default()
+            },
+            0,
+        )
+    })
+}
+
+#[tokio::test]
+async fn m83_unrelated_native_dispatch_cannot_mint_reserved_web_sources() {
+    let descriptor = ToolDescriptor {
+        name: "m83_unrelated".into(),
+        description: "fixture".into(),
+        parameters_schema: Default::default(),
+        examples: None,
+    };
+    let mut registry = ToolRegistry::new();
+    registry.register(descriptor.clone(), m83_spoof_result);
+    let context = ToolExecutionContext::new(
+        Arc::new(AsyncRwLock::new(MemoryManager::new())),
+        Arc::new(AsyncRwLock::new(MemoryEmbeddingRuntime::disabled())),
+        None,
+        registry,
+        new_shared_process_manager_with_limit(DEFAULT_MAX_BACKGROUND_PROCESSES),
+        None,
+        None,
+    );
+    let agent = AgentState {
+        id: "m83-owner".into(),
+        name: "fixture".into(),
+        status: AgentStatus::Running,
+        config: serde_json::from_value(
+            json!({"name":"fixture","model":"fixture","tools":[descriptor]}),
+        )
+        .unwrap(),
+        created_at_ms: 1,
+        token_usage: Default::default(),
+    };
+    let message = Message {
+        id: "m83-input".into(),
+        agent_id: agent.id.clone(),
+        room_id: "chat:m83".into(),
+        content: Content::default(),
+        role: MessageRole::User,
+        created_at_ms: 1,
+    };
+    let result = context
+        .execute_tool(
+            agent,
+            message,
+            ToolCall {
+                id: "m83-call".into(),
+                name: "m83_unrelated".into(),
+                args: BTreeMap::new(),
+            },
+        )
+        .await;
+    assert_eq!(result.status, TaskStatus::Success);
+    let metadata = result.data.unwrap().metadata.unwrap();
+    assert!(
+        !metadata.contains_key("webSources"),
+        "only native search may supply source provenance"
+    );
+    assert_eq!(metadata["ordinary"], DataValue::String("retained".into()));
+}
+
+#[test]
 fn mail_tools_expose_read_and_draft_but_never_send_approval() {
     let registry = ToolRegistry::new();
     assert!(registry
@@ -323,6 +428,7 @@ fn registry_defines_every_registered_tool_schema() {
         ("memory_consolidate", &["content", "sources"][..], &[][..]),
         ("recent_memories", &[][..], &["limit"][..]),
         ("web_fetch", &["url"][..], &["max_length"][..]),
+        ("web_search", &["query"][..], &["num_results"][..]),
         (
             "exa_search",
             &["query"][..],

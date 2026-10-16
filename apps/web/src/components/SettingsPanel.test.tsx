@@ -150,6 +150,152 @@ const configuredWorkspace: DaemonWorkspaceState = {
   defaultRoot: '/workspaces',
 };
 
+describe('m83 independent owner web permissions', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each([
+    ['Allow web search', 'web_search', 'Allow web page reads'],
+    ['Allow web page reads', 'web_fetch', 'Allow web search'],
+  ])(
+    'saves only the explicitly selected %s grant without probing the network',
+    async (label, tool, otherLabel) => {
+      const network = vi
+        .spyOn(globalThis, 'fetch')
+        .mockRejectedValue(new Error('No network in owner settings'));
+      const original = ['read_file', 'custom_permission', 'exa_search'];
+      const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+      renderPanel(agent({ toolNames: original }), { saveSettings });
+      const selected = screen.getByRole('checkbox', { name: label });
+      expect(selected).not.toBeChecked();
+      expect(
+        screen.getByRole('checkbox', { name: otherLabel }),
+      ).not.toBeChecked();
+      fireEvent.click(selected);
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() =>
+        expect(saveSettings).toHaveBeenCalledWith({
+          tools: [...original, tool],
+        }),
+      );
+      expect(network).not.toHaveBeenCalled();
+      expect(
+        screen.getByRole('checkbox', { name: otherLabel }),
+      ).not.toBeChecked();
+      expect(screen.getByText(/anonymous public service/i)).toBeVisible();
+      expect(screen.getByText(/rate.limit/i)).toBeVisible();
+    },
+  );
+
+  it('recognizes stored optional grants without widening profiles and preserves custom grants on unrelated saves', async () => {
+    const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+    const original = [
+      ...toolNamesForProfile('collaborate'),
+      'web_search',
+      'web_fetch',
+    ];
+    const view = renderPanel(agent({ toolNames: original }), { saveSettings });
+    expect(screen.getByRole('radio', { name: /^Collaborate/ })).toBeChecked();
+    expect(
+      screen.getByRole('checkbox', { name: 'Allow web search' }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole('checkbox', { name: 'Allow web page reads' }),
+    ).toBeChecked();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Nova with search' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith({ name: 'Nova with search' }),
+    );
+    expect(saveSettings.mock.calls[0][0]).not.toHaveProperty('tools');
+    view.rerender(
+      <SettingsPanel
+        {...view.props}
+        agent={agent({ toolNames: ['custom_permission', 'web_search'] })}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'Allow web page reads' }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: /^(Save changes|Saved ✓)$/ }),
+    );
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenLastCalledWith({
+        tools: ['custom_permission', 'web_search', 'web_fetch'],
+      }),
+    );
+    for (const profile of ['observe', 'collaborate', 'operate'] as const) {
+      expect(toolNamesForProfile(profile)).not.toContain('web_search');
+      expect(toolNamesForProfile(profile)).not.toContain('web_fetch');
+    }
+  });
+
+  it('clears optional web grants on deliberate profile selection and resets them on agent changes', async () => {
+    const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+    const view = renderPanel(
+      agent({ toolNames: ['custom_permission', 'web_search', 'web_fetch'] }),
+      { saveSettings },
+    );
+    fireEvent.click(screen.getByRole('radio', { name: /^Observe/ }));
+    expect(
+      screen.getByRole('checkbox', { name: 'Allow web search' }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByRole('checkbox', { name: 'Allow web page reads' }),
+    ).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith({
+        tools: toolNamesForProfile('observe'),
+      }),
+    );
+    view.rerender(
+      <SettingsPanel
+        {...view.props}
+        agent={agent({ id: 'next-agent', toolNames: ['web_fetch'] })}
+      />,
+    );
+    expect(
+      screen.getByRole('checkbox', { name: 'Allow web search' }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByRole('checkbox', { name: 'Allow web page reads' }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole('button', { name: /^(No changes|Saved ✓)$/ }),
+    ).toBeDisabled();
+  });
+
+  it('retains failed grant drafts and locks the web controls during save and reset', async () => {
+    const view = renderPanel(agent(), {
+      saveSettings: vi.fn(async () => false),
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Allow web search' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    view.rerender(
+      <SettingsPanel {...view.props} saveError="Grant save failed" />,
+    );
+    expect(
+      screen.getByRole('checkbox', { name: 'Allow web search' }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole('checkbox', { name: 'Allow web page reads' }),
+    ).not.toBeChecked();
+    expect(view.props.agent.toolNames).not.toContain('web_search');
+    for (const busy of [{ saving: true }, { resetting: true }]) {
+      view.rerender(<SettingsPanel {...view.props} {...busy} />);
+      expect(
+        screen.getByRole('checkbox', { name: 'Allow web search' }),
+      ).toBeDisabled();
+      expect(
+        screen.getByRole('checkbox', { name: 'Allow web page reads' }),
+      ).toBeDisabled();
+    }
+  });
+});
+
 describe('SettingsPanel Tasks connection', () => {
   afterEach(() => vi.restoreAllMocks());
 

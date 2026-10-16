@@ -2,11 +2,21 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentDetail, ChatMessage } from '../lib/types';
-import type { LearningReview, Run } from '@animaOS-SWARM/sdk';
+import {
+  createDaemonClient,
+  type LearningReview,
+  type Run,
+} from '@animaOS-SWARM/sdk';
+import { toChatMessage } from '../lib/daemon-api';
 import { formatTime } from './ui-bits';
 import { Composer, MessageList } from './ChatScreen';
 import { SLASH_COMMANDS } from '../lib/slash-commands';
-import { emptyLiveRun, type LiveRun } from '../lib/session-events';
+import {
+  applyEvent,
+  EMPTY_LIVE_STATE,
+  emptyLiveRun,
+  type LiveRun,
+} from '../lib/session-events';
 import { buildTranscript } from '../lib/transcript';
 import { runFixture } from '../test/live';
 
@@ -48,6 +58,224 @@ const agent: AgentDetail = {
   token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
   messages,
 };
+
+async function openM83SearchCards() {
+  for (const button of screen.queryAllByRole('button', {
+    name: /^\d+ tool requests?/,
+  }))
+    fireEvent.click(button);
+  for (const button of screen.getAllByRole('button', { name: /^web_search/ }))
+    fireEvent.click(button);
+}
+
+describe('m83 visible search provenance', () => {
+  it('renders saved returned sources and ordinary answer citations without fetching search again', async () => {
+    const url = 'https://example.com/actual-result?x=1&y=2';
+    const sourceMessages: ChatMessage[] = [
+      {
+        id: 'search-call',
+        role: 'Assistant',
+        content: {
+          text: '',
+          metadata: {
+            runId: 'search-run',
+            stepId: 'search-run:1',
+            toolCalls: [
+              {
+                id: 'search-call-id',
+                name: 'web_search',
+                args: { query: 'bounded' },
+              },
+            ],
+          },
+        },
+        created_at_ms: 1,
+      },
+      {
+        id: 'search-result',
+        role: 'Tool',
+        content: {
+          text: 'canonical native result',
+          metadata: {
+            runId: 'search-run',
+            stepId: 'search-run:1',
+            toolCallId: 'search-call-id',
+            toolStatus: 'success',
+            webSources: [{ title: 'Returned source', url }],
+          },
+        },
+        created_at_ms: 2,
+      },
+      {
+        id: 'search-answer',
+        role: 'Assistant',
+        content: {
+          text: `See [Answer reference](${url}).`,
+          metadata: { runId: 'search-run' },
+        },
+        created_at_ms: 3,
+      },
+    ];
+    render(
+      <MessageList
+        agent={{ ...agent, messages: sourceMessages }}
+        sending={false}
+        scrollerRef={{ current: null }}
+        onSuggestion={vi.fn()}
+        items={buildTranscript({ messages: sourceMessages })}
+      />,
+    );
+    await openM83SearchCards();
+    const source = screen.getByRole('link', { name: 'Returned source' });
+    expect(source).toHaveAttribute('href', url);
+    expect(source.closest('pre')).toBeNull();
+    expect(
+      screen.getByRole('link', { name: 'Answer reference' }),
+    ).toHaveAttribute('href', url);
+    expect(screen.getByText('Search sources')).toBeVisible();
+  });
+
+  it('does not label an answer-only Markdown URL as a retrieved source', () => {
+    const onlyAnswer: ChatMessage[] = [
+      {
+        id: 'answer-only',
+        role: 'Assistant',
+        content: { text: '[Answer link](https://example.com/answer)' },
+        created_at_ms: 1,
+      },
+    ];
+    render(
+      <MessageList
+        agent={{ ...agent, messages: onlyAnswer }}
+        sending={false}
+        scrollerRef={{ current: null }}
+        onSuggestion={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('link', { name: 'Answer link' })).toBeVisible();
+    expect(screen.queryByText('Search sources')).not.toBeInTheDocument();
+  });
+
+  it.skipIf(!process.env.ANIMA_M83_CONSOLE_ARTIFACT)(
+    'm83 renders exact captured native owner-session sources through SDK and console',
+    async () => {
+      const { readFile } = await import('node:fs/promises');
+      const artifact = JSON.parse(
+        await readFile(process.env.ANIMA_M83_CONSOLE_ARTIFACT!, 'utf8'),
+      );
+      expect(artifact.schemaVersion).toBe(1);
+      expect(artifact.endpoint).toBe('https://mcp.exa.ai/mcp');
+      expect(artifact.search.status).toBe('success');
+      expect(artifact.search.urls.length).toBeGreaterThan(0);
+      const fetch = vi.fn(async (url: RequestInfo | URL) =>
+        String(url).endsWith('/events')
+          ? new Response(
+              artifact.events
+                .map(
+                  (event: { type: string }) =>
+                    `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+                )
+                .join(''),
+              { headers: { 'content-type': 'text/event-stream' } },
+            )
+          : Response.json(artifact.sessionMessages),
+      );
+      const client = createDaemonClient({ baseUrl: '', fetch });
+      const page = await client.sessions.messages(
+        'captured-agent',
+        'captured-session',
+      );
+      const captured = page.messages.map(toChatMessage);
+      expect(
+        captured.some(
+          (message) =>
+            message.role === 'Assistant' &&
+            artifact.search.urls.some((url: string) =>
+              message.content.text.includes(url),
+            ),
+        ),
+      ).toBe(true);
+      let live = EMPTY_LIVE_STATE;
+      for await (const event of client.events.stream('captured-agent'))
+        live = applyEvent(live, event);
+      const streamSources = Object.values(live.runs).flatMap((run) =>
+        run.tools.flatMap((tool) => tool.sources ?? []),
+      );
+      expect([...new Set(streamSources.map((source) => source.url))]).toEqual(
+        artifact.search.urls,
+      );
+      if (artifact.snapshot) {
+        const reconnected = applyEvent(EMPTY_LIVE_STATE, artifact.snapshot);
+        const restoredSources = Object.values(reconnected.runs).flatMap((run) =>
+          run.tools.flatMap((tool) => tool.sources ?? []),
+        );
+        expect([
+          ...new Set(restoredSources.map((source) => source.url)),
+        ]).toEqual(artifact.search.urls);
+      }
+      const streamed = render(
+        <MessageList
+          agent={{ ...agent, messages: [] }}
+          sending={false}
+          scrollerRef={{ current: null }}
+          onSuggestion={vi.fn()}
+          items={buildTranscript({
+            messages: [],
+            runs: Object.values(live.runs),
+            olderHistory: false,
+          })}
+        />,
+      );
+      await openM83SearchCards();
+      expect([
+        ...new Set(
+          screen
+            .getAllByRole('list', { name: 'Search sources' })
+            .flatMap((list) =>
+              within(list)
+                .getAllByRole('link')
+                .map((link) => link.getAttribute('href')),
+            ),
+        ),
+      ]).toEqual(artifact.search.urls);
+      streamed.unmount();
+      render(
+        <MessageList
+          agent={{ ...agent, messages: captured }}
+          sending={false}
+          scrollerRef={{ current: null }}
+          onSuggestion={vi.fn()}
+          items={buildTranscript({ messages: captured })}
+        />,
+      );
+      await openM83SearchCards();
+      const lists = screen.getAllByRole('list', { name: 'Search sources' });
+      const rendered = lists.flatMap((list) =>
+        within(list)
+          .getAllByRole('link')
+          .map((link) => link.getAttribute('href')),
+      );
+      expect([...new Set(rendered)]).toEqual(artifact.search.urls);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(
+        fetch.mock.calls.every(
+          ([url]) =>
+            String(url).endsWith('/messages') ||
+            String(url).endsWith('/events'),
+        ),
+      ).toBe(true);
+      for (const list of lists)
+        for (const link of within(list).getAllByRole('link')) {
+          expect(link.closest('pre')).toBeNull();
+          expect(link).toHaveAttribute('target', '_blank');
+          expect(link).toHaveAttribute(
+            'rel',
+            expect.stringContaining('noreferrer'),
+          );
+        }
+    },
+  );
+});
 
 describe('MessageList', () => {
   it('M38_offers_review_for_a_completed_task_with_tool_activity', async () => {

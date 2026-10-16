@@ -138,6 +138,8 @@ export function SettingsPanel({
     'read_conversation_window',
   );
   const hasDocumentRead = agent.toolNames.includes('read_document');
+  const hasWebSearch = agent.toolNames.includes('web_search');
+  const hasWebFetch = agent.toolNames.includes('web_fetch');
   const derivedAccess = deriveAccessProfile(
     agent.toolNames.filter(
       (tool) =>
@@ -145,7 +147,9 @@ export function SettingsPanel({
         tool !== 'memory_consolidate' &&
         !isBrowserTool(tool) &&
         tool !== 'read_conversation_window' &&
-        tool !== 'read_document',
+        tool !== 'read_document' &&
+        tool !== 'web_search' &&
+        tool !== 'web_fetch',
     ),
   );
 
@@ -173,6 +177,8 @@ export function SettingsPanel({
   const [allowConversationRead, setAllowConversationRead] =
     useState(hasConversationRead);
   const [allowDocumentRead, setAllowDocumentRead] = useState(hasDocumentRead);
+  const [allowWebSearch, setAllowWebSearch] = useState(hasWebSearch);
+  const [allowWebFetch, setAllowWebFetch] = useState(hasWebFetch);
   const [savedFlash, setSavedFlash] = useState(false);
   const saveErrorRef = useRef<HTMLDivElement>(null);
   const resetErrorRef = useRef<HTMLDivElement>(null);
@@ -206,6 +212,8 @@ export function SettingsPanel({
     setAllowMemoryConsolidate(hasMemoryConsolidate);
     setAllowConversationRead(hasConversationRead);
     setAllowDocumentRead(hasDocumentRead);
+    setAllowWebSearch(hasWebSearch);
+    setAllowWebFetch(hasWebFetch);
   }, [
     agent.id,
     agent.name,
@@ -217,6 +225,8 @@ export function SettingsPanel({
     hasMemoryConsolidate,
     hasConversationRead,
     hasDocumentRead,
+    hasWebSearch,
+    hasWebFetch,
     derivedAccess,
   ]);
 
@@ -294,7 +304,9 @@ export function SettingsPanel({
     allowMemoryRemove !== hasMemoryRemove ||
     allowMemoryConsolidate !== hasMemoryConsolidate ||
     allowConversationRead !== hasConversationRead ||
-    allowDocumentRead !== hasDocumentRead;
+    allowDocumentRead !== hasDocumentRead ||
+    allowWebSearch !== hasWebSearch ||
+    allowWebFetch !== hasWebFetch;
   const dirty =
     name.trim() !== agent.name ||
     provider !== agent.provider ||
@@ -321,7 +333,9 @@ export function SettingsPanel({
           !isBrowserTool(tool) &&
           (tool !== 'memory_consolidate' || allowMemoryConsolidate) &&
           (tool !== 'read_conversation_window' || allowConversationRead) &&
-          (tool !== 'read_document' || allowDocumentRead),
+          (tool !== 'read_document' || allowDocumentRead) &&
+          (tool !== 'web_search' || allowWebSearch) &&
+          (tool !== 'web_fetch' || allowWebFetch),
       );
       if (allowMemoryRemove && !patch.tools.includes('memory_remove')) {
         patch.tools.push('memory_remove');
@@ -340,6 +354,12 @@ export function SettingsPanel({
       }
       if (allowDocumentRead && !patch.tools.includes('read_document')) {
         patch.tools.push('read_document');
+      }
+      if (allowWebSearch && !patch.tools.includes('web_search')) {
+        patch.tools.push('web_search');
+      }
+      if (allowWebFetch && !patch.tools.includes('web_fetch')) {
+        patch.tools.push('web_fetch');
       }
       patch.tools.push(
         ...BROWSER_TOOL_ACCESS.filter(({ name }) =>
@@ -755,6 +775,8 @@ export function SettingsPanel({
                             setAllowMemoryConsolidate(false);
                             setAllowConversationRead(false);
                             setAllowDocumentRead(false);
+                            setAllowWebSearch(false);
+                            setAllowWebFetch(false);
                             setBrowserGrants([]);
                           }}
                           className="mr-3 h-4 w-4 align-top"
@@ -776,6 +798,50 @@ export function SettingsPanel({
                       </div>
                     );
                   })}
+                  {[
+                    {
+                      id: 'web-search',
+                      label: 'Allow web search',
+                      checked: allowWebSearch,
+                      setChecked: setAllowWebSearch,
+                      help: "Sends the query to Exa's anonymous public service, which may be rate-limited. Existing Network approval rules still apply.",
+                    },
+                    {
+                      id: 'web-fetch',
+                      label: 'Allow web page reads',
+                      checked: allowWebFetch,
+                      setChecked: setAllowWebFetch,
+                      help: 'Sends the selected URL to the public site. Existing Network approval rules still apply.',
+                    },
+                  ].map(({ id, label, checked, setChecked, help }) => (
+                    <div
+                      key={id}
+                      className="rounded-xl border border-line bg-white/[0.015] p-3.5"
+                    >
+                      <div className="flex items-start gap-3">
+                        <input
+                          id={`settings-${id}`}
+                          type="checkbox"
+                          aria-describedby={`settings-${id}-help`}
+                          checked={checked}
+                          onChange={(event) => setChecked(event.target.checked)}
+                          className="mt-0.5 h-4 w-4 shrink-0"
+                        />
+                        <label
+                          htmlFor={`settings-${id}`}
+                          className="cursor-pointer font-medium text-ink"
+                        >
+                          {label}
+                        </label>
+                      </div>
+                      <p
+                        id={`settings-${id}-help`}
+                        className="mt-1 pl-7 text-sm text-ink-2"
+                      >
+                        {help}
+                      </p>
+                    </div>
+                  ))}
                   <div className="rounded-xl border border-line bg-white/[0.015] p-3.5">
                     <p className="font-medium text-ink">Browser tool access</p>
                     <p className="mt-1 text-sm text-ink-2">

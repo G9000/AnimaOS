@@ -4,12 +4,14 @@ import {
   type LearningReview,
   type Run,
   type SessionMessageAttachment,
+  type WebSource,
 } from '@animaOS-SWARM/sdk';
 
 import type { SaveOutcome, SavedState } from '../hooks/useSaveToMemory';
 import type { ApprovalDecide } from './approvals';
 import { emptyLiveRun, stepRunId, type LiveRun } from './session-events';
 import type { ChatMessage } from './types';
+import { toolWebSources } from './web-sources';
 
 /** Tools whose calls start a helper or delegated run (spec §15.2). */
 export const HELPER_TOOLS: ReadonlySet<string> = new Set([
@@ -48,6 +50,7 @@ export interface ToolStep {
   /** The run that made the call, when known. */
   runId: string | null;
   helper: ToolHelper | null;
+  sources?: WebSource[];
 }
 
 /** A message the daemon has not accepted yet, or a steer not yet applied. */
@@ -280,22 +283,26 @@ function resultText(message: ChatMessage, status: 'success' | 'error'): string {
 
 /** The tool cards of a run the stream is showing. */
 export function liveToolSteps(live: LiveRun): ToolStep[] {
-  return live.tools.map((card) => ({
-    stepId: card.stepId,
-    toolCallId: card.toolCallId,
-    name: card.name,
-    argumentsPreview: previewSummary(card.argumentsPreview),
-    status: card.status,
-    durationMs: card.durationMs,
-    result: card.resultPreview,
-    truncated: card.truncated,
-    runId: live.run.id,
-    helper: toolHelper(
-      card.name,
-      parsedFields(card.argumentsPreview),
-      card.resultPreview,
-    ),
-  }));
+  return live.tools.map((card) => {
+    const sources = toolWebSources(card.name, card.status, card.sources);
+    return {
+      stepId: card.stepId,
+      toolCallId: card.toolCallId,
+      name: card.name,
+      argumentsPreview: previewSummary(card.argumentsPreview),
+      status: card.status,
+      durationMs: card.durationMs,
+      result: card.resultPreview,
+      truncated: card.truncated,
+      ...(sources.length ? { sources } : {}),
+      runId: live.run.id,
+      helper: toolHelper(
+        card.name,
+        parsedFields(card.argumentsPreview),
+        card.resultPreview,
+      ),
+    };
+  });
 }
 
 /** Where a non-terminal status sits in the run lifecycle (spec §4.1).
@@ -536,6 +543,22 @@ export function buildHistory(input: HistoryInput): TranscriptHistory {
         step.status = status;
         step.durationMs = resultDuration(metadata);
         step.result = result;
+        const ownsSourceResult =
+          runId !== null &&
+          stringField(metadata, 'runId') === runId &&
+          stepId !== null &&
+          callId !== null &&
+          step.runId === runId &&
+          step.stepId === stepId &&
+          step.toolCallId === callId &&
+          metadata.toolStatus === 'success';
+        const sources = toolWebSources(
+          step.name,
+          ownsSourceResult ? 'success' : 'error',
+          metadata.webSources,
+        );
+        if (sources.length) step.sources = sources;
+        else delete step.sources;
         if (step.helper && !step.helper.agentId)
           step.helper = {
             ...step.helper,

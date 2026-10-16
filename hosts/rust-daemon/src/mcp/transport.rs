@@ -173,6 +173,12 @@ pub(crate) trait McpTransportSession: Send + Sync {
         &self,
         control: TransportControl,
     ) -> BoxFuture<'static, Result<McpDiscovery, McpTransportError>>;
+    fn discover_native_search(
+        &self,
+        control: TransportControl,
+    ) -> BoxFuture<'static, Result<McpDiscovery, McpTransportError>> {
+        self.discover(control)
+    }
     fn call_once(
         &self,
         call: McpCall,
@@ -670,6 +676,7 @@ impl HttpSession {
     async fn discover_inner(
         self,
         control: TransportControl,
+        native_search: bool,
     ) -> Result<McpDiscovery, McpTransportError> {
         let _operation = control
             .run(async { Ok(self.0.operation.lock().await) })
@@ -680,7 +687,7 @@ impl HttpSession {
         self.0.backend.begin(control.clone());
         let sdk = self.0.sdk.lock().await;
         let sdk = sdk.as_ref().ok_or(McpTransportError::Unavailable)?;
-        discover_sdk(
+        discover_sdk_mode(
             sdk,
             &control,
             |fallback| self.error(fallback),
@@ -691,6 +698,7 @@ impl HttpSession {
                     None => Ok(()),
                 }
             },
+            native_search,
         )
         .await
     }
@@ -738,7 +746,24 @@ pub(super) async fn discover_sdk<F, A, Fut>(
     sdk: &RunningService<RoleClient, ClientConfig>,
     control: &TransportControl,
     error: F,
+    after_page: A,
+) -> Result<McpDiscovery, McpTransportError>
+where
+    F: Fn(McpTransportError) -> McpTransportError,
+    A: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<(), McpTransportError>>,
+{
+    discover_sdk_mode(sdk, control, error, after_page, false).await
+}
+
+// Only the fixed native adapter can request this compatibility path. Generic
+// reviewed MCP discovery keeps its existing schema and descriptor policy.
+async fn discover_sdk_mode<F, A, Fut>(
+    sdk: &RunningService<RoleClient, ClientConfig>,
+    control: &TransportControl,
+    error: F,
     mut after_page: A,
+    native_search: bool,
 ) -> Result<McpDiscovery, McpTransportError>
 where
     F: Fn(McpTransportError) -> McpTransportError,
@@ -749,6 +774,9 @@ where
     let mut cursors = HashSet::new();
     let mut names = HashSet::new();
     let mut tools = Vec::new();
+    let mut tool_count = 0;
+    #[cfg(test)]
+    let mut evidence_pages = Vec::<Value>::new();
     for page in 0..4 {
         let params = cursor
             .take()
@@ -761,15 +789,44 @@ where
             })
             .await?;
         after_page().await?;
+        #[cfg(test)]
+        if let Some(path) = std::env::var_os("ANIMA_M83_DISCOVERY_EVIDENCE_PATH") {
+            evidence_pages.push(serde_json::json!({"page":page,"result":&result}));
+            let bytes = serde_json::to_vec_pretty(&serde_json::json!({
+                "schemaVersion":1,"protocolVersion":PROTOCOL,"pages":&evidence_pages
+            }))
+            .expect("SDK discovery metadata serializes");
+            assert!(
+                bytes.len() <= RAW_TOTAL,
+                "Discovery evidence exceeds its byte budget"
+            );
+            std::fs::write(path, bytes).expect("Discovery evidence is saved before validation");
+        }
         for tool in result.tools {
-            if tools.len() >= 64 || !names.insert(tool.name.to_string()) {
+            if tool_count >= 64 || !names.insert(tool.name.to_string()) {
                 return Err(McpTransportError::WireLimit);
             }
+            tool_count += 1;
+            if tool.name.trim().is_empty()
+                || tool.name.len() > 128
+                || tool.name.chars().any(char::is_control)
+            {
+                return Err(McpTransportError::SchemaRejected);
+            }
+            if native_search && tool.name != "web_search_exa" {
+                continue;
+            }
+            let input = Value::Object((*tool.input_schema).clone());
+            let input = if native_search {
+                native_search_schema(input)?
+            } else {
+                input
+            };
             tools.push(
                 external_tools::prepare_external_tool(
                     &tool.name,
                     tool.description.as_deref().unwrap_or(""),
-                    Value::Object((*tool.input_schema).clone()),
+                    input,
                     tool.output_schema
                         .map(|schema| Value::Object((*schema).clone())),
                 )
@@ -796,6 +853,60 @@ where
         }
     }
     Err(McpTransportError::WireLimit)
+}
+
+fn native_search_schema(mut schema: Value) -> Result<Value, McpTransportError> {
+    match schema.get("$schema").and_then(Value::as_str) {
+        None | Some("https://json-schema.org/draft/2020-12/schema") => return Ok(schema),
+        Some("http://json-schema.org/draft-07/schema#") => {}
+        _ => return Err(McpTransportError::SchemaRejected),
+    }
+    let object = schema
+        .as_object()
+        .ok_or(McpTransportError::SchemaRejected)?;
+    if object.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "$schema" | "type" | "properties" | "required" | "additionalProperties"
+        )
+    }) || object.get("type").and_then(Value::as_str) != Some("object")
+        || object.get("additionalProperties") != Some(&Value::Bool(false))
+    {
+        return Err(McpTransportError::SchemaRejected);
+    }
+    let properties = object
+        .get("properties")
+        .and_then(Value::as_object)
+        .ok_or(McpTransportError::SchemaRejected)?;
+    for property in properties.values() {
+        let property = property
+            .as_object()
+            .ok_or(McpTransportError::SchemaRejected)?;
+        let kind = property.get("type").and_then(Value::as_str);
+        if !matches!(kind, Some("string" | "number"))
+            || property.keys().any(|key| {
+                !matches!(
+                    key.as_str(),
+                    "type" | "description" | "minLength" | "maxLength"
+                )
+            })
+            || property
+                .get("description")
+                .is_some_and(|value| !value.is_string())
+            || ["minLength", "maxLength"].iter().any(|key| {
+                property
+                    .get(*key)
+                    .is_some_and(|value| kind != Some("string") || value.as_u64().is_none())
+            })
+        {
+            return Err(McpTransportError::SchemaRejected);
+        }
+    }
+    // These observed scalar/object keywords have identical meaning in both
+    // dialects. Preserve every constraint; only replace the dialect annotation
+    // through the ordinary strict descriptor preparation below.
+    schema.as_object_mut().unwrap().remove("$schema");
+    Ok(schema)
 }
 
 pub(super) async fn request_sdk<F>(
@@ -929,7 +1040,22 @@ impl McpTransportSession for HttpSession {
         let session = self.clone();
         owned(control.clone(), async move {
             let result = control
-                .run(session.clone().discover_inner(control.clone()))
+                .run(session.clone().discover_inner(control.clone(), false))
+                .await;
+            if result.is_err() {
+                session.begin_close();
+            }
+            result
+        })
+    }
+    fn discover_native_search(
+        &self,
+        control: TransportControl,
+    ) -> BoxFuture<'static, Result<McpDiscovery, McpTransportError>> {
+        let session = self.clone();
+        owned(control.clone(), async move {
+            let result = control
+                .run(session.clone().discover_inner(control.clone(), true))
                 .await;
             if result.is_err() {
                 session.begin_close();
@@ -1104,6 +1230,69 @@ mod tests {
             Instant::now() + Duration::from_secs(seconds),
             CancellationToken::new(),
         )
+    }
+    #[tokio::test]
+    #[ignore = "explicit opt-in anonymous metadata-only diagnostic; no search query"]
+    async fn m83_public_discovery_metadata() {
+        assert_eq!(
+            std::env::var("ANIMA_M83_PUBLIC_METADATA").as_deref(),
+            Ok("1")
+        );
+        let path = std::env::var("ANIMA_M83_DISCOVERY_EVIDENCE_PATH")
+            .expect("ANIMA_M83_DISCOVERY_EVIDENCE_PATH must name a fresh private artifact");
+        assert!(
+            !std::path::Path::new(&path).exists(),
+            "Metadata evidence path must be fresh"
+        );
+        std::fs::write(&path, br#"{"schemaVersion":1,"pages":[]}"#).unwrap();
+        let ctl = control(30);
+        let connected = DefaultMcpTransportFactory::default()
+            .connect(
+                ValidatedMcpLaunch::Http(ValidatedMcpEndpoint("https://mcp.exa.ai/mcp".into())),
+                ctl.clone(),
+            )
+            .await;
+        let (connect, discover, close) = match connected {
+            Ok(session) => {
+                let discovered = session.discover(ctl.clone()).await;
+                let discover = match &discovered {
+                    Ok(value) => json!({"status":"success","toolCount":value.tools.len()}),
+                    Err(error) => json!({"status":"error","error":format!("{error:?}")}),
+                };
+                let close = match session.close().await {
+                    Ok(_) => json!({"status":"joined"}),
+                    Err(error) => json!({"status":"error","error":format!("{error:?}")}),
+                };
+                (json!({"status":"success"}), discover, close)
+            }
+            Err(error) => (
+                json!({"status":"error","error":format!("{error:?}")}),
+                json!({"status":"not-started"}),
+                json!({"status":"no-session"}),
+            ),
+        };
+        let dispatched = ctl.dispatched.load(Ordering::SeqCst);
+        let mut artifact: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        artifact["diagnostic"] = json!({
+            "endpoint":"https://mcp.exa.ai/mcp","connect":connect,"discover":discover,
+            "close":close,"logicalSearchCalls":usize::from(dispatched)
+        });
+        let bytes = serde_json::to_vec_pretty(&artifact).unwrap();
+        assert!(bytes.len() <= RAW_TOTAL + 4096);
+        std::fs::write(&path, bytes).unwrap();
+        println!(
+            "Metadata-only SDK evidence saved to {path}: {}",
+            artifact["diagnostic"]
+        );
+        assert!(
+            !dispatched,
+            "Metadata discovery must never dispatch tools/call"
+        );
+        assert_eq!(artifact["diagnostic"]["close"]["status"], "joined");
+        assert!(
+            !artifact["pages"].as_array().unwrap().is_empty(),
+            "Actual tools/list metadata must be retained"
+        );
     }
     fn m65_token() -> super::super::credentials::McpBearerToken {
         super::super::credentials::McpBearerToken::parse("m65-wire-secret".into()).unwrap()

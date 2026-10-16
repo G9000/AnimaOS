@@ -1,6 +1,14 @@
 Hermes Agent attribution for agent_files/{disk,selection,scan}.rs, tools/memory.rs,
 tools.rs memory descriptions and components/providers.rs memory curation guidance
 Source: https://github.com/NousResearch/hermes-agent
+
+M83 tools/web_search.rs uses the labelled Exa response-field behavior from
+plugins/web/keyless_mcp.py::_parse_exa_search_text at public revision
+1fd18277267152893a8a24792b79213e7ca3f899. The Rust parser is independently
+implemented with bounded Unicode-safe output, inline/multiline highlights,
+ambiguous-field rejection, complete public URL validation and typed source
+projection. Anima reuses its existing rmcp transport; no Hermes protocol,
+provider fallback, profile/configuration or account code is imported.
 Revision: f3ef9db68332063a3625661f3a9b259f60abdb4e
 
 Adapted agent/prompt_builder.py source selection (_agents_md_directory_chain,

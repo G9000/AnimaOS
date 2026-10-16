@@ -25,6 +25,8 @@ pub(crate) struct LiveToolView {
     pub(crate) duration_ms: Option<u64>,
     pub(crate) result_preview: Option<String>,
     pub(crate) truncated: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) sources: Vec<crate::tools::web_search::WebSource>,
 }
 
 /// What a snapshot shows of one run.
@@ -208,6 +210,26 @@ impl LiveRuns {
             tool.duration_ms = Some(duration_ms);
             tool.result_preview = Some(result_preview);
             tool.truncated = truncated;
+            tool.sources.clear();
+        }
+    }
+
+    pub(crate) fn tool_sources(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        call_id: &str,
+        sources: Vec<crate::tools::web_search::WebSource>,
+    ) {
+        if let Some(tool) = self.lock().get_mut(run_id).and_then(|run| {
+            run.view
+                .tools
+                .iter_mut()
+                .find(|tool| tool.step_id == step_id && tool.tool_call_id == call_id)
+        }) {
+            if tool.name == "web_search" && tool.status == "success" {
+                tool.sources = sources;
+            }
         }
     }
 

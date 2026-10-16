@@ -1,6 +1,18 @@
+# Handover: M83 web search with citations
+
+## Start here (2026-10-16): M83 search and citations accepted
+
+M83 adds anonymous native web_search through the existing MCP transport, independent owner search/page-read grants, and bounded Search sources links across live events, snapshots, saved Tool history, SDK and console. Sources stay outside the shortened preview; reload never re-searches. Fresh Rust 2989 passed/31 ignored across 46 suites; web1648passed/1opt-in skipped; SDK203passed/3skipped. Rust lint/build, SDK/web typecheck/build, touched formatting/docs and the native plus web/SDK reviews pass.
+
+One controlled actual-HTTP harness/history/console chain and one anonymous public search through the real native harness and console renderer pass with a scripted model consuming actual returned evidence. The initial discovery-only failure sent no query and stays archived as failed; the observed hosted schema/objective mismatch was fixed only for native search. Zero paid model calls. This establishes endpoint compatibility and source propagation, not general LLM research quality or independently verified answer claims. Anonymous service availability/rate limits remain external. No account/profile/normal-service/database/container activation or historical-case replay.
+
+Resume .superpowers/sdd/2026-10-16-companion-web-search-m83/progress.md.
+The ledger records exact publication and merge state. Existing dev sessions may still run an older binary; restart the normal dev session before using the new Settings grants.
+Finish explicit unsigned commit/push/PR/attach, standing merge and exact-source-tree verification if pending. Do not replay the consumed public query or historical cases. Use Settings to grant search/page reads explicitly in ordinary use. Preserve unrelated generated Astro settings/nx.json and user-owned runtime files; their external changes are recorded separately. No stash/reset/restore/path checkout/worktree. Cargo incremental0/jobs1/threads2, serialized. No normal profiles/accounts/services/DBs/containers/Docker55432.
+
 # Handover: M82 logical swarm task ownership
 
-## Start here (2026-10-16): publish M82 and continue selected parity
+## Historical M82 settled handover
 
 After M82 publication, prioritize one useful daily workflow through the existing console/harness and independently check its output, cancellation and recovery. Choose its bounded success criteria before another implementation milestone; add reliability fixes only when that workflow demonstrates a concrete blocker. The core feature surface is implemented, while selected real connector accounts, broader autonomous work quality and target-host acceptance remain open. No new account/message/provider/host activation is implied.
 

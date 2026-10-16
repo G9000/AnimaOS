@@ -23,6 +23,83 @@ function sseResponse(chunks: string[]): Response {
 }
 
 describe('agent events client', () => {
+  it('m83 preserves additive source lists on live finishes and reconnect snapshots while accepting old payloads', async () => {
+    const sources = [
+      { title: 'Returned source', url: 'https://example.com/exact?x=1&y=2' },
+    ];
+    const card = {
+      stepId: 'run:1',
+      toolCallId: 'call',
+      name: 'web_search',
+      argumentsPreview: '{}',
+      argumentsTruncated: false,
+      status: 'success',
+      durationMs: 1,
+      resultPreview: 'clipped',
+      truncated: true,
+      sources,
+    };
+    const payloads = [
+      {
+        type: 'stream.snapshot',
+        agentId: 'agent',
+        seq: 1,
+        at: 1,
+        approvals: [],
+        runs: [
+          {
+            run: { id: 'run' },
+            stepId: 'run:1',
+            text: '',
+            textOffset: 0,
+            tools: [card],
+          },
+        ],
+      },
+      {
+        type: 'tool.finished',
+        agentId: 'agent',
+        sessionId: 'session',
+        runId: 'run',
+        seq: 2,
+        at: 2,
+        ...card,
+        recovered: false,
+      },
+      {
+        type: 'tool.finished',
+        agentId: 'agent',
+        sessionId: 'session',
+        runId: 'run',
+        seq: 3,
+        at: 3,
+        ...card,
+        sources: undefined,
+        recovered: false,
+      },
+    ];
+    const client = createDaemonClient({
+      fetch: async () =>
+        sseResponse(
+          payloads.map(
+            (payload) =>
+              `event: ${payload.type}\ndata: ${JSON.stringify(payload)}\n\n`,
+          ),
+        ),
+    });
+    const received: AgentEvent[] = [];
+    for await (const event of client.events.stream('agent'))
+      received.push(event);
+    expect(
+      received[0].type === 'stream.snapshot' &&
+        received[0].runs[0].tools[0].sources,
+    ).toEqual(sources);
+    expect(received[1].type === 'tool.finished' && received[1].sources).toEqual(
+      sources,
+    );
+    expect(received[2]).not.toHaveProperty('sources');
+  });
+
   it('preserves optional public attachment metadata on steered events while legacy steers remain valid', async () => {
     const attachment = {
       id: 'att_1',

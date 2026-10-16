@@ -189,11 +189,13 @@ unknown outcome. Inspect the effect before an explicit retry; scheduled work is
 not automatically replayed. Older runs without receipts cannot be backfilled. A persisted unfinished schedule claim is disabled for review on recovery and reports an interrupted local outcome. Inspect the actual effect before explicitly resuming; that local record cannot prove whether an external action happened.
 
 Browser dictation/read-aloud depends on browser speech support and permissions.
-An unavailable microphone or speech API does not prevent typed chat. Web fetch
-and optional EXA search require explicit tool grants/configuration; they do not
-provide interactive browser or desktop control. Preserve custom connector/web
-permissions when changing access profiles: a standard profile replaces custom
-tool selections, as the settings warning explains.
+An unavailable microphone or speech API does not prevent typed chat. Enable
+**Allow web search** in the companion's Settings for anonymous native search and
+returned source links. Enable **Allow web page reads** separately to read a
+selected URL. Network approvals still apply; neither option runs a request when
+enabled. See [web research and source links](web-research.md) for setup and limits.
+Keyed `exa_search` remains a separate configured tool. A standard access-profile
+selection replaces custom tool grants, as the settings warning explains.
 
 ## Check memory search status
 
