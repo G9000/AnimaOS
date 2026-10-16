@@ -60,3 +60,11 @@ This plan authorizes only the truthful inventory/API/UI update. It makes no full
 Ruling: preserve historical rebuild inputs before validation — archive exact prior web-dist bytes before rebuilding, verify old sealed closures against those snapshots and pinned source Git blobs, and use a separate Rust validation target to preserve the pinned old daemon image and ordinary runtime — cost if wrong: archival verification blocks publication. Immutable outcomes are not re-executed against a new build. No real runtime case is planned for this metadata/UI change.
 
 Reuse decision: extend Anima's existing capability discovery/SDK/component and current voice/document/bundle implementations. The pinned public Hermes implementation remains a behavior reference; importing its Python discovery/lifecycle would add a second runtime and is unnecessary. No literal port or dependency addition.
+
+## Recorded outcome
+
+M75 implemented truthful capability discovery: voice, bounded document reads and reviewed community bundles are partial; camera, smart home and external coding workers remain planned. Browser/document tools are searchable, and unknown status stays unknown. Fresh Rust 2943 passed/28 intentional ignores/46 suites, lint/build/format; SDK 201 passed/3 service skips; web 1519 passed; SDK/web typecheck/build and both reviews passed.
+
+Implementation metadata is not configuration, health, tool authority or live acceptance. No endpoint, provider probe, grant, dependency or service activation was added. Historical M69–M74 cases, raw snapshots and pinned Git versions remain unchanged; archived build bytes preserve their original closures after normal rebuilds.
+
+The single fix wave corrected semantic region names in the regression. A later typecheck gate found a missing `.js` extension in a new type-only SDK test import; it was corrected and the SDK suite plus full type/build gates passed again. No product change followed review.

@@ -1,6 +1,23 @@
+# Handover: M75 capability inventory verified
+
+## Start here (2026-10-16): publish M75 and continue useful parity work
+
+M75 implemented truthful capability discovery: voice, bounded document reads and reviewed community bundles are partial; camera, smart home and external coding workers remain planned. Browser/document tools are searchable, and unknown status stays unknown. Fresh Rust 2943 passed/28 intentional ignores/46 suites, lint/build/format; SDK 201 passed/3 service skips; web 1519 passed; SDK/web typecheck/build and both reviews passed.
+
+Implementation metadata is not configuration, health, tool authority or live acceptance. No endpoint, provider probe, grant, dependency or service activation was added. Historical M69–M74 cases, raw snapshots and pinned Git versions remain unchanged; archived build bytes preserve their original closures after normal rebuilds.
+
+Resume .superpowers/sdd/2026-10-16-companion-capability-inventory-m75/progress.md.
+Finish docs/format/explicit unsigned commit/push/PR/attach/standing merge and exact-tree proof.
+Then use the locked parity roadmap and current source for a concrete daily-use gap.
+M74 strict browser-save acceptance is settled; do not replay its consumed case.
+Standing Codex delegation, unsigned per-command commits and merge-and-continue apply.
+No ordinary services, profiles, providers, accounts, devices, DBs, containers or Docker55432.
+Cargo incremental0/jobs1/threads2; explicit staging only; never nx.json/anima.yaml/.superpowers.
+No stash/reset/restore/path checkout/worktree.
+
 # Handover: M75 truthful capability inventory
 
-## Start here (2026-10-16): M74 merged and accepted; execute M75
+## Historical M75 bound-plan handover
 
 M74 PR80 merged71787ee6b19460e522fe972348717d0fea7c1afa,
 tree a17faae0b70f2dc6e02136d65bd937c741ef1566. Full strict isolated Files browser

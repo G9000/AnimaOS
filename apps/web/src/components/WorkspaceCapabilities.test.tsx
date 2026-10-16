@@ -117,3 +117,85 @@ it('keeps tools from newer daemon categories visible and searchable', async () =
   expect(screen.getByText('future_tool')).toBeVisible();
   expect(screen.queryByText('read_file')).not.toBeInTheDocument();
 });
+
+it('renders mixed implementation status and searchable browser and document groups without enable actions', async () => {
+  const mixedInventory = {
+    ...inventory,
+    tools: [
+      ...inventory.tools,
+      {
+        name: 'browser_observe',
+        description: 'Observe a page under an owner-selected browser policy',
+        category: 'browser',
+        requirements: ['Owner-selected browser policy', 'Explicit tool grant'],
+      },
+      {
+        name: 'read_document',
+        description: 'Read selected PDF, DOCX, or XLSX documents',
+        category: 'documents',
+        requirements: ['Workspace access', 'Explicit tool grant'],
+      },
+    ],
+    extensions: [
+      {
+        id: 'voice',
+        label: 'Voice',
+        status: 'partial',
+        description:
+          'Selected WAV input and selected-reply speech output; setup required.',
+      },
+      {
+        id: 'document-engine',
+        label: 'Document processing',
+        status: 'partial',
+        description:
+          'Bounded PDF, DOCX, and XLSX extraction; creation and OCR unavailable.',
+      },
+      {
+        id: 'community-bundles',
+        label: 'Community bundles',
+        status: 'partial',
+        description:
+          'Reviewed MCP and skill installation; no arbitrary execution bridge.',
+      },
+      {
+        id: 'camera',
+        label: 'Camera',
+        status: 'planned',
+        description: 'Camera observation is unavailable.',
+      },
+      {
+        id: 'future-extension',
+        label: 'Future extension',
+        status: 'unknown',
+        description: 'Status supplied by a newer daemon.',
+      },
+    ],
+  } as unknown as DaemonCapabilities;
+  vi.mocked(daemon.capabilities).mockResolvedValue(mixedInventory);
+  render(<WorkspaceCapabilities online />);
+
+  expect(await screen.findByText('Voice')).toBeVisible();
+  expect(
+    screen.getAllByText('Partial implementation · setup required'),
+  ).toHaveLength(3);
+  expect(screen.getByText('Planned · unavailable')).toBeVisible();
+  expect(screen.getByText('Implementation status unknown')).toBeVisible();
+  expect(screen.getByText('Additional capabilities')).toBeVisible();
+  expect(
+    screen.queryByRole('button', { name: /enable|grant/i }),
+  ).not.toBeInTheDocument();
+
+  const search = screen.getByRole('searchbox', { name: 'Search capabilities' });
+  fireEvent.change(search, { target: { value: 'browser' } });
+  expect(
+    screen.getByRole('region', { name: 'Browser tools' }),
+  ).toHaveTextContent('browser_observe');
+  expect(screen.queryByText('read_document')).not.toBeInTheDocument();
+
+  fireEvent.change(search, { target: { value: 'documents' } });
+  expect(
+    screen.getByRole('region', { name: 'Document tools' }),
+  ).toHaveTextContent('read_document');
+  expect(screen.queryByText('browser_observe')).not.toBeInTheDocument();
+});

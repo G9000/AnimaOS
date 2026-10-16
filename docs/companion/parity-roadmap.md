@@ -42,7 +42,7 @@ Each PAR ID is stable. Milestone numbers after M38 are assigned when its detaile
 | PAR-09 | Selected real connector workflows                            | Telegram/Discord/Google code exists; real-account acceptance unverified                                                                                                                                       | Current connector code; later relevant media/browser changes                 |
 | PAR-10 | Recurring schedules, outages and interrupted-work acceptance | M59 claim recovery and M62 controlled-clock interval outage/reload accepted; broader recurrence/host evidence incomplete                                                                                      | Current scheduler; optional PAR-06 acceptance fixtures                       |
 | PAR-11 | Always-on single-owner installation and recovery             | Deployment instructions/offline checks exist; target-host acceptance missing                                                                                                                                  | Release with required capabilities; deployment/operator lane                 |
-| PAR-12 | Clear capability controls and daily-use status               | M61 selective real memory HTTP/restart plus M60 index snapshot; broader lifecycle UI incomplete                                                                                                               | Add incrementally with PAR-01/04/05/07/08/09                                 |
+| PAR-12 | Clear capability controls and daily-use status               | M75 truthful partial/planned inventory and browser/document grouping; M61 real memory HTTP/restart and M60 index snapshot; broader lifecycle UI incomplete                                                    | Add incrementally with PAR-01/04/05/07/08/09                                 |
 
 ### PAR-01: budgeted post-task learning (M38)
 
@@ -228,6 +228,8 @@ M59 adds a finite unresolved-claim JSON load into a new daemon and a second fres
 - Public deployment, real containers/database servers and normal-profile credentials remain outside current activation authority. Code/package preparation and offline fixtures continue; actual activation waits for concrete target approval.
 
 ### PAR-12: a usable owner console
+
+M75 corrects the existing capability inventory and console: voice, bounded PDF/DOCX/XLSX reads and reviewed MCP/skill bundles show partial implementation with setup requirements. Browser/document tools are grouped and searchable. Planned and unknown capabilities remain explicit; this read-only inventory grants nothing and checks no provider health. Required local Rust, SDK and web gates passed. Broader lifecycle integration and live acceptance remain open.
 
 M61 locally accepts built-page memory edit/status/search/delete through actual Rust HTTP across one quiet forced restart with fresh synthetic stores. Shell/provider/account APIs stay mocked; ordinary profiles, actual semantic quality and broader lifecycle acceptance remain open. See [harness evidence](harness-acceptance.md).
 

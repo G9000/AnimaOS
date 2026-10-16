@@ -31,11 +31,15 @@ async fn capability_inventory_matches_registered_tools_without_granting_access()
     assert_eq!(value["persistence"]["controlPlane"], "ephemeral");
     assert_eq!(value["persistence"]["memory"], "ephemeral");
     assert_eq!(value["persistence"]["executionJournal"], false);
-    assert!(value["extensions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|item| item["status"] == "planned"));
+    for id in ["camera", "smart-home", "coding-agents"] {
+        let extension = value["extensions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == id)
+            .unwrap();
+        assert_eq!(extension["status"], "planned", "{id}");
+    }
     assert!(state.read().await.list_agents().is_empty());
     let search = value["tools"]
         .as_array()
@@ -44,6 +48,90 @@ async fn capability_inventory_matches_registered_tools_without_granting_access()
         .find(|tool| tool["name"] == "exa_search")
         .unwrap();
     assert!(!search["requirements"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn m75_capability_inventory_reports_supported_partial_slices_without_activation() {
+    let state = Arc::new(RwLock::new(DaemonState::new()));
+    let app = router(state.clone(), DaemonConfig::default());
+    let before = {
+        let state = state.read().await;
+        assert!(state.list_agents().is_empty());
+        serde_json::to_value(state.control_plane_snapshot()).unwrap()
+    };
+    assert_eq!(before["runs"], serde_json::json!([]));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/capabilities")
+                .header("host", "127.0.0.1:8080")
+                .header("origin", "http://localhost:4200")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let body = to_bytes(response.into_body(), 128 * 1024).await.unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(value["schemaVersion"], 1);
+    let extensions = value["extensions"].as_array().unwrap();
+    for (id, expected_status) in [
+        ("voice", "partial"),
+        ("document-engine", "partial"),
+        ("community-bundles", "partial"),
+        ("camera", "planned"),
+        ("smart-home", "planned"),
+        ("coding-agents", "planned"),
+    ] {
+        let matching: Vec<_> = extensions.iter().filter(|item| item["id"] == id).collect();
+        assert_eq!(matching.len(), 1, "{id}");
+        assert_eq!(matching[0]["status"], expected_status, "{id}");
+        let description = matching[0]["description"].as_str().unwrap();
+        assert!(!description.is_empty() && description.len() <= 512, "{id}");
+    }
+    assert_eq!(extensions.len(), 6);
+    let tools = value["tools"].as_array().unwrap();
+    let document = tools
+        .iter()
+        .find(|tool| tool["name"] == "read_document")
+        .unwrap();
+    assert_eq!(document["category"], "documents");
+    let requirements = document["requirements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item.as_str().unwrap())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    for prerequisite in ["workspace", "document", "opt-in", "grant"] {
+        assert!(
+            requirements.contains(prerequisite),
+            "missing {prerequisite}: {requirements}"
+        );
+    }
+    for name in [
+        "browser_navigate",
+        "browser_observe",
+        "browser_act",
+        "browser_transfer",
+    ] {
+        let browser = tools.iter().find(|tool| tool["name"] == name).unwrap();
+        assert_eq!(browser["category"], "browser", "{name}");
+        assert!(!browser["requirements"].as_array().unwrap().is_empty());
+    }
+    let after = {
+        let state = state.read().await;
+        assert!(state.list_agents().is_empty());
+        serde_json::to_value(state.control_plane_snapshot()).unwrap()
+    };
+    assert_eq!(after["runs"], serde_json::json!([]));
+    assert_eq!(
+        after, before,
+        "Discovery must not mutate grants or persisted runtime state"
+    );
 }
 
 #[tokio::test]

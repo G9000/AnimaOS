@@ -45,6 +45,19 @@ For durable local use, configure control-plane/history and memory persistence as
 specified in the [daemon startup examples](../../hosts/rust-daemon/README.md#starting-the-daemon). An ephemeral preview is not a persistent assistant. Keep the
 same workspace path and private credential vault across restart.
 
+## Understand the Capabilities page
+
+Open **Capabilities** to browse registered tools and their prerequisites. Search
+includes browser and document tool groups. Tool registration does not grant an
+agent access; configure the relevant feature and explicitly select its tools.
+
+**Partial implementation · setup required** describes supported slices of voice,
+PDF/DOCX/XLSX reading and reviewed MCP/skill bundles. Read each card for its limits
+and prerequisites. **Planned · unavailable** marks camera, smart home and external
+coding workers. An unrecognized status displays **Implementation status unknown**.
+This page checks no devices, accounts or provider health and enables nothing.
+Storage labels describe configuration, rather than a successful persistence check.
+
 ## Identity and everyday work
 
 Place UTF-8 `SOUL.md` in the configured workspace root for the lead companion's
