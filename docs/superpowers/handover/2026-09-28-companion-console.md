@@ -1,6 +1,24 @@
+# Handover: M82 logical swarm task ownership
+
+## Start here (2026-10-16): M81 merged; execute M82
+
+M81 PR87 merged at c90946ffe0726f43d7c29af64f2e6449e8ad3621, exact tested tree 874908a892ba28393d207e500fe2dd8350df01af.
+Fresh web1579/122files, typecheck/build/format/docs and final combined review passed.
+M80 task preservation, M79 scheduler recovery, M78 Memory freshness, M77 public page and M74 Files stay settled. No case replay or regrading.
+
+Continue g9000/companion-swarm-tasks-m82. Read the [M82 plan](../plans/2026-10-16-companion-swarm-tasks-m82.md), then AGENTS.md.
+Resume .superpowers/sdd/2026-10-16-companion-swarm-tasks-m82/progress.md.
+Tests-first host-owned task scope, one daemon batch review/fix wave, required Rust test/lint/build/format/docs, explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof. No actual acceptance case.
+Do not change runtime/memory/database identity or infer a migration from orphan task files. Cross-process restoration requires the same logical swarm identity; no universal restart claim.
+
+Standing Codex delegation, unsigned per-command commits and merge-and-continue apply.
+No ordinary profiles/accounts/providers/devices/services/DBs/containers/Docker55432.
+Explicit stage only; never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+Cargo incremental0/jobs1/threads2, serialized. Preserve unrelated work and historical raw/Git/runtime versions.
+
 # Handover: M81 Tasks reconnect freshness
 
-## Start here (2026-10-16): publish M81 and continue selected parity
+## Historical M81 settled handover
 
 M81 makes both owner Tasks entry points observe connection state. Offline controls dispatch nothing, reconnect revalidates saved tasks and obsolete results cannot become current state. Same-agent drafts survive read-only; changed revisions require explicit discard before loading saved tasks. Submitted saves retain their original target/revision once, with pending ownership and no automatic retry. Fresh web 1579 tests/122 files, typecheck/build, touched formatting/docs and one final web/SDK-contract review pass.
 
