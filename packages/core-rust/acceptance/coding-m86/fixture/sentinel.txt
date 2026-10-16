@@ -1,0 +1,1 @@
+M86 synthetic fixture sentinel. Preserve exact bytes and timestamp.

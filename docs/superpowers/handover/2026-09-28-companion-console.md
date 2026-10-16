@@ -1,6 +1,20 @@
+# Handover: M86 coding-task and helper reliability
+
+## Start here (2026-10-17): publish M86 and use the checked task workflow
+
+One distinct actual snapshot-comparison repair is FAILED: gpt-6-luna made3parent +2helper subscription calls,12542reportedtokens in116.4seconds. One helper completed three read-only inspections and returned grounded advice. The driver withheld the first Exec after seeing linked helper frames; zero shell commands/module writes/todo saves/output files. Owner cancelled once; five quiet same-store seconds preserved all observed state, both owned daemons retired and18786 was free.
+
+Fresh Rust test/lint/build, SDK/web typecheck/build, public coding oracle, retained legacy oracle targets, private policy/type/bundle/Python checks, touched formatting/docs and one batch/final SDK review with one combined fix wave pass. No production Rust/SDK/web/dependency change; this milestone adds the reusable offline coding acceptance fixture/oracle and target. A future-use private driver correction now recognizes only the exact linked helper in the owner stream, with synthetic refusal controls. The sealed actual result is unchanged and has not been rerun or regraded. The initial zero-dispatch native-summary preflight failure is separately archived and remains FAILED.
+
+One actual task FAILED at its private helper-stream approval guard; coding repair, six tests, output read-back, completed saved progress and final reporting remain unassessed. The cancelled parent/helper history, empty tasks, unchanged files, usage/config/grants and memory survived five quiet same-store seconds without replay. This does not prove successful coding, in-flight recovery, indefinite uptime, browser interaction or full Hermes parity. No retry/fallback/report repair, normal profile/account/login/service/connector/database server/container/Docker55432 action or historical-case replay; settings/accounting are not hard billing caps.
+
+Read the [M86 plan](../plans/2026-10-17-companion-coding-reliability-m86.md), then AGENTS.md. Exact resume .superpowers/sdd/2026-10-17-companion-coding-reliability-m86/progress.md. Finish explicit unsigned commit/push/PR/attach/standing merge/exact-tree and raw preservation checks if pending. The actual case is consumed; no more model task, replay, regrading or report repair for M86. Use the retained task/output for inspection. Broader daily-repository work, in-flight recovery and selected real connector accounts remain separately scoped acceptance gaps.
+
+Keep standing lean Codex delegation, unsigned per-command commits and merge-and-continue. Explicit stage only, never nx.json/anima.yaml/.superpowers/uploads/generated Astro settings. No stash/reset/restore/path checkout/worktree. Cargo incremental0/jobs1/threads2, serialized/root-only. Isolated local testing and existing app-owned subscription resolver remain authorized; no login/raw credential/profile copying/account change, ordinary service/connector/database server/container/Docker55432 action.
+
 # Handover: M85 actual cited research accepted
 
-## Start here (2026-10-17): publish M85 and use the accepted research workflow
+## Historical M85 settled handover
 
 M85 minimally parameterizes the existing offline oracle for a root-frozen simple Markdown filename and numeric stable version. Its private driver now verifies approvals from contiguous typed live events/full pending arguments, retains complete immutable decision witnesses, correlates unapproved Read arguments and refuses known-ended streams or uncorroborated competing fetches. No production runtime, SDK, web or dependency change.
 
