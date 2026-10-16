@@ -73,3 +73,9 @@ Hermes browser session comparison remains pinned to
 1fd18277267152893a8a24792b79213e7ca3f899; no literal upstream code is copied and no
 dependency or notice change is needed. No normal profile, account, credential,
 provider, model, daemon, web preview, database or container is activated.
+
+## Recorded outcome
+
+M77 adds a separate ignored Windows public-page driver and offline contract/oracle controls. Fresh Rust 2949 passed/29 ignored across 46 suites, lint/build/format and 21 supervisor tests pass. One native batch review, one final supervisor review and one combined fix wave are recorded. The single case f9e26a1d-c9a5-4dbf-a98d-57bf9ca469fd is ACCEPTED. It matched the exact H1 and whole normalized 3568-byte paragraph digest through ordinary BrowserPort approvals, two actions/one request, zero model calls, reported shortening=True and omittedNodes=2, and retired 8 known processes with Job active0/errors0.
+
+This is selected read-only public static-page content and process-ownership evidence. It does not establish arbitrary sites, complete DOM coverage, model reasoning, account/provider readiness or full Hermes parity. M64 remains NOT RUN, M52 remains PARTIAL and all earlier cases keep their original outcomes. No production transport, web/SDK, dependency, account, provider, ordinary service, database or container change.

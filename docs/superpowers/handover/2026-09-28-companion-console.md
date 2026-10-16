@@ -1,3 +1,18 @@
+# Handover: M77 public-page case ACCEPTED
+
+## Start here (2026-10-16): publish M77 and continue selected parity
+
+M77 adds a separate ignored Windows public-page driver and offline contract/oracle controls. Fresh Rust 2949 passed/29 ignored across 46 suites, lint/build/format and 21 supervisor tests pass. One native batch review, one final supervisor review and one combined fix wave are recorded. The single case f9e26a1d-c9a5-4dbf-a98d-57bf9ca469fd is ACCEPTED. It matched the exact H1 and whole normalized 3568-byte paragraph digest through ordinary BrowserPort approvals, two actions/one request, zero model calls, reported shortening=True and omittedNodes=2, and retired 8 known processes with Job active0/errors0.
+
+This is selected read-only public static-page content and process-ownership evidence. It does not establish arbitrary sites, complete DOM coverage, model reasoning, account/provider readiness or full Hermes parity. M64 remains NOT RUN, M52 remains PARTIAL and all earlier cases keep their original outcomes. No production transport, web/SDK, dependency, account, provider, ordinary service, database or container change.
+
+Resume .superpowers/sdd/2026-10-16-companion-public-page-m77/progress.md.
+Raw case/release/results/logs and 8 raw source snapshots are sealed; finish docs/format/explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof. Pin source Git provenance before advancing reusable inputs. Never replay or regrade a consumed case.
+Standing Codex delegation, unsigned per-command commits and merge-and-continue apply.
+No ordinary profiles, accounts, providers, devices, services, DBs, containers or Docker55432.
+Explicit stage only; never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+Cargo incremental0/jobs1/threads2; serialize Cargo.
+
 # Handover: M77 one public static-page case
 
 ## Start here (2026-10-16): M76 merged; prepare M77

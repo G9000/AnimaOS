@@ -2757,3 +2757,6 @@ async fn m64_windows_public_example_dom_oracle() {
         result_witness.expect("accepted case has a finite oracle")
     );
 }
+
+#[cfg(windows)]
+mod public_page_m77;
