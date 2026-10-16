@@ -1,6 +1,20 @@
+# Handover: M84 research oracle and retained actual failure
+
+## Start here (2026-10-17): settle M84, then fix live-event admission
+
+M84 adds an offline cited-report oracle and77 positive/negative controls, plus an existing-project Nx target; no production runtime, SDK, web or dependency change. Fresh Rust2989passed/31ignored across46suites, lint/build, SDK/web typecheck/build and10 private-driver tests pass. One daemon/oracle batch review, final SDK/web-driver review and one reviewed fix wave are complete.
+
+Actual research acceptance FAILED at the first approval. One gpt-6-luna subscription call reported1,417tokens; the private verifier required a matching full saved Assistant call before it would AllowOnce. Live tool/approval events preceded terminal-only saved message events, so the verifier denied and stopped the run. No remote search, fetch or report write ran; research quality, report read-back and research-source rendering were unassessed. Five quiet same-store seconds preserved the cancelled run/history/usage exactly; both owned daemons retired and18784 was free. This is cancellation/recovery evidence, not research-quality acceptance.
+
+Two earlier private preflights are separately preserved: runs-list limit200 exceeded native maximum50 before any task POST, then an existing original log was refused before process launch. Their outcomes were not regraded; both used zero model/search calls. The runs limit was corrected before the sole model task. The decision-time current capture was later overwritten; exact original page contents are unavailable, while raw stream/source timing supports the diagnosis. Frozen source, exact binaries, raw receipts and original failures remain immutable. No retry, fallback, steering, report repair, account/login/profile change, normal-service/database/container activity or historical-case replay. M52 remains PARTIAL and M83 remains revision-specific.
+
+Next: repair private admission to use actual typed live tool/approval events with exact run/session/step/call identity and full nontruncated pending arguments; retain immutable decision snapshots and validate native taskResult metadata against terminal full text for the oracle. Prove those contracts deterministically before a separately frozen, distinct bounded task. Do not replay M84 or infer full Hermes parity.
+
+Read the [M84 plan](../plans/2026-10-16-companion-research-acceptance-m84.md), then AGENTS.md. Exact resume is .superpowers/sdd/2026-10-16-companion-research-acceptance-m84/progress.md. Finish explicit unsigned commit/push/PR/attach, standing merge and exact-tree/raw preservation proof if pending; cut the next milestone from merged main. Preserve onboarding and unrelated generated Astro settings, nx.json, anima.yaml and uploads. Never stage those or .superpowers. No stash/reset/restore/path checkout/worktree. Cargo incremental0/jobs1/threads2, serialized/root-only. Isolated testing and existing subscription resolver use remain authorized; no login/raw credential/profile copying or ordinary service/connector/DB/container/Docker55432 action. Standing Codex delegation, unsigned per-command commits and merge-and-continue apply.
+
 # Handover: M83 web search with citations
 
-## Start here (2026-10-16): M83 search and citations accepted
+## Historical M83 settled handover
 
 M83 adds anonymous native web_search through the existing MCP transport, independent owner search/page-read grants, and bounded Search sources links across live events, snapshots, saved Tool history, SDK and console. Sources stay outside the shortened preview; reload never re-searches. Fresh Rust 2989 passed/31 ignored across 46 suites; web1648passed/1opt-in skipped; SDK203passed/3skipped. Rust lint/build, SDK/web typecheck/build, touched formatting/docs and the native plus web/SDK reviews pass.
 

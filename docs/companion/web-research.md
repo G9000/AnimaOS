@@ -42,3 +42,16 @@ For a search failure, inspect the tool's error and Network approval state. Check
 the two grants independently. History reload does not retry a search. Anonymous
 availability and result quality depend on the external service; source cards do
 not imply general autonomous research quality or full browser automation.
+
+## Recorded research acceptance
+
+M84 adds a reproducible offline report/provenance/read-back oracle. Its one actual
+subscription task stopped at the first approval because the private verifier
+expected full saved calls before terminal history was available. One model call
+reported1,417tokens; no search, page read or report write ran. Quiet cancelled-run
+recovery and cleanup passed. This does not assess answer quality or change the
+working search setup above. See the [M84 outcome](../superpowers/plans/2026-10-16-companion-research-acceptance-m84.md).
+
+The next distinct acceptance must use live typed tool/approval evidence for
+approval-time identity and chronology, then saved full history for final grading.
+The consumed M84 task will not be retried or regraded.
