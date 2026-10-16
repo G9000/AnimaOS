@@ -1,3 +1,35 @@
+# Handover: pinned public HTTPS browser policy (M0–M63)
+
+## Start here (2026-10-16): M62 merged; M63 bound public browser transport
+
+Continue g9000/companion-public-browser-m63 from [M62/PR68](https://github.com/G9000/animaOS-SWARM/pull/68)
+main22a732316a5a6073f7030b6af752740372923a07, source5a685fc4cfc783f6148f74f41a9e70650b53a201,
+identical tree6463da0b90b2d707d10f875af3ec605c96ef0279. M62 controlled interval
+outage/reload [1,0,0,1] and two fake calls after all joins pass; fresh Rust/core
+2857/26 intentional ignores/45 suites/lint/build, five docs/format/hash checks.
+No production change.187 unowned hashes and unrelated nx.json preserved.
+
+The [M63 bound plan](../plans/2026-10-16-companion-public-browser-m63.md) adds one
+operator HTTPS hostname/public IPv4 pin/exact GET policy, normal TLS verification
+and physically retained request/socket ownership. No public DNS/fallback/redirect,
+account/browser/daemon/ordinary-profile activation. Existing loopback/grant/budget/
+Stop and lease boundaries stay. Source-only Sol native lane, Astra transport lane,
+root RED/GREEN commands, one batch and final web/SDK scope review/fix wave/gates.
+Public plan push precedes implementation. Reuse existing BrowserPort/worker;
+Hermes pinned public helpers are behavior reference, not a copied supervisor.
+
+Resume .superpowers/sdd/2026-10-16-companion-public-browser-m63/progress.md.
+Root five risk rulings bind exact syntax/IP table/TLS/cleanup. Synthetic finite
+local TLS peers are within isolated test authority; no actual public-site claim.
+Cargo CARGO_INCREMENTAL=0/jobs1/threads2 serialized, provider/service env scrubbed.
+Explicit-path unsigned push/PR/attach/standing merge with exact tree/hash proof.
+Never stage nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/
+worktree. No real models/accounts/devices/ordinary services/profiles/credentials/
+DB servers/containers/Docker55432/deployment. M47/M52 and four failed M61 cases
+immutable, M52 PARTIAL; broader public/account/host/full parity remains open.
+
+## Historical M62 gated handover
+
 # Handover: interval outage recovery (M0–M62)
 
 ## Start here (2026-10-16): M62 gated; publish/merge then continue parity
