@@ -284,6 +284,30 @@ describe('daemon workspace requests', () => {
     expect(state.workspace?.companyName).toBe('Acme');
   });
 
+  it('m68_downloads_current_workspace_bytes_through_the_same_origin_sdk', async () => {
+    const bytes = 'month,total\r\nMay,42\r\n';
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(bytes, {
+        status: 200,
+        headers: { 'content-type': 'application/octet-stream' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const signal = new AbortController().signal;
+
+    const result = await daemon.downloadWorkspaceFile(
+      'reports/annual 2026.csv',
+      signal,
+    );
+
+    expect(await result.text()).toBe(bytes);
+    expect(result.type).toBe('application/octet-stream');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspace/file/download?path=reports%2Fannual%202026.csv',
+      expect.objectContaining({ method: 'GET', signal }),
+    );
+  });
+
   it('putWorkspace PUTs to /workspace with the exact body', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify(workspaceState), {

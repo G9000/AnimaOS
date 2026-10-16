@@ -65,6 +65,119 @@ pub(super) async fn preview(
         .map_err(|_| ApiError::service_unavailable("Workspace file preview failed"))?
 }
 
+pub(super) async fn download(
+    state: &SharedDaemonState,
+    path: String,
+) -> Result<axum::response::Response, ApiError> {
+    use crate::attachments::documents::source_read::read_retained;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    validate_download_path(&path)?;
+    let root = tokio::time::timeout_at(deadline, configured_root(state))
+        .await
+        .map_err(|_| ApiError::service_unavailable("Workspace download timed out"))??;
+    let disposition = download_disposition(&path);
+    let cancel = anima_core::CancelSignal::new();
+    let bytes = read_retained(move || capture_download(&root, &path), &cancel, deadline)
+        .await
+        .map_err(|_| ApiError::service_unavailable("Workspace download is unavailable"))??;
+    if tokio::time::Instant::now() >= deadline {
+        return Err(ApiError::service_unavailable(
+            "Workspace download timed out",
+        ));
+    }
+    axum::response::Response::builder()
+        .header("content-type", "application/octet-stream")
+        .header("content-disposition", disposition)
+        .header("x-content-type-options", "nosniff")
+        .header("content-length", bytes.len().to_string())
+        .body(axum::body::Body::from(bytes))
+        .map_err(|_| ApiError::service_unavailable("Workspace download is unavailable"))
+}
+
+fn validate_download_path(path: &str) -> Result<(), ApiError> {
+    if path.is_empty()
+        || path.len() > 1024
+        || path.contains(['\\', ':'])
+        || path.chars().any(char::is_control)
+        || path
+            .split('/')
+            .any(|part| matches!(part, "" | "." | "..") || excluded(part))
+    {
+        return Err(ApiError::bad_request_static(
+            "This workspace path cannot be downloaded",
+        ));
+    }
+    if !path.rsplit_once('.').is_some_and(|(_, extension)| {
+        matches!(
+            extension.to_ascii_lowercase().as_str(),
+            "txt" | "md" | "csv"
+        )
+    }) {
+        return Err(ApiError::bad_request_static(
+            "Only TXT, Markdown and CSV reports can be downloaded",
+        ));
+    }
+    Ok(())
+}
+
+fn capture_download(root: &Path, relative: &str) -> Result<Vec<u8>, ApiError> {
+    use crate::tools::workspace_bytes::{InstructionReadError, WorkspaceBytes};
+    let workspace = WorkspaceBytes::open(root).map_err(io_error)?;
+    let bytes = workspace
+        .read_file_snapshot_with_policy(
+            relative,
+            crate::attachments::MAX_TEXT_BYTES,
+            |name, metadata| !excluded(name) && !hidden(metadata),
+        )
+        .map_err(|error| match error {
+            InstructionReadError::Missing => ApiError::not_found(),
+            InstructionReadError::Oversized => {
+                ApiError::bad_request_static("Workspace report exceeds the 1 MiB download limit")
+            }
+            _ => ApiError::bad_request_static("Workspace report is unavailable or excluded"),
+        })?;
+    let text = std::str::from_utf8(&bytes)
+        .map_err(|_| ApiError::bad_request_static("Only UTF-8 reports can be downloaded"))?;
+    if text
+        .chars()
+        .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err(ApiError::bad_request_static(
+            "Binary files cannot be downloaded",
+        ));
+    }
+    if credential_fields(text) {
+        return Err(ApiError::bad_request_static(
+            "Files containing credential fields cannot be downloaded",
+        ));
+    }
+    Ok(bytes)
+}
+
+fn download_disposition(path: &str) -> String {
+    use std::fmt::Write;
+    let basename = path.rsplit('/').next().expect("validated nonempty path");
+    let fallback: String = basename
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_' | ' ') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let mut encoded = String::new();
+    for byte in basename.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_') {
+            encoded.push(char::from(byte));
+        } else {
+            write!(&mut encoded, "%{byte:02X}").expect("write to string");
+        }
+    }
+    format!("attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}")
+}
+
 fn linked(metadata: &Metadata) -> bool {
     crate::tools::workspace_bytes::linked(metadata)
 }
@@ -284,12 +397,25 @@ fn preview_file(root: &Path, relative: &str) -> Result<WorkspaceFileResponse, Ap
             "Binary files cannot be previewed",
         ));
     }
+    if credential_fields(text) {
+        return Err(ApiError::bad_request_static(
+            "Files containing credential fields cannot be previewed",
+        ));
+    }
+    Ok(WorkspaceFileResponse {
+        path: relative.to_string(),
+        content: text.to_string(),
+        truncated,
+    })
+}
+
+fn credential_fields(text: &str) -> bool {
     let lower = text.to_lowercase();
     let compact: String = lower
         .chars()
         .filter(|character| !character.is_whitespace())
         .collect();
-    if [
+    [
         "private key-----",
         "api_key=",
         "api_key:",
@@ -312,16 +438,6 @@ fn preview_file(root: &Path, relative: &str) -> Result<WorkspaceFileResponse, Ap
     ]
     .iter()
     .any(|marker| lower.contains(marker) || compact.contains(marker))
-    {
-        return Err(ApiError::bad_request_static(
-            "Files containing credential fields cannot be previewed",
-        ));
-    }
-    Ok(WorkspaceFileResponse {
-        path: relative.to_string(),
-        content: text.to_string(),
-        truncated,
-    })
 }
 
 fn open_regular_file(directory: &Dir, name: &str) -> Result<cap_std::fs::File, ApiError> {

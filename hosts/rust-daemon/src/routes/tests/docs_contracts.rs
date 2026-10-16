@@ -42,7 +42,14 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 202, "complete registered operation count");
+    assert_eq!(actual.len(), 203, "complete registered operation count");
+    let report_additions = [("GET", "/api/workspace/file/download")];
+    for (method, path) in report_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "explicit workspace report download operation must be registered"
+        );
+    }
     let credential_additions = [
         (
             "PUT",
@@ -85,6 +92,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             .filter(|(method, path)| {
                 !speech_additions.contains(&(method.as_str(), path.as_str()))
                     && !credential_additions.contains(&(method.as_str(), path.as_str()))
+                    && !report_additions.contains(&(method.as_str(), path.as_str()))
             })
             .count(),
         197,
@@ -116,6 +124,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                 |(method, path)| !additions.contains(&(method.as_str(), path.as_str()))
                     && !speech_additions.contains(&(method.as_str(), path.as_str()))
                     && !credential_additions.contains(&(method.as_str(), path.as_str()))
+                    && !report_additions.contains(&(method.as_str(), path.as_str()))
             )
             .count(),
         192,

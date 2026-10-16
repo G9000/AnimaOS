@@ -282,3 +282,10 @@ in the agent Settings, save, then ask it to read a relative DOCX/PDF/XLSX path.
 This separate opt-in uses bounded `read_document` source snapshots with locators
 and coverage; extracted text can enter the selected model context. It does not
 calculate formulas, add OCR or modify the file. See [document use](documents.md).
+
+To save a generated report locally, open **Files**, refresh, select its text,
+Markdown or CSV file, then choose **Download current file**. This explicitly
+downloads current complete UTF-8 bytes up to 1 MiB; it preserves BOM/CRLF/empty
+files and leaves the source unchanged. Preview and download can fail separately;
+existing Files exclusions apply. It does not make assistant Markdown links
+authoritative or create a persistent artifact. See [document/report use](documents.md).

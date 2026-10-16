@@ -270,3 +270,10 @@ and bounded ordinary tool results. An owner Settings checkbox preserves defaults
 and other grants; existing helper/connector filesystem authority applies. Local
 recording-model/history tests establish plumbing, not independent answer quality.
 See [document use and limits](documents.md).
+
+M68 closes the selected report-delivery gap with an explicit owner Files download
+for current bounded text/Markdown/CSV bytes, reusing the existing safe reader,
+retained leases and authenticated SDK. A local synthetic write/list/HTTP oracle
+and SDK/web tests establish exact byte delivery, cancellation and URL retirement;
+no actual browser save, general binary artifact, chat output button, report-quality
+or full Hermes parity claim. See [report use](documents.md#download-a-generated-report).

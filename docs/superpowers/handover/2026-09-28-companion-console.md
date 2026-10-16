@@ -1,6 +1,68 @@
+# Handover: report downloads locally gated (M0–M68)
+
+## Start here (2026-10-16): M68 gates pass; finish publication and continue
+
+Branch g9000/companion-report-downloads-m68 from M67/PR73 main
+6e9250a5a117aaddda621af7a056fd1f0f75ff56; bound plan
+9f8e53e747f44c8e48dd9f515800261da447662e preceded source. Files explicitly
+downloads owner-selected current text/Markdown/CSV, raw UTF8 up to1MiB including
+empty/BOM/CRLF. Full Files exclusions through held-root capture, shared4retained
+readleases/10s, strict query/auth/no-store, safe headers and bounded SDK/web
+abort/stale-selection/URL lifecycle. No writer grant, artifact or model-link change.
+
+Fresh Rust/core2942/28ignores/46suites/lint/build/7focused,
+SDK200/3serviceSkips, web1518/121files/typecheck/build. One native
+batch/final SDK-web review and combined fix wave, docs/format/hashes recorded.
+Synthetic normally granted report-write→Files→HTTP exactbyte evidence only; no
+actual browser save, personal files/profiles/models/providers/accounts/ordinary
+daemon/DB/container/deployment. Existing Anima components reused; public pinned
+Hermes Electron download behavior checked without copying/starting that process.
+M64 browser NOT RUN, M52 PARTIAL and consumed cases unchanged.
+
+Resume .superpowers/sdd/2026-10-16-companion-report-downloads-m68/progress.md.
+Finish explicit-path per-command unsigned commit/push/PR/attach/standing merge
+and exact tree/hash proof, then bind the next concrete useful scope from verified
+main. Root commands/fmt/Git; Cargo incremental0/jobs1/threads2 serialized. Never
+stage nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+Preserve ordinary services/profiles/Docker55432. Delegation, selected-chat context
+updates and merge-and-continue remain authorized.
+
+# Handover: report downloads bound (M0–M68)
+
+## Historical M68 bound-plan handover
+
+M67 source 95ff29d518936691e3933d00c90af0efba9b62b6; main merge 6e9250a5a117aaddda621af7a056fd1f0f75ff56;
+exact source/merge tree 59074edcdd5e510008bf36699ff139d53b28c3d0. PR73 is merged,
+with fresh Rust/core2935/28 intentional
+ignores/46 suites/lint/build/17focused, web1512/121files/typecheck/
+build, shared document19/1intentionalignore and safe-reader4 checks. SDK/API/core
+parsers/dependencies unchanged. Explicit workspace read_document and separate
+Settings opt-in use held-root2MiB snapshots/path+hash, bounded16KiB tool evidence,
+retained physical reads/owned worker and one absolute10s deadline. Synthetic
+coordinator/history/helper/connector-origin/Stop evidence only, not live providers.
+
+Continue M68 on g9000/companion-report-downloads-m68, cut from that verified main. Read
+[the bound lean plan](../plans/2026-10-16-companion-report-downloads-m68.md),
+then AGENTS.md. Close the concrete report-delivery gap with an explicit Files
+Download current file action, authenticated owner byte route and bounded SDK.
+Text/Markdown/CSV only,1MiB raw UTF8 bytes including empty/BOM/CRLF, current-file
+snapshot semantics, full Files exclusions and retained nofollow read capacity;
+no artifact engine, writer grant change or model-authored download-link authority.
+First meaningful native/SDK/UI RED, disjoint source owners, one native batch/final
+SDK-web review/combined fix wave and required fresh gates. New operation must be
+included in compiled API/README expectations without changing historical counts.
+
+Resume .superpowers/sdd/2026-10-16-companion-report-downloads-m68/progress.md.
+Root commands/fmt/Git, Cargo incremental0/jobs1/threads2 serialized. Explicit stage
+only; never nx.json/anima.yaml/.superpowers. No stash/reset/restore/path checkout/
+worktree, real files/profiles/models/providers/accounts/ordinary daemons/DB servers/
+containers/Docker55432/deployments. Per-command unsigned commits, delegation,
+context-only selected-chat updates and merge-and-continue remain authorized.
+M64 browser NOT RUN, M52 quality PARTIAL and consumed cases stay unchanged.
+
 # Handover: workspace document reads locally gated (M0–M67)
 
-## Start here (2026-10-16): M67 gates pass; finish publication and continue
+## Historical M67 locally gated handover
 
 Branch g9000/companion-workspace-documents-m67 from M66/PR72 main
 98a7b2cd860246b1e505a0fd9128bdd0e332f22b; bound plan

@@ -92,7 +92,24 @@ export class WorkspaceClient {
   }
 
   readFile(path: string): Promise<WorkspaceFileResponse> {
-    return this.client.requestJson(`/api/workspace/file?path=${encodeURIComponent(path)}`);
+    return this.client.requestJson(
+      `/api/workspace/file?path=${encodeURIComponent(path)}`,
+    );
+  }
+
+  downloadFile(
+    path: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<Blob> {
+    return this.client.requestBoundedBlob(
+      `/api/workspace/file/download?path=${encodeURIComponent(path)}`,
+      { method: 'GET', signal: options.signal },
+      {
+        maxBytes: 1024 * 1024,
+        contentType: 'application/octet-stream',
+        allowEmpty: true,
+      },
+    );
   }
 
   get(): Promise<WorkspaceResponse> {

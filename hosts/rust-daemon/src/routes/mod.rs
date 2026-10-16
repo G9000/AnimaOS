@@ -164,6 +164,7 @@ use crate::runtime_model::provider_summaries;
         inspect_workspace_entry,
         workspace_files_entry,
         workspace_file_entry,
+        workspace_file_download_entry,
         folder_picker::pick_folder,
         resume_workspace_entry,
         gdrive::status,gdrive::connect,gdrive::disconnect,gdrive::callback,
@@ -1043,6 +1044,7 @@ fn router_with_services_with_policies_and_integrations(
         .route("/api/workspace/inspect", get(inspect_workspace_entry))
         .route("/api/workspace/files", get(workspace_files_entry))
         .route("/api/workspace/file", get(workspace_file_entry))
+        .route("/api/workspace/file/download", get(workspace_file_download_entry))
         .route(
             "/api/workspace/resume",
             axum::routing::post(resume_workspace_entry),
@@ -2520,6 +2522,59 @@ async fn workspace_file_entry(State(state): State<AppState>, request: AxumReques
     response
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkspaceDownloadQuery {
+    path: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/workspace/file/download",
+    tag = "workspace",
+    params(("path" = String, Query, description = "Relative .txt, .md or .csv workspace path")),
+    responses(
+        (status = 200, description = "Current raw UTF-8 snapshot, at most 1 MiB including empty files", content_type = "application/octet-stream"),
+        (status = 400, description = "Malformed query, excluded path or unsupported content", body = ErrorBody),
+        (status = 403, description = "Local owner authorization required", body = ErrorBody),
+        (status = 404, description = "File not found", body = ErrorBody),
+        (status = 409, description = "No configured workspace", body = ErrorBody),
+        (status = 503, description = "Read capacity unavailable or deadline exceeded", body = ErrorBody)
+    )
+)]
+async fn workspace_file_download_entry(
+    State(state): State<AppState>,
+    request: AxumRequest,
+) -> AxumResponse {
+    let result = async move {
+        state
+            .local_owner
+            .authorize_read(request.headers())
+            .map_err(|_| ApiError {
+                kind: ApiErrorKind::General,
+                status: StatusCode::FORBIDDEN,
+                message: "local owner authorization required".into(),
+            })?;
+        // Validate strict escapes/UTF-8 using the existing parser, but never feed its
+        // decoded values to another decoder. The typed parser reads the original URI
+        // and also refuses duplicate or unknown fields.
+        request_query(request.uri()).map_err(|()| ApiError::malformed_request())?;
+        let axum::extract::Query(query) =
+            axum::extract::Query::<WorkspaceDownloadQuery>::try_from_uri(request.uri())
+                .map_err(|_| ApiError::malformed_request())?;
+        workspace_files::download(&state.daemon, query.path).await
+    }
+    .await;
+    let mut response = match result {
+        Ok(response) => response,
+        Err(error) => error.into_response(),
+    };
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
 #[utoipa::path(
     post,
     path = "/api/workspace/resume",
@@ -2588,6 +2643,7 @@ mod tests {
     mod status;
     mod swarm_reliability;
     mod usage;
+    mod workspace_download;
 
     use super::{router, router_with_services, router_with_services_with_policies};
     use crate::agent_runs::AgentRunCoordinator;

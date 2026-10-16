@@ -138,6 +138,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/workspace`                                                                             |
 | `GET`    | `/api/workspace/avatar`                                                                      |
 | `GET`    | `/api/workspace/file`                                                                        |
+| `GET`    | `/api/workspace/file/download`                                                               |
 | `GET`    | `/api/workspace/files`                                                                       |
 | `GET`    | `/api/workspace/inspect`                                                                     |
 | `PATCH`  | `/api/agents/{agent_id}`                                                                     |
@@ -240,6 +241,28 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `PUT`    | `/api/workspace/avatar`                                                                      |
 
 <!-- openapi-route-inventory:end -->
+
+### Current workspace report downloads
+
+The owner can select a `.txt`, `.md` or `.csv` in **Files**, then click
+**Download current file**. `GET /api/workspace/file/download?path=...` uses the
+existing local-owner read authority and refuses malformed/duplicate/unknown query
+fields. It returns the captured raw UTF-8 bytes, including empty files, BOM and
+CRLF, up to 1 MiB without truncation or changing the source. This is the current
+file at the click, rather than a version lock on an earlier preview.
+
+Every path component retains Files exclusions and hidden-entry policy through
+held nofollow regular-file reads. Complete captured text is checked for existing
+control/credential markers; these heuristics are not a universal secrecy promise.
+Symlinks/reparse points and nonregular files are refused; ordinary hard-link
+semantics are unchanged. Four physical read leases are shared with document
+admission, with no queued retry and a ten-second absolute deadline. Dropping or
+cancelling a request retains capacity until its blocking read retires.
+
+Success uses attachment/octet-stream, a safely encoded basename, nosniff and an
+exact length; handler successes and errors use no-store. The SDK bounds the body
+independently. No parser, model, upload record, artifact store or writer grant is
+created by downloading. See the [M68 plan](../../docs/superpowers/plans/2026-10-16-companion-report-downloads-m68.md).
 
 ## ChatGPT subscription
 
