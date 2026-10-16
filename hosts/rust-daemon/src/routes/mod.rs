@@ -105,6 +105,7 @@ use crate::runtime_model::provider_summaries;
         community_bundles::update,community_bundles::set_enabled,community_bundles::remove,
         mcp::list, mcp::create, mcp::get, mcp::update, mcp::connect,
         mcp::discover, mcp::review, mcp::set_grant, mcp::disconnect, mcp::delete,
+        mcp::set_credential, mcp::clear_credential,
         jobs::list_jobs,
         jobs::create_job,
         jobs::cancel_job,
@@ -239,6 +240,7 @@ use crate::runtime_model::provider_summaries;
         self::contracts::mcp::UpdateMcpConnectionRequest, self::contracts::mcp::McpVersionRequest,
         self::contracts::mcp::ReviewMcpToolRequest, self::contracts::mcp::McpGrantRequest,
         self::contracts::mcp::McpGrantEnvelope,
+        self::contracts::mcp::McpCredentialRequest,
         crate::browser::BrowserSelection,crate::browser::SaveBrowserScope,crate::browser::StopBrowserScope,crate::browser::BrowserScopeEnvelope,crate::browser::BrowserSavedScopeEnvelope,
         crate::browser::BrowserScopesEnvelope,crate::browser::BrowserPoliciesEnvelope,crate::browser::BrowserScopeView,
         crate::browser::BrowserScopeState,crate::browser::BrowserPolicyView,crate::browser::BrowserPolicyRouteView,
@@ -865,6 +867,7 @@ fn router_with_services_with_policies_and_integrations(
         .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/review", axum::routing::post(mcp::review))
         .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/grants/{alias}", axum::routing::patch(mcp::set_grant))
         .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/disconnect", axum::routing::post(mcp::disconnect))
+        .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/credential", axum::routing::put(mcp::set_credential).delete(mcp::clear_credential))
         .route("/openapi.json", get(openapi_entry))
         .route("/docs", get(docs_entry))
         .route("/docs/", get(docs_entry))

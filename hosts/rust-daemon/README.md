@@ -46,6 +46,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `DELETE` | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}`                           |
 | `DELETE` | `/api/agents/{agent_id}/connectors/{connector_id}`                                           |
 | `DELETE` | `/api/agents/{agent_id}/mcp-connections/{connection_id}`                                     |
+| `DELETE` | `/api/agents/{agent_id}/mcp-connections/{connection_id}/credential`                          |
 | `DELETE` | `/api/agents/{agent_id}/schedules/{schedule_id}`                                             |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}`                                               |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}/voice/speech/{operation_id}`                   |
@@ -229,6 +230,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `PUT`    | `/api/agents/{agent_id}/avatar`                                                              |
 | `PUT`    | `/api/agents/{agent_id}/connectors/discord/{connector_id}/credential`                        |
 | `PUT`    | `/api/agents/{agent_id}/connectors/{connector_id}/credential`                                |
+| `PUT`    | `/api/agents/{agent_id}/mcp-connections/{connection_id}/credential`                          |
 | `PUT`    | `/api/agents/{agent_id}/runs/{run_id}/browser-scope`                                         |
 | `PUT`    | `/api/agents/{agent_id}/tasks`                                                               |
 | `PUT`    | `/api/connectors/oauth-apps/{provider}`                                                      |

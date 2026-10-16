@@ -1,25 +1,30 @@
-# Handover: owner-configured HTTPS MCP bearer authentication (M0–M65)
+# Handover: owner-managed HTTPS MCP credentials locally gated (M0–M65)
 
-## Start here (2026-10-16): M64 merged partial; M65 bearer feature bound
+## Start here (2026-10-16): M65 source gates pass; finish publication then continue
 
-Continue g9000/companion-mcp-bearer-m65 from M64/PR70 main76ef520da769d950c04cbed165758078eda69f55,
-source14c0764c4e7e38a87486b71ea032b0fae0c0ab46, exact treebbdf79dcdb3aa68d7935d5c36d84518a78577f42.
-M64 native/worker gates passed; real public browser acceptance NOT RUN after
-independent source heading precondition failed. No DNS metadata/pin/browser release.
-M52 strict quality PARTIAL and consumed M47/M52/four failed M61 cases unchanged.
+Current branch g9000/companion-mcp-bearer-m65, from verified M64/PR70 main
+76ef520da769d950c04cbed165758078eda69f55. Plan904c01fb6b57add6fe01401cb73f8147db77bcc9
+preceded implementation. M65 provides explicit HTTPS-only static Bearer save/replace/
+clear through endpoint-bound private vault references and a secret-free SDK/console.
+Generation retirement joins before mutation; exact bundle removal cleans owned slots
+and preserves intent/references on uncertainty. No OAuth/arbitrary headers/stdio auth.
 
-The [M65 plan](../plans/2026-10-16-companion-mcp-bearer-m65.md) adds explicit owner
-static bearer credentials for HTTPS MCP using separate OS-vault slots and opaque
-endpoint-bound references; versioned mutations retire physical generations.
-SDK/console never return or persist the secret; no OAuth/arbitrary headers/stdio
-auth or real keyring/account/remote MCP release. Publish plan before native work,
-freeze DTOs before Sol SDK/web, one native batch/final web review/fix wave/gates.
+Fresh Rust/core2886/27 ignores/45 suites/lint/build, 20focused native,
+SDK185/3 service skips, web1497/121files/typecheck/build, 202 compiled route operations,
+one native batch/final web review/one pre-gate fix wave plus inventory-contract
+gate repair/docs/format/frozen hashes pass. One
+dev-only direct TLS edge reuses locked0.26.4; zero new package versions. These are
+synthetic store/local-TLS checks; actual OS-vault/account/remote-server acceptance is
+open. No actual profile/provider/daemon/device/database/container/deploy activation
+by this work. M64 public browser NOT RUN; M52 strict quality PARTIAL; consumed cases
+unchanged. No whole Hermes parity claim.
 
-Resume .superpowers/sdd/2026-10-16-companion-mcp-bearer-m65/progress.md. Root commands/
-fmt/Git; Cargo CARGO_INCREMENTAL=0/jobs1/threads2 serialized. Explicit unsigned
-commit/push/PR/attach/standing merge, exact tree/hash proof; never stage nx.json/
-anima.yaml/.superpowers. No stash/reset/restore/path checkout/worktree or actual
-profiles/providers/daemons/devices/DB servers/containers/deployments.
+Resume .superpowers/sdd/2026-10-16-companion-mcp-bearer-m65/progress.md. Finish explicit
+path unsigned commit/push/PR/attach/standing merge and exact source-tree/protected
+hash proof. Then choose/bind the next concrete remaining parity work from verified
+main; the private next-memory note is held, not an implementation release. Root
+commands/fmt/Git; Cargo CARGO_INCREMENTAL=0/jobs1/threads2 serialized. Never stage
+nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
 
 ## Historical M64 partial handover
 

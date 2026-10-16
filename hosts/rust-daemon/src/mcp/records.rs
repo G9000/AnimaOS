@@ -122,6 +122,8 @@ pub(crate) struct McpConnectionRecord {
     pub(crate) endpoint: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) stdio: Option<McpStdioSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) bearer_credential_ref: Option<String>,
     pub(crate) enabled: bool,
     pub(crate) version: u64,
     pub(crate) reviewed_tools: Vec<ReviewedMcpTool>,
@@ -142,6 +144,13 @@ impl McpRegistry {
         let mut ids = HashSet::new();
         let mut aliases = HashSet::new();
         for row in rows {
+            if row.bearer_credential_ref.as_ref().is_some_and(|reference| {
+                !super::credentials::valid_reference(reference)
+                    || row.stdio.is_some()
+                    || !row.endpoint.starts_with("https://")
+            }) {
+                return Err("Invalid MCP credential reference".into());
+            }
             if uuid::Uuid::parse_str(&row.id).is_err()
                 || !ids.insert(&row.id)
                 || !valid_id(&row.agent_id)
@@ -270,10 +279,8 @@ pub(crate) struct StaticMcpError {
     pub(crate) code: &'static str,
     pub(crate) message: &'static str,
 }
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug)]
 pub(crate) struct McpConnectionView {
-    #[serde(flatten)]
     pub(crate) record: McpConnectionRecord,
     pub(crate) state: McpConnectionState,
     pub(crate) wire_generation: u64,

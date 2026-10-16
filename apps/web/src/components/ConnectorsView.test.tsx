@@ -119,6 +119,7 @@ it('M45 shares the owner lock and preserves dirty MCP fields through canonical b
     endpoint: 'http://127.0.0.1:8089/mcp',
     enabled: false,
     version: 1,
+    hasBearerCredential: false,
     reviewedTools: [],
     state: 'disconnected' as const,
     wireGeneration: 1,

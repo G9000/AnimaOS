@@ -1,6 +1,6 @@
 # M65 owner-configured bearer authentication for HTTP MCP
 
-**Status:** bound from verified M64 main; publish before source-only implementation. No actual keyring/account/remote server is released.
+**Status:** implemented; reviewed source and required local gates pass with synthetic credentials/local TLS. Actual OS-vault/account/remote-server acceptance remains open.
 
 ## Goal
 
@@ -72,7 +72,7 @@ Exact owner contract when bound:
 4. **Auth callback ambiguity:** RMCP `auth: Option<String>` is Bearer-token input, and OAuth's client wrapper can refresh/retry. Keep static secret sourced only from the MCP vault; explicitly prove no refresh, duplicate request, challenge-driven auth, or model-controlled influence.
 5. **Authority/scope creep:** arbitrary header and OAuth support would enlarge credential policy substantially. Keep one owner-entered bearer on HTTPS only, no secret in connection JSON/tool arguments, and leave stdio unchanged.
 
-**Unresolved binding decision:** whether credential replacement should require a disconnected state or have the manager retire the current generation automatically. Preferred: manager-owned retire-and-join before vault mutation, with version CAS and bounded route deadline; if retirement cannot settle, refuse without changing the stored secret.
+**Resolved by binding ruling 3:** the manager retires and joins the current generation before vault mutation, with version CAS and a bounded response deadline. Uncertain retirement refuses before changing stored material; the retained manager task settles independently of a dropped caller.
 
 ## Controller rulings on the risks (binding)
 
@@ -85,3 +85,9 @@ Exact owner contract when bound:
 ## Execution and resume
 
 Root owns commands/fmt/Git and serialized Cargo CARGO_INCREMENTAL=0/jobs1/threads2. Source-only implementers, one native batch and final web/SDK review, one fix wave then fresh relevant Nx gates. Per-command unsigned commits and merge-and-continue authorized. Explicit stage paths only; never nx.json/anima.yaml/.superpowers, no stash/reset/restore/path checkout/worktree. No real keyring/credential/profile/account/provider/daemon/device/remote MCP/DB server/container/deployment activation. M64 public browser NOT RUN; M52 PARTIAL and consumed cases unchanged. Resume .superpowers/sdd/2026-10-16-companion-mcp-bearer-m65/progress.md.
+
+## Recorded outcome
+
+Rust/core **2,886 passed / 27 intentional ignores / 45 suites / lint/build**, including **20 focused M65 native tests**; SDK **185 passed / three intentional service skips / typecheck/build**; web **1,497 passed / 121 files / typecheck/build**.
+
+Compiled route inventory: 202 operations. One native batch review and final web/SDK review, one combined pre-gate fix wave, docs/format/hash checks. Bundle removal deletes only exact owned slots after retirement; partial/uncertain deletion preserves references and intent. One dev-only tokio-rustls edge at existing locked version 0.26.4, zero new package versions. No actual OS-vault/account/remote-server activation or full-parity claim. M64 public browser NOT RUN; M52 strict quality PARTIAL. See [harness evidence](../../companion/harness-acceptance.md).

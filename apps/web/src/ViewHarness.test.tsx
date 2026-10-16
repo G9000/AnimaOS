@@ -3054,6 +3054,7 @@ function mcpReviewFixture(agentId: string): McpConnection {
     endpoint: 'http://127.0.0.1:8089/mcp',
     enabled: true,
     version: 3,
+    hasBearerCredential: false,
     state: 'ready',
     wireGeneration: 1,
     discoveryId: 'discovery-1',

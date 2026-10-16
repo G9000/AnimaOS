@@ -42,6 +42,8 @@ export interface McpConnection {
   endpoint: string;
   enabled: boolean;
   version: number;
+  /** Saved credential reference only; not vault availability or remote validity. */
+  hasBearerCredential: boolean;
   reviewedTools: ReviewedMcpTool[];
   state: McpConnectionState;
   wireGeneration: number;
@@ -65,6 +67,10 @@ export interface McpUpdateInput {
 
 export interface McpVersionInput {
   expectedVersion: number;
+}
+
+export interface McpBearerCredentialInput extends McpVersionInput {
+  bearerToken: string;
 }
 
 export interface McpReviewInput extends McpVersionInput {
@@ -177,6 +183,34 @@ export class McpClient {
         body: input,
       },
     );
+  }
+
+  async saveBearerCredential(
+    agentId: string,
+    connectionId: string,
+    input: McpBearerCredentialInput,
+  ): Promise<McpConnection> {
+    const response = await this.client.requestJson<{
+      connection: McpConnection;
+    }>(`${connectionPath(agentId, connectionId)}/credential`, {
+      method: 'PUT',
+      body: input,
+    });
+    return response.connection;
+  }
+
+  async clearBearerCredential(
+    agentId: string,
+    connectionId: string,
+    input: McpVersionInput,
+  ): Promise<McpConnection> {
+    const response = await this.client.requestJson<{
+      connection: McpConnection;
+    }>(`${connectionPath(agentId, connectionId)}/credential`, {
+      method: 'DELETE',
+      body: input,
+    });
+    return response.connection;
   }
 
   async setGrant(

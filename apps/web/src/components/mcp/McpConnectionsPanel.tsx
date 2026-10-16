@@ -485,6 +485,25 @@ export function McpConnectionsPanel({
               replace,
             )
           }
+          saveBearerCredential={(bearerToken) =>
+            mutate(
+              () =>
+                api.saveBearerCredential(agentId, row.id, {
+                  expectedVersion: row.version,
+                  bearerToken,
+                }),
+              replace,
+            )
+          }
+          clearBearerCredential={() =>
+            mutate(
+              () =>
+                api.clearBearerCredential(agentId, row.id, {
+                  expectedVersion: row.version,
+                }),
+              replace,
+            )
+          }
           review={(tool) => {
             if (!row.discoveryId) return;
             const click = {
@@ -567,6 +586,8 @@ function ConnectionCard({
   connect,
   discover,
   disconnect,
+  saveBearerCredential,
+  clearBearerCredential,
   review,
   grant,
   remove,
@@ -581,12 +602,15 @@ function ConnectionCard({
   connect: () => void;
   discover: () => void;
   disconnect: () => void;
+  saveBearerCredential: (bearerToken: string) => Promise<void>;
+  clearBearerCredential: () => Promise<void>;
   review: (tool: McpToolDescriptor) => void;
   grant: (alias: string, digest: string, granted: boolean) => void;
   remove: () => void;
 }) {
   const [label, setLabel] = useState(row.label);
   const [endpoint, setEndpoint] = useState(row.endpoint);
+  const [bearerToken, setBearerToken] = useState('');
   const dirty = useRef({ label: false, endpoint: false });
   useEffect(() => {
     if (!dirty.current.label || label === row.label) {
@@ -598,8 +622,13 @@ function ConnectionCard({
       setEndpoint(row.endpoint);
     }
   }, [row.label, row.endpoint, row.version, label, endpoint]);
+  useEffect(() => {
+    // A refreshed version or endpoint requires deliberate re-entry.
+    setBearerToken('');
+  }, [row.endpoint, row.version]);
   const [confirmRemove, setConfirmRemove] = useState<number | null>(null);
   const local = row.transport === 'stdio';
+  const bearerEligible = !local && row.endpoint.startsWith('https://');
   const wireBusy =
     row.state === 'stopping' ||
     row.state === 'connecting' ||
@@ -649,6 +678,60 @@ function ConnectionCard({
           The connection reported an issue ({row.error.code}). Refresh to check
           its current state.
         </p>
+      )}
+      {bearerEligible && (
+        <div className="space-y-2 rounded-lg border border-line p-3 text-xs">
+          <p>
+            {row.hasBearerCredential
+              ? 'Bearer credential saved'
+              : 'No bearer credential saved'}
+          </p>
+          <p className="text-ink-3">
+            A saved credential does not confirm that this server accepts it.
+          </p>
+          <label className="block">
+            Bearer token
+            <input
+              className={inputClass}
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              value={bearerToken}
+              maxLength={4096}
+              disabled={blocked || wireBusy}
+              onChange={(event) => setBearerToken(event.target.value)}
+            />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className={button}
+              disabled={blocked || wireBusy || bearerToken.length === 0}
+              onClick={() => {
+                const submitted = bearerToken;
+                void saveBearerCredential(submitted).finally(() =>
+                  setBearerToken(''),
+                );
+              }}
+            >
+              {row.hasBearerCredential
+                ? 'Replace bearer credential'
+                : 'Save bearer credential'}
+            </button>
+            {row.hasBearerCredential && (
+              <button
+                className={button}
+                disabled={blocked || wireBusy}
+                onClick={() => {
+                  void clearBearerCredential().finally(() =>
+                    setBearerToken(''),
+                  );
+                }}
+              >
+                Clear bearer credential
+              </button>
+            )}
+          </div>
+        </div>
       )}
       <details>
         <summary className="text-xs">Edit saved connection</summary>

@@ -412,7 +412,11 @@ fn daemon_runtime(state: SharedDaemonState, config: &DaemonConfig) -> io::Result
     let run_limiter = Arc::new(Semaphore::new(config.max_concurrent_runs));
     let agent_runs = AgentRunCoordinator::new(Arc::clone(&state), Arc::clone(&run_limiter))
         .with_max_runs_per_agent(config.max_runs_per_agent);
-    let agent_runs = coordinator_with_mcp(&state, agent_runs);
+    let agent_runs = coordinator_with_mcp_credentials(
+        &state,
+        agent_runs,
+        Arc::new(crate::mcp::credentials::OsKeyringMcpCredentialStore::new()),
+    );
     let transport = TelegramClient::new()
         .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string()))?;
     let transport: Arc<dyn TelegramTransport> = Arc::new(transport);
@@ -501,15 +505,27 @@ pub(crate) fn coordinator_with_mcp(
     state: &SharedDaemonState,
     coordinator: AgentRunCoordinator,
 ) -> AgentRunCoordinator {
+    coordinator_with_mcp_credentials(
+        state,
+        coordinator,
+        Arc::new(crate::mcp::credentials::InMemoryMcpCredentialStore::default()),
+    )
+}
+fn coordinator_with_mcp_credentials(
+    state: &SharedDaemonState,
+    coordinator: AgentRunCoordinator,
+    credentials: Arc<dyn crate::mcp::credentials::McpCredentialStore>,
+) -> AgentRunCoordinator {
     let mut guard = state
         .try_write()
         .expect("runtime construction requires an uncontended daemon state");
     let manager = guard.mcp_manager.clone().unwrap_or_else(|| {
-        crate::mcp::McpManager::new(
+        crate::mcp::McpManager::with_credentials(
             Arc::downgrade(state),
             coordinator.control_plane_transactions(),
             Arc::clone(&guard.mcp_publication),
             Arc::new(crate::mcp::transport::DefaultMcpTransportFactory::default()),
+            credentials,
         )
     });
     guard.mcp_manager = Some(manager.clone());

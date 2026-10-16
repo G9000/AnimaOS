@@ -26,6 +26,25 @@ async fn body<T: DeserializeOwned>(state: &AppState, request: Request) -> Result
     .map_err(no_store)?;
     parse_json_body(bytes).map_err(|error: ApiError| no_store(error.into_response()))
 }
+async fn credential_body<T: DeserializeOwned>(
+    state: &AppState,
+    request: Request,
+) -> Result<T, Response> {
+    let read = axum::body::to_bytes(
+        request.into_body(),
+        state.config.max_request_bytes.min(MAX_MCP_OWNER_BODY_BYTES),
+    );
+    let bytes = match tokio::time::timeout(std::time::Duration::from_secs(5), read).await {
+        Ok(Ok(bytes)) => zeroize::Zeroizing::new(bytes.to_vec()),
+        Ok(Err(_)) => {
+            let mut response = service_error(McpServiceError::InvalidRequest);
+            *response.status_mut() = StatusCode::PAYLOAD_TOO_LARGE;
+            return Err(response);
+        }
+        Err(_) => return Err(service_error(McpServiceError::TimedOut)),
+    };
+    serde_json::from_slice(&bytes).map_err(|_| service_error(McpServiceError::InvalidRequest))
+}
 
 fn service_error(error: McpServiceError) -> Response {
     let error = match error {
@@ -75,6 +94,7 @@ fn connection_response(view: McpConnectionView) -> McpConnectionResponse {
             args: spec.args,
         }),
         enabled: view.record.enabled,
+        has_bearer_credential: view.record.bearer_credential_ref.is_some(),
         version: view.record.version,
         reviewed_tools: view
             .record
@@ -434,4 +454,66 @@ pub(super) async fn delete(
         Ok(()) => no_store(StatusCode::NO_CONTENT.into_response()),
         Err(error) => service_error(error),
     }
+}
+
+#[utoipa::path(put, path = "/api/agents/{agent_id}/mcp-connections/{connection_id}/credential", tag = "mcp",
+    params(("agent_id" = String, Path), ("connection_id" = String, Path)), request_body = McpCredentialRequest,
+    responses((status = 200, description = "Owner bearer saved; explicit reconnect required", body = McpConnectionEnvelope),
+        (status = 400, description = "Invalid credential request", body = ErrorBody),
+        (status = 403, description = "Local owner required", body = ErrorBody),
+        (status = 404, description = "Connection not found", body = ErrorBody),
+        (status = 409, description = "Version conflict", body = ErrorBody),
+        (status = 413, description = "Request too large", body = ErrorBody),
+        (status = 503, description = "Credential could not be confirmed", body = ErrorBody)))]
+pub(super) async fn set_credential(
+    State(state): State<AppState>,
+    Path((agent, id)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, false) {
+        return response;
+    }
+    let input: McpCredentialRequest = match credential_body(&state, request).await {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        state
+            .mcp
+            .set_bearer(&agent, &id, input.expected_version, input.bearer_token),
+    )
+    .await
+    .unwrap_or(Err(McpServiceError::Unavailable));
+    one(StatusCode::OK, result)
+}
+
+#[utoipa::path(delete, path = "/api/agents/{agent_id}/mcp-connections/{connection_id}/credential", tag = "mcp",
+    params(("agent_id" = String, Path), ("connection_id" = String, Path)), request_body = McpVersionRequest,
+    responses((status = 200, description = "Owner bearer cleared; absent reference is a checked no-op", body = McpConnectionEnvelope),
+        (status = 400, description = "Invalid request", body = ErrorBody),
+        (status = 403, description = "Local owner required", body = ErrorBody),
+        (status = 404, description = "Connection not found", body = ErrorBody),
+        (status = 409, description = "Version conflict", body = ErrorBody),
+        (status = 413, description = "Request too large", body = ErrorBody),
+        (status = 503, description = "Credential could not be confirmed", body = ErrorBody)))]
+pub(super) async fn clear_credential(
+    State(state): State<AppState>,
+    Path((agent, id)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, false) {
+        return response;
+    }
+    let input: McpVersionRequest = match credential_body(&state, request).await {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        state.mcp.clear_bearer(&agent, &id, input.expected_version),
+    )
+    .await
+    .unwrap_or(Err(McpServiceError::Unavailable));
+    one(StatusCode::OK, result)
 }

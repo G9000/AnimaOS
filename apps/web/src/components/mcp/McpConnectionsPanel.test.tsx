@@ -30,6 +30,7 @@ function connection(patch: Partial<McpConnection> = {}): McpConnection {
     endpoint: 'http://127.0.0.1:8089/mcp',
     enabled: false,
     version: 1,
+    hasBearerCredential: false,
     reviewedTools: [],
     state: 'disconnected',
     wireGeneration: 1,
@@ -64,6 +65,8 @@ function api(
     review: vi.fn(),
     disconnect: vi.fn(),
     remove: vi.fn(),
+    saveBearerCredential: vi.fn(),
+    clearBearerCredential: vi.fn(),
     setGrant: vi.fn(),
   };
 }
@@ -83,6 +86,202 @@ async function loaded() {
 }
 
 describe('owner external tools', () => {
+  it('M65 offers an explicit password action only for saved HTTPS HTTP connections', async () => {
+    const mock = api([
+      connection({ endpoint: 'https://example.test/mcp' }),
+      connection({ id: 'loopback', label: 'Loopback' }),
+      connection({
+        id: 'local',
+        label: 'Local process',
+        transport: 'stdio',
+        stdio: { executable: 'C:\\synthetic\\mcp.exe', args: [] },
+        endpoint: '',
+      }),
+    ]);
+    render(<McpConnectionsPanel agentId="main" api={mock} />);
+    await loaded();
+    const https = within(
+      screen.getByRole('article', { name: 'External server Local server' }),
+    );
+    const token = https.getByLabelText('Bearer token');
+    expect(token).toHaveAttribute('type', 'password');
+    expect(
+      https.getByRole('button', { name: 'Save bearer credential' }),
+    ).toBeDisabled();
+    expect(https.getByText('No bearer credential saved')).toBeVisible();
+    expect(
+      within(
+        screen.getByRole('article', { name: 'External server Loopback' }),
+      ).queryByLabelText('Bearer token'),
+    ).not.toBeInTheDocument();
+    expect(
+      within(
+        screen.getByRole('article', { name: 'External server Local process' }),
+      ).queryByLabelText('Bearer token'),
+    ).not.toBeInTheDocument();
+    expect(mock.saveBearerCredential).not.toHaveBeenCalled();
+    expect(mock.clearBearerCredential).not.toHaveBeenCalled();
+    expect(mock.connect).not.toHaveBeenCalled();
+  });
+
+  it('M65 saves and replaces only on clicks, clears the password after settlement, and never echoes it', async () => {
+    const user = userEvent.setup();
+    const token = 'synthetic-owner-secret';
+    const mock = api([connection({ endpoint: 'https://example.test/mcp' })]);
+    vi.mocked(mock.saveBearerCredential)
+      .mockResolvedValueOnce(
+        connection({
+          endpoint: 'https://example.test/mcp',
+          version: 2,
+          hasBearerCredential: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        connection({
+          endpoint: 'https://example.test/mcp',
+          version: 3,
+          hasBearerCredential: true,
+        }),
+      );
+    vi.mocked(mock.clearBearerCredential).mockResolvedValue(
+      connection({ endpoint: 'https://example.test/mcp', version: 4 }),
+    );
+    const { container } = render(
+      <McpConnectionsPanel agentId="main" api={mock} />,
+    );
+    await loaded();
+    const card = within(
+      screen.getByRole('article', { name: 'External server Local server' }),
+    );
+    const password = card.getByLabelText('Bearer token');
+    await user.type(password, token);
+    expect(mock.saveBearerCredential).not.toHaveBeenCalled();
+    await user.click(
+      card.getByRole('button', { name: 'Save bearer credential' }),
+    );
+    expect(mock.saveBearerCredential).toHaveBeenCalledWith('main', 'server-1', {
+      expectedVersion: 1,
+      bearerToken: token,
+    });
+    await waitFor(() => expect(password).toHaveValue(''));
+    expect(card.getByText('Bearer credential saved')).toBeVisible();
+    expect(container.textContent).not.toContain(token);
+    await user.type(password, 'replacement-token');
+    await user.click(
+      card.getByRole('button', { name: 'Replace bearer credential' }),
+    );
+    expect(mock.saveBearerCredential).toHaveBeenLastCalledWith(
+      'main',
+      'server-1',
+      {
+        expectedVersion: 2,
+        bearerToken: 'replacement-token',
+      },
+    );
+    await waitFor(() => expect(password).toHaveValue(''));
+    await user.click(
+      card.getByRole('button', { name: 'Clear bearer credential' }),
+    );
+    expect(mock.clearBearerCredential).toHaveBeenCalledWith(
+      'main',
+      'server-1',
+      {
+        expectedVersion: 3,
+      },
+    );
+    expect(await card.findByText('No bearer credential saved')).toBeVisible();
+    expect(mock.connect).not.toHaveBeenCalled();
+  });
+
+  it('M65 discards a failed password, shows only a static error, and requires explicit refresh before re-entry', async () => {
+    const user = userEvent.setup();
+    const token = 'synthetic-failed-token';
+    const mock = api([connection({ endpoint: 'https://example.test/mcp' })]);
+    vi.mocked(mock.saveBearerCredential).mockRejectedValue({
+      status: 409,
+      body: { error: token },
+    });
+    const { container } = render(
+      <McpConnectionsPanel agentId="main" api={mock} />,
+    );
+    await loaded();
+    const card = within(
+      screen.getByRole('article', { name: 'External server Local server' }),
+    );
+    const password = card.getByLabelText('Bearer token');
+    await user.type(password, token);
+    await user.click(
+      card.getByRole('button', { name: 'Save bearer credential' }),
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This connection changed',
+    );
+    expect(password).toHaveValue('');
+    expect(container.textContent).not.toContain(token);
+    expect(
+      card.getByRole('button', { name: 'Save bearer credential' }),
+    ).toBeDisabled();
+    expect(mock.saveBearerCredential).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: 'Refresh status' }));
+    await loaded();
+    expect(mock.saveBearerCredential).toHaveBeenCalledTimes(1);
+  });
+
+  it('M65 locks other mutations while a credential write is pending and fences an old agent completion', async () => {
+    const user = userEvent.setup();
+    const pending = deferred<McpConnection>();
+    const mock = api();
+    vi.mocked(mock.list)
+      .mockResolvedValueOnce([
+        connection({ endpoint: 'https://example.test/mcp' }),
+      ])
+      .mockResolvedValueOnce([
+        connection({
+          id: 'beta-server',
+          agentId: 'beta',
+          label: 'Beta server',
+          endpoint: 'https://beta.test/mcp',
+        }),
+      ]);
+    vi.mocked(mock.saveBearerCredential).mockReturnValue(pending.promise);
+    const view = render(<McpConnectionsPanel agentId="main" api={mock} />);
+    await loaded();
+    const card = within(
+      screen.getByRole('article', { name: 'External server Local server' }),
+    );
+    await user.type(
+      card.getByLabelText('Bearer token'),
+      'synthetic-pending-token',
+    );
+    await user.click(
+      card.getByRole('button', { name: 'Save bearer credential' }),
+    );
+    expect(
+      screen.getByRole('button', { name: 'Refresh status' }),
+    ).toBeDisabled();
+    expect(
+      card.getByRole('button', { name: 'Remove saved connection' }),
+    ).toBeDisabled();
+    view.rerender(<McpConnectionsPanel agentId="beta" api={mock} />);
+    await screen.findByRole('heading', { name: 'Beta server' });
+    await act(async () => {
+      pending.resolve(
+        connection({
+          endpoint: 'https://example.test/mcp',
+          version: 2,
+          hasBearerCredential: true,
+        }),
+      );
+      await pending.promise;
+    });
+    expect(screen.queryByText('Local server')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('article', { name: 'External server Beta server' }),
+    ).toBeVisible();
+    expect(mock.saveBearerCredential).toHaveBeenCalledTimes(1);
+    expect(mock.connect).not.toHaveBeenCalled();
+  });
+
   it('M44_owner_explicitly_selects_connection_type_before_configuring_local_server', async () => {
     const mock = api();
     render(<McpConnectionsPanel agentId="main" api={mock} />);

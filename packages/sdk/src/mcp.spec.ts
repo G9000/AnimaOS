@@ -13,6 +13,7 @@ function connection(overrides: Partial<McpConnection> = {}): McpConnection {
     endpoint: 'https://example.test/mcp',
     enabled: false,
     version: 1,
+    hasBearerCredential: false,
     reviewedTools: [],
     state: 'disconnected',
     wireGeneration: 0,
@@ -37,6 +38,51 @@ function harness(respond: (url: string, init?: RequestInit) => Response) {
 }
 
 describe('MCP owner client', () => {
+  it('M65 saves a bearer credential through the versioned owner PUT without echoing the token', async () => {
+    const saved = connection({ version: 4, hasBearerCredential: true });
+    const token = 'synthetic-m65-token';
+    const { mcp, requests } = harness(() =>
+      Response.json({ connection: saved }),
+    );
+
+    const result = await mcp.saveBearerCredential('agent/a', 'connection/1', {
+      expectedVersion: 3,
+      bearerToken: token,
+    });
+    expect(result).toEqual(saved);
+    expect(JSON.stringify(result)).not.toContain(token);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe(
+      '/api/agents/agent%2Fa/mcp-connections/connection%2F1/credential',
+    );
+    expect(requests[0].init?.method).toBe('PUT');
+    expect(JSON.parse(requests[0].init!.body as string)).toEqual({
+      expectedVersion: 3,
+      bearerToken: token,
+    });
+  });
+
+  it('M65 clears a bearer credential through the versioned owner DELETE without retry', async () => {
+    const cleared = connection({ version: 5, hasBearerCredential: false });
+    const { mcp, requests } = harness(() =>
+      Response.json({ connection: cleared }),
+    );
+
+    expect(
+      await mcp.clearBearerCredential('agent/a', 'connection/1', {
+        expectedVersion: 4,
+      }),
+    ).toEqual(cleared);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe(
+      '/api/agents/agent%2Fa/mcp-connections/connection%2F1/credential',
+    );
+    expect(requests[0].init?.method).toBe('DELETE');
+    expect(JSON.parse(requests[0].init!.body as string)).toEqual({
+      expectedVersion: 4,
+    });
+  });
+
   it('M44 preserves exact HTTP create and sends only the immutable stdio launch body with empty response endpoint', async () => {
     const stdio = {
       executable: 'C:\\synthetic\\mcp-server.exe',

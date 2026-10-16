@@ -4,6 +4,9 @@ use super::*;
 use crate::control_plane_store::{
     load_control_plane_snapshot, ControlPlaneStoreConfig, WorkspaceConfig,
 };
+use crate::mcp::credentials::{
+    InMemoryMcpCredentialStore, McpBearerToken, McpCredentialError, McpCredentialStore,
+};
 use crate::mcp::transport::{
     McpTransportError, McpTransportFactory, McpTransportSession, TransportControl,
     ValidatedMcpLaunch,
@@ -34,6 +37,48 @@ impl McpTransportFactory for NoLaunch {
         Box::pin(async { Err(McpTransportError::Unavailable) })
     }
 }
+#[derive(Default)]
+struct BundleVault {
+    inner: InMemoryMcpCredentialStore,
+    deletes: std::sync::Mutex<Vec<(String, String)>>,
+    fail_at: AtomicUsize,
+    uncertain: AtomicUsize,
+}
+#[async_trait::async_trait]
+impl McpCredentialStore for BundleVault {
+    async fn load(
+        &self,
+        id: &str,
+        endpoint: &str,
+        reference: &str,
+    ) -> Result<Option<McpBearerToken>, McpCredentialError> {
+        self.inner.load(id, endpoint, reference).await
+    }
+    async fn put(
+        &self,
+        id: &str,
+        endpoint: &str,
+        reference: &str,
+        token: McpBearerToken,
+    ) -> Result<(), McpCredentialError> {
+        self.inner.put(id, endpoint, reference, token).await
+    }
+    async fn delete(&self, id: &str, reference: &str) -> Result<(), McpCredentialError> {
+        let call = {
+            let mut calls = self.deletes.lock().unwrap();
+            calls.push((id.into(), reference.into()));
+            calls.len()
+        };
+        if self.fail_at.load(Ordering::SeqCst) == call {
+            if self.uncertain.load(Ordering::SeqCst) != 0 {
+                self.inner.delete(id, reference).await?;
+                return Err(McpCredentialError::Uncertain);
+            }
+            return Err(McpCredentialError::Unavailable);
+        }
+        self.inner.delete(id, reference).await
+    }
+}
 struct Fixture {
     folder: TempDir,
     state: crate::app::SharedDaemonState,
@@ -42,6 +87,7 @@ struct Fixture {
     bundles: BundleService,
     skills: SkillService,
     factory: Arc<NoLaunch>,
+    vault: Arc<BundleVault>,
 }
 impl Fixture {
     async fn new() -> Self {
@@ -62,11 +108,13 @@ impl Fixture {
         let publication = daemon.mcp_publication.clone();
         let state = Arc::new(RwLock::new(daemon));
         let factory = Arc::new(NoLaunch::default());
-        let mcp = McpManager::new(
+        let vault = Arc::new(BundleVault::default());
+        let mcp = McpManager::with_credentials(
             Arc::downgrade(&state),
             Arc::new(Mutex::new(())),
             publication,
             factory.clone(),
+            vault.clone(),
         );
         state.write().await.mcp_manager = Some(mcp.clone());
         let bundles = BundleService::new(state.clone(), mcp.clone());
@@ -79,6 +127,7 @@ impl Fixture {
             bundles,
             skills,
             factory,
+            vault,
         }
     }
     async fn review(
@@ -160,6 +209,316 @@ fn removal(view: &BundleView) -> RemoveRequest {
     RemoveRequest {
         expected_version: view.summary.version,
         reviewed_component_state_digest: view.summary.reviewed_component_state_digest.clone(),
+    }
+}
+
+#[tokio::test]
+async fn m65_bundle_remove_cleans_only_owned_current_and_predecessor_slots_after_retirement() {
+    let f = Fixture::new().await;
+    let review = f
+        .review("Synthetic procedure", "https://m65.invalid/first", None)
+        .await;
+    let installed = f.install(&review).await;
+    let id = installed.summary.id.clone();
+    let old_id = connection(&installed).connection_id.clone();
+    let old = f
+        .mcp
+        .set_bearer(
+            &f.agent,
+            &old_id,
+            connection(&installed).connection_version,
+            McpBearerToken::parse("m65-bundle-first".into()).unwrap(),
+        )
+        .await
+        .unwrap()
+        .record;
+    let review = f
+        .review(
+            "Synthetic procedure",
+            "https://m65.invalid/second",
+            Some((&id, installed.summary.version)),
+        )
+        .await;
+    let updated = f
+        .bundles
+        .update(
+            &f.agent,
+            &id,
+            UpdateRequest {
+                expected_version: installed.summary.version,
+                review_id: review.id,
+                review_digest: review.review_digest,
+            },
+        )
+        .await
+        .unwrap();
+    let new_id = connection(&updated).connection_id.clone();
+    assert_ne!(new_id, old_id);
+    let current = f
+        .mcp
+        .set_bearer(
+            &f.agent,
+            &new_id,
+            connection(&updated).connection_version,
+            McpBearerToken::parse("m65-bundle-second".into()).unwrap(),
+        )
+        .await
+        .unwrap()
+        .record;
+    let neighbor = f
+        .mcp
+        .create(
+            &f.agent,
+            CreateMcpConnection {
+                label: "Unmanaged neighbor".into(),
+                endpoint: "https://m65.invalid/neighbor".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let neighbor = f
+        .mcp
+        .set_bearer(
+            &f.agent,
+            &neighbor.record.id,
+            neighbor.record.version,
+            McpBearerToken::parse("m65-neighbor".into()).unwrap(),
+        )
+        .await
+        .unwrap()
+        .record;
+    let refreshed = f.bundles.get(&f.agent, &id).await.unwrap();
+    let disabled = f
+        .bundles
+        .set_enabled(&f.agent, &id, change(&refreshed, false))
+        .await
+        .unwrap();
+    assert!(
+        f.vault.deletes.lock().unwrap().is_empty(),
+        "disable/update preserve retained credentials"
+    );
+    for row in [&old, &current, &neighbor] {
+        assert!(f
+            .vault
+            .load(
+                &row.id,
+                &row.endpoint,
+                row.bearer_credential_ref.as_ref().unwrap()
+            )
+            .await
+            .unwrap()
+            .is_some());
+    }
+    f.bundles
+        .remove(&f.agent, &id, removal(&disabled))
+        .await
+        .unwrap();
+    timeout(Duration::from_secs(1), f.mcp.shutdown())
+        .await
+        .unwrap();
+    for row in [&old, &current] {
+        assert!(f
+            .vault
+            .load(
+                &row.id,
+                &row.endpoint,
+                row.bearer_credential_ref.as_ref().unwrap()
+            )
+            .await
+            .unwrap()
+            .is_none());
+    }
+    assert_eq!(
+        f.vault
+            .load(
+                &neighbor.id,
+                &neighbor.endpoint,
+                neighbor.bearer_credential_ref.as_ref().unwrap()
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .expose(),
+        "m65-neighbor"
+    );
+    let mut expected = vec![
+        (old.id, old.bearer_credential_ref.unwrap()),
+        (current.id, current.bearer_credential_ref.unwrap()),
+    ];
+    expected.sort();
+    let mut actual = f.vault.deletes.lock().unwrap().clone();
+    actual.sort();
+    assert_eq!(actual, expected);
+    assert_eq!(
+        f.state.read().await.mcp_registry.snapshot(),
+        vec![neighbor.clone()]
+    );
+    assert_eq!(f.saved().await.mcp_connections, vec![neighbor]);
+    f.no_launch();
+}
+
+#[tokio::test]
+async fn m65_bundle_remove_vault_failure_retains_removing_intent_and_all_slot_references() {
+    for uncertain in [false, true] {
+        let f = Fixture::new().await;
+        let review = f
+            .review("Synthetic procedure", "https://m65.invalid/owned", None)
+            .await;
+        let installed = f.install(&review).await;
+        let id = installed.summary.id.clone();
+        let connection = connection(&installed);
+        let owned = f
+            .mcp
+            .set_bearer(
+                &f.agent,
+                &connection.connection_id,
+                connection.connection_version,
+                McpBearerToken::parse("m65-bundle-owned".into()).unwrap(),
+            )
+            .await
+            .unwrap()
+            .record;
+        let review = f
+            .review(
+                "Synthetic procedure",
+                "https://m65.invalid/replacement",
+                Some((&id, installed.summary.version)),
+            )
+            .await;
+        let replacement = f
+            .bundles
+            .update(
+                &f.agent,
+                &id,
+                UpdateRequest {
+                    expected_version: installed.summary.version,
+                    review_id: review.id,
+                    review_digest: review.review_digest,
+                },
+            )
+            .await
+            .unwrap();
+        let replacement_connection = replacement
+            .components
+            .iter()
+            .find_map(|part| match part {
+                BundleComponentView::Mcp(part) => Some(part),
+                _ => None,
+            })
+            .unwrap();
+        let current = f
+            .mcp
+            .set_bearer(
+                &f.agent,
+                &replacement_connection.connection_id,
+                replacement_connection.connection_version,
+                McpBearerToken::parse("m65-bundle-current".into()).unwrap(),
+            )
+            .await
+            .unwrap()
+            .record;
+        let neighbor = f
+            .mcp
+            .create(
+                &f.agent,
+                CreateMcpConnection {
+                    label: "Unmanaged neighbor".into(),
+                    endpoint: "https://m65.invalid/neighbor".into(),
+                },
+            )
+            .await
+            .unwrap();
+        let neighbor = f
+            .mcp
+            .set_bearer(
+                &f.agent,
+                &neighbor.record.id,
+                neighbor.record.version,
+                McpBearerToken::parse("m65-neighbor".into()).unwrap(),
+            )
+            .await
+            .unwrap()
+            .record;
+        f.vault.fail_at.store(2, Ordering::SeqCst);
+        f.vault
+            .uncertain
+            .store(usize::from(uncertain), Ordering::SeqCst);
+        let refreshed = f.bundles.get(&f.agent, &id).await.unwrap();
+        let result = f.bundles.remove(&f.agent, &id, removal(&refreshed)).await;
+        timeout(Duration::from_secs(1), f.mcp.shutdown())
+            .await
+            .unwrap();
+        assert!(matches!(result, Err(BundleError::Unavailable)));
+        let state = f.state.read().await;
+        let bundle = state
+            .community_bundles
+            .iter()
+            .find(|row| row.id == id)
+            .unwrap();
+        assert_eq!(bundle.state, "removing");
+        assert_eq!(bundle.settlement.as_ref().unwrap().kind, "remove");
+        assert_eq!(
+            state.mcp_registry.connections[&owned.id].bearer_credential_ref,
+            owned.bearer_credential_ref
+        );
+        assert_eq!(
+            state.mcp_registry.connections[&current.id].bearer_credential_ref,
+            current.bearer_credential_ref
+        );
+        assert_eq!(state.mcp_registry.connections[&neighbor.id], neighbor);
+        let rows = state.mcp_registry.snapshot();
+        drop(state);
+        let disk = f.saved().await;
+        assert_eq!(disk.mcp_connections, rows);
+        let mut restored = DaemonState::new();
+        restored.restore_control_plane_snapshot(disk).unwrap();
+        assert_eq!(restored.mcp_registry.snapshot(), rows);
+        assert!(restored.mcp_publication.read().unwrap().live.is_empty());
+        let calls = f.vault.deletes.lock().unwrap().clone();
+        assert_eq!(calls.len(), 2);
+        let mut observed = calls.clone();
+        observed.sort();
+        let mut expected = vec![
+            (
+                owned.id.clone(),
+                owned.bearer_credential_ref.clone().unwrap(),
+            ),
+            (
+                current.id.clone(),
+                current.bearer_credential_ref.clone().unwrap(),
+            ),
+        ];
+        expected.sort();
+        assert_eq!(observed, expected);
+        for row in [&owned, &current] {
+            assert_eq!(
+                f.vault
+                    .load(
+                        &row.id,
+                        &row.endpoint,
+                        row.bearer_credential_ref.as_ref().unwrap()
+                    )
+                    .await
+                    .unwrap()
+                    .is_none(),
+                row.id == calls[0].0 || uncertain,
+                "known prior cleanup stays visible without losing any owned reference"
+            );
+        }
+        assert_eq!(
+            f.vault
+                .load(
+                    &neighbor.id,
+                    &neighbor.endpoint,
+                    neighbor.bearer_credential_ref.as_ref().unwrap()
+                )
+                .await
+                .unwrap()
+                .unwrap()
+                .expose(),
+            "m65-neighbor"
+        );
+        f.no_launch();
     }
 }
 

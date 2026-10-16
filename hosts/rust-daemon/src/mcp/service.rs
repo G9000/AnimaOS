@@ -16,6 +16,7 @@ use tokio::sync::{Mutex, Notify, OwnedSemaphorePermit, RwLock, Semaphore};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+use super::credentials::{InMemoryMcpCredentialStore, McpBearerToken, McpCredentialStore};
 use super::records::*;
 use super::transport::{
     McpCall, McpDiscovery, McpTransportError, McpTransportFactory, McpTransportSession,
@@ -50,6 +51,7 @@ struct Inner {
     transactions: Arc<Mutex<()>>,
     publication: SharedMcpPublication,
     factory: Arc<dyn McpTransportFactory>,
+    credentials: Arc<dyn McpCredentialStore>,
     live: StdMutex<LiveState>,
     generation: AtomicU64,
     slots: Arc<Semaphore>,
@@ -63,6 +65,7 @@ struct LiveState {
     connections: BTreeMap<String, LiveConnection>,
     grant_epochs: BTreeMap<String, u64>,
     quarantined: Vec<(OwnedSemaphorePermit, OwnedSemaphorePermit)>,
+    credential_blocked: HashSet<String>,
 }
 #[derive(Clone)]
 struct LiveConnection {
@@ -74,6 +77,8 @@ struct LiveConnection {
     discovery_id: Option<String>,
     candidates: Vec<anima_core::ExternalToolDescriptor>,
     permit: Arc<Semaphore>,
+    discovery: Arc<Semaphore>,
+    closing: Arc<AtomicUsize>,
     error: Option<McpServiceError>,
 }
 impl Default for LiveConnection {
@@ -87,11 +92,19 @@ impl Default for LiveConnection {
             discovery_id: None,
             candidates: Vec::new(),
             permit: Arc::new(Semaphore::new(1)),
+            discovery: Arc::new(Semaphore::new(1)),
+            closing: Arc::new(AtomicUsize::new(0)),
             error: None,
         }
     }
 }
 struct Work(Arc<Inner>);
+struct CloseWork(Arc<AtomicUsize>);
+impl Drop for CloseWork {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 impl Drop for Work {
     fn drop(&mut self) {
         self.0.pending.fetch_sub(1, Ordering::SeqCst);
@@ -131,12 +144,28 @@ impl McpManager {
         publication: SharedMcpPublication,
         factory: Arc<dyn McpTransportFactory>,
     ) -> Self {
+        Self::with_credentials(
+            state,
+            transactions,
+            publication,
+            factory,
+            Arc::new(InMemoryMcpCredentialStore::default()),
+        )
+    }
+    pub(crate) fn with_credentials(
+        state: Weak<RwLock<DaemonState>>,
+        transactions: Arc<Mutex<()>>,
+        publication: SharedMcpPublication,
+        factory: Arc<dyn McpTransportFactory>,
+        credentials: Arc<dyn McpCredentialStore>,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 state,
                 transactions,
                 publication,
                 factory,
+                credentials,
                 live: StdMutex::new(Default::default()),
                 generation: AtomicU64::new(1),
                 slots: Arc::new(Semaphore::new(2)),
@@ -146,6 +175,185 @@ impl McpManager {
                 settled: Notify::new(),
             }),
         }
+    }
+    pub(crate) async fn set_bearer(
+        &self,
+        agent: &str,
+        id: &str,
+        expected: u64,
+        token: McpBearerToken,
+    ) -> Result<McpConnectionView, McpServiceError> {
+        let manager = self.clone();
+        let (agent, id) = (agent.to_owned(), id.to_owned());
+        self.owned(async move {
+            manager
+                .credential_owned(&agent, &id, expected, Some(token))
+                .await
+        })
+        .await
+    }
+    pub(crate) async fn clear_bearer(
+        &self,
+        agent: &str,
+        id: &str,
+        expected: u64,
+    ) -> Result<McpConnectionView, McpServiceError> {
+        let manager = self.clone();
+        let (agent, id) = (agent.to_owned(), id.to_owned());
+        self.owned(async move { manager.credential_owned(&agent, &id, expected, None).await })
+            .await
+    }
+    fn block_credential(&self, id: &str) {
+        let _ = self.retire(id, Some(McpServiceError::Unavailable));
+        let mut live = self
+            .inner
+            .live
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        live.credential_blocked.insert(id.into());
+        let connection = live.connections.entry(id.into()).or_default();
+        connection.error = Some(McpServiceError::Unavailable);
+        if connection.state == McpConnectionState::Disconnected {
+            connection.state = McpConnectionState::Degraded;
+        }
+    }
+    async fn retire_and_join(&self, id: &str) -> Result<(), McpServiceError> {
+        self.retire(id, None)?;
+        let deadline = Instant::now() + DISCOVERY_TIME;
+        loop {
+            let settled = self.inner.settled.notified();
+            tokio::pin!(settled);
+            settled.as_mut().enable();
+            let done = {
+                let live = self
+                    .inner
+                    .live
+                    .lock()
+                    .map_err(|_| McpServiceError::Unavailable)?;
+                live.connections.get(id).is_none_or(|connection| {
+                    connection.state != McpConnectionState::Stopping
+                        && connection.session.is_none()
+                        && connection.permit.available_permits() == 1
+                        && connection.discovery.available_permits() == 1
+                        && connection.closing.load(Ordering::SeqCst) == 0
+                })
+            };
+            if done {
+                return Ok(());
+            }
+            if tokio::time::timeout_at(deadline, settled).await.is_err() {
+                self.block_credential(id);
+                return Err(McpServiceError::Unavailable);
+            }
+        }
+    }
+    async fn credential_owned(
+        &self,
+        agent: &str,
+        id: &str,
+        expected: u64,
+        token: Option<McpBearerToken>,
+    ) -> Result<McpConnectionView, McpServiceError> {
+        self.running()?;
+        let _transaction = self.inner.transactions.lock().await;
+        let old = self.record(agent, id, Some(expected)).await?;
+        let state = self.state()?;
+        {
+            let guard = state.read().await;
+            crate::community_bundles::check_mcp_edit(&guard, id, false, false)?;
+            if guard.control_plane_store.is_none() {
+                return Err(McpServiceError::Unavailable);
+            }
+        }
+        if token.is_some() && (old.stdio.is_some() || !old.endpoint.starts_with("https://")) {
+            return Err(McpServiceError::InvalidRequest);
+        }
+        if token.is_none() && old.bearer_credential_ref.is_none() {
+            return self.view(old);
+        }
+        let version = next_version(old.version)?;
+        self.retire_and_join(id).await?;
+        let fresh = if let Some(token) = token {
+            let reference = uuid::Uuid::new_v4().to_string();
+            if self
+                .inner
+                .credentials
+                .put(id, &old.endpoint, &reference, token)
+                .await
+                .is_err()
+            {
+                let _ = self.inner.credentials.delete(id, &reference).await;
+                self.block_credential(id);
+                return Err(McpServiceError::Unavailable);
+            }
+            Some(reference)
+        } else {
+            None
+        };
+        if let Some(reference) = &old.bearer_credential_ref {
+            if self.inner.credentials.delete(id, reference).await.is_err() {
+                if let Some(fresh) = &fresh {
+                    let _ = self.inner.credentials.delete(id, fresh).await;
+                }
+                self.block_credential(id);
+                return Err(McpServiceError::Unavailable);
+            }
+        }
+        // Vault and control-plane publication are separate, observable operations.
+        let saved = async {
+            let mut guard = state.write().await;
+            Self::owner(&guard, agent)?;
+            self.same_publication(&guard)?;
+            if guard.mcp_registry.connections.get(id) != Some(&old) {
+                return Err(McpServiceError::Conflict);
+            }
+            let mut next = guard.mcp_registry.clone();
+            let row = next
+                .connections
+                .get_mut(id)
+                .ok_or(McpServiceError::NotFound)?;
+            row.version = version;
+            row.bearer_credential_ref = fresh.clone();
+            let persist = guard
+                .control_plane_persist_request()
+                .with_mcp_candidate(next.snapshot(), None)
+                .ok_or(McpServiceError::Unavailable)?;
+            drop(guard);
+            let uncertain = match persist.save_mcp_candidate().await {
+                Ok(()) => false,
+                Err(error) if crate::control_plane_store::is_durability_uncertain(&error) => true,
+                Err(_) => return Err(McpServiceError::Unavailable),
+            };
+            let mut guard = state.write().await;
+            Self::owner(&guard, agent)?;
+            self.same_publication(&guard)?;
+            guard.mcp_registry = next;
+            self.publish(&guard.mcp_registry)?;
+            if uncertain {
+                return Err(McpServiceError::Unavailable);
+            }
+            {
+                let mut live = self
+                    .inner
+                    .live
+                    .lock()
+                    .map_err(|_| McpServiceError::Unavailable)?;
+                live.credential_blocked.remove(id);
+                if let Some(connection) = live.connections.get_mut(id) {
+                    connection.error = None;
+                    connection.state = McpConnectionState::Disconnected;
+                }
+            }
+            self.view(guard.mcp_registry.connections[id].clone())
+        }
+        .await;
+        if saved.is_err() {
+            if let Some(fresh) = fresh {
+                let _ = self.inner.credentials.delete(id, &fresh).await;
+            }
+            self.block_credential(id);
+        }
+        saved
     }
     fn state(&self) -> Result<Arc<RwLock<DaemonState>>, McpServiceError> {
         self.inner
@@ -503,6 +711,7 @@ impl McpManager {
                         label: normalized_label(&input.label)?,
                         endpoint: normalized_endpoint(&input.endpoint)?,
                         stdio: None,
+                        bearer_credential_ref: None,
                         enabled: false,
                         version: 1,
                         reviewed_tools: Vec::new(),
@@ -523,6 +732,7 @@ impl McpManager {
                         label: normalized_label(&label)?,
                         endpoint: String::new(),
                         stdio: Some(spec),
+                        bearer_credential_ref: None,
                         enabled: false,
                         version: 1,
                         reviewed_tools: Vec::new(),
@@ -574,6 +784,9 @@ impl McpManager {
                                     return Err(McpServiceError::InvalidRequest);
                                 }
                                 row.endpoint = normalized_endpoint(&endpoint)?;
+                            }
+                            if row.endpoint != old.endpoint {
+                                row.bearer_credential_ref = None;
                             }
                             if let Some(enabled) = input.enabled {
                                 row.enabled = enabled;
@@ -725,6 +938,21 @@ impl McpManager {
                 bundle_patch,
             )
         };
+        // Delete endpoint-bound material before a changed endpoint/deletion publishes.
+        if let Some(id) = id {
+            let old = self.record(agent, id, None).await?;
+            if let Some(reference) = old.bearer_credential_ref.as_ref().filter(|_| {
+                next.connections
+                    .get(id)
+                    .is_none_or(|row| row.endpoint != old.endpoint)
+            }) {
+                self.retire_and_join(id).await?;
+                if self.inner.credentials.delete(id, reference).await.is_err() {
+                    self.block_credential(id);
+                    return Err(McpServiceError::Unavailable);
+                }
+            }
+        }
         let uncertain = match persist.save_mcp_candidate().await {
             Ok(()) => false,
             Err(error) if crate::control_plane_store::is_durability_uncertain(&error) => true,
@@ -901,12 +1129,15 @@ impl McpManager {
         if !record.enabled {
             return Err(McpServiceError::Conflict);
         }
-        let (generation, cancel, session) = {
+        let (generation, cancel, session, _discovery) = {
             let mut live = self
                 .inner
                 .live
                 .lock()
                 .map_err(|_| McpServiceError::Unavailable)?;
+            if live.credential_blocked.contains(id) {
+                return Err(McpServiceError::Unavailable);
+            }
             let connection = live.connections.entry(id.into()).or_default();
             if matches!(
                 connection.state,
@@ -921,6 +1152,11 @@ impl McpManager {
             if !connect && connection.session.is_none() {
                 return Err(McpServiceError::Conflict);
             }
+            let discovery = connection
+                .discovery
+                .clone()
+                .try_acquire_owned()
+                .map_err(|_| McpServiceError::Busy)?;
             connection.agent_id = agent.to_owned();
             connection.generation = self.generation()?;
             connection.cancel = CancellationToken::new();
@@ -932,6 +1168,7 @@ impl McpManager {
                 connection.generation,
                 connection.cancel.clone(),
                 connection.session.clone(),
+                discovery,
             )
         };
         self.inner
@@ -942,6 +1179,26 @@ impl McpManager {
             .retain(|_, binding| binding.connection_id != id);
         drop(transaction);
         let control = TransportControl::new(deadline, cancel.clone());
+        let bearer = if connect {
+            if let Some(reference) = &record.bearer_credential_ref {
+                match tokio::time::timeout_at(
+                    deadline,
+                    self.inner.credentials.load(id, &record.endpoint, reference),
+                )
+                .await
+                {
+                    Ok(Ok(Some(token))) if !cancel.is_cancelled() => Some(token),
+                    _ => {
+                        self.block_credential(id);
+                        return Err(McpServiceError::Unavailable);
+                    }
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         let session = match session {
             Some(session) => session,
             None => match self
@@ -953,9 +1210,15 @@ impl McpManager {
                             spec,
                             connection_id: record.id.clone(),
                         },
-                        None => {
-                            ValidatedMcpLaunch::Http(ValidatedMcpEndpoint(record.endpoint.clone()))
-                        }
+                        None => match bearer {
+                            Some(token) => ValidatedMcpLaunch::HttpBearer {
+                                endpoint: ValidatedMcpEndpoint(record.endpoint.clone()),
+                                token,
+                            },
+                            None => ValidatedMcpLaunch::Http(ValidatedMcpEndpoint(
+                                record.endpoint.clone(),
+                            )),
+                        },
                     },
                     control.clone(),
                 )
@@ -987,6 +1250,10 @@ impl McpManager {
             }
         }
         let discovery = session.discover(control).await;
+        if cancel.is_cancelled() {
+            self.retire_if_generation(id, generation, Some(McpServiceError::Revoked))?;
+            return Err(McpServiceError::Revoked);
+        }
         let _transaction =
             match tokio::time::timeout_at(deadline, self.inner.transactions.lock()).await {
                 Ok(transaction) => transaction,
@@ -1134,11 +1401,27 @@ impl McpManager {
         id: String,
         generation: u64,
     ) {
+        let closing = {
+            let mut live = self
+                .inner
+                .live
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            let closing = live
+                .connections
+                .entry(id.clone())
+                .or_default()
+                .closing
+                .clone();
+            closing.fetch_add(1, Ordering::SeqCst);
+            CloseWork(closing)
+        };
         self.inner.pending.fetch_add(1, Ordering::SeqCst);
         let work = Work(self.inner.clone());
         let manager = self.clone();
         tokio::spawn(async move {
             let _work = work;
+            let _closing = closing;
             let closed = std::panic::AssertUnwindSafe(session.close())
                 .catch_unwind()
                 .await;
@@ -1167,6 +1450,7 @@ impl McpManager {
                 }
                 if let Some(connection) = live.connections.get_mut(&id) {
                     connection.error = Some(McpServiceError::Unavailable);
+                    connection.state = McpConnectionState::Stopping;
                 }
             }
         });
@@ -1304,6 +1588,84 @@ impl McpManager {
         })
         .await
         .map_err(|_| McpServiceError::Unavailable)?
+    }
+    /// Called only from the bundle owner's retained removal task while it holds
+    /// the shared transaction lock. Keep durable row references until all deletes
+    /// have settled; a partial failure leaves the existing removing intent intact.
+    pub(crate) async fn delete_retired_bundle_credentials(
+        &self,
+        agent: &str,
+        bundle_id: &str,
+        rows: &[McpConnectionRecord],
+    ) -> Result<(), McpServiceError> {
+        {
+            let state = self.state()?;
+            let guard = state.read().await;
+            Self::owner(&guard, agent)?;
+            self.same_publication(&guard)?;
+            let bundle = guard
+                .community_bundles
+                .iter()
+                .find(|bundle| {
+                    bundle.id == bundle_id
+                        && bundle.agent_id == agent
+                        && bundle.state == "removing"
+                        && bundle
+                            .settlement
+                            .as_ref()
+                            .is_some_and(|intent| intent.kind == "remove")
+                })
+                .ok_or(McpServiceError::Conflict)?;
+            let ids = bundle
+                .mcp()
+                .map(|part| part.connection_id.as_str())
+                .collect::<HashSet<_>>();
+            if ids.len() != rows.len()
+                || rows
+                    .iter()
+                    .map(|row| row.id.as_str())
+                    .collect::<HashSet<_>>()
+                    != ids
+                || rows.iter().any(|row| {
+                    row.agent_id != agent
+                        || !ids.contains(row.id.as_str())
+                        || guard.mcp_registry.connections.get(&row.id) != Some(row)
+                })
+            {
+                return Err(McpServiceError::Conflict);
+            }
+            let live = self
+                .inner
+                .live
+                .lock()
+                .map_err(|_| McpServiceError::Unavailable)?;
+            if rows.iter().any(|row| {
+                live.connections.get(&row.id).is_some_and(|connection| {
+                    connection.state == McpConnectionState::Stopping
+                        || connection.session.is_some()
+                        || connection.permit.available_permits() == 0
+                        || connection.discovery.available_permits() == 0
+                        || connection.closing.load(Ordering::SeqCst) != 0
+                })
+            }) {
+                return Err(McpServiceError::Unavailable);
+            }
+        }
+        for row in rows {
+            if let Some(reference) = &row.bearer_credential_ref {
+                if self
+                    .inner
+                    .credentials
+                    .delete(&row.id, reference)
+                    .await
+                    .is_err()
+                {
+                    self.block_credential(&row.id);
+                    return Err(McpServiceError::Unavailable);
+                }
+            }
+        }
+        Ok(())
     }
     pub(crate) fn capture_dispatch(
         &self,

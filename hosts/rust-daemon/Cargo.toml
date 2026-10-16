@@ -53,6 +53,7 @@ win-custody = "=0.1.1"
 
 [dev-dependencies]
 http-body-util = "0.1"
+tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring", "tls12"] }
 
 [[example]]
 name = "document_worker_peer"

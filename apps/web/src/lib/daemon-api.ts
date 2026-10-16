@@ -24,6 +24,7 @@ import {
   type McpCreateInput,
   type McpUpdateInput,
   type McpVersionInput,
+  type McpBearerCredentialInput,
   type McpReviewInput,
   type McpGrantInput,
   type BundleReviewInput,
@@ -120,6 +121,16 @@ export const mcpOwnerApi = {
     setupClient.mcp.disconnect(agentId, id, input),
   remove: (agentId: string, id: string, input: McpVersionInput) =>
     setupClient.mcp.remove(agentId, id, input),
+  saveBearerCredential: (
+    agentId: string,
+    id: string,
+    input: McpBearerCredentialInput,
+  ) => setupClient.mcp.saveBearerCredential(agentId, id, input),
+  clearBearerCredential: (
+    agentId: string,
+    id: string,
+    input: McpVersionInput,
+  ) => setupClient.mcp.clearBearerCredential(agentId, id, input),
   setGrant: (
     agentId: string,
     id: string,

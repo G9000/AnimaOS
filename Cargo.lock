@@ -125,6 +125,7 @@ dependencies = [
  "sse-stream",
  "tempfile",
  "tokio",
+ "tokio-rustls",
  "tokio-util",
  "tower",
  "tower-http",

@@ -130,6 +130,10 @@ pub(crate) struct ValidatedMcpEndpoint(pub(crate) String);
 #[derive(Clone, Debug)]
 pub(crate) enum ValidatedMcpLaunch {
     Http(ValidatedMcpEndpoint),
+    HttpBearer {
+        endpoint: ValidatedMcpEndpoint,
+        token: super::credentials::McpBearerToken,
+    },
     Stdio {
         spec: super::McpStdioSpec,
         connection_id: String,
@@ -318,6 +322,7 @@ struct HttpBackend {
     activity: Arc<Activity>,
     workers: Arc<Activity>,
     stop: CancellationToken,
+    bearer: Option<(String, super::credentials::McpBearerToken)>,
 }
 impl HttpBackend {
     fn new(control: TransportControl) -> Result<Self, McpTransportError> {
@@ -334,11 +339,42 @@ impl HttpBackend {
             activity: Arc::new(Activity::default()),
             workers: Arc::new(Activity::default()),
             stop: CancellationToken::new(),
+            bearer: None,
         })
     }
     fn failure(&self, error: McpTransportError) -> StreamableHttpError<McpTransportError> {
         *lock(&self.error) = Some(error);
         StreamableHttpError::Client(error)
+    }
+    fn with_bearer(
+        mut self,
+        endpoint: &str,
+        token: super::credentials::McpBearerToken,
+    ) -> Result<Self, McpTransportError> {
+        if !endpoint.starts_with("https://")
+            || !super::normalized_endpoint(endpoint).is_ok_and(|value| value == endpoint)
+        {
+            return Err(McpTransportError::Unavailable);
+        }
+        self.bearer = Some((endpoint.into(), token));
+        Ok(self)
+    }
+    fn authorize_request(
+        &self,
+        uri: &str,
+        request: reqwest::RequestBuilder,
+    ) -> Result<reqwest::RequestBuilder, StreamableHttpError<McpTransportError>> {
+        let Some((endpoint, token)) = &self.bearer else {
+            return Ok(request);
+        };
+        if uri != endpoint {
+            return Err(self.failure(McpTransportError::Unavailable));
+        }
+        let value = zeroize::Zeroizing::new(format!("Bearer {}", token.expose()));
+        let mut header = HeaderValue::from_str(&value)
+            .map_err(|_| self.failure(McpTransportError::Unavailable))?;
+        header.set_sensitive(true);
+        Ok(request.header(axum::http::header::AUTHORIZATION, header))
     }
     fn begin(&self, control: TransportControl) {
         *lock(&self.control) = control;
@@ -365,6 +401,7 @@ impl HttpBackend {
             .post(uri.as_ref())
             .header("accept", "application/json, text/event-stream")
             .json(&message);
+        request = self.authorize_request(&uri, request)?;
         if let Some(id) = session_id {
             request = request.header("mcp-session-id", id.as_ref());
         }
@@ -553,6 +590,7 @@ impl StreamableHttpClient for HttpBackend {
             .http
             .delete(u.as_ref())
             .header("mcp-session-id", s.as_ref());
+        request = self.authorize_request(&u, request)?;
         for (name, value) in h {
             if name.as_str() != "mcp-protocol-version" {
                 return Err(self.failure(McpTransportError::Malformed));
@@ -576,6 +614,8 @@ impl StreamableHttpClient for HttpBackend {
 #[derive(Default)]
 pub(crate) struct DefaultMcpTransportFactory {
     stdio: Arc<super::stdio::StdioRuntime>,
+    #[cfg(test)]
+    http: Option<reqwest::Client>,
 }
 struct SessionInner {
     backend: HttpBackend,
@@ -934,11 +974,26 @@ impl DefaultMcpTransportFactory {
     fn connect_http(
         &self,
         endpoint: ValidatedMcpEndpoint,
+        bearer: Option<super::credentials::McpBearerToken>,
         control: TransportControl,
     ) -> BoxFuture<'static, Result<Arc<dyn McpTransportSession>, McpTransportError>> {
+        #[cfg(test)]
+        let http = self.http.clone();
         owned(control.clone(), async move {
             control.check()?;
             let backend = HttpBackend::new(control.clone())?;
+            #[cfg(test)]
+            let backend = {
+                let mut backend = backend;
+                if let Some(http) = http {
+                    backend.http = http;
+                }
+                backend
+            };
+            let backend = match bearer {
+                Some(token) => backend.with_bearer(&endpoint.0, token)?,
+                None => backend,
+            };
             let mut config = StreamableHttpClientTransportConfig::with_uri(endpoint.0)
                 .reinit_on_expired_session(false)
                 .max_sse_event_size(RAW_EVENT);
@@ -1021,7 +1076,10 @@ impl McpTransportFactory for DefaultMcpTransportFactory {
         control: TransportControl,
     ) -> BoxFuture<'static, Result<Arc<dyn McpTransportSession>, McpTransportError>> {
         match launch {
-            ValidatedMcpLaunch::Http(endpoint) => self.connect_http(endpoint, control),
+            ValidatedMcpLaunch::Http(endpoint) => self.connect_http(endpoint, None, control),
+            ValidatedMcpLaunch::HttpBearer { endpoint, token } => {
+                self.connect_http(endpoint, Some(token), control)
+            }
             ValidatedMcpLaunch::Stdio {
                 spec,
                 connection_id,
@@ -1046,6 +1104,263 @@ mod tests {
             Instant::now() + Duration::from_secs(seconds),
             CancellationToken::new(),
         )
+    }
+    fn m65_token() -> super::super::credentials::McpBearerToken {
+        super::super::credentials::McpBearerToken::parse("m65-wire-secret".into()).unwrap()
+    }
+    #[tokio::test]
+    async fn m65_sensitive_header_exact_endpoint_callback_and_unsupported_get_are_fail_closed() {
+        let endpoint = "https://m65.invalid/mcp";
+        let backend = HttpBackend::new(control(2))
+            .unwrap()
+            .with_bearer(endpoint, m65_token())
+            .unwrap();
+        for method in [reqwest::Method::POST, reqwest::Method::DELETE] {
+            let request = backend
+                .authorize_request(endpoint, backend.http.request(method, endpoint))
+                .unwrap()
+                .build()
+                .unwrap();
+            let header = &request.headers()["authorization"];
+            assert_eq!(header, "Bearer m65-wire-secret");
+            assert!(header.is_sensitive());
+            assert!(!format!("{request:?}").contains("m65-wire-secret"));
+        }
+        for target in [
+            "https://m65.invalid/other",
+            "https://foreign.invalid/mcp",
+            "http://127.0.0.1/mcp",
+        ] {
+            assert!(backend
+                .authorize_request(target, backend.http.post(target))
+                .is_err());
+        }
+        assert!(HttpBackend::new(control(2))
+            .unwrap()
+            .with_bearer("http://127.0.0.1/mcp", m65_token())
+            .is_err());
+        let message: ClientJsonRpcMessage =
+            serde_json::from_value(json!({"jsonrpc":"2.0","id":1,"method":"tools/list"})).unwrap();
+        assert!(backend
+            .post(
+                endpoint.into(),
+                message,
+                None,
+                Some("alternate-callback-source".into()),
+                HashMap::new()
+            )
+            .await
+            .is_err());
+        assert!(backend
+            .delete_session(
+                endpoint.into(),
+                "fixture".into(),
+                Some("alternate-callback-source".into()),
+                HashMap::new()
+            )
+            .await
+            .is_err());
+        assert!(matches!(
+            backend
+                .get_stream(endpoint.into(), None, None, None, HashMap::new())
+                .await,
+            Err(StreamableHttpError::ServerDoesNotSupportSse)
+        ));
+        assert_eq!(backend.activity.count.load(Ordering::SeqCst), 0);
+        assert!(!lock(&backend.control).dispatched.load(Ordering::SeqCst));
+    }
+
+    // Reuse the public synthetic test CA only in this private test client. The
+    // production factory has neither custom trust nor a DNS/dial override.
+    async fn m65_tls_fixture(
+        mode: u16,
+    ) -> (
+        ValidatedMcpEndpoint,
+        reqwest::Client,
+        Arc<StdMutex<Vec<(String, String)>>>,
+        CancellationToken,
+        tokio::task::JoinHandle<()>,
+    ) {
+        use tokio_rustls::rustls::{
+            pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
+            ServerConfig,
+        };
+        let cert =
+            include_bytes!("../../../../packages/core-rust/browser-worker/fixtures/m63/server.pem");
+        let key = include_bytes!(
+            "../../../../packages/core-rust/browser-worker/fixtures/m63/server-key.pem"
+        );
+        let ca =
+            include_bytes!("../../../../packages/core-rust/browser-worker/fixtures/m63/ca.pem");
+        let config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![CertificateDer::from_pem_slice(cert).unwrap()],
+                PrivateKeyDer::from_pem_slice(key).unwrap(),
+            )
+            .unwrap();
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let endpoint = ValidatedMcpEndpoint(format!(
+            "https://m63-browser.anima.tools:{}/mcp",
+            addr.port()
+        ));
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .resolve("m63-browser.anima.tools", addr)
+            .add_root_certificate(reqwest::Certificate::from_pem(ca).unwrap())
+            .connect_timeout(Duration::from_secs(2))
+            .build()
+            .unwrap();
+        let captured = Arc::new(StdMutex::new(Vec::new()));
+        let stop = CancellationToken::new();
+        let task_stop = stop.clone();
+        let records = captured.clone();
+        let task = tokio::spawn(async move {
+            let mut peers = tokio::task::JoinSet::new();
+            loop {
+                tokio::select! {
+                    _ = task_stop.cancelled() => break,
+                    peer = peers.join_next(), if !peers.is_empty() => { peer.unwrap().unwrap(); },
+                    accepted = listener.accept() => {
+                        let (stream, _) = accepted.unwrap();
+                        let (acceptor, records) = (acceptor.clone(), records.clone());
+                        peers.spawn(async move {
+                            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                            tokio::time::timeout(Duration::from_secs(5), async move {
+                                let mut stream = acceptor.accept(stream).await.unwrap();
+                                let mut bytes = Vec::new();
+                                let header_end = loop {
+                                    let mut chunk = [0u8; 1024];
+                                    let count = stream.read(&mut chunk).await.unwrap();
+                                    assert!(count > 0 && bytes.len() + count <= RAW_EVENT);
+                                    bytes.extend_from_slice(&chunk[..count]);
+                                    if let Some(end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") { break end + 4; }
+                                };
+                                let headers = String::from_utf8(bytes[..header_end].to_vec()).unwrap();
+                                let lines = headers.lines().collect::<Vec<_>>();
+                                let auth = lines.iter().find_map(|line| line.split_once(':').filter(|(name,_)| name.eq_ignore_ascii_case("authorization")))
+                                    .map(|(_,value)| value.trim().to_owned()).unwrap_or_default();
+                                let size: usize = lines.iter().find_map(|line| line.split_once(':').filter(|(name,_)| name.eq_ignore_ascii_case("content-length")))
+                                    .map(|(_,value)| value.trim().parse().unwrap()).unwrap_or(0);
+                                assert!(size <= RAW_EVENT);
+                                while bytes.len() < header_end + size {
+                                    let mut chunk = [0u8; 1024];
+                                    let count = stream.read(&mut chunk).await.unwrap();
+                                    assert!(count > 0 && bytes.len() + count <= 2 * RAW_EVENT);
+                                    bytes.extend_from_slice(&chunk[..count]);
+                                }
+                                let delete = lines[0].starts_with("DELETE ");
+                                let request: Value = if delete { Value::Null } else { serde_json::from_slice(&bytes[header_end..header_end + size]).unwrap() };
+                                let method = if delete { "DELETE" } else { request["method"].as_str().unwrap() };
+                                lock(&records).push((method.into(), auth));
+                                let (status, mime, extra, body) = if mode == 302 || mode == 401 {
+                                    (mode, "application/json", "location: /redirect-target\r\nwww-authenticate: Bearer\r\n", String::new())
+                                } else if delete || method.starts_with("notifications/") {
+                                    (204, "application/json", "", String::new())
+                                } else {
+                                    let result = match method {
+                                        "initialize" => json!({"protocolVersion":PROTOCOL,"capabilities":{"tools":{}},"serverInfo":{"name":"fixture","version":"1"}}),
+                                        "tools/list" => json!({"tools":[{"name":"echo_record","description":"Synthetic","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}]}),
+                                        "tools/call" => json!({"content":[{"type":"text","text":"synthetic authenticated reply"}],"isError":false}),
+                                        _ => panic!("unexpected fixture operation"),
+                                    };
+                                    let body = json!({"jsonrpc":"2.0","id":request["id"],"result":result}).to_string();
+                                    if mode == 201 && method == "tools/call" { (200, "text/event-stream", "mcp-session-id: m65-fixture\r\n", format!("data: {body}\n\n")) }
+                                    else { (200, "application/json", "mcp-session-id: m65-fixture\r\n", body) }
+                                };
+                                let response = format!("HTTP/1.1 {status} Fixture\r\ncontent-type: {mime}\r\ncontent-length: {}\r\nconnection: close\r\n{extra}\r\n{body}", body.len());
+                                stream.write_all(response.as_bytes()).await.unwrap();
+                                stream.shutdown().await.unwrap();
+                            }).await.expect("finite TLS fixture peer");
+                        });
+                    }
+                }
+            }
+            peers.abort_all();
+            while let Some(peer) = peers.join_next().await {
+                if let Err(error) = peer {
+                    assert!(error.is_cancelled(), "TLS fixture peer panicked");
+                }
+            }
+        });
+        (endpoint, client, captured, stop, task)
+    }
+    #[tokio::test]
+    async fn m65_verified_tls_static_bearer_covers_sdk_json_sse_delete_without_redirect_or_retry() {
+        use futures::FutureExt;
+        for mode in [200, 201, 302, 401] {
+            let (endpoint, client, captured, stop, server) = m65_tls_fixture(mode).await;
+            let factory = DefaultMcpTransportFactory {
+                http: Some(client),
+                ..Default::default()
+            };
+            let mut session = None;
+            let outcome = std::panic::AssertUnwindSafe(async {
+                let result = factory
+                    .connect(
+                        ValidatedMcpLaunch::HttpBearer {
+                            endpoint,
+                            token: m65_token(),
+                        },
+                        control(3),
+                    )
+                    .await;
+                if mode == 302 || mode == 401 {
+                    assert!(result.is_err());
+                    return;
+                }
+                let connected = result.unwrap();
+                session = Some(connected.clone());
+                let discovery = connected.discover(control(3)).await.unwrap();
+                let descriptor = discovery.tools.into_iter().next().unwrap();
+                let result = connected
+                    .call_once(
+                        McpCall {
+                            remote_name: descriptor.remote_name.clone(),
+                            arguments: json!({}),
+                            descriptor,
+                        },
+                        control(3),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(result.text_blocks, ["synthetic authenticated reply"]);
+            })
+            .catch_unwind()
+            .await;
+            let closed = if let Some(session) = session {
+                Some(tokio::time::timeout(Duration::from_secs(4), session.close()).await)
+            } else {
+                None
+            };
+            stop.cancel();
+            tokio::time::timeout(Duration::from_secs(2), server)
+                .await
+                .unwrap()
+                .unwrap();
+            if let Some(result) = closed {
+                result.unwrap().unwrap();
+            }
+            let records = lock(&captured);
+            assert!(records
+                .iter()
+                .all(|(_, auth)| auth == "Bearer m65-wire-secret"));
+            let count = |method: &str| records.iter().filter(|(name, _)| name == method).count();
+            assert_eq!(count("initialize"), 1);
+            if mode == 302 || mode == 401 {
+                assert_eq!(records.len(), 1, "no redirect follow, refresh or retry");
+            } else {
+                assert_eq!(count("tools/list"), 1);
+                assert_eq!(count("tools/call"), 1);
+                assert_eq!(count("DELETE"), 1);
+            }
+            if let Err(panic) = outcome {
+                std::panic::resume_unwind(panic);
+            }
+        }
     }
     #[test]
     fn raw_event_and_shared_aggregate_caps_precede_parsing() {
