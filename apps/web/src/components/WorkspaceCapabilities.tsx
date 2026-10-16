@@ -33,9 +33,30 @@ const groups = [
     'Connected work',
     'Work with connected services when configured and authorized.',
   ],
+  [
+    'browser',
+    'Browser tools',
+    'Browse pages under an owner-selected policy and explicit tool grants.',
+  ],
+  [
+    'documents',
+    'Document tools',
+    'Read selected supported documents with workspace access and an explicit tool grant.',
+  ],
   ['utility', 'Utilities', 'Supporting tools for everyday agent work.'],
 ] as const;
 const panel = 'rounded-2xl border border-line bg-surface p-5 sm:p-6';
+
+function implementationStatusLabel(status: string) {
+  switch (status) {
+    case 'partial':
+      return 'Partial implementation · setup required';
+    case 'planned':
+      return 'Planned · unavailable';
+    default:
+      return 'Implementation status unknown';
+  }
+}
 
 export function WorkspaceCapabilities({ online }: { online: boolean }) {
   const [inventory, setInventory] = useState<DaemonCapabilities | null>(null);
@@ -303,22 +324,22 @@ export function WorkspaceCapabilities({ online }: { online: boolean }) {
             </section>
 
             {inventory.extensions.length > 0 && (
-              <section aria-labelledby="planned-capabilities-heading">
+              <section aria-labelledby="additional-capabilities-heading">
                 <h3
-                  id="planned-capabilities-heading"
+                  id="additional-capabilities-heading"
                   className="text-lg font-semibold"
                 >
-                  Room to grow
+                  Additional capabilities
                 </h3>
                 <p className="mt-2 text-sm text-ink-3">
-                  Future extensions. These modules cannot be enabled or used
-                  yet.
+                  Some modules have bounded implementations that require setup;
+                  others remain planned.
                 </p>
                 <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {inventory.extensions.map((extension) => (
                     <article key={extension.id} className={panel}>
                       <p className="text-xs text-ink-3">
-                        Planned · unavailable
+                        {implementationStatusLabel(extension.status)}
                       </p>
                       <h4 className="mt-2 font-semibold">{extension.label}</h4>
                       <p className="mt-2 text-sm leading-relaxed text-ink-2">

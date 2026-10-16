@@ -2,7 +2,16 @@
 export interface DaemonCapabilityTool {
   name: string;
   description: string;
-  category: 'workspace' | 'terminal' | 'memory' | 'team' | 'research' | 'productivity' | 'utility';
+  category:
+    | 'workspace'
+    | 'terminal'
+    | 'memory'
+    | 'team'
+    | 'research'
+    | 'productivity'
+    | 'browser'
+    | 'documents'
+    | 'utility';
   requirements: string[];
 }
 
@@ -19,7 +28,7 @@ export interface DaemonCapabilities {
   extensions: Array<{
     id: string;
     label: string;
-    status: 'planned';
+    status: 'planned' | 'partial';
     description: string;
   }>;
   limitations: string[];
