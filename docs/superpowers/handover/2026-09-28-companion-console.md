@@ -1,6 +1,23 @@
+# Handover: M78 Memory reconnect freshness verified
+
+## Start here (2026-10-16): publish M78 and continue selected parity
+
+M78 fences Memory lists, mutation completions and evidence to the current mounted companion/connection/epoch. Reconnect or scope changes synchronously hide old editable rows until fresh reads settle; late responses cannot publish stale state or initiate offline/unmounted follow-up reads. Submitted mutations retain their original target and run once, with no automatic retry. Same-context reloads, partial sections and independent action/read errors remain. Root StrictMode replay and latest search/filter recovery are regression-covered. Fresh web 1552 tests/122 files, typecheck/build, touched formatting and final web/SDK-contract review pass.
+
+Local deterministic owner-console evidence only; no daemon, SDK, dependency or provider behavior changes and no actual runtime case. This does not establish semantic ranking, memory quality, exactly-once server effects, target-host recovery or full Hermes parity. Historical raw cases and Git provenance remain unchanged.
+
+Resume .superpowers/sdd/2026-10-16-companion-memory-reconnect-m78/progress.md.
+Finish docs/format/explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof.
+M77 public-page ACCEPTED case and M74 strict Files save remain settled; preserve raw/Git versions.
+Next inspect the locked roadmap and current source for a concrete remaining daily-use product gap.
+Standing Codex delegation, unsigned per-command commits and merge-and-continue apply.
+No ordinary profiles, accounts, providers, devices, services, DBs, containers or Docker55432.
+Explicit stage only; never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+Cargo incremental0/jobs1/threads2 and serialized if later needed; none used here.
+
 # Handover: M78 Memory reconnect freshness
 
-## Start here (2026-10-16): M77 merged; execute M78
+## Historical M78 bound-plan handover
 
 M77 PR83 merged at 0b892a405bd43d7eeedaf2a20246e12ef084a415; exact tested tree 6ea9ac52d1e856054a440ae8fbdd4368e96ddebb.
 Its one consumed static-page outcome and raw/Git provenance are immutable; read its

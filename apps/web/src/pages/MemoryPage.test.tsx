@@ -109,6 +109,149 @@ afterEach(() => {
   sessionStorage.clear();
 });
 
+describe('MemoryPage: M78 context freshness', () => {
+  function deferNextBatch(memories: ReturnType<typeof memoryFixture>[]) {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(daemon.recentMemories).mockImplementationOnce(() =>
+      pending.then(() => memories),
+    );
+    vi.mocked(daemon.listFacts).mockImplementationOnce(() =>
+      pending.then(() => []),
+    );
+    vi.mocked(daemon.listMemoryEntities).mockImplementationOnce(() =>
+      pending.then(() => []),
+    );
+    vi.mocked(daemon.listMemoryRelationships).mockImplementationOnce(() =>
+      pending.then(() => []),
+    );
+    return release;
+  }
+
+  function expectReadBatches(count: number) {
+    for (const read of [
+      daemon.recentMemories,
+      daemon.listFacts,
+      daemon.listMemoryEntities,
+      daemon.listMemoryRelationships,
+    ]) {
+      expect(read).toHaveBeenCalledTimes(count);
+    }
+  }
+
+  function expectNoEditableRows() {
+    expect(
+      screen.queryByRole('button', { name: 'Edit', exact: true }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Delete', exact: true }),
+    ).toBeNull();
+    expect(screen.queryByRole('form', { name: 'Edit memory' })).toBeNull();
+  }
+
+  it('m78 hides old editable rows until the fresh reconnect batch settles', async () => {
+    vi.mocked(daemon.recentMemories).mockResolvedValueOnce([
+      memoryFixture('before-reconnect', { content: 'Old editable memory' }),
+    ]);
+    const page = renderPage();
+    expect(await screen.findByText('Old editable memory')).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Edit', exact: true }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: 'Delete', exact: true }),
+    ).toBeEnabled();
+    expectReadBatches(1);
+    const releaseFresh = deferNextBatch([
+      memoryFixture('after-reconnect', { content: 'Fresh reconnect memory' }),
+    ]);
+    try {
+      page.rerender(
+        <MemoryPage agentId="agent-main" online={false} epoch={1} />,
+      );
+      expect(screen.getByText(COMPANION_UNREACHABLE)).toBeVisible();
+      expect(screen.queryByText('Old editable memory')).toBeNull();
+      expectNoEditableRows();
+      expectReadBatches(1);
+
+      // The same agent and epoch must still have a new online context.
+      page.rerender(<MemoryPage agentId="agent-main" online epoch={1} />);
+      expectReadBatches(2);
+      expect(screen.queryByText('Old editable memory')).toBeNull();
+      expectNoEditableRows();
+      expect(screen.getByText('Loading memory…')).toBeVisible();
+
+      await act(async () => releaseFresh());
+      expect(await screen.findByText('Fresh reconnect memory')).toBeVisible();
+      expect(screen.queryByText('Old editable memory')).toBeNull();
+      expect(screen.queryByText('Loading memory…')).toBeNull();
+      expect(
+        screen.getByRole('button', { name: 'Edit', exact: true }),
+      ).toBeEnabled();
+      expectReadBatches(2);
+      expect(daemon.updateMemory).not.toHaveBeenCalled();
+      expect(daemon.deleteMemory).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => releaseFresh());
+    }
+  });
+
+  it('m78 hides the previous agent rows while new reads wait and ignores its late refresh', async () => {
+    vi.mocked(daemon.recentMemories).mockResolvedValueOnce([
+      memoryFixture('old-agent-memory', { content: 'Previous agent memory' }),
+    ]);
+    const page = render(<MemoryPage agentId="agent-old" online epoch={1} />);
+    expect(await screen.findByText('Previous agent memory')).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Edit', exact: true }),
+    ).toBeEnabled();
+    const releaseOld = deferNextBatch([
+      memoryFixture('late-old-memory', {
+        content: 'Late previous agent memory',
+      }),
+    ]);
+    const releaseNew = deferNextBatch([
+      memoryFixture('new-agent-memory', { content: 'Current agent memory' }),
+    ]);
+    try {
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Refresh', exact: true }),
+      );
+      expectReadBatches(2);
+      expect(daemon.recentMemories).toHaveBeenLastCalledWith('agent-old', 200);
+      page.rerender(<MemoryPage agentId="agent-new" online epoch={1} />);
+      expectReadBatches(3);
+      expect(daemon.recentMemories).toHaveBeenLastCalledWith('agent-new', 200);
+      expect(screen.queryByText('Previous agent memory')).toBeNull();
+      expectNoEditableRows();
+      expect(screen.getByText('Loading memory…')).toBeVisible();
+
+      await act(async () => releaseNew());
+      expect(await screen.findByText('Current agent memory')).toBeVisible();
+      await act(async () => releaseOld());
+      expect(screen.getByText('Current agent memory')).toBeVisible();
+      expect(screen.queryByText('Previous agent memory')).toBeNull();
+      expect(screen.queryByText('Late previous agent memory')).toBeNull();
+      expect(
+        screen.getAllByRole('button', { name: 'Edit', exact: true }),
+      ).toHaveLength(1);
+      expect(
+        screen.getAllByRole('button', { name: 'Delete', exact: true }),
+      ).toHaveLength(1);
+      expectReadBatches(3);
+      expect(daemon.updateMemory).not.toHaveBeenCalled();
+      expect(daemon.deleteMemory).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        releaseOld();
+        releaseNew();
+      });
+    }
+  });
+});
+
 describe('MemoryPage: memories', () => {
   it('shows the empty state when nothing is remembered', async () => {
     renderPage();

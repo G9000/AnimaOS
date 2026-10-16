@@ -53,94 +53,166 @@ export interface MemoryView {
   removeEntity: (entity: MemoryEntity) => Promise<boolean>;
 }
 
+interface MemoryContext extends MemoryOptions {
+  generation: number;
+}
+
+interface MemorySnapshot {
+  context: MemoryContext;
+  memories: MemoryEntry[];
+  facts: MemoryFact[];
+  entities: MemoryEntity[];
+  relationships: AgentRelationship[];
+  loaded: boolean;
+  readError: string | null;
+  actionError: string | null;
+  actionStatus: number | null;
+}
+
+const EMPTY_MEMORIES: MemoryEntry[] = [];
+const EMPTY_FACTS: MemoryFact[] = [];
+const EMPTY_ENTITIES: MemoryEntity[] = [];
+const EMPTY_RELATIONSHIPS: AgentRelationship[] = [];
+
 /** An empty list that is empty again keeps its array, so a harness that goes
  *  online with nothing remembered does not render again (the M5 I4 lesson). */
 function keepEmpty<T>(previous: T[], next: T[]): T[] {
   return previous.length === 0 && next.length === 0 ? previous : next;
 }
 
-/** The Memory page's data (spec §15.4, §15.5 `useMemory`). The daemon sends
- *  no memory event: the page reads on open, on resync, after its own actions,
- *  and on Refresh. */
+function sameInputs(context: MemoryContext, options: MemoryOptions): boolean {
+  return (
+    context.agentId === options.agentId &&
+    context.enabled === options.enabled &&
+    context.epoch === options.epoch
+  );
+}
+
+function emptySnapshot(context: MemoryContext): MemorySnapshot {
+  return {
+    context,
+    memories: EMPTY_MEMORIES,
+    facts: EMPTY_FACTS,
+    entities: EMPTY_ENTITIES,
+    relationships: EMPTY_RELATIONSHIPS,
+    loaded: false,
+    readError: null,
+    actionError: null,
+    actionStatus: null,
+  };
+}
+
+/** Memory reads and actions belong to one mounted owner/online/epoch context. */
 export function useMemory({
   agentId,
   epoch,
   enabled,
 }: MemoryOptions): MemoryView {
-  const [memories, setMemories] = useState<MemoryEntry[]>([]);
-  const [facts, setFacts] = useState<MemoryFact[]>([]);
-  const [entities, setEntities] = useState<MemoryEntity[]>([]);
-  const [relationships, setRelationships] = useState<AgentRelationship[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [query, setQueryState] = useState('');
-  const [includeReplaced, setIncludeReplacedState] = useState(false);
-  // A failed read and a failed action keep their own messages, so a
-  // successful reload does not hide a refused action, nor the reverse.
-  const [readError, setReadError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [actionStatus, setActionStatus] = useState<number | null>(null);
-
-  // The latest inputs, so the actions' reload sees what the page shows now.
-  const agentIdRef = useRef(agentId);
-  agentIdRef.current = agentId;
-  const queryRef = useRef('');
-  const includeReplacedRef = useRef(false);
-  // A read answered after a newer one started (or after unmount) is ignored.
   const sequence = useRef(0);
   const mounted = useRef(true);
+  const contextRef = useRef<MemoryContext | null>(null);
+  const inputs = { agentId, epoch, enabled };
+
+  if (!contextRef.current || !sameInputs(contextRef.current, inputs)) {
+    const generation = (contextRef.current?.generation ?? 0) + 1;
+    contextRef.current = { ...inputs, generation };
+    // Invalidate reads as soon as a new context is rendered. The visible view
+    // is projected from the context-bound snapshot below, before effects run.
+    sequence.current += 1;
+  }
+
+  const context = contextRef.current!;
+  const isCurrent = useCallback(
+    (origin: MemoryContext) =>
+      mounted.current &&
+      contextRef.current === origin &&
+      origin.enabled &&
+      Boolean(origin.agentId),
+    [],
+  );
+
+  const [snapshot, setSnapshot] = useState<MemorySnapshot>(() =>
+    emptySnapshot(context),
+  );
+  const [query, setQuery] = useState('');
+  const [includeReplaced, setIncludeReplaced] = useState(false);
+  const queryRef = useRef(query);
+  queryRef.current = query;
+  const includeReplacedRef = useRef(includeReplaced);
+  includeReplacedRef.current = includeReplaced;
+
+  const currentSnapshot =
+    snapshot.context === context ? snapshot : emptySnapshot(context);
 
   const load = useCallback(async () => {
-    const id = agentIdRef.current;
-    if (!id) return;
-    const current = ++sequence.current;
-    const text = queryRef.current;
+    if (!isCurrent(context) || !context.agentId) return;
+
+    // Freeze the current filters at dispatch. A mutation completion calls
+    // this only after its owner context is revalidated, so it reloads the
+    // latest same-owner view without following an obsolete closure's query.
+    const requestQuery = queryRef.current;
+    const requestIncludeReplaced = includeReplacedRef.current;
+    const requestSequence = ++sequence.current;
     const results = await Promise.allSettled([
-      text
-        ? daemon.searchMemories(text, id, MEMORY_PAGE_LIMIT)
-        : daemon.recentMemories(id, MEMORY_PAGE_LIMIT),
+      requestQuery
+        ? daemon.searchMemories(
+            requestQuery,
+            context.agentId,
+            MEMORY_PAGE_LIMIT,
+          )
+        : daemon.recentMemories(context.agentId, MEMORY_PAGE_LIMIT),
       // Facts belong to the owner, not to one agent: a fact whose evidence
       // memories were deleted, or that only a helper's memories evidence,
       // is still in use.
       daemon.listFacts({
-        includeInactive: includeReplacedRef.current,
+        includeInactive: requestIncludeReplaced,
         limit: MAX_FACTS_SHOWN,
       }),
       daemon.listMemoryEntities(MEMORY_PAGE_LIMIT),
-      daemon.listMemoryRelationships(id, MEMORY_PAGE_LIMIT),
+      daemon.listMemoryRelationships(context.agentId, MEMORY_PAGE_LIMIT),
     ]);
-    if (current !== sequence.current) return;
+
+    if (!isCurrent(context) || requestSequence !== sequence.current) {
+      return;
+    }
+
     const [memoriesResult, factsResult, entitiesResult, relationshipsResult] =
       results;
-    if (memoriesResult.status === 'fulfilled') {
-      const next = memoriesResult.value;
-      setMemories((previous) => keepEmpty(previous, next));
-    }
-    if (factsResult.status === 'fulfilled') {
-      const next = factsResult.value;
-      setFacts((previous) => keepEmpty(previous, next));
-    }
-    if (entitiesResult.status === 'fulfilled') {
-      const next = entitiesResult.value;
-      setEntities((previous) => keepEmpty(previous, next));
-    }
-    if (relationshipsResult.status === 'fulfilled') {
-      const next = relationshipsResult.value;
-      setRelationships((previous) => keepEmpty(previous, next));
-    }
-    const failed = results.find((result) => result.status === 'rejected');
-    setReadError(
-      failed
-        ? memoryErrorMessage((failed as PromiseRejectedResult).reason).message
-        : null,
-    );
-    setLoaded(true);
-  }, []);
+    setSnapshot((previous) => {
+      if (!isCurrent(context) || requestSequence !== sequence.current) {
+        return previous;
+      }
+      const base =
+        previous.context === context ? previous : emptySnapshot(context);
+      const failed = results.find((result) => result.status === 'rejected');
+      return {
+        ...base,
+        memories:
+          memoriesResult.status === 'fulfilled'
+            ? keepEmpty(base.memories, memoriesResult.value)
+            : base.memories,
+        facts:
+          factsResult.status === 'fulfilled'
+            ? keepEmpty(base.facts, factsResult.value)
+            : base.facts,
+        entities:
+          entitiesResult.status === 'fulfilled'
+            ? keepEmpty(base.entities, entitiesResult.value)
+            : base.entities,
+        relationships:
+          relationshipsResult.status === 'fulfilled'
+            ? keepEmpty(base.relationships, relationshipsResult.value)
+            : base.relationships,
+        loaded: true,
+        readError: failed
+          ? memoryErrorMessage((failed as PromiseRejectedResult).reason).message
+          : null,
+      };
+    });
+  }, [context, isCurrent]);
 
-  useEffect(() => {
-    if (!enabled || !agentId) return;
-    void load();
-  }, [enabled, agentId, epoch, query, includeReplaced, load]);
-
+  // Mount validity must be established before the read effect. React Strict
+  // Mode replays effects after cleanup; the replayed load must see mounted=true.
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -149,59 +221,78 @@ export function useMemory({
     };
   }, []);
 
-  // A new read starts with a clean header: a refused action's message goes
-  // when the owner reads again, on any tab.
+  useEffect(() => {
+    if (!context.enabled || !context.agentId) return;
+    void load();
+  }, [context, includeReplaced, load, query]);
+
   const clearActionError = useCallback(() => {
-    setActionError(null);
-    setActionStatus(null);
-  }, []);
+    if (!isCurrent(context)) return;
+    setSnapshot((previous) => {
+      if (!isCurrent(context)) return previous;
+      const base =
+        previous.context === context ? previous : emptySnapshot(context);
+      return { ...base, actionError: null, actionStatus: null };
+    });
+  }, [context, isCurrent]);
 
   const search = useCallback(
     (next: string) => {
+      if (!isCurrent(context)) return;
       clearActionError();
-      queryRef.current = next;
-      setQueryState(next);
+      setQuery(next);
     },
-    [clearActionError],
+    [clearActionError, context, isCurrent],
   );
 
-  const setIncludeReplaced = useCallback(
+  const setReplaced = useCallback(
     (value: boolean) => {
+      if (!isCurrent(context)) return;
       clearActionError();
-      includeReplacedRef.current = value;
-      setIncludeReplacedState(value);
+      setIncludeReplaced(value);
     },
-    [clearActionError],
+    [clearActionError, context, isCurrent],
   );
 
   const refresh = useCallback(() => {
+    if (!isCurrent(context)) return;
     clearActionError();
     void load();
-  }, [clearActionError, load]);
+  }, [clearActionError, context, isCurrent, load]);
 
-  // The page does not depend on any stream event, so an action reads again
-  // before it answers.
   const act = useCallback(
     async (work: () => Promise<unknown>, gone: string) => {
-      setActionError(null);
-      setActionStatus(null);
+      // A saved callback from a prior render cannot dispatch an action into a
+      // new owner context. Once sent, however, the original mutation settles
+      // exactly once and is never redirected or retried.
+      if (!isCurrent(context)) return false;
+      clearActionError();
       try {
         await work();
       } catch (caught) {
+        if (!isCurrent(context)) return false;
         const { message, status } = memoryErrorMessage(caught);
-        if (mounted.current) {
-          setActionError(status === 404 ? gone : message);
-          setActionStatus(status);
+        setSnapshot((previous) => {
+          if (!isCurrent(context)) return previous;
+          const base =
+            previous.context === context ? previous : emptySnapshot(context);
+          return {
+            ...base,
+            actionError: status === 404 ? gone : message,
+            actionStatus: status,
+          };
+        });
+        if ((status === 404 || status === 409) && isCurrent(context)) {
+          await load();
         }
-        // The thing acted on changed or went away since the lists were
-        // read: read them again so the page shows what is there now.
-        if (status === 404 || status === 409) await load();
         return false;
       }
+
+      if (!isCurrent(context)) return false;
       await load();
-      return true;
+      return isCurrent(context);
     },
-    [load],
+    [clearActionError, context, isCurrent, load],
   );
 
   const edit = useCallback(
@@ -229,39 +320,50 @@ export function useMemory({
     [act],
   );
 
-  // Reading evidence changes nothing, so it does not read the lists again.
   const trace = useCallback(
     async (memory: Memory): Promise<MemoryEvidenceTrace | null> => {
-      setActionError(null);
-      setActionStatus(null);
+      if (!isCurrent(context)) return null;
+      clearActionError();
       try {
-        return await daemon.traceMemory(memory.id);
+        const evidence = await daemon.traceMemory(memory.id);
+        return isCurrent(context) ? evidence : null;
       } catch (caught) {
+        if (!isCurrent(context)) return null;
         const { message, status } = memoryErrorMessage(caught);
-        if (mounted.current) {
-          setActionError(status === 404 ? MEMORY_GONE : message);
-          setActionStatus(status);
-        }
-        // The memory is gone: read the lists again so the page drops it.
-        if (status === 404) await load();
+        setSnapshot((previous) => {
+          if (!isCurrent(context)) return previous;
+          const base =
+            previous.context === context ? previous : emptySnapshot(context);
+          return {
+            ...base,
+            actionError: status === 404 ? MEMORY_GONE : message,
+            actionStatus: status,
+          };
+        });
+        if (status === 404 && isCurrent(context)) await load();
         return null;
       }
     },
-    [load],
+    [clearActionError, context, isCurrent, load],
   );
 
   return {
-    memories,
-    facts,
-    entities,
-    relationships,
-    loaded,
-    error: actionError ?? readError,
-    errorStatus: actionError ? actionStatus : null,
+    memories:
+      currentSnapshot.context === context
+        ? currentSnapshot.memories
+        : EMPTY_MEMORIES,
+    facts: currentSnapshot.facts,
+    entities: currentSnapshot.entities,
+    relationships: currentSnapshot.relationships,
+    loaded: currentSnapshot.loaded,
+    error: currentSnapshot.actionError ?? currentSnapshot.readError,
+    errorStatus: currentSnapshot.actionError
+      ? currentSnapshot.actionStatus
+      : null,
     query,
     includeReplaced,
     search,
-    setIncludeReplaced,
+    setIncludeReplaced: setReplaced,
     refresh,
     edit,
     remove,

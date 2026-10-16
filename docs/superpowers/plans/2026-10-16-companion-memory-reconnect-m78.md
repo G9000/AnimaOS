@@ -83,3 +83,9 @@ Use the existing daemon facade; no cancellation API, general cache or hook frame
 Only the hook and its two existing test files are released. A demonstrated need for
 production page changes requires a recorded root ruling before expanding ownership.
 No actual browser, daemon, provider, account, device, database or container is planned.
+
+## Recorded outcome
+
+M78 fences Memory lists, mutation completions and evidence to the current mounted companion/connection/epoch. Reconnect or scope changes synchronously hide old editable rows until fresh reads settle; late responses cannot publish stale state or initiate offline/unmounted follow-up reads. Submitted mutations retain their original target and run once, with no automatic retry. Same-context reloads, partial sections and independent action/read errors remain. Root StrictMode replay and latest search/filter recovery are regression-covered. Fresh web 1552 tests/122 files, typecheck/build, touched formatting and final web/SDK-contract review pass.
+
+Local deterministic owner-console evidence only; no daemon, SDK, dependency or provider behavior changes and no actual runtime case. This does not establish semantic ranking, memory quality, exactly-once server effects, target-host recovery or full Hermes parity. Historical raw cases and Git provenance remain unchanged.
