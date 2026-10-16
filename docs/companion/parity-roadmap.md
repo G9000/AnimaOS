@@ -39,6 +39,13 @@ checks, actual anonymous endpoint compatibility and unverified model research
 quality. This complements PAR-04/PAR-05; it does not close interactive arbitrary
 website or account acceptance.
 
+M84 adds77 offline research-oracle controls, but its sole actual task failed at
+the private approval verifier before any search or report. One subscription call
+reported1,417tokens; cancelled-run quiet recovery/cleanup passed. Model research
+quality remains unassessed. The next distinct task first needs live-event
+admission and faithful terminal-result projection. See the
+[M84 outcome](../superpowers/plans/2026-10-16-companion-research-acceptance-m84.md).
+
 Each PAR ID is stable. Milestone numbers after M38 are assigned when its detailed plan is cut from then-current main. File/API names below are candidates; capability, authority, scope and evidence requirements are binding.
 
 | ID     | Deliverable                                                  | Current state                                                                                                                                                                                                 | Dependency / accountable lane                                                |

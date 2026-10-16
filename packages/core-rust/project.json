@@ -24,6 +24,16 @@
       "cache": false,
       "parallelism": false
     },
+    "research-acceptance-test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --test packages/core-rust/acceptance/research-m84/oracle.test.mjs"
+      },
+      "inputs": ["default", "{projectRoot}/acceptance/research-m84/**/*"],
+      "cache": false,
+      "parallelism": false
+    },
     "browser-worker-test": {
       "executor": "nx:run-commands",
       "options": {
