@@ -58,6 +58,26 @@ afterEach(() => {
 
 const online = { agentId: 'agent-main', epoch: 1, enabled: true };
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+}
+
+function readCount() {
+  return [
+    daemon.recentMemories,
+    daemon.searchMemories,
+    daemon.listFacts,
+    daemon.listMemoryEntities,
+    daemon.listMemoryRelationships,
+  ].reduce((total, method) => total + vi.mocked(method).mock.calls.length, 0);
+}
+
 async function loaded(options = online) {
   const hook = renderHook((props) => useMemory(props), {
     initialProps: options,
@@ -146,6 +166,33 @@ describe('useMemory', () => {
     expect(hook.result.current.memories.map((m) => m.id)).toEqual(['fresh']);
   });
 
+  it('StrictMode effect replay starts a live batch and ignores the first batch', async () => {
+    const firstBatch = deferred<ReturnType<typeof memoryFixture>[]>();
+    vi.mocked(daemon.recentMemories)
+      .mockReturnValueOnce(firstBatch.promise)
+      .mockResolvedValueOnce([memoryFixture('strict-fresh')]);
+    const hook = renderHook((props) => useMemory(props), {
+      initialProps: online,
+      reactStrictMode: true,
+    });
+
+    await waitFor(() => expect(daemon.recentMemories).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(hook.result.current.memories.map((memory) => memory.id)).toEqual([
+        'strict-fresh',
+      ]),
+    );
+    await act(async () => {
+      firstBatch.resolve([memoryFixture('strict-stale')]);
+      await firstBatch.promise;
+    });
+
+    expect(hook.result.current.loaded).toBe(true);
+    expect(hook.result.current.memories.map((memory) => memory.id)).toEqual([
+      'strict-fresh',
+    ]);
+  });
+
   it('a failed list keeps the others and sets the error', async () => {
     const { result } = await loaded();
     vi.mocked(daemon.listFacts).mockRejectedValue(
@@ -198,6 +245,91 @@ describe('useMemory', () => {
     });
     expect(daemon.recentMemories).toHaveBeenCalledTimes(2);
   });
+
+  it.each([
+    ['search', 'success', null],
+    ['search', 'conflict', new DaemonHttpError(409, { error: 'review edit' })],
+    ['includeReplaced', 'success', null],
+    [
+      'includeReplaced',
+      'conflict',
+      new DaemonHttpError(409, { error: 'review edit' }),
+    ],
+  ] as const)(
+    'a deferred edit %s reloads the current view after %s',
+    async (viewChange, _outcome, failure) => {
+      const hook = await loaded();
+      const mutation = deferred<ReturnType<typeof memoryFixture>>();
+      vi.mocked(daemon.updateMemory).mockReturnValueOnce(mutation.promise);
+      let pending!: Promise<boolean>;
+      act(() => {
+        pending = hook.result.current.edit(memoryFixture('m1'), {
+          content: 'submitted once',
+        });
+      });
+
+      if (viewChange === 'search') {
+        vi.mocked(daemon.searchMemories)
+          .mockResolvedValueOnce([memoryFixture('filtered-first')])
+          .mockResolvedValueOnce([memoryFixture('filtered-after-edit')]);
+        act(() => hook.result.current.search('tea'));
+        await waitFor(() =>
+          expect(
+            hook.result.current.memories.map((memory) => memory.id),
+          ).toEqual(['filtered-first']),
+        );
+      } else {
+        vi.mocked(daemon.listFacts)
+          .mockResolvedValueOnce([
+            factFixture('replacement-first', { status: 'superseded' }),
+          ])
+          .mockResolvedValueOnce([
+            factFixture('replacement-after-edit', { status: 'superseded' }),
+          ]);
+        act(() => hook.result.current.setIncludeReplaced(true));
+        await waitFor(() =>
+          expect(hook.result.current.facts.map((fact) => fact.id)).toEqual([
+            'replacement-first',
+          ]),
+        );
+      }
+
+      await act(async () => {
+        if (failure) mutation.reject(failure);
+        else mutation.resolve(memoryFixture('m1'));
+        await mutation.promise.catch(() => undefined);
+      });
+      await expect(pending).resolves.toBe(!failure);
+
+      if (viewChange === 'search') {
+        await waitFor(() =>
+          expect(
+            hook.result.current.memories.map((memory) => memory.id),
+          ).toEqual(['filtered-after-edit']),
+        );
+        expect(daemon.searchMemories).toHaveBeenLastCalledWith(
+          'tea',
+          'agent-main',
+          200,
+        );
+        expect(daemon.recentMemories).toHaveBeenCalledTimes(1);
+      } else {
+        await waitFor(() =>
+          expect(hook.result.current.facts.map((fact) => fact.id)).toEqual([
+            'replacement-after-edit',
+          ]),
+        );
+        expect(daemon.listFacts).toHaveBeenLastCalledWith({
+          includeInactive: true,
+          limit: 500,
+        });
+      }
+      expect(daemon.updateMemory).toHaveBeenCalledTimes(1);
+      if (failure) {
+        expect(hook.result.current.error).toBe('review edit');
+      }
+    },
+  );
 
   it('a 404 on remove says the memory is gone and reloads', async () => {
     const { result } = await loaded();
@@ -375,4 +507,224 @@ describe('useMemory', () => {
     expect(daemon.listFacts).not.toHaveBeenCalled();
     expect(hook.result.current.loaded).toBe(false);
   });
+
+  it('offline refresh and search do not issue reads, including from an initially offline hook', async () => {
+    const hook = renderHook((props) => useMemory(props), {
+      initialProps: { agentId: 'agent-main', epoch: 1, enabled: false },
+    });
+
+    act(() => {
+      hook.result.current.refresh();
+      hook.result.current.search('offline query');
+    });
+
+    expect(readCount()).toBe(0);
+    expect(hook.result.current.loaded).toBe(false);
+    expect(hook.result.current.memories).toEqual([]);
+  });
+
+  it.each([
+    ['success', null],
+    ['conflict', new DaemonHttpError(409, { error: 'changed elsewhere' })],
+  ] as const)(
+    'a submitted edit settling with %s after disconnect is not acknowledged and causes no read',
+    async (_label, failure) => {
+      const { result, rerender } = await loaded();
+      const mutation = deferred<ReturnType<typeof memoryFixture>>();
+      vi.mocked(daemon.updateMemory).mockReturnValueOnce(mutation.promise);
+      let pending!: Promise<boolean>;
+      act(() => {
+        pending = result.current.edit(memoryFixture('m1'), {
+          content: 'submitted once',
+        });
+      });
+      expect(daemon.updateMemory).toHaveBeenCalledTimes(1);
+      const readsBeforeDisconnect = readCount();
+
+      rerender({ ...online, enabled: false });
+      await act(async () => {
+        if (failure) mutation.reject(failure);
+        else mutation.resolve(memoryFixture('m1'));
+        await mutation.promise.catch(() => undefined);
+      });
+
+      await expect(pending).resolves.toBe(false);
+      expect(daemon.updateMemory).toHaveBeenCalledTimes(1);
+      expect(readCount()).toBe(readsBeforeDisconnect);
+      expect(result.current.error).toBeNull();
+      expect(result.current.loaded).toBe(false);
+      expect(result.current.memories).toEqual([]);
+    },
+  );
+
+  it('a callback captured before disconnect cannot submit a stale action', async () => {
+    const hook = await loaded();
+    const staleEdit = hook.result.current.edit;
+    hook.rerender({ ...online, enabled: false });
+
+    await act(async () => {
+      await expect(
+        staleEdit(memoryFixture('m1'), { content: 'stale' }),
+      ).resolves.toBe(false);
+    });
+
+    expect(daemon.updateMemory).not.toHaveBeenCalled();
+    expect(readCount()).toBe(4);
+  });
+
+  it('late list success and error cannot publish across offline and same-value reconnect', async () => {
+    const oldMemories = deferred<ReturnType<typeof memoryFixture>[]>();
+    const oldFacts = deferred<ReturnType<typeof factFixture>[]>();
+    const oldEntities = deferred<ReturnType<typeof entityFixture>[]>();
+    const oldRelationships =
+      deferred<ReturnType<typeof relationshipFixture>[]>();
+    vi.mocked(daemon.recentMemories).mockReturnValueOnce(oldMemories.promise);
+    vi.mocked(daemon.listFacts).mockReturnValueOnce(oldFacts.promise);
+    vi.mocked(daemon.listMemoryEntities).mockReturnValueOnce(
+      oldEntities.promise,
+    );
+    vi.mocked(daemon.listMemoryRelationships).mockReturnValueOnce(
+      oldRelationships.promise,
+    );
+    const hook = renderHook((props) => useMemory(props), {
+      initialProps: online,
+    });
+    await waitFor(() => expect(readCount()).toBe(4));
+
+    hook.rerender({ ...online, enabled: false });
+    expect(hook.result.current.loaded).toBe(false);
+    expect(hook.result.current.memories).toEqual([]);
+    expect(hook.result.current.facts).toEqual([]);
+    expect(hook.result.current.entities).toEqual([]);
+    expect(hook.result.current.relationships).toEqual([]);
+
+    await act(async () => {
+      oldMemories.resolve([memoryFixture('old')]);
+      oldFacts.reject(new DaemonHttpError(503, { error: 'old read failed' }));
+      oldEntities.resolve([entityFixture('old-entity')]);
+      oldRelationships.resolve([relationshipFixture('old-relationship')]);
+      await Promise.allSettled([
+        oldMemories.promise,
+        oldFacts.promise,
+        oldEntities.promise,
+        oldRelationships.promise,
+      ]);
+    });
+    expect(hook.result.current.memories).toEqual([]);
+    expect(hook.result.current.error).toBeNull();
+
+    vi.mocked(daemon.recentMemories).mockResolvedValueOnce([
+      memoryFixture('fresh'),
+    ]);
+    hook.rerender(online);
+    expect(hook.result.current.loaded).toBe(false);
+    expect(hook.result.current.memories).toEqual([]);
+    await waitFor(() =>
+      expect(hook.result.current.memories.map((memory) => memory.id)).toEqual([
+        'fresh',
+      ]),
+    );
+    expect(daemon.recentMemories).toHaveBeenCalledTimes(2);
+    expect(hook.result.current.error).toBeNull();
+  });
+
+  it.each([
+    ['agent', { ...online, agentId: 'agent-next' }],
+    ['epoch', { ...online, epoch: 2 }],
+  ] as const)(
+    'a pending read cannot publish after an independent %s change',
+    async (_label, nextOptions) => {
+      const hook = await loaded();
+      const oldRead = deferred<ReturnType<typeof memoryFixture>[]>();
+      vi.mocked(daemon.recentMemories).mockReturnValueOnce(oldRead.promise);
+      act(() => hook.result.current.refresh());
+      await waitFor(() =>
+        expect(daemon.recentMemories).toHaveBeenCalledTimes(2),
+      );
+
+      vi.mocked(daemon.recentMemories).mockResolvedValueOnce([
+        memoryFixture('new-context'),
+      ]);
+      hook.rerender(nextOptions);
+      expect(hook.result.current.loaded).toBe(false);
+      expect(hook.result.current.memories).toEqual([]);
+      await waitFor(() =>
+        expect(hook.result.current.memories.map((memory) => memory.id)).toEqual(
+          ['new-context'],
+        ),
+      );
+
+      await act(async () => {
+        oldRead.resolve([memoryFixture('old-context')]);
+        await oldRead.promise;
+      });
+      expect(hook.result.current.memories.map((memory) => memory.id)).toEqual([
+        'new-context',
+      ]);
+    },
+  );
+
+  it.each([
+    ['success', null],
+    ['error', new DaemonHttpError(503, { error: 'old trace failed' })],
+    ['404', new DaemonHttpError(404, { error: 'memory not found' })],
+  ] as const)(
+    'late trace %s after disconnect cannot publish evidence, errors, or recovery reads',
+    async (_label, failure) => {
+      const hook = await loaded();
+      const traceResult =
+        deferred<Awaited<ReturnType<typeof daemon.traceMemory>>>();
+      vi.mocked(daemon.traceMemory).mockReturnValueOnce(traceResult.promise);
+      let pending!: Promise<
+        Awaited<ReturnType<typeof hook.result.current.trace>>
+      >;
+      act(() => {
+        pending = hook.result.current.trace(memoryFixture('m1'));
+      });
+      const readsBeforeDisconnect = readCount();
+      hook.rerender({ ...online, enabled: false });
+
+      await act(async () => {
+        if (failure) traceResult.reject(failure);
+        else
+          traceResult.resolve({
+            memory: memoryFixture('m1'),
+            relationships: [],
+            entities: [],
+          });
+        await traceResult.promise.catch(() => undefined);
+      });
+
+      await expect(pending).resolves.toBeNull();
+      expect(readCount()).toBe(readsBeforeDisconnect);
+      expect(hook.result.current.error).toBeNull();
+      expect(hook.result.current.memories).toEqual([]);
+    },
+  );
+
+  it.each([
+    ['success', null],
+    ['conflict', new DaemonHttpError(409, { error: 'changed elsewhere' })],
+  ] as const)(
+    'a submitted edit settling with %s after unmount causes no recovery read or stale result',
+    async (_label, failure) => {
+      const hook = await loaded();
+      const mutation = deferred<ReturnType<typeof memoryFixture>>();
+      vi.mocked(daemon.updateMemory).mockReturnValueOnce(mutation.promise);
+      let pending!: Promise<boolean>;
+      act(() => {
+        pending = hook.result.current.edit(memoryFixture('m1'), {
+          content: 'submitted once',
+        });
+      });
+      const readsBeforeUnmount = readCount();
+      hook.unmount();
+
+      if (failure) mutation.reject(failure);
+      else mutation.resolve(memoryFixture('m1'));
+      await expect(pending).resolves.toBe(false);
+      expect(daemon.updateMemory).toHaveBeenCalledTimes(1);
+      expect(readCount()).toBe(readsBeforeUnmount);
+    },
+  );
 });

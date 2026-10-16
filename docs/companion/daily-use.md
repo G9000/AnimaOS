@@ -315,3 +315,9 @@ downloads current complete UTF-8 bytes up to 1 MiB; it preserves BOM/CRLF/empty
 files and leaves the source unchanged. Preview and download can fail separately;
 existing Files exclusions apply. It does not make assistant Markdown links
 authoritative or create a persistent artifact. See [document/report use](documents.md).
+
+## Memory after reconnect
+
+After reconnecting or switching companions, Memory shows Loading while it reads fresh data. Old editable rows stay hidden until that read settles. A request finishing from the previous view cannot replace the current rows or evidence.
+
+An edit or delete already submitted may still reach the daemon if you disconnect. The console does not retry it automatically. Reconnect and inspect the fresh list before taking another action; use Refresh when needed.

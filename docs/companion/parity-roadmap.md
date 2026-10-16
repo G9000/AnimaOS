@@ -42,7 +42,7 @@ Each PAR ID is stable. Milestone numbers after M38 are assigned when its detaile
 | PAR-09 | Selected real connector workflows                            | Telegram/Discord/Google code exists; real-account acceptance unverified                                                                                                                                       | Current connector code; later relevant media/browser changes                 |
 | PAR-10 | Recurring schedules, outages and interrupted-work acceptance | M59 claim recovery and M62 controlled-clock interval outage/reload accepted; broader recurrence/host evidence incomplete                                                                                      | Current scheduler; optional PAR-06 acceptance fixtures                       |
 | PAR-11 | Always-on single-owner installation and recovery             | Deployment instructions/offline checks exist; target-host acceptance missing                                                                                                                                  | Release with required capabilities; deployment/operator lane                 |
-| PAR-12 | Clear capability controls and daily-use status               | M76 interrupted automation review/fresh history; M75 truthful inventory; M61 memory HTTP/restart and M60 index snapshot; broader lifecycle UI incomplete                                                      | Add incrementally with PAR-01/04/05/07/08/09                                 |
+| PAR-12 | Clear capability controls and daily-use status               | M78 fresh Memory reconnect state; M76 interrupted automation review; M75 truthful inventory; M61 memory HTTP/restart and M60 index snapshot; broader lifecycle UI incomplete                                  | Add incrementally with PAR-01/04/05/07/08/09                                 |
 
 ### PAR-01: budgeted post-task learning (M38)
 
@@ -228,6 +228,8 @@ M59 adds a finite unresolved-claim JSON load into a new daemon and a second fres
 - Public deployment, real containers/database servers and normal-profile credentials remain outside current activation authority. Code/package preparation and offline fixtures continue; actual activation waits for concrete target approval.
 
 ### PAR-12: a usable owner console
+
+M78 prevents stale Memory rows, evidence and action errors across reconnect/companion/epoch changes. Submitted mutations run once without automatic retry; old completions cannot trigger offline reads. Current-context partial data and error channels remain usable. Full affected web gates pass; memory ranking and target-host acceptance remain separate.
 
 M76 adds read-only review guidance for recorded interrupted automation runs, with exact saved-thread navigation and fresh agent/schedule/version/offline history. Opening review never runs or resumes work; existing owner execution controls remain separate. Required web gates pass; broader recurrence and target-host acceptance remain open.
 
