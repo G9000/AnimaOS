@@ -1,6 +1,37 @@
+# Handover: actual browser report save bound (M0–M69)
+
+## Start here (2026-10-16): M68 merged; execute M69 from its bound lean plan
+
+M68 PR74 merged: sourcefdbe175896cb938c691f9c7fedc8a3693662ff76, maincf5af4307b6af59c0d32478ed757b790cc5eb29d,
+exact tree1a4d6ca5ca5fab4041dee65191e63cc3179aebac;21publication/13sourcepaths,597unowned
+raw hashes and nx preserved. Rust/core2942/28intentionalignores/46suites/lint/build/
+7focused, SDK200/3intentionalserviceSkips, web1518/121files/typecheck/build.
+Explicit authenticated Files current text/Markdown/CSV downloads preserve1MiB
+rawUTF8/empty/BOM/CRLF, safe held-root/full exclusions/retained reads and web lifecycle.
+No actual browser save was claimed by M68; no real services/accounts activated.
+
+Continue M69 on g9000/companion-report-browser-m69, cut from that verified main. Read
+[the bound lean plan](../plans/2026-10-16-companion-report-browser-m69.md), then
+AGENTS.md. One NEW immutable synthetic CSV actual built-web→Rust Files
+list/preview/download→browser saveAs case, exact bytes/hash and full owned Windows
+Job/log/process/listener retirement. Ordinary config-only supervisor PUT, exact
+declared workspace with all other activity zero. Existing UI shell mocks explicit;
+actual accepted routes must continue to real daemon without fulfilled-success fallback.
+First offline policy RED, disjoint source-only owners, one ownership/e2e review,
+combined fix wave/typecheck/offline gates, then root-only frozen single-use release.
+No case launched yet; no provider/model/account/ordinary profile/DB/container/public
+browser/M64 retry. M52 PARTIAL and all consumed cases remain unchanged.
+
+Resume .superpowers/sdd/2026-10-16-companion-report-browser-m69/progress.md.
+Root commands/fmt/Git/activation; Cargo incremental0/jobs1/threads2 if needed.
+Explicit stage only, never nx.json/anima.yaml/.superpowers. No stash/reset/restore/
+path checkout/worktree. Preserve ordinary services/profiles/Docker55432. Delegation,
+selected-chat context-only updates, per-command unsigned commits and standing
+merge-and-continue remain authorized.
+
 # Handover: report downloads locally gated (M0–M68)
 
-## Start here (2026-10-16): M68 gates pass; finish publication and continue
+## Historical M68 locally gated handover
 
 Branch g9000/companion-report-downloads-m68 from M67/PR73 main
 6e9250a5a117aaddda621af7a056fd1f0f75ff56; bound plan
