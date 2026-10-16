@@ -1,6 +1,68 @@
+# Handover: M69 actual browser report save PARTIAL
+
+## Start here (2026-10-16): publish M69 honestly; continue bounded M70 repair
+
+M69 branch g9000/companion-report-browser-m69, plan9b25c0e before source,
+base M68 maincf5af4307b6af59c0d32478ed757b790cc5eb29d. Four E2E source paths
+add exact ordered real Files request admission and one opt-in browser byte oracle.
+Policy47/fullconsole65pass2liveskips/typecheck pass; one ownership/final E2E review
+and combined fix wave. Production Rust/SDK/web/dependencies are unchanged.
+
+Actual case9b09c8ee-5dee-4ed1-8c3c-73a304ee66ed FAILED before navigation at Edge
+launch, despite its private debugging directory. Windows PathService key112/token
+0x3F0 and non-default directory refusal are observed; cause needs diagnosis.
+Config-only workspace PUT/quiet setup succeeded. All14 captured identities retired,
+clean logs, ports18752/18753 free, 12.969s. Zero browser Files/download/save evidence.
+Independent84byte CSV unchanged;2026 runtime/fixed executable/M61 hashes preserved.
+
+Resume .superpowers/sdd/2026-10-16-companion-report-browser-m69/progress.md;
+failed-case-seal.json pins original release/consumed/results/logs/case artifacts.
+Finish docs/format/explicit unsigned commit/push/PR/attach/standing merge and exact
+tree proof. Then M70 from merged main must bind a specific launch repair, fresh
+source/manifest/UUID, same independent oracle. Never modify/replay/regrade M69,
+M61 or other consumed cases. M64 public-browser NOT RUN and M52 PARTIAL remain.
+
+No ordinary profiles/services, real accounts/providers/models, DB/container or
+Docker55432. Isolated finite synthetic daemon/preview/browser testing remains
+authorized; root owns commands/fmt/Git/activation. Cargo incremental0/jobs1/threads2
+if needed; explicit stage only, never nx.json/anima.yaml/.superpowers; no stash,
+reset/restore/path checkout/worktree. Delegation, context-only selected-chat updates,
+per-command unsigned commits and standing merge-and-continue remain authorized.
+
+# Handover: actual browser report save bound (M0–M69)
+
+## Historical M69 bound-plan handover
+
+M68 PR74 merged: sourcefdbe175896cb938c691f9c7fedc8a3693662ff76, maincf5af4307b6af59c0d32478ed757b790cc5eb29d,
+exact tree1a4d6ca5ca5fab4041dee65191e63cc3179aebac;21publication/13sourcepaths,597unowned
+raw hashes and nx preserved. Rust/core2942/28intentionalignores/46suites/lint/build/
+7focused, SDK200/3intentionalserviceSkips, web1518/121files/typecheck/build.
+Explicit authenticated Files current text/Markdown/CSV downloads preserve1MiB
+rawUTF8/empty/BOM/CRLF, safe held-root/full exclusions/retained reads and web lifecycle.
+No actual browser save was claimed by M68; no real services/accounts activated.
+
+Continue M69 on g9000/companion-report-browser-m69, cut from that verified main. Read
+[the bound lean plan](../plans/2026-10-16-companion-report-browser-m69.md), then
+AGENTS.md. One NEW immutable synthetic CSV actual built-web→Rust Files
+list/preview/download→browser saveAs case, exact bytes/hash and full owned Windows
+Job/log/process/listener retirement. Ordinary config-only supervisor PUT, exact
+declared workspace with all other activity zero. Existing UI shell mocks explicit;
+actual accepted routes must continue to real daemon without fulfilled-success fallback.
+First offline policy RED, disjoint source-only owners, one ownership/e2e review,
+combined fix wave/typecheck/offline gates, then root-only frozen single-use release.
+No case launched yet; no provider/model/account/ordinary profile/DB/container/public
+browser/M64 retry. M52 PARTIAL and all consumed cases remain unchanged.
+
+Resume .superpowers/sdd/2026-10-16-companion-report-browser-m69/progress.md.
+Root commands/fmt/Git/activation; Cargo incremental0/jobs1/threads2 if needed.
+Explicit stage only, never nx.json/anima.yaml/.superpowers. No stash/reset/restore/
+path checkout/worktree. Preserve ordinary services/profiles/Docker55432. Delegation,
+selected-chat context-only updates, per-command unsigned commits and standing
+merge-and-continue remain authorized.
+
 # Handover: report downloads locally gated (M0–M68)
 
-## Start here (2026-10-16): M68 gates pass; finish publication and continue
+## Historical M68 locally gated handover
 
 Branch g9000/companion-report-downloads-m68 from M67/PR73 main
 6e9250a5a117aaddda621af7a056fd1f0f75ff56; bound plan
