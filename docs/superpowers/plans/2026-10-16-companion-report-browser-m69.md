@@ -1,6 +1,6 @@
 # M69 actual browser report save — lean plan
 
-**Status:** bound before feature source on `g9000/companion-report-browser-m69`, from verified M68 main `cf5af4307b6af59c0d32478ed757b790cc5eb29d` (tree `1a4d6ca5ca5fab4041dee65191e63cc3179aebac`). Standing isolated synthetic testing applies only to the finite case below; no case has launched.
+**Status:** PARTIAL. Offline policy/console/typecheck pass; the one actual case failed Edge launch before navigation. No actual browser save accepted; all 14 captured identities retired. Preserve this case and continue a separately bound M70 repair.
 
 ## Objective and proof boundary
 
@@ -81,3 +81,9 @@ Independent fixture relative path: reports/ledger.csv; basename ledger.csv; exac
 Root publishes the plan first, then source-only workers add policy RED and a private supervisor in disjoint files. Root alone runs commands/fmt/Git/activation. Confirmed e2e-console target uses static intercepted assets with no application server; policy tests require no page/browser fixture. After meaningful behavioral RED, implement policy/fixture/spec, freeze source, do one harness/native-ownership batch and one final e2e review, one combined fix wave, targeted offline/full console and e2e typecheck gates. Reuse exact M68 Rust2942/28ignores/46suites/lint/build and SDK200/3 plus web1518/typecheck/build evidence by preserved source/build hashes; rerun only if those inputs change. No Rust/dependency/production-source changes are planned. Only after offline gates and reviewed exact manifests may root release the single new isolated case.
 
 Record the actual case, cleanup and limits without replaying M61/M64/M52 evidence. Update master status/handover, docs/format/protected hashes, explicit per-command unsigned commit/push/PR/attach/standing merge and exact tree verification. Preserve nx.json/anima.yaml/.superpowers from staging; no stash/reset/restore/path checkout/worktree. No real personal file/profile/account/provider/model/ordinary daemon/DB/container/deployment activation. A finite synthetic daemon/preview/browser started only inside the owned case is authorized. General account/quality/always-on parity remains open.
+
+## Recorded outcome
+
+M69 offline gates pass: 47 focused policy tests, full console 65 passed / 2 opt-in live cases skipped, and E2E typecheck. The one released actual case `9b09c8ee-5dee-4ed1-8c3c-73a304ee66ed` failed before navigation during Edge launch (Windows PathService/non-default debugging directory refusal); no browser report was saved. It retired all 14 captured process identities in 12.969 seconds, joined clean logs and freed both test ports. The independent 84-byte CSV source is unchanged; 2,026 runtime hashes, fixed executable hashes and immutable M61 inputs remain preserved.
+
+One ownership review and final E2E review, one combined fix wave, meaningful offline RED and frozen-source gates are recorded. The launch failure is retained as failure; future repair uses a fresh plan/branch/case without changing this oracle or consumed evidence. No production Rust/SDK/web/dependency change.

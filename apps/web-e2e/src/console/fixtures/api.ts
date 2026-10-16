@@ -4,6 +4,7 @@ import {
   type Request as PlaywrightRequest,
   type Route,
 } from '@playwright/test';
+import { createHash } from 'node:crypto';
 import type {
   AgentEvent,
   AgentFilesPreview,
@@ -17,6 +18,10 @@ import type {
 import { AGENT, ORIGIN, createState, queuedRun, session } from './state';
 import { staticAsset } from './static';
 import { disconnect, emit, installStreams } from './stream';
+import {
+  createWorkspaceFilesPolicy,
+  type WorkspaceFilesStep,
+} from './workspace-files-policy';
 export interface FixtureCall {
   method: string;
   path: string;
@@ -27,12 +32,48 @@ export interface ConsoleFixtureOptions {
   origin?: string;
   realStatic?: boolean;
   realMemory?: boolean;
+  realWorkspaceFiles?: boolean;
 }
 export interface RealMemoryResponse {
   method: string;
   path: string;
   status: number;
   body: unknown;
+}
+export interface RealWorkspaceFilesResponse {
+  kind: WorkspaceFilesStep;
+  path: string;
+  status: number;
+  bytes: number;
+  redirects: number;
+  sha256: string;
+  body: unknown;
+}
+async function installWorkspaceFilesRedirectGuard(page: Page) {
+  await page.addInitScript(() => {
+    const previousFetch = globalThis.fetch.bind(globalThis);
+    globalThis.fetch = (input, init) => {
+      const url = new URL(
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url,
+        location.href,
+      );
+      return previousFetch(
+        input,
+        url.origin === 'http://127.0.0.1:18753' &&
+          [
+            '/api/workspace/files',
+            '/api/workspace/file',
+            '/api/workspace/file/download',
+          ].includes(url.pathname)
+          ? { ...init, redirect: 'manual' }
+          : init,
+      );
+    };
+  });
 }
 export async function installMemoryRedirectGuard(page: Page, origin: string) {
   await page.addInitScript((allowedOrigin) => {
@@ -69,17 +110,130 @@ export async function installConsoleFixture(
 ) {
   const origin = options.origin ?? ORIGIN;
   if (
-    (options.realStatic || options.realMemory) &&
+    (options.realStatic || options.realMemory || options.realWorkspaceFiles) &&
     origin !== 'http://127.0.0.1:18753'
   ) {
     throw new Error(
       'The real console fixture requires its isolated loopback origin',
     );
   }
+  if (options.realWorkspaceFiles && (!options.realStatic || options.realMemory))
+    throw new Error('Real workspace files require isolated static mode only');
   const calls: FixtureCall[] = [],
     unexpected: string[] = [],
     errors: string[] = [];
   const realResponses: RealMemoryResponse[] = [];
+  const workspaceFilesPolicy = createWorkspaceFilesPolicy();
+  const workspaceFileResponses: RealWorkspaceFilesResponse[] = [];
+  const workspaceFileResponseCounts = {
+    success: 0,
+    redirects: 0,
+    errors: 0,
+    bytes: 0,
+  };
+  const pendingWorkspaceResponses = new Set<Promise<null>>();
+  const workspaceAdmitted = new Map<
+    PlaywrightRequest,
+    {
+      kind: WorkspaceFilesStep;
+      path: string;
+      done: Promise<null>;
+      finish(failure?: string): void;
+    }
+  >();
+  const admitWorkspace = (
+    request: PlaywrightRequest,
+    kind: WorkspaceFilesStep,
+    path: string,
+  ) => {
+    let complete!: (value: null) => void;
+    const done = new Promise<null>((resolve) => {
+      complete = resolve;
+    });
+    const finish = (failure?: string) => {
+      if (!workspaceAdmitted.delete(request)) return;
+      clearTimeout(timer);
+      if (failure) {
+        workspaceFileResponseCounts.errors++;
+        unexpected.push(`${failure}: GET ${path}`);
+      }
+      pendingWorkspaceResponses.delete(done);
+      complete(null);
+    };
+    const timer = setTimeout(
+      () => finish('Timed out real workspace response'),
+      5000,
+    );
+    workspaceAdmitted.set(request, { kind, path, done, finish });
+    pendingWorkspaceResponses.add(done);
+  };
+  page.on('requestfailed', (request) => {
+    workspaceAdmitted.get(request)?.finish('Failed real workspace request');
+  });
+  page.on('response', (response) => {
+    const entry = workspaceAdmitted.get(response.request());
+    if (!entry) return;
+    const status = response.status();
+    const headers = response.headers();
+    if (status >= 300 && status < 400) workspaceFileResponseCounts.redirects++;
+    if (
+      status !== 200 ||
+      headers['location'] !== undefined ||
+      response.request().redirectedFrom()
+    ) {
+      entry.finish('Refused real workspace status or redirect');
+      return;
+    }
+    // These three known daemon responses have an explicit, uncompressed size.
+    // Refuse before body() unless the header bounds the observation, then also
+    // verify the received length. Never proxy or reconstruct the response.
+    const length = headers['content-length'];
+    const type = headers['content-type']?.split(';', 1)[0].trim().toLowerCase();
+    if (
+      !length ||
+      !/^[0-9]+$/.test(length) ||
+      Number(length) < 1 ||
+      Number(length) > 262_144 ||
+      headers['content-encoding'] !== undefined ||
+      type !==
+        (entry.kind === 'download'
+          ? 'application/octet-stream'
+          : 'application/json')
+    ) {
+      entry.finish('Refused real workspace response headers');
+      return;
+    }
+    if (
+      entry.kind === 'download' &&
+      (headers['cache-control'] !== 'no-store' ||
+        headers['x-content-type-options'] !== 'nosniff' ||
+        headers['content-disposition'] !==
+          'attachment; filename="ledger.csv"; filename*=UTF-8\'\'ledger.csv')
+    ) {
+      entry.finish('Refused report download headers');
+      return;
+    }
+    void (async () => {
+      const bytes = await Promise.race([response.body(), entry.done]);
+      if (bytes === null) return;
+      if (bytes.length !== Number(length) || bytes.length > 262_144)
+        return entry.finish('Refused real workspace response size');
+      const body: unknown =
+        entry.kind === 'download' ? null : JSON.parse(bytes.toString('utf8'));
+      workspaceFileResponses.push({
+        kind: entry.kind,
+        path: entry.path,
+        status,
+        bytes: bytes.length,
+        redirects: 0,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        body,
+      });
+      workspaceFileResponseCounts.success++;
+      workspaceFileResponseCounts.bytes += bytes.length;
+      entry.finish();
+    })().catch(() => entry.finish('Failed real workspace response'));
+  });
   const realCounts = new Map<string, number>();
   const realResponseCounts = { success: 0, redirects: 0, errors: 0, bytes: 0 };
   const pendingRealResponses = new Set<Promise<null>>();
@@ -195,6 +349,8 @@ export async function installConsoleFixture(
     origin,
   );
   if (options.realMemory) await installMemoryRedirectGuard(page, origin);
+  if (options.realWorkspaceFiles)
+    await installWorkspaceFilesRedirectGuard(page);
   const json = (route: Route, body: unknown, status = 200) =>
     route.fulfill({
       status,
@@ -205,7 +361,22 @@ export async function installConsoleFixture(
     const request = route.request(),
       url = new URL(request.url());
     if (url.origin !== origin) {
+      if (options.realWorkspaceFiles)
+        workspaceFilesPolicy.admit({
+          method: request.method(),
+          url: request.url(),
+        });
       unexpected.push(`External ${url.origin}${url.pathname}`);
+      return route.abort('blockedbyclient');
+    }
+    if (options.realWorkspaceFiles && request.method() !== 'GET') {
+      workspaceFilesPolicy.admit({
+        method: request.method(),
+        url: request.url(),
+      });
+      unexpected.push(
+        `Refused browser mutation: ${request.method()} ${url.pathname}`,
+      );
       return route.abort('blockedbyclient');
     }
     if (!url.pathname.startsWith('/api/')) {
@@ -223,8 +394,19 @@ export async function installConsoleFixture(
         return route.fulfill({ status: 404, body: 'Fixture asset missing' });
       }
     }
-    const path = decodeURIComponent(url.pathname),
-      method = request.method();
+    let path: string;
+    try {
+      path = decodeURIComponent(url.pathname);
+    } catch (error) {
+      if (!options.realWorkspaceFiles) throw error;
+      workspaceFilesPolicy.admit({
+        method: request.method(),
+        url: request.url(),
+      });
+      unexpected.push('Refused malformed workspace URL');
+      return route.abort('blockedbyclient');
+    }
+    const method = request.method();
     let body: Record<string, unknown> = {};
     if (
       request.postData() &&
@@ -237,6 +419,29 @@ export async function installConsoleFixture(
       body,
       key: request.headers()['idempotency-key'] ?? null,
     });
+    if (options.realWorkspaceFiles) {
+      if (path.startsWith('/api/workspace/file')) {
+        const admission = workspaceFilesPolicy.admit({
+          method,
+          url: request.url(),
+        });
+        if (!admission.allowed) {
+          unexpected.push(admission.reason);
+          return route.abort('blockedbyclient');
+        }
+        admitWorkspace(request, admission.kind, admission.path);
+        try {
+          return await route.continue();
+        } catch {
+          workspaceAdmitted
+            .get(request)
+            ?.finish('Failed real workspace continuation');
+        }
+        return;
+      }
+      // The existing, explicitly matched shell/bootstrap/provider GET mocks
+      // below are synthetic. Mutations were refused before any continuation.
+    }
     if (options.realMemory && path.startsWith('/api/memories')) {
       const key = `${method} ${path}`;
       const limits: Record<string, number> = {
@@ -507,6 +712,12 @@ export async function installConsoleFixture(
     realResponses,
     realCounts,
     realResponseCounts,
+    workspaceFilesPolicy,
+    workspaceFileResponses,
+    workspaceFileResponseCounts,
+    async waitForWorkspaceResponses() {
+      await Promise.all([...pendingWorkspaceResponses]);
+    },
     async waitForRealResponses() {
       // Every admitted request owns a five-second timer, including no-response failures.
       await Promise.all([...pendingRealResponses]);

@@ -1,6 +1,37 @@
+# Handover: M69 actual browser report save PARTIAL
+
+## Start here (2026-10-16): publish M69 honestly; continue bounded M70 repair
+
+M69 branch g9000/companion-report-browser-m69, plan9b25c0e before source,
+base M68 maincf5af4307b6af59c0d32478ed757b790cc5eb29d. Four E2E source paths
+add exact ordered real Files request admission and one opt-in browser byte oracle.
+Policy47/fullconsole65pass2liveskips/typecheck pass; one ownership/final E2E review
+and combined fix wave. Production Rust/SDK/web/dependencies are unchanged.
+
+Actual case9b09c8ee-5dee-4ed1-8c3c-73a304ee66ed FAILED before navigation at Edge
+launch, despite its private debugging directory. Windows PathService key112/token
+0x3F0 and non-default directory refusal are observed; cause needs diagnosis.
+Config-only workspace PUT/quiet setup succeeded. All14 captured identities retired,
+clean logs, ports18752/18753 free, 12.969s. Zero browser Files/download/save evidence.
+Independent84byte CSV unchanged;2026 runtime/fixed executable/M61 hashes preserved.
+
+Resume .superpowers/sdd/2026-10-16-companion-report-browser-m69/progress.md;
+failed-case-seal.json pins original release/consumed/results/logs/case artifacts.
+Finish docs/format/explicit unsigned commit/push/PR/attach/standing merge and exact
+tree proof. Then M70 from merged main must bind a specific launch repair, fresh
+source/manifest/UUID, same independent oracle. Never modify/replay/regrade M69,
+M61 or other consumed cases. M64 public-browser NOT RUN and M52 PARTIAL remain.
+
+No ordinary profiles/services, real accounts/providers/models, DB/container or
+Docker55432. Isolated finite synthetic daemon/preview/browser testing remains
+authorized; root owns commands/fmt/Git/activation. Cargo incremental0/jobs1/threads2
+if needed; explicit stage only, never nx.json/anima.yaml/.superpowers; no stash,
+reset/restore/path checkout/worktree. Delegation, context-only selected-chat updates,
+per-command unsigned commits and standing merge-and-continue remain authorized.
+
 # Handover: actual browser report save bound (M0–M69)
 
-## Start here (2026-10-16): M68 merged; execute M69 from its bound lean plan
+## Historical M69 bound-plan handover
 
 M68 PR74 merged: sourcefdbe175896cb938c691f9c7fedc8a3693662ff76, maincf5af4307b6af59c0d32478ed757b790cc5eb29d,
 exact tree1a4d6ca5ca5fab4041dee65191e63cc3179aebac;21publication/13sourcepaths,597unowned

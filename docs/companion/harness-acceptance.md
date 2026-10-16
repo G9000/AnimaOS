@@ -1,5 +1,23 @@
 # Native harness acceptance
 
+## M69 browser report-save acceptance (2026-10-16)
+
+**PARTIAL — actual browser save failed before navigation.** The fixture now admits
+only one ordered real owner Files list, preview and explicit download request;
+the opt-in case checks actual download/save bytes against an independent synthetic
+CSV. These are acceptance tooling changes, not new production behavior.
+
+M69 offline gates pass: 47 focused policy tests, full console 65 passed / 2 opt-in live cases skipped, and E2E typecheck. The one released actual case `9b09c8ee-5dee-4ed1-8c3c-73a304ee66ed` failed before navigation during Edge launch (Windows PathService/non-default debugging directory refusal); no browser report was saved. It retired all 14 captured process identities in 12.969 seconds, joined clean logs and freed both test ports. The independent 84-byte CSV source is unchanged; 2,026 runtime hashes, fixed executable hashes and immutable M61 inputs remain preserved.
+
+The supervisor's config-only workspace PUT and quiet-state checks succeeded.
+No browser Files request, download event or saved-byte acceptance occurred.
+The consumed release, case, logs and source are retained without replay/regrade.
+M70 must diagnose and repair browser launch in a fresh separately bound case;
+this failed case supplies no success evidence. Existing UI bootstrap/SSE/provider
+metadata remain synthetic, and no model/report-quality/account or full-parity claim
+is made. M64 public-browser NOT RUN and M52 strict quality PARTIAL remain unchanged.
+See the [M69 plan](../superpowers/plans/2026-10-16-companion-report-browser-m69.md).
+
 ## M68 explicit workspace report downloads (2026-10-16)
 
 **Implemented with local synthetic write/list/HTTP and SDK/web tests.** Files now

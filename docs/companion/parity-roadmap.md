@@ -277,3 +277,5 @@ retained leases and authenticated SDK. A local synthetic write/list/HTTP oracle
 and SDK/web tests establish exact byte delivery, cancellation and URL retirement;
 no actual browser save, general binary artifact, chat output button, report-quality
 or full Hermes parity claim. See [report use](documents.md#download-a-generated-report).
+
+M69 actual built-web report-save acceptance remains **PARTIAL**: offline policy/console/typecheck pass, but the one isolated Edge launch failed before navigation. All 14 captured identities retired and the source fixture is unchanged; no browser-save success is claimed. M70 will repair that launch boundary using a fresh separately bound case while preserving the failed case and byte oracle.
