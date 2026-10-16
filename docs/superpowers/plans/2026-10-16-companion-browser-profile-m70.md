@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust daemon, Vite built preview, Playwright with the frozen Microsoft Edge executable, TypeScript e2e fixture/policy, Python M61 Windows Job Object process guard.
 
-**Status:** bound on `g9000/companion-browser-profile-m70` before source, from the verified M69 merge/tree below. No fresh case released.
+**Status:** PARTIAL. Profile18/policy47/console65pass3liveskips/typecheck pass. The one actual case failed supervisor process capture before a browser witness; all14 known identities retired/portsfree/profile witness stable, but final descendant capture failed. No browser-save or profile-fix acceptance; preserve case and diagnose a separately versioned guard.
 
 ---
 
@@ -93,3 +93,9 @@ Expected completion claim is limited to whether this one fresh isolated M70 Edge
 5. Ruling: root alone releases one new UUID/nonce/<=5minute manifest after one ownership review/final E2E review/combined fix wave and offline gates, with all children suspended-assigned to the retained Job and a300s total/30s cleanup reserve — prior user authorization covers finite isolated local testing and standing merge/continue — cost if wrong: save immutable failure/cleanup witnesses and stop that case; no automatic retries, ordinary services/accounts/providers/DB/containers/public-network activation.
 
 Root publishes this plan before source. All decisions and failure receipts stay in the M70 ledger. The M69 consumed case and its runtime closure stay byte-identical; M64 public browser NOT RUN and M52 PARTIAL remain unchanged. No production code or new dependency is in scope.
+
+## Recorded outcome
+
+M70 offline gates pass: 18 profile regressions, 47 policy tests, full console 65 passed / 3 opt-in live skips and E2E typecheck. Its one actual case db8c54c7-0756-404f-8a83-2f09783c8947 failed during supervisor process capture before any browser-result witness. All 14 known captured identities retired in 12.141 seconds and both ports are free, but final descendant capture failed, so complete cleanup evidence is not accepted. The private profile identity witness stayed stable; the independent 84-byte CSV is unchanged and no report was saved. All 2,026 runtime inputs, fixed images, original M69 inputs/case and immutable M61 inputs remain preserved.
+
+One ownership batch and final E2E review, one combined fix wave and frozen-source gates are recorded. Profile/path/env/stale/reparse tests pass. The actual capture failure remains failed; future versioned guard repair must pass deterministic regressions without changing this oracle or consumed evidence. No production Rust/SDK/web/dependency change.

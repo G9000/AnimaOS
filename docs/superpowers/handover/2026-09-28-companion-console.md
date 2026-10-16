@@ -1,6 +1,39 @@
+# Handover: M70 isolated browser profile repair PARTIAL
+
+## Start here (2026-10-16): publish M70; diagnose versioned process guard next
+
+M70 branch g9000/companion-browser-profile-m70 from verified M69main
+3b2bc6c0ccd9e3079887233229667cd0b795ef06, plan0af6dd4 before source.
+One new opt-in E2E spec/private supervisor use short isolated conventional profile
+directories and disposable temp/pw. Existing production/policy/oracle/deps unchanged.
+Offline profile18/policy47/fullconsole65pass3liveskips/typecheck pass; one ownership
+batch/final E2E review and combined fix wave. Frozen2026runtime inputs preserved.
+
+Actual case db8c54c7-0756-404f-8a83-2f09783c8947 FAILED in supervisor process
+capture, no browser-result witness/download/save. Exact initial GuardError text
+not retained; final descendant capture explicitly failed. All14 KNOWN captured
+identities retired/ports18752/18753 free in12.141s, logs clean, private profile identity
+witness stable and independent84byte CSV unchanged. Complete capture/cleanup is
+NOT accepted. No inference that the profile repair succeeded or failed at Edge.
+
+Resume .superpowers/sdd/2026-10-16-companion-browser-profile-m70/progress.md.
+Seal original case/release/results/logs/source then docs/format/explicit unsigned
+commit/push/PR/attach/standing merge/exact tree. Next diagnose a NEW versioned
+process guard with deterministic failure/retirement tests and bounded diagnostics;
+never modify M61/M69/M70 sources, consumed cases or grade them again. Prior exact
+error31 retiring-child evidence came from ordinary validation; it does not prove
+the lost M70 initial exception. No fresh live case until a concrete reviewed fix
+and its offline regressions pass. M69 failed-before-navigation/M64 NOT RUN/M52 PARTIAL.
+
+Root commands/fmt/Git/activation; no ordinary profiles/services/accounts/providers/
+models/DB/containers/Docker55432/public network. Isolated finite synthetic testing,
+delegation, selected-chat context updates, per-command unsigned commits and standing
+merge-and-continue remain authorized. Cargo incremental0/jobs1/threads2; explicit
+stage only, never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+
 # Handover: M70 isolated browser launch repair bound
 
-## Start here (2026-10-16): M69 merged PARTIAL; execute M70 lean plan
+## Historical M70 bound-plan handover
 
 M69 PR75 merged source206ddc4d5dcdd97b15db7fff28802dad9b5455cb,
 main3b2bc6c0ccd9e3079887233229667cd0b795ef06,

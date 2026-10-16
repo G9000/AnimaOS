@@ -279,3 +279,5 @@ no actual browser save, general binary artifact, chat output button, report-qual
 or full Hermes parity claim. See [report use](documents.md#download-a-generated-report).
 
 M69 actual built-web report-save acceptance remains **PARTIAL**: offline policy/console/typecheck pass, but the one isolated Edge launch failed before navigation. All 14 captured identities retired and the source fixture is unchanged; no browser-save success is claimed. M70 will repair that launch boundary using a fresh separately bound case while preserving the failed case and byte oracle.
+
+M70 profile repair remains **PARTIAL**: profile18/policy47/console65pass3liveskips/typecheck pass, but the actual case failed during process capture before any browser-result witness. All14 known identities retired/portsfree/profilewitness stable; final descendant capture failed and complete cleanup is unaccepted. No browser-save or profile-repair success is inferred; a new guard repair needs deterministic regressions before further live acceptance. M69 remains failed and unchanged.

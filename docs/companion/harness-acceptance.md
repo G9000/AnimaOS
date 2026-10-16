@@ -1,5 +1,27 @@
 # Native harness acceptance
 
+## M70 browser report-save acceptance (2026-10-16)
+
+**PARTIAL — process capture failed before browser acceptance.** The new opt-in
+case uses short private conventional Windows profile directories and an exact
+disposable Playwright user-data path. Existing request policy, independent bytes
+and production code remain unchanged.
+
+M70 offline gates pass: 18 profile regressions, 47 policy tests, full console 65 passed / 3 opt-in live skips and E2E typecheck. Its one actual case db8c54c7-0756-404f-8a83-2f09783c8947 failed during supervisor process capture before any browser-result witness. All 14 known captured identities retired in 12.141 seconds and both ports are free, but final descendant capture failed, so complete cleanup evidence is not accepted. The private profile identity witness stayed stable; the independent 84-byte CSV is unchanged and no report was saved. All 2,026 runtime inputs, fixed images, original M69 inputs/case and immutable M61 inputs remain preserved.
+
+The supervisor's config-only workspace PUT and quiet-state checks succeeded.
+No browser-result/download/save witness was produced, and the daemon log records
+only setup requests. The exact initial GuardError was not retained. The final
+descendant-capture error is explicit; fourteen known exits are not complete capture
+proof. This does not establish whether the profile repair enabled browser use.
+The consumed release, case, logs and source are retained without replay/regrade.
+A separately versioned process guard needs deterministic regression evidence before
+any fresh separately bound case;
+this failed case supplies no success evidence. Existing UI bootstrap/SSE/provider
+metadata remain synthetic, and no model/report-quality/account or full-parity claim
+is made. M64 public-browser NOT RUN and M52 strict quality PARTIAL remain unchanged.
+See the [M70 plan](../superpowers/plans/2026-10-16-companion-browser-profile-m70.md).
+
 ## M69 browser report-save acceptance (2026-10-16)
 
 **PARTIAL — actual browser save failed before navigation.** The fixture now admits
