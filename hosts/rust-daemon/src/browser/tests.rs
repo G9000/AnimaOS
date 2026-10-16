@@ -51,6 +51,7 @@ pub(crate) fn policies(scope_ms: u32) -> InstalledBrowserPolicies {
                 id: "operator-template".into(),
                 revision: 1,
                 origin: "http://127.0.0.1:43220".into(),
+                public_ipv4_pin: None,
                 routes: vec![BrowserRoute {
                     id: "page".into(),
                     method: BrowserMethod::Get,
@@ -73,6 +74,25 @@ pub(crate) fn policies(scope_ms: u32) -> InstalledBrowserPolicies {
         }],
     )
     .unwrap()
+}
+
+fn public_policy() -> InstalledBrowserPolicy {
+    let mut baseline = policies(120_000);
+    let mut policy = baseline
+        .policies
+        .remove("controlled-operator-policy")
+        .unwrap();
+    policy.id = "public-operator-policy".into();
+    let mut value = serde_json::to_value(&policy.template).unwrap();
+    value["origin"] = serde_json::json!("https://m63-browser.anima.tools");
+    value["publicIpv4Pin"] = serde_json::json!("93.184.216.34");
+    value["routes"] = serde_json::json!([
+        {"id": "page", "method": "GET", "path": "/"},
+        {"id": "article", "method": "GET", "path": "/article"}
+    ]);
+    policy.template = serde_json::from_value(value)
+        .expect("operator public pin must deserialize as scope admission data");
+    policy
 }
 pub(crate) fn fixture_policies(
     installation: &InstalledBrowserPolicies,
@@ -614,6 +634,149 @@ fn m46_installed_policy_constructor_refuses_non_numeric_origins_and_invalid_caps
         InstalledBrowserPolicies::new(installation, vec![policy]),
         Err(BrowserServiceError::Invalid)
     ));
+}
+
+#[test]
+fn m63_installed_policy_allows_only_one_pinned_get_only_public_template() {
+    let baseline = policies(120_000);
+    let installation = baseline.installation.unwrap();
+    let loopback = baseline.policies.into_values().next().unwrap();
+    let public = public_policy();
+    assert!(InstalledBrowserPolicies::new(
+        installation.clone(),
+        vec![loopback.clone(), public.clone()]
+    )
+    .is_ok());
+    let mut second = public.clone();
+    second.id = "second-public-policy".into();
+    assert!(matches!(
+        InstalledBrowserPolicies::new(installation.clone(), vec![public.clone(), second]),
+        Err(BrowserServiceError::Invalid)
+    ));
+
+    let mut missing_pin = public.clone();
+    let mut value = serde_json::to_value(&missing_pin.template).unwrap();
+    value.as_object_mut().unwrap().remove("publicIpv4Pin");
+    missing_pin.template = serde_json::from_value(value).unwrap();
+    assert!(matches!(
+        InstalledBrowserPolicies::new(installation.clone(), vec![missing_pin]),
+        Err(BrowserServiceError::Invalid)
+    ));
+    let mut post = public.clone();
+    post.template.routes[1].method = BrowserMethod::Post;
+    assert!(matches!(
+        InstalledBrowserPolicies::new(installation.clone(), vec![post]),
+        Err(BrowserServiceError::Invalid)
+    ));
+    let mut inputs = public.clone();
+    inputs.template.input_ids.push("operator-input".into());
+    assert!(matches!(
+        InstalledBrowserPolicies::new(installation.clone(), vec![inputs]),
+        Err(BrowserServiceError::Invalid)
+    ));
+    let mut private_pin = public;
+    let mut value = serde_json::to_value(&private_pin.template).unwrap();
+    value["publicIpv4Pin"] = serde_json::json!("169.254.169.254");
+    private_pin.template = serde_json::from_value(value).unwrap();
+    assert!(matches!(
+        InstalledBrowserPolicies::new(installation, vec![private_pin]),
+        Err(BrowserServiceError::Invalid)
+    ));
+}
+
+#[tokio::test]
+async fn m63_public_metadata_does_not_grant_browser_tools_or_accept_inputs() {
+    let f = Fixture::new(120_000).await;
+    let installed = InstalledBrowserPolicies::new(
+        policies(120_000).installation.unwrap(),
+        vec![public_policy()],
+    )
+    .unwrap();
+    let service = BrowserService::new(
+        &f.state,
+        f.coordinator.control_plane_transactions(),
+        installed,
+        f.port.clone(),
+    );
+    let input = SaveBrowserScope {
+        policy_id: "public-operator-policy".into(),
+        selected_input_ids: vec![],
+        enabled: true,
+        expected_version: None,
+    };
+    let view = service
+        .save(&f.run.agent_id, &f.run.run_id, input.clone())
+        .await
+        .unwrap();
+    assert_eq!(view.origin, "https://m63-browser.anima.tools");
+    assert_eq!(view.tool_names, vec!["calculate"]);
+    assert!(view.selected_input_ids.is_empty());
+    assert_eq!(f.port.opens.load(Ordering::SeqCst), 0);
+    let listed = serde_json::to_value(service.policies(&f.run.agent_id).await.unwrap()).unwrap();
+    assert!(!listed.to_string().contains("93.184.216.34"));
+    assert!(!listed.to_string().contains("publicIpv4Pin"));
+
+    let call = anima_core::ToolCall {
+        id: "attempt-public-navigation".into(),
+        name: "browser_navigate".into(),
+        args: std::collections::BTreeMap::new(),
+    };
+    assert_eq!(
+        service
+            .capture_dispatch(
+                &f.run,
+                &call,
+                anima_core::browser::BrowserOperation::Navigate {
+                    route_id: "page".into(),
+                },
+                None,
+            )
+            .await
+            .err()
+            .expect("a public destination must not grant a browser tool")
+            .code,
+        BrowserErrorCode::Denied
+    );
+    assert_eq!(f.port.opens.load(Ordering::SeqCst), 0);
+    let mut selected = input.clone();
+    selected.selected_input_ids = vec!["unselected-input".into()];
+    selected.expected_version = Some(view.version);
+    assert_eq!(
+        service.save(&f.run.agent_id, &f.run.run_id, selected).await,
+        Err(BrowserServiceError::Invalid)
+    );
+    f.zero_dispatch();
+
+    let granted =
+        Fixture::with_tools_model(120_000, ScriptedModel::new(vec![]), &["browser_navigate"]).await;
+    let installed = InstalledBrowserPolicies::new(
+        policies(120_000).installation.unwrap(),
+        vec![public_policy()],
+    )
+    .unwrap();
+    let granted_service = BrowserService::new(
+        &granted.state,
+        granted.coordinator.control_plane_transactions(),
+        installed,
+        granted.port.clone(),
+    );
+    let granted_view = granted_service
+        .save(&granted.run.agent_id, &granted.run.run_id, input)
+        .await
+        .unwrap();
+    assert_eq!(granted_view.tool_names, vec!["browser_navigate"]);
+    assert!(granted_service
+        .capture_dispatch(
+            &granted.run,
+            &call,
+            anima_core::browser::BrowserOperation::Navigate {
+                route_id: "page".into(),
+            },
+            None,
+        )
+        .await
+        .is_ok());
+    granted.zero_dispatch();
 }
 
 #[tokio::test]

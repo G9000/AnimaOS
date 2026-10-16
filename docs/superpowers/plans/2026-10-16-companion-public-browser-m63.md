@@ -1,6 +1,6 @@
 # M63 one pinned public HTTPS browser policy
 
-Status: bound from verified M62/PR68 main. Publish this plan before source-only implementation; no public-site/browser/account activation is released.
+Status: locally gated; publication and merge settlement are recorded in the private progress ledger.
 
 ## Decision and acceptance boundary
 
@@ -296,3 +296,60 @@ No ordinary profiles/credentials, account sends, devices, DB servers, containers
 Docker55432 or deployment. Update master/parity/harness/operator docs/handover,
 push/PR/attach/standing merge and verify exact source/merge tree plus raw hashes.
 Resume .superpowers/sdd/2026-10-16-companion-public-browser-m63/progress.md.
+
+## Execution clarifications (binding)
+
+Public requests admit exact configured main-frame navigation GET and the existing
+internally identified typed-CSV download only. Other page fetches, subresources
+and frames refuse even when their path is listed. Loopback assets stay unchanged.
+Public contexts disable page JavaScript; dynamic sites remain unsupported.
+This does not provide OS network isolation. Download purpose is an internal
+operation, never an IPC/page/model-supplied bypass flag.
+
+An optional pin is an absent JSON property on loopback; explicit null/non-string
+values refuse on both Rust and JS. Rust None serializes omission. Freeze the old
+loopback sample digest as literal
+`8a921f1b63fece7799c595fa856d71c03398ce6258f1ccff41022b6680a2a442`, independently
+derived from its fixed 412-byte ASCII/integer JCS vector before production edits.
+Retain existing roundtrip assertions as well.
+
+The worker helper may expose an immediate request owner with response and close
+promises through dependency-only test seams. No CLI/bootstrap/IPC CA or dial
+override is accepted. Synthetic test PEM files are never installed as trust.
+
+## Gated outcome (2026-10-16)
+
+An operator can now install one canonical ASCII HTTPS hostname on port443 with
+one explicit public IPv4 pin and exact GET routes. The native scope, host policy
+and worker independently refuse malformed hosts/pins, the reviewed19 special-use
+address prefixes, POST and selected inputs. Omitted pin preserves the existing
+loopback JSON/digest; explicit null refuses. Both runtimes refuse xn-- labels.
+The pin stays outside public HTTP/SDK/tool inputs and grants remain separate.
+
+The existing worker connects directly to the numeric pin while normal TLS name
+verification, SNI and Host retain the configured hostname. No DNS, fallback,
+ordinary public fetch, retry, redirect or pool. Bounded identity-encoded streams
+and request/response/socket owners survive cancellation until physical close;
+late completion cannot fulfill after Stop. Public page JavaScript and other
+subresources are disabled; only main-frame GET and internal typed-CSV download
+paths are admitted. The console hides public file sharing and preserves normal
+chat attachments and loopback sharing.
+
+One independent native/worker batch review and final web/SDK scope review settled
+with one fix wave: shared A-label refusal and the public file-picker affordance.
+Meaningful RED/GREEN cases precede the fixes. Fresh Rust/core **2,862/26
+intentional ignores/45 suites**, **52 worker tests** (including10 new cases),
+web **1,493/121 files**, typecheck/build/format and owned docs/hash
+gates pass. Synthetic local TLS peers check trusted, wrong-name and untrusted
+certificates plus abort/close/byte limits; all7 recorded final worker-job
+identities retired. Test CA/dial seams never enter CLI/bootstrap and no CA is
+installed. No dependency, public endpoint, SDK schema or standing grant is added.
+
+This is fixture-tested static HTTPS transport and UI behavior. No actual public
+site, real browser, account/provider/daemon/ordinary profile or deployment is
+activated. Dynamic sites, IDN/IPv6/CDN rotation, actual public rendering and wider
+browser/account/host acceptance remain open; no OS network-isolation or full
+Hermes-parity claim. M47/M52 consumed cases and four failed M61 cases stay
+immutable; M52 strict quality remains PARTIAL.
+
+See [harness evidence](../../companion/harness-acceptance.md).

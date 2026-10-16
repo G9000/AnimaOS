@@ -86,6 +86,7 @@ impl InstalledBrowserPolicies {
             return Err(BrowserServiceError::Invalid);
         }
         let mut table = BTreeMap::new();
+        let mut public_policies = 0usize;
         for policy in policies {
             if !valid_id(&policy.id)
                 || !policy.template.input_ids.is_empty()
@@ -94,16 +95,31 @@ impl InstalledBrowserPolicies {
             {
                 return Err(BrowserServiceError::Invalid);
             }
-            // The initial operator boundary is an exact numeric loopback origin.
-            let port = policy
-                .template
-                .origin
-                .strip_prefix("http://127.0.0.1:")
-                .and_then(|p| p.parse::<u16>().ok());
-            if port.is_none_or(|p| p == 0)
-                || policy.template.origin != format!("http://127.0.0.1:{}", port.unwrap())
-            {
-                return Err(BrowserServiceError::Invalid);
+            if policy.template.public_ipv4_pin.is_some() {
+                public_policies += 1;
+                if public_policies > 1
+                    || !policy.template.origin.starts_with("https://")
+                    || !policy.template.input_ids.is_empty()
+                    || policy
+                        .template
+                        .routes
+                        .iter()
+                        .any(|route| route.method != anima_core::browser::BrowserMethod::Get)
+                {
+                    return Err(BrowserServiceError::Invalid);
+                }
+            } else {
+                // Preserve the exact numeric-loopback operator boundary.
+                let port = policy
+                    .template
+                    .origin
+                    .strip_prefix("http://127.0.0.1:")
+                    .and_then(|p| p.parse::<u16>().ok());
+                if port.is_none_or(|p| p == 0)
+                    || policy.template.origin != format!("http://127.0.0.1:{}", port.unwrap())
+                {
+                    return Err(BrowserServiceError::Invalid);
+                }
             }
             scope_digest(&policy.template).map_err(|_| BrowserServiceError::Invalid)?;
             table.insert(policy.id.clone(), policy);

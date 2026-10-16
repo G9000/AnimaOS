@@ -7,7 +7,7 @@ use std::{collections::HashSet, time::Instant};
 use async_trait::async_trait;
 use serde::{
     de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor},
-    Deserialize, Serialize,
+    Deserialize, Deserializer, Serialize,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -46,6 +46,14 @@ pub struct BrowserScope {
     pub id: String,
     pub revision: u64,
     pub origin: String,
+    /// Optional operator-issued public address. Absence preserves the M46
+    /// numeric-loopback wire shape; an explicit null is not absence.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_string"
+    )]
+    pub public_ipv4_pin: Option<String>,
     pub routes: Vec<BrowserRoute>,
     pub input_ids: Vec<String>,
     pub limits: BrowserLimits,
@@ -277,7 +285,10 @@ fn safe_positive_integer(value: u64) -> Result<(), BrowserError> {
     }
     Ok(())
 }
-fn origin(value: &str) -> Result<(), BrowserError> {
+fn present_string<'de, D: Deserializer<'de>>(decoder: D) -> Result<Option<String>, D::Error> {
+    String::deserialize(decoder).map(Some)
+}
+fn loopback_origin(value: &str) -> Result<(), BrowserError> {
     let port = value
         .strip_prefix("http://127.0.0.1:")
         .ok_or_else(invalid)?;
@@ -289,6 +300,93 @@ fn origin(value: &str) -> Result<(), BrowserError> {
         return Err(invalid());
     }
     if port.parse::<u16>().map_err(|_| invalid())? == 0 {
+        return Err(invalid());
+    }
+    Ok(())
+}
+fn public_hostname(value: &str) -> Result<(), BrowserError> {
+    let name = value.strip_prefix("https://").ok_or_else(invalid)?;
+    if name.len() > 253 || name.is_empty() {
+        return Err(invalid());
+    }
+    let labels = name.split('.').collect::<Vec<_>>();
+    if labels.len() < 2
+        || labels.iter().any(|label| {
+            label.is_empty()
+                || label.len() > 63
+                || label.starts_with("xn--")
+                || !label
+                    .as_bytes()
+                    .first()
+                    .is_some_and(|byte| byte.is_ascii_alphanumeric())
+                || !label
+                    .as_bytes()
+                    .last()
+                    .is_some_and(|byte| byte.is_ascii_alphanumeric())
+                || !label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        })
+        || !labels
+            .last()
+            .unwrap()
+            .bytes()
+            .any(|byte| byte.is_ascii_lowercase())
+        || (labels.last().unwrap().starts_with("0x")
+            && labels.last().unwrap()[2..]
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit()))
+        || matches!(
+            *labels.last().unwrap(),
+            "localhost"
+                | "local"
+                | "internal"
+                | "lan"
+                | "home"
+                | "onion"
+                | "test"
+                | "invalid"
+                | "example"
+                | "arpa"
+        )
+    {
+        return Err(invalid());
+    }
+    Ok(())
+}
+fn public_ipv4_pin(value: &str) -> Result<(), BrowserError> {
+    let address = value.parse::<std::net::Ipv4Addr>().map_err(|_| invalid())?;
+    if address.to_string() != value {
+        return Err(invalid());
+    }
+    let number = u32::from_be_bytes(address.octets());
+    // Conservative collapsed IANA IPv4 special-purpose prefixes (2025-10-09),
+    // multicast/reserved space, and Azure's documented platform address.
+    const DENIED: [([u8; 4], u32); 19] = [
+        ([0, 0, 0, 0], 8),
+        ([10, 0, 0, 0], 8),
+        ([100, 64, 0, 0], 10),
+        ([127, 0, 0, 0], 8),
+        ([168, 63, 129, 16], 32),
+        ([169, 254, 0, 0], 16),
+        ([172, 16, 0, 0], 12),
+        ([192, 0, 0, 0], 24),
+        ([192, 0, 2, 0], 24),
+        ([192, 31, 196, 0], 24),
+        ([192, 52, 193, 0], 24),
+        ([192, 88, 99, 0], 24),
+        ([192, 168, 0, 0], 16),
+        ([192, 175, 48, 0], 24),
+        ([198, 18, 0, 0], 15),
+        ([198, 51, 100, 0], 24),
+        ([203, 0, 113, 0], 24),
+        ([224, 0, 0, 0], 4),
+        ([240, 0, 0, 0], 4),
+    ];
+    if DENIED.iter().any(|(prefix, bits)| {
+        let mask = u32::MAX << (32 - *bits);
+        (number & mask) == (u32::from_be_bytes(*prefix) & mask)
+    }) {
         return Err(invalid());
     }
     Ok(())
@@ -325,7 +423,21 @@ fn frame_size(length: usize, maximum: u32) -> Result<(), BrowserError> {
 pub fn validate_scope(scope: &BrowserScope) -> Result<(), BrowserError> {
     identifier(&scope.id)?;
     safe_positive_integer(scope.revision)?;
-    origin(&scope.origin)?;
+    match scope.public_ipv4_pin.as_deref() {
+        Some(pin) => {
+            public_hostname(&scope.origin)?;
+            public_ipv4_pin(pin)?;
+            if !scope.input_ids.is_empty()
+                || scope
+                    .routes
+                    .iter()
+                    .any(|route| route.method != BrowserMethod::Get)
+            {
+                return Err(invalid());
+            }
+        }
+        None => loopback_origin(&scope.origin)?,
+    }
     if scope.routes.is_empty() {
         return Err(invalid());
     }
@@ -652,6 +764,7 @@ mod tests {
             id: "quote-task_1".into(),
             revision: 1,
             origin: "http://127.0.0.1:41873".into(),
+            public_ipv4_pin: None,
             routes: vec![
                 BrowserRoute {
                     id: "offers".into(),
@@ -704,6 +817,7 @@ mod tests {
             id: "quote-task_1".into(),
             revision: 1,
             origin: "http://127.0.0.1:41873".into(),
+            public_ipv4_pin: None,
             routes: vec![
                 BrowserRoute {
                     id: "offers".into(),
@@ -730,6 +844,17 @@ mod tests {
                 screenshot_bytes: 256 * 1024,
             },
         }
+    }
+    fn public_scope_json(origin: &str, pin: &str) -> serde_json::Value {
+        let mut value = serde_json::to_value(sample()).unwrap();
+        value["origin"] = serde_json::json!(origin);
+        value["routes"] = serde_json::json!([
+            {"id": "home", "method": "GET", "path": "/"},
+            {"id": "article", "method": "GET", "path": "/article"}
+        ]);
+        value["inputIds"] = serde_json::json!([]);
+        value["publicIpv4Pin"] = serde_json::json!(pin);
+        value
     }
     fn node() -> BrowserNodeRef {
         BrowserNodeRef {
@@ -908,6 +1033,294 @@ mod tests {
         let mut scope = sample();
         scope.routes[0].path = "/".to_owned() + &"a".repeat(256);
         rejects(validate_scope(&scope), BrowserErrorCode::Invalid);
+    }
+
+    #[test]
+    fn m63_one_public_origin_and_pin_are_host_issued_scope_data_not_a_new_operation() {
+        let loopback = sample();
+        let old_json = serde_json::to_value(&loopback).unwrap();
+        assert!(old_json.get("publicIpv4Pin").is_none());
+        assert_eq!(
+            scope_digest(&loopback).unwrap(),
+            "8a921f1b63fece7799c595fa856d71c03398ce6258f1ccff41022b6680a2a442"
+        );
+        assert_eq!(
+            scope_digest(&loopback).unwrap(),
+            scope_digest(&decode_scope(&serde_json::to_vec(&old_json).unwrap()).unwrap()).unwrap()
+        );
+        assert_eq!(loopback.routes[1].method, BrowserMethod::Post);
+
+        let value = public_scope_json("https://m63-browser.anima.tools", "93.184.216.34");
+        let scope = decode_scope(&serde_json::to_vec(&value).unwrap())
+            .expect("the exact operator public origin and pin must be accepted");
+        assert_eq!(serde_json::to_value(&scope).unwrap(), value);
+        assert_eq!(scope.origin, "https://m63-browser.anima.tools");
+        assert!(scope.input_ids.is_empty());
+        assert!(scope
+            .routes
+            .iter()
+            .all(|route| route.method == BrowserMethod::Get));
+        assert!(validate_operation(
+            &scope,
+            &BrowserOperation::Navigate {
+                route_id: "article".into()
+            }
+        )
+        .is_ok());
+        rejects(
+            validate_operation(
+                &scope,
+                &BrowserOperation::Navigate {
+                    route_id: "foreign".into(),
+                },
+            ),
+            BrowserErrorCode::Denied,
+        );
+        let first_digest = scope_digest(&scope).unwrap();
+        let changed = public_scope_json("https://m63-browser.anima.tools", "9.9.9.9");
+        let changed = decode_scope(&serde_json::to_vec(&changed).unwrap()).unwrap();
+        assert_ne!(scope_digest(&changed).unwrap(), first_digest);
+        let max_host = format!(
+            "https://{}.{}.{}.{}.com",
+            "a".repeat(63),
+            "b".repeat(63),
+            "c".repeat(63),
+            "d".repeat(57)
+        );
+        assert_eq!(max_host.len() - "https://".len(), 253);
+        let max_scope = public_scope_json(&max_host, "93.184.216.34");
+        decode_scope(&serde_json::to_vec(&max_scope).unwrap())
+            .expect("253-byte hostname and 63-byte labels are allowed");
+        let ordinary_hex_prefix = public_scope_json("https://browser.0xyz", "93.184.216.34");
+        decode_scope(&serde_json::to_vec(&ordinary_hex_prefix).unwrap())
+            .expect("a nonnumeric LDH suffix with 0x prefix is a DNS name");
+    }
+
+    #[test]
+    fn m63_public_scope_rejects_noncanonical_hosts_missing_pin_post_and_inputs() {
+        let mut no_pin = public_scope_json("https://m63-browser.anima.tools", "93.184.216.34");
+        no_pin.as_object_mut().unwrap().remove("publicIpv4Pin");
+        rejects(
+            decode_scope(&serde_json::to_vec(&no_pin).unwrap()),
+            BrowserErrorCode::Invalid,
+        );
+        let mut loopback_with_pin = serde_json::to_value(sample()).unwrap();
+        loopback_with_pin["publicIpv4Pin"] = serde_json::json!("93.184.216.34");
+        rejects(
+            decode_scope(&serde_json::to_vec(&loopback_with_pin).unwrap()),
+            BrowserErrorCode::Invalid,
+        );
+        for origin in ["http://127.0.0.1:41873", "https://m63-browser.anima.tools"] {
+            let mut value = if origin.starts_with("http://") {
+                serde_json::to_value(sample()).unwrap()
+            } else {
+                public_scope_json(origin, "93.184.216.34")
+            };
+            value["publicIpv4Pin"] = serde_json::Value::Null;
+            rejects(
+                decode_scope(&serde_json::to_vec(&value).unwrap()),
+                BrowserErrorCode::Invalid,
+            );
+        }
+        for hostname in [
+            "https://M63-browser.anima.tools",
+            "https://m63-browser.anima.tools:443",
+            "https://m63-browser.anima.tools/",
+            "https://m63-browser.anima.tools?q=1",
+            "https://m63-browser.anima.tools#frag",
+            "https://user@m63-browser.anima.tools",
+            "https://m63-browser.anima.tools.",
+            "https://m63--browser..anima.tools",
+            "https://-browser.anima.tools",
+            "https://browser-.anima.tools",
+            "https://browser.anima.123",
+            "https://browser.0x7f",
+            "https://browser.0x",
+            "https://xn--a.tools",
+            "https://xn--bcher-kva.example.com",
+            "https://browser_anima.tools",
+            "https://browser.%74ools",
+            "https://browser.anima.tools\n",
+            "https://127.0.0.1",
+            "https://[::1]",
+            "https://browser.localhost",
+            "https://browser.local",
+            "https://browser.internal",
+            "https://browser.lan",
+            "https://browser.home",
+            "https://browser.onion",
+            "https://browser.test",
+            "https://browser.invalid",
+            "https://browser.example",
+            "https://browser.arpa",
+            "https://bröwser.anima.tools",
+        ] {
+            let value = public_scope_json(hostname, "93.184.216.34");
+            rejects(
+                decode_scope(&serde_json::to_vec(&value).unwrap()),
+                BrowserErrorCode::Invalid,
+            );
+        }
+        for hostname in [
+            format!("https://{}.anima.tools", "a".repeat(64)),
+            format!(
+                "https://{}.{}.{}.{}.com",
+                "a".repeat(63),
+                "b".repeat(63),
+                "c".repeat(63),
+                "d".repeat(63)
+            ),
+        ] {
+            let value = public_scope_json(&hostname, "93.184.216.34");
+            rejects(
+                decode_scope(&serde_json::to_vec(&value).unwrap()),
+                BrowserErrorCode::Invalid,
+            );
+        }
+        let mut post = public_scope_json("https://m63-browser.anima.tools", "93.184.216.34");
+        post["routes"][1]["method"] = serde_json::json!("POST");
+        rejects(
+            decode_scope(&serde_json::to_vec(&post).unwrap()),
+            BrowserErrorCode::Invalid,
+        );
+        let mut inputs = public_scope_json("https://m63-browser.anima.tools", "93.184.216.34");
+        inputs["inputIds"] = serde_json::json!(["owned-input"]);
+        rejects(
+            decode_scope(&serde_json::to_vec(&inputs).unwrap()),
+            BrowserErrorCode::Invalid,
+        );
+        let mut unknown = public_scope_json("https://m63-browser.anima.tools", "93.184.216.34");
+        unknown["operatorMayRetry"] = serde_json::json!(true);
+        rejects(
+            decode_scope(&serde_json::to_vec(&unknown).unwrap()),
+            BrowserErrorCode::Invalid,
+        );
+    }
+
+    #[test]
+    fn m63_public_pin_rejects_noncanonical_and_all_bound_special_use_classes() {
+        for pin in [
+            "93.184.216.34",
+            "9.9.9.9",
+            "1.0.0.0",
+            "9.255.255.255",
+            "11.0.0.0",
+            "100.63.255.255",
+            "100.128.0.0",
+            "126.255.255.255",
+            "128.0.0.0",
+            "169.253.255.255",
+            "169.255.0.0",
+            "172.15.255.255",
+            "172.32.0.0",
+            "191.255.255.255",
+            "192.0.1.0",
+            "192.0.1.255",
+            "192.0.3.0",
+            "192.31.195.255",
+            "192.31.197.0",
+            "192.52.192.255",
+            "192.52.194.0",
+            "192.88.98.255",
+            "192.88.100.0",
+            "192.167.255.255",
+            "192.169.0.0",
+            "192.175.47.255",
+            "192.175.49.0",
+            "198.17.255.255",
+            "198.20.0.0",
+            "198.51.99.255",
+            "198.51.101.0",
+            "203.0.112.255",
+            "203.0.114.0",
+            "223.255.255.255",
+            "168.63.129.15",
+            "168.63.129.17",
+        ] {
+            let value = public_scope_json("https://m63-browser.anima.tools", pin);
+            decode_scope(&serde_json::to_vec(&value).unwrap())
+                .expect("canonical non-special-use IPv4 pin must be admitted");
+        }
+        for pin in [
+            "93.184.216.034",
+            "93.184.216",
+            "0x5db8d822",
+            "+93.184.216.34",
+            " 93.184.216.34",
+            "93.184.216.34 ",
+            "::ffff:93.184.216.34",
+            "[::ffff:93.184.216.34]",
+            "93.184.216.256",
+            "93.184.216.-1",
+            "",
+            "0.0.0.1",
+            "10.0.0.1",
+            "100.64.0.1",
+            "127.0.0.1",
+            "168.63.129.16",
+            "169.254.169.254",
+            "172.16.0.1",
+            "192.0.0.9",
+            "192.0.2.1",
+            "192.31.196.1",
+            "192.52.193.1",
+            "192.88.99.1",
+            "192.168.1.1",
+            "192.175.48.1",
+            "198.18.0.1",
+            "198.51.100.1",
+            "203.0.113.1",
+            "224.0.0.1",
+            "239.255.255.255",
+            "240.0.0.1",
+            "255.255.255.255",
+            "0.0.0.0",
+            "0.255.255.255",
+            "10.0.0.0",
+            "10.255.255.255",
+            "100.64.0.0",
+            "100.127.255.255",
+            "127.0.0.0",
+            "127.255.255.255",
+            "169.254.0.0",
+            "169.254.255.255",
+            "172.16.0.0",
+            "172.31.255.255",
+            "192.0.0.0",
+            "192.0.0.255",
+            "192.0.2.0",
+            "192.0.2.255",
+            "192.31.196.0",
+            "192.31.196.255",
+            "192.52.193.0",
+            "192.52.193.255",
+            "192.88.99.0",
+            "192.88.99.255",
+            "192.168.0.0",
+            "192.168.255.255",
+            "192.175.48.0",
+            "192.175.48.255",
+            "198.18.0.0",
+            "198.19.255.255",
+            "198.51.100.0",
+            "198.51.100.255",
+            "203.0.113.0",
+            "203.0.113.255",
+            "224.0.0.0",
+            "240.0.0.0",
+        ] {
+            let value = public_scope_json("https://m63-browser.anima.tools", pin);
+            rejects(
+                decode_scope(&serde_json::to_vec(&value).unwrap()),
+                BrowserErrorCode::Invalid,
+            );
+        }
+        let mut non_string = public_scope_json("https://m63-browser.anima.tools", "93.184.216.34");
+        non_string["publicIpv4Pin"] = serde_json::json!(934);
+        rejects(
+            decode_scope(&serde_json::to_vec(&non_string).unwrap()),
+            BrowserErrorCode::Invalid,
+        );
     }
 
     #[test]

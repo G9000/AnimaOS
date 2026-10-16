@@ -234,35 +234,40 @@ export function BrowserTaskControls({
                     </li>
                   ))}
                 </ul>
-                {attachments.map((item) => (
-                  <label key={item.id} className="block">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.includes(item.id)}
-                      disabled={
-                        disabled ||
-                        offline ||
-                        busy ||
-                        item.kind !== 'text' ||
-                        item.size > policy.limits.inputBytes ||
-                        (!selectedIds.includes(item.id) &&
-                          selectedBytes + item.size > policy.limits.inputBytes)
-                      }
-                      onChange={(event) =>
-                        onSelection({
-                          policyId: policy.id,
-                          selectedInputIds: event.target.checked
-                            ? [
-                                ...selectedIds.filter((id) => id !== item.id),
-                                item.id,
-                              ]
-                            : selectedIds.filter((id) => id !== item.id),
-                        })
-                      }
-                    />{' '}
-                    Share {item.name} ({item.size} bytes)
-                  </label>
-                ))}
+                {policy.origin.startsWith('https://') ? (
+                  <p>Uploaded files aren’t shared with public pages.</p>
+                ) : (
+                  attachments.map((item) => (
+                    <label key={item.id} className="block">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(item.id)}
+                        disabled={
+                          disabled ||
+                          offline ||
+                          busy ||
+                          item.kind !== 'text' ||
+                          item.size > policy.limits.inputBytes ||
+                          (!selectedIds.includes(item.id) &&
+                            selectedBytes + item.size >
+                              policy.limits.inputBytes)
+                        }
+                        onChange={(event) =>
+                          onSelection({
+                            policyId: policy.id,
+                            selectedInputIds: event.target.checked
+                              ? [
+                                  ...selectedIds.filter((id) => id !== item.id),
+                                  item.id,
+                                ]
+                              : selectedIds.filter((id) => id !== item.id),
+                          })
+                        }
+                      />{' '}
+                      Share {item.name} ({item.size} bytes)
+                    </label>
+                  ))
+                )}
                 <p>
                   Selection applies once. Reloading or recovering a message
                   requires choosing browser access again.

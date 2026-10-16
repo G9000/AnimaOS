@@ -1,5 +1,42 @@
 # Native harness acceptance
 
+## M63 pinned public HTTPS browser policy (2026-10-16)
+
+An operator can now install one canonical ASCII HTTPS hostname on port443 with
+one explicit public IPv4 pin and exact GET routes. The native scope, host policy
+and worker independently refuse malformed hosts/pins, the reviewed19 special-use
+address prefixes, POST and selected inputs. Omitted pin preserves the existing
+loopback JSON/digest; explicit null refuses. Both runtimes refuse xn-- labels.
+The pin stays outside public HTTP/SDK/tool inputs and grants remain separate.
+
+The existing worker connects directly to the numeric pin while normal TLS name
+verification, SNI and Host retain the configured hostname. No DNS, fallback,
+ordinary public fetch, retry, redirect or pool. Bounded identity-encoded streams
+and request/response/socket owners survive cancellation until physical close;
+late completion cannot fulfill after Stop. Public page JavaScript and other
+subresources are disabled; only main-frame GET and internal typed-CSV download
+paths are admitted. The console hides public file sharing and preserves normal
+chat attachments and loopback sharing.
+
+One independent native/worker batch review and final web/SDK scope review settled
+with one fix wave: shared A-label refusal and the public file-picker affordance.
+Meaningful RED/GREEN cases precede the fixes. Fresh Rust/core **2,862/26
+intentional ignores/45 suites**, **52 worker tests** (including10 new cases),
+web **1,493/121 files**, typecheck/build/format and owned docs/hash
+gates pass. Synthetic local TLS peers check trusted, wrong-name and untrusted
+certificates plus abort/close/byte limits; all7 recorded final worker-job
+identities retired. Test CA/dial seams never enter CLI/bootstrap and no CA is
+installed. No dependency, public endpoint, SDK schema or standing grant is added.
+
+This is fixture-tested static HTTPS transport and UI behavior. No actual public
+site, real browser, account/provider/daemon/ordinary profile or deployment is
+activated. Dynamic sites, IDN/IPv6/CDN rotation, actual public rendering and wider
+browser/account/host acceptance remain open; no OS network-isolation or full
+Hermes-parity claim. M47/M52 consumed cases and four failed M61 cases stay
+immutable; M52 strict quality remains PARTIAL.
+
+See [browser setup](browser-work.md) and the [M63 plan](../superpowers/plans/2026-10-16-companion-public-browser-m63.md).
+
 ## M62 interval outage recovery (2026-10-16)
 
 One finite synthetic workspace interval case now crosses fresh JSON restores

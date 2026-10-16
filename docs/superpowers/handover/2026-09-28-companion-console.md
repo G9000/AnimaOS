@@ -1,32 +1,34 @@
 # Handover: pinned public HTTPS browser policy (M0–M63)
 
-## Start here (2026-10-16): M62 merged; M63 bound public browser transport
+## Start here (2026-10-16): M63 gated; settle publication then actual browser scope
 
-Continue g9000/companion-public-browser-m63 from [M62/PR68](https://github.com/G9000/animaOS-SWARM/pull/68)
-main22a732316a5a6073f7030b6af752740372923a07, source5a685fc4cfc783f6148f74f41a9e70650b53a201,
-identical tree6463da0b90b2d707d10f875af3ec605c96ef0279. M62 controlled interval
-outage/reload [1,0,0,1] and two fake calls after all joins pass; fresh Rust/core
-2857/26 intentional ignores/45 suites/lint/build, five docs/format/hash checks.
-No production change.187 unowned hashes and unrelated nx.json preserved.
+Continue g9000/companion-public-browser-m63 from M62/PR68 main
+22a732316a5a6073f7030b6af752740372923a07. Bound plan6c2c15187674f9c0e80e7b6597e5667fbfc4319c
+was pushed before source. One operator HTTPS443 hostname/public IPv4 pin/exact GET
+policy now crosses core/host/worker validation with normal TLS identity and retained
+request/socket cleanup. Public page JS/upload sharing off; existing loopback,
+tool grants and approvals stay. No new SDK/API schema/dependency/account grant.
 
-The [M63 bound plan](../plans/2026-10-16-companion-public-browser-m63.md) adds one
-operator HTTPS hostname/public IPv4 pin/exact GET policy, normal TLS verification
-and physically retained request/socket ownership. No public DNS/fallback/redirect,
-account/browser/daemon/ordinary-profile activation. Existing loopback/grant/budget/
-Stop and lease boundaries stay. Source-only Sol native lane, Astra transport lane,
-root RED/GREEN commands, one batch and final web/SDK scope review/fix wave/gates.
-Public plan push precedes implementation. Reuse existing BrowserPort/worker;
-Hermes pinned public helpers are behavior reference, not a copied supervisor.
+One independent native/worker batch and final web/SDK scope review settled; one
+fix wave aligns xn-- rejection and public file-picker affordance. Fresh Rust/core
+2,862/26 ignores/45 suites/lint/build, worker52, web1493/121/type/build
+and local TLS trusted/wrong-name/untrusted/abort/close evidence pass. All7 recorded
+final worker-job identities retired. No actual public site, browser, DNS, account,
+provider, ordinary profile/daemon/DB server/container/deploy activation. Dynamic
+sites/IDN/IPv6/CDN rotation and actual public rendering remain open.
 
-Resume .superpowers/sdd/2026-10-16-companion-public-browser-m63/progress.md.
-Root five risk rulings bind exact syntax/IP table/TLS/cleanup. Synthetic finite
-local TLS peers are within isolated test authority; no actual public-site claim.
-Cargo CARGO_INCREMENTAL=0/jobs1/threads2 serialized, provider/service env scrubbed.
-Explicit-path unsigned push/PR/attach/standing merge with exact tree/hash proof.
-Never stage nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/
-worktree. No real models/accounts/devices/ordinary services/profiles/credentials/
+Resume .superpowers/sdd/2026-10-16-companion-public-browser-m63/progress.md. Finish
+owned docs/format/hash checks, explicit-path unsigned commit/push/PR/attach and
+standing authorized merge; verify identical source/merge tree and raw hashes,
+nonforced fetch main before switch. Next useful scope is one separately bounded
+isolated actual browser-rendering/public-read acceptance, not another duplicate
+memory wiring test. No release is implied until its new root-bound case exists.
+
+Root commands/fmt/Git, source-only workers; Cargo CARGO_INCREMENTAL=0/jobs1/threads2
+serialized. Never stage nx.json/anima.yaml/.superpowers; no stash/reset/restore/
+path checkout/worktree. No ordinary profiles/credentials, account writes, devices,
 DB servers/containers/Docker55432/deployment. M47/M52 and four failed M61 cases
-immutable, M52 PARTIAL; broader public/account/host/full parity remains open.
+immutable; M52 PARTIAL. No OS-egress isolation, full public or full parity claim.
 
 ## Historical M62 gated handover
 

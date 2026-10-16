@@ -9,6 +9,8 @@ import * as filesystem from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { createServer } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import { Readable } from 'node:stream';
 
 const require = createRequire(import.meta.url);
 const engineMetadata = require('playwright-core/package.json');
@@ -41,7 +43,7 @@ export const LIMITS = Object.freeze({
 /** @typedef {{wireBytes:number,lastIncomingId:number,lastOutgoingId:number}} FrameState */
 /** @typedef {{id:string,method:'GET'|'POST',path:string}} BrowserRoute */
 /** @typedef {{actions:number,requests:number,scopeMs:number,frameBytes:number,wireBytes:number,observationNodes:number,observationTextBytes:number,inputBytes:number,outputBytes:number,screenshotBytes:number}} BrowserLimits */
-/** @typedef {{id:string,revision:number,origin:string,routes:BrowserRoute[],inputIds:string[],limits:BrowserLimits}} BrowserScope */
+/** @typedef {{id:string,revision:number,origin:string,publicIpv4Pin?:string,routes:BrowserRoute[],inputIds:string[],limits:BrowserLimits}} BrowserScope */
 /** @typedef {{documentId:string,documentGeneration:number,observationDigest:string}} DocumentWitness */
 /** @typedef {{id:string,filePath:string,bytes:number,sha256:string}} InputSlot */
 /** @typedef {{id:string,kind:'csv'|'screenshot',filePath:string}} OutputSlot */
@@ -332,11 +334,104 @@ function routePath(value) {
     fail();
 }
 
+// IANA IPv4 Special-Purpose registry, 2025-10-09, conservatively collapsed;
+// also multicast/reserved and Microsoft's documented platform virtual address.
+// This static admission table makes no future-allocation or OS-isolation claim.
+const PUBLIC_PIN_DENY = [
+  [0x00000000, 8],
+  [0x0a000000, 8],
+  [0x64400000, 10],
+  [0x7f000000, 8],
+  [0xa9fe0000, 16],
+  [0xac100000, 12],
+  [0xc0000000, 24],
+  [0xc0000200, 24],
+  [0xc01fc400, 24],
+  [0xc034c100, 24],
+  [0xc0586300, 24],
+  [0xc0a80000, 16],
+  [0xc0af3000, 24],
+  [0xc6120000, 15],
+  [0xc6336400, 24],
+  [0xcb007100, 24],
+  [0xe0000000, 4],
+  [0xf0000000, 4],
+  [0xa83f8110, 32],
+];
+function publicPin(value) {
+  if (
+    typeof value !== 'string' ||
+    !/^(?:0|[1-9][0-9]{0,2})(?:\.(?:0|[1-9][0-9]{0,2})){3}$(?![\s\S])/.test(
+      value,
+    )
+  )
+    fail();
+  const parts = value.split('.').map(Number);
+  if (parts.some((part) => part > 255)) fail();
+  const address = parts.reduce((total, part) => total * 256 + part, 0);
+  for (const [base, prefix] of PUBLIC_PIN_DENY) {
+    const width = 2 ** (32 - prefix);
+    if (Math.floor(address / width) === Math.floor(base / width)) fail();
+  }
+}
+function publicHostname(origin) {
+  if (typeof origin !== 'string' || !origin.startsWith('https://')) fail();
+  const hostname = origin.slice(8);
+  if (!hostname.length || hostname.length > 253 || /[^a-z0-9.-]/.test(hostname))
+    fail();
+  const labels = hostname.split('.');
+  if (
+    labels.length < 2 ||
+    labels.some(
+      (label) =>
+        label.length > 63 ||
+        label.startsWith('xn--') ||
+        !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$(?![\s\S])/.test(label),
+    )
+  )
+    fail();
+  if (
+    !/[a-z]/.test(labels.at(-1)) ||
+    /^0x[0-9a-f]*$/.test(labels.at(-1)) ||
+    [
+      'localhost',
+      'local',
+      'internal',
+      'lan',
+      'home',
+      'onion',
+      'test',
+      'invalid',
+      'example',
+      'arpa',
+    ].includes(labels.at(-1))
+  )
+    fail();
+  try {
+    if (new URL(origin).origin !== origin) fail();
+  } catch {
+    fail();
+  }
+  return hostname;
+}
+
 export function validateScope(scope) {
-  exact(scope, ['id', 'revision', 'origin', 'routes', 'inputIds', 'limits']);
+  const pinned = scope && Object.hasOwn(scope, 'publicIpv4Pin');
+  exact(scope, [
+    'id',
+    'revision',
+    'origin',
+    'routes',
+    'inputIds',
+    'limits',
+    ...(pinned ? ['publicIpv4Pin'] : []),
+  ]);
   identifier(scope.id);
   integer(scope.revision);
-  if (
+  if (pinned) {
+    publicHostname(scope.origin);
+    publicPin(scope.publicIpv4Pin);
+  } else if (
     typeof scope.origin !== 'string' ||
     !/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$(?![\s\S])/.test(scope.origin) ||
     Number(scope.origin.split(':').at(-1)) > 65535
@@ -350,6 +445,7 @@ export function validateScope(scope) {
     exact(route, ['id', 'method', 'path']);
     identifier(route.id);
     if (route.method !== 'GET' && route.method !== 'POST') fail();
+    if (pinned && route.method !== 'GET') fail();
     routePath(route.path);
     const pair = route.method + ' ' + route.path;
     if (routeIds.has(route.id) || pairs.has(pair)) fail();
@@ -357,6 +453,7 @@ export function validateScope(scope) {
     pairs.add(pair);
   }
   array(scope.inputIds, 16);
+  if (pinned && scope.inputIds.length) fail();
   const inputs = new Set();
   for (const input of scope.inputIds) {
     identifier(input);
@@ -1127,6 +1224,10 @@ export function guardRequest(scope, intercepted, window) {
   }
   if (intercepted.download === true && window.downloadRouteId !== route.id)
     denied();
+  // Only trusted navigation admission or the worker's typed download can issue
+  // public requests. Listed page fetches/resources do not gain that authority.
+  if (scope.publicIpv4Pin && !intercepted.navigation && !intercepted.download)
+    denied();
   return freeze({ id: route.id, method: route.method, path: route.path });
 }
 
@@ -1194,6 +1295,9 @@ export async function readBoundedResponse(response, limits, control) {
     )
       fail('denied');
     const announced = response.headers.get('content-length');
+    const encoding = response.headers.get('content-encoding');
+    if (encoding !== null && encoding.toLowerCase() !== 'identity')
+      fail('denied');
     if (
       announced !== null &&
       (!/^(?:0|[1-9][0-9]*)$(?![\s\S])/.test(announced) ||
@@ -1796,6 +1900,166 @@ export async function createDenyProxy({ signal, onRequest, onFailure } = {}) {
   }
 }
 
+/**
+ * One numeric HTTPS dial. The dependency seam is module-local test wiring, never
+ * bootstrap/IPC data. Owning this object includes joining close(), even when its
+ * response promise has already failed. No resolver, pool, retry or redirect path.
+ */
+export function createPinnedHttpsRequest(
+  scope,
+  route,
+  { signal, requestImpl = httpsRequest } = {},
+) {
+  validateScope(scope);
+  if (
+    !scope.publicIpv4Pin ||
+    !scope.routes.some(
+      (candidate) =>
+        candidate.id === route?.id &&
+        candidate.method === 'GET' &&
+        candidate.path === route.path,
+    )
+  )
+    fail();
+  const hostname = publicHostname(scope.origin);
+  const resources = new Map();
+  let closing = false,
+    settled = false,
+    uncertain = false,
+    scheduled = false;
+  let resolveResponse, rejectResponse, resolveClosed;
+  const response = new Promise((resolve, reject) => {
+    resolveResponse = resolve;
+    rejectResponse = reject;
+  });
+  // Close/cancellation may precede the caller's first await. Retain rejection
+  // ownership immediately rather than leaking a process-level unhandled error.
+  response.catch(() => {});
+  const closed = new Promise((resolve) => {
+    resolveClosed = resolve;
+  });
+  const refusal = () =>
+    new BrowserWorkerError(signal?.aborted ? 'cancelled' : 'unavailable');
+  const reject = () => {
+    if (!settled) {
+      settled = true;
+      rejectResponse(refusal());
+    }
+  };
+  const checkClosed = () => {
+    if (
+      !closing ||
+      uncertain ||
+      scheduled ||
+      [...resources.values()].some((value) => !value)
+    )
+      return;
+    scheduled = true;
+    // Account for socket/response delivery queued around request cancellation.
+    // A request-close acknowledgement, not an abort promise, is authoritative.
+    setImmediate(() => {
+      scheduled = false;
+      if (!uncertain && [...resources.values()].every(Boolean)) {
+        signal?.removeEventListener('abort', abort);
+        resolveClosed();
+      }
+    });
+  };
+  const destroy = (resource) => {
+    try {
+      if (!resource.destroyed) resource.destroy();
+    } catch {
+      uncertain = true;
+    }
+  };
+  const close = () => {
+    closing = true;
+    reject();
+    for (const resource of resources.keys()) destroy(resource);
+    checkClosed();
+    return closed;
+  };
+  const abort = () => {
+    void close();
+  };
+  const own = (resource) => {
+    if (resources.has(resource)) return;
+    resources.set(resource, resource.closed === true);
+    resource.once('close', () => {
+      resources.set(resource, true);
+      checkClosed();
+    });
+    resource.on('error', () => {
+      reject();
+      void close();
+    });
+    if (closing) destroy(resource);
+  };
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) {
+    void close();
+    return { response, close };
+  }
+  try {
+    const request = requestImpl({
+      hostname: scope.publicIpv4Pin,
+      port: 443,
+      path: route.path,
+      method: 'GET',
+      servername: hostname,
+      headers: { Host: hostname, 'Accept-Encoding': 'identity' },
+      rejectUnauthorized: true,
+      agent: false,
+      maxHeaderSize: 8192,
+    });
+    own(request);
+    request.on('socket', (socket) => own(socket));
+    request.on('response', (incoming) => {
+      own(incoming);
+      if (closing || settled) {
+        destroy(incoming);
+        return;
+      }
+      try {
+        const headers = new Headers();
+        for (let index = 0; index < incoming.rawHeaders.length; index += 2)
+          headers.append(
+            incoming.rawHeaders[index],
+            incoming.rawHeaders[index + 1],
+          );
+        const body = Readable.toWeb(incoming, {
+          // One queued transport chunk, not a high-water mark measured in chunks
+          // copied from Node's byte-based stream buffering.
+          strategy: { highWaterMark: 1, size: () => 1 },
+        });
+        settled = true;
+        resolveResponse({
+          status: incoming.statusCode,
+          headers,
+          body,
+          redirected: false,
+        });
+      } catch {
+        reject();
+        void close();
+      }
+    });
+    // Unexpected close before headers must settle the response too, while still
+    // retaining any independently delivered socket until its close event.
+    request.once('close', () => {
+      if (!settled) {
+        reject();
+        void close();
+      }
+    });
+    request.end();
+  } catch {
+    reject();
+    void close();
+  }
+  return { response, close };
+}
+
 export async function createMaintainedSession(bootstrap, dependencies) {
   const {
     chromium,
@@ -1849,6 +2113,7 @@ export async function createMaintainedSession(bootstrap, dependencies) {
   const fetchedLedger = { bytes: 0 };
   const usedOutputs = new Set();
   const routeTasks = new Set();
+  const publicRequests = new Set();
   let finishStartup;
   const startup = new Promise((resolve) => {
     finishStartup = resolve;
@@ -1892,6 +2157,9 @@ export async function createMaintainedSession(bootstrap, dependencies) {
           failed = true;
         }
         await Promise.allSettled([...routeTasks]);
+        // Public response rejection does not imply socket retirement. This join
+        // deliberately remains pending when the native host must quarantine/kill.
+        await Promise.all([...publicRequests].map((owner) => owner.close()));
         try {
           if (denyProxy) await denyProxy.close();
         } catch {
@@ -1981,22 +2249,34 @@ export async function createMaintainedSession(bootstrap, dependencies) {
       abort,
       diagnostics: privateDiagnostics,
     };
+    let publicOwner;
     try {
       privateDiagnostics.fetchAttempts++;
-      const response = await fetchImpl(scope.origin + target.path, {
-        method: target.method,
-        redirect: 'manual',
-        signal: controller.signal,
-        headers: {
-          'accept-encoding': 'identity',
-          ...(headers['content-type']
-            ? { 'content-type': headers['content-type'] }
+      let response;
+      if (scope.publicIpv4Pin) {
+        publicOwner = createPinnedHttpsRequest(scope, target, {
+          signal: controller.signal,
+          requestImpl: dependencies.httpsRequestImpl,
+        });
+        publicRequests.add(publicOwner); // No yield between dispatch and ownership.
+        response = await publicOwner.response;
+      } else
+        response = await fetchImpl(scope.origin + target.path, {
+          method: target.method,
+          redirect: 'manual',
+          signal: controller.signal,
+          headers: {
+            'accept-encoding': 'identity',
+            ...(headers['content-type']
+              ? { 'content-type': headers['content-type'] }
+              : {}),
+          },
+          ...(target.method === 'POST'
+            ? { body: body ?? Buffer.alloc(0) }
             : {}),
-        },
-        ...(target.method === 'POST' ? { body: body ?? Buffer.alloc(0) } : {}),
-        credentials: 'omit',
-        cache: 'no-store',
-      });
+          credentials: 'omit',
+          cache: 'no-store',
+        });
       const bounded = await readBoundedResponse(
         response,
         {
@@ -2012,6 +2292,10 @@ export async function createMaintainedSession(bootstrap, dependencies) {
     } finally {
       clearTimeout(timer);
       shutdown.signal.removeEventListener('abort', abort);
+      if (publicOwner) {
+        await publicOwner.close();
+        publicRequests.delete(publicOwner);
+      }
     }
   }
   async function routeHttp(route) {
@@ -2045,6 +2329,9 @@ export async function createMaintainedSession(bootstrap, dependencies) {
         headers,
         body,
       );
+      // Joining physical public closure may yield after the last body check.
+      // Stop/deadline must still fence publication after that join.
+      timeout();
       await route.fulfill({
         status: bounded.status,
         headers: { ...bounded.headers, 'cache-control': 'no-store' },
@@ -2451,6 +2738,7 @@ export async function createMaintainedSession(bootstrap, dependencies) {
       permissions: [],
       ignoreHTTPSErrors: false,
       bypassCSP: false,
+      ...(scope.publicIpv4Pin ? { javaScriptEnabled: false } : {}),
     });
     timeout();
     context.setDefaultTimeout(10000);

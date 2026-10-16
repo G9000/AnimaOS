@@ -1,6 +1,12 @@
+import { useState } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { BrowserPolicy, BrowserScope } from '@animaOS-SWARM/sdk';
+import type {
+  BrowserPolicy,
+  BrowserScope,
+  BrowserSelection,
+  UploadedAttachment,
+} from '@animaOS-SWARM/sdk';
 import {
   BrowserTaskControls,
   type BrowserControlsApi,
@@ -51,6 +57,20 @@ const scope: BrowserScope = {
   toolNames: ['browser_navigate'],
   error: null,
 };
+const publicPolicy: BrowserPolicy = {
+  ...policy,
+  id: 'public-read',
+  origin: 'https://m63-browser.anima.tools',
+};
+const draftAttachment: UploadedAttachment = {
+  id: 'draft-file',
+  name: 'draft.txt',
+  mime: 'text/plain',
+  size: 12,
+  kind: 'text',
+  path: 'draft-file',
+  createdAtMs: 1,
+};
 
 function api(): BrowserControlsApi {
   return {
@@ -67,6 +87,99 @@ function api(): BrowserControlsApi {
 }
 
 describe('browser task controls', () => {
+  it('does not offer local file sharing for a public HTTPS policy', async () => {
+    const mock = api();
+    vi.mocked(mock.policies).mockResolvedValue([publicPolicy]);
+    render(
+      <BrowserTaskControls
+        agentId="a"
+        runId={null}
+        disabled={false}
+        attachments={[draftAttachment]}
+        selection={{
+          policyId: publicPolicy.id,
+          selectedInputIds: ['draft-file'],
+        }}
+        onSelection={vi.fn()}
+        api={mock}
+      />,
+    );
+    const details = screen.getByText('Browser task').closest('details')!;
+    details.open = true;
+    fireEvent(details, new Event('toggle'));
+    await screen.findByRole('option', { name: /public-read/ });
+    expect(
+      screen.getByText('Uploaded files aren’t shared with public pages.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Share draft\.txt/)).not.toBeInTheDocument();
+  });
+
+  it('clears browser file selection when switching to public while retaining the chat attachment', async () => {
+    const mock = api();
+    vi.mocked(mock.policies).mockResolvedValue([policy, publicPolicy]);
+    const onSelection = vi.fn();
+    const attachments = [draftAttachment];
+    function Harness() {
+      const [selection, setSelection] = useState<BrowserSelection | null>({
+        policyId: policy.id,
+        selectedInputIds: [draftAttachment.id],
+      });
+      return (
+        <>
+          <div aria-label="Chat attachments">Draft attachment: draft.txt</div>
+          <BrowserTaskControls
+            agentId="a"
+            runId={null}
+            disabled={false}
+            attachments={attachments}
+            selection={selection}
+            onSelection={(next) => {
+              onSelection(next);
+              setSelection(next);
+            }}
+            api={mock}
+          />
+        </>
+      );
+    }
+    render(<Harness />);
+    const details = screen.getByText('Browser task').closest('details')!;
+    details.open = true;
+    fireEvent(details, new Event('toggle'));
+    await screen.findByRole('option', { name: /public-read/ });
+    expect(
+      screen.getByRole('checkbox', { name: /Share draft\.txt/ }),
+    ).toBeChecked();
+
+    fireEvent.change(screen.getByLabelText('Browser policy for next message'), {
+      target: { value: publicPolicy.id },
+    });
+    expect(onSelection).toHaveBeenLastCalledWith({
+      policyId: publicPolicy.id,
+      selectedInputIds: [],
+    });
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.getByText('Draft attachment: draft.txt')).toBeInTheDocument();
+    expect(attachments).toEqual([draftAttachment]);
+
+    fireEvent.change(screen.getByLabelText('Browser policy for next message'), {
+      target: { value: policy.id },
+    });
+    expect(onSelection).toHaveBeenLastCalledWith({
+      policyId: policy.id,
+      selectedInputIds: [],
+    });
+    const share = screen.getByRole('checkbox', { name: /Share draft\.txt/ });
+    expect(share).not.toBeChecked();
+    fireEvent.click(share);
+    expect(onSelection).toHaveBeenLastCalledWith({
+      policyId: policy.id,
+      selectedInputIds: [draftAttachment.id],
+    });
+    expect(screen.getByText('Draft attachment: draft.txt')).toBeInTheDocument();
+  });
+
   it('loads metadata only on opening and selects only installed policies and ready inputs', async () => {
     const mock = api();
     const onSelection = vi.fn();
