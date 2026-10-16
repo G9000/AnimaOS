@@ -1,9 +1,87 @@
 //! A1: a due scan may wait, but closure fences the subsequent durable claim.
 use super::tests::{due_schedule, service_with_daemon, GatedModel};
 use super::*;
-use crate::control_plane_store::{load_control_plane_snapshot, ControlPlaneStoreConfig};
+use crate::connectors::credentials::InMemoryCredentialStore;
+use crate::control_plane_store::{
+    load_control_plane_snapshot, ControlPlaneSnapshot, ControlPlaneStoreConfig,
+};
 use crate::state::DaemonState;
-use tokio::sync::{Notify, Semaphore};
+use futures::FutureExt;
+use std::panic::AssertUnwindSafe;
+use tokio::sync::{Notify, RwLock, Semaphore};
+
+struct FixtureFile(std::path::PathBuf);
+impl Drop for FixtureFile {
+    fn drop(&mut self) {
+        // Only this test's exact synthetic JSON file, including on assertion failure.
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn restore(
+    snapshot: ControlPlaneSnapshot,
+    store: &ControlPlaneStoreConfig,
+    entered: Arc<Semaphore>,
+    release: Arc<Semaphore>,
+) -> (SchedulerService, SharedDaemonState) {
+    let mut daemon = DaemonState::with_model_adapter(Arc::new(GatedModel { entered, release }));
+    daemon.set_control_plane_store(Some(store.clone()));
+    daemon.restore_control_plane_snapshot(snapshot).unwrap();
+    // The sibling helper creates another owner. Build only its service wiring
+    // here so these fresh states retain exactly the owner loaded from disk.
+    let state = Arc::new(RwLock::new(daemon));
+    let runs = AgentRunCoordinator::new(state.clone(), Arc::new(Semaphore::new(2)));
+    let connectors = ConnectorManager::new(
+        state.clone(),
+        runs.clone(),
+        Arc::new(InMemoryCredentialStore::default()),
+        Arc::new(super::tests::NoopTelegram),
+    );
+    (
+        SchedulerService::new(state.clone(), runs, connectors),
+        state,
+    )
+}
+
+async fn settle_owned(service: &SchedulerService, release: &Semaphore) -> bool {
+    // A regression that accidentally enters the fake model must not strand
+    // cleanup. No real provider exists in any of the daemon states.
+    release.add_permits(MAX_ACTIVE_SCHEDULES);
+    let budget = Duration::from_secs(5);
+    let mut clean = tokio::time::timeout(budget, service.request_shutdown())
+        .await
+        .is_ok();
+    if let Ok(mut worker) = tokio::time::timeout(budget, service.worker.lock()).await {
+        if let Some(mut worker) = worker.take() {
+            let _ = worker.cancel.send(true);
+            match tokio::time::timeout(budget, &mut worker.join).await {
+                Ok(result) => clean &= result.is_ok(),
+                Err(_) => {
+                    clean = false;
+                    worker.join.abort();
+                    let _ = tokio::time::timeout(budget, &mut worker.join).await;
+                }
+            }
+        }
+    } else {
+        clean = false;
+    }
+    if let Ok(mut jobs) = tokio::time::timeout(budget, service.inner.jobs.lock()).await {
+        for (_, mut job) in std::mem::take(&mut *jobs) {
+            match tokio::time::timeout(budget, &mut job).await {
+                Ok(result) => clean &= result.is_ok(),
+                Err(_) => {
+                    clean = false;
+                    job.abort();
+                    let _ = tokio::time::timeout(budget, &mut job).await;
+                }
+            }
+        }
+    } else {
+        clean = false;
+    }
+    clean
+}
 
 async fn fixture() -> (
     SchedulerService,
@@ -109,85 +187,6 @@ async fn shutdown_preserves_an_already_claimed_schedule_settlement() {
 
 #[tokio::test]
 async fn persisted_unfinished_claim_recovers_in_fresh_states_without_replay() {
-    use crate::connectors::credentials::InMemoryCredentialStore;
-    use crate::control_plane_store::ControlPlaneSnapshot;
-    use futures::FutureExt;
-    use std::panic::AssertUnwindSafe;
-    use tokio::sync::RwLock;
-
-    struct FixtureFile(std::path::PathBuf);
-    impl Drop for FixtureFile {
-        fn drop(&mut self) {
-            // Only this test's exact synthetic JSON file, including on assertion failure.
-            let _ = std::fs::remove_file(&self.0);
-        }
-    }
-
-    fn restore(
-        snapshot: ControlPlaneSnapshot,
-        store: &ControlPlaneStoreConfig,
-        entered: Arc<Semaphore>,
-        release: Arc<Semaphore>,
-    ) -> (SchedulerService, SharedDaemonState) {
-        let mut daemon = DaemonState::with_model_adapter(Arc::new(GatedModel { entered, release }));
-        daemon.set_control_plane_store(Some(store.clone()));
-        daemon.restore_control_plane_snapshot(snapshot).unwrap();
-        // The sibling helper creates another owner. Build only its service wiring
-        // here so these fresh states retain exactly the owner loaded from disk.
-        let state = Arc::new(RwLock::new(daemon));
-        let runs = AgentRunCoordinator::new(state.clone(), Arc::new(Semaphore::new(2)));
-        let connectors = ConnectorManager::new(
-            state.clone(),
-            runs.clone(),
-            Arc::new(InMemoryCredentialStore::default()),
-            Arc::new(super::tests::NoopTelegram),
-        );
-        (
-            SchedulerService::new(state.clone(), runs, connectors),
-            state,
-        )
-    }
-
-    async fn settle_owned(service: &SchedulerService, release: &Semaphore) -> bool {
-        // A regression that accidentally enters the fake model must not strand
-        // cleanup. No real provider exists in any of the three daemon states.
-        release.add_permits(MAX_ACTIVE_SCHEDULES);
-        let budget = Duration::from_secs(5);
-        let mut clean = tokio::time::timeout(budget, service.request_shutdown())
-            .await
-            .is_ok();
-        if let Ok(mut worker) = tokio::time::timeout(budget, service.worker.lock()).await {
-            if let Some(mut worker) = worker.take() {
-                let _ = worker.cancel.send(true);
-                match tokio::time::timeout(budget, &mut worker.join).await {
-                    Ok(result) => clean &= result.is_ok(),
-                    Err(_) => {
-                        clean = false;
-                        worker.join.abort();
-                        let _ = tokio::time::timeout(budget, &mut worker.join).await;
-                    }
-                }
-            }
-        } else {
-            clean = false;
-        }
-        if let Ok(mut jobs) = tokio::time::timeout(budget, service.inner.jobs.lock()).await {
-            for (_, mut job) in std::mem::take(&mut *jobs) {
-                match tokio::time::timeout(budget, &mut job).await {
-                    Ok(result) => clean &= result.is_ok(),
-                    Err(_) => {
-                        clean = false;
-                        job.abort();
-                        let _ = tokio::time::timeout(budget, &mut job).await;
-                    }
-                }
-            }
-        } else {
-            clean = false;
-        }
-        clean
-    }
-
     let (original, original_state, agent, path, original_calls, original_release) = fixture().await;
     let _file = FixtureFile(path.clone());
     let store = ControlPlaneStoreConfig::Json(path);
@@ -364,6 +363,274 @@ async fn persisted_unfinished_claim_recovers_in_fresh_states_without_replay() {
     }
     match result {
         Ok(result) => result.expect("persisted recovery acceptance must finish within 15 seconds"),
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
+#[tokio::test]
+async fn persisted_interval_outage_collapses_missed_occurrences_without_catch_up() {
+    const INTERVAL_MS: u64 = 60_000;
+    const OUTAGE_INTERVALS: u64 = 5;
+
+    let (original, original_state, agent, path, original_calls, original_release) = fixture().await;
+    let _file = FixtureFile(path.clone());
+    let store = ControlPlaneStoreConfig::Json(path);
+    let first_calls = Arc::new(Semaphore::new(0));
+    let first_release = Arc::new(Semaphore::new(0));
+    let second_calls = Arc::new(Semaphore::new(0));
+    let second_release = Arc::new(Semaphore::new(0));
+    let mut owned = vec![(original.clone(), original_release, original_calls.clone())];
+    // Keep tick ownership outside the acceptance future, including if it
+    // panics or times out while a model gate is held.
+    let mut ticks: Vec<Option<JoinHandle<Result<usize, ScheduleError>>>> = Vec::new();
+    let mut observed_calls = 0;
+    let result = AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(15), async {
+        let initial = due_schedule(&original, &agent).await;
+        let due_t = initial.next_due_at_ms;
+        let outage_n = due_t
+            .checked_add(INTERVAL_MS.checked_mul(OUTAGE_INTERVALS).unwrap())
+            .unwrap();
+        let next_due = outage_n.checked_add(INTERVAL_MS).unwrap();
+        let following_due = next_due.checked_add(INTERVAL_MS).unwrap();
+        assert_eq!(
+            initial.trigger,
+            ScheduleTrigger::Interval {
+                interval_ms: INTERVAL_MS
+            }
+        );
+        assert_eq!(initial.target, ScheduleTarget::Workspace);
+        assert!(initial.enabled);
+        assert!(initial.last_fired.is_none());
+        assert!(initial.last_safe_outcome.is_none());
+        assert_eq!(initial.counters, AutomationCounters::default());
+        let seed = load_control_plane_snapshot(&store).await.unwrap().unwrap();
+        assert_eq!(seed.agents.len(), 1);
+        assert_eq!(seed.agents[0].state.id, agent);
+        assert_eq!(seed.schedules, vec![initial.clone()]);
+        assert!(seed.runs.is_empty());
+        assert!(seed.schedule_fires.is_empty());
+        assert!(seed.outbound.is_empty());
+        assert!(seed.discord_outbound.is_empty());
+        assert!(seed.agents[0].messages.is_empty());
+        assert_eq!(original_calls.available_permits(), 0);
+        original.shutdown().await;
+        assert_eq!(original_state.read().await.schedules[&initial.id], initial);
+
+        let (first, first_state) =
+            restore(seed, &store, first_calls.clone(), first_release.clone());
+        owned.push((first.clone(), first_release.clone(), first_calls.clone()));
+        assert!(!Arc::ptr_eq(&original_state, &first_state));
+        assert_eq!(first_state.read().await.schedules[&initial.id], initial);
+        assert_eq!(first_calls.available_permits(), 0);
+
+        let slot = ticks.len();
+        ticks.push(Some(tokio::spawn({
+            let first = first.clone();
+            async move { first.tick_at(outage_n).await }
+        })));
+        tokio::time::timeout(Duration::from_secs(3), first_calls.acquire())
+            .await
+            .expect("the outage occurrence must enter the fake model")
+            .unwrap()
+            .forget();
+        observed_calls += 1;
+        first_release.add_permits(1);
+        let admitted = tokio::time::timeout(Duration::from_secs(5), ticks[slot].as_mut().unwrap())
+            .await
+            .expect("the first tick must settle");
+        ticks[slot] = None;
+        assert_eq!(admitted.unwrap().unwrap(), 1);
+        let first_record = first_state.read().await.schedules[&initial.id].clone();
+        assert!(first_record.enabled);
+        assert_eq!(first_record.id, initial.id);
+        assert_eq!(first_record.agent_id, agent);
+        assert_eq!(first_record.trigger, initial.trigger);
+        assert_eq!(first_record.next_due_at_ms, next_due);
+        assert_eq!(
+            first_record.last_fired,
+            Some(ScheduleLastFired {
+                fired_at_ms: outage_n,
+                run_idempotency_key: format!("schedule:{}:{outage_n}", initial.id),
+                manual: false,
+            })
+        );
+        assert_eq!(first_record.counters.runs, 1);
+        assert_eq!(first_record.counters.failures, 0);
+        assert_eq!(first_record.counters.consecutive_failures, 0);
+        let first_outcome = first_record.last_safe_outcome.as_ref().unwrap();
+        assert_eq!(first_outcome.status, ScheduleOutcomeStatus::Silent);
+        assert_eq!(first_outcome.error_code, None);
+        let first_snapshot = first_state.read().await.control_plane_snapshot();
+        assert_eq!(first_snapshot.schedule_fires.len(), 1);
+        let first_fire = &first_snapshot.schedule_fires[0];
+        assert_eq!(first_fire.id, format!("schedule:{}:{outage_n}", initial.id));
+        assert_eq!(first_fire.schedule_id, initial.id);
+        assert_eq!(first_fire.agent_id, agent);
+        assert_eq!(first_fire.fired_at_ms, outage_n);
+        assert_eq!(first_fire.outcome, ScheduleOutcomeStatus::Silent);
+        assert!(!first_fire.manual);
+        assert_eq!(first_fire.error_code, None);
+        assert!(first_snapshot.outbound.is_empty());
+        assert!(first_snapshot.discord_outbound.is_empty());
+        let first_disk = load_control_plane_snapshot(&store).await.unwrap().unwrap();
+        assert_eq!(first_disk.schedules, vec![first_record.clone()]);
+        assert_eq!(first_disk.schedule_fires, first_snapshot.schedule_fires);
+        assert_eq!(
+            serde_json::to_value(&first_disk).unwrap(),
+            serde_json::to_value(&first_snapshot).unwrap()
+        );
+
+        let slot = ticks.len();
+        ticks.push(Some(tokio::spawn({
+            let first = first.clone();
+            async move { first.tick_at(outage_n).await }
+        })));
+        let duplicate = tokio::time::timeout(Duration::from_secs(3), ticks[slot].as_mut().unwrap())
+            .await
+            .expect("the duplicate outage tick must settle");
+        ticks[slot] = None;
+        assert_eq!(duplicate.unwrap().unwrap(), 0);
+        assert_eq!(first_calls.available_permits(), 0);
+        assert_eq!(
+            first_state.read().await.schedules[&initial.id],
+            first_record
+        );
+        assert!(settle_owned(&first, &first_release).await);
+        assert_eq!(first_calls.available_permits(), 0);
+        let saved_after_retire = load_control_plane_snapshot(&store).await.unwrap().unwrap();
+        assert_eq!(
+            serde_json::to_value(&saved_after_retire).unwrap(),
+            serde_json::to_value(&first_snapshot).unwrap()
+        );
+
+        let (second, second_state) = restore(
+            saved_after_retire,
+            &store,
+            second_calls.clone(),
+            second_release.clone(),
+        );
+        owned.push((second.clone(), second_release.clone(), second_calls.clone()));
+        assert!(!Arc::ptr_eq(&first_state, &second_state));
+        assert!(!Arc::ptr_eq(&original_state, &second_state));
+        assert_eq!(
+            second_state.read().await.schedules[&initial.id],
+            first_record
+        );
+        assert_eq!(second_calls.available_permits(), 0);
+        let slot = ticks.len();
+        ticks.push(Some(tokio::spawn({
+            let second = second.clone();
+            async move { second.tick_at(outage_n).await }
+        })));
+        let duplicate = tokio::time::timeout(Duration::from_secs(3), ticks[slot].as_mut().unwrap())
+            .await
+            .expect("the fresh state must reject the old occurrence");
+        ticks[slot] = None;
+        assert_eq!(duplicate.unwrap().unwrap(), 0);
+        assert_eq!(second_calls.available_permits(), 0);
+        assert_eq!(
+            second_state.read().await.schedules[&initial.id],
+            first_record
+        );
+
+        let slot = ticks.len();
+        ticks.push(Some(tokio::spawn({
+            let second = second.clone();
+            async move { second.tick_at(next_due).await }
+        })));
+        tokio::time::timeout(Duration::from_secs(3), second_calls.acquire())
+            .await
+            .expect("the next normal occurrence must enter the fake model")
+            .unwrap()
+            .forget();
+        observed_calls += 1;
+        second_release.add_permits(1);
+        let admitted = tokio::time::timeout(Duration::from_secs(5), ticks[slot].as_mut().unwrap())
+            .await
+            .expect("the next normal tick must settle");
+        ticks[slot] = None;
+        assert_eq!(admitted.unwrap().unwrap(), 1);
+        let second_record = second_state.read().await.schedules[&initial.id].clone();
+        assert!(second_record.enabled);
+        assert_eq!(second_record.id, initial.id);
+        assert_eq!(second_record.agent_id, agent);
+        assert_eq!(second_record.next_due_at_ms, following_due);
+        assert_eq!(
+            second_record.last_fired,
+            Some(ScheduleLastFired {
+                fired_at_ms: next_due,
+                run_idempotency_key: format!("schedule:{}:{next_due}", initial.id),
+                manual: false,
+            })
+        );
+        assert_eq!(second_record.counters.runs, 2);
+        assert_eq!(second_record.counters.failures, 0);
+        assert_eq!(second_record.counters.consecutive_failures, 0);
+        assert_eq!(
+            second_record.last_safe_outcome.as_ref().unwrap().status,
+            ScheduleOutcomeStatus::Silent
+        );
+        let final_snapshot = second_state.read().await.control_plane_snapshot();
+        assert_eq!(final_snapshot.schedule_fires.len(), 2);
+        assert_eq!(final_snapshot.schedule_fires[0], *first_fire);
+        let second_fire = &final_snapshot.schedule_fires[1];
+        assert_eq!(
+            second_fire.id,
+            format!("schedule:{}:{next_due}", initial.id)
+        );
+        assert_eq!(second_fire.schedule_id, initial.id);
+        assert_eq!(second_fire.agent_id, agent);
+        assert_eq!(second_fire.fired_at_ms, next_due);
+        assert_eq!(second_fire.outcome, ScheduleOutcomeStatus::Silent);
+        assert!(!second_fire.manual);
+        assert_eq!(second_fire.error_code, None);
+        assert!(final_snapshot.outbound.is_empty());
+        assert!(final_snapshot.discord_outbound.is_empty());
+        let final_disk = load_control_plane_snapshot(&store).await.unwrap().unwrap();
+        assert_eq!(final_disk.schedules, vec![second_record]);
+        assert_eq!(final_disk.schedule_fires, final_snapshot.schedule_fires);
+        assert_eq!(
+            serde_json::to_value(&final_disk).unwrap(),
+            serde_json::to_value(&final_snapshot).unwrap()
+        );
+    }))
+    .catch_unwind()
+    .await;
+
+    // Release every fake gate before bounded joins, even if acceptance failed.
+    for (_, release, _) in &owned {
+        release.add_permits(MAX_ACTIVE_SCHEDULES);
+    }
+    let mut clean = true;
+    for tick in &mut ticks {
+        if let Some(mut tick) = tick.take() {
+            match tokio::time::timeout(Duration::from_secs(5), &mut tick).await {
+                Ok(result) => clean &= result.is_ok(),
+                Err(_) => {
+                    clean = false;
+                    tick.abort();
+                    let _ = tokio::time::timeout(Duration::from_secs(5), &mut tick).await;
+                }
+            }
+        }
+    }
+    for (service, release, _) in &owned {
+        clean &= settle_owned(service, release).await;
+    }
+    assert!(
+        clean,
+        "all owned ticks and scheduler jobs must settle within bounds"
+    );
+    assert_eq!(observed_calls, 2, "exactly two ticks enter the fake model");
+    for (_, _, calls) in &owned {
+        assert_eq!(
+            calls.available_permits(),
+            0,
+            "no extra model call may arrive through shutdown or a fresh state"
+        );
+    }
+    match result {
+        Ok(result) => result.expect("outage acceptance must finish within 15 seconds"),
         Err(panic) => std::panic::resume_unwind(panic),
     }
 }

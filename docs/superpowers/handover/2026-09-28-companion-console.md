@@ -1,29 +1,36 @@
 # Handover: interval outage recovery (M0–M62)
 
-## Start here (2026-10-16): M61 merged; M62 bound controlled-clock interval outage recovery
+## Start here (2026-10-16): M62 gated; publish/merge then continue parity
 
-Continue g9000/companion-interval-outage-m62 from [M61/PR67](https://github.com/G9000/animaOS-SWARM/pull/67)
-main61af5dca33799c53e191736bf1f2676800068c9e, source2448040f3bc60b778494059ae914163cf267e9e3,
-identical treeda3f6a2d0ff1b0e39b160d4d7350b5fc22c314ae. M61 actual selective memory HTTP
-create/UI edit/status/search/delete across one quiet forced restart passed; all24
-owned identities retired, isolated ports free.18 offline browser tests/type/build/
-format/docs pass. Four earlier failed fresh cases remain immutable, unreplayed.
-Shell/bootstrap/SSE/account/provider/connector APIs stayed mocked; no full parity.
+Continue g9000/companion-interval-outage-m62 from M61/PR67 main
+61af5dca33799c53e191736bf1f2676800068c9e. Bound plan
+0afdac6ddbe122bec8d0365e5137f0d262ab9d4a was pushed before source.
+One native test module: fresh JSON enabled unclaimed interval due T, N=T+5I,
+controlled ticks [1,0,0,1] across fresh C1/C2, exact IDs/next due/counters/disk
+equality and exactly two fake-model calls after all owned work joins. One late
+run skips backlog, then normal recurrence resumes. M59 assertions preserved.
+No scheduler worker start, wall-clock cadence, production or dependency change.
 
-The [M62 bound plan](../plans/2026-10-16-companion-interval-outage-m62.md) adds one
-test in schedules/shutdown_tests.rs: persisted enabled unclaimed interval, five
-missed periods, controlled ticks [1,0,0,1], exact two fake-model calls after joins,
-same saved schedule/occurrence fields across fresh reload and resumed cadence.
-No worker start, real wall-time wait or production change unless a concrete gap.
-Root five risk rulings; plan push before source-only Sol implementation; one
-native concurrency review/fix wave, focused and full Rust test/lint/build gates.
+One native concurrency batch review settled; fresh Rust/core 2,857/26
+ignores/45 suites, lint/build pass. Final owned docs/format/hash checks precede
+explicit-path unsigned commit/push/PR/attach and standing authorized merge; verify
+exact source/merge tree and raw hashes, nonforced fetch main before switch.
+Unchanged SDK/web retain M60 SDK183/three service skips, web1491/121/type/build;
+M61 selective actual memory HTTP/restart and 18 offline cases remain scoped.
+No redundant browser/provider run or whole-product parity claim.
 
 Resume .superpowers/sdd/2026-10-16-companion-interval-outage-m62/progress.md.
-Root commands/fmt/Git; Cargo CARGO_INCREMENTAL=0/jobs1/threads2 serialized. No real
-models/providers/accounts/devices/ordinary services/profiles/credentials/DB servers/
-containers/Docker55432/deployment. Explicit-path unsigned push/PR/standing merge;
-never stage nx.json/anima.yaml/.superpowers. No stash/reset/restore/path checkout/
-worktree. M47/M52 cases immutable, M52 PARTIAL; full parity unclaimed.
+Next held brief is next-held.md there; root must bind scope/five risks on the
+next branch after settlement. Daily/cron/DST, actual scheduled effects and
+target-host uptime remain open. M47/M52 cases and all four failed M61 cases are
+immutable; M52 PARTIAL. No replay, rescue, overwrite or regrade.
+
+Root commands/fmt/Git, source-only Codex delegation; Cargo CARGO_INCREMENTAL=0/
+jobs1/threads2 serialized with scrubbed provider/service env. No real models/
+providers/accounts/devices/ordinary services/profiles/credentials/DB servers/
+containers/Docker55432/deployment. Never stage nx.json/anima.yaml/.superpowers;
+no stash/reset/restore/path checkout/worktree. nx raw hash remains
+3B71AABE3A3ACF91B43F6C0B4F7F53B486645EB9316D7E66B16F9B85F9DBAC90.
 
 ## Historical M61 gated handover
 

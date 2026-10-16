@@ -1,6 +1,6 @@
 # M62 finite interval recovery after an outage
 
-Status: bound test-only milestone from verified M61/PR67; source release follows plan publication.
+Status: locally accepted test-only milestone; publication and merge settlement are recorded in the private progress ledger.
 
 ## Gap and smallest useful case
 
@@ -75,3 +75,35 @@ Update master/parity/harness/handover, explicit-path unsigned commit/push/PR/att
 standing authorized merge and exact tree/raw-hash proof. Never stage nx.json,
 anima.yaml or .superpowers; no stash/reset/restore/path checkout/worktree.
 Resume .superpowers/sdd/2026-10-16-companion-interval-outage-m62/progress.md.
+
+## Gated outcome (2026-10-16)
+
+One finite synthetic workspace interval case now crosses fresh JSON restores
+after an unclaimed outage. The enabled schedule is due at frozen T; explicit
+time N=T+5I uses I=60,000 ms. A newly constructed state runs exactly once at N,
+skips the missed backlog and advances to N+I. A repeated N tick stays quiet.
+After quiet settlement and a second fresh restore, N stays quiet and N+I runs
+once, advancing to N+2I. The four controlled tick counts are **[1,0,0,1]**.
+
+Exact occurrence IDs, local silent outcomes, run/failure counters and JSON/state
+equality pass. Both fake-model counters survive the acceptance future; exactly
+two calls are checked after every owned tick, scheduler and job has settled.
+No connector/outbound effect is admitted. The existing M59 recovery test retains
+all assertions through a narrow shared test-helper extraction.
+
+One native concurrency batch review is settled. Fresh Rust/core **2,857 tests /
+26 intentional ignores / 45 suites / format / build** pass. Only the
+existing native test module and evidence docs change; production, SDK/web, APIs,
+dependencies and recovery policy remain unchanged. M60 SDK183/three service skips
+and web1491/121-file/type/build, and M61 selective actual memory HTTP acceptance
+plus 18 offline browser passes, retain revision-specific evidence for unchanged
+inputs. No redundant browser/provider run is claimed.
+
+This proves controlled-clock local interval recovery, without a worker start or
+wall-clock cadence. Daily/cron/time-zone/DST/clock changes, target-host uptime,
+actual scheduled task effects and external exactly-once delivery remain open.
+No real model/provider/account/service/device/database server/container/deployment
+is activated. M47/M52 consumed cases and all four failed M61 fresh cases remain
+immutable; M52 strict quality remains PARTIAL.
+
+See [harness evidence](../../companion/harness-acceptance.md).
