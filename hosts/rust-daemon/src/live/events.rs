@@ -61,6 +61,7 @@ pub(crate) enum LiveEventBody {
         result_preview: String,
         truncated: bool,
         recovered: bool,
+        sources: Vec<crate::tools::web_search::WebSource>,
     },
     ApprovalRequested(ApprovalRequest),
     ApprovalResolved(ApprovalRequest),
@@ -224,6 +225,7 @@ impl LiveEvent {
                 result_preview,
                 truncated,
                 recovered,
+                sources,
             } => {
                 value["stepId"] = json!(step_id);
                 value["toolCallId"] = json!(tool_call_id);
@@ -233,6 +235,9 @@ impl LiveEvent {
                 value["resultPreview"] = json!(result_preview);
                 value["truncated"] = json!(truncated);
                 value["recovered"] = json!(recovered);
+                if !sources.is_empty() {
+                    value["sources"] = json!(sources);
+                }
             }
             LiveEventBody::ApprovalRequested(approval)
             | LiveEventBody::ApprovalResolved(approval) => {

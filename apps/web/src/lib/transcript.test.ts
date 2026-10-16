@@ -36,6 +36,138 @@ function kinds(items: TranscriptItem[]): string[] {
   return items.map((item) => item.kind);
 }
 
+describe('m83 search source provenance in transcript cards', () => {
+  const sourceA = [{ title: 'Returned A', url: 'https://example.com/a' }];
+  const sourceB = [{ title: 'Returned B', url: 'https://example.com/b' }];
+  const call = (
+    id: string,
+    runId: string,
+    stepId: string,
+    name = 'web_search',
+  ) =>
+    message(id, 'Assistant', '', {
+      runId,
+      stepId,
+      toolCalls: [{ id: 'reused', name, args: { query: 'bounded query' } }],
+    });
+  const result = (
+    id: string,
+    runId: string,
+    stepId: string,
+    webSources: unknown,
+    toolStatus = 'success',
+  ) =>
+    message(id, 'Tool', 'Actual tool result', {
+      runId,
+      stepId,
+      toolCallId: 'reused',
+      toolStatus,
+      webSources,
+    });
+
+  it('attaches delayed saved sources only to their own run, step and call identity', () => {
+    const history = buildHistory({
+      messages: [
+        call('call-a', 'run-a', 'run-a:1'),
+        message('between', 'Assistant', 'Waiting', { runId: 'run-a' }),
+        call('call-b', 'run-b', 'run-b:1'),
+        result('result-b', 'run-b', 'run-b:1', sourceB),
+        result('late-a', 'run-a', 'run-a:1', sourceA),
+        call('second-a', 'run-a', 'run-a:2', 'memory_search'),
+        result('result-second-a', 'run-a', 'run-a:2', sourceB),
+      ],
+    });
+    const steps = history.items.flatMap((item) =>
+      item.kind === 'tools' ? item.steps : [],
+    );
+    expect(
+      steps.find((step) => step.runId === 'run-a' && step.stepId === 'run-a:1')
+        ?.sources,
+    ).toEqual(sourceA);
+    expect(steps.find((step) => step.runId === 'run-b')?.sources).toEqual(
+      sourceB,
+    );
+    expect(
+      steps.find((step) => step.stepId === 'run-a:2')?.sources ?? [],
+    ).toEqual([]);
+  });
+
+  it.each(['error', 'denied', 'unknown'])(
+    'does not give a %s saved result search provenance',
+    (status) => {
+      const items = buildHistory({
+        messages: [
+          call('call', 'run-a', 'run-a:1'),
+          result('result', 'run-a', 'run-a:1', sourceA, status),
+        ],
+      }).items;
+      const tools = items.find((item) => item.kind === 'tools');
+      expect(tools?.kind === 'tools' && (tools.steps[0].sources ?? [])).toEqual(
+        [],
+      );
+    },
+  );
+
+  it('does not mint sources from answer links, non-tool metadata or an orphan result', () => {
+    const items = buildHistory({
+      messages: [
+        message('user', 'User', 'Search this', { webSources: sourceA }),
+        message(
+          'answer',
+          'Assistant',
+          '[Answer citation](https://example.com/answer)',
+          { webSources: sourceB },
+        ),
+        result('orphan', 'unknown', 'unknown:1', sourceA),
+      ],
+    }).items;
+    const tools = items.find((item) => item.kind === 'tools');
+    expect(tools?.kind === 'tools' && (tools.steps[0].sources ?? [])).toEqual(
+      [],
+    );
+    expect(items.filter((item) => item.kind === 'message')).toHaveLength(2);
+  });
+
+  it.each(['runId', 'stepId', 'toolCallId'])(
+    'requires saved source identity field %s',
+    (field) => {
+      const saved = result('result', 'run-a', 'run-a:1', sourceA);
+      delete (saved.content.metadata as Record<string, unknown>)[field];
+      const items = buildHistory({
+        messages: [call('call', 'run-a', 'run-a:1'), saved],
+      }).items;
+      for (const item of items)
+        if (item.kind === 'tools')
+          for (const step of item.steps) expect(step.sources ?? []).toEqual([]);
+    },
+  );
+
+  it('keeps live URLs outside the preview and accepts no sources on running or unrelated cards', () => {
+    const run = emptyLiveRun(runFixture('run-a'));
+    const base = {
+      stepId: 'run-a:1',
+      toolCallId: 'call',
+      name: 'web_search',
+      argumentsPreview: '{}',
+      argumentsTruncated: false,
+      durationMs: 1,
+      resultPreview: 'x'.repeat(2048),
+      truncated: true,
+      sources: sourceA,
+    };
+    run.tools = [
+      { ...base, status: 'success' },
+      { ...base, status: 'running', toolCallId: 'pending' },
+      { ...base, status: 'success', toolCallId: 'other', name: 'web_fetch' },
+    ];
+    const steps = liveToolSteps(run);
+    expect(steps[0].sources).toEqual(sourceA);
+    expect(steps[0].result).not.toContain(sourceA[0].url);
+    expect(steps[1].sources ?? []).toEqual([]);
+    expect(steps[2].sources ?? []).toEqual([]);
+  });
+});
+
 describe('M53 accepted budget wrap-up message shape', () => {
   const reply = (metadata: unknown): ChatMessage => ({
     ...message('saved', 'Assistant', 'Saved reply'),

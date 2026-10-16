@@ -3,6 +3,12 @@ import type { DaemonClient } from './client.js';
 import type { Run } from './runs.js';
 import type { UploadedAttachment } from './attachments.js';
 
+/** A returned native web_search URL, not a verification of answer claims. */
+export interface WebSource {
+  title: string;
+  url: string;
+}
+
 /** One tool call of a run in flight. */
 export interface LiveToolCard {
   stepId: string;
@@ -14,6 +20,8 @@ export interface LiveToolCard {
   durationMs: number | null;
   resultPreview: string | null;
   truncated: boolean;
+  /** Host-normalized sources for a successful native web_search. */
+  sources?: WebSource[];
 }
 
 /** An active run as a new stream first sees it (spec §6). */
@@ -96,6 +104,7 @@ export type AgentEvent =
       resultPreview: string;
       truncated: boolean;
       recovered: boolean;
+      sources?: WebSource[];
     })
   | (EventBase & {
       type: 'approval.requested' | 'approval.resolved';

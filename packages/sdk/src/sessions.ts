@@ -2,6 +2,7 @@ import { DaemonHttpError } from './client.js';
 import type { DaemonClient } from './client.js';
 import type { UsageTotals } from './usage.js';
 import type { UploadedAttachment } from './attachments.js';
+import type { WebSource } from './events.js';
 
 export type SessionKind =
   | 'chat'
@@ -192,12 +193,17 @@ export type SessionMessageDocumentExtraction =
   | SessionMessagePdfExtraction
   | SessionMessageXlsxExtraction;
 
+export interface SessionMessageMetadata extends Record<string, unknown> {
+  /** Narrow host projection, present only on successful native search results. */
+  webSources?: WebSource[];
+}
+
 export interface SessionMessage {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   text: string;
   attachments: SessionMessageAttachment[];
-  metadata: Record<string, unknown>;
+  metadata: SessionMessageMetadata;
   createdAtMs: number;
   /** Present on silent check-in messages when `includeHidden` is set. */
   hidden?: boolean;

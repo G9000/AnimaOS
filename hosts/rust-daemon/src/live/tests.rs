@@ -41,6 +41,7 @@ fn tool(call: &str) -> LiveToolView {
         duration_ms: None,
         result_preview: None,
         truncated: false,
+        sources: Vec::new(),
     }
 }
 
@@ -91,6 +92,7 @@ fn events_serialize_their_envelope_and_fields() {
             result_preview: "boom".into(),
             truncated: true,
             recovered: false,
+            sources: Vec::new(),
         },
     )
     .to_json(2);
@@ -494,6 +496,65 @@ mod coalescing {
             offset,
             text: text.into(),
         }
+    }
+
+    #[tokio::test]
+    async fn m83_full_search_sources_survive_preview_clipping_and_reconnect_snapshot() {
+        let hub = LiveHub::new(16);
+        let run = record("m83-owner");
+        let mut subscription = hub.subscribe("m83-owner").unwrap();
+        let live_run = LiveRun::register(hub.clone(), &run, None);
+        let observer = live_run.observer();
+        let step = format!("{}:1", run.id);
+        observer.on_frame(RunFrame::StepStarted {
+            step_id: step.clone(),
+        });
+        let sources = serde_json::json!([
+            {"title":"First source","url":"https://example.com/first?q=one&lang=en"},
+            {"title":"Second source","url":"https://example.org/second#evidence"}
+        ]);
+        let result =
+            serde_json::json!({"version":1,"provider":"exa","mode":"anonymous","untrusted":true,
+            "results":[
+                {"title":"First source","url":sources[0]["url"],"excerpt":"a".repeat(1200)},
+                {"title":"Second source","url":sources[1]["url"],"excerpt":"b".repeat(1200)}
+            ],"truncated":false})
+            .to_string();
+        assert!(result.len() > crate::live::MAX_PREVIEW_BYTES);
+        observer.on_frame(RunFrame::ToolStarted {
+            step_id: step.clone(),
+            tool_call: anima_core::ToolCall {
+                id: "reused-call".into(),
+                name: "web_search".into(),
+                args: Default::default(),
+            },
+        });
+        observer.on_frame(RunFrame::ToolFinished {
+            step_id: step.clone(),
+            tool_call_id: "reused-call".into(),
+            name: "web_search".into(),
+            status: anima_core::TaskStatus::Success,
+            duration_ms: 1,
+            result,
+            recovered: false,
+        });
+        let _started = next_event(&mut subscription).await;
+        let finished = next_event(&mut subscription).await.to_json(2);
+        assert_eq!(finished["sources"], sources);
+        assert_eq!(finished["stepId"], step);
+        assert_eq!(finished["truncated"], true);
+        let snapshot = super::snapshot_json(
+            "m83-owner",
+            2,
+            &[super::SnapshotRun {
+                record: run.clone(),
+                live: hub.runs().view(&run.id),
+            }],
+            &[],
+        );
+        assert_eq!(snapshot["runs"][0]["tools"][0]["sources"], sources);
+        drop(observer);
+        drop(live_run);
     }
 
     #[test]

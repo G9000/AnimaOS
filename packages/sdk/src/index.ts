@@ -64,6 +64,7 @@ export type {
   SessionListOptions,
   SessionMatch,
   SessionMessage,
+  SessionMessageMetadata,
   SessionMessageAttachment,
   SessionMessageDocumentExtraction,
   SessionMessageDocxExtraction,
@@ -153,6 +154,7 @@ export type {
   LiveToolCard,
   RunLifecycleEventType,
   SnapshotRun,
+  WebSource,
 } from './events.js';
 export {
   ApprovalsClient,

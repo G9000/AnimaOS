@@ -1,13 +1,14 @@
 # Handover: M83 web search with citations
 
-## Start here (2026-10-16): M82 merged; execute M83
+## Start here (2026-10-16): M83 search and citations accepted
 
-M82 PR88 merged at b71c351cbf60983c928fe2eb803b2b93336cb7be; exact tested tree a89cb45ffb4d6344195ef5afc8da155771e6134b. Rust2965/29intentionalignores/46suites, lint/build/format/docs pass. M81 Tasks reconnect and all historical consumed cases remain settled.
+M83 adds anonymous native web_search through the existing MCP transport, independent owner search/page-read grants, and bounded Search sources links across live events, snapshots, saved Tool history, SDK and console. Sources stay outside the shortened preview; reload never re-searches. Fresh Rust 2989 passed/31 ignored across 46 suites; web1648passed/1opt-in skipped; SDK203passed/3skipped. Rust lint/build, SDK/web typecheck/build, touched formatting/docs and the native plus web/SDK reviews pass.
 
-User now explicitly requests web search end to end with citations. Continue g9000/companion-web-search-m83; read the [M83 plan](../plans/2026-10-16-companion-web-search-m83.md), then AGENTS.md. Resume .superpowers/sdd/2026-10-16-companion-web-search-m83/progress.md.
-Use native keyless Exa MCP through the existing bounded transport, explicit independent search/page-read grants and typed returned source links across live/history/SDK/console. Keyed exa_search remains explicit and separate. One native batch review, one final web/SDK review and one fix wave; required affected gates, controlled chain and one bounded anonymous public search with zero paid generation. Record actual limits and preserve old cases. No normal profiles/accounts/providers/services/DBs/containers/Docker55432; only the newly authorized bounded anonymous search check after gates.
+One controlled actual-HTTP harness/history/console chain and one anonymous public search through the real native harness and console renderer pass with a scripted model consuming actual returned evidence. The initial discovery-only failure sent no query and stays archived as failed; the observed hosted schema/objective mismatch was fixed only for native search. Zero paid model calls. This establishes endpoint compatibility and source propagation, not general LLM research quality or independently verified answer claims. Anonymous service availability/rate limits remain external. No account/profile/normal-service/database/container activation or historical-case replay.
 
-Preserve unrelated generated Astro settings, nx.json, anima.yaml and uploads. Explicit staging only; never those paths or .superpowers. No stash/reset/restore/path checkout/worktree. Cargo incremental0/jobs1/threads2, serialized/root-only. Standing Codex delegation, per-command unsigned commits and merge-and-continue apply.
+Resume .superpowers/sdd/2026-10-16-companion-web-search-m83/progress.md.
+The ledger records exact publication and merge state. Existing dev sessions may still run an older binary; restart the normal dev session before using the new Settings grants.
+Finish explicit unsigned commit/push/PR/attach, standing merge and exact-source-tree verification if pending. Do not replay the consumed public query or historical cases. Use Settings to grant search/page reads explicitly in ordinary use. Preserve unrelated generated Astro settings/nx.json and user-owned runtime files; their external changes are recorded separately. No stash/reset/restore/path checkout/worktree. Cargo incremental0/jobs1/threads2, serialized. No normal profiles/accounts/services/DBs/containers/Docker55432.
 
 # Handover: M82 logical swarm task ownership
 

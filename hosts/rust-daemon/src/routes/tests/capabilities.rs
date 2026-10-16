@@ -1,6 +1,41 @@
 use super::*;
 
 #[tokio::test]
+async fn m83_capabilities_explain_anonymous_search_without_granting_it() {
+    let state = Arc::new(RwLock::new(DaemonState::new()));
+    let before = serde_json::to_value(state.read().await.control_plane_snapshot()).unwrap();
+    let app = router(state.clone(), DaemonConfig::default());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/capabilities")
+                .header("host", "127.0.0.1:8080")
+                .header("origin", "http://localhost:4200")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), 128 * 1024).await.unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let search = value["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "web_search")
+        .expect("native anonymous search inventory");
+    let requirements = search["requirements"].to_string().to_lowercase();
+    for word in ["anonymous", "exa", "rate", "grant"] {
+        assert!(requirements.contains(word), "{requirements}");
+    }
+    assert_eq!(
+        serde_json::to_value(state.read().await.control_plane_snapshot()).unwrap(),
+        before
+    );
+}
+
+#[tokio::test]
 async fn capability_inventory_matches_registered_tools_without_granting_access() {
     let state = Arc::new(RwLock::new(DaemonState::new()));
     let expected = state.read().await.tool_registry.tool_names();

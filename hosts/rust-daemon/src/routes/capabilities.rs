@@ -103,6 +103,8 @@ fn metadata(name: &str) -> (&'static str, Vec<&'static str>) {
             ("research", vec!["Network access to a public HTTP or HTTPS URL."]),
         "exa_search" =>
             ("research", vec!["A daemon-configured Exa API key and authorized provider usage; provider charges may apply."]),
+        "web_search" =>
+            ("research", vec!["An explicit agent tool grant and ordinary Network approval. Sends only the query and bounded search options to Exa's anonymous public service; it may be rate-limited or unavailable. No API key or paid fallback."]),
         name if name.starts_with("calendar_") =>
             ("productivity", vec!["A connected Google Calendar. Changes remain drafts until owner approval."]),
         name if name.starts_with("drive_") => ("productivity",vec!["Connected Google Drive, immutable selected file IDs, and a current agent tool grant."]),

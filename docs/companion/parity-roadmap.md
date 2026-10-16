@@ -27,6 +27,18 @@ All PAR-01–PAR-12 implementer and reviewer briefs inherit this policy; their d
 
 ## Locked work inventory
 
+### Web research addition (M83)
+
+M83 adds native anonymous web search and returned source links to the selected
+daily-use scope. It reuses the existing bounded MCP transport and the installed
+Hermes keyless Exa response behavior, with explicit owner search/page-read grants.
+See [web research](web-research.md) and the
+[M83 plan](../superpowers/plans/2026-10-16-companion-web-search-m83.md).
+The milestone's recorded outcome distinguishes deterministic harness/console
+checks, actual anonymous endpoint compatibility and unverified model research
+quality. This complements PAR-04/PAR-05; it does not close interactive arbitrary
+website or account acceptance.
+
 Each PAR ID is stable. Milestone numbers after M38 are assigned when its detailed plan is cut from then-current main. File/API names below are candidates; capability, authority, scope and evidence requirements are binding.
 
 | ID     | Deliverable                                                  | Current state                                                                                                                                                                                                 | Dependency / accountable lane                                                |

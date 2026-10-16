@@ -7,6 +7,84 @@ use crate::sessions::{SessionKind, SessionOrigin, SessionRecord, TitleSource};
 
 const OWNER_ORIGIN: &str = "http://localhost:4200";
 
+#[test]
+fn m83_history_projects_only_successful_tool_source_metadata() {
+    use crate::routes::contracts::SessionMessageResponse;
+    use crate::sessions::views::PageMessage;
+    let sources =
+        serde_json::json!([{"title":"Returned source","url":"https://example.com/returned"}]);
+    let envelope = serde_json::json!({"version":1,"provider":"exa","mode":"anonymous","untrusted":true,
+        "results":[{"title":"Returned source","url":"https://example.com/returned","excerpt":"actual result"}],"truncated":false});
+    let mut message = history_message(
+        "m83-tool",
+        "agent",
+        "chat:m83",
+        MessageRole::Tool,
+        &envelope.to_string(),
+        1,
+    )
+    .message;
+    message.content.metadata = Some(std::collections::BTreeMap::from([
+        (
+            "webSources".into(),
+            DataValue::Array(vec![DataValue::Object(std::collections::BTreeMap::from([
+                ("title".into(), DataValue::String("Returned source".into())),
+                (
+                    "url".into(),
+                    DataValue::String("https://example.com/returned".into()),
+                ),
+            ]))]),
+        ),
+        ("toolStatus".into(), DataValue::String("success".into())),
+        ("toolCallId".into(), DataValue::String("search-call".into())),
+        (
+            "taskResult".into(),
+            DataValue::Object(std::collections::BTreeMap::from([(
+                "status".into(),
+                DataValue::String("success".into()),
+            )])),
+        ),
+        (
+            "secretLike".into(),
+            DataValue::String("must stay hidden".into()),
+        ),
+    ]));
+    let projected = serde_json::to_value(SessionMessageResponse::from(&PageMessage {
+        message: message.clone(),
+        hidden: false,
+    }))
+    .unwrap();
+    assert_eq!(projected["metadata"]["webSources"], sources);
+    assert!(projected["metadata"].get("taskResult").is_none());
+    assert!(projected["metadata"].get("secretLike").is_none());
+    for role in [
+        MessageRole::User,
+        MessageRole::Assistant,
+        MessageRole::System,
+    ] {
+        message.role = role;
+        let projected = serde_json::to_value(SessionMessageResponse::from(&PageMessage {
+            message: message.clone(),
+            hidden: false,
+        }))
+        .unwrap();
+        assert!(projected["metadata"].get("webSources").is_none());
+    }
+    message.role = MessageRole::Tool;
+    message
+        .content
+        .metadata
+        .as_mut()
+        .unwrap()
+        .insert("toolStatus".into(), DataValue::String("error".into()));
+    let projected = serde_json::to_value(SessionMessageResponse::from(&PageMessage {
+        message,
+        hidden: false,
+    }))
+    .unwrap();
+    assert!(projected["metadata"].get("webSources").is_none());
+}
+
 /// A model adapter that blocks in `generate` until released, signaling entry
 /// first -- lets a test hold a run's room lock open (same pattern as
 /// `routes::agents::tests::PendingModelAdapter`, not reusable across those

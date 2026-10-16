@@ -63,6 +63,170 @@ function applyAll(
 
 const running = runFixture('run_1', { status: 'running', startedAtMs: 2 });
 
+describe('m83 retrieved search sources', () => {
+  const sources = [
+    { title: 'Returned source', url: 'https://example.com/returned?x=1&y=2' },
+  ];
+  const finished = (seq: number, extra = {}) =>
+    ({
+      ...toolFinishedEvent(running, 'same-call', 'web_search', seq, {
+        resultPreview: 'x'.repeat(2048),
+        truncated: true,
+      }),
+      sources,
+      ...extra,
+    }) as AgentEvent;
+
+  it('retains successful sources outside the clipped preview and through reconnect snapshots', () => {
+    const state = applyAll([
+      snapshotEvent([snapshotRun(running)]),
+      toolStartedEvent(running, 'same-call', 'web_search', 2),
+      finished(3),
+    ]);
+    const card = state.runs.run_1.tools[0];
+    expect(card.sources).toEqual(sources);
+    expect(card.resultPreview).not.toContain(sources[0].url);
+    const reconnected = applyEvent(
+      state,
+      snapshotEvent([snapshotRun(running, { tools: [card] })]),
+    );
+    expect(reconnected.runs.run_1.tools[0].sources).toEqual(sources);
+    expect(
+      applyEvent(
+        reconnected,
+        finished(1, {
+          sources: [{ title: 'Late', url: 'https://example.com/late' }],
+        }),
+      ),
+    ).toBe(reconnected);
+  });
+
+  it('clears a successful card’s sources on error and never carries them to another step or run', () => {
+    const other = runFixture('run_2', { status: 'running' });
+    let state = applyAll([
+      snapshotEvent([snapshotRun(running), snapshotRun(other)]),
+      finished(2),
+      {
+        ...toolStartedEvent(running, 'same-call', 'web_search', 3),
+        stepId: 'run_1:2',
+      },
+      {
+        ...toolFinishedEvent(other, 'same-call', 'web_search', 4),
+        sources: [{ title: 'Other run', url: 'https://example.com/other' }],
+      } as AgentEvent,
+    ]);
+    expect(state.runs.run_1.tools[0].sources).toEqual(sources);
+    expect(state.runs.run_1.tools[1].sources ?? []).toEqual([]);
+    expect(state.runs.run_2.tools[0].sources).toEqual([
+      { title: 'Other run', url: 'https://example.com/other' },
+    ]);
+    state = applyEvent(state, finished(5, { status: 'error' }));
+    expect(state.runs.run_1.tools[0].sources ?? []).toEqual([]);
+    state = applyEvent(state, finished(6, { sources: undefined }));
+    expect(state.runs.run_1.tools[0].sources ?? []).toEqual([]);
+  });
+
+  it.each(['running', 'error'] as const)(
+    'rejects sources on %s reconnect cards',
+    (status) => {
+      const card = {
+        stepId: 'run_1:1',
+        toolCallId: 'same-call',
+        name: 'web_search',
+        argumentsPreview: '',
+        argumentsTruncated: false,
+        status,
+        durationMs: null,
+        resultPreview: null,
+        truncated: false,
+        sources,
+      };
+      const state = applyEvent(
+        EMPTY_LIVE_STATE,
+        snapshotEvent([snapshotRun(running, { tools: [card] })]),
+      );
+      expect(state.runs.run_1.tools[0].sources ?? []).toEqual([]);
+    },
+  );
+
+  const invalidSources: [string, unknown][] = [
+    ['non-array', { title: 'Source', url: 'https://example.com' }],
+    ['null row', [null]],
+    ['blank title', [{ title: '  ', url: 'https://example.com' }]],
+    ['non-string title', [{ title: 7, url: 'https://example.com' }]],
+    [
+      'UTF-8 title overflow',
+      [{ title: '界'.repeat(86), url: 'https://example.com' }],
+    ],
+    [
+      'URL overflow',
+      [{ title: 'Source', url: 'https://example.com/' + 'a'.repeat(2048) }],
+    ],
+    [
+      'too many results',
+      Array.from({ length: 6 }, (_, i) => ({
+        title: 'Source',
+        url: `https://example.com/${i}`,
+      })),
+    ],
+    [
+      'serialized UTF-8 budget',
+      Array.from({ length: 5 }, (_, i) => ({
+        title: '界'.repeat(80),
+        url: `https://example.com/${i}?q=${'a'.repeat(1900)}`,
+      })),
+    ],
+    ...[
+      'javascript:alert(1)',
+      '//example.com/path',
+      'https://user:secret@example.com/',
+      'https://example.com/\npath',
+      'http://localhost/',
+      'http://name.localhost/',
+      'http://127.1/',
+      'http://2130706433/',
+      'http://10.0.0.1/',
+      'http://172.16.0.1/',
+      'http://192.168.0.1/',
+      'http://169.254.169.254/',
+      'http://[::1]/',
+      'http://[fc00::1]/',
+      'http://[fe80::1]/',
+      'http://[::ffff:127.0.0.1]/',
+    ].map((url): [string, unknown] => [url, [{ title: 'Unsafe source', url }]]),
+  ];
+  it.each(invalidSources)(
+    'rejects malformed or unsafe source projection: %s',
+    (_, value) => {
+      const card = {
+        stepId: 'run_1:1',
+        toolCallId: 'call',
+        name: 'web_search',
+        argumentsPreview: '',
+        argumentsTruncated: false,
+        status: 'success' as const,
+        durationMs: 1,
+        resultPreview: 'ok',
+        truncated: false,
+        sources: value,
+      };
+      const event = snapshotEvent([
+        snapshotRun(running, { tools: [card as never] }),
+      ]);
+      const state = applyEvent(EMPTY_LIVE_STATE, event);
+      expect(state.runs.run_1.tools[0].sources ?? []).toEqual([]);
+    },
+  );
+
+  it('does not accept source fields from unrelated tools', () => {
+    const state = applyAll([
+      snapshotEvent([snapshotRun(running)]),
+      finished(2, { name: 'exa_search' }),
+    ]);
+    expect(state.runs.run_1.tools[0].sources ?? []).toEqual([]);
+  });
+});
+
 describe('applyEvent', () => {
   it('starts every stream from its snapshot', () => {
     const before = applyAll([

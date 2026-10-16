@@ -10,6 +10,27 @@
 
 ## Controller decision boundary
 
+### Binding amendment from the actual hosted catalogue
+
+The first actual SDK probe on 2026-10-16 connected and joined cleanup but failed
+at discovery before any search call. Its source, binary and evidence remain
+archived as a failed outcome. A separate metadata-only SDK capture shows
+`web_search_exa` with a flat Draft 7 object schema and required string `objective`
+alongside `query`; `numResults` remains optional. The protocol version matches.
+
+For native search only, add an explicit discovery seam selecting that expected
+tool before schema preparation while retaining catalogue wire/page/name/count
+bounds. Accept only the observed flat scalar schema fragment with shared
+semantics across Draft 7 and 2020-12; preserve its constraints and reject unknown
+structural features, references and dialects. Generic discovery and core schema
+policy stay unchanged. When that known string objective is required, derive it
+from the same trimmed query; no new model argument or session context is sent.
+This amendment supersedes the earlier two-field-only remote translation rule.
+Keep old-server query/count fixtures, actual-shaped JSON/SSE fixtures, and
+no-call regressions for incompatible descriptors. Rerun affected native gates
+before a fresh lookup attempt. The original failed probe is never replayed or
+regraded; its logical search-call count was zero.
+
 Root has verified official Exa documentation advertising the anonymous, rate-limited `https://mcp.exa.ai/mcp` endpoint and read-only `web_search_exa` / `web_fetch_exa` tools. Sources: <https://github.com/exa-labs/exa-mcp-server> and <https://exa.ai/mcp>.
 
 Controller has bound the fixed native `web_search` adapter described below. Preserve explicit keyed `exa_search` unchanged; there is no silent paid fallback. Do not use an available assistant search connector as product implementation.
@@ -280,3 +301,9 @@ Ruling: keep explicit independent owner controls for search and page reads, with
 Ruling: reuse Hermes's pinned public response-field/workflow behavior and Anima's existing rmcp transport, URL/approval paths and Markdown renderer — porting its protocol/provider framework would increase maintenance without helping this workflow — cost if wrong: any needed compatibility adjustment must be demonstrated, attributed and reviewed. Preserve notices for copied code and use Anima product names.
 
 Ruling: use meaningful initial RED against existing registration/projection/owner-UI interfaces, then add detailed adapter tests with the new internal seam — missing-symbol compiler failures are not feature evidence and repeated native builds add cost — cost if wrong: new adapter behavior could be under-tested. Keep original failing assertions; detailed fixtures must exercise real transport/harness paths before focused GREEN and final gates.
+
+## Recorded outcome
+
+M83 adds anonymous native web_search through the existing MCP transport, independent owner search/page-read grants, and bounded Search sources links across live events, snapshots, saved Tool history, SDK and console. Sources stay outside the shortened preview; reload never re-searches. Fresh Rust 2989 passed/31 ignored across 46 suites; web1648passed/1opt-in skipped; SDK203passed/3skipped. Rust lint/build, SDK/web typecheck/build, touched formatting/docs and the native plus web/SDK reviews pass.
+
+One controlled actual-HTTP harness/history/console chain and one anonymous public search through the real native harness and console renderer pass with a scripted model consuming actual returned evidence. The initial discovery-only failure sent no query and stays archived as failed; the observed hosted schema/objective mismatch was fixed only for native search. Zero paid model calls. This establishes endpoint compatibility and source propagation, not general LLM research quality or independently verified answer claims. Anonymous service availability/rate limits remain external. No account/profile/normal-service/database/container activation or historical-case replay.

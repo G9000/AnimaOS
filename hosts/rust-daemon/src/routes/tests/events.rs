@@ -179,6 +179,7 @@ async fn the_first_event_is_a_snapshot_of_the_active_runs() {
                 duration_ms: None,
                 result_preview: None,
                 truncated: false,
+                sources: Vec::new(),
             },
         );
     }

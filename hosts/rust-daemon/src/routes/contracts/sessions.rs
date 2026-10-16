@@ -440,6 +440,10 @@ impl From<&PageMessage> for SessionMessageResponse {
                 .flatten()
                 .filter(|(key, _)| EXPOSED_MESSAGE_METADATA.contains(&key.as_str()))
                 .map(|(key, value)| (key.clone(), data_value_to_json(value)))
+                .chain(
+                    crate::tools::web_search::history_sources(message)
+                        .map(|sources| ("webSources".into(), sources)),
+                )
                 .collect(),
             created_at_ms: message.created_at_ms,
             hidden: entry.hidden,

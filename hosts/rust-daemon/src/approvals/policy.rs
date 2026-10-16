@@ -63,7 +63,13 @@ const EXEC_TOOLS: &[&str] = &[
     "browser_act",
     "browser_transfer",
 ];
-const NETWORK_TOOLS: &[&str] = &["web_fetch", "exa_search"];
+const NETWORK_TOOLS: &[&str] = &["web_fetch", "exa_search", "web_search"];
+
+#[test]
+fn m83_anonymous_search_uses_ordinary_network_approval_class() {
+    assert_eq!(risk_class("web_search"), RiskClass::Network);
+    assert_eq!(matcher_kinds("web_search"), &[MatcherKind::Any]);
+}
 const DELEGATE_TOOLS: &[&str] = &[
     "delegate_to_agent",
     "spawn_helper",

@@ -8,6 +8,7 @@ import {
   type SessionMessageAttachment,
 } from '@animaOS-SWARM/sdk';
 import { messageAttachment } from './attachments';
+import { toolWebSources } from './web-sources';
 
 /** The streamed text of one model call (spec §4.5 steps). */
 export interface LiveStep {
@@ -253,6 +254,12 @@ function updateRun(
     : { ...state, runs: { ...state.runs, [runId]: next } };
 }
 
+function withSafeSources(card: LiveToolCard): LiveToolCard {
+  const { sources: raw, ...rest } = card;
+  const sources = toolWebSources(card.name, card.status, raw);
+  return sources.length ? { ...rest, sources } : rest;
+}
+
 /** Adds a tool card or updates the one with its step and call id (a
  *  provider may reuse a call id in every step, as the daemon's live
  *  registry allows); a late start never undoes a finish. */
@@ -266,7 +273,7 @@ function upsertTool(
       tool.stepId === card.stepId && tool.toolCallId === card.toolCallId,
   );
   if (index < 0) {
-    const next = [...tools, card];
+    const next = [...tools, withSafeSources(card)];
     return next.length > MAX_LIVE_TOOL_CARDS
       ? next.slice(next.length - MAX_LIVE_TOOL_CARDS)
       : next;
@@ -274,15 +281,18 @@ function upsertTool(
   const current = tools[index];
   if (!finished && current.status !== 'running') return tools;
   const next = [...tools];
-  next[index] = finished
-    ? {
-        ...current,
-        status: card.status,
-        durationMs: card.durationMs,
-        resultPreview: card.resultPreview,
-        truncated: card.truncated,
-      }
-    : { ...current, ...card };
+  next[index] = withSafeSources(
+    finished
+      ? {
+          ...current,
+          status: card.status,
+          durationMs: card.durationMs,
+          resultPreview: card.resultPreview,
+          truncated: card.truncated,
+          sources: current.name === card.name ? card.sources : undefined,
+        }
+      : { ...current, ...card, sources: undefined },
+  );
   return next;
 }
 
@@ -304,7 +314,7 @@ export function applyEvent(state: LiveState, event: AgentEvent): LiveState {
               }),
             ]
           : [],
-        tools: item.tools,
+        tools: item.tools.map(withSafeSources),
         approvals: runApprovals(approvals, item.run.id),
       };
     }
@@ -415,6 +425,7 @@ export function applyEvent(state: LiveState, event: AgentEvent): LiveState {
             durationMs: event.durationMs,
             resultPreview: event.resultPreview,
             truncated: event.truncated,
+            sources: event.sources,
           },
           true,
         ),
