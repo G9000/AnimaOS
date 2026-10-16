@@ -1,5 +1,39 @@
 # Native harness acceptance
 
+## M65 owner-managed HTTPS MCP Bearer credentials (2026-10-16)
+
+**Implemented and locally tested with synthetic credentials and verified local TLS.**
+Owners can explicitly save, replace or clear one static Bearer credential for a saved
+HTTPS MCP connection. Secrets use a separate OS-vault namespace and a fresh opaque
+endpoint-bound reference; public responses expose only `hasBearerCredential`, which
+means a reference is saved, not that the vault or remote authorization is healthy.
+List/get performs no vault read. Password input clears after every settled response.
+
+Versioned mutations physically retire and join the affected generation first.
+Endpoint edits invalidate the binding. Bundle removal cleans only the exact owned
+row set, including retained predecessors that removal already owns; disabled/retained
+rows outside that set and neighbors keep their credentials. Partial or uncertain
+cleanup preserves removal intent and references for operator review. Vault writes and
+control-plane persistence are separate operations: no atomic rollback or complete
+erasure claim. Missing or unreadable material fails before network use.
+
+The real RMCP fixture checks initialize/list/call, POST/SSE and session DELETE headers,
+redirect/challenge refusal and absence of automatic retry/refresh. Existing GET event
+stream support remains unavailable. No OAuth, arbitrary headers, stdio auth, changed
+grants or automatic connect/discovery are added.
+
+Fresh local gates: Rust/core **2,886 passed / 27 intentional ignores / 45 suites / lint/build**, including **20 focused M65 native tests**; SDK **185 passed / three intentional service skips / typecheck/build**; web **1,497 passed / 121 files / typecheck/build**. One native batch and final web/SDK review, one combined
+fix wave and a gate-discovered inventory-contract repair, compiled route inventory (202 operations), docs/format and frozen hashes
+are recorded. One dev-only direct `tokio-rustls` edge reuses locked version 0.26.4;
+there are zero new package versions. Initial compiler/environment failures remain
+in the ledger, with no false behavioral acceptance claim.
+
+No actual OS vault, account, remote MCP server, provider, ordinary profile or daemon
+was activated by this milestone. Real credential/server acceptance, broader task
+quality and full parity remain open. M64 public browser is NOT RUN and M52 strict
+quality remains PARTIAL; consumed cases are unchanged. See the
+[M65 plan](../superpowers/plans/2026-10-16-companion-mcp-bearer-m65.md).
+
 ## M64 public browser acceptance preparation (2026-10-16)
 
 **Partial: real public browser acceptance was not run.** A single independent

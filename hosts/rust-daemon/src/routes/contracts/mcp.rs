@@ -38,6 +38,8 @@ pub(crate) struct McpConnectionResponse {
     #[schema(value_type = Option<McpStdioResponse>, nullable)]
     pub(crate) stdio: Option<McpStdioResponse>,
     pub(crate) enabled: bool,
+    /// A saved reference exists; this does not probe the vault or remote service.
+    pub(crate) has_bearer_credential: bool,
     pub(crate) version: u64,
     pub(crate) reviewed_tools: Vec<ReviewedMcpToolResponse>,
     pub(crate) state: String,
@@ -117,6 +119,14 @@ where
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct McpVersionRequest {
     pub(crate) expected_version: u64,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpCredentialRequest {
+    pub(crate) expected_version: u64,
+    #[schema(value_type = String, min_length = 1, max_length = 4096, write_only)]
+    pub(crate) bearer_token: crate::mcp::credentials::McpBearerToken,
 }
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]

@@ -1,3 +1,33 @@
+# Handover: owner-managed HTTPS MCP credentials locally gated (M0–M65)
+
+## Start here (2026-10-16): M65 source gates pass; finish publication then continue
+
+Current branch g9000/companion-mcp-bearer-m65, from verified M64/PR70 main
+76ef520da769d950c04cbed165758078eda69f55. Plan904c01fb6b57add6fe01401cb73f8147db77bcc9
+preceded implementation. M65 provides explicit HTTPS-only static Bearer save/replace/
+clear through endpoint-bound private vault references and a secret-free SDK/console.
+Generation retirement joins before mutation; exact bundle removal cleans owned slots
+and preserves intent/references on uncertainty. No OAuth/arbitrary headers/stdio auth.
+
+Fresh Rust/core2886/27 ignores/45 suites/lint/build, 20focused native,
+SDK185/3 service skips, web1497/121files/typecheck/build, 202 compiled route operations,
+one native batch/final web review/one pre-gate fix wave plus inventory-contract
+gate repair/docs/format/frozen hashes pass. One
+dev-only direct TLS edge reuses locked0.26.4; zero new package versions. These are
+synthetic store/local-TLS checks; actual OS-vault/account/remote-server acceptance is
+open. No actual profile/provider/daemon/device/database/container/deploy activation
+by this work. M64 public browser NOT RUN; M52 strict quality PARTIAL; consumed cases
+unchanged. No whole Hermes parity claim.
+
+Resume .superpowers/sdd/2026-10-16-companion-mcp-bearer-m65/progress.md. Finish explicit
+path unsigned commit/push/PR/attach/standing merge and exact source-tree/protected
+hash proof. Then choose/bind the next concrete remaining parity work from verified
+main; the private next-memory note is held, not an implementation release. Root
+commands/fmt/Git; Cargo CARGO_INCREMENTAL=0/jobs1/threads2 serialized. Never stage
+nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+
+## Historical M64 partial handover
+
 # Handover: public browser preparation partial; authenticated MCP next (M0–M64)
 
 ## Start here (2026-10-16): M64 source-only gates pass; public case NOT RUN

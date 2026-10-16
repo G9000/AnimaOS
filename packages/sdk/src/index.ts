@@ -126,6 +126,7 @@ export type {
   McpToolDescriptor,
   McpUpdateInput,
   McpVersionInput,
+  McpBearerCredentialInput,
   ReviewedMcpTool,
 } from './mcp.js';
 export type {

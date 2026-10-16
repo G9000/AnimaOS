@@ -400,6 +400,7 @@ impl BundleService {
                         label,
                         endpoint,
                         stdio,
+                        bearer_credential_ref: None,
                         enabled: false,
                         version: 1,
                         reviewed_tools: Vec::new(),
@@ -1234,6 +1235,30 @@ impl BundleService {
         let _transaction = self.transactions.lock().await;
         let state = self.state.read().await;
         if state.community_bundles.iter().find(|r| r.id == id) != Some(&removing) {
+            return Err(BundleError::Conflict);
+        }
+        let removing_rows = ids
+            .iter()
+            .map(|id| {
+                state
+                    .mcp_registry
+                    .connections
+                    .get(id)
+                    .cloned()
+                    .ok_or(BundleError::Conflict)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(state);
+        self.mcp
+            .delete_retired_bundle_credentials(agent, id, &removing_rows)
+            .await
+            .map_err(|_| BundleError::Unavailable)?;
+        let state = self.state.read().await;
+        if state.community_bundles.iter().find(|r| r.id == id) != Some(&removing)
+            || removing_rows
+                .iter()
+                .any(|row| state.mcp_registry.connections.get(&row.id) != Some(row))
+        {
             return Err(BundleError::Conflict);
         }
         let mut bundles = state.community_bundles.clone();

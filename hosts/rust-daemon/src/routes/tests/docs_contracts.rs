@@ -42,7 +42,23 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 200, "complete registered operation count");
+    assert_eq!(actual.len(), 202, "complete registered operation count");
+    let credential_additions = [
+        (
+            "PUT",
+            "/api/agents/{agent_id}/mcp-connections/{connection_id}/credential",
+        ),
+        (
+            "DELETE",
+            "/api/agents/{agent_id}/mcp-connections/{connection_id}/credential",
+        ),
+    ];
+    for (method, path) in credential_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "explicit MCP credential operation must be registered"
+        );
+    }
     let speech_additions = [
         (
             "GET",
@@ -66,7 +82,10 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
     assert_eq!(
         actual
             .iter()
-            .filter(|(method, path)| !speech_additions.contains(&(method.as_str(), path.as_str())))
+            .filter(|(method, path)| {
+                !speech_additions.contains(&(method.as_str(), path.as_str()))
+                    && !credential_additions.contains(&(method.as_str(), path.as_str()))
+            })
             .count(),
         197,
         "all pre-M58 operations remain present"
@@ -96,6 +115,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             .filter(
                 |(method, path)| !additions.contains(&(method.as_str(), path.as_str()))
                     && !speech_additions.contains(&(method.as_str(), path.as_str()))
+                    && !credential_additions.contains(&(method.as_str(), path.as_str()))
             )
             .count(),
         192,
