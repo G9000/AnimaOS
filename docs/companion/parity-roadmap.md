@@ -40,7 +40,7 @@ Each PAR ID is stable. Milestone numbers after M38 are assigned when its detaile
 | PAR-07 | Native voice input/output                                    | Partial: M56 selected-WAV transcription, M57 local capture and M58 selected-reply native speech/manual playback; synthetic acceptance | Actual device/provider/voice-quality and connector/local-provider acceptance |
 | PAR-08 | Text/image acceptance and PDF/Office understanding           | M54 DOCX/M55 scoped Windows PDF text locally accepted; vision conditional; OCR/other Office/answer quality open                       | Existing attachments/model adapters; document worker + SDK/web               |
 | PAR-09 | Selected real connector workflows                            | Telegram/Discord/Google code exists; real-account acceptance unverified                                                               | Current connector code; later relevant media/browser changes                 |
-| PAR-10 | Recurring schedules, outages and interrupted-work acceptance | M59 fresh-state JSON claim recovery fixture accepted; broader recurrence/outage evidence incomplete                                   | Current scheduler; optional PAR-06 acceptance fixtures                       |
+| PAR-10 | Recurring schedules, outages and interrupted-work acceptance | M59 claim recovery and M62 controlled-clock interval outage/reload accepted; broader recurrence/host evidence incomplete              | Current scheduler; optional PAR-06 acceptance fixtures                       |
 | PAR-11 | Always-on single-owner installation and recovery             | Deployment instructions/offline checks exist; target-host acceptance missing                                                          | Release with required capabilities; deployment/operator lane                 |
 | PAR-12 | Clear capability controls and daily-use status               | M61 selective real memory HTTP/restart plus M60 index snapshot; broader lifecycle UI incomplete                                       | Add incrementally with PAR-01/04/05/07/08/09                                 |
 
@@ -202,6 +202,8 @@ behavior. M57 adds local microphone-to-WAV capture, explicit Add, retained brows
 - Account acceptance is queued per named account/resource/destination and concrete action. Keep read, local draft and outbound/write evidence distinct; unknown delivery is not failure-free delivery and must not be automatically resent. Use synthetic owner-only test content, not customer data.
 
 ### PAR-10: recurring and unattended jobs
+
+M62 adds enabled unclaimed interval recovery after five elapsed periods, four explicit ticks [1,0,0,1] across two fresh JSON states and exactly two fake-model calls after all joins. The existing skip-missed policy runs once late, avoids a catch-up storm and resumes normal recurrence; IDs, counters and saved state agree. This is controlled-clock local acceptance, not actual cadence, daily/cron/DST, target-host uptime or external exactly-once proof. The broader checklist below stays open. See [harness evidence](harness-acceptance.md).
 
 M59 adds a finite unresolved-claim JSON load into a new daemon and a second fresh reload. Startup disables the interrupted schedule, preserves its occurrence/next due and records a durable local interrupted outcome with zero mock-model calls. This is synthetic claim-recovery evidence; it does not complete the broader recurrence/outage checklist or prove external exactly-once delivery. See [harness evidence](harness-acceptance.md).
 
