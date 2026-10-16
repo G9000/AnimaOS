@@ -141,6 +141,9 @@ export function AutomationsPage({
               // characters are shown as markers, never rendered.
               const name = revealInvisible(automation.name).text;
               const prompt = revealInvisible(automation.prompt).text;
+              const interrupted =
+                automation.lastOutcome?.status === 'error' &&
+                automation.lastOutcome.errorCode === 'schedule_run_interrupted';
               return (
                 <li key={automation.id}>
                   <article
@@ -172,7 +175,7 @@ export function AutomationsPage({
                         ? `Next run ${formatWhen(automation.nextDueAtMs)}`
                         : 'Paused'}
                       {automation.lastOutcome &&
-                        ` · Last: ${OUTCOME_LABELS[automation.lastOutcome.status]}`}
+                        ` · Last: ${interrupted ? 'Needs review' : OUTCOME_LABELS[automation.lastOutcome.status]}`}
                       {automation.counters.consecutiveFailures > 0 &&
                         ` · ${automation.counters.consecutiveFailures} failed in a row`}
                       {automation.target.type === 'connector' && ' · Telegram'}
@@ -181,6 +184,13 @@ export function AutomationsPage({
                       <p className="automation-note">{AGENT_CREATED_NOTE}</p>
                     )}
                     <pre className="automation-prompt">{prompt}</pre>
+                    {interrupted && (
+                      <p className="automation-note">
+                        <strong>Needs review</strong>. The interrupted run may
+                        have completed some effects. Review the prior thread and
+                        its effects before using Run now or Resume.
+                      </p>
+                    )}
                     <div className="automation-actions">
                       <button
                         type="button"
@@ -215,7 +225,17 @@ export function AutomationsPage({
                       >
                         History
                       </button>
-                      {automation.lastFiredAtMs !== null &&
+                      {interrupted && (
+                        <button
+                          type="button"
+                          className="studio-tool-button"
+                          onClick={() => setHistoryId(automation.id)}
+                        >
+                          Review interrupted run
+                        </button>
+                      )}
+                      {!interrupted &&
+                        automation.lastFiredAtMs !== null &&
                         automation.target.type === 'workspace' && (
                           <button
                             type="button"
@@ -274,6 +294,7 @@ export function AutomationsPage({
           agentId={agentId}
           automation={history}
           version={version}
+          online={online}
           onClose={() => setHistoryId(null)}
           onOpenSession={onOpenSession}
         />

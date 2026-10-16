@@ -45,6 +45,19 @@ For durable local use, configure control-plane/history and memory persistence as
 specified in the [daemon startup examples](../../hosts/rust-daemon/README.md#starting-the-daemon). An ephemeral preview is not a persistent assistant. Keep the
 same workspace path and private credential vault across restart.
 
+## Review an interrupted automation
+
+An automation with a recorded interrupted run shows **Needs review**. Some actions
+may already have happened. Open **Review interrupted run** to read its history;
+each interrupted occurrence keeps its warning even after a later successful run.
+Use **Review thread** when that occurrence has a saved thread. If none was saved,
+the drawer says so; check the affected files or destination directly.
+
+Opening history or a thread does not execute work. After reviewing possible
+effects, choose the existing **Run now** or **Resume** action yourself if needed.
+History reloads when the selected companion, automation or run version changes.
+While offline it makes no request and hides old rows; reconnect to load fresh history.
+
 ## Understand the Capabilities page
 
 Open **Capabilities** to browse registered tools and their prerequisites. Search

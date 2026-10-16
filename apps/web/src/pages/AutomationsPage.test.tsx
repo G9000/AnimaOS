@@ -31,7 +31,10 @@ function fakeView(overrides: Partial<AutomationsView> = {}): AutomationsView {
   };
 }
 
-function renderPage(view: AutomationsView, extra: { focusId?: string } = {}) {
+function renderPage(
+  view: AutomationsView,
+  extra: { focusId?: string; online?: boolean } = {},
+) {
   const onOpenSession = vi.fn();
   const onFocusHandled = vi.fn();
   render(
@@ -39,7 +42,7 @@ function renderPage(view: AutomationsView, extra: { focusId?: string } = {}) {
       view={view}
       agentId="agent-main"
       version={0}
-      online
+      online={extra.online ?? true}
       telegramConnectorId={null}
       focusId={extra.focusId ?? null}
       onFocusHandled={onFocusHandled}
@@ -79,6 +82,31 @@ const heartbeat = automationFixture('schedule-2', {
   enabled: false,
 });
 
+const interrupted = automationFixture('schedule-interrupted', {
+  name: 'Interrupted check-in',
+  enabled: false,
+  lastFiredAtMs: 5,
+  lastOutcome: {
+    status: 'error',
+    occurredAtMs: 5,
+    errorCode: 'schedule_run_interrupted',
+  },
+});
+
+function expectNoAutomationMutation(view: AutomationsView) {
+  for (const method of [
+    view.runNow,
+    view.setEnabled,
+    view.create,
+    view.createHeartbeat,
+    view.update,
+    view.remove,
+    view.undo,
+  ]) {
+    expect(method).not.toHaveBeenCalled();
+  }
+}
+
 beforeEach(() => {
   // Settled only by the tests that read them, so no update lands after a
   // test ends.
@@ -91,6 +119,195 @@ afterEach(() => {
 });
 
 describe('AutomationsPage', () => {
+  it('m76 reviews an interrupted occurrence without running, resuming, or inventing a thread', async () => {
+    const user = userEvent.setup();
+    vi.mocked(daemon.automationHistory).mockResolvedValue([
+      automationRunFixture('interrupted-occurrence', {
+        scheduleId: interrupted.id,
+        outcome: 'failed',
+        errorCode: 'schedule_run_interrupted',
+        sessionId: 'saved-session:actual-occurrence',
+      }),
+    ]);
+    const view = fakeView({ automations: [interrupted] });
+    const { onOpenSession } = renderPage(view);
+    const row = screen.getByRole('article', { name: interrupted.name });
+    expect(
+      within(row).queryByRole('button', { name: 'Open thread', exact: true }),
+    ).not.toBeInTheDocument();
+    expect(within(row).getByText('Needs review')).toBeVisible();
+    expect(
+      within(row).getByText(/may have completed some effects/i),
+    ).toBeVisible();
+    expect(
+      within(row).getByText(/review.*thread.*effects.*run now.*resume/i),
+    ).toBeVisible();
+    expectNoAutomationMutation(view);
+
+    await user.click(
+      within(row).getByRole('button', { name: 'Review interrupted run' }),
+    );
+    const drawer = screen.getByRole('complementary', {
+      name: `History of ${interrupted.name}`,
+    });
+    const review = await within(drawer).findByRole('button', {
+      name: 'Review thread',
+    });
+    expect(daemon.automationHistory).toHaveBeenCalledTimes(1);
+    expect(daemon.automationHistory).toHaveBeenCalledWith(
+      'agent-main',
+      interrupted.id,
+      {
+        signal: expect.any(AbortSignal),
+      },
+    );
+    expect(onOpenSession).not.toHaveBeenCalled();
+    expectNoAutomationMutation(view);
+    await user.click(review);
+    expect(onOpenSession).toHaveBeenCalledTimes(1);
+    expect(onOpenSession).toHaveBeenCalledWith(
+      'saved-session:actual-occurrence',
+    );
+    expectNoAutomationMutation(view);
+  });
+
+  it('m76 does not infer a thread when an interrupted occurrence has no saved session', async () => {
+    const user = userEvent.setup();
+    vi.mocked(daemon.automationHistory).mockResolvedValue([
+      automationRunFixture('interrupted-without-session', {
+        scheduleId: interrupted.id,
+        outcome: 'failed',
+        errorCode: 'schedule_run_interrupted',
+        sessionId: null,
+      }),
+    ]);
+    const view = fakeView({ automations: [interrupted] });
+    const { onOpenSession } = renderPage(view);
+    const row = screen.getByRole('article', { name: interrupted.name });
+    await user.click(
+      within(row).getByRole('button', { name: 'Review interrupted run' }),
+    );
+    const drawer = screen.getByRole('complementary', {
+      name: `History of ${interrupted.name}`,
+    });
+    expect(
+      await within(drawer).findByText('No saved thread is available.'),
+    ).toBeVisible();
+    expect(
+      within(row).queryByRole('button', { name: 'Open thread', exact: true }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(drawer).queryByRole('button', {
+        name: 'Review thread',
+        exact: true,
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(drawer).queryByRole('button', { name: 'Open', exact: true }),
+    ).not.toBeInTheDocument();
+    expect(onOpenSession).not.toHaveBeenCalled();
+    expectNoAutomationMutation(view);
+    await user.click(
+      within(drawer).getByRole('button', { name: 'Close history' }),
+    );
+    expect(onOpenSession).not.toHaveBeenCalled();
+    expectNoAutomationMutation(view);
+  });
+
+  it('m76 keeps Run now and Resume as separate explicit actions after interruption guidance', async () => {
+    const user = userEvent.setup();
+    const view = fakeView({ automations: [interrupted] });
+    renderPage(view);
+    const row = screen.getByRole('article', { name: interrupted.name });
+    expect(within(row).getByText('Needs review')).toBeVisible();
+    expectNoAutomationMutation(view);
+    await user.click(
+      within(row).getByRole('button', { name: 'Run now', exact: true }),
+    );
+    expect(view.runNow).toHaveBeenCalledTimes(1);
+    expect(view.runNow).toHaveBeenCalledWith(interrupted);
+    expect(view.setEnabled).not.toHaveBeenCalled();
+    await user.click(
+      within(row).getByRole('button', { name: 'Resume', exact: true }),
+    );
+    expect(view.setEnabled).toHaveBeenCalledTimes(1);
+    expect(view.setEnabled).toHaveBeenCalledWith(interrupted, true);
+    expect(view.runNow).toHaveBeenCalledTimes(1);
+    expect(view.update).not.toHaveBeenCalled();
+    expect(daemon.automationHistory).not.toHaveBeenCalled();
+  });
+
+  it('m76 keeps ordinary failure and stopped outcomes outside interruption review', () => {
+    const ordinaryFailure = automationFixture('ordinary-failure', {
+      lastOutcome: {
+        status: 'error',
+        occurredAtMs: 5,
+        errorCode: 'schedule_run_failed',
+      },
+    });
+    const stopped = automationFixture('owner-stopped', {
+      lastOutcome: {
+        status: 'stopped',
+        occurredAtMs: 5,
+        errorCode: 'schedule_run_interrupted',
+      },
+    });
+    const view = fakeView({ automations: [ordinaryFailure, stopped] });
+    renderPage(view);
+    expect(
+      within(
+        screen.getByRole('article', { name: ordinaryFailure.name }),
+      ).getByText(/Last: Failed/),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole('article', { name: stopped.name })).getByText(
+        /Last: Stopped/,
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText('Needs review')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Review interrupted run' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getAllByRole('button', { name: 'Run now', exact: true }),
+    ).toHaveLength(2);
+    expectNoAutomationMutation(view);
+  });
+
+  it('m76 allows offline review entry without history requests or execution', async () => {
+    const user = userEvent.setup();
+    const view = fakeView({ automations: [interrupted] });
+    const { onOpenSession } = renderPage(view, { online: false });
+    const row = screen.getByRole('article', { name: interrupted.name });
+    expect(within(row).getByText('Needs review')).toBeVisible();
+    await user.click(
+      within(row).getByRole('button', { name: 'Review interrupted run' }),
+    );
+    const drawer = screen.getByRole('complementary', {
+      name: `History of ${interrupted.name}`,
+    });
+    expect(drawer).toBeVisible();
+    expect(daemon.automationHistory).not.toHaveBeenCalled();
+    expect(
+      within(row).getByRole('button', { name: 'Run now', exact: true }),
+    ).toBeDisabled();
+    expect(
+      within(row).getByRole('button', { name: 'Resume', exact: true }),
+    ).toBeDisabled();
+    await user.click(
+      within(row).getByRole('button', { name: 'Run now', exact: true }),
+    );
+    await user.click(
+      within(row).getByRole('button', { name: 'Resume', exact: true }),
+    );
+    await user.click(
+      within(drawer).getByRole('button', { name: 'Close history' }),
+    );
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+    expect(onOpenSession).not.toHaveBeenCalled();
+    expectNoAutomationMutation(view);
+  });
+
   it('lists automations with their schedule, outcome, and creator as text', () => {
     renderPage(fakeView({ automations: [agentMade, heartbeat] }));
 
