@@ -1,6 +1,14 @@
+# Handover: M87 fresh coding acceptance in progress
+
+## Start here (2026-10-17): execute the bound fresh coding case
+
+M86 is merged in PR#92. Its original failed actual case and preflight stay immutable. The user authorizes one fresh coding task with the corrected driver: a distinct duplicate-inventory repair, one advisory helper, protected six-test verifier, full report read-back, saved progress, quiet restart and honest final report. Read the [M87 lean plan](../plans/2026-10-17-companion-coding-acceptance-m87.md), then AGENTS.md. Exact resume .superpowers/sdd/2026-10-17-companion-coding-acceptance-m87/progress.md. Execute source-only lanes, one batch/final SDK review and one fix wave, fresh gates, exact source/runtime freeze, sole actual outcome and publication/standing merge. No consumed-case replay/regrade.
+
+Standing lean Codex delegation, unsigned per-command commits and merge-and-continue apply. Root owns commands/releases/Git/services. Explicit stage only; never nx.json/anima.yaml/.superpowers/uploads/generated Astro settings/design. No stash/reset/restore/path checkout/worktree. Cargo incremental0/jobs1/threads2, serialized/root-only. Isolated local testing and the existing app-owned subscription resolver are authorized; no raw credential/profile copying/login/account change, ordinary service/connector/DB server/container/Docker55432 action.
+
 # Handover: M86 coding-task and helper reliability
 
-## Start here (2026-10-17): publish M86 and use the checked task workflow
+## Historical M86 settled handover
 
 One distinct actual snapshot-comparison repair is FAILED: gpt-6-luna made3parent +2helper subscription calls,12542reportedtokens in116.4seconds. One helper completed three read-only inspections and returned grounded advice. The driver withheld the first Exec after seeing linked helper frames; zero shell commands/module writes/todo saves/output files. Owner cancelled once; five quiet same-store seconds preserved all observed state, both owned daemons retired and18786 was free.
 
