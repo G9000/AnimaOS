@@ -57,6 +57,28 @@ fn pdf_record(temp: &Temp, id: &str) -> AttachmentRecord {
     }
 }
 
+fn xlsx_record(temp: &Temp, id: &str) -> AttachmentRecord {
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/documents/m66-selected.xlsx"
+    ));
+    let name = format!("{id}.xlsx");
+    let saved = save_upload(&temp.0, "2026-10-16", &name, bytes).unwrap();
+    AttachmentRecord {
+        id: id.into(),
+        agent_id: "agent".into(),
+        session_id: "chat:session".into(),
+        name,
+        mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet".into(),
+        size: bytes.len() as u64,
+        kind: AttachmentKind::Document,
+        path: saved.path,
+        created_at_ms: 0,
+        workspace_root: saved.workspace_root,
+        sha256: saved.sha256,
+    }
+}
+
 fn document_content(rows: &[AttachmentRecord]) -> Content {
     use anima_core::document_content::*;
     let mut content =
@@ -68,20 +90,42 @@ fn document_content(rows: &[AttachmentRecord]) -> Content {
             source_sha256: row.sha256.clone(),
             extraction: ExtractedDocumentText {
                 version: 2,
-                format: crate::attachments::documents::document_format(row).unwrap(),
-                status: DocumentExtractionStatus::Ready,
+                format: match row.mime.as_str() {
+                    crate::attachments::documents::PDF_MIME => DocumentFormat::Pdf,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => {
+                        DocumentFormat::Xlsx
+                    }
+                    _ => DocumentFormat::Docx,
+                },
+                status: if row.mime
+                    == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                {
+                    DocumentExtractionStatus::Partial
+                } else {
+                    DocumentExtractionStatus::Ready
+                },
                 blocks: vec![DocumentBlock {
-                    locator: if row.mime == crate::attachments::documents::PDF_MIME {
-                        DocumentLocator::PdfPage { page: 1 }
-                    } else {
-                        DocumentLocator::DocxParagraph { paragraph: 1 }
+                    locator: match row.mime.as_str() {
+                        crate::attachments::documents::PDF_MIME => {
+                            DocumentLocator::PdfPage { page: 1 }
+                        }
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => {
+                            DocumentLocator::XlsxCell {
+                                sheet: 1,
+                                row: 1,
+                                column: 1,
+                            }
+                        }
+                        _ => DocumentLocator::DocxParagraph { paragraph: 1 },
                     },
                     text: format!("derived {}", row.id),
                 }],
-                omissions: vec![if row.mime == crate::attachments::documents::PDF_MIME {
-                    DocumentOmission::TextLayerOnly
-                } else {
-                    DocumentOmission::MainBodyOnly
+                omissions: vec![match row.mime.as_str() {
+                    crate::attachments::documents::PDF_MIME => DocumentOmission::TextLayerOnly,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => {
+                        DocumentOmission::StoredCellsOnly
+                    }
+                    _ => DocumentOmission::MainBodyOnly,
                 }],
                 pdf_coverage: (row.mime == crate::attachments::documents::PDF_MIME).then_some(
                     PdfCoverage {
@@ -90,6 +134,31 @@ fn document_content(rows: &[AttachmentRecord]) -> Content {
                         included_page_count: 1,
                     },
                 ),
+                xlsx_coverage: (row.mime
+                    == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    .then_some(anima_core::document_content::XlsxCoverage {
+                        sheet_count: 2,
+                        observed_cell_count: 5,
+                        included_cell_count: 1,
+                        sheets: vec![
+                            anima_core::document_content::XlsxSheetCoverage {
+                                index: 1,
+                                name: "Ledger".into(),
+                                visibility:
+                                    anima_core::document_content::XlsxSheetVisibility::Visible,
+                                observed_cell_count: 4,
+                                included_cell_count: 1,
+                            },
+                            anima_core::document_content::XlsxSheetCoverage {
+                                index: 2,
+                                name: "Private notes".into(),
+                                visibility:
+                                    anima_core::document_content::XlsxSheetVisibility::Hidden,
+                                observed_cell_count: 1,
+                                included_cell_count: 0,
+                            },
+                        ],
+                    }),
             },
         })
         .collect::<Vec<_>>();
@@ -148,6 +217,68 @@ async fn document_snapshots_hydrate_newest_four_only_and_preserve_saved_history(
                 .is_some_and(|m| m.contains_key(key)));
         }
     }
+}
+
+#[tokio::test]
+async fn m66_xlsx_snapshot_projects_covered_cells_as_untrusted_context() {
+    let temp = Temp::new();
+    let row = xlsx_record(&temp, "m66-xlsx-context");
+    let adapter = fixture(std::slice::from_ref(&row), Some(temp.0.clone())).await;
+    let input = request(
+        "agent",
+        "chat:session",
+        document_content(std::slice::from_ref(&row)),
+    );
+    let original = input.clone();
+    let reads = Arc::new(Mutex::new(Vec::new()));
+    let read_capture = reads.clone();
+    let prepared = adapter
+        .prepare_request_using_reader(
+            &config("unknown"),
+            &input,
+            Arc::new(move |root, attachment| {
+                read_capture.lock().unwrap().push(attachment.id.clone());
+                read_attachment_bytes(root, attachment)
+            }),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(*reads.lock().unwrap(), [row.id.clone()]);
+    assert_eq!(
+        input, original,
+        "preparation must not rewrite saved history"
+    );
+    let user = prepared
+        .messages
+        .iter()
+        .find(|message| message.role == MessageRole::User)
+        .unwrap();
+    assert!(user.content.text.contains("UNTRUSTED DOCUMENT DATA"));
+    assert!(user
+        .content
+        .text
+        .contains("locator=xlsx#sheet=1;row=1;column=1"));
+    assert!(user.content.text.contains("derived m66-xlsx-context"));
+    assert!(!user.content.metadata.as_ref().is_some_and(|metadata| {
+        metadata.contains_key(anima_core::document_content::DOCUMENT_EXTRACTS_METADATA_KEY)
+    }));
+    let snapshot =
+        anima_core::document_content::parse_document_snapshots(&input.messages[0].content)
+            .unwrap()
+            .remove(0);
+    assert!(snapshot
+        .extraction
+        .omissions
+        .contains(&anima_core::document_content::DocumentOmission::StoredCellsOnly));
+    let coverage = snapshot.extraction.xlsx_coverage.unwrap();
+    assert_eq!(coverage.sheet_count, 2);
+    assert_eq!(coverage.observed_cell_count, 5);
+    assert_eq!(coverage.included_cell_count, 1);
+    assert_eq!(
+        coverage.sheets[1].visibility,
+        anima_core::document_content::XlsxSheetVisibility::Hidden
+    );
 }
 
 #[tokio::test]

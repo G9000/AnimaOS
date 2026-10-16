@@ -2,7 +2,7 @@
 #![cfg(windows)]
 
 use anima_core::document_content::{
-    validate_document_extraction, DocumentFormat, ExtractedDocumentText,
+    validate_document_extraction, DocumentFormat, ExtractedDocumentText, XlsxSheetVisibility,
 };
 use process_wrap::tokio::{CommandWrap, CreationFlags, JobObject, KillOnDrop};
 use std::process::Stdio;
@@ -54,7 +54,11 @@ async fn document_worker_cli_reads_selected_literal_before_any_host_initializati
             stdout.read_exact(&mut ready).await.unwrap();
             assert_eq!(&ready, b"ANIMA-DOCUMENT-READY-v2\n");
             stdin
-                .write_u8(if format == DocumentFormat::Docx { 0 } else { 1 })
+                .write_u8(match format {
+                    DocumentFormat::Docx => 0,
+                    DocumentFormat::Pdf => 1,
+                    DocumentFormat::Xlsx => 2,
+                })
                 .await
                 .unwrap();
             stdin
@@ -95,6 +99,7 @@ async fn document_worker_cli_reads_selected_literal_before_any_host_initializati
                     assert_eq!(coverage.text_page_count, 1);
                     assert_eq!(coverage.included_page_count, 1);
                 }
+                DocumentFormat::Xlsx => unreachable!("legacy DOCX/PDF case list only"),
             }
             let mut errors = [0; 1];
             assert_eq!(
@@ -115,6 +120,96 @@ async fn document_worker_cli_reads_selected_literal_before_any_host_initializati
             .expect("CLI framing and selected text");
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
     }
+}
+
+#[tokio::test]
+#[ignore = "root runs finite Windows M66 XLSX CLI acceptance explicitly"]
+async fn m66_document_worker_cli_reads_selected_xlsx_before_host_initialization() {
+    let bytes = include_bytes!("fixtures/documents/m66-selected.xlsx").as_slice();
+    let directory = tempfile::tempdir().unwrap();
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_anima-daemon"));
+    command
+        .arg("--document-worker-v2")
+        .env_clear()
+        .current_dir(directory.path())
+        .env("ANIMAOS_RS_MAX_REQUEST_BYTES", "invalid")
+        .env("TEMP", directory.path())
+        .env("TMP", directory.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for name in ["SystemRoot", "WINDIR"] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    let mut wrapped = CommandWrap::from(command);
+    wrapped.wrap(KillOnDrop);
+    let mut flags = CreationFlags(Default::default());
+    flags.0 .0 = 0x08000000;
+    wrapped.wrap(flags).wrap(JobObject);
+    let mut child = wrapped.spawn().unwrap();
+    let mut stdin = child.stdin().take().unwrap();
+    let mut stdout = child.stdout().take().unwrap();
+    let mut stderr = child.stderr().take().unwrap();
+    let mut pipes = tokio::spawn(async move {
+        let mut ready = [0; b"ANIMA-DOCUMENT-READY-v2\n".len()];
+        stdout.read_exact(&mut ready).await.unwrap();
+        assert_eq!(&ready, b"ANIMA-DOCUMENT-READY-v2\n");
+        stdin.write_u8(2).await.unwrap();
+        stdin
+            .write_all(&(bytes.len() as u32).to_le_bytes())
+            .await
+            .unwrap();
+        stdin.write_all(bytes).await.unwrap();
+        stdin.shutdown().await.unwrap();
+        drop(stdin);
+        let mut length = [0; 4];
+        stdout.read_exact(&mut length).await.unwrap();
+        let length = u32::from_le_bytes(length) as usize;
+        assert!(length <= 64 * 1024 - ready.len() - 4);
+        let mut json = vec![0; length];
+        stdout.read_exact(&mut json).await.unwrap();
+        let mut extra = [0; 1];
+        assert_eq!(stdout.read(&mut extra).await.unwrap(), 0);
+        let extraction: ExtractedDocumentText = serde_json::from_slice(&json).unwrap();
+        validate_document_extraction(&extraction).unwrap();
+        assert_eq!(extraction.version, 2);
+        assert_eq!(extraction.format, DocumentFormat::Xlsx);
+        let text = extraction
+            .blocks
+            .iter()
+            .map(|block| block.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("M66 selected ledger"));
+        assert!(text.contains("137.42"));
+        assert!(text.contains("formula (not evaluated)=SUM(A2,2)"));
+        assert!(text.contains("cached (possibly stale)=139.42"));
+        assert!(text.contains("Hidden source marker: cobalt 7319"));
+        let coverage = extraction.xlsx_coverage.unwrap();
+        assert_eq!(coverage.sheet_count, 2);
+        assert_eq!(coverage.observed_cell_count, 5);
+        assert_eq!(coverage.included_cell_count, 5);
+        assert_eq!(coverage.sheets[0].visibility, XlsxSheetVisibility::Visible);
+        assert_eq!(coverage.sheets[1].visibility, XlsxSheetVisibility::Hidden);
+        let mut errors = [0; 1];
+        assert_eq!(
+            stderr.read(&mut errors).await.unwrap(),
+            0,
+            "worker tracing must not emit document contents"
+        );
+    });
+    let result = tokio::time::timeout(Duration::from_secs(5), &mut pipes).await;
+    child.start_kill().unwrap();
+    child.wait().await.unwrap();
+    if result.is_err() {
+        let _ = tokio::time::timeout(Duration::from_secs(2), &mut pipes).await;
+    }
+    result
+        .expect("bounded XLSX CLI exchange")
+        .expect("M66 synthetic workbook extracted");
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
 }
 
 #[tokio::test]

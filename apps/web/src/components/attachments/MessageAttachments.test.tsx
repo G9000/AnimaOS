@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import type { SessionMessageXlsxExtraction } from '@animaOS-SWARM/sdk';
 import { daemon } from '../../lib/daemon-api';
 import {
   describeDocumentExtraction,
@@ -286,6 +287,269 @@ it('keeps known PDF coverage visible when context omits all text', () => {
   ).toBe(
     'PDF text not included · 1 of 2 pages with text · 0 pages included · Only the PDF text layer was read · Not all PDF text fit in this message context',
   );
+});
+
+const xlsxExtraction: SessionMessageXlsxExtraction = {
+  version: 2,
+  format: 'xlsx',
+  status: 'partial',
+  sheetCount: 2,
+  observedCellCount: 6,
+  includedCellCount: 4,
+  hiddenSheetCount: 1,
+  omissions: ['stored_cells_only'],
+};
+
+it('describes XLSX stored-cell coverage without implying formula evaluation or freshness', () => {
+  expect(describeDocumentExtraction(xlsxExtraction)).toBe(
+    'Some XLSX stored cells extracted · 2 sheets · 4 of 6 cells included · 1 hidden sheet · Stored cells only; formulas were not evaluated and cached values may be stale',
+  );
+  expect(
+    describeDocumentExtraction({
+      ...xlsxExtraction,
+      sheetCount: 1,
+      observedCellCount: 1,
+      includedCellCount: 1,
+      hiddenSheetCount: 0,
+      omissions: [
+        'stored_cells_only',
+        'cell_text_limit',
+        'cell_limit',
+        'text_limit',
+        'context_limit',
+      ],
+    }),
+  ).toBe(
+    'Some XLSX stored cells extracted · 1 sheet · 1 of 1 cells included · 0 hidden sheets · Stored cells only; formulas were not evaluated and cached values may be stale · Cell text limit reached · Cell limit reached · XLSX text limit reached · Not all XLSX cell text fit in this message context',
+  );
+  expect(
+    describeDocumentExtraction({
+      ...xlsxExtraction,
+      sheetCount: 16,
+      observedCellCount: 2000,
+      includedCellCount: 2000,
+      hiddenSheetCount: 16,
+    }),
+  ).toContain('16 sheets · 2000 of 2000 cells included · 16 hidden sheets');
+});
+
+it('describes XLSX no-text and omitted outcomes with only established counts', () => {
+  expect(
+    describeDocumentExtraction({
+      ...xlsxExtraction,
+      status: 'no_text',
+      observedCellCount: 0,
+      includedCellCount: 0,
+    }),
+  ).toBe(
+    'No readable XLSX stored cells found · 2 sheets · 0 of 0 cells included · 1 hidden sheet · Stored cells only; formulas were not evaluated and cached values may be stale',
+  );
+  expect(
+    describeDocumentExtraction({
+      ...xlsxExtraction,
+      status: 'no_text',
+      includedCellCount: 0,
+      omissions: [],
+    }),
+  ).toBe(
+    'No readable XLSX stored cells found · 2 sheets · 0 of 6 cells included · 1 hidden sheet',
+  );
+  expect(
+    describeDocumentExtraction({
+      ...xlsxExtraction,
+      status: 'context_omitted',
+      includedCellCount: 0,
+      omissions: ['stored_cells_only', 'context_limit'],
+    }),
+  ).toBe(
+    'XLSX cell text not included · 2 sheets · 0 of 6 cells included · 1 hidden sheet · Stored cells only; formulas were not evaluated and cached values may be stale · Not all XLSX cell text fit in this message context',
+  );
+  expect(
+    describeDocumentExtraction({
+      ...xlsxExtraction,
+      status: 'context_omitted',
+      sheetCount: null,
+      observedCellCount: null,
+      includedCellCount: null,
+      hiddenSheetCount: null,
+      omissions: ['selection_limit'],
+    }),
+  ).toBe(
+    'XLSX cell text not included · Additional documents were not included',
+  );
+});
+
+it.each([
+  ['unsupported', 'XLSX text extraction unsupported'],
+  ['encrypted', 'Encrypted XLSX workbook'],
+  ['malformed', 'XLSX workbook could not be read'],
+  ['too_large', 'XLSX workbook too large for text extraction'],
+  ['unavailable', 'XLSX text extraction unavailable'],
+  ['cancelled', 'XLSX text extraction cancelled'],
+])('describes XLSX %s without inventing counts', (status, label) => {
+  expect(
+    describeDocumentExtraction({
+      ...xlsxExtraction,
+      status,
+      sheetCount: null,
+      observedCellCount: null,
+      includedCellCount: null,
+      hiddenSheetCount: null,
+      omissions: [],
+    }),
+  ).toBe(label);
+  expect(
+    describeDocumentExtraction({
+      ...xlsxExtraction,
+      status,
+      includedCellCount: 0,
+      omissions: [],
+    }),
+  ).toBe(`${label} · 2 sheets · 0 of 6 cells included · 1 hidden sheet`);
+});
+
+it('quietly rejects malformed, hostile, and cross-format XLSX summaries', () => {
+  const invalid = [
+    { ...xlsxExtraction, version: 1 },
+    { ...xlsxExtraction, format: 'docx' },
+    { ...xlsxExtraction, format: 'pdf' },
+    { ...xlsxExtraction, status: 'future_status' },
+    { ...xlsxExtraction, status: 'ready' },
+    { ...xlsxExtraction, sheetCount: 0 },
+    { ...xlsxExtraction, sheetCount: 17 },
+    { ...xlsxExtraction, observedCellCount: 2001 },
+    { ...xlsxExtraction, includedCellCount: 7 },
+    { ...xlsxExtraction, hiddenSheetCount: 3 },
+    { ...xlsxExtraction, hiddenSheetCount: -1 },
+    { ...xlsxExtraction, observedCellCount: 1.5 },
+    { ...xlsxExtraction, includedCellCount: Number.NaN },
+    { ...xlsxExtraction, hiddenSheetCount: Number.POSITIVE_INFINITY },
+    { ...xlsxExtraction, sheetCount: '2' },
+    { ...xlsxExtraction, sheetCount: null },
+    { ...xlsxExtraction, observedCellCount: null },
+    { ...xlsxExtraction, includedCellCount: null },
+    { ...xlsxExtraction, hiddenSheetCount: null },
+    { ...xlsxExtraction, includedCellCount: 0 },
+    { ...xlsxExtraction, status: 'no_text' },
+    { ...xlsxExtraction, status: 'context_omitted' },
+    { ...xlsxExtraction, status: 'malformed' },
+    {
+      ...xlsxExtraction,
+      status: 'malformed',
+      includedCellCount: 0,
+      hiddenSheetCount: null,
+    },
+    {
+      ...xlsxExtraction,
+      status: 'no_text',
+      sheetCount: null,
+      observedCellCount: null,
+      includedCellCount: null,
+      hiddenSheetCount: null,
+    },
+    { ...xlsxExtraction, omissions: [] },
+    { ...xlsxExtraction, omissions: ['stored_cells_only', 'private'] },
+    { ...xlsxExtraction, omissions: ['main_body_only'] },
+    { ...xlsxExtraction, omissions: ['paragraph_limit'] },
+    { ...xlsxExtraction, omissions: ['text_layer_only'] },
+    {
+      ...xlsxExtraction,
+      omissions: ['stored_cells_only', 'stored_cells_only'],
+    },
+    {
+      ...xlsxExtraction,
+      omissions: [
+        'stored_cells_only',
+        'cell_limit',
+        'cell_text_limit',
+        'text_limit',
+        'context_limit',
+        'selection_limit',
+      ],
+    },
+    { ...xlsxExtraction, omissions: ['stored_cells_only', 1] },
+    { ...xlsxExtraction, omissions: 'stored_cells_only' },
+    { ...xlsxExtraction, pageCount: 2 },
+    { ...xlsxExtraction, paragraphCount: 1 },
+    { ...xlsxExtraction, sheetNames: ['secret-sheet'] },
+    { ...xlsxExtraction, cells: ['secret-cell'] },
+    { ...xlsxExtraction, formula: '=secret-formula' },
+    { ...xlsxExtraction, sourceHash: 'secret-hash' },
+    { ...xlsxExtraction, path: '/private/secret-path.xlsx' },
+  ];
+
+  for (const extraction of invalid) {
+    expect(describeDocumentExtraction(extraction)).toBeNull();
+  }
+});
+
+it('renders a read-only XLSX badge beside the authenticated original download', async () => {
+  const download = vi
+    .spyOn(daemon, 'downloadAttachment')
+    .mockResolvedValue(new Blob(['synthetic-xlsx']));
+  render(
+    <MessageAttachments
+      agentId="agent"
+      attachments={[
+        {
+          ...uploaded,
+          type: 'file',
+          kind: 'document',
+          name: 'selected.xlsx',
+          mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          extraction: xlsxExtraction,
+        },
+      ]}
+    />,
+  );
+
+  expect(
+    screen.getByText(/Some XLSX stored cells extracted/),
+  ).toHaveTextContent('2 sheets · 4 of 6 cells included · 1 hidden sheet');
+  expect(screen.getByText(/formulas were not evaluated/)).toHaveTextContent(
+    'cached values may be stale',
+  );
+  expect(screen.getAllByRole('button')).toHaveLength(1);
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Download selected.xlsx' }),
+  );
+  expect(download).toHaveBeenCalledOnce();
+  expect(download).toHaveBeenCalledWith('agent', 'att_1', {
+    signal: expect.any(AbortSignal),
+  });
+});
+
+it('does not echo rejected XLSX metadata and retains the original download', () => {
+  render(
+    <MessageAttachments
+      agentId="agent"
+      attachments={[
+        {
+          ...uploaded,
+          type: 'file',
+          kind: 'document',
+          name: 'historical.xlsx',
+          extraction: {
+            ...xlsxExtraction,
+            privateText:
+              '<script>secret-cell</script> /private/secret-path.xlsx',
+            sheetNames: ['secret-sheet'],
+          },
+        } as never,
+      ]}
+    />,
+  );
+
+  expect(
+    screen.queryByText(/XLSX stored cells extracted/),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(/secret-cell|secret-path|secret-sheet/),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole('button', { name: 'Download historical.xlsx' }),
+  ).toBeVisible();
 });
 
 it('renders a PDF summary beside its unchanged original download', async () => {

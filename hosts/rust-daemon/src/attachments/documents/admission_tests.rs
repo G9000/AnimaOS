@@ -6,6 +6,7 @@ use crate::{
 };
 use anima_core::document_content::{
     document_rendered_bytes, parse_document_snapshots, DocumentBlock, DocumentLocator, PdfCoverage,
+    XlsxCoverage, XlsxSheetCoverage, XlsxSheetVisibility,
 };
 use async_trait::async_trait;
 use std::{
@@ -20,6 +21,10 @@ const DOCX: &[u8] = include_bytes!(concat!(
 const PDF: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/fixtures/documents/m55-selected.pdf"
+));
+const XLSX: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/documents/m66-selected.xlsx"
 ));
 
 fn pdf_output() -> ExtractedDocumentText {
@@ -37,6 +42,7 @@ fn pdf_output() -> ExtractedDocumentText {
             text_page_count: 1,
             included_page_count: 1,
         }),
+        xlsx_coverage: None,
     }
 }
 
@@ -54,7 +60,73 @@ impl DocumentExtractor for FormatExtractor {
         Ok(match format {
             DocumentFormat::Docx => output(),
             DocumentFormat::Pdf => pdf_output(),
+            DocumentFormat::Xlsx => xlsx_output(),
         })
+    }
+}
+
+struct XlsxCapture(std::sync::Mutex<Vec<(DocumentFormat, Vec<u8>)>>);
+#[async_trait]
+impl DocumentExtractor for XlsxCapture {
+    async fn extract(
+        &self,
+        format: DocumentFormat,
+        bytes: Vec<u8>,
+        _cancel: CancelSignal,
+        _deadline: Option<tokio::time::Instant>,
+    ) -> Result<ExtractedDocumentText, WorkerFailure> {
+        self.0.lock().unwrap().push((format, bytes));
+        Ok(xlsx_output())
+    }
+}
+
+fn xlsx_output() -> ExtractedDocumentText {
+    let cells = [
+        (1, 1, 1, "M66 selected ledger"),
+        (1, 2, 1, "137.42"),
+        (
+            1,
+            2,
+            2,
+            "formula (not evaluated)=SUM(A2,2); cached (possibly stale)=139.42",
+        ),
+        (1, 2, 3, "true"),
+        (2, 1, 1, "Hidden source marker: cobalt 7319"),
+    ];
+    ExtractedDocumentText {
+        version: 2,
+        format: DocumentFormat::Xlsx,
+        status: Status::Partial,
+        blocks: cells
+            .into_iter()
+            .map(|(sheet, row, column, text)| DocumentBlock {
+                locator: DocumentLocator::XlsxCell { sheet, row, column },
+                text: text.into(),
+            })
+            .collect(),
+        omissions: vec![DocumentOmission::StoredCellsOnly],
+        pdf_coverage: None,
+        xlsx_coverage: Some(XlsxCoverage {
+            sheet_count: 2,
+            observed_cell_count: 5,
+            included_cell_count: 5,
+            sheets: vec![
+                XlsxSheetCoverage {
+                    index: 1,
+                    name: "Ledger".into(),
+                    visibility: XlsxSheetVisibility::Visible,
+                    observed_cell_count: 4,
+                    included_cell_count: 4,
+                },
+                XlsxSheetCoverage {
+                    index: 2,
+                    name: "Private notes".into(),
+                    visibility: XlsxSheetVisibility::Hidden,
+                    observed_cell_count: 1,
+                    included_cell_count: 1,
+                },
+            ],
+        }),
     }
 }
 
@@ -76,6 +148,21 @@ fn selected_record(
         name,
         mime: mime.into(),
         size: bytes.len() as u64,
+        path: saved.path,
+        sha256: saved.sha256,
+        workspace_root: saved.workspace_root,
+        ..template.clone()
+    }
+}
+
+fn selected_xlsx_record(temp: &Temp, template: &AttachmentRecord, id: &str) -> AttachmentRecord {
+    let name = format!("{id}.xlsx");
+    let saved = save_upload(&temp.0, "2026-10-16", &name, XLSX).unwrap();
+    AttachmentRecord {
+        id: id.into(),
+        name,
+        mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet".into(),
+        size: XLSX.len() as u64,
         path: saved.path,
         sha256: saved.sha256,
         workspace_root: saved.workspace_root,
@@ -256,6 +343,17 @@ fn document_recognition_requires_exact_kind_mime_and_extension() {
         ("selected.docx", super::super::PDF_MIME, None),
         ("selected.pdf", "application/pdf; charset=utf-8", None),
         ("selected", super::super::PDF_MIME, None),
+        (
+            "selected.XLSX",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            Some(DocumentFormat::Xlsx),
+        ),
+        (
+            "selected.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            Some(DocumentFormat::Xlsx),
+        ),
+        ("selected.xlsx", super::super::DOCX_MIME, None),
     ] {
         row.name = name.into();
         row.mime = mime.into();
@@ -264,6 +362,91 @@ fn document_recognition_requires_exact_kind_mime_and_extension() {
     row.name = "selected.pdf".into();
     row.kind = AttachmentKind::Image;
     assert_eq!(document_format(&row), None);
+}
+
+#[tokio::test]
+async fn m66_selected_xlsx_admission_keeps_selection_original_and_coverage() {
+    let (temp, state, agent, id, config, row) = fixture().await;
+    let selected = selected_xlsx_record(&temp, &row, "m66-selected");
+    let unselected = selected_xlsx_record(&temp, &row, "m66-unselected");
+    state
+        .read()
+        .await
+        .history
+        .store()
+        .upsert_attachments(&[selected.clone(), unselected.clone()])
+        .await
+        .unwrap();
+
+    // The unselected attachment exists in the durable store, but only the
+    // explicitly attached workbook may be read or passed to the extractor.
+    let mut input = crate::agent_runs::attachments::attachment_content(
+        "summarize this selected workbook",
+        &[selected.clone()],
+        None,
+    );
+    let original_text = input.text.clone();
+    let original_refs = input.attachments.clone();
+    let reads = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let read_capture = reads.clone();
+    let extractor = Arc::new(XlsxCapture(std::sync::Mutex::new(Vec::new())));
+    admit_with_reader(
+        &state,
+        &agent,
+        "chat:docs",
+        &id,
+        RunSource::Web,
+        &config,
+        &mut input,
+        extractor.clone(),
+        CancelSignal::new(),
+        None,
+        Arc::new(move |root, record| {
+            read_capture.lock().unwrap().push(record.id.clone());
+            read_attachment_bytes(root, record)
+        }),
+    )
+    .await;
+
+    assert_eq!(
+        *reads.lock().unwrap(),
+        [selected.id.clone(), selected.id.clone()]
+    );
+    assert_eq!(
+        *extractor.0.lock().unwrap(),
+        [(DocumentFormat::Xlsx, XLSX.to_vec())]
+    );
+    assert_eq!(input.text, original_text);
+    assert_eq!(input.attachments, original_refs);
+    assert_eq!(std::fs::read(temp.0.join(&selected.path)).unwrap(), XLSX);
+
+    let snapshots = parse_document_snapshots(&input).unwrap();
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(snapshots[0].attachment_id, selected.id);
+    let extraction = &snapshots[0].extraction;
+    assert_eq!(extraction.format, DocumentFormat::Xlsx);
+    let coverage = extraction.xlsx_coverage.as_ref().unwrap();
+    assert_eq!(coverage.sheet_count, 2);
+    assert_eq!(coverage.observed_cell_count, 5);
+    assert_eq!(coverage.included_cell_count, 5);
+    assert_eq!(coverage.sheets[0].visibility, XlsxSheetVisibility::Visible);
+    assert_eq!(coverage.sheets[1].visibility, XlsxSheetVisibility::Hidden);
+    assert_eq!(
+        extraction.blocks[2].locator,
+        DocumentLocator::XlsxCell {
+            sheet: 1,
+            row: 2,
+            column: 2,
+        }
+    );
+    assert_eq!(
+        extraction.blocks[2].text,
+        "formula (not evaluated)=SUM(A2,2); cached (possibly stale)=139.42"
+    );
+    assert!(document_rendered_bytes(&input) > 0);
+    assert!(!snapshots
+        .iter()
+        .any(|snapshot| snapshot.attachment_id == unselected.id));
 }
 struct Temp(PathBuf);
 impl Drop for Temp {
@@ -307,6 +490,7 @@ fn output() -> ExtractedDocumentText {
         }],
         omissions: vec![DocumentOmission::MainBodyOnly],
         pdf_coverage: None,
+        xlsx_coverage: None,
     }
 }
 fn extractor() -> Arc<Extractor> {

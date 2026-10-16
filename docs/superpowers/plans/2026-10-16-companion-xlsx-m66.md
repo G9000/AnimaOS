@@ -1,6 +1,6 @@
 # M66 bounded read-only XLSX attachment extraction
 
-**Status:** bound from verified merged M65 main. Publish before source-only tests/implementation. Synthetic XLSX fixtures only; no general Office or model answer-quality claim.
+**Status:** implemented and locally fixture-tested, including one finite synthetic Windows worker CLI case. Broader workbook and answer-quality acceptance remains open.
 
 ## Outcome
 
@@ -90,4 +90,16 @@ Root has selected this direction from verified M65 main. Source-only execution s
 
 ## Execution and resume
 
+### Conditional public-format amendment (bound before SDK/web source)
+
+The existing selected-chat attachment response at `hosts/rust-daemon/src/routes/contracts/sessions.rs` has a closed document extraction union, projected to `packages/sdk/src/sessions.ts` and the read-only badge in `apps/web/src/components/attachments/MessageAttachments.tsx`. XLSX therefore requires the plan's conditional public variant. Add `SessionMessageXlsxExtraction` with `version: 2`, `format: 'xlsx'`, existing closed status, nullable `sheetCount`, `observedCellCount`, `includedCellCount`, `hiddenSheetCount`, and omissions. Hidden count includes hidden and very-hidden sheets. Public projection contains no sheet names, cells/formulas, raw text, source hash, private paths or errors. Keep existing DOCX/PDF response bytes and selected-record/snapshot validation unchanged. SDK exports and omissions add only this variant and the three typed XLSX omissions; UI renders bounded counts/limitations through the existing badge with no new controls.
+
+Ruling: extend the existing safe extraction-status response and badge when adding XLSX — root's targeted contract trace found a real closed public union, so suppressing every XLSX status would leave the console incomplete — cost if wrong: return no badge for invalid/mismatched metadata; never show raw document data or claim calculation/answer quality. One final SDK/web review and relevant fresh SDK/web gates now apply, after the frozen response and implementation. This supersedes the earlier expectation of no public DTO change and adds no route or account activation.
+
 Root alone commands/fmt/Git, serialized Cargo CARGO_INCREMENTAL=0/jobs1/testthreads2. First source-only contract/RED stage, then frozen-contract disjoint parser/native integration owners. One native batch review, one combined fix wave, focused and required fresh Nx native/core gates. SDK/web review/gates only if actually changed; no duplicate broad audits. Per-command unsigned commit/push/PR/attach/standing merge and exact tree/hash proof remain authorized. Never stage nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree. No real profiles/providers/models/accounts/daemons/devices/DB servers/containers/deployments. M64 public browser NOT RUN, M52 strict quality PARTIAL and consumed cases unchanged. Resume .superpowers/sdd/2026-10-16-companion-xlsx-m66/progress.md.
+
+## Recorded outcome
+
+Rust/core **2,918 passed / 28 intentional ignores / 46 suites / lint/build**; SDK **186 passed / three intentional service skips / typecheck/build**; web **1,508 passed / 121 files / typecheck/build**.
+
+Focused core/native, one native batch and final SDK/web review, finite Windows worker CLI, docs/format/frozen hashes pass. Reused ZIP/XML dependencies unchanged; public Hermes XLSX informed behavior without a literal Python port. No real workbook/profile/model/provider/account/daemon/service/deployment activation. See [harness evidence](../../companion/harness-acceptance.md) for limits and exact scope.

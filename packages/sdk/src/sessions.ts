@@ -165,10 +165,32 @@ export interface SessionMessagePdfExtraction {
   omissions: PdfDocumentOmission[];
 }
 
+export type XlsxDocumentOmission =
+  | 'stored_cells_only'
+  | 'cell_limit'
+  | 'cell_text_limit'
+  | 'text_limit'
+  | 'context_limit'
+  | 'selection_limit';
+
+/** Counts only; formulas are not evaluated and cached values may be stale. */
+export interface SessionMessageXlsxExtraction {
+  version: 2;
+  format: 'xlsx';
+  status: DocumentExtractionStatus;
+  sheetCount: number | null;
+  observedCellCount: number | null;
+  includedCellCount: number | null;
+  /** Includes both hidden and very-hidden sheets. */
+  hiddenSheetCount: number | null;
+  omissions: XlsxDocumentOmission[];
+}
+
 /** Closed public summaries for the attachment's extracted document text. */
 export type SessionMessageDocumentExtraction =
   | SessionMessageDocxExtraction
-  | SessionMessagePdfExtraction;
+  | SessionMessagePdfExtraction
+  | SessionMessageXlsxExtraction;
 
 export interface SessionMessage {
   id: string;

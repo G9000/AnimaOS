@@ -29,7 +29,7 @@ pub fn extract_docx(bytes: &[u8]) -> ExtractedDocumentText {
     }
 }
 
-fn extras_ok(mut extras: ExtraFields<'_>) -> Result<(), Status> {
+pub(super) fn extras_ok(mut extras: ExtraFields<'_>) -> Result<(), Status> {
     for (id, _) in extras.by_ref() {
         if id == ExtraFieldId::ZIP64 {
             return Err(Status::Unsupported);
@@ -181,7 +181,7 @@ fn extract(bytes: &[u8]) -> Result<ExtractedDocumentText, Status> {
 
 /// rawzip owns parsing/offset discovery. Its public API omits multi-disk and
 /// ZIP64 EOCD policy, so compare only fixed fields at its validated EOCD offset.
-fn check_archive_policy(bytes: &[u8], eocd: usize) -> Result<(), Status> {
+pub(super) fn check_archive_policy(bytes: &[u8], eocd: usize) -> Result<(), Status> {
     let end = eocd.checked_add(22).ok_or(Status::Malformed)?;
     let record = bytes.get(eocd..end).ok_or(Status::Malformed)?;
     if &record[..4] != b"PK\x05\x06" {
@@ -202,7 +202,7 @@ fn check_archive_policy(bytes: &[u8], eocd: usize) -> Result<(), Status> {
     Ok(())
 }
 
-fn read_part(
+pub(super) fn read_part(
     archive: &ZipSliceArchive<&[u8]>,
     entry: ZipArchiveEntryWayfinder,
     method: CompressionMethod,
@@ -584,6 +584,7 @@ fn parse_main(xml: &[u8]) -> Result<ExtractedDocumentText, Status> {
         blocks,
         omissions,
         pdf_coverage: None,
+        xlsx_coverage: None,
     })
 }
 
@@ -609,11 +610,11 @@ fn serde_text_cost(text: &str) -> usize {
         .sum::<usize>()
 }
 
-fn valid_xml_character(c: char) -> bool {
+pub(super) fn valid_xml_character(c: char) -> bool {
     matches!(c, '\t' | '\n' | '\r') || c >= '\u{20}' && c != '\u{fffe}' && c != '\u{ffff}'
 }
 
-fn validate_declaration(value: &quick_xml::events::BytesDecl<'_>) -> Result<(), Status> {
+pub(super) fn validate_declaration(value: &quick_xml::events::BytesDecl<'_>) -> Result<(), Status> {
     if value.version().map_err(|_| Status::Malformed)?.as_ref() != b"1.0" {
         return Err(Status::Unsupported);
     }
@@ -649,7 +650,7 @@ fn validate_declaration(value: &quick_xml::events::BytesDecl<'_>) -> Result<(), 
     Ok(())
 }
 
-fn validate_xml_characters(xml: &[u8]) -> Result<(), Status> {
+pub(super) fn validate_xml_characters(xml: &[u8]) -> Result<(), Status> {
     let xml = std::str::from_utf8(xml).map_err(|_| Status::Malformed)?;
     if !xml.chars().all(valid_xml_character) {
         return Err(Status::Malformed);

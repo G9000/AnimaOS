@@ -78,6 +78,7 @@ fn read_request(reader: &mut impl Read) -> io::Result<(DocumentFormat, Vec<u8>)>
     let format = match format[0] {
         0 => DocumentFormat::Docx,
         1 => DocumentFormat::Pdf,
+        2 => DocumentFormat::Xlsx,
         _ => return Err(invalid()),
     };
     let mut header = [0; 4];
@@ -160,11 +161,13 @@ async fn exchange(
         return Err(WorkerFailure::InvalidOutput);
     }
     // The READY check is the only gate to transmitting untrusted document bytes.
+    let format_code = match format {
+        DocumentFormat::Docx => 0,
+        DocumentFormat::Pdf => 1,
+        DocumentFormat::Xlsx => 2,
+    };
     stdin
-        .write_all(&[match format {
-            DocumentFormat::Docx => 0,
-            DocumentFormat::Pdf => 1,
-        }])
+        .write_all(&[format_code])
         .await
         .map_err(|_| WorkerFailure::Unavailable)?;
     stdin

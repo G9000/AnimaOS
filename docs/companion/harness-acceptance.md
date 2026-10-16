@@ -1,5 +1,45 @@
 # Native harness acceptance
 
+## M66 selected XLSX stored-cell extraction (2026-10-16)
+
+**Implemented with synthetic parser/selection tests and one finite Windows worker
+CLI case.** Selected own-chat XLSX attachments now use the existing reusable
+document parser and physically owned worker. Workbook-order numeric cell locators,
+quoted sheet names/visibility, shared/inline/scalar values, literal formulas and
+possibly stale cached values remain untrusted data. No formula is calculated.
+Visible, hidden and very-hidden sheets are within the bounded reader's scope.
+
+The existing 2 MiB input, two usable documents and shared 16 KiB rendered context
+limits remain. XLSX caps entries, XML bytes/events/depth, sheets, strings, cells and
+individual text. Too many observed cells refuses the workbook without invented
+coverage; capped cell text is omitted whole. Required relationships stay internal;
+recognized macro/external-link packages and malformed supported parts are refused.
+Only transitional OOXML is supported; shared/array formulas, date-string cells
+and additional relationship-bearing features are refused. OOXML `_xNNNN_` escape
+tokens remain literal stored text. Unused drawings/styles are not parsed. Archives are not unpacked and
+no workbook connection is opened. DOCX/PDF behavior, original bytes/downloads and
+grants remain. Exact cell/coverage/serialization checks and selected
+versus unselected reads are fixture evidence, not general spreadsheet fidelity.
+
+Public message badges project only bounded sheet/cell/hidden-sheet counts, status
+and limitations. They expose no cell/formula text, sheet names, source hash or
+private paths. Existing version-2 document snapshots remain readable; the added
+coverage field is absent for old DOCX/PDF JSON. Fitting drops whole XLSX cells and
+updates included counts while preserving observed counts and source metadata.
+
+Fresh gates: Rust/core **2,918 passed / 28 intentional ignores / 46 suites / lint/build**; SDK **186 passed / three intentional service skips / typecheck/build**; web **1,508 passed / 121 files / typecheck/build**. Focused core/native checks, one native batch and final SDK/web
+review, compiled API/README equality, docs/format/frozen hashes and one root-run
+synthetic worker CLI case are recorded. The CLI receives a fixed workbook and exits
+before any host configuration/service startup; no ordinary daemon, model, provider,
+account, personal workbook, database server, container or deployment was activated
+by this milestone. Existing ZIP/XML dependencies and the original DOCX notice are
+reused; public Hermes XLSX is a behavioral reference, with no copied Python runtime.
+
+Styles, formatted dates, chart/pivot/image/comment/merged-layout understanding,
+OCR, other Office formats, larger workbooks and answer quality remain open. M64
+public browser is NOT RUN, M52 strict quality remains PARTIAL and consumed cases
+are unchanged. See the [M66 plan](../superpowers/plans/2026-10-16-companion-xlsx-m66.md).
+
 ## M65 owner-managed HTTPS MCP Bearer credentials (2026-10-16)
 
 **Implemented and locally tested with synthetic credentials and verified local TLS.**

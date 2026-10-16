@@ -1080,6 +1080,7 @@ fn document_extraction_projection_is_user_selected_only_and_private_data_never_p
             }],
             omissions: vec![DocumentOmission::MainBodyOnly],
             pdf_coverage: None,
+            xlsx_coverage: None,
         },
     };
     content.metadata.as_mut().unwrap().insert(
@@ -1248,6 +1249,7 @@ fn pdf_projection_is_closed_has_honest_coverage_and_refuses_mismatched_format() 
                 text_page_count: 1,
                 included_page_count: 1,
             }),
+            xlsx_coverage: None,
         });
         assert_eq!(
             public["attachments"][0]["extraction"],
@@ -1304,6 +1306,150 @@ fn pdf_projection_is_closed_has_honest_coverage_and_refuses_mismatched_format() 
     ));
     assert!(mismatched["attachments"][0].get("extraction").is_none());
 }
+
+#[test]
+fn m66_xlsx_projection_exposes_only_closed_coverage_for_the_selected_source() {
+    use anima_core::document_content::*;
+    let mut row = crate::history::conformance::attachment_record("att-xlsx", "agent", "chat:files");
+    row.name = "selected.xlsx".into();
+    row.mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet".into();
+    row.kind = crate::attachments::AttachmentKind::Document;
+    row.path = "uploads/2026-10-16/selected.xlsx".into();
+    row.sha256 = "c".repeat(64);
+    let project = |selected: &crate::attachments::AttachmentRecord| {
+        let mut message = crate::sessions::test_support::message(
+            "agent",
+            "m",
+            "chat:files",
+            anima_core::MessageRole::User,
+            "",
+            1,
+        );
+        message.content = crate::agent_runs::attachments::attachment_content(
+            "original",
+            &[selected.clone()],
+            None,
+        );
+        let snapshot = DocumentSnapshot {
+            attachment_id: selected.id.clone(),
+            source_sha256: selected.sha256.clone(),
+            extraction: ExtractedDocumentText {
+                version: 2,
+                format: DocumentFormat::Xlsx,
+                status: DocumentExtractionStatus::Partial,
+                blocks: vec![
+                    DocumentBlock {
+                        locator: DocumentLocator::XlsxCell {
+                            sheet: 1,
+                            row: 1,
+                            column: 1,
+                        },
+                        text: "private extracted cell literal".into(),
+                    },
+                    DocumentBlock {
+                        locator: DocumentLocator::XlsxCell {
+                            sheet: 2,
+                            row: 1,
+                            column: 1,
+                        },
+                        text: "private hidden cell literal".into(),
+                    },
+                    DocumentBlock {
+                        locator: DocumentLocator::XlsxCell {
+                            sheet: 3,
+                            row: 1,
+                            column: 1,
+                        },
+                        text: "private very-hidden cell literal".into(),
+                    },
+                ],
+                omissions: vec![DocumentOmission::StoredCellsOnly],
+                pdf_coverage: None,
+                xlsx_coverage: Some(XlsxCoverage {
+                    sheet_count: 3,
+                    observed_cell_count: 3,
+                    included_cell_count: 3,
+                    sheets: vec![
+                        XlsxSheetCoverage {
+                            index: 1,
+                            name: "private visible sheet name".into(),
+                            visibility: XlsxSheetVisibility::Visible,
+                            observed_cell_count: 1,
+                            included_cell_count: 1,
+                        },
+                        XlsxSheetCoverage {
+                            index: 2,
+                            name: "private hidden sheet name".into(),
+                            visibility: XlsxSheetVisibility::Hidden,
+                            observed_cell_count: 1,
+                            included_cell_count: 1,
+                        },
+                        XlsxSheetCoverage {
+                            index: 3,
+                            name: "private very-hidden sheet name".into(),
+                            visibility: XlsxSheetVisibility::VeryHidden,
+                            observed_cell_count: 1,
+                            included_cell_count: 1,
+                        },
+                    ],
+                }),
+            },
+        };
+        message.content.metadata.as_mut().unwrap().insert(
+            DOCUMENT_EXTRACTS_METADATA_KEY.into(),
+            document_snapshots_metadata(&[snapshot]).unwrap(),
+        );
+        serde_json::to_value(crate::routes::contracts::SessionMessageResponse::from(
+            &crate::sessions::views::PageMessage {
+                message,
+                hidden: false,
+            },
+        ))
+        .unwrap()
+    };
+
+    let public = project(&row);
+    let extraction = &public["attachments"][0]["extraction"];
+    assert_eq!(
+        extraction,
+        &json!({
+            "version": 2,
+            "format": "xlsx",
+            "status": "partial",
+            "sheetCount": 3,
+            "observedCellCount": 3,
+            "includedCellCount": 3,
+            "hiddenSheetCount": 2,
+            "omissions": ["stored_cells_only"],
+        })
+    );
+    for private in [
+        "private extracted cell literal",
+        "private hidden cell literal",
+        "private very-hidden cell literal",
+        "private visible sheet name",
+        "private hidden sheet name",
+        "private very-hidden sheet name",
+        row.sha256.as_str(),
+        "workspaceRoot",
+        "xl/worksheets",
+    ] {
+        assert!(!extraction.to_string().contains(private), "{private}");
+    }
+
+    let mut mismatched = row.clone();
+    mismatched.name = "selected.xlsm".into();
+    assert!(project(&mismatched)["attachments"][0]
+        .get("extraction")
+        .is_none());
+    mismatched.name = "selected.xlsx".into();
+    mismatched.mime =
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document".into();
+    assert!(project(&mismatched)["attachments"][0]
+        .get("extraction")
+        .is_none());
+}
+
 #[tokio::test]
 async fn image_magic_owns_mime_and_collision_name_is_server_approved() {
     use base64::Engine;

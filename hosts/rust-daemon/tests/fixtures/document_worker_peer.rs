@@ -142,18 +142,25 @@ fn main() -> io::Result<()> {
                                     DocumentLocator::DocxParagraph { paragraph: 1 }
                                 }
                                 DocumentFormat::Pdf => DocumentLocator::PdfPage { page: 1 },
+                                DocumentFormat::Xlsx => {
+                                    return Err(io::Error::other("fixture supports DOCX/PDF only"));
+                                }
                             },
                             text: "memory-refused child-refused".into(),
                         }],
                         omissions: vec![match format {
                             DocumentFormat::Docx => DocumentOmission::MainBodyOnly,
                             DocumentFormat::Pdf => DocumentOmission::TextLayerOnly,
+                            DocumentFormat::Xlsx => {
+                                return Err(io::Error::other("fixture supports DOCX/PDF only"));
+                            }
                         }],
                         pdf_coverage: (format == DocumentFormat::Pdf).then_some(PdfCoverage {
                             page_count: 1,
                             text_page_count: 1,
                             included_page_count: 1,
                         }),
+                        xlsx_coverage: None,
                     },
                 )?;
             }
@@ -173,6 +180,9 @@ fn main() -> io::Result<()> {
                     match format {
                         DocumentFormat::Docx => DocumentFormat::Pdf,
                         DocumentFormat::Pdf => DocumentFormat::Docx,
+                        DocumentFormat::Xlsx => {
+                            return Err(io::Error::other("fixture supports DOCX/PDF only"));
+                        }
                     }
                 } else {
                     format
