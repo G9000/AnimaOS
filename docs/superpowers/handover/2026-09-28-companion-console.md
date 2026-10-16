@@ -1,3 +1,38 @@
+# Handover: actual pinned public HTTPS browser acceptance (M0–M64)
+
+## Start here (2026-10-16): M63 merged; M64 bound actual browser DOM acceptance
+
+Continue g9000/companion-public-https-m64 from [M63/PR69](https://github.com/G9000/animaOS-SWARM/pull/69)
+main4da796e02190cd351f2f5fc1dd0cbbdcc429c114, sourcee5373d4212b97e3c6dd9a7aedd8ea0695c51328a,
+identical tree27810003aff070f3e57735aaf702e8bd652953b6. M63 pinned static HTTPS
+feature gates: Rust2862/26 ignores/45 suites/lint/build, worker52, web1493/121/
+type/build, seven docs0issues/format/hash;21 paths,193 unowned hashes and nx exact.
+One independent native/worker and final web/SDK review/fix wave settled. No actual
+public site/browser/account activated by M63; fixture-tested only.
+
+The [M64 bound plan](../plans/2026-10-16-companion-public-https-m64.md) prepares one
+new UUID case for example.com public HTTPS with the installed real browser/worker:
+two ordinary owner-approved Navigate/Observe actions, one exact GET, zero models,
+no selected inputs/artifacts. Independent source oracle and one DNS metadata
+operation freeze a single permitted IPv4 before activation. Normal TLS/JSdisabled
+and run/grant controls remain. No source/actual release before plan publication;
+driver safety/native gates and root's frozen one-shot manifest precede the case.
+
+Resume .superpowers/sdd/2026-10-16-companion-public-https-m64/progress.md.
+Root owns commands/fmt/Git/processes, source-only Sol driver and one bounded review/
+fix wave. Nx prepares the test artifact; actual case executes its exact frozen
+binary under owned job/deadline, no compile/retry/fallback/rebaseline. Failures
+stay immutable. Reuse M46 helpers/M61 process-guard source, never old releases.
+No actual daemon/preview/provider/account/ordinary profile/device/DB server/
+container/deployment. Isolated local test/read-only research authority persists.
+
+Cargo CARGO_INCREMENTAL=0/jobs1/threads2 serialized. Explicit-path unsigned push/
+PR/attach/standing merge with exact tree/hash proof. Never stage nx.json/anima.yaml/
+.superpowers; no stash/reset/restore/path checkout/worktree. Preserve M47/M52 and
+four failed M61 cases, M52 PARTIAL. No full public/provider/host/parity claim.
+
+## Historical M63 gated handover
+
 # Handover: pinned public HTTPS browser policy (M0–M63)
 
 ## Start here (2026-10-16): M63 gated; settle publication then actual browser scope
