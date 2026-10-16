@@ -56,6 +56,8 @@ class FakeWinAPI:
         self.events = []
         self.wait_state = guard.WAIT_TIMEOUT
         self.wait_states = {}
+        self.wait_queues = {}
+        self.wait_error_queues = {}
         self.open_wait_state = None
         self.wait_error_after = None
         self.time_error = None
@@ -83,8 +85,16 @@ class FakeWinAPI:
 
     def WaitForSingleObject(self, handle, milliseconds):
         self.events.append(("wait", handle, milliseconds))
-        if self.wait_error_after is not None:
+        queued_errors = self.wait_error_queues.get(handle, [])
+        if queued_errors:
+            error = queued_errors.pop(0)
+            if error is not None:
+                C.set_last_error(error)
+        elif self.wait_error_after is not None:
             C.set_last_error(self.wait_error_after)
+        queued_states = self.wait_queues.get(handle, [])
+        if queued_states:
+            return queued_states.pop(0)
         return self.wait_states.get(handle, self.wait_state)
 
     def GetProcessTimes(self, handle, creation, exit_time, kernel, user):
@@ -280,9 +290,119 @@ class GuardIdentityTests(unittest.TestCase):
     def test_other_retired_image_error_stays_fatal(self):
         api = FakeWinAPI()
         api.wait_state = guard.WAIT_OBJECT_0
-        api.image_error = 5
+        api.image_error = 87
         with self.assertRaises(guard.GuardError):
             guard.OwnedProcess(api, 1041, 41, "retired-child", allow_retired_image=True)
+        self.assertEqual(sum(event[0] == "wait" for event in api.events), 1)
+
+    def test_m74_image5_retirement_after_query_uses_same_retained_handle(self):
+        api = FakeWinAPI()
+        api.wait_queues[1041] = [guard.WAIT_TIMEOUT, guard.WAIT_OBJECT_0]
+        api.image_error = 5
+        api.wait_error_after = 123  # Successful wait must not clobber the captured image error.
+
+        process = guard.OwnedProcess(
+            api, 1041, 41, "retired-child", allow_retired_image=True
+        )
+
+        self.assertEqual(
+            process.identity,
+            {
+                "pid": 41,
+                "image": None,
+                "creationTime100ns": 77,
+                "imageQueryError": 5,
+                "retiredAtCapture": True,
+            },
+        )
+        waits = [event for event in api.events if event[0] == "wait"]
+        self.assertEqual(waits, [("wait", 1041, 0), ("wait", 1041, 0)])
+        self.assertEqual(sum(event[0] == "image" for event in api.events), 1)
+
+    def test_m74_initial_signaled_image5_is_allowed_for_descendant(self):
+        api = FakeWinAPI()
+        api.wait_state = guard.WAIT_OBJECT_0
+        api.image_error = 5
+
+        process = guard.OwnedProcess(
+            api, 1041, 41, "retired-child", allow_retired_image=True
+        )
+
+        self.assertIsNone(process.identity["image"])
+        self.assertEqual(process.identity["imageQueryError"], 5)
+        self.assertTrue(process.identity["retiredAtCapture"])
+        self.assertEqual(sum(event[0] == "wait" for event in api.events), 1)
+
+    def test_m74_live_image5_or31_stays_fatal_after_one_post_error_wait(self):
+        for image_error in (5, 31):
+            with self.subTest(image_error=image_error):
+                api = FakeWinAPI()
+                api.wait_queues[1041] = [guard.WAIT_TIMEOUT, guard.WAIT_TIMEOUT]
+                api.image_error = image_error
+                with self.assertRaises(guard.GuardError):
+                    guard.OwnedProcess(
+                        api, 1041, 41, "live-child", allow_retired_image=True
+                    )
+                waits = [event for event in api.events if event[0] == "wait"]
+                self.assertEqual(waits, [("wait", 1041, 0), ("wait", 1041, 0)])
+                self.assertEqual(sum(event[0] == "image" for event in api.events), 1)
+
+    def test_m74_failed_or_unexpected_post_error_wait_preserves_both_errors(self):
+        for wait_state, wait_error in ((0xFFFFFFFF, 6), (1, 87)):
+            with self.subTest(wait_state=wait_state):
+                api = FakeWinAPI()
+                api.wait_queues[1041] = [guard.WAIT_TIMEOUT, wait_state]
+                api.wait_error_queues[1041] = [None, wait_error]
+                api.image_error = 5
+                with self.assertRaises(guard.GuardError) as caught:
+                    guard.OwnedProcess(
+                        api, 1041, 41, "child", allow_retired_image=True
+                    )
+                self.assertEqual(caught.exception.diagnostic["win32Error"], wait_error if wait_state == 0xFFFFFFFF else None)
+                self.assertEqual(caught.exception.diagnostic["originalImageError"], 5)
+                self.assertEqual(caught.exception.diagnostic["waitState"], wait_state)
+                self.assertEqual(sum(event[0] == "wait" for event in api.events), 2)
+
+    def test_m74_primary_image5_remains_strict_even_when_already_signaled(self):
+        api = FakeWinAPI()
+        api.wait_state = guard.WAIT_OBJECT_0
+        api.image_error = 5
+        job = guard.OwnedJob(api=api)
+        fixture_root = Path(__file__).resolve().parents[3] / ".superpowers/m71-unit-fixtures"
+        fixture_root.mkdir(parents=True, exist_ok=True)
+        self.assertEqual(fixture_root.resolve(strict=True), fixture_root)
+
+        with tempfile.TemporaryDirectory(dir=fixture_root, prefix="primary-error-") as directory:
+            owned_directory = Path(directory).resolve(strict=True)
+            self.assertTrue(owned_directory.is_relative_to(fixture_root))
+            executable = owned_directory / "pinned.exe"
+            executable.write_bytes(b"synthetic executable path only")
+            with self.assertRaisesRegex(guard.GuardError, "process image"):
+                job.launch(executable, [], directory, {}, owned_directory / "child.log", "primary")
+
+        self.assertEqual([event for event in api.events if event[0] == "wait"],
+                         [("wait", 600, 0), ("wait", 600, 5000)])
+        self.assertEqual(sum(event[0] == "image" for event in api.events), 1)
+        proof = job.close(seconds=1)
+        self.assertEqual(api.closed.count(600), 1)
+        self.assertTrue(proof["jobEmptyBeforeClose"])
+
+    def test_m74_known_image_is_preserved_when_verify_observes_retired_error5(self):
+        api = FakeWinAPI()
+        process = guard.OwnedProcess(api, 1041, 41, "known-descendant", allow_retired_image=True)
+        pinned_image = process.identity["image"]
+        api.image_error = 5
+        api.wait_queues[1041] = [guard.WAIT_TIMEOUT, guard.WAIT_OBJECT_0]
+
+        process.verify()
+
+        self.assertEqual(process.identity["image"], pinned_image)
+        self.assertEqual(process.identity["creationTime100ns"], 77)
+        self.assertIsNone(process.lastObservation["image"])
+        self.assertEqual(process.lastObservation["imageQueryError"], 5)
+        self.assertTrue(process.lastObservation["retiredAtCapture"])
+        self.assertEqual(sum(event[0] == "image" for event in api.events), 2)
+        self.assertEqual(sum(event[0] == "wait" for event in api.events), 3)
 
     def test_retained_creation_time_change_is_detected(self):
         api = FakeWinAPI()
@@ -354,7 +474,7 @@ class GuardJobCaptureTests(unittest.TestCase):
 
     def test_failed_capture_closes_caller_owned_process_handle_once(self):
         api, job = self.make_job()
-        api.image_error = 5
+        api.image_error = 87
         with self.assertRaises(guard.GuardError):
             job.capture_descendants()
         self.assertEqual(api.closed.count(api.opened[41][0]), 1)

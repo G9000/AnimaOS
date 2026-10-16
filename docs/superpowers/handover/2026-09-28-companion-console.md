@@ -1,3 +1,23 @@
+# Handover: M74 retained-handle retirement; browser save ACCEPTED
+
+## Start here (2026-10-16): publish M74 and continue selected parity
+
+Offline paired-runtime admission10 passed; Guard 34, profile 18, policy 47 and offline console gates/typecheck passed. One ownership review, one final E2E review, one combined fix wave and mechanical case reuse are recorded. Fresh case 2de6769f-ecbe-4969-862c-d004469a5dcf completed in 14.391s: browser save ACCEPTED, 1 saved reports, 11 known identities retired, 0 discovery gaps covered by zero-error Job drain, active count zero before close, ports free, stable private profile and exact 84-byte source preserved. The installed engine1.59.1/headless-shell1217 was used with the original single-page, route/save and cleanup assertions. Old M72 remains PARTIAL; no cause is inferred for its second page. M73 browser flow passed but its overall supervisor case remains historical PARTIAL; this new case never regrades it. Descendant image5/31 now requires a confirmed signaled observation on the same retained handle; still-active, unknown-error and primary-image paths remain strict.
+
+Resume .superpowers/sdd/2026-10-16-companion-retirement-observation-m74/progress.md.
+Seal and preserve case/release/results/logs plus ten raw source snapshots, then
+docs/format/explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof.
+Pin committed source versions. Never replay or regrade a consumed case. M71 raw
+snapshots/Git blobs and M61/M69/M70 one-offs remain exact. Reusable guard/tests
+may advance normally with historical version provenance.
+
+Next use the parity roadmap to choose a concrete remaining agent-loop gap; avoid
+claiming synthetic browser evidence proves model reasoning or full Hermes parity.
+Standing merge-and-continue, Codex delegation and isolated synthetic testing apply.
+No ordinary services/profiles/accounts/providers/models/databases/containers or
+Docker55432. Cargo incremental0/jobs1/threads2 if needed; explicit staging only,
+never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+
 # Handover: M74 confirm retained-handle retirement
 
 ## Start here (2026-10-16): M73 merged; execute M74
