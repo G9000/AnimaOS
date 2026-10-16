@@ -1,17 +1,17 @@
 # Handover: M81 Tasks reconnect freshness
 
-## Start here (2026-10-16): M80 merged; execute M81
+## Start here (2026-10-16): publish M81 and continue selected parity
 
-M80 PR86 merged at 1073dbb499954289bdf1d049f0793900783ceed8, exact tested tree b37293f065bf50be8138600fe442274bd578b7d7.
-Task preservation, M79 scheduler recovery, M78 Memory freshness, M77 public page and M74 Files cases stay settled; no case replay/regrading.
+M81 makes both owner Tasks entry points observe connection state. Offline controls dispatch nothing, reconnect revalidates saved tasks and obsolete results cannot become current state. Same-agent drafts survive read-only; changed revisions require explicit discard before loading saved tasks. Submitted saves retain their original target/revision once, with pending ownership and no automatic retry. Fresh web 1579 tests/122 files, typecheck/build, touched formatting/docs and one final web/SDK-contract review pass.
 
-Continue g9000/companion-tasks-reconnect-m81. Read the [M81 plan](../plans/2026-10-16-companion-tasks-reconnect-m81.md), then AGENTS.md.
+Local deterministic owner-console evidence only. No Rust, SDK, schema, dependency, provider/account/device/ordinary-service, database or container change and no new actual acceptance case. This does not establish model planning quality, external delivery, target-host uptime or full Hermes parity. Historical case/source/Git/runtime versions remain unchanged.
+
 Resume .superpowers/sdd/2026-10-16-companion-tasks-reconnect-m81/progress.md.
-Two disjoint tests-first lanes, one web/SDK-contract review/fix wave, required web test/typecheck/build/format/docs, explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof. No actual acceptance case.
-
-Standing Codex delegation/unsigned commits/merge-and-continue apply. No ordinary profiles/accounts/providers/devices/services/DBs/containers/Docker55432.
+The ledger records exact publication state. Finish pending docs/format/explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof before selecting another demonstrated gap. M80 task preservation, M79 active-hours recovery, M78 Memory freshness, M77 public page and M74 Files save stay settled. Never replay or regrade consumed cases.
+Standing Codex delegation, unsigned per-command commits and merge-and-continue apply.
+No ordinary profiles/accounts/providers/devices/services/DBs/containers/Docker55432.
 Explicit stage only; never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
-No Cargo needed; any later Cargo incremental0/jobs1/threads2 and serialized. Preserve unrelated work and historical raw/Git/runtime versions.
+No Cargo here; later Cargo incremental0/jobs1/threads2, serialized. Preserve unrelated edits and historical versions.
 
 # Handover: M80 observed task revision
 

@@ -1,4 +1,10 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -100,6 +106,47 @@ afterEach(() => {
 });
 
 describe('WorkspaceShell', () => {
+  it('passes Work connectivity through the hub to the mounted Tasks editor', async () => {
+    const tasks = vi.mocked(daemon.agentTasks).mockResolvedValue({
+      revision: '1',
+      tasks: [
+        { content: 'Saved task', activeForm: 'Saved task', status: 'pending' },
+      ],
+    });
+    const save = vi.spyOn(daemon, 'updateAgentTasks');
+    const view = render(<Shell connection="offline" />);
+    await userEvent.click(screen.getByRole('button', { name: 'Work' }));
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled();
+    expect(tasks).not.toHaveBeenCalled();
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Manage Nova’s tasks' }),
+    );
+    expect(
+      screen.getByRole('button', { name: 'Refresh tasks' }),
+    ).toBeDisabled();
+    expect(tasks).not.toHaveBeenCalled();
+
+    view.rerender(<Shell connection="online" />);
+    const task = await screen.findByLabelText('Task 1');
+    expect(tasks).toHaveBeenCalledTimes(2); // One hub list and one editor read.
+    fireEvent.change(task, { target: { value: 'Unsaved Work task' } });
+    view.rerender(<Shell connection="offline" />);
+    expect(screen.getByLabelText('Task 1')).toBe(task);
+    expect(task).toHaveValue('Unsaved Work task');
+    expect(task).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Refresh tasks' }),
+    ).toBeDisabled();
+    expect(tasks).toHaveBeenCalledTimes(2);
+
+    view.rerender(<Shell connection="online" />);
+    await waitFor(() => expect(task).toBeEnabled());
+    expect(screen.getByLabelText('Task 1')).toBe(task);
+    expect(task).toHaveValue('Unsaved Work task');
+    expect(tasks).toHaveBeenCalledTimes(4);
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it('lands on the conversation with a New chat action and no work dispatched', async () => {
     const onNewChat = vi.fn();
     render(<Shell onNewChat={onNewChat} />);

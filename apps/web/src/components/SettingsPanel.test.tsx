@@ -15,10 +15,11 @@ import {
   toolNamesForProfile,
   type AccessProfile,
 } from '../lib/agent-access';
-import type {
-  AgentUpdateInput,
-  DaemonProvider,
-  DaemonWorkspaceState,
+import {
+  daemon,
+  type AgentUpdateInput,
+  type DaemonProvider,
+  type DaemonWorkspaceState,
 } from '../lib/daemon-api';
 import type { AgentDetail } from '../lib/types';
 import type { LearningReviewApi } from './learning/LearningReviewPanel';
@@ -72,6 +73,7 @@ function agent(overrides: Partial<AgentDetail> = {}): AgentDetail {
 function renderPanel(
   currentAgent: AgentDetail,
   overrides: Partial<{
+    online: boolean;
     saving: boolean;
     resetting: boolean;
     saveError: string | null;
@@ -85,6 +87,7 @@ function renderPanel(
 ) {
   const props = {
     agent: currentAgent,
+    online: true,
     providers,
     saving: false,
     resetting: false,
@@ -146,6 +149,55 @@ const configuredWorkspace: DaemonWorkspaceState = {
   },
   defaultRoot: '/workspaces',
 };
+
+describe('SettingsPanel Tasks connection', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('opens Tasks offline without reading and revalidates on reconnect', async () => {
+    const tasks = vi.spyOn(daemon, 'agentTasks').mockResolvedValue({
+      revision: '1',
+      tasks: [],
+    });
+    const view = renderPanel(agent(), { online: false });
+    fireEvent.click(screen.getByRole('button', { name: 'tasks' }));
+    expect(
+      screen.getByRole('button', { name: 'Refresh tasks' }),
+    ).toBeDisabled();
+    expect(tasks).not.toHaveBeenCalled();
+    view.rerender(<SettingsPanel {...view.props} online />);
+    expect(await screen.findByLabelText('New agent task')).toBeEnabled();
+    expect(tasks).toHaveBeenCalledTimes(1);
+    expect(tasks).toHaveBeenCalledWith('agent-main');
+  });
+
+  it('keeps the same Tasks editor and unsaved draft read-only across a disconnect', async () => {
+    const tasks = vi.spyOn(daemon, 'agentTasks').mockResolvedValue({
+      revision: '1',
+      tasks: [
+        { content: 'Saved task', activeForm: 'Saved task', status: 'pending' },
+      ],
+    });
+    const save = vi.spyOn(daemon, 'updateAgentTasks');
+    const view = renderPanel(agent());
+    fireEvent.click(screen.getByRole('button', { name: 'tasks' }));
+    const task = await screen.findByLabelText('Task 1');
+    fireEvent.change(task, { target: { value: 'Unsaved Settings task' } });
+    view.rerender(<SettingsPanel {...view.props} online={false} />);
+    expect(screen.getByLabelText('Task 1')).toBe(task);
+    expect(task).toHaveValue('Unsaved Settings task');
+    expect(task).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Refresh tasks' }),
+    ).toBeDisabled();
+    expect(tasks).toHaveBeenCalledTimes(1);
+    view.rerender(<SettingsPanel {...view.props} online />);
+    await waitFor(() => expect(task).toBeEnabled());
+    expect(screen.getByLabelText('Task 1')).toBe(task);
+    expect(task).toHaveValue('Unsaved Settings task');
+    expect(tasks).toHaveBeenCalledTimes(2);
+    expect(save).not.toHaveBeenCalled();
+  });
+});
 
 describe('M49 Settings subscription models', () => {
   function metadata(

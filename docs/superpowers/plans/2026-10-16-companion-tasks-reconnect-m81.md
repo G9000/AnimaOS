@@ -81,3 +81,9 @@ Prettier-check touched source/docs and run scoped docs consistency. No Rust/SDK 
 5. Ruling: pass required connectivity through both existing callers and limit hub changes to Tasks — a component-only fix misses actual daily-use routes — cost if wrong: one entry point remains unsafe or unrelated screens regress. Own only the ten listed source/test candidates; publish only actual changes.
 
 Ruling: reuse the integrated Rust revision API and local M78 lifecycle pattern — a new store/SDK or general offline framework adds cost without closing this UI defect — cost if wrong: any required contract expansion must be recorded and reviewed before widening scope.
+
+## Recorded outcome
+
+M81 makes both owner Tasks entry points observe connection state. Offline controls dispatch nothing, reconnect revalidates saved tasks and obsolete results cannot become current state. Same-agent drafts survive read-only; changed revisions require explicit discard before loading saved tasks. Submitted saves retain their original target/revision once, with pending ownership and no automatic retry. Fresh web 1579 tests/122 files, typecheck/build, touched formatting/docs and one final web/SDK-contract review pass.
+
+Local deterministic owner-console evidence only. No Rust, SDK, schema, dependency, provider/account/device/ordinary-service, database or container change and no new actual acceptance case. This does not establish model planning quality, external delivery, target-host uptime or full Hermes parity. Historical case/source/Git/runtime versions remain unchanged.

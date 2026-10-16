@@ -850,6 +850,64 @@ afterEach(() => {
 });
 
 describe('ViewHarness workspace controller', () => {
+  it('passes an initially offline connection into Settings Tasks without a GET', async () => {
+    const nova = snapshot('agent-main', 'Nova', 1);
+    vi.spyOn(daemon, 'health').mockRejectedValue(new Error('offline'));
+    vi.spyOn(daemon, 'listAgents').mockResolvedValue({ agents: [nova] });
+    mockProviders();
+    render(<ViewHarness />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'tasks' }));
+    const refresh = screen.getByRole('button', { name: 'Refresh tasks' });
+    expect(refresh).toBeDisabled();
+    fireEvent.click(refresh);
+    expect(daemon.agentTasks).not.toHaveBeenCalled();
+  });
+
+  it('passes bootstrap disconnect and recovery into the existing Settings Tasks editor', async () => {
+    const nova = snapshot('agent-main', 'Nova', 1);
+    vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+    const listAgents = vi
+      .spyOn(daemon, 'listAgents')
+      .mockResolvedValue({ agents: [nova] });
+    const tasks = vi.mocked(daemon.agentTasks).mockResolvedValue({
+      revision: '1',
+      tasks: [
+        { content: 'Saved task', activeForm: 'Saved task', status: 'pending' },
+      ],
+    });
+    const save = vi.spyOn(daemon, 'updateAgentTasks');
+    mockProviders();
+    const poll = capturePollTimer();
+    render(<ViewHarness />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'tasks' }));
+    const task = await screen.findByLabelText('Task 1');
+    fireEvent.change(task, { target: { value: 'Keep this Tasks draft' } });
+    const offline = deferred<Awaited<ReturnType<typeof daemon.listAgents>>>();
+    listAgents.mockReturnValueOnce(offline.promise);
+    act(() => poll());
+    await act(async () => offline.reject(new Error('Disconnected')));
+    expect(screen.getByLabelText('Task 1')).toBe(task);
+    expect(task).toHaveValue('Keep this Tasks draft');
+    expect(task).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Refresh tasks' }),
+    ).toBeDisabled();
+    expect(tasks).toHaveBeenCalledTimes(1);
+
+    const recovery = deferred<Awaited<ReturnType<typeof daemon.listAgents>>>();
+    listAgents.mockReturnValueOnce(recovery.promise);
+    act(() => poll());
+    await act(async () => recovery.resolve({ agents: [nova] }));
+    await waitFor(() => expect(task).toBeEnabled());
+    expect(screen.getByLabelText('Task 1')).toBe(task);
+    expect(task).toHaveValue('Keep this Tasks draft');
+    expect(tasks).toHaveBeenCalledTimes(2);
+    expect(tasks).toHaveBeenLastCalledWith('agent-main');
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it('uploads a workspace avatar and refreshes daemon-owned workspace state', async () => {
     const user = userEvent.setup();
     const nova = snapshot('agent-main', 'Nova', 1);
