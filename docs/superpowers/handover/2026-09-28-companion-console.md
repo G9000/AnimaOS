@@ -1,3 +1,28 @@
+# Handover: owner-configured HTTPS MCP bearer authentication (M0–M65)
+
+## Start here (2026-10-16): M64 merged partial; M65 bearer feature bound
+
+Continue g9000/companion-mcp-bearer-m65 from M64/PR70 main76ef520da769d950c04cbed165758078eda69f55,
+source14c0764c4e7e38a87486b71ea032b0fae0c0ab46, exact treebbdf79dcdb3aa68d7935d5c36d84518a78577f42.
+M64 native/worker gates passed; real public browser acceptance NOT RUN after
+independent source heading precondition failed. No DNS metadata/pin/browser release.
+M52 strict quality PARTIAL and consumed M47/M52/four failed M61 cases unchanged.
+
+The [M65 plan](../plans/2026-10-16-companion-mcp-bearer-m65.md) adds explicit owner
+static bearer credentials for HTTPS MCP using separate OS-vault slots and opaque
+endpoint-bound references; versioned mutations retire physical generations.
+SDK/console never return or persist the secret; no OAuth/arbitrary headers/stdio
+auth or real keyring/account/remote MCP release. Publish plan before native work,
+freeze DTOs before Sol SDK/web, one native batch/final web review/fix wave/gates.
+
+Resume .superpowers/sdd/2026-10-16-companion-mcp-bearer-m65/progress.md. Root commands/
+fmt/Git; Cargo CARGO_INCREMENTAL=0/jobs1/threads2 serialized. Explicit unsigned
+commit/push/PR/attach/standing merge, exact tree/hash proof; never stage nx.json/
+anima.yaml/.superpowers. No stash/reset/restore/path checkout/worktree or actual
+profiles/providers/daemons/devices/DB servers/containers/deployments.
+
+## Historical M64 partial handover
+
 # Handover: public browser preparation partial; authenticated MCP next (M0–M64)
 
 ## Start here (2026-10-16): M64 source-only gates pass; public case NOT RUN
