@@ -445,3 +445,340 @@ async fn a_restart_during_run_now_disables_the_automation_and_records_a_manual_f
     assert!(fires[0].manual);
     assert_eq!(fires[0].outcome, ScheduleOutcomeStatus::Failed);
 }
+
+fn m79_at(utc: &str) -> u64 {
+    chrono::DateTime::parse_from_rfc3339(utc)
+        .unwrap()
+        .timestamp_millis() as u64
+}
+
+fn m79_hours(start: &str, end: &str, days: &[u8], zone: &str) -> ActiveHours {
+    ActiveHours {
+        start: start.into(),
+        end: end.into(),
+        days: days.to_vec(),
+        time_zone: zone.into(),
+    }
+}
+
+fn m79_record(agent: &str, id: &str, due: u64, hours: ActiveHours) -> ScheduledPromptRecord {
+    let mut record = test_automation(agent, id);
+    record.trigger = ScheduleTrigger::Interval {
+        interval_ms: 30 * 60_000,
+    };
+    record.next_due_at_ms = due;
+    record.active_hours = Some(hours);
+    record
+}
+
+// Own each join until it settles. Expected RED never waits for a model-entry
+// notification: permits are supplied before admission, including zero-work cases.
+async fn m79_settle_jobs(service: &SchedulerService) {
+    let jobs = std::mem::take(&mut *service.inner.jobs.lock().await);
+    let mut settled = true;
+    for (_, mut job) in jobs {
+        match tokio::time::timeout(std::time::Duration::from_secs(10), &mut job).await {
+            Ok(joined) => settled &= joined.is_ok(),
+            Err(_) => {
+                settled = false;
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    service.request_shutdown(),
+                )
+                .await;
+                job.abort();
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(5), &mut job).await;
+            }
+        }
+    }
+    assert!(
+        settled,
+        "M79 owned jobs must settle before inspecting effects"
+    );
+}
+
+async fn m79_tick(
+    service: &SchedulerService,
+    release: &Semaphore,
+    now: u64,
+) -> Result<usize, ScheduleError> {
+    release.add_permits(MAX_ACTIVE_SCHEDULES);
+    let ticking = service.clone();
+    let mut tick =
+        tokio::spawn(async move { SchedulerService::tick_inner(&ticking.inner, now).await });
+    let result = tokio::time::timeout(std::time::Duration::from_secs(10), &mut tick).await;
+    if result.is_err() {
+        tick.abort();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), &mut tick).await;
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            service.request_shutdown(),
+        )
+        .await;
+    }
+    m79_settle_jobs(service).await;
+    result
+        .expect("M79 tick must finish within its bound")
+        .expect("M79 tick task joined")
+}
+
+#[tokio::test]
+async fn m79_overdue_occurrence_waits_unchanged_until_next_opening_then_runs_once() {
+    let (service, state, agent, calls, release) = gated();
+    let due = m79_at("2026-01-05T21:30:00Z");
+    let opening = m79_at("2026-01-06T08:00:00Z");
+    let before = m79_record(
+        &agent,
+        "m79-outage",
+        due,
+        m79_hours("08:00", "22:00", &[0, 1, 2, 3, 4, 5, 6], "UTC"),
+    );
+    state
+        .write()
+        .await
+        .schedules
+        .insert(before.id.clone(), before.clone());
+    for at in [
+        m79_at("2026-01-05T23:00:00Z"),
+        m79_at("2026-01-06T07:59:00Z"),
+    ] {
+        let claimed = m79_tick(&service, &release, at).await;
+        let snapshot = state.read().await.control_plane_snapshot();
+        assert_eq!(
+            claimed.unwrap(),
+            0,
+            "outside-window automatic claim is deferred"
+        );
+        assert_eq!(
+            snapshot.schedules,
+            vec![before.clone()],
+            "every stored field is unchanged"
+        );
+        assert!(snapshot.runs.is_empty());
+        assert!(snapshot.schedule_fires.is_empty());
+        assert!(snapshot
+            .agents
+            .iter()
+            .all(|entry| entry.messages.is_empty()));
+        assert_eq!(calls.available_permits(), 0);
+    }
+    let claimed = m79_tick(&service, &release, opening).await;
+    assert_eq!(claimed.unwrap(), 1);
+    let after = state.read().await.schedules[&before.id].clone();
+    assert_eq!(after.next_due_at_ms, m79_at("2026-01-06T08:30:00Z"));
+    assert_eq!(
+        after.counters,
+        AutomationCounters {
+            runs: 1,
+            failures: 0,
+            consecutive_failures: 0
+        }
+    );
+    let fires = state.read().await.schedule_fires.for_schedule(&before.id);
+    assert_eq!(fires.len(), 1);
+    assert_eq!(fires[0].id, format!("schedule:{}:{opening}", before.id));
+    assert_eq!(fires[0].fired_at_ms, opening);
+    assert_eq!(fires[0].outcome, ScheduleOutcomeStatus::Silent);
+    assert!(!fires[0].manual);
+    assert!(fires[0].run_id.is_some());
+    assert_eq!(calls.available_permits(), 1);
+    let repeat = m79_tick(&service, &release, opening).await;
+    assert_eq!(repeat.unwrap(), 0);
+    assert_eq!(state.read().await.schedules[&before.id], after);
+    assert_eq!(
+        state.read().await.schedule_fires.for_schedule(&before.id),
+        fires
+    );
+    assert_eq!(calls.available_permits(), 1);
+}
+
+#[tokio::test]
+async fn m79_interval_daily_and_cron_defer_at_exclusive_end_and_admit_at_inclusive_start() {
+    let due = m79_at("2026-01-05T21:30:00Z");
+    let close = m79_at("2026-01-05T22:00:00Z");
+    let opening = m79_at("2026-01-06T08:00:00Z");
+    for (trigger, expected_next) in [
+        (
+            ScheduleTrigger::Interval {
+                interval_ms: 30 * 60_000,
+            },
+            m79_at("2026-01-06T08:30:00Z"),
+        ),
+        (
+            ScheduleTrigger::Daily {
+                hour: 21,
+                minute: 30,
+                time_zone: "UTC".into(),
+            },
+            m79_at("2026-01-06T21:30:00Z"),
+        ),
+        (
+            ScheduleTrigger::Cron {
+                expression: "30 21 * * *".into(),
+                time_zone: "UTC".into(),
+            },
+            m79_at("2026-01-06T21:30:00Z"),
+        ),
+    ] {
+        let (service, state, agent, calls, release) = gated();
+        let mut before = m79_record(
+            &agent,
+            "m79-boundary",
+            due,
+            m79_hours("08:00", "22:00", &[0, 1, 2, 3, 4, 5, 6], "UTC"),
+        );
+        before.trigger = trigger;
+        state
+            .write()
+            .await
+            .schedules
+            .insert(before.id.clone(), before.clone());
+        let closed_claim = m79_tick(&service, &release, close).await;
+        assert_eq!(closed_claim.unwrap(), 0, "{:?}", before.trigger);
+        assert_eq!(state.read().await.schedules[&before.id], before);
+        assert_eq!(calls.available_permits(), 0);
+        let open_claim = m79_tick(&service, &release, opening).await;
+        assert_eq!(open_claim.unwrap(), 1, "{:?}", before.trigger);
+        assert_eq!(
+            state.read().await.schedules[&before.id].next_due_at_ms,
+            expected_next
+        );
+        assert_eq!(
+            state
+                .read()
+                .await
+                .schedule_fires
+                .for_schedule(&before.id)
+                .len(),
+            1
+        );
+        let repeated = m79_tick(&service, &release, opening).await;
+        assert_eq!(repeated.unwrap(), 0);
+        assert_eq!(calls.available_permits(), 1);
+    }
+}
+
+#[tokio::test]
+async fn m79_automatic_admission_uses_existing_overnight_weekday_and_dst_windows() {
+    let overnight = m79_hours("22:00", "06:00", &[5], "UTC");
+    let weekdays = m79_hours("08:00", "22:00", &[1, 2, 3, 4, 5], "UTC");
+    let new_york = m79_hours("01:00", "04:00", &[0, 1, 2, 3, 4, 5, 6], "America/New_York");
+    for (hours, instant, expected) in [
+        (overnight.clone(), "2026-01-09T22:00:00Z", true),
+        (overnight.clone(), "2026-01-10T05:59:00Z", true),
+        (overnight.clone(), "2026-01-10T06:00:00Z", false),
+        (overnight, "2026-01-10T22:00:00Z", false),
+        (weekdays.clone(), "2026-01-10T08:00:00Z", false),
+        (weekdays.clone(), "2026-01-11T08:00:00Z", false),
+        (weekdays, "2026-01-12T08:00:00Z", true),
+        (new_york.clone(), "2026-03-08T06:59:00Z", true),
+        (new_york.clone(), "2026-03-08T07:00:00Z", true),
+        (new_york, "2026-03-08T08:00:00Z", false),
+    ] {
+        let at = m79_at(instant);
+        assert_eq!(
+            timing::ActiveWindow::parse(&hours).unwrap().contains(at),
+            expected,
+            "declared existing wall-clock rule: {instant}"
+        );
+        let (service, state, agent, calls, release) = gated();
+        let before = m79_record(&agent, "m79-local-clock", at - 60_000, hours);
+        state
+            .write()
+            .await
+            .schedules
+            .insert(before.id.clone(), before.clone());
+        let claimed = m79_tick(&service, &release, at).await;
+        assert_eq!(claimed.unwrap(), usize::from(expected), "{instant}");
+        assert_eq!(
+            calls.available_permits(),
+            usize::from(expected),
+            "{instant}"
+        );
+        let snapshot = state.read().await.control_plane_snapshot();
+        assert_eq!(
+            snapshot.schedule_fires.len(),
+            usize::from(expected),
+            "{instant}"
+        );
+        if !expected {
+            assert_eq!(snapshot.schedules, vec![before], "{instant}");
+            assert!(snapshot.runs.is_empty());
+            assert!(snapshot
+                .agents
+                .iter()
+                .all(|entry| entry.messages.is_empty()));
+        }
+    }
+}
+
+#[tokio::test]
+async fn m79_skipped_and_malformed_windows_do_not_starve_an_eligible_peer() {
+    for malformed in [false, true] {
+        let (service, state, agent, calls, release) = gated();
+        let at = m79_at("2026-01-05T23:00:00Z");
+        let mut blocked = m79_record(
+            &agent,
+            "m79-first",
+            at - 90 * 60_000,
+            m79_hours("08:00", "22:00", &[0, 1, 2, 3, 4, 5, 6], "UTC"),
+        );
+        if malformed {
+            blocked.active_hours.as_mut().unwrap().start = "invalid".into();
+        }
+        let mut peer = test_automation(&agent, "m79-peer");
+        peer.next_due_at_ms = blocked.next_due_at_ms + 1;
+        {
+            let mut guard = state.write().await;
+            guard.schedules.insert(blocked.id.clone(), blocked.clone());
+            guard.schedules.insert(peer.id.clone(), peer.clone());
+        }
+        let claimed = m79_tick(&service, &release, at).await;
+        assert_eq!(claimed.unwrap(), 1, "malformed={malformed}");
+        assert_eq!(calls.available_permits(), 1);
+        let guard = state.read().await;
+        let mut expected = blocked.clone();
+        if malformed {
+            expected.enabled = false;
+            expected.updated_at_ms = at;
+        }
+        assert_eq!(guard.schedules[&blocked.id], expected);
+        assert!(guard.schedule_fires.for_schedule(&blocked.id).is_empty());
+        let fires = guard.schedule_fires.for_schedule(&peer.id);
+        assert_eq!(fires.len(), 1);
+        assert_eq!(fires[0].outcome, ScheduleOutcomeStatus::Silent);
+        assert_eq!(guard.schedules[&peer.id].counters.runs, 1);
+    }
+}
+
+#[tokio::test]
+async fn m79_explicit_manual_run_now_still_overrides_active_hours_without_moving_due() {
+    let (service, state, agent, calls, release) = gated();
+    let at = m79_at("2026-01-05T23:00:00Z");
+    let before = m79_record(
+        &agent,
+        "m79-manual",
+        m79_at("2026-01-06T08:00:00Z"),
+        m79_hours("08:00", "22:00", &[0, 1, 2, 3, 4, 5, 6], "UTC"),
+    );
+    state
+        .write()
+        .await
+        .schedules
+        .insert(before.id.clone(), before.clone());
+    release.add_permits(1);
+    let claimed = run_now_inner(&service.inner, &agent, &before.id, at).await;
+    m79_settle_jobs(&service).await;
+    assert!(claimed.unwrap().last_fired.unwrap().manual);
+    assert_eq!(calls.available_permits(), 1);
+    let guard = state.read().await;
+    let after = &guard.schedules[&before.id];
+    assert_eq!(after.next_due_at_ms, before.next_due_at_ms);
+    assert_eq!(after.enabled, before.enabled);
+    assert_eq!(after.counters.runs, 1);
+    let fires = guard.schedule_fires.for_schedule(&before.id);
+    assert_eq!(fires.len(), 1);
+    assert!(fires[0].manual);
+    assert_eq!(fires[0].fired_at_ms, at);
+    assert_eq!(fires[0].outcome, ScheduleOutcomeStatus::Silent);
+}

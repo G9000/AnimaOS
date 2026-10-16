@@ -87,3 +87,9 @@ Use bounded representative boundary tables for interval/daily/cron, overnight,
 weekday/weekend and one DST transition. Pre-release fake model permits and await
 owned jobs before assertions so a failing RED cannot strand a fake task. No
 actual service, model provider, account, device, database or container activation.
+
+## Recorded outcome
+
+M79 makes automatic overdue recovery respect the owner's active hours at claim admission. An occurrence due at21:30 with an08:00–22:00 window stays unclaimed and unchanged at23:00, then runs once at a permitted opening through the existing skip-missed planner. Explicit manual Run now, malformed-record error isolation and already-claimed work retain their existing behavior. Controlled-clock regressions cover boundary, overnight/weekend/DST, trigger, peer and manual paths. Fresh Rust 2954 passed/29 ignored across 46 suites, lint/build/format, docs and one daemon batch review pass.
+
+Deterministic native scheduler evidence only. No web, SDK, schema, dependency, timing API, real provider/account/device/service, database or container change and no new actual acceptance case. This governs automatic claim admission at the supplied tick time; it does not stop already-claimed work or guarantee every later effect finishes inside the window. Broader recurrence/target-host/external-effect acceptance and full Hermes parity remain open. Historical case/source/Git evidence and the original M77 test executable remain exact in version archives.
