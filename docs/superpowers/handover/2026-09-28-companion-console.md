@@ -1,6 +1,33 @@
+# Handover: M75 truthful capability inventory
+
+## Start here (2026-10-16): M74 merged and accepted; execute M75
+
+M74 PR80 merged71787ee6b19460e522fe972348717d0fea7c1afa,
+tree a17faae0b70f2dc6e02136d65bd937c741ef1566. Full strict isolated Files browser
+case2de6769f-ecbe-4969-862c-d004469a5dcf PASSED14.391s: exact84byte report saved,
+singlepage/3orderedGET/post-context/final witnesses pass,11knownretired/active0/errors0/
+portsfree.34guard/10admission/18profile/47policy/65console7liveskips/typecheck pass.
+OldM69-M73 cases stay immutable, with their original outcomes.
+
+Continue g9000/companion-capability-inventory-m75. Read
+[M75 plan](../plans/2026-10-16-companion-capability-inventory-m75.md), then AGENTS.md.
+Resume .superpowers/sdd/2026-10-16-companion-capability-inventory-m75/progress.md.
+Existing GET/api/capabilities wrongly says implemented voice/documents/bundles are
+all planned/unavailable. Correct bounded implementation metadata and SDK/browser/
+documents categories; show partial/planned/unknown honestly in existing screen.
+No new endpoint, health probe, readiness claim, grant, account or activation action.
+Meaningful native/web RED before implementation, batched reviews/one fix wave/gates.
+
+Before rebuilds archive old webdist bytes for historical closure provenance; use
+separate Rust validation target so pinned old executable and normal services stay
+untouched. No actual runtime case planned. Standing Codex delegation/unsigned commits/
+merge-and-continue apply. Cargo incremental0/jobs1/threads2; explicit stage only,
+never nx.json/anima.yaml/.superpowers; no stash/reset/restore/pathcheckout/worktree.
+No ordinary service/profile/provider/model/account/DB/container/Docker55432 activity.
+
 # Handover: M74 retained-handle retirement; browser save ACCEPTED
 
-## Start here (2026-10-16): publish M74 and continue selected parity
+## Historical M74 settled handover
 
 Offline paired-runtime admission10 passed; Guard 34, profile 18, policy 47 and offline console gates/typecheck passed. One ownership review, one final E2E review, one combined fix wave and mechanical case reuse are recorded. Fresh case 2de6769f-ecbe-4969-862c-d004469a5dcf completed in 14.391s: browser save ACCEPTED, 1 saved reports, 11 known identities retired, 0 discovery gaps covered by zero-error Job drain, active count zero before close, ports free, stable private profile and exact 84-byte source preserved. The installed engine1.59.1/headless-shell1217 was used with the original single-page, route/save and cleanup assertions. Old M72 remains PARTIAL; no cause is inferred for its second page. M73 browser flow passed but its overall supervisor case remains historical PARTIAL; this new case never regrades it. Descendant image5/31 now requires a confirmed signaled observation on the same retained handle; still-active, unknown-error and primary-image paths remain strict.
 
