@@ -67,9 +67,14 @@ class FakeWinAPI:
         self.job_active = 0
         self.query_error = None
         self.query_error_class = 1
+        self.member_query_count = 0
+        self.member_snapshots = None
+        self.member_query_errors = {}
+        self.member_reported_counts = {}
         self.terminate_job_error = None
         self.opened = {}
         self.open_count = 0
+        self.open_errors = {}
         self.closed = []
 
     @staticmethod
@@ -113,17 +118,29 @@ class FakeWinAPI:
 
     def QueryInformationJobObject(self, handle, info_class, info, _size, _returned):
         self.events.append(("query-job", handle, info_class))
+        if info_class == 3:
+            self.member_query_count += 1
+            if self.member_query_count in self.member_query_errors:
+                C.set_last_error(self.member_query_errors[self.member_query_count])
+                return 0
         if self.query_error is not None and info_class == self.query_error_class:
             C.set_last_error(self.query_error)
             return 0
         if info_class == 3:  # JOBOBJECT_BASIC_PROCESS_ID_LIST
+            members = self.job_members
+            if self.member_snapshots is not None:
+                index = min(self.member_query_count - 1, len(self.member_snapshots) - 1)
+                members = self.member_snapshots[index]
+            reported_count = self.member_reported_counts.get(
+                self.member_query_count, len(members)
+            )
             base = C.cast(info, C.POINTER(guard.W.DWORD))
-            base[0] = len(self.job_members)
-            base[1] = len(self.job_members)
+            base[0] = reported_count
+            base[1] = reported_count
             alignment = C.alignment(guard.ULONG_PTR)
             offset = (2 * C.sizeof(guard.W.DWORD) + alignment - 1) // alignment * alignment
             ids = C.cast(C.addressof(info._obj) + offset, C.POINTER(guard.ULONG_PTR))
-            for index, pid in enumerate(self.job_members):
+            for index, pid in enumerate(members[:128]):
                 ids[index] = pid
         elif info_class == 1:  # JOBOBJECT_BASIC_ACCOUNTING_INFORMATION
             self._pointer(info, BASIC_ACCOUNTING).ActiveProcesses = self.job_active
@@ -137,6 +154,9 @@ class FakeWinAPI:
     def OpenProcess(self, _access, _inherit, pid):
         self.events.append(("open-process", pid))
         self.open_count += 1
+        if pid in self.open_errors:
+            C.set_last_error(self.open_errors[pid])
+            return 0
         handle = 1000 + self.open_count
         self.opened.setdefault(pid, []).append(handle)
         if self.open_wait_state is not None:
@@ -373,6 +393,217 @@ class GuardJobCaptureTests(unittest.TestCase):
         self.assertEqual(job.processes[1].identity["creationTime100ns"], 78)
         self.assertNotEqual(job.processes[0].handle, job.processes[1].handle)
         self.assertEqual(api.closed.count(original.handle), 0)
+
+    def test_m72_open_error87_is_gap_after_one_same_job_requery_confirms_absence(self):
+        api = FakeWinAPI()
+        api.job_members = [568]
+        api.member_snapshots = [[568], []]
+        api.open_errors[568] = 87
+        job = guard.OwnedJob(api=api)
+
+        # RED: current capture raises "job member open" instead of re-querying.
+        job.capture_descendants()
+
+        self.assertEqual(api.member_query_count, 2)
+        self.assertEqual(api.open_count, 1, "Never retry OpenProcess")
+        self.assertEqual(job.processes, [], "A discovery gap is not an owned process")
+        self.assertEqual(
+            job.discovery_gaps,
+            [{
+                "pid": 568,
+                "openError": 87,
+                "absentOnRequery": True,
+                "image": None,
+                "creationTime100ns": None,
+                "individualRetirement": "unknown",
+                "coveredByJobDrain": False,
+            }],
+        )
+
+    def test_m72_error87_with_pid_still_present_fails_without_retry(self):
+        api = FakeWinAPI()
+        api.job_members = [568]
+        api.member_snapshots = [[568], [568]]
+        api.open_errors[568] = 87
+        job = guard.OwnedJob(api=api)
+
+        with self.assertRaises(guard.GuardError):
+            job.capture_descendants()
+
+        self.assertEqual(api.member_query_count, 2)
+        self.assertEqual(api.open_count, 1)
+        self.assertEqual(job.processes, [])
+
+    def test_m72_non87_open_error_fails_without_requery(self):
+        api = FakeWinAPI()
+        api.job_members = [568]
+        api.open_errors[568] = 5
+        job = guard.OwnedJob(api=api)
+
+        with self.assertRaises(guard.GuardError) as caught:
+            job.capture_descendants()
+
+        self.assertEqual(api.member_query_count, 1)
+        self.assertEqual(api.open_count, 1)
+        self.assertEqual(caught.exception.diagnostic["win32Error"], 5)
+
+    def test_m72_requery_failure_keeps_both_native_errors(self):
+        api = FakeWinAPI()
+        api.job_members = [568]
+        api.member_snapshots = [[568], []]
+        api.open_errors[568] = 87
+        api.member_query_errors[2] = 1460
+        job = guard.OwnedJob(api=api)
+
+        with self.assertRaises(guard.GuardError) as caught:
+            job.capture_descendants()
+
+        self.assertEqual(api.member_query_count, 2)
+        self.assertEqual(api.open_count, 1)
+        self.assertEqual(caught.exception.diagnostic["win32Error"], 1460)
+        self.assertEqual(caught.exception.diagnostic["originalOpenError"], 87)
+
+    def test_m72_oversized_requery_fails_and_preserves_open_error_context(self):
+        api = FakeWinAPI()
+        api.job_members = [568]
+        api.member_snapshots = [[568], []]
+        api.member_reported_counts[2] = 129
+        api.open_errors[568] = 87
+        job = guard.OwnedJob(api=api)
+
+        with self.assertRaises(guard.GuardError) as caught:
+            job.capture_descendants()
+
+        self.assertEqual(api.member_query_count, 2)
+        self.assertEqual(api.open_count, 1)
+        self.assertEqual(caught.exception.diagnostic["originalOpenError"], 87)
+        self.assertIn("bound", str(caught.exception).lower())
+
+    def test_m72_discovery_gap_bound_rejects_the_129th_gap(self):
+        api = FakeWinAPI()
+        first_members = list(range(1, 129))
+        api.job_members = first_members
+        api.open_errors = {pid: 87 for pid in first_members + [129]}
+        api.member_snapshots = [first_members, *([[]] * 128), [129], []]
+        job = guard.OwnedJob(api=api)
+
+        job.capture_descendants()
+        self.assertEqual(len(job.discovery_gaps), 128)
+        self.assertEqual(job.processes, [])
+
+        with self.assertRaises(guard.GuardError):
+            job.capture_descendants()
+        self.assertEqual(len(job.discovery_gaps), 128)
+        self.assertEqual(job.processes, [])
+        self.assertEqual(api.open_count, 129)
+
+    def test_m72_gap_is_covered_only_by_zero_error_job_drain(self):
+        api = FakeWinAPI()
+        api.job_members = [568]
+        api.member_snapshots = [[568], []]
+        api.open_errors[568] = 87
+        job = guard.OwnedJob(api=api)
+        job.capture_descendants()
+        api.job_members = []
+        api.member_snapshots = None
+
+        proof = job.close(seconds=1)
+
+        self.assertTrue(proof["jobEmptyBeforeClose"])
+        self.assertEqual(proof["activeProcessesBeforeClose"], 0)
+        self.assertEqual(proof["errors"], [])
+        self.assertEqual(proof["unresolvedDiscoveryGaps"], 0)
+        self.assertTrue(proof["discoveryGaps"][0]["coveredByJobDrain"])
+
+    def test_m72_gap_stays_unresolved_when_cleanup_has_an_error(self):
+        api = FakeWinAPI()
+        api.job_members = [568]
+        api.member_snapshots = [[568], []]
+        api.open_errors[568] = 87
+        job = guard.OwnedJob(api=api)
+        job.capture_descendants()
+        api.job_members = []
+        api.member_snapshots = None
+        api.query_error = 1460
+
+        proof = job.close(seconds=1)
+
+        self.assertTrue(proof["errors"])
+        self.assertEqual(proof["unresolvedDiscoveryGaps"], 1)
+        self.assertFalse(proof["discoveryGaps"][0]["coveredByJobDrain"])
+
+    def test_m72_repeated_pid_gaps_stay_distinct_and_keep_open_error(self):
+        api = FakeWinAPI()
+        api.member_snapshots = [[568], [], [568], []]
+        api.open_errors[568] = 87
+        query = api.QueryInformationJobObject
+
+        def clobber_last_error(*args):
+            result = query(*args)
+            if result:
+                C.set_last_error(123)
+            return result
+
+        api.QueryInformationJobObject = clobber_last_error
+        job = guard.OwnedJob(api=api)
+        job.capture_descendants()
+        job.capture_descendants()
+        self.assertEqual(api.member_query_count, 4)
+        self.assertEqual(api.open_count, 2)
+        self.assertEqual(api.closed, [])
+        self.assertEqual(job.processes, [])
+        self.assertEqual(len(job.discovery_gaps), 2)
+        self.assertIsNot(job.discovery_gaps[0], job.discovery_gaps[1])
+        self.assertTrue(all(g["openError"] == 87 for g in job.discovery_gaps))
+
+    def test_m72_gap_coverage_rejects_final_cleanup_failures(self):
+        for failure in ("terminate", "deadline", "job-close", "process-close", "failed-log", "truncated-log"):
+            with self.subTest(failure=failure):
+                api = FakeWinAPI()
+                api.member_snapshots = [[568], []]
+                api.open_errors[568] = 87
+                job = guard.OwnedJob(api=api)
+                job.capture_descendants()
+                api.member_snapshots = None
+                if failure == "terminate":
+                    api.terminate_job_error = 5
+                elif failure == "deadline":
+                    def retain_active(handle, code):
+                        api.job_active = 1
+                        return 1
+                    api.TerminateJobObject = retain_active
+                elif failure == "job-close":
+                    close = api.CloseHandle
+                    def failed_close(handle):
+                        close(handle)
+                        if handle == 900:
+                            C.set_last_error(5)
+                            return 0
+                        return 1
+                    api.CloseHandle = failed_close
+                elif failure == "process-close":
+                    process = FakeProcess(api.events)
+                    def failed_process_close():
+                        raise guard.GuardError("synthetic process close", win32_error=5)
+                    process.close = failed_process_close
+                    job.processes.append(process)
+                else:
+                    job.logs.append({"file": "synthetic", "failed": failure == "failed-log",
+                                     "truncated": failure == "truncated-log"})
+                ticks = [0.0]
+                def monotonic():
+                    ticks[0] += 0.01
+                    return ticks[0]
+                with patch.object(guard.time, "monotonic", side_effect=monotonic):
+                    with patch.object(guard.time, "sleep", return_value=None):
+                        proof = job.close(seconds=0.025)
+                self.assertEqual(proof["unresolvedDiscoveryGaps"], 1)
+                self.assertFalse(proof["discoveryGaps"][0]["coveredByJobDrain"])
+                if failure in ("job-close", "process-close", "failed-log", "truncated-log"):
+                    self.assertIs(proof["jobEmptyBeforeClose"], True)
+                    self.assertEqual(proof["activeProcessesBeforeClose"], 0)
+                if failure in ("job-close", "process-close"):
+                    self.assertTrue(proof["errors"])
 
 
 class GuardJobCleanupTests(unittest.TestCase):

@@ -1,6 +1,26 @@
+# Handover: M72 discovery gaps; browser save PARTIAL
+
+## Start here (2026-10-16): publish M72 and continue selected parity
+
+Guard 28, profile 18, policy 47 and offline console gates/typecheck passed. One ownership review, one final E2E review, one combined fix wave and mechanical case reuse are recorded. Fresh case e73821b6-dad1-41c7-96d3-33fe497f76b0 completed in 17.312s: browser save PARTIAL, 1 saved reports, 20 known identities retired, 0 discovery gaps covered by zero-error Job drain, active count zero before close, ports free, stable private profile and exact 84-byte source preserved. The browser passed the three ordered real Files GETs, explicit click, one download event, filename/blob URL and exact saved/source byte checks, then failed the single-context-page assertion at spec line414: a second page was present. Its cause is unknown. The full browser case remains PARTIAL; it was not retried or regraded. No discovery gap occurred in this actual case; error87 coverage is deterministic unit evidence.
+
+Resume .superpowers/sdd/2026-10-16-companion-discovery-gap-m72/progress.md.
+Seal and preserve case/release/results/logs plus eight raw source snapshots, then
+docs/format/explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof.
+Pin committed source versions. Never replay or regrade a consumed case. M71 raw
+snapshots/Git blobs and M61/M69/M70 one-offs remain exact. Reusable guard/tests
+may advance normally with historical version provenance.
+
+Next use the parity roadmap to choose a concrete remaining agent-loop gap; avoid
+claiming synthetic browser evidence proves model reasoning or full Hermes parity.
+Standing merge-and-continue, Codex delegation and isolated synthetic testing apply.
+No ordinary services/profiles/accounts/providers/models/databases/containers or
+Docker55432. Cargo incremental0/jobs1/threads2 if needed; explicit staging only,
+never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+
 # Handover: M72 bounded discovery-gap repair
 
-## Start here (2026-10-16): M71 merged; execute M72
+## Historical M72 bound-plan handover
 
 M71 PR 77 merged at ca733936e55833a4e1859f6d72f2250d320f98f3,
 tree f6cb62df2737af994f50b5a2e56373ea100ba4d2. Its browser-save remains PARTIAL:
