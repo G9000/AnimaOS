@@ -1,6 +1,27 @@
+# Handover: M78 Memory reconnect freshness
+
+## Start here (2026-10-16): M77 merged; execute M78
+
+M77 PR83 merged at 0b892a405bd43d7eeedaf2a20246e12ef084a415; exact tested tree 6ea9ac52d1e856054a440ae8fbdd4368e96ddebb.
+Its one consumed static-page outcome and raw/Git provenance are immutable; read its
+recorded result before making any broader browser claim. M76 automation review,
+M75 capability inventory and M74 strict Files save remain settled.
+
+Continue g9000/companion-memory-reconnect-m78. Read the
+[M78 plan](../plans/2026-10-16-companion-memory-reconnect-m78.md), then AGENTS.md.
+Resume .superpowers/sdd/2026-10-16-companion-memory-reconnect-m78/progress.md.
+Use deferred tests first, hook-only implementation, one final web/SDK-contract
+review, one fix wave, full web test/typecheck/build/format/docs, explicit unsigned
+commit/push/PR/attach/standing merge/exact-tree proof. No new actual case.
+Preserve submitted edits/deletes exactly once and never retry them automatically.
+Standing Codex delegation, unsigned per-command commits and merge-and-continue apply.
+No ordinary services/profiles/accounts/providers/devices/DBs/containers/Docker55432.
+Never stage nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+Cargo incremental0/jobs1/threads2 and serialized if later needed; none planned here.
+
 # Handover: M77 public-page case ACCEPTED
 
-## Start here (2026-10-16): publish M77 and continue selected parity
+## Historical M77 settled handover
 
 M77 adds a separate ignored Windows public-page driver and offline contract/oracle controls. Fresh Rust 2949 passed/29 ignored across 46 suites, lint/build/format and 21 supervisor tests pass. One native batch review, one final supervisor review and one combined fix wave are recorded. The single case f9e26a1d-c9a5-4dbf-a98d-57bf9ca469fd is ACCEPTED. It matched the exact H1 and whole normalized 3568-byte paragraph digest through ordinary BrowserPort approvals, two actions/one request, zero model calls, reported shortening=True and omittedNodes=2, and retired 8 known processes with Job active0/errors0.
 
