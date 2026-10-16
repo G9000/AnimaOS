@@ -321,3 +321,9 @@ authoritative or create a persistent artifact. See [document/report use](documen
 After reconnecting or switching companions, Memory shows Loading while it reads fresh data. Old editable rows stay hidden until that read settles. A request finishing from the previous view cannot replace the current rows or evidence.
 
 An edit or delete already submitted may still reach the daemon if you disconnect. The console does not retry it automatically. Reconnect and inspect the fresh list before taking another action; use Refresh when needed.
+
+## Automations after an outage
+
+If the daemon comes back outside an automation’s allowed hours, overdue automatic work waits for the next permitted window. It keeps the pending occurrence and uses the existing skip-missed policy when it runs. Repeated ticks do not create a catch-up burst.
+
+**Run now** remains an explicit manual action and can run outside the window. Work already claimed continues through its normal lifecycle; closing the active-hours window does not stop an in-progress job.

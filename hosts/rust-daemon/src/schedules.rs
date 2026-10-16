@@ -713,6 +713,14 @@ async fn claim_due(
             now,
         ) {
             Ok(next_due_at_ms) => {
+                // Planning validates stored windows/triggers through the existing
+                // rejection path. An overdue occurrence still waits for its
+                // current active window before any claim is recorded.
+                if active_window(claimed.active_hours.as_ref())?
+                    .is_some_and(|window| !window.contains(now))
+                {
+                    return Ok(None);
+                }
                 claimed.next_due_at_ms = next_due_at_ms;
                 claimed.last_fired = Some(ScheduleLastFired {
                     fired_at_ms: now,
