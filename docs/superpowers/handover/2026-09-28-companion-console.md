@@ -1,6 +1,16 @@
+# Handover: M84 model-driven cited research
+
+## Start here (2026-10-16): M83 merged; execute M84
+
+M83 PR89 merged at fee5e00c510bd9a89d779cb3153a3392c94e068d; native anonymous search and live/history/console source propagation passed one actual anonymous lookup with a scripted model, not general model research quality. Existing main then added onboarding workspace selection/resume at9e8caa3c0c2bc9bb868924cc52c66b4ac0df3a50; preserve it. Branch g9000/companion-research-acceptance-m84 starts from that newer main.
+
+Continue the [M84 plan](../plans/2026-10-16-companion-research-acceptance-m84.md), then AGENTS.md; exact resume is .superpowers/sdd/2026-10-16-companion-research-acceptance-m84/progress.md. Add only the narrow public oracle/tests/brief first. Root alone releases current catalogue selection and one actual subscription research task after deterministic gates. Search official sources, read selected pages, save a cited report, require read-back before final, and check quiet same-store recovery. No helpers, retry/fallback, copied answers, model steering or old-case replay. M52 remains PARTIAL and M83's original failure/success stay unchanged.
+
+Root uses only the existing app-owned subscription resolver through normal routes, with isolated synthetic workspace/store/processes. Never read/export/copy raw credentials or ordinary profiles, start login, change account or touch normal services/connectors/DBs/containers/Docker55432. Existing finite model settings are not a hard billing cap. Preserve unrelated generated Astro settings, nx.json, anima.yaml and uploads. Explicit stage paths only, never those files or .superpowers. No stash/reset/restore/path checkout/worktree. Cargo incremental0/jobs1/threads2, serialized/root-only. Standing Codex delegation, unsigned per-command commits and merge-and-continue apply.
+
 # Handover: M83 web search with citations
 
-## Start here (2026-10-16): M83 search and citations accepted
+## Historical M83 settled handover
 
 M83 adds anonymous native web_search through the existing MCP transport, independent owner search/page-read grants, and bounded Search sources links across live events, snapshots, saved Tool history, SDK and console. Sources stay outside the shortened preview; reload never re-searches. Fresh Rust 2989 passed/31 ignored across 46 suites; web1648passed/1opt-in skipped; SDK203passed/3skipped. Rust lint/build, SDK/web typecheck/build, touched formatting/docs and the native plus web/SDK reviews pass.
 
