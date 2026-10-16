@@ -1,6 +1,16 @@
+# Handover: M86 coding-task and helper reliability in progress
+
+## Start here (2026-10-17): execute the bound M86 task
+
+M85 is merged in PR#91 with one actual cited research case ACCEPTED. The owner now authorizes tasks/helper reliability: one real small coding repair, independently checked files/tests/output, saved progress, quiet restart and accurate final. M86 uses a new snapshot-comparison fixture, one advisory helper, two fixed verifier commands, full native artifact read, root substance review and a five-second same-store proof. Source-only workers, root-owned commands/releases/Git; exact source/runtime/oracle freeze before one actual attempt. No production change is presumed.
+
+Read the [M86 lean plan](../plans/2026-10-17-companion-coding-reliability-m86.md), then AGENTS.md. Exact resume .superpowers/sdd/2026-10-17-companion-coding-reliability-m86/progress.md. Planner/root risks are bound; proceed tests-first public fixture/oracle and private SDK driver lanes, one batch/final SDK review/fix wave, required gates, actual outcome and publication. M52PARTIAL, M84FAIL and M85ACCEPTED remain closed and immutable. No retry, rescue, steering or historical replay.
+
+Standing Codex delegation, unsigned per-command commits and merge-and-continue apply. Explicit stage only, never nx.json/anima.yaml/.superpowers/uploads/generated Astro settings. No stash/reset/restore/path checkout/worktree. Cargo incremental0/jobs1/threads2, serialized/root-only. Isolated local testing and existing app-owned subscription resolver are authorized; no raw credential/profile copying/login/account change, ordinary service/connector/database server/container/Docker55432 action.
+
 # Handover: M85 actual cited research accepted
 
-## Start here (2026-10-17): publish M85 and use the accepted research workflow
+## Historical M85 settled handover
 
 M85 minimally parameterizes the existing offline oracle for a root-frozen simple Markdown filename and numeric stable version. Its private driver now verifies approvals from contiguous typed live events/full pending arguments, retains complete immutable decision witnesses, correlates unapproved Read arguments and refuses known-ended streams or uncorroborated competing fetches. No production runtime, SDK, web or dependency change.
 
