@@ -1,5 +1,19 @@
 # Native harness acceptance
 
+## M73 paired Chromium report-save acceptance (2026-10-16)
+
+M73 uses the already accepted installed Playwright1.59.1/Chromium headless-shell1217
+pair. Offline admission checks engine/revision/version metadata, exact canonical
+regular non-reparse executable and known SHA before release and launch. No browser
+install, executable version probe, fallback, production code or dependency change.
+
+Offline paired-runtime admission10 passed; Guard 28, profile 18, policy 47 and offline console gates/typecheck passed. One ownership review, one final E2E review, one combined fix wave and mechanical case reuse are recorded. Fresh case 615aa155-ad14-4a3c-8217-e82f28afd7b8 completed in 13.063s: browser save PARTIAL, 1 saved reports, 11 known identities retired, 0 discovery gaps covered by zero-error Job drain, active count zero before close, ports free, stable private profile and exact 84-byte source preserved. Exact browser failure logs are sealed; no retry or regrade. The installed engine1.59.1/headless-shell1217 was used with the original single-page, route/save and cleanup assertions. Old M72 remains PARTIAL; no cause is inferred for its second page. The browser test/result itself passed all strict checks, including single-page and post-context closure; overall supervisor acceptance remains PARTIAL. Its exact failure was process-image error5/PID26340 with creation134366078117796641 and initial wait258, before retaining that identity; whether the process retired during image query is unknown. Final known11 identities retired with active0/errors0. Next use deterministic tests for a same-retained-handle post-error wait; never assume an active inaccessible child is retired or weaken primary-image admission.
+
+This is synthetic owner HTTP/browser evidence, not model reasoning, report quality,
+provider readiness or complete Hermes parity. Previous M69/M70/M71/M72 failed cases,
+M64 NOT RUN and M52 PARTIAL remain unchanged. See the
+[M73 plan](../superpowers/plans/2026-10-16-companion-paired-browser-m73.md).
+
 ## M72 bounded discovery gaps and browser save (2026-10-16)
 
 The Windows acceptance guard captures exact OpenProcess error 87 and queries the
