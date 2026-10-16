@@ -1,20 +1,17 @@
 # Handover: M80 observed task revision
 
-## Start here (2026-10-16): M79 merged; execute M80
+## Start here (2026-10-16): publish M80 and continue selected parity
 
-M79 PR85 merged at ab215434df14db7da18268b7a498089aeace1028, exact tested tree 8a767aa01deff4ce69745dc03a019e466d3ad3f8.
-Its local gates and scheduler outcome are recorded in the M79 plan/ledger. M77 public-page and M74 Files cases remain settled and immutable.
+M80 requires an observed task-list revision before model-driven todo_write. A failed initial read can no longer turn into an unconditional overwrite: refusal preserves bytes and the missing baseline until an explicit successful todo_read. Ordinary missing-file empty reads, explicit owner/internal writes and stale-CAS merged recovery remain supported. Legacy swarm runs now capture their own fresh baseline before execution; failed reads still refuse. Fresh Rust 2959 passed/29 ignored across 46 suites, lint/build/format, docs, daemon review and the gate-found caller follow-up pass.
 
-Continue g9000/companion-task-revision-m80. Read the [M80 plan](../plans/2026-10-16-companion-task-revision-m80.md), then AGENTS.md.
+This is deterministic task-preservation evidence. It does not establish model planning quality, account workflows, target-host uptime or full Hermes parity. No web, SDK, schema, dependency, provider/account/device/ordinary-service, database or container change and no new actual acceptance case. Historical raw/Git/runtime evidence remains unchanged. Legacy swarm runtime identity across dispatches is unchanged; cross-dispatch task continuity is not accepted by this milestone.
+
 Resume .superpowers/sdd/2026-10-16-companion-task-revision-m80/progress.md.
-Tests first, narrow model todo-write refusal, one daemon batch review/fix wave,
-required Rust test/lint/build/format/docs, explicit unsigned commit/push/PR/attach,
-standing merge and exact-tree proof. No actual acceptance case or normal activation.
-
+The ledger records exact publication state. Finish pending docs/format/explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof before selecting another concrete gap. M79 scheduler recovery, M78 Memory freshness, M77 public page and M74 Files save remain settled. No replay or regrading of consumed cases.
 Standing Codex delegation, unsigned per-command commits and merge-and-continue apply.
-No ordinary profiles/services/providers/accounts/devices/DBs/containers/Docker55432.
+No ordinary profiles/accounts/providers/devices/services/DBs/containers/Docker55432.
 Explicit stage only; never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
-Cargo incremental0/jobs1/threads2, serialized. Preserve historical raw/Git/runtime versions.
+Cargo incremental0/jobs1/threads2, serialized; preserve unrelated edits and historical versions.
 
 # Handover: M79 automatic recovery respects active hours
 

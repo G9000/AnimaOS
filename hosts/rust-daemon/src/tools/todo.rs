@@ -52,7 +52,13 @@ pub(super) fn execute_todo_write(
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
-        match write_agent_todos(root, &agent.id, &todos, expected.as_deref()) {
+        let Some(observed_revision) = expected else {
+            return TaskResult::error(
+                "No task revision was observed for this run, so nothing was saved. Call todo_read, merge your changes into the current list, then call todo_write with the complete list.",
+                0,
+            );
+        };
+        match write_agent_todos(root, &agent.id, &todos, Some(&observed_revision)) {
             Ok(saved) => {
                 *context
                     .todo_revision
@@ -631,19 +637,254 @@ mod agent_tests {
     }
 
     #[tokio::test]
-    async fn todo_write_without_a_baseline_replaces_the_list() {
+    async fn todo_write_without_a_baseline_preserves_the_existing_list() {
         let root = temp_root("agent-todo-blind");
+        let path = agent_todo_path(Some(&root), "agent-blind").unwrap();
+        let original = br#"[
+            {"content":"Existing task","status":"pending","activeForm":"Doing existing task"}
+        ]"#;
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, original).unwrap();
+        let context = todo_context(&root);
 
         let written = execute_todo_write(
-            todo_context(&root),
+            context.clone(),
             todo_agent("agent-blind"),
             user_message(),
             write_call(&["Plan"]),
         )
         .await;
-
-        assert_eq!(written.status, TaskStatus::Success);
+        let after = fs::read(&path).unwrap();
+        let baseline = context.todo_revision.lock().unwrap().clone();
         fs::remove_dir_all(root).unwrap();
+
+        assert_eq!(written.status, TaskStatus::Error);
+        let error = written.error.unwrap();
+        assert!(error.contains("nothing was saved"), "{error}");
+        assert!(error.contains("todo_read"), "{error}");
+        assert!(
+            error.contains("merge") || error.contains("Merge"),
+            "{error}"
+        );
+        assert!(!error.starts_with(TASKS_CHANGED_PREFIX), "{error}");
+        assert_eq!(after.as_slice(), original);
+        assert_eq!(baseline, None);
+    }
+
+    #[tokio::test]
+    async fn failed_todo_read_does_not_authorize_overwriting_malformed_bytes() {
+        let root = temp_root("agent-todo-malformed");
+        let path = agent_todo_path(Some(&root), "agent-malformed").unwrap();
+        let original = b"{ unfinished tasks: \xff\r\n";
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, original).unwrap();
+        let initial = read_agent_todos(Some(&root), "agent-malformed");
+        let context = todo_context(&root).with_todo_baseline(
+            initial
+                .as_ref()
+                .ok()
+                .map(|snapshot| snapshot.revision.clone()),
+        );
+
+        let read = execute_todo_read(
+            context.clone(),
+            todo_agent("agent-malformed"),
+            user_message(),
+            ToolCall {
+                id: "todo-read".into(),
+                name: "todo_read".into(),
+                args: std::collections::BTreeMap::new(),
+            },
+        )
+        .await;
+        let after_read = fs::read(&path).unwrap();
+        let baseline_after_read = context.todo_revision.lock().unwrap().clone();
+        let written = execute_todo_write(
+            context.clone(),
+            todo_agent("agent-malformed"),
+            user_message(),
+            write_call(&["Plan"]),
+        )
+        .await;
+        let after_write = fs::read(&path).unwrap();
+        let baseline_after_write = context.todo_revision.lock().unwrap().clone();
+        fs::remove_dir_all(root).unwrap();
+
+        assert!(initial.is_err());
+        assert_eq!(read.status, TaskStatus::Error);
+        assert!(read
+            .error
+            .unwrap()
+            .starts_with("Could not decode agent tasks:"));
+        assert_eq!(after_read.as_slice(), original);
+        assert_eq!(baseline_after_read, None);
+        assert_eq!(written.status, TaskStatus::Error);
+        assert_eq!(after_write.as_slice(), original);
+        assert_eq!(baseline_after_write, None);
+    }
+
+    #[tokio::test]
+    async fn repaired_tasks_require_an_explicit_read_before_a_merged_write() {
+        let root = temp_root("agent-todo-repaired");
+        let path = agent_todo_path(Some(&root), "agent-repaired").unwrap();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, b"unfinished tasks").unwrap();
+        let initial = read_agent_todos(Some(&root), "agent-repaired");
+        let context = todo_context(&root).with_todo_baseline(
+            initial
+                .as_ref()
+                .ok()
+                .map(|snapshot| snapshot.revision.clone()),
+        );
+        let other_room_task = TodoItem {
+            content: "From room B".into(),
+            status: "pending".into(),
+            active_form: "Doing From room B".into(),
+        };
+        let repaired = write_agent_todos(
+            Some(&root),
+            "agent-repaired",
+            &[other_room_task.clone()],
+            None,
+        )
+        .unwrap();
+        let repaired_bytes = fs::read(&path).unwrap();
+
+        let refused = execute_todo_write(
+            context.clone(),
+            todo_agent("agent-repaired"),
+            user_message(),
+            write_call(&["From room A"]),
+        )
+        .await;
+        let after_refusal = fs::read(&path).unwrap();
+        let baseline_after_refusal = context.todo_revision.lock().unwrap().clone();
+        let read = execute_todo_read(
+            context.clone(),
+            todo_agent("agent-repaired"),
+            user_message(),
+            ToolCall {
+                id: "todo-read".into(),
+                name: "todo_read".into(),
+                args: std::collections::BTreeMap::new(),
+            },
+        )
+        .await;
+        let baseline_after_read = context.todo_revision.lock().unwrap().clone();
+        let merged = execute_todo_write(
+            context.clone(),
+            todo_agent("agent-repaired"),
+            user_message(),
+            write_call(&["From room B", "From room A"]),
+        )
+        .await;
+        let saved = read_agent_todos(Some(&root), "agent-repaired").unwrap();
+        let baseline_after_write = context.todo_revision.lock().unwrap().clone();
+        fs::remove_dir_all(root).unwrap();
+
+        assert!(initial.is_err());
+        assert_eq!(refused.status, TaskStatus::Error);
+        assert_eq!(after_refusal, repaired_bytes);
+        assert_eq!(baseline_after_refusal, None);
+        assert_eq!(read.status, TaskStatus::Success);
+        assert_eq!(read.data.unwrap().text, "[ ] 1. [pending] From room B");
+        assert_eq!(baseline_after_read, Some(repaired.revision));
+        assert_eq!(merged.status, TaskStatus::Success);
+        assert_eq!(saved.tasks[0], other_room_task);
+        assert_eq!(saved.tasks[1].content, "From room A");
+        assert_eq!(saved.tasks.len(), 2);
+        assert_eq!(baseline_after_write, Some(saved.revision));
+    }
+
+    #[tokio::test]
+    async fn missing_task_file_read_supplies_a_revision_for_the_first_write() {
+        let root = temp_root("agent-todo-first-read");
+        let path = agent_todo_path(Some(&root), "agent-first-read").unwrap();
+        let empty = read_agent_todos(Some(&root), "agent-first-read").unwrap();
+        let context = todo_context(&root);
+        let read = execute_todo_read(
+            context.clone(),
+            todo_agent("agent-first-read"),
+            user_message(),
+            ToolCall {
+                id: "todo-read".into(),
+                name: "todo_read".into(),
+                args: std::collections::BTreeMap::new(),
+            },
+        )
+        .await;
+        let baseline_after_read = context.todo_revision.lock().unwrap().clone();
+        let file_exists_after_read = path.exists();
+        let written = execute_todo_write(
+            context.clone(),
+            todo_agent("agent-first-read"),
+            user_message(),
+            write_call(&["Plan"]),
+        )
+        .await;
+        let saved = read_agent_todos(Some(&root), "agent-first-read").unwrap();
+        let baseline_after_write = context.todo_revision.lock().unwrap().clone();
+        fs::remove_dir_all(root).unwrap();
+
+        assert_eq!(read.status, TaskStatus::Success);
+        assert_eq!(read.data.unwrap().text, "No todos set.");
+        assert!(empty.tasks.is_empty());
+        assert_eq!(baseline_after_read, Some(empty.revision));
+        assert!(!file_exists_after_read);
+        assert_eq!(written.status, TaskStatus::Success);
+        assert_eq!(saved.tasks.len(), 1);
+        assert_eq!(saved.tasks[0].content, "Plan");
+        assert_eq!(baseline_after_write, Some(saved.revision));
+    }
+
+    #[tokio::test]
+    async fn blind_first_todo_write_does_not_create_the_task_directory() {
+        let root = temp_root("agent-todo-blind-first");
+        let context = todo_context(&root);
+        let written = execute_todo_write(
+            context.clone(),
+            todo_agent("agent-blind-first"),
+            user_message(),
+            write_call(&["Plan"]),
+        )
+        .await;
+        let task_directory_exists = root.join(TODO_DIRECTORY_NAME).exists();
+        let baseline = context.todo_revision.lock().unwrap().clone();
+        fs::remove_dir_all(root).unwrap();
+
+        assert_eq!(written.status, TaskStatus::Error);
+        assert!(!task_directory_exists);
+        assert_eq!(baseline, None);
+    }
+
+    #[test]
+    fn explicit_unconditional_agent_writer_can_replace_an_existing_list() {
+        let root = temp_root("agent-todo-unconditional");
+        let original = TodoItem {
+            content: "Original".into(),
+            status: "pending".into(),
+            active_form: "Doing Original".into(),
+        };
+        let initial =
+            write_agent_todos(Some(&root), "agent-unconditional", &[original], None).unwrap();
+        let replacement = TodoItem {
+            content: "Explicit replacement".into(),
+            status: "completed".into(),
+            active_form: "Doing explicit replacement".into(),
+        };
+        let updated = write_agent_todos(
+            Some(&root),
+            "agent-unconditional",
+            &[replacement.clone()],
+            None,
+        )
+        .unwrap();
+        let saved = read_agent_todos(Some(&root), "agent-unconditional").unwrap();
+        fs::remove_dir_all(root).unwrap();
+
+        assert_eq!(saved.tasks, vec![replacement]);
+        assert_eq!(saved.revision, updated.revision);
+        assert_ne!(saved.revision, initial.revision);
     }
 
     #[cfg(unix)]

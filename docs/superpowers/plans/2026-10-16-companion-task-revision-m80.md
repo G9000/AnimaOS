@@ -76,3 +76,23 @@ The lint target checks Cargo formatting. Keep touched Markdown Prettier-clean an
 5. Ruling: return a distinct actionable refusal and preserve failed-read bytes without recovery or retry — the model needs a truthful next step, not a silent repair claim — cost if wrong: corrupted or uncertain state can be mistaken for an empty successfully saved list. Keep all effects and result assertions deterministic.
 
 Ruling: keep this delegated plan proportionate to a one-file boundary fix — the user requests cheap continuous progress and a lean plan — cost if wrong: broader API/concurrency requirements must be recorded before expanding ownership. No 1000-line boilerplate, new acceptance harness or redundant audit is needed.
+
+## Gate-found caller correction (binding)
+
+The first full gate exposed a legitimate legacy swarm caller that never supplied a task revision. Its existing todo SSE success test failed; a second test then failed because that assertion poisoned a shared fixture lock. Preserve both assertions and the new model-boundary refusal.
+
+Ruling: expand ownership to `hosts/rust-daemon/src/state/swarm_runtime.rs` and `hosts/rust-daemon/tests/swarm_api.rs` — the legacy per-agent run must observe a baseline just like the ordinary run coordinator — cost if wrong: valid swarm task writes regress or a stale baseline is reused across runs. Capture once per run after runtime lock/reset and before inference/tool execution, not in the persistent factory or immediately before each write. Failed reads remain None. Keep independent run-local revision storage and add subsequent-run valid/malformed revision coverage.
+
+Ruling: reopen the existing fix wave for this gate-demonstrated integration seam and review only its added source — required checks found a caller omitted by the initial one-file scope — cost if wrong: skipping the correction or review would ship a known regression. Retain the failed gate, original one-file freeze/review and meaningful RED unchanged. No support-lock workaround, skipped assertion or automatic baseline seeding at tool dispatch.
+
+## Invalid additional fixture retired (binding)
+
+Ruling: retire only the invalid added cross-dispatch file fixture and preserve the exact original integration test — coordinator clear/reset rebuilds AgentRuntime with a fresh state.id while set_persistence_agent_id changes only database identity, so the fixture watched the previous agent's file — cost if wrong: legacy cross-dispatch task continuity remains unaccepted and must be designed separately. The repeated deterministic call-ID explanation was unproven and is withdrawn. Keep the rejected test source and all failed gate receipts; no original assertion is weakened. Existing task-boundary exact-byte tests and the original legacy SSE route remain the scoped evidence. No production identity, cache, retry or migration change.
+
+Final implementation ownership is todo.rs and state/swarm_runtime.rs. The original tests/swarm_api.rs is byte-exact with its pre-milestone version.
+
+## Recorded outcome
+
+M80 requires an observed task-list revision before model-driven todo_write. A failed initial read can no longer turn into an unconditional overwrite: refusal preserves bytes and the missing baseline until an explicit successful todo_read. Ordinary missing-file empty reads, explicit owner/internal writes and stale-CAS merged recovery remain supported. Legacy swarm runs now capture their own fresh baseline before execution; failed reads still refuse. Fresh Rust 2959 passed/29 ignored across 46 suites, lint/build/format, docs, daemon review and the gate-found caller follow-up pass.
+
+This is deterministic task-preservation evidence. It does not establish model planning quality, account workflows, target-host uptime or full Hermes parity. No web, SDK, schema, dependency, provider/account/device/ordinary-service, database or container change and no new actual acceptance case. Historical raw/Git/runtime evidence remains unchanged. Legacy swarm runtime identity across dispatches is unchanged; cross-dispatch task continuity is not accepted by this milestone.

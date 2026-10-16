@@ -327,3 +327,9 @@ An edit or delete already submitted may still reach the daemon if you disconnect
 If the daemon comes back outside an automation’s allowed hours, overdue automatic work waits for the next permitted window. It keeps the pending occurrence and uses the existing skip-missed policy when it runs. Repeated ticks do not create a catch-up burst.
 
 **Run now** remains an explicit manual action and can run outside the window. Work already claimed continues through its normal lifecycle; closing the active-hours window does not stop an in-progress job.
+
+## Preserve tasks after a read failure
+
+If the companion could not read its saved task list, a task write saves nothing. It must successfully read the current list with `todo_read`, merge its changes, then write explicitly. Failed reads leave the saved bytes intact; Anima does not silently repair the list or replace it with an empty one.
+
+A normally missing task file still reads as an empty list and supports the first save. Concurrent updates keep the existing conflict and merged-retry behavior. Owner task editing keeps its existing revision checks.
