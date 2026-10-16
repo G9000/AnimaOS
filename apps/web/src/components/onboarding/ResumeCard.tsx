@@ -8,6 +8,7 @@ export interface ResumeCardProps {
   resumeError: string | null;
   onResume(): void;
   onSetupFresh(): void;
+  onSetupFreshLabel?: string;
 }
 
 export function ResumeCard({
@@ -17,12 +18,10 @@ export function ResumeCard({
   resumeError,
   onResume,
   onSetupFresh,
+  onSetupFreshLabel = 'Set up fresh instead',
 }: ResumeCardProps) {
   return (
-    <section
-      aria-labelledby="onboarding-resume-heading"
-      className="space-y-5"
-    >
+    <section aria-labelledby="onboarding-resume-heading" className="space-y-5">
       <div>
         <h2
           id="onboarding-resume-heading"
@@ -104,7 +103,7 @@ export function ResumeCard({
           onClick={onSetupFresh}
           className="rounded-xl border border-line bg-white/[0.02] px-4 py-2 text-sm font-medium text-ink-2 transition hover:border-line-strong hover:text-ink"
         >
-          Set up fresh instead
+          {onSetupFreshLabel}
         </button>
       </div>
 

@@ -41,6 +41,14 @@ local web console and Rust daemon with synthetic data and no messaging connector
 Choose a real configured model during onboarding, create the companion and select
 its workspace. Confirm a real reply before relying on tools or schedules.
 
+The workspace folder can be an existing folder on the machine running the daemon.
+Enter its path, or use **Browse…** from an approved local Windows browser, then
+**Check folder**. If the folder contains an Anima `anima.yaml`, setup previews its
+saved agents and offers **Resume workspace**. A folder without that file can be
+used for a new companion; setup keeps its existing files and adds `anima.yaml`.
+The folder is inspected again before creating a new companion so a saved
+workspace is not accidentally bootstrapped over.
+
 For durable local use, configure control-plane/history and memory persistence as
 specified in the [daemon startup examples](../../hosts/rust-daemon/README.md#starting-the-daemon). An ephemeral preview is not a persistent assistant. Keep the
 same workspace path and private credential vault across restart.

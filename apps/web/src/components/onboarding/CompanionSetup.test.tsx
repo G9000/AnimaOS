@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ChatGptClient, type ChatGptModelsSnapshot } from '@animaOS-SWARM/sdk';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { daemon, type DaemonProvider } from '../../lib/daemon-api';
 import { CompanionSetup } from './CompanionSetup';
 
@@ -15,8 +15,259 @@ const providers: DaemonProvider[] = [
   },
 ];
 afterEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  vi.spyOn(daemon, 'inspectWorkspace').mockResolvedValue({ found: false });
+});
 
 describe('CompanionSetup', () => {
+  it('uses a chosen ordinary folder for a new companion', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
+      configured: false,
+      workspace: null,
+      defaultRoot: '/data/workspace',
+    });
+    vi.spyOn(daemon, 'pickWorkspaceFolder').mockResolvedValue({
+      rootPath: '/my/existing/files',
+    });
+    const create = vi.spyOn(daemon, 'bootstrapWorkspace').mockResolvedValue({
+      agent: { state: { id: 'main' } },
+    } as never);
+    render(
+      <CompanionSetup
+        providers={providers}
+        providersError={null}
+        retryProviders={vi.fn()}
+        onCreated={vi.fn()}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Browse…' }));
+    expect(
+      screen.getByRole('textbox', { name: 'Workspace folder on the server' }),
+    ).toHaveValue('/my/existing/files');
+    await user.click(screen.getByRole('button', { name: 'Start chatting' }));
+    await waitFor(() => expect(create).toHaveBeenCalledOnce());
+    expect(daemon.inspectWorkspace).toHaveBeenCalledWith('/my/existing/files');
+    expect(create.mock.calls[0][0].workspace.rootPath).toBe(
+      '/my/existing/files',
+    );
+  });
+
+  it('previews a saved workspace and resumes its existing agent', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
+      configured: false,
+      workspace: null,
+      defaultRoot: '/data/workspace',
+    });
+    vi.mocked(daemon.inspectWorkspace).mockResolvedValue({
+      found: true,
+      companyName: 'My workspace',
+      mission: 'Continue my work',
+      orchestrator: { name: 'Ari', provider: 'openai', model: 'gpt-test' },
+      workers: [],
+      providerAvailable: true,
+    });
+    const resume = vi.spyOn(daemon, 'resumeWorkspace').mockResolvedValue({
+      orchestrator: { state: { id: 'ari' } },
+    } as never);
+    const bootstrap = vi.spyOn(daemon, 'bootstrapWorkspace');
+    const created = vi.fn();
+    render(
+      <CompanionSetup
+        providers={providers}
+        providersError={null}
+        retryProviders={vi.fn()}
+        onCreated={created}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.type(
+      await screen.findByRole('textbox', {
+        name: 'Workspace folder on the server',
+      }),
+      '{Control>}a{/Control}/saved/workspace',
+    );
+    await user.click(screen.getByRole('button', { name: 'Start chatting' }));
+    expect(await screen.findByText('Continue my work')).toBeVisible();
+    expect(screen.getByText('Ari')).toBeVisible();
+    expect(bootstrap).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Resume workspace' }));
+    await waitFor(() =>
+      expect(resume).toHaveBeenCalledWith('/saved/workspace'),
+    );
+    expect(created).toHaveBeenCalledWith(
+      expect.objectContaining({ state: { id: 'ari' } }),
+    );
+  });
+
+  it('can inspect and resume a saved workspace before a provider is configured', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
+      configured: false,
+      workspace: null,
+      defaultRoot: '/data/workspace',
+    });
+    vi.mocked(daemon.inspectWorkspace).mockResolvedValue({
+      found: true,
+      companyName: 'Saved',
+      orchestrator: { name: 'Ari', provider: 'openai', model: 'gpt-test' },
+      workers: [],
+      providerAvailable: false,
+    });
+    const resume = vi.spyOn(daemon, 'resumeWorkspace').mockResolvedValue({
+      orchestrator: { state: { id: 'ari' } },
+    } as never);
+    render(
+      <CompanionSetup
+        providers={[]}
+        providersError={null}
+        retryProviders={vi.fn()}
+        onCreated={vi.fn()}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole('button', { name: 'Check folder' }),
+    );
+    expect(await screen.findByText('Saved')).toBeVisible();
+    expect(
+      screen.getByText(/resume offline until you add the key/),
+    ).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Resume workspace' }));
+    await waitFor(() => expect(resume).toHaveBeenCalledWith('/data/workspace'));
+  });
+
+  it('does not create a new companion from Enter while a saved workspace is previewed', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
+      configured: false,
+      workspace: null,
+      defaultRoot: '/data/workspace',
+    });
+    vi.mocked(daemon.inspectWorkspace).mockResolvedValue({
+      found: true,
+      companyName: 'Saved',
+      orchestrator: { name: 'Ari', provider: 'openai', model: 'gpt-test' },
+      workers: [],
+      providerAvailable: true,
+    });
+    const bootstrap = vi.spyOn(daemon, 'bootstrapWorkspace');
+    render(
+      <CompanionSetup
+        providers={providers}
+        providersError={null}
+        retryProviders={vi.fn()}
+        onCreated={vi.fn()}
+      />,
+    );
+    const user = userEvent.setup();
+    const folder = await screen.findByRole('textbox', {
+      name: 'Workspace folder on the server',
+    });
+    await user.click(screen.getByRole('button', { name: 'Check folder' }));
+    expect(await screen.findByText('Saved')).toBeVisible();
+    await user.click(folder);
+    await user.keyboard('{Enter}');
+    expect(daemon.inspectWorkspace).toHaveBeenCalledOnce();
+    expect(bootstrap).not.toHaveBeenCalled();
+  });
+
+  it('does not bootstrap when inspection fails', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
+      configured: false,
+      workspace: null,
+      defaultRoot: '/data/workspace',
+    });
+    vi.mocked(daemon.inspectWorkspace).mockRejectedValue(
+      new Error('Invalid anima.yaml'),
+    );
+    const bootstrap = vi.spyOn(daemon, 'bootstrapWorkspace');
+    render(
+      <CompanionSetup
+        providers={providers}
+        providersError={null}
+        retryProviders={vi.fn()}
+        onCreated={vi.fn()}
+      />,
+    );
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Start chatting' }),
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Invalid anima.yaml',
+    );
+    expect(bootstrap).not.toHaveBeenCalled();
+  });
+
+  it('ignores a stale inspection after the folder changes', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
+      configured: false,
+      workspace: null,
+      defaultRoot: '/data/workspace',
+    });
+    let resolveInspect!: (value: { found: false }) => void;
+    vi.mocked(daemon.inspectWorkspace).mockReturnValue(
+      new Promise((resolve) => {
+        resolveInspect = resolve;
+      }),
+    );
+    render(
+      <CompanionSetup
+        providers={providers}
+        providersError={null}
+        retryProviders={vi.fn()}
+        onCreated={vi.fn()}
+      />,
+    );
+    const user = userEvent.setup();
+    const folder = await screen.findByRole('textbox', {
+      name: 'Workspace folder on the server',
+    });
+    await user.click(screen.getByRole('button', { name: 'Check folder' }));
+    await user.clear(folder);
+    await user.type(folder, '/another/folder');
+    resolveInspect({ found: false });
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Check folder' }),
+      ).toBeEnabled(),
+    );
+    expect(
+      screen.queryByText(/No saved Anima workspace found here/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps a typed folder when the picker returns an older selection', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
+      configured: false,
+      workspace: null,
+      defaultRoot: '/data/workspace',
+    });
+    let resolvePicker!: (value: { rootPath: string }) => void;
+    vi.spyOn(daemon, 'pickWorkspaceFolder').mockReturnValue(
+      new Promise((resolve) => {
+        resolvePicker = resolve;
+      }),
+    );
+    render(
+      <CompanionSetup
+        providers={providers}
+        providersError={null}
+        retryProviders={vi.fn()}
+        onCreated={vi.fn()}
+      />,
+    );
+    const user = userEvent.setup();
+    const folder = await screen.findByRole('textbox', {
+      name: 'Workspace folder on the server',
+    });
+    await user.click(screen.getByRole('button', { name: 'Browse…' }));
+    await user.clear(folder);
+    await user.type(folder, '/typed/folder');
+    resolvePicker({ rootPath: '/old/picker/folder' });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Browse…' })).toBeEnabled(),
+    );
+    expect(folder).toHaveValue('/typed/folder');
+  });
   it('m49_chatgpt_models_connected_subscription_requires_owner_model_choice', async () => {
     vi.spyOn(ChatGptClient.prototype, 'models').mockResolvedValue({
       state: 'unrequested',

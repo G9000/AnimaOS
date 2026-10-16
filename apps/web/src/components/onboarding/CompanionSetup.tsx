@@ -3,6 +3,7 @@ import {
   daemon,
   MODEL_SUGGESTIONS,
   type DaemonWorkspaceState,
+  type WorkspaceInspectFound,
 } from '../../lib/daemon-api';
 import {
   ACCESS_PROFILES,
@@ -12,6 +13,7 @@ import {
 import type { OnboardingFlowProps } from './OnboardingFlow';
 import { ModelStep } from './ModelStep';
 import { AccessStep } from './AccessStep';
+import { ResumeCard } from './ResumeCard';
 
 export function CompanionSetup({
   providers,
@@ -29,6 +31,16 @@ export function CompanionSetup({
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [rootPath, setRootPath] = useState('');
+  const rootPathRef = useRef('');
+  const [preview, setPreview] = useState<{
+    rootPath: string;
+    workspace: WorkspaceInspectFound;
+  } | null>(null);
+  const [folderNote, setFolderNote] = useState<string | null>(null);
+  const [browsing, setBrowsing] = useState(false);
+  const [inspecting, setInspecting] = useState(false);
+  const [resuming, setResuming] = useState(false);
+  const folderRequest = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -52,7 +64,9 @@ export function CompanionSetup({
       .then((state) => {
         if (!current) return;
         setWorkspace(state);
-        setRootPath(state.workspace?.rootPath ?? state.defaultRoot);
+        const path = state.workspace?.rootPath ?? state.defaultRoot;
+        rootPathRef.current = path;
+        setRootPath(path);
       })
       .catch((caught) => {
         if (current)
@@ -100,20 +114,94 @@ export function CompanionSetup({
     }
   };
   const resolvedModel = (model === '__custom__' ? customModel : model).trim();
+  const changeRootPath = (path: string) => {
+    folderRequest.current += 1;
+    setInspecting(false);
+    rootPathRef.current = path;
+    setRootPath(path);
+    setPreview(null);
+    setFolderNote(null);
+    setError(null);
+  };
+  const inspectFolder = async (path: string) => {
+    const request = ++folderRequest.current;
+    setInspecting(true);
+    setFolderNote(null);
+    try {
+      const result = await daemon.inspectWorkspace(path);
+      if (
+        !mounted.current ||
+        request !== folderRequest.current ||
+        rootPathRef.current.trim() !== path
+      )
+        return null;
+      if (result.found) {
+        setPreview({ rootPath: path, workspace: result });
+      } else {
+        setFolderNote(
+          'No saved Anima workspace found here. This folder can be used for a new companion.',
+        );
+      }
+      return result;
+    } catch (caught) {
+      if (mounted.current && request === folderRequest.current) {
+        setError(caught instanceof Error ? caught.message : String(caught));
+      }
+      return null;
+    } finally {
+      if (mounted.current && request === folderRequest.current)
+        setInspecting(false);
+    }
+  };
+  const browseFolder = async () => {
+    if (browsing || inspecting) return;
+    const request = folderRequest.current;
+    setBrowsing(true);
+    setError(null);
+    try {
+      const { rootPath: selected } = await daemon.pickWorkspaceFolder();
+      if (mounted.current && request === folderRequest.current && selected) {
+        changeRootPath(selected);
+        await inspectFolder(selected.trim());
+      }
+    } catch (caught) {
+      if (mounted.current)
+        setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      if (mounted.current) setBrowsing(false);
+    }
+  };
+  const resume = async () => {
+    if (!preview || resuming) return;
+    setResuming(true);
+    setError(null);
+    try {
+      const result = await daemon.resumeWorkspace(preview.rootPath);
+      if (mounted.current) onCreated(result.orchestrator);
+    } catch (caught) {
+      if (mounted.current)
+        setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      if (mounted.current) setResuming(false);
+    }
+  };
   const ready =
     !!workspace &&
     !workspaceError &&
     !providersError &&
     !retrying &&
+    !browsing &&
+    !inspecting &&
     !!providers?.some((item) => item.id === provider && item.configured) &&
     !!resolvedModel &&
     !!name.trim() &&
     !!rootPath.trim();
   const submit = async () => {
-    if (!ready || submitting.current) return;
+    if (!ready || preview || submitting.current) return;
     submitting.current = true;
     setCreating(true);
     setError(null);
+    const selectedRoot = rootPath.trim();
     const system = [
       `You are ${name.trim()}, the owner's personal companion. Keep a consistent identity across conversations and channels.`,
       'Help with everyday plans, research, files, reminders, and connected tools. Be warm, concise, practical, and honest about what you can actually do.',
@@ -127,6 +215,15 @@ export function CompanionSetup({
       ...(priorities.trim() ? [`Owner preferences: ${priorities.trim()}`] : []),
     ].join('\n\n');
     try {
+      if (!workspace?.configured) {
+        const inspected = await inspectFolder(selectedRoot);
+        if (
+          !inspected ||
+          inspected.found ||
+          rootPathRef.current.trim() !== selectedRoot
+        )
+          return;
+      }
       const config = {
         name: name.trim(),
         provider,
@@ -141,7 +238,7 @@ export function CompanionSetup({
           })
         : await daemon.bootstrapWorkspace({
             workspace: {
-              rootPath: rootPath.trim(),
+              rootPath: selectedRoot,
               companyName: 'Personal',
               mission:
                 'A dependable personal companion for everyday life and work.',
@@ -185,99 +282,149 @@ export function CompanionSetup({
             conversation. You can add channels and schedules later.
           </p>
         </header>
-        <fieldset disabled={creating} className="space-y-8">
-          <div>
-            <label
-              htmlFor="companion-name"
-              className="mb-2 block text-sm font-medium"
-            >
-              Companion name
-            </label>
+        <div>
+          <label
+            htmlFor="companion-folder"
+            className="mb-2 block text-sm font-medium"
+          >
+            Workspace folder on the server
+          </label>
+          <div className="flex flex-wrap gap-2">
             <input
-              id="companion-name"
-              className="field w-full"
-              value={name}
-              maxLength={80}
-              onChange={(event) => setName(event.target.value)}
-              required
+              id="companion-folder"
+              className="field min-w-0 flex-1 basis-full sm:basis-0"
+              value={rootPath}
+              readOnly={workspace?.configured}
+              disabled={creating || resuming}
+              onChange={(event) => changeRootPath(event.target.value)}
+              spellCheck={false}
             />
+            {!workspace?.configured && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void inspectFolder(rootPath.trim())}
+                  disabled={
+                    !rootPath.trim() ||
+                    inspecting ||
+                    browsing ||
+                    creating ||
+                    resuming
+                  }
+                  className="rounded-xl border border-line px-4 py-2 text-sm font-medium disabled:opacity-50"
+                >
+                  {inspecting ? 'Checking…' : 'Check folder'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void browseFolder()}
+                  disabled={browsing || inspecting || creating || resuming}
+                  className="rounded-xl border border-line px-4 py-2 text-sm font-medium disabled:opacity-50"
+                >
+                  {browsing ? 'Choosing folder…' : 'Browse…'}
+                </button>
+              </>
+            )}
           </div>
-          <ModelStep
-            providers={providers}
-            catalogState={
-              retrying
-                ? 'retrying'
-                : providersError
-                  ? 'error'
-                  : providers === null
-                    ? 'loading'
-                    : providers.length
-                      ? 'ready'
-                      : 'empty'
-            }
-            providerError={providersError}
-            provider={provider}
-            model={model}
-            customModel={customModel}
-            onProviderChange={(value) => {
-              if (value === provider) return;
-              setProvider(value);
-              setModel(
-                value === 'chatgpt'
-                  ? ''
-                  : (MODEL_SUGGESTIONS[value]?.[0] ?? '__custom__'),
-              );
-              setCustomModel('');
+          <p className="mt-2 text-xs text-ink-3">
+            Choose a folder on the machine running Anima. Existing files are
+            preserved.
+          </p>
+          {folderNote && !preview && (
+            <p role="status" className="mt-2 text-sm text-ink-2">
+              {folderNote}
+            </p>
+          )}
+        </div>
+        {preview ? (
+          <ResumeCard
+            preview={preview.workspace}
+            rootPath={preview.rootPath}
+            resuming={resuming}
+            resumeError={error}
+            onResume={() => void resume()}
+            onSetupFresh={() => {
+              setPreview(null);
+              setFolderNote('Choose another folder to create a new companion.');
             }}
-            onModelChange={setModel}
-            onCustomModelChange={setCustomModel}
-            onRetryProviders={() => void refreshProviders()}
-            modelSelectRef={modelSelectRef}
-            customModelInputRef={customModelInputRef}
+            onSetupFreshLabel="Choose another folder"
           />
-          <details className="rounded-xl border border-line p-4">
-            <summary className="cursor-pointer text-sm font-medium">
-              Personalize and set permissions
-            </summary>
-            <div className="mt-5 space-y-6">
-              <div>
-                <label
-                  htmlFor="companion-preferences"
-                  className="mb-2 block text-sm"
-                >
-                  What should your companion know about you?
-                </label>
-                <textarea
-                  id="companion-preferences"
-                  className="field min-h-24 w-full"
-                  value={priorities}
-                  onChange={(event) => setPriorities(event.target.value)}
-                  placeholder="Your name, priorities, and how you like to work…"
-                />
-              </div>
-              <AccessStep access={access} onAccessChange={setAccess} />
-              <div>
-                <label
-                  htmlFor="companion-folder"
-                  className="mb-2 block text-sm"
-                >
-                  Workspace folder on the server
-                </label>
-                <input
-                  id="companion-folder"
-                  className="field w-full"
-                  value={rootPath}
-                  readOnly={workspace?.configured}
-                  onChange={(event) => setRootPath(event.target.value)}
-                />
-                <p className="mt-2 text-xs text-ink-3">
-                  Files live on the machine running Anima, not in this browser.
-                  Existing workspace data is preserved.
-                </p>
-              </div>
+        ) : (
+          <fieldset disabled={creating} className="space-y-8">
+            <div>
+              <label
+                htmlFor="companion-name"
+                className="mb-2 block text-sm font-medium"
+              >
+                Companion name
+              </label>
+              <input
+                id="companion-name"
+                className="field w-full"
+                value={name}
+                maxLength={80}
+                onChange={(event) => setName(event.target.value)}
+                required
+              />
             </div>
-          </details>
-        </fieldset>
+            <ModelStep
+              providers={providers}
+              catalogState={
+                retrying
+                  ? 'retrying'
+                  : providersError
+                    ? 'error'
+                    : providers === null
+                      ? 'loading'
+                      : providers.length
+                        ? 'ready'
+                        : 'empty'
+              }
+              providerError={providersError}
+              provider={provider}
+              model={model}
+              customModel={customModel}
+              onProviderChange={(value) => {
+                if (value === provider) return;
+                setProvider(value);
+                setModel(
+                  value === 'chatgpt'
+                    ? ''
+                    : (MODEL_SUGGESTIONS[value]?.[0] ?? '__custom__'),
+                );
+                setCustomModel('');
+              }}
+              onModelChange={setModel}
+              onCustomModelChange={setCustomModel}
+              onRetryProviders={() => void refreshProviders()}
+              modelSelectRef={modelSelectRef}
+              customModelInputRef={customModelInputRef}
+            />
+            <details className="rounded-xl border border-line p-4">
+              <summary className="cursor-pointer text-sm font-medium">
+                Personalize and set permissions
+              </summary>
+              <div className="mt-5 space-y-6">
+                <div>
+                  <label
+                    htmlFor="companion-preferences"
+                    className="mb-2 block text-sm"
+                  >
+                    What should your companion know about you?
+                  </label>
+                  <textarea
+                    id="companion-preferences"
+                    className="field min-h-24 w-full"
+                    value={priorities}
+                    onChange={(event) => setPriorities(event.target.value)}
+                    placeholder="Your name, priorities, and how you like to work…"
+                  />
+                </div>
+                <AccessStep access={access} onAccessChange={setAccess} />
+              </div>
+            </details>
+          </fieldset>
+        )}
         {!workspace && !workspaceError && (
           <p role="status" className="text-sm text-ink-3">
             Loading your workspace…
@@ -295,23 +442,25 @@ export function CompanionSetup({
             </button>
           </div>
         )}
-        {error && (
+        {error && !preview && (
           <p role="alert" className="text-sm text-danger">
             {error}
           </p>
         )}
-        <div>
-          <button
-            type="submit"
-            disabled={!ready || creating}
-            className="w-full rounded-xl bg-accent px-5 py-3 text-sm font-semibold text-accent-fg disabled:opacity-40"
-          >
-            {creating ? 'Setting things up…' : 'Start chatting'}
-          </button>
-          <p className="mt-3 text-center text-xs text-ink-3">
-            {ACCESS_PROFILES[access].risk}
-          </p>
-        </div>
+        {!preview && (
+          <div>
+            <button
+              type="submit"
+              disabled={!ready || creating}
+              className="w-full rounded-xl bg-accent px-5 py-3 text-sm font-semibold text-accent-fg disabled:opacity-40"
+            >
+              {creating ? 'Setting things up…' : 'Start chatting'}
+            </button>
+            <p className="mt-3 text-center text-xs text-ink-3">
+              {ACCESS_PROFILES[access].risk}
+            </p>
+          </div>
+        )}
       </form>
     </main>
   );
