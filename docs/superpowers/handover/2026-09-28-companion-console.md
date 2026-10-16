@@ -1,6 +1,34 @@
+# Handover: M72 bounded discovery-gap repair
+
+## Start here (2026-10-16): M71 merged; execute M72
+
+M71 PR 77 merged at ca733936e55833a4e1859f6d72f2250d320f98f3,
+tree f6cb62df2737af994f50b5a2e56373ea100ba4d2. Its browser-save remains PARTIAL:
+OpenProcess error 87/PID568 without a retained identity; cause unproven. Seven
+Edge images existed, but no browser result/navigation/save witness. Whole-Job
+cleanup accepted: 14 known retired, active zero before close, zero errors/ports free.
+
+Continue branch g9000/companion-discovery-gap-m72. Read
+[the bound M72 plan](../plans/2026-10-16-companion-discovery-gap-m72.md), then AGENTS.md.
+Resume .superpowers/sdd/2026-10-16-companion-discovery-gap-m72/progress.md.
+First publish plan, then fake-API meaningful RED; workers own only reusable guard
+and tests. Root derives supervisor and browser spec mechanically from final M71.
+Only exact error87 plus one same-retained-Job requery omitting PID permits a
+bounded gap. No identity/individual retirement invention, no OpenProcess retry.
+Unresolved gaps or any cleanup errors block acceptance; require zero-active Job.
+One reviewed fresh finite browser-save case after offline gates, no old-case replay.
+
+Preserve M71 sealed case, eight raw snapshots and pinned historical Git blobs.
+The current reusable guard/tests may advance normally; old one-off sources/specs
+and M61/M69/M70 cases remain exact. Standing merge-and-continue, Codex delegation,
+per-command unsigned commits and isolated testing are authorized. No ordinary
+services, profiles, providers, models, accounts, databases, containers or port55432.
+Root commands/Git; Cargo incremental0/jobs1/threads2 if needed; explicit stage only,
+never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+
 # Handover: M71 Job cleanup proved; report save PARTIAL
 
-## Start here (2026-10-16): publish M71; fix exact discovery gap next
+## Historical M71 settled handover
 
 Branch g9000/companion-process-guard-m71 from M70main
 b94878c010cf61a35febdd6ac7c2d389b962bde4; planb1fb34b before source.
