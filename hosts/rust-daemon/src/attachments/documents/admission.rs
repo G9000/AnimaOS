@@ -1,7 +1,7 @@
 //! One-time extraction after durable run start. No disk/process await holds daemon state.
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, OnceLock},
+    sync::Arc,
 };
 
 use anima_core::{
@@ -30,7 +30,6 @@ use crate::{
 
 pub(crate) type SourceReader =
     Arc<dyn Fn(&Path, &AttachmentRecord) -> Result<Vec<u8>, AttachmentError> + Send + Sync>;
-static SOURCE_READ_SLOTS: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
 
 /// Four retained physical read leases, no queue. Cancellation drops only the
 /// await; the bounded blocking task keeps its lease until the OS read returns.
@@ -41,27 +40,9 @@ pub(crate) async fn read_source(
     cancel: &CancelSignal,
     deadline: tokio::time::Instant,
 ) -> Result<Vec<u8>, WorkerFailure> {
-    if cancel.is_cancelled() {
-        return Err(WorkerFailure::Cancelled);
-    }
-    if tokio::time::Instant::now() >= deadline {
-        return Err(WorkerFailure::TimedOut);
-    }
-    let lease = SOURCE_READ_SLOTS
-        .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(4)))
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| WorkerFailure::Busy)?;
-    let reading = tokio::task::spawn_blocking(move || {
-        let _lease = lease;
-        reader(&root, &record)
-    });
-    tokio::select! { biased;
-        () = cancel.cancelled() => Err(WorkerFailure::Cancelled),
-        () = tokio::time::sleep_until(deadline) => Err(WorkerFailure::TimedOut),
-        result = reading => result.map_err(|_| WorkerFailure::Unavailable)?
-            .map_err(|_| WorkerFailure::Unavailable),
-    }
+    super::source_read::read_retained(move || reader(&root, &record), cancel, deadline)
+        .await?
+        .map_err(|_| WorkerFailure::Unavailable)
 }
 
 /// Only a newly selected owner Web message can acquire a derived snapshot.

@@ -1,6 +1,36 @@
+# Handover: workspace document reads locally gated (M0–M67)
+
+## Start here (2026-10-16): M67 gates pass; finish publication and continue
+
+Branch g9000/companion-workspace-documents-m67 from M66/PR72 main
+98a7b2cd860246b1e505a0fd9128bdd0e332f22b; bound plan
+7da06d322313797facf64904c143dd26800c05c8 preceded source. Explicitly granted
+read_document reads workspace DOCX/PDF/XLSX through existing safe byte capture and
+owned Windows parser worker. Source path/hash snapshot, quoted16KiB envelope,
+2MiB input, four retained read leases/single worker and absolute10s deadline;
+existing helper/connector grants apply with required cancellation. One Settings
+opt-in preserves defaults/custom neighbors. No new API/SDK/parser/dependencies.
+
+Fresh Rust/core2935/28 ignores/46 suites/lint/build/17 focused,
+web1512/121files/typecheck/build and shared-reader regressions pass. One native
+batch/final changed-web review and exact source hashes/docs/format recorded.
+Synthetic recording-model/tool/history evidence only; M66 finite physical worker
+CLI evidence retained. No personal file/profile/provider/model/account/ordinary
+daemon/DB/container/deployment activation. M64 browser NOT RUN, M52 PARTIAL and
+consumed cases unchanged. OCR/editing/visual fidelity/non-Windows worker and
+independent answer quality remain open.
+
+Resume .superpowers/sdd/2026-10-16-companion-workspace-documents-m67/progress.md.
+Finish exact explicit-path per-command unsigned commit/push/PR/attach/standing
+merge and tree/hash proof, then select next concrete useful scope from verified
+main. Root commands/fmt/Git, Cargo incremental0/jobs1/threads2 serialized; never
+stage nx.json/anima.yaml/.superpowers, no stash/reset/restore/path checkout/worktree.
+Preserve ordinary services/profiles/Docker55432. Delegation, context-only updates
+to the already selected chat, and merge-and-continue remain authorized.
+
 # Handover: workspace document reads bound (M0–M67)
 
-## Start here (2026-10-16): M66 merged; execute M67 from its bound lean plan
+## Historical M67 bound-plan handover
 
 M66 PR72 is merged. Source 3716c4478c29b058b78aeae66ee55cab6a55ea49; main merge
 98a7b2cd860246b1e505a0fd9128bdd0e332f22b; exact source/merge tree f96256f0c1d967127ac8128b0967722bdc53a15c.

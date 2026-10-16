@@ -494,6 +494,8 @@ Runs and steers accept `attachmentIds` alongside text and skill; attachment-only
 
 Browser dictation and read-aloud use browser speech APIs when available, and cancel when their chat becomes inactive. Browser support and microphone permission vary; browsers may use an external speech service. These controls remain separate from the opt-in daemon transcription and speech actions described above. Local mocked tests do not establish live provider image acceptance, speech quality or microphone behavior.
 
+An explicitly configured `read_document` tool can read an existing workspace DOCX, PDF or XLSX without an attachment upload. The owner enables it separately in Settings; defaults and unrelated grants stay unchanged. Existing filesystem grant checks also apply to helpers and connector-triggered runs. A held-root bounded read captures at most 2 MiB; the returned untrusted tool envelope includes the relative path, captured-byte SHA-256, typed locators and coverage within 16 KiB total serialized output. It is a byte snapshot, with no current-path freshness promise. Reads share the retained four-slot source pool and the existing single owned Windows document worker under one ten-second deadline. A run cancellation signal is required; there is no retry, formula calculation, OCR, edit or automatic grant. Source files stay unchanged. See [document use and limits](../../docs/companion/documents.md).
+
 ### Live runs
 
 Every live-run route requires local-owner authorization and answers `Cache-Control: no-store`, errors included.

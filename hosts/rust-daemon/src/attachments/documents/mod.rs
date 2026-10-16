@@ -1,5 +1,6 @@
 //! Selected-message document admission; parsing stays behind the owned worker.
 pub(crate) mod admission;
+pub(crate) mod source_read;
 pub(crate) mod worker;
 
 pub(crate) const DOCX_MIME: &str =

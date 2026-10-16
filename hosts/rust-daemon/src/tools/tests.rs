@@ -354,6 +354,7 @@ fn registry_defines_every_registered_tool_schema() {
         ("list_automations", &[][..], &[][..]),
         ("pause_automation", &["id"][..], &[][..]),
         ("read_file", &["file_path"][..], &["offset", "limit"][..]),
+        ("read_document", &["file_path"][..], &[][..]),
         ("list_dir", &["path"][..], &[][..]),
         ("glob", &["pattern"][..], &["path"][..]),
         ("grep", &["pattern"][..], &["path", "include"][..]),

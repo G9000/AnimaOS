@@ -1,4 +1,34 @@
-# Selected documents in chat
+# Reading documents
+
+## Documents already in the workspace
+
+In the agent's Settings, enable **Allow reading workspace documents**, save, then
+ask it to read a workspace-relative DOCX, PDF or XLSX such as
+`reports/ledger.xlsx`. The `read_document` tool reads one file up to 2 MiB without
+uploading the original. Extracted text enters the conversation and can be sent to
+the selected model. The grant is off when absent; standard profiles do not add it.
+Existing explicitly granted helpers and connector-triggered runs can use it too.
+
+The result quotes the relative path and SHA-256 of the captured bytes, with typed
+locators and coverage under a 16 KiB total serialized limit. It is a captured
+snapshot, so it does not promise that the file still has those bytes afterward.
+Ordinary tool history can retain that snapshot across restart without opening or
+parsing the source again. Ask for another read when current contents are needed.
+No attachment or download entry is created and the source stays unchanged.
+
+The tool uses the same Windows worker and format limits described below. A
+configured workspace root and run cancellation are required; missing/unsafe,
+oversized or unsupported sources can be refused. Symlinks/reparse points and
+nonregular files are rejected; hard-link behavior follows existing workspace
+reads. Four physical source-read leases are shared with attachment admission, and
+one absolute ten-second deadline covers capture/extraction/fitting. Stop does not
+release capacity while physical work survives. No automatic retry or reparse.
+
+See the [M67 plan](../superpowers/plans/2026-10-16-companion-workspace-documents-m67.md).
+Local synthetic tool/history tests verify the workflow; they do not establish
+independent model answer quality or add OCR, editing or visual fidelity.
+
+## Documents selected in chat
 
 On Windows, send a DOCX, PDF or XLSX attachment with a message in your own web chat.
 Anima extracts bounded DOCX main-body text, PDF text-layer content or XLSX

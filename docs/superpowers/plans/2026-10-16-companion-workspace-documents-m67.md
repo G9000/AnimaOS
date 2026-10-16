@@ -2,7 +2,7 @@
 
 > For agentic workers: use the controller's source-only, disjoint implementation workflow. This is a lean plan: exact interfaces, owned files, meaningful RED, focused tests and gates; implementation code only where an API is tricky.
 
-**Status:** bound before source. Branch `g9000/companion-workspace-documents-m67` from verified M66/PR72 main `98a7b2cd860246b1e505a0fd9128bdd0e332f22b` (tree `f96256f0c1d967127ac8128b0967722bdc53a15c`). Root commands and source-only disjoint workers; first meaningful RED, then implementation. No services/models/accounts activated.
+**Status:** implemented and locally synthetic-tested through real coordinator/tool/history paths. Independent model quality and broader host/format support remain open.
 
 **Goal:** an explicitly granted `read_document` tool reads one existing workspace `.docx`, `.pdf` or `.xlsx` and returns bounded source-cited untrusted text with honest coverage, without uploading the file or granting shell access.
 
@@ -91,3 +91,9 @@ Web source owner, after grant/output freeze: `apps/web/src/components/SettingsPa
 3. Ruling: return one ordinary untrusted JSON tool envelope, capped by its exact serialized 16 KiB size, using existing extraction validation and whole-block fitting — attachment records and private reserved metadata establish different authority and must not be fabricated — cost if wrong: refuse an unfittable envelope or omission overflow; never slice JSON, formula/cache cells or widen limits. Existing tool history/context accounting remains responsible for the result.
 4. Ruling: expose one explicit read_document owner checkbox without adding it to profile defaults or changing unrelated grants — registered-but-unreachable functionality is incomplete, while defaults would silently expand access — cost if wrong: preserve unknown/custom grants, require exact saved tool delta and verify missing/revoked authority prevents reads. Enabling the checkbox alone performs no source read or process start; SDK/API changes require a concrete exposed-contract need.
 5. Ruling: prove one finite source-cited handler/run/history workflow with synthetic documents and a recording fake model, retaining actual worker acceptance from M66 — this closes the real local document path cheaply without spending provider tokens or repeating parser/resource suites — cost if wrong: no broad model-quality, OCR, editing, visual-fidelity, non-Windows or complete Hermes-parity claim. One native batch, one final changed web/SDK review, one combined fix wave and fresh required gates precede publication.
+
+## Recorded outcome
+
+Rust/core **2,935 passed / 28 intentional ignores / 46 suites / lint/build**, including **17 focused M67 cases**; web **1,512 passed / 121 files / typecheck/build**. SDK/API, core parsers and dependency hashes are unchanged.
+
+Meaningful absent-handler RED preceded native implementation; checkbox RED preceded UI implementation. One native batch and one final changed-web/SDK review, focused shared-reader regressions, docs/format/frozen hashes pass. Existing core parsers/dependencies/notices are retained. No real file/profile/model/provider/account/service activation. See [harness evidence](../../companion/harness-acceptance.md) for exact limits.

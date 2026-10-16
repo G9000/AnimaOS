@@ -1796,6 +1796,7 @@ impl AgentRunCoordinator {
             None
         };
         let tool_context = tool_context
+            .with_document_extractor(Arc::clone(&self.document_extractor))
             .with_action_journal(action_journal.clone())
             .with_team(self.clone(), can_delegate)
             .with_delegated_parent(delegated_parent)
@@ -2478,3 +2479,5 @@ mod title_tests;
 
 #[cfg(test)]
 mod agent_files_tests;
+#[cfg(test)]
+mod workspace_document_tests;

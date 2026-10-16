@@ -1172,3 +1172,93 @@ it('replaces a personality style saved at the start of an otherwise empty prompt
   expect(prompt.value).not.toContain('Be calm.');
   expect(prompt.value.match(/\[Personality style\]/g)).toHaveLength(1);
 });
+
+it('m67_read_document_is_off_when_absent_and_unrelated_saves_do_not_grant_it', async () => {
+  const saveSettings = vi.fn(async () => true);
+  const currentTools = ['read_file', 'memory_remove', 'legacy_workspace_tool'];
+  renderPanel(agent({ toolNames: currentTools }), { saveSettings });
+
+  expect(
+    screen.getByRole('checkbox', {
+      name: 'Allow reading workspace documents',
+    }),
+  ).not.toBeChecked();
+  const name = screen.getByDisplayValue('Nova');
+  await userEvent.clear(name);
+  await userEvent.type(name, 'Nova Two');
+  await userEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+  expect(saveSettings).toHaveBeenCalledWith({ name: 'Nova Two' });
+  expect(saveSettings.mock.calls[0]?.[0]).not.toHaveProperty('tools');
+});
+
+it('m67_read_document_adds_only_its_opt_in_to_a_custom_tool_set', async () => {
+  const user = userEvent.setup();
+  const currentTools = ['read_file', 'memory_remove', 'legacy_workspace_tool'];
+  const saveSettings = vi.fn(async () => true);
+  renderPanel(agent({ toolNames: currentTools }), { saveSettings });
+
+  const allowRead = screen.getByRole('checkbox', {
+    name: 'Allow reading workspace documents',
+  });
+  expect(allowRead).not.toBeChecked();
+  await user.click(allowRead);
+  await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+  expect(saveSettings).toHaveBeenCalledWith({
+    tools: [...currentTools, 'read_document'],
+  });
+});
+
+it('m67_read_document_reseeds_from_saved_opt_in_changes', async () => {
+  const currentAgent = agent({
+    toolNames: ['read_file', 'read_document', 'legacy_workspace_tool'],
+  });
+  const view = renderPanel(currentAgent);
+  const allowRead = screen.getByRole('checkbox', {
+    name: 'Allow reading workspace documents',
+  });
+  expect(allowRead).toBeChecked();
+  await userEvent.click(allowRead);
+
+  view.rerender(
+    <SettingsPanel
+      {...view.props}
+      agent={{ ...currentAgent, toolNames: ['read_file'] }}
+    />,
+  );
+  expect(allowRead).not.toBeChecked();
+
+  view.rerender(
+    <SettingsPanel
+      {...view.props}
+      agent={{
+        ...currentAgent,
+        id: 'agent-next',
+        toolNames: ['read_file', 'read_document'],
+      }}
+    />,
+  );
+  expect(allowRead).toBeChecked();
+});
+
+it('m67_read_document_profile_replacement_clears_the_opt_in_until_reselected', async () => {
+  const user = userEvent.setup();
+  const saveSettings = vi.fn(async () => true);
+  const currentTools = ['read_file', 'read_document', 'legacy_workspace_tool'];
+  renderPanel(agent({ toolNames: currentTools }), { saveSettings });
+
+  const allowRead = screen.getByRole('checkbox', {
+    name: 'Allow reading workspace documents',
+  });
+  expect(allowRead).toBeChecked();
+  await user.click(screen.getByRole('radio', { name: /^Collaborate/ }));
+  expect(allowRead).not.toBeChecked();
+  await user.click(allowRead);
+  await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+  expect(saveSettings).toHaveBeenCalledWith({
+    tools: [...toolNamesForProfile('collaborate'), 'read_document'],
+  });
+  expect(toolNamesForProfile('collaborate')).not.toContain('read_document');
+});
