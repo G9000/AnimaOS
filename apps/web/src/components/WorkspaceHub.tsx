@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { daemon } from '../lib/daemon-api';
 import type { AgentDetail } from '../lib/types';
 import { AgentRunsView } from './AgentRuns';
@@ -21,14 +21,25 @@ type LoadResult = {
 
 function noteText(content: string, tags?: string[] | null): string {
   if (!tags?.includes('user-stated')) return content;
-  const text = content.replace(/^user stated (?:memory|preference|profile):\s*/i, '').trim();
+  const text = content
+    .replace(/^user stated (?:memory|preference|profile):\s*/i, '')
+    .trim();
   // Older extractors saved requests containing "my" as profile facts.
   // Hide those records without deleting the underlying memory.
-  if (/^(?:(?:can|could|would|will) you\b|(?:please )?remind me\b|(?:please )?remember to\b|i want you to\b)/i.test(text)) return '';
+  if (
+    /^(?:(?:can|could|would|will) you\b|(?:please )?remind me\b|(?:please )?remember to\b|i want you to\b)/i.test(
+      text,
+    )
+  )
+    return '';
   return text.replace(/^(?:please )?remember (?:that\s+)?/i, '');
 }
 
-function noteLabel(content: string, type: string, tags?: string[] | null): string {
+function noteLabel(
+  content: string,
+  type: string,
+  tags?: string[] | null,
+): string {
   if (tags?.includes('user-stated')) {
     if (/^user stated preference:/i.test(content)) return 'Preference';
     if (/^user stated profile:/i.test(content)) return 'About you';
@@ -45,18 +56,21 @@ async function loadEntries(
     const { memories } = await daemon.recentAgentMemories(agentId);
     // Runtime task results and evaluator reflections are internal records.
     // Preserve deliberate memory_add saves, regardless of their chosen type.
-    return memories.filter((item) =>
-      noteText(item.content, item.tags).trim().length > 0 && (
-        item.type === 'fact' || item.type === 'observation' ||
-        item.tags?.includes('tool-memory-add')
-      ),
-    ).map((item) => ({
-      id: item.id,
-      agentId,
-      content: noteText(item.content, item.tags),
-      detail: noteLabel(item.content, item.type, item.tags),
-      timestamp: new Date(item.createdAt).getTime(),
-    }));
+    return memories
+      .filter(
+        (item) =>
+          noteText(item.content, item.tags).trim().length > 0 &&
+          (item.type === 'fact' ||
+            item.type === 'observation' ||
+            item.tags?.includes('tool-memory-add')),
+      )
+      .map((item) => ({
+        id: item.id,
+        agentId,
+        content: noteText(item.content, item.tags),
+        detail: noteLabel(item.content, item.type, item.tags),
+        timestamp: new Date(item.createdAt).getTime(),
+      }));
   }
   if (section === 'Tasks') {
     const { tasks } = await daemon.agentTasks(agentId);
@@ -99,10 +113,12 @@ async function loadEntries(
 
 export function WorkspaceHub({
   agents,
+  online,
   onSelectAgent,
   initialSection = 'Notes',
 }: {
   agents: readonly AgentDetail[];
+  online: boolean;
   onSelectAgent?: (id: string) => void;
   initialSection?: Section;
 }) {
@@ -110,19 +126,45 @@ export function WorkspaceHub({
   const [agentFilter, setAgentFilter] = useState('');
   const [query, setQuery] = useState('');
   const [revision, setRevision] = useState(0);
-  const [result, setResult] = useState<LoadResult | null>(null);
+  const [loaded, setLoaded] = useState<{
+    generation: object;
+    result: LoadResult;
+  } | null>(null);
   const [managedId, setManagedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   // Agent snapshots also change during chat polling. Only membership changes reload the hub.
   const agentIds = JSON.stringify(agents.map((agent) => agent.id).sort());
+  // Connectivity only invalidates Tasks. A reconnect owns a new generation,
+  // even when its membership and online value match an earlier request.
+  const tasksOnline = section !== 'Tasks' || online;
+  const contextKey = JSON.stringify([agentIds, section, revision, tasksOnline]);
+  const generationRef = useRef({ key: contextKey });
+  if (generationRef.current.key !== contextKey) {
+    generationRef.current = { key: contextKey };
+  }
+  const generation = generationRef.current;
+  const result =
+    section !== 'Tasks' || (online && loaded?.generation === generation)
+      ? (loaded?.result ?? null)
+      : null;
   useEffect(() => {
     let cancelled = false;
-    setResult(null);
-    if (section === 'Runs' || section === 'Goals') return;
+    setLoaded(null);
+    if (
+      section === 'Runs' ||
+      section === 'Goals' ||
+      !tasksOnline ||
+      (section === 'Tasks' && generationRef.current !== generation)
+    )
+      return;
     const ids = JSON.parse(agentIds) as string[];
     void Promise.allSettled(ids.map((id) => loadEntries(id, section))).then(
       (responses) => {
-        if (cancelled) return;
+        if (
+          cancelled ||
+          (section === 'Tasks' && generationRef.current !== generation)
+        )
+          return;
         const next: LoadResult = { entries: [], errors: [] };
         responses.forEach((response, index) => {
           if (response.status === 'fulfilled')
@@ -142,13 +184,13 @@ export function WorkspaceHub({
               ? (b.timestamp ?? 0) - (a.timestamp ?? 0)
               : (a.timestamp ?? 0) - (b.timestamp ?? 0),
           );
-        setResult(next);
+        setLoaded({ generation, result: next });
       },
     );
     return () => {
       cancelled = true;
     };
-  }, [agentIds, section, revision]);
+  }, [agentIds, section, revision, tasksOnline, generation]);
 
   const selectedId = agents.some((agent) => agent.id === agentFilter)
     ? agentFilter
@@ -198,6 +240,7 @@ export function WorkspaceHub({
               <AgentTasksView
                 key={managed.id}
                 agentId={managed.id}
+                online={online}
                 name={managed.name}
                 running={managed.status === 'Running'}
                 onBusyChange={setSaving}
@@ -276,7 +319,9 @@ export function WorkspaceHub({
               aria-labelledby={`hub-tab-${section}`}
               className="space-y-6"
             >
-              {section === 'Goals' ? <WorkspaceGoals agents={agents} /> : section === 'Runs' ? (
+              {section === 'Goals' ? (
+                <WorkspaceGoals agents={agents} />
+              ) : section === 'Runs' ? (
                 <div className="space-y-5">
                   <label className="block space-y-2 text-sm">
                     Agent
@@ -339,7 +384,15 @@ export function WorkspaceHub({
                     <button
                       type="button"
                       className="rounded-xl border border-line px-4 py-3 text-sm"
-                      onClick={() => setRevision((value) => value + 1)}
+                      disabled={section === 'Tasks' && !online}
+                      onClick={() => {
+                        if (
+                          section === 'Tasks' &&
+                          (!online || generationRef.current !== generation)
+                        )
+                          return;
+                        setRevision((value) => value + 1);
+                      }}
                     >
                       Refresh
                     </button>
@@ -375,7 +428,9 @@ export function WorkspaceHub({
                       : {error.message}. Use Refresh to retry.
                     </p>
                   ))}
-                  {!result ? (
+                  {section === 'Tasks' && !online ? (
+                    <p role="status">Offline. Reconnect to load tasks.</p>
+                  ) : !result ? (
                     <p role="status">Loading {section.toLowerCase()}…</p>
                   ) : (
                     <>

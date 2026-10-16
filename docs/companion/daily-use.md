@@ -333,3 +333,9 @@ If the daemon comes back outside an automation’s allowed hours, overdue automa
 If the companion could not read its saved task list, a task write saves nothing. It must successfully read the current list with `todo_read`, merge its changes, then write explicitly. Failed reads leave the saved bytes intact; Anima does not silently repair the list or replace it with an empty one.
 
 A normally missing task file still reads as an empty list and supports the first save. Concurrent updates keep the existing conflict and merged-retry behavior. Owner task editing keeps its existing revision checks.
+
+## Tasks while offline
+
+Tasks pause while disconnected. Unsaved edits and new-task text stay visible read-only; reconnect checks the saved list. If its revision is unchanged, editing resumes with your draft. If it changed, your draft stays intact and Save remains disabled until you explicitly choose **Discard draft and load saved tasks**. Review any draft text you need before discarding it.
+
+A save already submitted is not sent again automatically. The editor waits for that pending save to settle before allowing another save; reconnect checks current saved tasks without treating a lost response as rollback. Running-agent and concurrent-edit restrictions still apply.

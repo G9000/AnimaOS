@@ -1154,6 +1154,7 @@ export function ViewHarness() {
 
   const settingsPanel = showSettings ? (
     <SettingsPanel
+      online={connection === 'online'}
       refreshProviders={retryProviders}
       agent={agent}
       providers={providers}

@@ -1,6 +1,21 @@
+# Handover: M81 Tasks reconnect freshness
+
+## Start here (2026-10-16): publish M81 and continue selected parity
+
+M81 makes both owner Tasks entry points observe connection state. Offline controls dispatch nothing, reconnect revalidates saved tasks and obsolete results cannot become current state. Same-agent drafts survive read-only; changed revisions require explicit discard before loading saved tasks. Submitted saves retain their original target/revision once, with pending ownership and no automatic retry. Fresh web 1579 tests/122 files, typecheck/build, touched formatting/docs and one final web/SDK-contract review pass.
+
+Local deterministic owner-console evidence only. No Rust, SDK, schema, dependency, provider/account/device/ordinary-service, database or container change and no new actual acceptance case. This does not establish model planning quality, external delivery, target-host uptime or full Hermes parity. Historical case/source/Git/runtime versions remain unchanged.
+
+Resume .superpowers/sdd/2026-10-16-companion-tasks-reconnect-m81/progress.md.
+The ledger records exact publication state. Finish pending docs/format/explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof before selecting another demonstrated gap. M80 task preservation, M79 active-hours recovery, M78 Memory freshness, M77 public page and M74 Files save stay settled. Never replay or regrade consumed cases.
+Standing Codex delegation, unsigned per-command commits and merge-and-continue apply.
+No ordinary profiles/accounts/providers/devices/services/DBs/containers/Docker55432.
+Explicit stage only; never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+No Cargo here; later Cargo incremental0/jobs1/threads2, serialized. Preserve unrelated edits and historical versions.
+
 # Handover: M80 observed task revision
 
-## Start here (2026-10-16): publish M80 and continue selected parity
+## Historical M80 settled handover
 
 M80 requires an observed task-list revision before model-driven todo_write. A failed initial read can no longer turn into an unconditional overwrite: refusal preserves bytes and the missing baseline until an explicit successful todo_read. Ordinary missing-file empty reads, explicit owner/internal writes and stale-CAS merged recovery remain supported. Legacy swarm runs now capture their own fresh baseline before execution; failed reads still refuse. Fresh Rust 2959 passed/29 ignored across 46 suites, lint/build/format, docs, daemon review and the gate-found caller follow-up pass.
 

@@ -95,6 +95,7 @@ const DEFAULT_LEARNING_API: LearningReviewApi = {
  */
 export function SettingsPanel({
   agent,
+  online,
   providers,
   workspace = null,
   saving,
@@ -110,6 +111,7 @@ export function SettingsPanel({
   onOpenSkills,
 }: {
   agent: AgentDetail;
+  online: boolean;
   providers: DaemonProvider[] | null;
   workspace?: DaemonWorkspaceState | null;
   saving: boolean;
@@ -431,6 +433,7 @@ export function SettingsPanel({
             <AgentTasksView
               key={agent.id}
               agentId={agent.id}
+              online={online}
               name={agent.name}
               running={agent.status === 'Running'}
             />

@@ -1,7 +1,14 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { daemon } from '../lib/daemon-api';
 import type { AgentDetail } from '../lib/types';
+import { deferred } from '../test/view-harness';
 import { WorkspaceHub } from './WorkspaceHub';
 
 const agents: AgentDetail[] = ['Alpha', 'Beta'].map((name) => ({
@@ -21,7 +28,7 @@ it('keeps Runs inside Work and scopes queueing to the selected agent', async () 
   const list = vi.spyOn(daemon, 'agentJobs').mockResolvedValue([]);
   const tasks = vi.spyOn(daemon, 'agentTasks');
   const schedules = vi.spyOn(daemon, 'listSchedules');
-  render(<WorkspaceHub agents={agents} initialSection="Runs" />);
+  render(<WorkspaceHub agents={agents} online initialSection="Runs" />);
   expect(screen.getByRole('tab', { name: 'Runs' })).toHaveAttribute(
     'aria-selected',
     'true',
@@ -46,46 +53,87 @@ it('presents extracted notes as readable text and hides legacy misclassified rem
       'user stated preference: I prefer concise summaries.',
       'user stated memory: Remember that the brand is Ardenta.',
     ].map((content, index) => ({
-      id: String(index), content, agentId: 'alpha', agentName: 'Alpha',
-      type: 'fact' as const, scope: 'room' as const, importance: 0.8,
-      tags: ['runtime', 'memory-evaluator', 'user-stated', 'relation:general_profile'],
+      id: String(index),
+      content,
+      agentId: 'alpha',
+      agentName: 'Alpha',
+      type: 'fact' as const,
+      scope: 'room' as const,
+      importance: 0.8,
+      tags: [
+        'runtime',
+        'memory-evaluator',
+        'user-stated',
+        'relation:general_profile',
+      ],
       createdAt: '2026-09-06T00:00:00Z',
     })),
   });
-  render(<WorkspaceHub agents={[agents[0]]} />);
+  render(<WorkspaceHub agents={[agents[0]]} online />);
   expect(await screen.findByText('I prefer concise summaries.')).toBeVisible();
   expect(screen.getByText('the brand is Ardenta.')).toBeVisible();
   expect(screen.getByText(/^Preference ·/)).toBeVisible();
-  expect(screen.queryByText(/user stated|memory-evaluator|general_profile|brand guideline/)).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(
+      /user stated|memory-evaluator|general_profile|brand guideline/,
+    ),
+  ).not.toBeInTheDocument();
   expect(screen.getByText('2 notes shown')).toBeVisible();
-  fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'Ardenta' } });
+  fireEvent.change(screen.getByLabelText('Search'), {
+    target: { value: 'Ardenta' },
+  });
   expect(screen.getByText('1 note shown')).toBeVisible();
 });
 
 it('shows saved knowledge and explicit notes without exposing automatic run records', async () => {
   vi.spyOn(daemon, 'recentAgentMemories').mockResolvedValue({
     memories: [
-      { type: 'task_result' as const, content: 'Hey — I’m here.', tags: ['runtime', 'task-result'] },
-      { type: 'reflection' as const, content: 'evaluated response: Hey — I’m here.', tags: ['runtime', 'memory-evaluator'] },
+      {
+        type: 'task_result' as const,
+        content: 'Hey — I’m here.',
+        tags: ['runtime', 'task-result'],
+      },
+      {
+        type: 'reflection' as const,
+        content: 'evaluated response: Hey — I’m here.',
+        tags: ['runtime', 'memory-evaluator'],
+      },
       { type: 'fact' as const, content: 'The campaign launches Friday.' },
       { type: 'observation' as const, content: 'Short posts perform better.' },
-      { type: 'reflection' as const, content: 'Saved campaign retrospective', tags: ['runtime', 'tool-memory-add'] },
-      { type: 'task_result' as const, content: 'Saved campaign results', tags: ['runtime', 'tool-memory-add'] },
+      {
+        type: 'reflection' as const,
+        content: 'Saved campaign retrospective',
+        tags: ['runtime', 'tool-memory-add'],
+      },
+      {
+        type: 'task_result' as const,
+        content: 'Saved campaign results',
+        tags: ['runtime', 'tool-memory-add'],
+      },
       { type: 'fact' as const, content: '   ' },
     ].map((item, index) => ({
-      ...item, id: `memory-${index}`, agentId: 'alpha', agentName: 'Alpha',
-      scope: 'private' as const, importance: 0.8, createdAt: '2026-09-06T00:00:00Z',
+      ...item,
+      id: `memory-${index}`,
+      agentId: 'alpha',
+      agentName: 'Alpha',
+      scope: 'private' as const,
+      importance: 0.8,
+      createdAt: '2026-09-06T00:00:00Z',
     })),
   });
-  render(<WorkspaceHub agents={[agents[0]]} />);
-  expect(await screen.findByText('The campaign launches Friday.')).toBeVisible();
+  render(<WorkspaceHub agents={[agents[0]]} online />);
+  expect(
+    await screen.findByText('The campaign launches Friday.'),
+  ).toBeVisible();
   expect(screen.getByText('Short posts perform better.')).toBeVisible();
   expect(screen.getByText('Saved campaign retrospective')).toBeVisible();
   expect(screen.getByText('Saved campaign results')).toBeVisible();
   expect(screen.queryByText('Hey — I’m here.')).not.toBeInTheDocument();
   expect(screen.queryByText(/evaluated response:/)).not.toBeInTheDocument();
   expect(screen.getByText('4 notes shown')).toBeVisible();
-  fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'Hey' } });
+  fireEvent.change(screen.getByLabelText('Search'), {
+    target: { value: 'Hey' },
+  });
   expect(screen.getByText('No matches. Try another search.')).toBeVisible();
 });
 
@@ -102,7 +150,7 @@ it('keeps the editor open during a save and retains a failed draft', async () =>
         rejectSave = reject;
       }),
   );
-  render(<WorkspaceHub agents={[agents[0]]} />);
+  render(<WorkspaceHub agents={[agents[0]]} online />);
   fireEvent.click(screen.getByRole('tab', { name: 'Tasks' }));
   fireEvent.click(screen.getByRole('button', { name: 'Manage Alpha’s tasks' }));
   fireEvent.change(await screen.findByLabelText('New agent task'), {
@@ -136,12 +184,13 @@ it('aggregates notes, filters by owner, and opens the owning chat without refetc
     }));
   const onSelectAgent = vi.fn();
   const { rerender } = render(
-    <WorkspaceHub agents={agents} onSelectAgent={onSelectAgent} />,
+    <WorkspaceHub agents={agents} online onSelectAgent={onSelectAgent} />,
   );
   expect(await screen.findByText('alpha saved note')).toBeVisible();
   expect(screen.getByText('beta saved note')).toBeVisible();
   rerender(
     <WorkspaceHub
+      online
       agents={agents.map((agent) => ({ ...agent, status: 'Running' }))}
       onSelectAgent={onSelectAgent}
     />,
@@ -176,7 +225,7 @@ it('keeps successful agent data when another fails and retries explicitly', asyn
         ],
       };
     });
-  render(<WorkspaceHub agents={agents} />);
+  render(<WorkspaceHub agents={agents} online />);
   fireEvent.click(screen.getByRole('tab', { name: 'Tasks' }));
   expect(await screen.findByText('Write campaign')).toBeVisible();
   expect(screen.getByRole('alert')).toHaveTextContent('Beta: Unavailable');
@@ -197,7 +246,7 @@ it('ignores a stale notes response after switching to schedules', async () => {
       }),
   );
   vi.spyOn(daemon, 'listSchedules').mockResolvedValue({ schedules: [] });
-  render(<WorkspaceHub agents={[agents[0]]} />);
+  render(<WorkspaceHub agents={[agents[0]]} online />);
   fireEvent.click(screen.getByRole('tab', { name: 'Schedules' }));
   expect(await screen.findByText('No schedules yet.')).toBeVisible();
   resolveNotes({ memories: [] });
@@ -207,4 +256,165 @@ it('ignores a stale notes response after switching to schedules', async () => {
   expect(
     screen.getByRole('button', { name: 'Manage Alpha’s schedules' }),
   ).toBeVisible();
+});
+
+it('does not read or refresh Tasks while initially offline', () => {
+  const tasks = vi.spyOn(daemon, 'agentTasks').mockResolvedValue({
+    revision: '1',
+    tasks: [],
+  });
+  render(
+    <WorkspaceHub agents={[agents[0]]} online={false} initialSection="Tasks" />,
+  );
+  const refresh = screen.getByRole('button', { name: 'Refresh' });
+  expect(refresh).toBeDisabled();
+  fireEvent.click(refresh);
+  expect(tasks).not.toHaveBeenCalled();
+  expect(screen.getByText(/offline/i)).toBeVisible();
+});
+
+it.each(['success', 'error'] as const)(
+  'ignores an old Tasks-list %s while the reconnect read is pending',
+  async (outcome) => {
+    const old = deferred<Awaited<ReturnType<typeof daemon.agentTasks>>>();
+    const fresh = deferred<Awaited<ReturnType<typeof daemon.agentTasks>>>();
+    const tasks = vi
+      .spyOn(daemon, 'agentTasks')
+      .mockReturnValueOnce(old.promise)
+      .mockReturnValueOnce(fresh.promise);
+    const view = render(
+      <WorkspaceHub agents={[agents[0]]} online initialSection="Tasks" />,
+    );
+    expect(tasks).toHaveBeenCalledTimes(1);
+    view.rerender(
+      <WorkspaceHub
+        agents={[agents[0]]}
+        online={false}
+        initialSection="Tasks"
+      />,
+    );
+    expect(tasks).toHaveBeenCalledTimes(1);
+    view.rerender(
+      <WorkspaceHub agents={[agents[0]]} online initialSection="Tasks" />,
+    );
+    expect(tasks).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      if (outcome === 'success') {
+        old.resolve({
+          revision: 'old',
+          tasks: [
+            {
+              content: 'Obsolete task',
+              status: 'pending',
+              activeForm: 'Obsolete task',
+            },
+          ],
+        });
+      } else old.reject(new Error('Obsolete list error'));
+    });
+    expect(screen.getByText('Loading tasks…')).toBeVisible();
+    expect(screen.queryByText('Obsolete task')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await act(async () =>
+      fresh.resolve({
+        revision: 'fresh',
+        tasks: [
+          {
+            content: 'Current task',
+            status: 'pending',
+            activeForm: 'Current task',
+          },
+        ],
+      }),
+    );
+    expect(screen.getByText('Current task')).toBeVisible();
+    expect(tasks).toHaveBeenCalledTimes(2);
+  },
+);
+
+it.each(['success', 'error'] as const)(
+  'keeps a current Tasks-list error when the pre-disconnect read settles with %s',
+  async (outcome) => {
+    const old = deferred<Awaited<ReturnType<typeof daemon.agentTasks>>>();
+    const tasks = vi
+      .spyOn(daemon, 'agentTasks')
+      .mockReturnValueOnce(old.promise)
+      .mockRejectedValueOnce(new Error('Current list error'));
+    const view = render(
+      <WorkspaceHub agents={[agents[0]]} online initialSection="Tasks" />,
+    );
+    view.rerender(
+      <WorkspaceHub
+        agents={[agents[0]]}
+        online={false}
+        initialSection="Tasks"
+      />,
+    );
+    view.rerender(
+      <WorkspaceHub agents={[agents[0]]} online initialSection="Tasks" />,
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Current list error',
+    );
+    await act(async () => {
+      if (outcome === 'success') old.resolve({ revision: 'old', tasks: [] });
+      else old.reject(new Error('Obsolete list error'));
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('Current list error');
+    expect(screen.getByRole('alert')).not.toHaveTextContent(
+      'Obsolete list error',
+    );
+    expect(tasks).toHaveBeenCalledTimes(2);
+  },
+);
+
+it('hides saved Tasks on disconnect and revalidates once without reloading for status polls', async () => {
+  const fresh = deferred<Awaited<ReturnType<typeof daemon.agentTasks>>>();
+  const tasks = vi
+    .spyOn(daemon, 'agentTasks')
+    .mockResolvedValueOnce({
+      revision: '1',
+      tasks: [
+        { content: 'Saved task', status: 'pending', activeForm: 'Saved task' },
+      ],
+    })
+    .mockReturnValueOnce(fresh.promise);
+  const view = render(
+    <WorkspaceHub agents={[agents[0]]} online initialSection="Tasks" />,
+  );
+  expect(await screen.findByText('Saved task')).toBeVisible();
+  view.rerender(
+    <WorkspaceHub
+      agents={[{ ...agents[0], status: 'Running' }]}
+      online
+      initialSection="Tasks"
+    />,
+  );
+  expect(tasks).toHaveBeenCalledTimes(1);
+  view.rerender(
+    <WorkspaceHub agents={[agents[0]]} online={false} initialSection="Tasks" />,
+  );
+  expect(screen.queryByText('Saved task')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled();
+  view.rerender(
+    <WorkspaceHub agents={[agents[0]]} online initialSection="Tasks" />,
+  );
+  expect(screen.queryByText('Saved task')).not.toBeInTheDocument();
+  expect(screen.getByText('Loading tasks…')).toBeVisible();
+  expect(tasks).toHaveBeenCalledTimes(2);
+  await act(async () => fresh.resolve({ revision: '2', tasks: [] }));
+  expect(screen.getByText('No tasks yet.')).toBeVisible();
+});
+
+it('keeps Notes data and read membership stable across connection changes', async () => {
+  const notes = vi
+    .spyOn(daemon, 'recentAgentMemories')
+    .mockResolvedValue({ memories: [] });
+  const view = render(<WorkspaceHub agents={[agents[0]]} online />);
+  expect(await screen.findByText('No notes yet.')).toBeVisible();
+  view.rerender(<WorkspaceHub agents={[agents[0]]} online={false} />);
+  expect(screen.getByText('No notes yet.')).toBeVisible();
+  view.rerender(<WorkspaceHub agents={[agents[0]]} online />);
+  expect(screen.getByText('No notes yet.')).toBeVisible();
+  expect(notes).toHaveBeenCalledTimes(1);
 });

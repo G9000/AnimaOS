@@ -653,7 +653,11 @@ export function WorkspaceShell({
               ) : page === 'capabilities' ? (
                 <WorkspaceCapabilities online={connection === 'online'} />
               ) : page === 'work' ? (
-                <WorkspaceHub agents={[mainAgent]} initialSection="Tasks" />
+                <WorkspaceHub
+                  agents={[mainAgent]}
+                  online={connection === 'online'}
+                  initialSection="Tasks"
+                />
               ) : null}
             </div>
           </main>

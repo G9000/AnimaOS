@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { AgentTask, AgentTasks } from '@animaOS-SWARM/sdk';
 import {
   daemon,
@@ -7,62 +7,303 @@ import {
 } from '../lib/daemon-api';
 import { primaryBtnCls } from './ui-bits';
 
+interface TasksContext {
+  agentId: string;
+  online: boolean;
+  generation: number;
+  owner: object;
+}
+
+interface TasksEditor {
+  owner: object;
+  snapshot: AgentTasks | null;
+  tasks: AgentTask[];
+  content: string;
+  read: {
+    context: TasksContext;
+    status: 'loading' | 'loaded' | 'error';
+    latest: AgentTasks | null;
+    error: string | null;
+  } | null;
+  actionError: string | null;
+  review: boolean;
+}
+
+interface PendingTasksSave {
+  context: TasksContext;
+  notify?: (busy: boolean) => void;
+  ownsBusy: boolean;
+}
+
+function emptyTasksEditor(context: TasksContext): TasksEditor {
+  return {
+    owner: context.owner,
+    snapshot: null,
+    tasks: [],
+    content: '',
+    read: null,
+    actionError: null,
+    review: false,
+  };
+}
+
+function changedTasks(editor: TasksEditor): boolean {
+  return (
+    editor.snapshot !== null &&
+    JSON.stringify(editor.tasks) !== JSON.stringify(editor.snapshot.tasks)
+  );
+}
+
+function hasTaskDraft(editor: TasksEditor): boolean {
+  return changedTasks(editor) || editor.content !== '';
+}
+
+function releaseTasksBusy(operation: PendingTasksSave) {
+  if (!operation.ownsBusy) return;
+  operation.ownsBusy = false;
+  operation.notify?.(false);
+}
+
 export function AgentTasksView({
   agentId,
   name,
+  online,
   running = false,
   onBusyChange,
 }: {
   agentId: string;
   name: string;
+  online: boolean;
   running?: boolean;
   onBusyChange?: (busy: boolean) => void;
 }) {
-  const [snapshot, setSnapshot] = useState<AgentTasks | null>(null);
-  const [tasks, setTasks] = useState<AgentTask[]>([]);
-  const [content, setContent] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [reload, setReload] = useState(0);
-  useEffect(() => {
-    let cancelled = false;
-    setSnapshot(null);
-    setError(null);
-    daemon
-      .agentTasks(agentId)
-      .then((value) => {
-        if (!cancelled) {
-          setSnapshot(value);
-          setTasks(value.tasks);
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String(e.message ?? e));
-      });
-    return () => {
-      cancelled = true;
+  const mounted = useRef(true);
+  const sequence = useRef(0);
+  const contextRef = useRef<TasksContext | null>(null);
+  if (
+    !contextRef.current ||
+    contextRef.current.agentId !== agentId ||
+    contextRef.current.online !== online
+  ) {
+    contextRef.current = {
+      agentId,
+      online,
+      generation: (contextRef.current?.generation ?? 0) + 1,
+      owner:
+        contextRef.current?.agentId === agentId ? contextRef.current.owner : {},
     };
-  }, [agentId, reload]);
-  const dirty =
-    snapshot && JSON.stringify(tasks) !== JSON.stringify(snapshot.tasks);
-  const save = async () => {
-    if (!snapshot || busy || running) return;
-    setBusy(true);
-    onBusyChange?.(true);
-    setError(null);
-    try {
-      const saved = await daemon.updateAgentTasks(agentId, {
-        tasks,
-        revision: snapshot.revision,
+    sequence.current += 1;
+  }
+  const context = contextRef.current!;
+  const isCurrent = useCallback(
+    (origin: TasksContext) =>
+      mounted.current && contextRef.current === origin && origin.online,
+    [],
+  );
+  const [state, setState] = useState(() => emptyTasksEditor(context));
+  const editorRef = useRef(state);
+  editorRef.current = state;
+  const updateEditor = useCallback(
+    (update: (previous: TasksEditor) => TasksEditor) => {
+      const next = update(editorRef.current);
+      editorRef.current = next;
+      setState(next);
+    },
+    [],
+  );
+  // This reservation survives connection generations until the physical PUT
+  // settles. Display freshness alone must never authorize another submission.
+  const pendingRef = useRef<PendingTasksSave | null>(null);
+  const [pending, setPending] = useState<PendingTasksSave | null>(null);
+  const runningRef = useRef(running);
+  runningRef.current = running;
+
+  const load = useCallback(
+    async (manual = false) => {
+      if (!isCurrent(context)) return;
+      const request = ++sequence.current;
+      updateEditor((previous) => {
+        if (!isCurrent(context)) return previous;
+        const base =
+          previous.owner === context.owner
+            ? previous
+            : emptyTasksEditor(context);
+        return {
+          ...base,
+          read: { context, status: 'loading', latest: null, error: null },
+          actionError: null,
+        };
       });
-      setSnapshot(saved);
-      setTasks(saved.tasks);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      try {
+        const latest = await daemon.agentTasks(context.agentId);
+        if (!isCurrent(context) || sequence.current !== request) return;
+        updateEditor((previous) => {
+          if (!isCurrent(context) || sequence.current !== request)
+            return previous;
+          const base =
+            previous.owner === context.owner
+              ? previous
+              : emptyTasksEditor(context);
+          const retain = base.snapshot !== null && hasTaskDraft(base);
+          return {
+            ...base,
+            snapshot: retain ? base.snapshot : latest,
+            tasks: retain ? base.tasks : latest.tasks,
+            content: retain ? base.content : '',
+            read: { context, status: 'loaded', latest, error: null },
+            actionError: null,
+            review:
+              retain && (manual || base.snapshot!.revision !== latest.revision),
+          };
+        });
+      } catch (caught) {
+        if (!isCurrent(context) || sequence.current !== request) return;
+        updateEditor((previous) => {
+          if (!isCurrent(context) || sequence.current !== request)
+            return previous;
+          return {
+            ...previous,
+            read: {
+              context,
+              status: 'error',
+              latest: null,
+              error: caught instanceof Error ? caught.message : String(caught),
+            },
+          };
+        });
+      }
+    },
+    [context, isCurrent, updateEditor],
+  );
+
+  // Establish mount ownership before starting reads so root StrictMode replay
+  // starts a live request while the discarded replay response stays fenced.
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      sequence.current += 1;
+      if (pendingRef.current) releaseTasksBusy(pendingRef.current);
+    };
+  }, []);
+  useEffect(
+    () => () => {
+      const operation = pendingRef.current;
+      if (operation?.context === context) releaseTasksBusy(operation);
+    },
+    [context],
+  );
+  useEffect(() => {
+    if (context.online) void load();
+  }, [context, load]);
+
+  // Project an agent/connection transition during render, before the effects.
+  // Same-agent drafts remain visible, but old clean rows cannot appear fresh.
+  const editor =
+    state.owner === context.owner ? state : emptyTasksEditor(context);
+  const currentRead = editor.read?.context === context ? editor.read : null;
+  const loaded = online && currentRead?.status === 'loaded';
+  const draft = hasTaskDraft(editor);
+  const snapshot = loaded || draft ? editor.snapshot : null;
+  const { tasks, content } = editor;
+  const dirty = changedTasks(editor);
+  const busy = pending !== null;
+  const editable = loaded && snapshot !== null && !busy;
+  const review = loaded && editor.review;
+  const error = online
+    ? (currentRead?.error ??
+      (loaded ? editor.actionError : null) ??
+      (review
+        ? 'Tasks changed or were refreshed. Review your draft or discard it to load the saved list.'
+        : null))
+    : null;
+  const canEdit = () => {
+    const current = editorRef.current;
+    return (
+      isCurrent(context) &&
+      current.owner === context.owner &&
+      current.snapshot !== null &&
+      current.read?.context === context &&
+      current.read.status === 'loaded' &&
+      pendingRef.current === null
+    );
+  };
+  const edit = (update: (previous: TasksEditor) => TasksEditor) => {
+    if (!canEdit()) return;
+    updateEditor((previous) => (canEdit() ? update(previous) : previous));
+  };
+  const save = async () => {
+    if (!canEdit() || runningRef.current) return;
+    const origin = editorRef.current;
+    if (
+      !origin.snapshot ||
+      origin.review ||
+      !changedTasks(origin) ||
+      origin.tasks.some((task) => !task.content.trim())
+    )
+      return;
+    const operation: PendingTasksSave = {
+      context,
+      notify: onBusyChange,
+      ownsBusy: true,
+    };
+    const payload = {
+      tasks: origin.tasks.map((task) => ({ ...task })),
+      revision: origin.snapshot.revision,
+    };
+    pendingRef.current = operation;
+    setPending(operation);
+    updateEditor((previous) => ({ ...previous, actionError: null }));
+    try {
+      operation.notify?.(true);
+      if (!isCurrent(context)) return;
+      const saved = await daemon.updateAgentTasks(context.agentId, payload);
+      if (!isCurrent(context)) return;
+      updateEditor((previous) => {
+        if (!isCurrent(context)) return previous;
+        return {
+          ...previous,
+          snapshot: saved,
+          tasks: saved.tasks,
+          read: { context, status: 'loaded', latest: saved, error: null },
+          actionError: null,
+          review: false,
+        };
+      });
+    } catch (caught) {
+      if (!isCurrent(context)) return;
+      updateEditor((previous) =>
+        isCurrent(context)
+          ? {
+              ...previous,
+              actionError:
+                caught instanceof Error ? caught.message : String(caught),
+            }
+          : previous,
+      );
     } finally {
-      setBusy(false);
-      onBusyChange?.(false);
+      if (pendingRef.current === operation) {
+        pendingRef.current = null;
+        if (mounted.current)
+          setPending((current) => (current === operation ? null : current));
+      }
+      if (isCurrent(context)) releaseTasksBusy(operation);
     }
+  };
+  const discard = () => {
+    if (!canEdit()) return;
+    updateEditor((previous) => {
+      const latest = previous.read?.latest;
+      if (!canEdit() || !previous.review || !latest) return previous;
+      return {
+        ...previous,
+        snapshot: latest,
+        tasks: latest.tasks,
+        content: '',
+        actionError: null,
+        review: false,
+      };
+    });
   };
   return (
     <section className="space-y-5" aria-label={`${name}'s tasks`}>
@@ -70,9 +311,11 @@ export function AgentTasksView({
         <h4 className="font-semibold">Tasks for {name}</h4>
         <button
           type="button"
-          disabled={busy}
+          disabled={!online || busy}
           className="text-xs underline"
-          onClick={() => setReload((value) => value + 1)}
+          onClick={() => {
+            if (isCurrent(context) && !pendingRef.current) void load(true);
+          }}
         >
           Refresh tasks
         </button>
@@ -93,23 +336,41 @@ export function AgentTasksView({
           finish before saving.
         </p>
       )}
-      {!snapshot && !error && <p role="status">Loading tasks…</p>}
+      {!online && (
+        <p role="status">Offline. Reconnect to refresh and edit tasks.</p>
+      )}
+      {online && !loaded && !error && <p role="status">Loading tasks…</p>}
+      {review && (
+        <button
+          type="button"
+          className="text-sm underline"
+          disabled={busy}
+          onClick={discard}
+        >
+          Discard draft and load saved tasks
+        </button>
+      )}
       {snapshot && (
         <>
           <form
             className="space-y-3"
             onSubmit={(event) => {
               event.preventDefault();
-              if (!content.trim()) return;
-              setTasks((current) => [
-                ...current,
-                {
-                  content: content.trim(),
-                  activeForm: content.trim(),
-                  status: 'pending',
-                },
-              ]);
-              setContent('');
+              edit((previous) => {
+                if (!previous.content.trim()) return previous;
+                return {
+                  ...previous,
+                  tasks: [
+                    ...previous.tasks,
+                    {
+                      content: previous.content.trim(),
+                      activeForm: previous.content.trim(),
+                      status: 'pending',
+                    },
+                  ],
+                  content: '',
+                };
+              });
             }}
           >
             <textarea
@@ -117,13 +378,16 @@ export function AgentTasksView({
               aria-label="New agent task"
               placeholder="What should this agent work on? Include the details they need."
               value={content}
-              disabled={busy}
-              onChange={(event) => setContent(event.target.value)}
+              disabled={!editable}
+              onChange={(event) => {
+                const value = event.target.value;
+                edit((previous) => ({ ...previous, content: value }));
+              }}
               rows={3}
             />
             <button
               className="rounded-lg border border-line px-4 py-2 text-sm"
-              disabled={busy || !content.trim()}
+              disabled={!editable || !content.trim()}
             >
               Add task
             </button>
@@ -142,40 +406,44 @@ export function AgentTasksView({
                 aria-label={`Task ${index + 1}`}
                 className="field"
                 rows={2}
-                disabled={busy}
+                disabled={!editable}
                 value={task.content}
-                onChange={(event) =>
-                  setTasks((current) =>
-                    current.map((item, i) =>
+                onChange={(event) => {
+                  const value = event.target.value;
+                  edit((previous) => ({
+                    ...previous,
+                    tasks: previous.tasks.map((item, i) =>
                       i === index
                         ? {
                             ...item,
-                            content: event.target.value,
-                            activeForm: event.target.value,
+                            content: value,
+                            activeForm: value,
                           }
                         : item,
                     ),
-                  )
-                }
+                  }));
+                }}
               />
               <div className="flex items-center justify-between gap-3">
                 <select
                   aria-label={`Task ${index + 1} status`}
                   className="field w-auto text-sm"
                   value={task.status}
-                  disabled={busy}
-                  onChange={(event) =>
-                    setTasks((current) =>
-                      current.map((item, i) =>
+                  disabled={!editable}
+                  onChange={(event) => {
+                    const value = event.target.value as AgentTask['status'];
+                    edit((previous) => ({
+                      ...previous,
+                      tasks: previous.tasks.map((item, i) =>
                         i === index
                           ? {
                               ...item,
-                              status: event.target.value as AgentTask['status'],
+                              status: value,
                             }
                           : item,
                       ),
-                    )
-                  }
+                    }));
+                  }}
                 >
                   <option value="pending">Pending</option>
                   <option value="in_progress">In progress</option>
@@ -185,9 +453,12 @@ export function AgentTasksView({
                   type="button"
                   aria-label={`Remove task ${index + 1}`}
                   className="text-xs text-danger"
-                  disabled={busy}
+                  disabled={!editable}
                   onClick={() =>
-                    setTasks((current) => current.filter((_, i) => i !== index))
+                    edit((previous) => ({
+                      ...previous,
+                      tasks: previous.tasks.filter((_, i) => i !== index),
+                    }))
                   }
                 >
                   Remove
@@ -199,7 +470,8 @@ export function AgentTasksView({
             type="button"
             className={`${primaryBtnCls} w-full`}
             disabled={
-              busy ||
+              !editable ||
+              review ||
               running ||
               !dirty ||
               tasks.some((task) => !task.content.trim())
@@ -208,9 +480,10 @@ export function AgentTasksView({
           >
             {busy ? 'Saving tasks…' : dirty ? 'Save tasks' : 'Tasks saved'}
           </button>
-          {dirty && (
+          {draft && (
             <p className="text-xs text-ink-3">
-              Unsaved changes. Refresh reloads the saved list.
+              Unsaved changes. Refresh keeps this draft until you choose to
+              discard it.
             </p>
           )}
         </>
