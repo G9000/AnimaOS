@@ -1,6 +1,42 @@
+# Handover: M71 Job cleanup proved; report save PARTIAL
+
+## Start here (2026-10-16): publish M71; fix exact discovery gap next
+
+Branch g9000/companion-process-guard-m71 from M70main
+b94878c010cf61a35febdd6ac7c2d389b962bde4; planb1fb34b before source.
+New public guard/tests/spec: strict retired-only31image witness, retained creation/
+prior-image checks, bounded diagnostics and explicit Job termination/zero-active
+proof. Guard18/profile18/policy47/console65pass4liveskips/typecheck; one ownership
+batch/final E2E review/combined fix wave/mechanical copy proof,2028runtime inputs.
+
+Actual5a8ee9a8-5969-4e06-8406-8ed7d4f4d82e failed at job member open,
+Win32error87/PID568 before handle/creationtime. No browser result/save/realFiles.
+All14knownidentities retired, JobdrainActiveProcesses0 beforeclose, zero cleanup/
+logerrors, portsfree/profilewitnessstable in12.64s. WholeJobcleanup accepted;
+browser save remains PARTIAL. Do not infer the unavailable PID's individual
+retirement or why it vanished; M70 exact initial cause stays unknown.
+
+Resume .superpowers/sdd/2026-10-16-companion-process-guard-m71/progress.md.
+case-seal.json and source-snapshot.json preserve original release/case/results/
+logs plus8rawsourceinputs. Finish docs/format/explicit unsigned commit/push/PR/
+attach/standingmerge/exacttree and pin public source Gitblob provenance. Next
+milestone may update reusable public guard/tests normally while retaining these
+immutable raw snapshots/committed old versions; never mutate/replay/regrade cases.
+M61/M69/M70 one-off scripts/cases stay exact. A new87gap maycontinue only after
+ONEsame-retainedJobrequery omitsPID, explicitunknownindividualidentity/gaprecord,
+boundedobservations and finalzero-drainproof; othererrors/stillpresent/queryfail
+remainfatal. Deterministic RED before any new actualcase. No automatic retry.
+
+No productioncode/dependencychange, ordinaryprofiles/services/accounts/providers/
+models/DB/containers/Docker55432/publicnetwork/deployment. Root commands/fmt/Git/
+activation, Python-B to avoidpublicbytecode; Cargo incremental0/jobs1/threads2
+ifneeded; explicitstageonlynever nx.json/anima.yaml/.superpowers; no stash/reset/
+restore/pathcheckout/worktree. Standing delegation/context-only selected-chat
+updates/per-commandunsignedcommits/merge-and-continue apply. M64 NOT RUN/M52 PARTIAL.
+
 # Handover: M71 versioned process guard repair bound
 
-## Start here (2026-10-16): M70 merged PARTIAL; execute M71 lean plan
+## Historical M71 bound-plan handover
 
 M70 PR76 merged sourcea308d0b7273cd3deab2774902e113fc876d31085,
 mainb94878c010cf61a35febdd6ac7c2d389b962bde4,

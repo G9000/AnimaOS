@@ -1,5 +1,26 @@
 # Native harness acceptance
 
+## M71 process guard and actual report-save acceptance (2026-10-16)
+
+**Guard retirement repair and whole-Job cleanup proved; browser save PARTIAL.**
+The new tested Windows acceptance guard accepts an unavailable image only for a
+confirmed retired error-31 descendant, preserves strict initial executable checks
+and prior image observations, and records bounded native diagnostics. It retains
+the Job through explicit termination, known-process/log retirement and zero-active
+accounting before final close. No production SDK/web/Rust/dependency change.
+
+Guard18/profile18/policy47/fullconsole65pass4liveskips/E2Etypecheck pass. One ownership batch and final E2E review, one combined fix wave, mechanical reuse proof and2,028 frozen runtime inputs are recorded. The one actual case5a8ee9a8-5969-4e06-8406-8ed7d4f4d82e failed at job-member OpenProcess error87/PID568 before obtaining a handle or creation time. All14 known identities retired in12.64s; explicit retained-Job termination/drain reached ActiveProcesses0 beforeclose with zero cleanup/log errors and both ports free. Profile witness and independent84byte source stayed unchanged; no browser-result/save occurred.
+
+Error87 means the opened PID was unavailable to this call; its individual lifetime
+or cause is unknown. The failed case remains immutable and does not establish a
+browser save. A future narrow fix may record a bounded discovery gap only after
+one requery of the same retained Job omits that PID; it must not invent an image,
+creation time or individual retirement, and complete Job drain remains required.
+Other errors/still-present members/query failure stay fatal. Original case/release
+and raw source versions are sealed; normal future library edits preserve their
+snapshots and Git versions. M69/M70 failures, M64 NOT RUN and M52 PARTIAL remain.
+See the [M71 plan](../superpowers/plans/2026-10-16-companion-process-guard-m71.md).
+
 ## M70 browser report-save acceptance (2026-10-16)
 
 **PARTIAL — process capture failed before browser acceptance.** The new opt-in

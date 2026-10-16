@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3, `ctypes` Win32 process/job APIs, `unittest` with fake Win32 API, Playwright TypeScript e2e.
 
-**Status:** bound before source on `g9000/companion-process-guard-m71` from the verified M70 merge/tree below. No case released.
+**Status:** implemented and locally gated; actual whole-Job cleanup accepted, browser save PARTIAL. The one case failed at job-member OpenProcess87/PID568 before a handle; original case/raw inputs sealed. No retry/regrade.
 
 ---
 
@@ -94,3 +94,9 @@ This plan covers one native guard fix plus one fresh browser acceptance case onl
 5. Ruling: publish plan, run a meaningful retired31 behavioral RED against a NEW copy of old guard (compatible unused parameters allowed), then source-only implementation/new M71 short-profile supervisor/spec, one ownership batch/final E2E review/combined fix wave and unit/profile/policy/fullconsole/typecheck/frozen-input gates before one new finite release — this is a concrete fix, not replay/pass hunting — cost if wrong: retain failure and stop that case; M61/M69/M70 sources, seals and consumed cases remain unchanged. Root owns commands and release; no ordinary profile/account/provider/model/DB/container/public-network/deployment activation.
 
 The new runtime root is exactly .superpowers/r71/UUID, active disposable profile temp/pw, with the same profile containment/path budget and independent84byte CSV. M71 supervisor must require jobEmptyBeforeClose and zero cleanup errors; nullable descendant image observations cannot satisfy the existing pinned browser-image witness. It freezes the NEW public guard and immutable private bound-plan snapshot, never the mutable public outcome plan. Root copies the exact predeclared fixture/oracle into the M71 private task before source; both supervisor and spec use those new identical pinned copies. Existing producer code/images, M61 preview and all old closures remain unchanged. No new dependency.
+
+## Recorded outcome
+
+Guard18/profile18/policy47/fullconsole65pass4liveskips/E2Etypecheck pass. One ownership batch and final E2E review, one combined fix wave, mechanical reuse proof and2,028 frozen runtime inputs are recorded. The one actual case5a8ee9a8-5969-4e06-8406-8ed7d4f4d82e failed at job-member OpenProcess error87/PID568 before obtaining a handle or creation time. All14 known identities retired in12.64s; explicit retained-Job termination/drain reached ActiveProcesses0 beforeclose with zero cleanup/log errors and both ports free. Profile witness and independent84byte source stayed unchanged; no browser-result/save occurred.
+
+Exact raw source snapshots and release/case evidence are retained. Future normal maintenance of the reusable public guard/tests must pin the old committed version and snapshots; never modify/regrade the consumed case or claim its image-null/open87 observation was browser-save success. Existing M61/M69/M70 scripts/cases stay byte-identical.
