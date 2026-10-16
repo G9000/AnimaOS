@@ -1,6 +1,23 @@
+# Handover: M82 logical swarm task ownership
+
+## Start here (2026-10-16): publish M82 and continue selected parity
+
+After M82 publication, prioritize one useful daily workflow through the existing console/harness and independently check its output, cancellation and recovery. Choose its bounded success criteria before another implementation milestone; add reliability fixes only when that workflow demonstrates a concrete blocker. The core feature surface is implemented, while selected real connector accounts, broader autonomous work quality and target-host acceptance remain open. No new account/message/provider/host activation is implied.
+
+M82 binds legacy swarm task tools and their per-run baseline to the host-generated coordinator/member identity instead of the fresh runtime ID. Later dispatches by that member can read the same saved tasks while runtime, memory and database identities retain their existing behavior. Default companion task ownership, failed-read refusal and revision-conflict merge recovery remain intact. Fresh Rust 2965 passed/29 ignored across 46 suites, lint/build/format/docs and one daemon batch review pass.
+
+Deterministic logical-owner and coordinator-reset evidence only. No automatic adoption or migration of old ephemeral task files, universal daemon-restart restoration, model-quality or full Hermes-parity claim. No web, SDK, schema, dependency, account/provider/device/ordinary-service, database or container change and no new actual acceptance case. Historical raw/Git/runtime evidence stays unchanged.
+
+Resume .superpowers/sdd/2026-10-16-companion-swarm-tasks-m82/progress.md.
+The ledger records exact publication state. Finish pending docs/format/explicit unsigned commit/push/PR/attach/standing merge/exact-tree proof before selecting another demonstrated gap. M81 Tasks reconnect, M80 task preservation, M79 scheduler recovery, M78 Memory freshness, M77 public page and M74 Files remain settled. No consumed-case replay or regrading.
+Standing Codex delegation, unsigned per-command commits and merge-and-continue apply.
+No ordinary profiles/accounts/providers/devices/services/DBs/containers/Docker55432.
+Explicit stage only; never nx.json/anima.yaml/.superpowers; no stash/reset/restore/path checkout/worktree.
+Cargo incremental0/jobs1/threads2, serialized; preserve unrelated work and historical versions.
+
 # Handover: M81 Tasks reconnect freshness
 
-## Start here (2026-10-16): publish M81 and continue selected parity
+## Historical M81 settled handover
 
 M81 makes both owner Tasks entry points observe connection state. Offline controls dispatch nothing, reconnect revalidates saved tasks and obsolete results cannot become current state. Same-agent drafts survive read-only; changed revisions require explicit discard before loading saved tasks. Submitted saves retain their original target/revision once, with pending ownership and no automatic retry. Fresh web 1579 tests/122 files, typecheck/build, touched formatting/docs and one final web/SDK-contract review pass.
 

@@ -74,7 +74,8 @@ impl DaemonState {
                     calendar,
                 )
                 .with_mail(mail)
-                .with_drive(drive);
+                .with_drive(drive)
+                .with_todo_owner(swarm_task_owner_id(&context.swarm_id, &context.agent_id));
                 let runtime_events: Arc<dyn Fn(EngineEvent) + Send + Sync> = Arc::new({
                     let event_stream = event_stream.clone();
                     let agent_name = context.config.name.clone();
@@ -165,7 +166,7 @@ impl DaemonState {
                                 let todo_baseline = if runtime.config().allows_tool("todo_write") {
                                     crate::tools::todo::read_agent_todos(
                                         crate::tools::ctx_workspace_root(&tool_context),
-                                        &runtime.state().id,
+                                        tool_context.todo_owner_id(&runtime.state()),
                                     )
                                     .ok()
                                     .map(|todos| todos.revision)
@@ -347,6 +348,12 @@ fn stable_swarm_persistence_agent_id(swarm_id: &str, agent_name: &str) -> String
     format!("{swarm_id}:agent:{agent_name}")
 }
 
+fn swarm_task_owner_id(swarm_id: &str, member_id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let tagged = format!("swarm:{swarm_id}:member:{member_id}");
+    format!("swarm:{:x}", Sha256::digest(tagged.as_bytes()))
+}
+
 struct SwarmParticipantsProvider {
     participants: Arc<CoordinatorParticipantsFn>,
 }
@@ -472,8 +479,721 @@ fn replace_or_push_tool(tools: &mut Vec<ToolDescriptor>, descriptor: ToolDescrip
 #[cfg(test)]
 mod tests {
     use super::with_swarm_messaging_tools;
+    use crate::tools::todo::{read_agent_todos, write_agent_todos, TodoItem};
     use crate::tools::ToolRegistry;
-    use anima_core::{AgentConfig, ToolDescriptor};
+    use anima_core::{
+        AgentConfig, Content, DataValue, MessageRole, ModelAdapter, ModelGenerateRequest,
+        ModelGenerateResponse, ModelStopReason, TaskStatus, ToolCall, ToolDescriptor,
+    };
+    use std::collections::{BTreeMap, VecDeque};
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    struct M82Step {
+        expected: Option<(&'static str, String)>,
+        next: Option<ToolCall>,
+        barrier: Option<Box<dyn Fn() + Send + Sync>>,
+    }
+
+    #[derive(Default)]
+    struct M82TodoAdapter {
+        steps: Mutex<VecDeque<M82Step>>,
+        requests: Mutex<Vec<String>>,
+        results: AtomicUsize,
+        calls: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl ModelAdapter for M82TodoAdapter {
+        fn provider(&self) -> &str {
+            "m82-script"
+        }
+
+        async fn generate(
+            &self,
+            _: &AgentConfig,
+            request: &ModelGenerateRequest,
+        ) -> Result<ModelGenerateResponse, String> {
+            let step = self
+                .steps
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("finite M82 script");
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let last = request.messages.last().expect("model request message");
+            if let Some((status, text)) = step.expected {
+                assert_eq!(last.role, MessageRole::Tool);
+                let metadata = last.content.metadata.as_ref().expect("tool metadata");
+                let DataValue::Object(result) = &metadata["taskResult"] else {
+                    panic!("tool result envelope");
+                };
+                assert_eq!(result["status"], DataValue::String(status.into()));
+                if status == "success" {
+                    assert_eq!(last.content.text, text);
+                } else {
+                    assert!(last.content.text.contains(&text), "{}", last.content.text);
+                }
+                self.results.fetch_add(1, Ordering::SeqCst);
+            } else {
+                assert_ne!(
+                    last.role,
+                    MessageRole::Tool,
+                    "a new run must begin with input"
+                );
+            }
+            // Fixture owner updates happen only at this deterministic point,
+            // after the actual preceding result has been inspected.
+            if let Some(barrier) = step.barrier {
+                barrier();
+            }
+            let tool_calls = step.next.map(|call| {
+                self.requests.lock().unwrap().push(call.name.clone());
+                vec![call]
+            });
+            let stop_reason = if tool_calls.is_some() {
+                ModelStopReason::ToolCall
+            } else {
+                ModelStopReason::End
+            };
+            Ok(ModelGenerateResponse {
+                content: Content {
+                    text: "done".into(),
+                    ..Default::default()
+                },
+                tool_calls,
+                usage: Default::default(),
+                stop_reason,
+            })
+        }
+    }
+
+    fn m82_step(expected: Option<(&'static str, String)>, next: Option<ToolCall>) -> M82Step {
+        M82Step {
+            expected,
+            next,
+            barrier: None,
+        }
+    }
+
+    fn m82_tasks(contents: &[&str]) -> Vec<TodoItem> {
+        contents
+            .iter()
+            .map(|content| TodoItem {
+                content: (*content).into(),
+                active_form: (*content).into(),
+                status: "pending".into(),
+            })
+            .collect()
+    }
+
+    fn m82_write(id: &str, contents: &[&str]) -> ToolCall {
+        ToolCall {
+            id: id.into(),
+            name: "todo_write".into(),
+            args: BTreeMap::from([(
+                "todos".into(),
+                DataValue::Array(
+                    contents
+                        .iter()
+                        .map(|content| {
+                            DataValue::Object(BTreeMap::from([
+                                ("content".into(), DataValue::String((*content).into())),
+                                ("activeForm".into(), DataValue::String((*content).into())),
+                                ("status".into(), DataValue::String("pending".into())),
+                            ]))
+                        })
+                        .collect(),
+                ),
+            )]),
+        }
+    }
+
+    fn m82_read(id: &str) -> ToolCall {
+        ToolCall {
+            id: id.into(),
+            name: "todo_read".into(),
+            args: BTreeMap::new(),
+        }
+    }
+
+    fn m82_render(contents: &[&str]) -> String {
+        if contents.is_empty() {
+            return "No todos set.".into();
+        }
+        contents
+            .iter()
+            .enumerate()
+            .map(|(i, text)| format!("[ ] {}. [pending] {text}", i + 1))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn m82_updated(count: usize) -> String {
+        format!("Todos updated (0 completed, 0 in progress, {count} pending). Proceed with current tasks.")
+    }
+
+    fn m82_read_write(before: &[&str], after: &[&str], tag: &str) -> Vec<M82Step> {
+        vec![
+            m82_step(None, Some(m82_read(&format!("{tag}-read")))),
+            m82_step(
+                Some(("success", m82_render(before))),
+                Some(m82_write(&format!("{tag}-write"), after)),
+            ),
+            m82_step(Some(("success", m82_updated(after.len()))), None),
+        ]
+    }
+
+    fn m82_state(root: &Path, adapter: Arc<M82TodoAdapter>) -> crate::state::DaemonState {
+        let mut state = crate::state::DaemonState::with_model_adapter(adapter);
+        state.workspace = Some(crate::control_plane_store::WorkspaceConfig {
+            root_path: root.into(),
+            company_name: "M82 fixture".into(),
+            mission: String::new(),
+            values: vec![],
+        });
+        state
+    }
+
+    fn m82_config() -> anima_swarm::SwarmConfig {
+        let registry = ToolRegistry::new();
+        let mut member = agent_config();
+        member.tools = Some(
+            ["todo_read", "todo_write"]
+                .into_iter()
+                .map(|name| registry.descriptor(name).unwrap())
+                .collect(),
+        );
+        anima_swarm::SwarmConfig {
+            strategy: anima_swarm::SwarmStrategy::RoundRobin,
+            manager: member.clone(),
+            workers: vec![member],
+            max_concurrent_agents: None,
+            max_parallel_delegations: None,
+            max_turns: Some(1),
+            token_budget: None,
+        }
+    }
+
+    fn m82_expected_owner(swarm_id: &str, member_id: &str) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hash = Sha256::new();
+        hash.update(b"swarm:");
+        hash.update(swarm_id.as_bytes());
+        hash.update(b":member:");
+        hash.update(member_id.as_bytes());
+        let digest: String = hash
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        format!("swarm:{digest}")
+    }
+
+    fn m82_owner(coordinator: &anima_swarm::coordinator::SwarmCoordinator) -> String {
+        let state = coordinator.get_state();
+        assert_eq!(state.agent_ids.len(), 1, "one real pooled member");
+        m82_expected_owner(&state.id, &state.agent_ids[0])
+    }
+
+    fn m82_path(root: &Path, owner: &str) -> PathBuf {
+        let encoded: String = owner.bytes().map(|byte| format!("{byte:02x}")).collect();
+        root.join(".animaos-swarm/agent-tasks")
+            .join(format!("{encoded}.json"))
+    }
+
+    fn m82_assert_store(root: &Path, owner: &str, contents: &[&str]) -> String {
+        use std::hash::{Hash, Hasher};
+        let tasks = m82_tasks(contents);
+        let bytes =
+            std::fs::read(m82_path(root, owner)).expect("tagged coordinator/member task file");
+        assert_eq!(bytes, serde_json::to_vec_pretty(&tasks).unwrap());
+        let saved = read_agent_todos(Some(root), owner).unwrap();
+        assert_eq!(saved.tasks, tasks);
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        bytes.hash(&mut hash);
+        assert_eq!(saved.revision, format!("{:016x}", hash.finish()));
+        saved.revision
+    }
+
+    fn m82_assert_files(root: &Path, owners: &[&str]) {
+        let mut actual = std::fs::read_dir(root.join(".animaos-swarm/agent-tasks"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        let mut expected = owners
+            .iter()
+            .map(|owner| m82_path(root, owner))
+            .collect::<Vec<_>>();
+        actual.sort();
+        expected.sort();
+        assert_eq!(actual, expected, "no transient-runtime task files");
+    }
+
+    fn m82_assert_script(adapter: &M82TodoAdapter, requests: &[&str], runs: usize) {
+        assert!(adapter.steps.lock().unwrap().is_empty());
+        assert_eq!(
+            adapter
+                .requests
+                .lock()
+                .unwrap()
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            requests.to_vec()
+        );
+        assert_eq!(adapter.results.load(Ordering::SeqCst), requests.len());
+        assert_eq!(adapter.calls.load(Ordering::SeqCst), requests.len() + runs);
+    }
+
+    #[tokio::test]
+    async fn m82_real_dispatch_reset_retains_tasks_and_recaptures_external_baseline() {
+        let root = tempfile::tempdir().unwrap();
+        let adapter = Arc::new(M82TodoAdapter::default());
+        let state = m82_state(root.path(), adapter.clone());
+        let (coordinator, _) = state.build_swarm(m82_config()).unwrap();
+        coordinator.start().await.unwrap();
+        let owner = m82_owner(&coordinator);
+        adapter.steps.lock().unwrap().extend([
+            m82_step(None, Some(m82_write("first-write", &["task A"]))),
+            m82_step(Some(("success", m82_updated(1))), None),
+        ]);
+        assert_eq!(
+            coordinator.dispatch("first dispatch").await.status,
+            TaskStatus::Success
+        );
+        let first_snapshot = read_agent_todos(Some(root.path()), &owner).unwrap();
+        let first_bytes = std::fs::read(m82_path(root.path(), &owner)).ok();
+
+        adapter.steps.lock().unwrap().extend(m82_read_write(
+            &["task A"],
+            &["task A", "task B"],
+            "second",
+        ));
+        assert_eq!(
+            coordinator
+                .dispatch("second dispatch resets the inner runtime")
+                .await
+                .status,
+            TaskStatus::Success
+        );
+        assert_eq!(m82_owner(&coordinator), owner);
+        assert_eq!(first_snapshot.tasks, m82_tasks(&["task A"]));
+        assert_eq!(
+            first_bytes,
+            Some(serde_json::to_vec_pretty(&m82_tasks(&["task A"])).unwrap())
+        );
+        let second_revision = m82_assert_store(root.path(), &owner, &["task A", "task B"]);
+        assert_ne!(first_snapshot.revision, second_revision);
+
+        write_agent_todos(
+            Some(root.path()),
+            &owner,
+            &m82_tasks(&["external owner task"]),
+            None,
+        )
+        .unwrap();
+        // No todo_read precedes this write: only fresh startup capture can
+        // authorize replacing the externally updated revision on this run.
+        adapter.steps.lock().unwrap().extend([
+            m82_step(
+                None,
+                Some(m82_write(
+                    "fresh-baseline",
+                    &["external owner task", "task C"],
+                )),
+            ),
+            m82_step(
+                Some(("success", m82_updated(2))),
+                Some(m82_read("read-merged")),
+            ),
+            m82_step(
+                Some(("success", m82_render(&["external owner task", "task C"]))),
+                None,
+            ),
+        ]);
+        assert_eq!(
+            coordinator.dispatch("fresh startup baseline").await.status,
+            TaskStatus::Success
+        );
+        coordinator.stop().await.unwrap();
+        m82_assert_store(root.path(), &owner, &["external owner task", "task C"]);
+        m82_assert_files(root.path(), &[&owner]);
+        m82_assert_script(
+            &adapter,
+            &[
+                "todo_write",
+                "todo_read",
+                "todo_write",
+                "todo_write",
+                "todo_read",
+            ],
+            3,
+        );
+    }
+
+    #[tokio::test]
+    async fn m82_malformed_stable_tasks_refuse_until_explicit_successful_read() {
+        let root = tempfile::tempdir().unwrap();
+        let adapter = Arc::new(M82TodoAdapter::default());
+        let state = m82_state(root.path(), adapter.clone());
+        let (coordinator, _) = state.build_swarm(m82_config()).unwrap();
+        coordinator.start().await.unwrap();
+        let owner = m82_owner(&coordinator);
+        let path = m82_path(root.path(), &owner);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"{malformed stable tasks").unwrap();
+        let refusal = "No task revision was observed for this run, so nothing was saved.";
+        let mut steps = vec![
+            m82_step(
+                None,
+                Some(m82_write("blind-malformed", &["blind replacement"])),
+            ),
+            m82_step(
+                Some(("error", refusal.into())),
+                Some(m82_read("read-malformed")),
+            ),
+            m82_step(
+                Some(("error", "Could not decode agent tasks".into())),
+                Some(m82_write("blind-repaired", &["blind replacement"])),
+            ),
+            m82_step(
+                Some(("error", refusal.into())),
+                Some(m82_read("read-repaired")),
+            ),
+            m82_step(
+                Some(("success", m82_render(&["other owner task"]))),
+                Some(m82_write(
+                    "explicit-merge",
+                    &["other owner task", "model task"],
+                )),
+            ),
+            m82_step(Some(("success", m82_updated(2))), None),
+        ];
+        let unchanged = path.clone();
+        steps[1].barrier = Some(Box::new(move || {
+            assert_eq!(
+                std::fs::read(&unchanged).unwrap(),
+                b"{malformed stable tasks"
+            )
+        }));
+        let repair_root = root.path().to_owned();
+        let repair_owner = owner.clone();
+        let malformed = path.clone();
+        steps[2].barrier = Some(Box::new(move || {
+            assert_eq!(
+                std::fs::read(&malformed).unwrap(),
+                b"{malformed stable tasks"
+            );
+            write_agent_todos(
+                Some(&repair_root),
+                &repair_owner,
+                &m82_tasks(&["other owner task"]),
+                None,
+            )
+            .unwrap();
+        }));
+        let repaired = path.clone();
+        steps[3].barrier = Some(Box::new(move || {
+            assert_eq!(
+                std::fs::read(&repaired).unwrap(),
+                serde_json::to_vec_pretty(&m82_tasks(&["other owner task"])).unwrap()
+            )
+        }));
+        adapter.steps.lock().unwrap().extend(steps);
+        assert_eq!(
+            coordinator
+                .dispatch("malformed repair recovery")
+                .await
+                .status,
+            TaskStatus::Success
+        );
+        coordinator.stop().await.unwrap();
+        m82_assert_store(root.path(), &owner, &["other owner task", "model task"]);
+        m82_assert_files(root.path(), &[&owner]);
+        m82_assert_script(
+            &adapter,
+            &[
+                "todo_write",
+                "todo_read",
+                "todo_write",
+                "todo_read",
+                "todo_write",
+            ],
+            1,
+        );
+    }
+
+    #[tokio::test]
+    async fn m82_stale_cas_refreshes_the_same_stable_owner_before_explicit_merge() {
+        let root = tempfile::tempdir().unwrap();
+        let adapter = Arc::new(M82TodoAdapter::default());
+        let state = m82_state(root.path(), adapter.clone());
+        let (coordinator, _) = state.build_swarm(m82_config()).unwrap();
+        coordinator.start().await.unwrap();
+        let owner = m82_owner(&coordinator);
+        write_agent_todos(
+            Some(root.path()),
+            &owner,
+            &m82_tasks(&["startup task"]),
+            None,
+        )
+        .unwrap();
+        let mut initial = m82_step(None, Some(m82_write("stale-write", &["model task"])));
+        let update_root = root.path().to_owned();
+        let update_owner = owner.clone();
+        initial.barrier = Some(Box::new(move || {
+            write_agent_todos(
+                Some(&update_root),
+                &update_owner,
+                &m82_tasks(&["new stable owner task"]),
+                None,
+            )
+            .unwrap();
+        }));
+        let mut conflict = m82_step(
+            Some(("error", "[pending] new stable owner task".into())),
+            Some(m82_write(
+                "merged-write",
+                &["new stable owner task", "model task"],
+            )),
+        );
+        let unchanged = m82_path(root.path(), &owner);
+        conflict.barrier = Some(Box::new(move || {
+            assert_eq!(
+                std::fs::read(&unchanged).unwrap(),
+                serde_json::to_vec_pretty(&m82_tasks(&["new stable owner task"])).unwrap()
+            )
+        }));
+        adapter.steps.lock().unwrap().extend([
+            initial,
+            conflict,
+            m82_step(Some(("success", m82_updated(2))), None),
+        ]);
+        assert_eq!(
+            coordinator.dispatch("stale CAS").await.status,
+            TaskStatus::Success
+        );
+        coordinator.stop().await.unwrap();
+        m82_assert_store(
+            root.path(),
+            &owner,
+            &["new stable owner task", "model task"],
+        );
+        m82_assert_files(root.path(), &[&owner]);
+        m82_assert_script(&adapter, &["todo_write", "todo_write"], 1);
+    }
+
+    #[tokio::test]
+    async fn m82_same_name_members_in_different_swarms_keep_distinct_lists() {
+        let root = tempfile::tempdir().unwrap();
+        let adapter = Arc::new(M82TodoAdapter::default());
+        let state = m82_state(root.path(), adapter.clone());
+        let (first, _) = state.build_swarm(m82_config()).unwrap();
+        let (second, _) = state.build_swarm(m82_config()).unwrap();
+        first.start().await.unwrap();
+        second.start().await.unwrap();
+        let a = m82_owner(&first);
+        let b = m82_owner(&second);
+        assert_ne!(first.get_state().id, second.get_state().id);
+        adapter
+            .steps
+            .lock()
+            .unwrap()
+            .extend(m82_read_write(&[], &["swarm A task"], "a-first"));
+        assert_eq!(first.dispatch("first A").await.status, TaskStatus::Success);
+        adapter
+            .steps
+            .lock()
+            .unwrap()
+            .extend(m82_read_write(&[], &["swarm B task"], "b-first"));
+        assert_eq!(second.dispatch("first B").await.status, TaskStatus::Success);
+        adapter.steps.lock().unwrap().extend(m82_read_write(
+            &["swarm A task"],
+            &["swarm A task", "A second task"],
+            "a-second",
+        ));
+        assert_eq!(first.dispatch("repeat A").await.status, TaskStatus::Success);
+        adapter.steps.lock().unwrap().extend(m82_read_write(
+            &["swarm B task"],
+            &["swarm B task", "B second task"],
+            "b-second",
+        ));
+        assert_eq!(
+            second.dispatch("repeat B").await.status,
+            TaskStatus::Success
+        );
+        first.stop().await.unwrap();
+        second.stop().await.unwrap();
+        let a_revision = m82_assert_store(root.path(), &a, &["swarm A task", "A second task"]);
+        let b_revision = m82_assert_store(root.path(), &b, &["swarm B task", "B second task"]);
+        assert_ne!(a_revision, b_revision);
+        m82_assert_files(root.path(), &[&a, &b]);
+        m82_assert_script(
+            &adapter,
+            &[
+                "todo_read",
+                "todo_write",
+                "todo_read",
+                "todo_write",
+                "todo_read",
+                "todo_write",
+                "todo_read",
+                "todo_write",
+            ],
+            4,
+        );
+    }
+
+    #[tokio::test]
+    async fn m82_distinct_same_name_members_and_new_ephemeral_members_never_inherit_tasks() {
+        use anima_swarm::coordinator::{CoordinatorStrategyFn, SwarmCoordinator};
+        let root = tempfile::tempdir().unwrap();
+        let adapter = Arc::new(M82TodoAdapter::default());
+        let state = m82_state(root.path(), adapter.clone());
+        let observed = Arc::new(Mutex::new(Vec::<Vec<String>>::new()));
+        let members = observed.clone();
+        let strategy: Arc<CoordinatorStrategyFn> = Arc::new(move |context| {
+            let members = members.clone();
+            Box::pin(async move {
+                // No worker pool: use actual run references to distinguish two
+                // equal display names without changing name routing.
+                let first = context
+                    .spawn_agent(context.manager_config().clone())
+                    .await
+                    .unwrap();
+                let second = context
+                    .spawn_agent(context.manager_config().clone())
+                    .await
+                    .unwrap();
+                members
+                    .lock()
+                    .unwrap()
+                    .push(vec![first.id.clone(), second.id.clone()]);
+                assert_eq!(
+                    first.run("first member".into()).await.status,
+                    TaskStatus::Success
+                );
+                assert_eq!(
+                    second.run("second member".into()).await.status,
+                    TaskStatus::Success
+                );
+                first.run("first member again".into()).await
+            })
+        });
+        let mut config = m82_config();
+        config.workers.clear();
+        let coordinator = SwarmCoordinator::with_hooks(
+            config,
+            strategy,
+            state.swarm_agent_factory(crate::events::EventFanout::new(32)),
+        );
+        coordinator.start().await.unwrap();
+        let swarm_id = coordinator.get_state().id;
+        for (tag, first, second, extra) in [
+            ("old", "old A", "old B", "old A second"),
+            ("new", "new A", "new B", "new A second"),
+        ] {
+            let mut script = m82_read_write(&[], &[first], &format!("{tag}-a"));
+            script.extend(m82_read_write(&[], &[second], &format!("{tag}-b")));
+            script.extend(m82_read_write(
+                &[first],
+                &[first, extra],
+                &format!("{tag}-a-again"),
+            ));
+            adapter.steps.lock().unwrap().extend(script);
+            assert_eq!(coordinator.dispatch(tag).await.status, TaskStatus::Success);
+        }
+        coordinator.stop().await.unwrap();
+        let ids = observed
+            .lock()
+            .unwrap()
+            .iter()
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(ids.len(), 4);
+        assert_eq!(
+            ids.iter().collect::<std::collections::HashSet<_>>().len(),
+            4
+        );
+        let owners = ids
+            .iter()
+            .map(|id| m82_expected_owner(&swarm_id, id))
+            .collect::<Vec<_>>();
+        for (owner, contents) in owners.iter().zip([
+            vec!["old A", "old A second"],
+            vec!["old B"],
+            vec!["new A", "new A second"],
+            vec!["new B"],
+        ]) {
+            m82_assert_store(root.path(), owner, &contents);
+        }
+        m82_assert_files(
+            root.path(),
+            &owners.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
+        m82_assert_script(&adapter, &["todo_read", "todo_write"].repeat(6), 6);
+    }
+
+    #[tokio::test]
+    async fn m82_long_member_name_keeps_real_task_tools_and_reset_continuity_usable() {
+        let root = tempfile::tempdir().unwrap();
+        let adapter = Arc::new(M82TodoAdapter::default());
+        let state = m82_state(root.path(), adapter.clone());
+        let mut config = m82_config();
+        config.manager.name = "x".repeat(100);
+        config.workers[0].name = config.manager.name.clone();
+        let (coordinator, _) = state.build_swarm(config).unwrap();
+        coordinator.start().await.unwrap();
+        let owner = m82_owner(&coordinator);
+        adapter.steps.lock().unwrap().extend(m82_read_write(
+            &[],
+            &["long-name task A"],
+            "long-first",
+        ));
+        assert_eq!(
+            coordinator
+                .dispatch("long name first dispatch")
+                .await
+                .status,
+            TaskStatus::Success
+        );
+        adapter.steps.lock().unwrap().extend(m82_read_write(
+            &["long-name task A"],
+            &["long-name task A", "long-name task B"],
+            "long-second",
+        ));
+        assert_eq!(
+            coordinator
+                .dispatch("long name second dispatch")
+                .await
+                .status,
+            TaskStatus::Success
+        );
+        assert_eq!(m82_owner(&coordinator), owner);
+        coordinator.stop().await.unwrap();
+        assert!(
+            m82_path(root.path(), &owner)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .len()
+                <= 255
+        );
+        m82_assert_store(
+            root.path(),
+            &owner,
+            &["long-name task A", "long-name task B"],
+        );
+        m82_assert_files(root.path(), &[&owner]);
+        m82_assert_script(
+            &adapter,
+            &["todo_read", "todo_write", "todo_read", "todo_write"],
+            2,
+        );
+    }
 
     struct DelegatingAdapter(std::sync::atomic::AtomicUsize);
 

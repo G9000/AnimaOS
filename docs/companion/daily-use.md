@@ -339,3 +339,9 @@ A normally missing task file still reads as an empty list and supports the first
 Tasks pause while disconnected. Unsaved edits and new-task text stay visible read-only; reconnect checks the saved list. If its revision is unchanged, editing resumes with your draft. If it changed, your draft stays intact and Save remains disabled until you explicitly choose **Discard draft and load saved tasks**. Review any draft text you need before discarding it.
 
 A save already submitted is not sent again automatically. The editor waits for that pending save to settle before allowing another save; reconnect checks current saved tasks without treating a lost response as rollback. Running-agent and concurrent-edit restrictions still apply.
+
+## Swarm tasks across dispatches
+
+A logical swarm member keeps the same saved task list when the coordinator resets its runtime for another dispatch. Different swarm/member owners keep separate lists. A new swarm is a new owner; this does not restore a swarm after a daemon restart or import task files left by older ephemeral runtime IDs.
+
+Unread or malformed task files still block model writes until an explicit successful read and merge. Normal companion tasks keep their existing agent ownership and revision checks.
