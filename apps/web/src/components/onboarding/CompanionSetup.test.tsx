@@ -1,5 +1,5 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { ChatGptClient, type ChatGptModelsSnapshot } from '@animaOS-SWARM/sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { daemon, type DaemonProvider } from '../../lib/daemon-api';
@@ -14,38 +14,84 @@ const providers: DaemonProvider[] = [
     apiKeyEnvs: ['OPENAI_API_KEY'],
   },
 ];
-afterEach(() => vi.restoreAllMocks());
+const freshWorkspace = {
+  configured: false,
+  workspace: null,
+  defaultRoot: '/data/workspace',
+};
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  localStorage.clear();
+});
 beforeEach(() => {
   vi.spyOn(daemon, 'inspectWorkspace').mockResolvedValue({ found: false });
 });
 
+function renderSetup(
+  overrides: Partial<Parameters<typeof CompanionSetup>[0]> = {},
+) {
+  return render(
+    <CompanionSetup
+      providers={providers}
+      providersError={null}
+      retryProviders={vi.fn()}
+      onCreated={vi.fn()}
+      {...overrides}
+    />,
+  );
+}
+
+const button = (name: string) => screen.getByRole('button', { name });
+
+async function start(user: UserEvent) {
+  await waitFor(() => expect(button('Get started')).toBeEnabled());
+  await user.click(button('Get started'));
+}
+
+async function toAccess(user: UserEvent) {
+  await start(user);
+  await user.click(button('Continue'));
+  await user.click(button('Continue'));
+  expect(
+    screen.getByRole('heading', { name: 'Where anima works' }),
+  ).toBeVisible();
+}
+
+async function toVoice(user: UserEvent) {
+  await toAccess(user);
+  await user.click(button('Continue'));
+  expect(
+    await screen.findByRole('heading', { name: 'Talk out loud?' }),
+  ).toBeVisible();
+}
+
+async function openExisting(user: UserEvent) {
+  await waitFor(() =>
+    expect(button('Open an existing workspace')).toBeEnabled(),
+  );
+  await user.click(button('Open an existing workspace'));
+}
+
 describe('CompanionSetup', () => {
   it('uses a chosen ordinary folder for a new companion', async () => {
-    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
-      configured: false,
-      workspace: null,
-      defaultRoot: '/data/workspace',
-    });
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
     vi.spyOn(daemon, 'pickWorkspaceFolder').mockResolvedValue({
       rootPath: '/my/existing/files',
     });
     const create = vi.spyOn(daemon, 'bootstrapWorkspace').mockResolvedValue({
       agent: { state: { id: 'main' } },
     } as never);
-    render(
-      <CompanionSetup
-        providers={providers}
-        providersError={null}
-        retryProviders={vi.fn()}
-        onCreated={vi.fn()}
-      />,
-    );
+    renderSetup();
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Browse…' }));
-    expect(
-      screen.getByRole('textbox', { name: 'Workspace folder on the server' }),
-    ).toHaveValue('/my/existing/files');
-    await user.click(screen.getByRole('button', { name: 'Start chatting' }));
+    await toAccess(user);
+    await user.click(button('Browse…'));
+    expect(screen.getByRole('textbox', { name: 'Home folder' })).toHaveValue(
+      '/my/existing/files',
+    );
+    await user.click(button('Continue'));
+    await user.click(await screen.findByRole('button', { name: 'Finish setup' }));
     await waitFor(() => expect(create).toHaveBeenCalledOnce());
     expect(daemon.inspectWorkspace).toHaveBeenCalledWith('/my/existing/files');
     expect(create.mock.calls[0][0].workspace.rootPath).toBe(
@@ -54,11 +100,7 @@ describe('CompanionSetup', () => {
   });
 
   it('previews a saved workspace and resumes its existing agent', async () => {
-    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
-      configured: false,
-      workspace: null,
-      defaultRoot: '/data/workspace',
-    });
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
     vi.mocked(daemon.inspectWorkspace).mockResolvedValue({
       found: true,
       companyName: 'My workspace',
@@ -72,26 +114,18 @@ describe('CompanionSetup', () => {
     } as never);
     const bootstrap = vi.spyOn(daemon, 'bootstrapWorkspace');
     const created = vi.fn();
-    render(
-      <CompanionSetup
-        providers={providers}
-        providersError={null}
-        retryProviders={vi.fn()}
-        onCreated={created}
-      />,
-    );
+    renderSetup({ onCreated: created });
     const user = userEvent.setup();
+    await toAccess(user);
     await user.type(
-      await screen.findByRole('textbox', {
-        name: 'Workspace folder on the server',
-      }),
+      screen.getByRole('textbox', { name: 'Home folder' }),
       '{Control>}a{/Control}/saved/workspace',
     );
-    await user.click(screen.getByRole('button', { name: 'Start chatting' }));
+    await user.click(button('Continue'));
     expect(await screen.findByText('Continue my work')).toBeVisible();
     expect(screen.getByText('Ari')).toBeVisible();
     expect(bootstrap).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('button', { name: 'Resume workspace' }));
+    await user.click(button('Resume workspace'));
     await waitFor(() =>
       expect(resume).toHaveBeenCalledWith('/saved/workspace'),
     );
@@ -101,11 +135,7 @@ describe('CompanionSetup', () => {
   });
 
   it('can inspect and resume a saved workspace before a provider is configured', async () => {
-    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
-      configured: false,
-      workspace: null,
-      defaultRoot: '/data/workspace',
-    });
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
     vi.mocked(daemon.inspectWorkspace).mockResolvedValue({
       found: true,
       companyName: 'Saved',
@@ -116,32 +146,20 @@ describe('CompanionSetup', () => {
     const resume = vi.spyOn(daemon, 'resumeWorkspace').mockResolvedValue({
       orchestrator: { state: { id: 'ari' } },
     } as never);
-    render(
-      <CompanionSetup
-        providers={[]}
-        providersError={null}
-        retryProviders={vi.fn()}
-        onCreated={vi.fn()}
-      />,
-    );
+    renderSetup({ providers: [] });
     const user = userEvent.setup();
-    await user.click(
-      await screen.findByRole('button', { name: 'Check folder' }),
-    );
+    await openExisting(user);
+    await user.click(button('Check folder'));
     expect(await screen.findByText('Saved')).toBeVisible();
     expect(
       screen.getByText(/resume offline until you add the key/),
     ).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Resume workspace' }));
+    await user.click(button('Resume workspace'));
     await waitFor(() => expect(resume).toHaveBeenCalledWith('/data/workspace'));
   });
 
   it('does not create a new companion from Enter while a saved workspace is previewed', async () => {
-    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
-      configured: false,
-      workspace: null,
-      defaultRoot: '/data/workspace',
-    });
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
     vi.mocked(daemon.inspectWorkspace).mockResolvedValue({
       found: true,
       companyName: 'Saved',
@@ -150,124 +168,78 @@ describe('CompanionSetup', () => {
       providerAvailable: true,
     });
     const bootstrap = vi.spyOn(daemon, 'bootstrapWorkspace');
-    render(
-      <CompanionSetup
-        providers={providers}
-        providersError={null}
-        retryProviders={vi.fn()}
-        onCreated={vi.fn()}
-      />,
-    );
+    renderSetup();
     const user = userEvent.setup();
-    const folder = await screen.findByRole('textbox', {
-      name: 'Workspace folder on the server',
-    });
-    await user.click(screen.getByRole('button', { name: 'Check folder' }));
+    await toAccess(user);
+    await user.click(button('Continue'));
     expect(await screen.findByText('Saved')).toBeVisible();
-    await user.click(folder);
+    await user.click(screen.getByRole('textbox', { name: 'Home folder' }));
     await user.keyboard('{Enter}');
     expect(daemon.inspectWorkspace).toHaveBeenCalledOnce();
     expect(bootstrap).not.toHaveBeenCalled();
   });
 
   it('does not bootstrap when inspection fails', async () => {
-    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
-      configured: false,
-      workspace: null,
-      defaultRoot: '/data/workspace',
-    });
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
     vi.mocked(daemon.inspectWorkspace).mockRejectedValue(
       new Error('Invalid anima.yaml'),
     );
     const bootstrap = vi.spyOn(daemon, 'bootstrapWorkspace');
-    render(
-      <CompanionSetup
-        providers={providers}
-        providersError={null}
-        retryProviders={vi.fn()}
-        onCreated={vi.fn()}
-      />,
-    );
-    await userEvent.click(
-      await screen.findByRole('button', { name: 'Start chatting' }),
-    );
+    renderSetup();
+    const user = userEvent.setup();
+    await toAccess(user);
+    await user.click(button('Continue'));
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Invalid anima.yaml',
     );
+    expect(
+      screen.getByRole('heading', { name: 'Where anima works' }),
+    ).toBeVisible();
     expect(bootstrap).not.toHaveBeenCalled();
   });
 
   it('ignores a stale inspection after the folder changes', async () => {
-    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
-      configured: false,
-      workspace: null,
-      defaultRoot: '/data/workspace',
-    });
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
     let resolveInspect!: (value: { found: false }) => void;
     vi.mocked(daemon.inspectWorkspace).mockReturnValue(
       new Promise((resolve) => {
         resolveInspect = resolve;
       }),
     );
-    render(
-      <CompanionSetup
-        providers={providers}
-        providersError={null}
-        retryProviders={vi.fn()}
-        onCreated={vi.fn()}
-      />,
-    );
+    renderSetup();
     const user = userEvent.setup();
-    const folder = await screen.findByRole('textbox', {
-      name: 'Workspace folder on the server',
-    });
-    await user.click(screen.getByRole('button', { name: 'Check folder' }));
+    await openExisting(user);
+    const folder = screen.getByRole('textbox', { name: 'Home folder' });
+    await user.click(button('Check folder'));
     await user.clear(folder);
     await user.type(folder, '/another/folder');
     resolveInspect({ found: false });
-    await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: 'Check folder' }),
-      ).toBeEnabled(),
-    );
+    await waitFor(() => expect(button('Check folder')).toBeEnabled());
     expect(
       screen.queryByText(/No saved Anima workspace found here/),
     ).not.toBeInTheDocument();
   });
 
   it('keeps a typed folder when the picker returns an older selection', async () => {
-    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
-      configured: false,
-      workspace: null,
-      defaultRoot: '/data/workspace',
-    });
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
     let resolvePicker!: (value: { rootPath: string }) => void;
     vi.spyOn(daemon, 'pickWorkspaceFolder').mockReturnValue(
       new Promise((resolve) => {
         resolvePicker = resolve;
       }),
     );
-    render(
-      <CompanionSetup
-        providers={providers}
-        providersError={null}
-        retryProviders={vi.fn()}
-        onCreated={vi.fn()}
-      />,
-    );
+    renderSetup();
     const user = userEvent.setup();
-    const folder = await screen.findByRole('textbox', {
-      name: 'Workspace folder on the server',
-    });
-    await user.click(screen.getByRole('button', { name: 'Browse…' }));
+    await openExisting(user);
+    const folder = screen.getByRole('textbox', { name: 'Home folder' });
+    await user.click(button('Browse…'));
     await user.clear(folder);
     await user.type(folder, '/typed/folder');
     resolvePicker({ rootPath: '/old/picker/folder' });
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Browse…' })).toBeEnabled(),
-    );
+    await waitFor(() => expect(button('Browse…')).toBeEnabled());
     expect(folder).toHaveValue('/typed/folder');
   });
+
   it('m49_chatgpt_models_connected_subscription_requires_owner_model_choice', async () => {
     vi.spyOn(ChatGptClient.prototype, 'models').mockResolvedValue({
       state: 'unrequested',
@@ -285,45 +257,71 @@ describe('CompanionSetup', () => {
       login: null,
       error: null,
     });
-    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
-      configured: false,
-      workspace: null,
-      defaultRoot: '/data/workspace',
-    });
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
     const create = vi.spyOn(daemon, 'bootstrapWorkspace');
-    render(
-      <CompanionSetup
-        providers={[
-          ...providers,
-          {
-            id: 'chatgpt',
-            label: 'ChatGPT subscription',
-            configured: true,
-            requiresKey: false,
-            apiKeyEnvs: [],
-          },
-        ]}
-        providersError={null}
-        retryProviders={vi.fn()}
-        onCreated={vi.fn()}
-      />,
-    );
+    renderSetup({
+      providers: [
+        ...providers,
+        {
+          id: 'chatgpt',
+          label: 'ChatGPT subscription',
+          configured: true,
+          requiresKey: false,
+          apiKeyEnvs: [],
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    await start(user);
     expect(await screen.findByText('Connected · synthetic-plan')).toBeVisible();
-    await waitFor(() =>
-      expect(
-        screen.queryByText('Loading your workspace…'),
-      ).not.toBeInTheDocument(),
-    );
     expect(
-      screen.getByRole('button', { name: 'ChatGPT subscription selected' }),
-    ).toHaveAttribute('aria-pressed', 'true');
+      screen.getByRole('radio', { name: /Use my ChatGPT plan/ }),
+    ).toBeChecked();
     expect(
       screen.getByRole('combobox', { name: 'Model', exact: true }),
     ).toHaveValue('');
-    expect(
-      screen.getByRole('button', { name: 'Start chatting' }),
-    ).toBeDisabled();
+    expect(button('Continue')).toBeDisabled();
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it('refreshes providers once when an already-connected ChatGPT account loads', async () => {
+    vi.spyOn(ChatGptClient.prototype, 'status').mockResolvedValue({
+      connected: true,
+      accountId: 'synthetic-account',
+      planType: 'synthetic-plan',
+      login: null,
+      error: null,
+    });
+    vi.spyOn(ChatGptClient.prototype, 'models').mockResolvedValue({
+      state: 'unrequested',
+      connectionRevision: 'connection-a',
+      catalogRevision: null,
+      fetchedAtMs: null,
+      expiresAtMs: null,
+      models: [],
+      error: null,
+    });
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
+    const retryProviders = vi.fn(async () => undefined);
+    renderSetup({
+      retryProviders,
+      providers: [
+        {
+          id: 'chatgpt',
+          label: 'ChatGPT subscription',
+          configured: true,
+          requiresKey: false,
+          apiKeyEnvs: [],
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    await start(user);
+    expect(await screen.findByText('Connected · synthetic-plan')).toBeVisible();
+    await waitFor(() => expect(retryProviders).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(retryProviders).toHaveBeenCalledOnce();
+    expect(screen.getByText('Connected · synthetic-plan')).toBeVisible();
   });
 
   it('m49_chatgpt_models_companion_preserves_explicit_custom_choice_when_metadata_arrives', async () => {
@@ -351,31 +349,23 @@ describe('CompanionSetup', () => {
           complete = resolve;
         }),
       );
-    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
-      configured: false,
-      workspace: null,
-      defaultRoot: '/data/workspace',
-    });
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
     const create = vi
       .spyOn(daemon, 'bootstrapWorkspace')
       .mockResolvedValue({ agent: { state: { id: 'main' } } } as never);
     const user = userEvent.setup();
-    render(
-      <CompanionSetup
-        providers={[
-          {
-            id: 'chatgpt',
-            label: 'ChatGPT subscription',
-            configured: true,
-            requiresKey: false,
-            apiKeyEnvs: [],
-          },
-        ]}
-        providersError={null}
-        retryProviders={vi.fn()}
-        onCreated={vi.fn()}
-      />,
-    );
+    renderSetup({
+      providers: [
+        {
+          id: 'chatgpt',
+          label: 'ChatGPT subscription',
+          configured: true,
+          requiresKey: false,
+          apiKeyEnvs: [],
+        },
+      ],
+    });
+    await start(user);
     await screen.findByText(/Model metadata has not been refreshed/);
     await user.selectOptions(
       screen.getByRole('combobox', { name: 'Model' }),
@@ -385,12 +375,7 @@ describe('CompanionSetup', () => {
       screen.getByRole('textbox', { name: 'Custom model' }),
       'Owner.Exact/Model',
     );
-    await user.click(screen.getByRole('button', { name: 'Refresh models' }));
-    await user.clear(screen.getByRole('textbox', { name: 'Companion name' }));
-    await user.type(
-      screen.getByRole('textbox', { name: 'Companion name' }),
-      'Kept name',
-    );
+    await user.click(button('Refresh models'));
     await act(async () =>
       complete({
         state: 'ready',
@@ -403,13 +388,17 @@ describe('CompanionSetup', () => {
       }),
     );
     await screen.findByText(/Received model metadata/);
-    await user.click(
-      screen.getByRole('button', { name: 'ChatGPT subscription selected' }),
-    );
+    await user.click(screen.getByRole('radio', { name: /Use my ChatGPT plan/ }));
     expect(screen.getByRole('textbox', { name: 'Custom model' })).toHaveValue(
       'Owner.Exact/Model',
     );
-    await user.click(screen.getByRole('button', { name: 'Start chatting' }));
+    await user.click(button('Continue'));
+    const agentName = screen.getByRole('textbox', { name: 'Agent name' });
+    await user.clear(agentName);
+    await user.type(agentName, 'Kept name');
+    await user.click(button('Continue'));
+    await user.click(button('Continue'));
+    await user.click(await screen.findByRole('button', { name: 'Finish setup' }));
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         agent: expect.objectContaining({
@@ -425,83 +414,56 @@ describe('CompanionSetup', () => {
   it.each([true, false])(
     'never defaults to the mock provider (real provider configured: %s)',
     async (configured) => {
-      vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
-        configured: false,
-        workspace: null,
-        defaultRoot: '/data/workspace',
-      });
+      vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
       const create = vi
         .spyOn(daemon, 'bootstrapWorkspace')
         .mockResolvedValue({ agent: { state: { id: 'main' } } } as never);
-      render(
-        <CompanionSetup
-          providers={[
-            {
-              id: 'deterministic',
-              label: 'Deterministic (mock)',
-              configured: true,
-              requiresKey: false,
-              apiKeyEnvs: [],
-            },
-            {
-              id: 'ollama',
-              label: 'Ollama',
-              configured: true,
-              requiresKey: false,
-              apiKeyEnvs: [],
-            },
-            { ...providers[0], configured },
-          ]}
-          providersError={null}
-          retryProviders={vi.fn()}
-          onCreated={vi.fn()}
-        />,
-      );
-      await waitFor(() =>
-        expect(
-          screen.queryByText('Loading your workspace…'),
-        ).not.toBeInTheDocument(),
-      );
-      const start = screen.getByRole('button', { name: 'Start chatting' });
+      renderSetup({
+        providers: [
+          {
+            id: 'deterministic',
+            label: 'Deterministic (mock)',
+            configured: true,
+            requiresKey: false,
+            apiKeyEnvs: [],
+          },
+          {
+            id: 'ollama',
+            label: 'Ollama',
+            configured: true,
+            requiresKey: false,
+            apiKeyEnvs: [],
+          },
+          { ...providers[0], configured },
+        ],
+      });
+      const user = userEvent.setup();
+      await start(user);
       if (configured) {
-        await userEvent.click(start);
+        await toVoiceFromModel(user);
+        await user.click(button('Finish setup'));
+        await waitFor(() => expect(create).toHaveBeenCalledOnce());
         expect(create.mock.calls[0][0].agent.provider).toBe('openai');
       } else {
-        expect(start).toBeDisabled();
+        expect(button('Continue')).toBeDisabled();
         expect(create).not.toHaveBeenCalled();
       }
     },
   );
 
   it('creates exactly one companion using the daemon workspace directory, with no agency generation', async () => {
-    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
-      configured: false,
-      workspace: null,
-      defaultRoot: '/data/workspace',
-    });
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
     const create = vi
       .spyOn(daemon, 'bootstrapWorkspace')
       .mockResolvedValue({ agent: { state: { id: 'main' } } } as never);
     const generate = vi.spyOn(daemon, 'generateAgency');
     const created = vi.fn();
-    render(
-      <CompanionSetup
-        providers={providers}
-        providersError={null}
-        retryProviders={vi.fn()}
-        onCreated={created}
-      />,
-    );
-    await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: 'Start chatting' }),
-      ).toBeEnabled(),
-    );
+    renderSetup({ onCreated: created });
+    const user = userEvent.setup();
+    await toVoice(user);
     expect(screen.queryByText('Team')).not.toBeInTheDocument();
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Start chatting' }),
-    );
-    expect(create).toHaveBeenCalledOnce();
+    await user.click(button('Finish setup'));
+    await waitFor(() => expect(create).toHaveBeenCalledOnce());
     expect(create.mock.calls[0][0]).toMatchObject({
       workspace: {
         rootPath: '/data/workspace',
@@ -514,8 +476,90 @@ describe('CompanionSetup', () => {
     expect(create.mock.calls[0][0].agent.system).toContain(
       'personal companion',
     );
+    expect(create.mock.calls[0][0].agent.tools).not.toContain(
+      'browser_navigate',
+    );
     expect(generate).not.toHaveBeenCalled();
     expect(created).toHaveBeenCalledOnce();
+  });
+
+  it('carries introductions and permissions into the new companion', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
+    const create = vi
+      .spyOn(daemon, 'bootstrapWorkspace')
+      .mockResolvedValue({ agent: { state: { id: 'main' } } } as never);
+    renderSetup();
+    const user = userEvent.setup();
+    await start(user);
+    await user.click(button('Continue'));
+    await user.type(screen.getByRole('textbox', { name: 'Your name' }), 'Sam');
+    await user.click(screen.getByRole('radio', { name: /Driven/ }));
+    expect(screen.getByText(/Good (morning|afternoon|evening), Sam\./)).toBeInTheDocument();
+    await user.click(button('Continue'));
+    await user.click(screen.getByRole('radio', { name: /Operate/ }));
+    await user.click(screen.getByRole('checkbox', { name: /read the web/ }));
+    await user.click(button('Continue'));
+    await user.click(await screen.findByRole('button', { name: 'Finish setup' }));
+    await waitFor(() => expect(create).toHaveBeenCalledOnce());
+    const agent = create.mock.calls[0][0].agent;
+    expect(agent.system).toContain("The owner's name is Sam.");
+    expect(agent.system).toContain('Take the lead');
+    expect(agent.tools).toEqual(
+      expect.arrayContaining(['bash', 'browser_navigate', 'browser_observe']),
+    );
+    expect(agent.tools).not.toContain('browser_act');
+  });
+
+  it('uploads a chosen avatar after the companion is created', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
+    vi.spyOn(daemon, 'bootstrapWorkspace').mockResolvedValue({
+      agent: { state: { id: 'main' } },
+    } as never);
+    const upload = vi.spyOn(daemon, 'setAgentAvatar').mockResolvedValue();
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:avatar'),
+      revokeObjectURL: vi.fn(),
+    });
+    const created = vi.fn();
+    renderSetup({ onCreated: created });
+    const user = userEvent.setup();
+    await start(user);
+    await user.click(button('Continue'));
+    const file = new File(['png'], 'me.png', { type: 'image/png' });
+    await user.upload(screen.getByLabelText('Upload an image'), file);
+    expect(screen.getByText(/me\.png/)).toBeVisible();
+    await user.click(button('Continue'));
+    await user.click(button('Continue'));
+    await user.click(await screen.findByRole('button', { name: 'Finish setup' }));
+    await waitFor(() => expect(created).toHaveBeenCalledOnce());
+    expect(upload).toHaveBeenCalledWith('main', file);
+  });
+
+  it.each([
+    ['Finish setup', 'voice-ember'],
+    ["Skip, I'll type", null],
+  ])('keeps the chosen voice only on %s', async (action, stored) => {
+    const voice = { voiceURI: 'voice-ember', name: 'Ember', lang: 'en-US' };
+    vi.stubGlobal('speechSynthesis', {
+      getVoices: () => [voice],
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      cancel: vi.fn(),
+      speak: vi.fn(),
+    });
+    vi.stubGlobal('SpeechSynthesisUtterance', vi.fn());
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
+    const create = vi
+      .spyOn(daemon, 'bootstrapWorkspace')
+      .mockResolvedValue({ agent: { state: { id: 'main' } } } as never);
+    renderSetup();
+    const user = userEvent.setup();
+    await toVoice(user);
+    await user.click(screen.getByRole('radio', { name: /Ember/ }));
+    await user.click(button(action));
+    await waitFor(() => expect(create).toHaveBeenCalledOnce());
+    expect(localStorage.getItem('anima.readAloudVoice')).toBe(stored);
   });
 
   it('does not bootstrap over a workspace that failed to load', async () => {
@@ -523,22 +567,11 @@ describe('CompanionSetup', () => {
       new Error('Storage unavailable'),
     );
     const create = vi.spyOn(daemon, 'bootstrapWorkspace');
-    render(
-      <CompanionSetup
-        providers={providers}
-        providersError={null}
-        retryProviders={vi.fn()}
-        onCreated={vi.fn()}
-      />,
-    );
+    renderSetup();
     expect(await screen.findByText('Storage unavailable')).toBeVisible();
-    expect(
-      screen.getByRole('button', { name: 'Start chatting' }),
-    ).toBeDisabled();
+    expect(button('Get started')).toBeDisabled();
     expect(create).not.toHaveBeenCalled();
-    expect(
-      screen.getByRole('button', { name: 'Retry workspace' }),
-    ).toBeVisible();
+    expect(button('Retry workspace')).toBeVisible();
   });
 
   it('reuses configured storage without overwriting its mission or existing agents', async () => {
@@ -557,36 +590,31 @@ describe('CompanionSetup', () => {
     const create = vi
       .spyOn(daemon, 'createAgent')
       .mockResolvedValue({ agent: { state: { id: 'main' } } } as never);
-    render(
-      <CompanionSetup
-        providers={providers}
-        providersError={null}
-        retryProviders={vi.fn()}
-        onCreated={vi.fn()}
-      />,
+    renderSetup();
+    const user = userEvent.setup();
+    await waitFor(() => expect(button('Get started')).toBeEnabled());
+    expect(
+      screen.queryByRole('button', { name: 'Open an existing workspace' }),
+    ).not.toBeInTheDocument();
+    await toAccess(user);
+    expect(screen.getByRole('textbox', { name: 'Home folder' })).toHaveAttribute(
+      'readonly',
     );
-    await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: 'Start chatting' }),
-      ).toBeEnabled(),
-    );
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Start chatting' }),
-    );
+    await user.click(button('Continue'));
+    await user.click(await screen.findByRole('button', { name: 'Finish setup' }));
+    await waitFor(() => expect(create).toHaveBeenCalledOnce());
     expect(bootstrap).not.toHaveBeenCalled();
+    expect(daemon.inspectWorkspace).not.toHaveBeenCalled();
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         settings: { additional: { workspaceRole: 'lead' } },
       }),
     );
+    expect(create.mock.calls[0][0].system).toContain('Workspace context: Keep me');
   });
 
-  it('blocks submission when a selected provider becomes unavailable', async () => {
-    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue({
-      configured: false,
-      workspace: null,
-      defaultRoot: '/data/workspace',
-    });
+  it('blocks progress when a selected provider becomes unavailable', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
     const props = {
       providers,
       providersError: null,
@@ -594,19 +622,23 @@ describe('CompanionSetup', () => {
       onCreated: vi.fn(),
     };
     const view = render(<CompanionSetup {...props} />);
-    await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: 'Start chatting' }),
-      ).toBeEnabled(),
-    );
+    const user = userEvent.setup();
+    await start(user);
+    expect(button('Continue')).toBeEnabled();
     view.rerender(
       <CompanionSetup
         {...props}
         providers={[{ ...providers[0], configured: false }]}
       />,
     );
-    expect(
-      screen.getByRole('button', { name: 'Start chatting' }),
-    ).toBeDisabled();
+    expect(button('Continue')).toBeDisabled();
+    expect(screen.getByText(/OpenAI is unavailable right now/)).toBeVisible();
   });
 });
+
+async function toVoiceFromModel(user: UserEvent) {
+  await user.click(button('Continue'));
+  await user.click(button('Continue'));
+  await user.click(button('Continue'));
+  await screen.findByRole('heading', { name: 'Talk out loud?' });
+}

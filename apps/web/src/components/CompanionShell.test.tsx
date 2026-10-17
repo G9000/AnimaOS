@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -38,7 +38,6 @@ function Shell({
       route={route}
       navigate={(next) => setRoute(next)}
       conversation={conversation}
-      onOpenSettings={vi.fn()}
     />
   );
 }
@@ -81,10 +80,9 @@ describe('single companion experience', () => {
       screen.queryByRole('navigation', { name: 'Direct messages' }),
     ).not.toBeInTheDocument();
     expect(
-      within(screen.getByRole('complementary')).getByRole('heading', {
-        name: 'Anima',
-      }),
+      screen.getByRole('heading', { name: 'Anima', level: 1 }),
     ).toBeVisible();
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
   });
 
   it('keeps the conversation mounted when checking another page', async () => {
@@ -96,9 +94,13 @@ describe('single companion experience', () => {
       />,
     );
     const input = screen.getByLabelText('Unsaved draft');
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Work', exact: true }),
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Open command menu' }));
+    await user.type(
+      screen.getByRole('combobox', { name: 'Search commands' }),
+      'Go to Work',
     );
+    await user.keyboard('{Enter}');
     expect(input).not.toBeVisible();
     await userEvent.click(
       screen.getByRole('button', { name: 'Open companion chat' }),

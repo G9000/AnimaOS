@@ -9,6 +9,7 @@ import type { Session, SessionKind } from '@animaOS-SWARM/sdk';
 
 import {
   SESSION_KIND_FILTER_LABELS,
+  SESSION_KIND_LABELS,
   groupSessions,
   presentKinds,
   sessionKey,
@@ -157,6 +158,11 @@ function SessionRow({
             <span className="session-pulse" aria-hidden />
           )}
           <span className="session-title">{session.title}</span>
+          {(session.kind === 'telegram' || session.kind === 'discord') && (
+            <span className="session-source" aria-hidden>
+              {SESSION_KIND_LABELS[session.kind]}
+            </span>
+          )}
           {session.pendingApprovals > 0 && (
             <span className="session-approval-badge" aria-hidden>
               {session.pendingApprovals}

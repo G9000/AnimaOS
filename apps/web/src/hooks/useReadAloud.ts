@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { revealInvisible } from '../lib/skills';
+import { preferredVoice } from '../lib/voice-preference';
 
 export const READ_ALOUD_ERROR =
   'Read aloud could not continue. Try again when you’re ready.';
@@ -114,6 +115,8 @@ export function useReadAloud(
       try {
         if (!hadPrevious) speech.synthesis.cancel();
         const utterance = new speech.Constructor(revealInvisible(text).text);
+        const voice = preferredVoice(speech.synthesis);
+        if (voice) utterance.voice = voice;
         current.current = { utterance, synthesis: speech.synthesis, messageId };
         const active = () =>
           activeBoundary() && current.current?.utterance === utterance;

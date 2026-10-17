@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ACCESS_PROFILES,
   BROWSER_TOOL_ACCESS,
@@ -9,61 +9,21 @@ import {
 } from '../lib/agent-access';
 import type { AgentDetail } from '../lib/types';
 import {
-  daemon,
   MODEL_SUGGESTIONS,
   type AgentUpdateInput,
   type DaemonProvider,
-  type DaemonWorkspaceState,
 } from '../lib/daemon-api';
-import { AlertIcon, TrashIcon, XIcon } from './icons';
+import { AlertIcon, TrashIcon } from './icons';
 import { ChatGptConnection } from './ChatGptConnection';
 import { ChatGptModelSelect } from './ChatGptModelSelect';
-import { AgentProfileDetails, AgentMemoryView } from './AgentProfileDetails';
+import { AgentProfileDetails } from './AgentProfileDetails';
 import { AgentFilesPanel } from './AgentFilesPanel';
-import { AgentTasksView, AgentProactiveView } from './AgentWork';
-import {
-  LearningReviewPanel,
-  type LearningReviewApi,
-} from './learning/LearningReviewPanel';
-import {
-  ErrorBanner,
-  SectionTitle,
-  formatTokens,
-  labelCls,
-  primaryBtnCls,
-} from './ui-bits';
+import { ErrorBanner, SectionTitle, labelCls, primaryBtnCls } from './ui-bits';
 
-const FOCUSABLE_SETTINGS_SELECTOR = [
-  'button:not([disabled])',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',');
-
-function InfoRow({
-  label,
-  value,
-  mono = true,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="flex items-start justify-between gap-4 rounded-lg border border-line bg-white/[0.02] px-3.5 py-2.5">
-      <span className="shrink-0 font-mono text-[11px] uppercase tracking-wider text-ink-3">
-        {label}
-      </span>
-      <span
-        className={`min-w-0 break-all text-right text-xs text-ink ${mono ? 'font-mono' : ''}`}
-        title={value}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
+/** The parts of the companion's own configuration. Each Settings page shows
+ *  the ones it is about; one save covers whatever the page shows. */
+export type SettingsSection = 'profile' | 'model' | 'access';
+const ALL_SECTIONS: readonly SettingsSection[] = ['profile', 'model', 'access'];
 
 const ACCESS_ORDER: readonly AccessProfile[] = [
   'observe',
@@ -71,60 +31,76 @@ const ACCESS_ORDER: readonly AccessProfile[] = [
   'operate',
 ];
 
-const DEFAULT_LEARNING_API: LearningReviewApi = {
-  policy: (agentId, options) => daemon.learningPolicy(agentId, options),
-  setPolicy: (agentId, input) => daemon.setLearningPolicy(agentId, input),
-  listReviews: (agentId, options) =>
-    daemon.listLearningReviews(agentId, options),
-  getReview: (agentId, reviewId, options) =>
-    daemon.getLearningReview(agentId, reviewId, options),
-  cancelReview: (agentId, reviewId) =>
-    daemon.cancelLearningReview(agentId, reviewId),
-  decideProposal: (agentId, reviewId, proposalId, input) =>
-    daemon.decideLearningProposal(agentId, reviewId, proposalId, input),
-  listSkills: (options) => daemon.listSkills(options),
-  skill: (slug, options) => daemon.skill(slug, options),
-  createSkillDraft: (agentId, reviewId, proposalId, input) =>
-    daemon.createLearningSkillDraft(agentId, reviewId, proposalId, input),
+const PERSONALITY_STYLES: Record<string, string> = {
+  calm: 'Be calm, patient, and thoughtful. Explain clearly and ask when the request is ambiguous.',
+  creative:
+    'Be imaginative, curious, and encouraging. Offer concrete creative options and help develop promising ideas.',
+  direct:
+    'Be direct, practical, and concise. Lead with the outcome and explain important trade-offs.',
+  proactive:
+    'Be organized and proactive during assigned work. Identify useful next steps within the agreed scope and existing tool permissions. Do not assume permission for external actions or background work.',
 };
 
+function AbilityToggle({
+  id,
+  label,
+  help,
+  checked,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  help: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="settings-ability">
+      <input
+        id={`settings-${id}`}
+        type="checkbox"
+        aria-describedby={`settings-${id}-help`}
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <div>
+        <label htmlFor={`settings-${id}`}>{label}</label>
+        <p id={`settings-${id}-help`}>{help}</p>
+      </div>
+    </div>
+  );
+}
+
 /**
- * Editable agent settings. Saves through the daemon's
- * PATCH /api/agents/:id endpoint — the conversation is preserved and the
- * new system prompt takes effect on the next run.
+ * The companion's own settings, shown inside the Settings window. Saves
+ * through PATCH /api/agents/:id: the conversation is kept and changes apply
+ * on the next run.
  */
 export function SettingsPanel({
   agent,
-  online,
   providers,
-  workspace = null,
   saving,
   resetting,
   saveError,
   resetError,
   saveSettings,
   resetAgent,
-  close,
-  integrations,
   refreshProviders,
-  learningApi,
-  onOpenSkills,
+  sections = ALL_SECTIONS,
 }: {
   agent: AgentDetail;
-  online: boolean;
   providers: DaemonProvider[] | null;
-  workspace?: DaemonWorkspaceState | null;
   saving: boolean;
   resetting: boolean;
   saveError: string | null;
   resetError: string | null;
   saveSettings: (patch: AgentUpdateInput) => Promise<boolean>;
   resetAgent: () => void;
-  close: () => void;
-  integrations?: ReactNode;
   refreshProviders?: () => void | Promise<void>;
-  learningApi?: LearningReviewApi;
-  onOpenSkills?: () => void;
+  sections?: readonly SettingsSection[];
 }) {
   const seedModel = useMemo(() => {
     if (agent.provider === 'chatgpt') return agent.model;
@@ -154,9 +130,6 @@ export function SettingsPanel({
   );
 
   const [name, setName] = useState(agent.name);
-  const [profileTab, setProfileTab] = useState<
-    'profile' | 'tasks' | 'proactive' | 'memory' | 'activity'
-  >('profile');
   const [provider, setProvider] = useState(agent.provider);
   const [model, setModel] = useState(seedModel);
   const [customModel, setCustomModel] = useState(
@@ -182,15 +155,8 @@ export function SettingsPanel({
   const [savedFlash, setSavedFlash] = useState(false);
   const saveErrorRef = useRef<HTMLDivElement>(null);
   const resetErrorRef = useRef<HTMLDivElement>(null);
-  const dialogRef = useRef<HTMLElement>(null);
-  const headingRef = useRef<HTMLHeadingElement>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const controlsDisabled = saving || resetting;
-
-  const requestClose = () => {
-    if (controlsDisabled) return;
-    close();
-  };
+  const shows = (section: SettingsSection) => sections.includes(section);
 
   // Re-seed after an accepted agent update or a main-agent transition. Tool
   // order alone is not a config change and must not clobber an in-progress draft.
@@ -241,54 +207,6 @@ export function SettingsPanel({
       resetErrorRef.current?.focus();
     }
   }, [resetError]);
-
-  useEffect(() => {
-    const closeButton = closeButtonRef.current;
-    if (closeButton && !closeButton.disabled) {
-      closeButton.focus();
-    } else {
-      headingRef.current?.focus();
-    }
-  }, []);
-
-  useEffect(() => {
-    const handleDialogKeyboard = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if (!saving && !resetting) close();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-
-      const dialog = dialogRef.current;
-      if (!dialog) return;
-      const focusable = Array.from(
-        dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SETTINGS_SELECTOR),
-      );
-      if (focusable.length === 0) {
-        event.preventDefault();
-        dialog.focus();
-        return;
-      }
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const active = document.activeElement;
-      const activeIndex = focusable.indexOf(active as HTMLElement);
-      if (event.shiftKey && activeIndex <= 0) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && activeIndex === focusable.length - 1) {
-        event.preventDefault();
-        first.focus();
-      } else if (!dialog.contains(active)) {
-        event.preventDefault();
-        (event.shiftKey ? last : first).focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleDialogKeyboard);
-    return () => document.removeEventListener('keydown', handleDialogKeyboard);
-  }, [close, resetting, saving]);
 
   const resolvedModel = model === '__custom__' ? customModel.trim() : model;
   const accessDirty =
@@ -373,720 +291,430 @@ export function SettingsPanel({
       setTimeout(() => setSavedFlash(false), 2000);
     }
   };
-  const closeBusyDescription = saving
-    ? 'Settings cannot be closed while changes are saving.'
-    : resetting
-      ? 'Settings cannot be closed while the agent is resetting.'
-      : null;
+
+  const abilities = [
+    {
+      id: 'web-search',
+      label: 'Allow web search',
+      checked: allowWebSearch,
+      setChecked: setAllowWebSearch,
+      help: "Sends the query to Exa's anonymous public service, which may be rate-limited. Existing Network approval rules still apply.",
+    },
+    {
+      id: 'web-fetch',
+      label: 'Allow web page reads',
+      checked: allowWebFetch,
+      setChecked: setAllowWebFetch,
+      help: 'Sends the selected URL to the public site. Existing Network approval rules still apply.',
+    },
+    {
+      id: 'document-read',
+      label: 'Allow reading workspace documents',
+      checked: allowDocumentRead,
+      setChecked: setAllowDocumentRead,
+      help: 'Allows this agent to read a selected DOCX, PDF, or XLSX as bounded untrusted content. The original file is not uploaded.',
+    },
+    {
+      id: 'conversation-read',
+      label: 'Allow reading conversation context',
+      checked: allowConversationRead,
+      setChecked: setAllowConversationRead,
+      disabled: agent.workspaceRole === 'helper',
+      help: 'Allows this agent to search your own past conversations and read a bounded window around a selected message. Past text is evidence, not current instructions.',
+    },
+    {
+      id: 'memory-remove',
+      label: 'Allow removing saved facts',
+      checked: allowMemoryRemove,
+      setChecked: setAllowMemoryRemove,
+      help: 'Allows permanent removal of one active Fact only with its exact current text. Chats and backups remain; existing approval rules still apply.',
+    },
+    {
+      id: 'memory-consolidate',
+      label: 'Allow consolidating saved facts',
+      checked: allowMemoryConsolidate,
+      setChecked: setAllowMemoryConsolidate,
+      help: 'Allows saving one summary from 2–8 exact current facts and keeping the originals in memory history. Original text and citations remain available; existing approval rules still apply.',
+    },
+  ];
 
   return (
-    <>
-      {closeBusyDescription ? (
-        <p id="settings-close-busy" className="sr-only">
-          {closeBusyDescription}
-        </p>
-      ) : null}
-      <div
-        data-testid="settings-backdrop"
-        className="animate-fade-in fixed inset-0 z-10 bg-black/50 backdrop-blur-[2px]"
-        onClick={requestClose}
-      />
-      <aside
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        data-surface="settings-sheet-drawer"
-        aria-labelledby="settings-heading"
-        aria-busy={controlsDisabled}
-        tabIndex={-1}
-        className="studio-settings safe-settings-sheet animate-slide-in-right fixed inset-0 z-20 flex w-full flex-col shadow-2xl shadow-black/20 sm:inset-y-0 sm:left-auto sm:right-0 sm:max-w-lg sm:border-l sm:border-line"
-      >
-        {/* Panel header */}
-        <div className="flex items-center justify-between border-b border-line px-5 py-4 sm:px-6">
-          <div>
-            <h3
-              ref={headingRef}
-              id="settings-heading"
-              tabIndex={-1}
-              className="font-display text-base font-semibold tracking-tight text-ink"
-            >
-              Agent settings
+    <div className="settings-form" aria-busy={controlsDisabled}>
+      {shows('profile') && (
+        <>
+          <section className="settings-group" aria-labelledby="settings-identity">
+            <h3 id="settings-identity" className="settings-group-title">
+              Identity
             </h3>
-            <p className="mt-0.5 font-mono text-[11px] text-ink-3">
-              edits keep the conversation · apply on next run
-            </p>
-          </div>
-          <button
-            ref={closeButtonRef}
-            onClick={requestClose}
-            disabled={controlsDisabled}
-            aria-describedby={
-              closeBusyDescription ? 'settings-close-busy' : undefined
-            }
-            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-line text-ink-3 transition hover:border-line-strong hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
-            aria-label="Close settings"
-          >
-            <XIcon size={14} />
-          </button>
-        </div>
-
-        <nav
-          aria-label="Agent profile sections"
-          className="flex shrink-0 gap-1 overflow-x-auto border-b border-line px-3 py-3"
-        >
-          {(
-            ['profile', 'tasks', 'proactive', 'memory', 'activity'] as const
-          ).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              aria-current={profileTab === tab ? 'page' : undefined}
-              className={`shrink-0 rounded-lg px-3 py-2 text-sm capitalize ${profileTab === tab ? 'bg-accent/15 font-semibold' : 'text-ink-3'}`}
-              onClick={() => setProfileTab(tab)}
-            >
-              {tab}
-            </button>
-          ))}
-        </nav>
-        <div className="flex flex-1 flex-col gap-7 overflow-y-auto px-5 py-6 sm:px-6">
-          {profileTab === 'tasks' && (
-            <AgentTasksView
+            <AgentProfileDetails
               key={agent.id}
-              agentId={agent.id}
-              online={online}
-              name={agent.name}
-              running={agent.status === 'Running'}
+              agent={agent}
+              disabled={controlsDisabled}
             />
-          )}
-          {profileTab === 'proactive' && (
-            <AgentProactiveView
-              key={agent.id}
-              agentId={agent.id}
-              name={agent.name}
-            />
-          )}
-          {profileTab === 'memory' && (
-            <AgentMemoryView key={agent.id} agentId={agent.id} />
-          )}
-          {profileTab === 'activity' && (
-            <section className="space-y-5" aria-label="Agent activity">
-              <h4 className="font-semibold">Recent activity</h4>
-              <InfoRow label="Status" value={agent.status.toLowerCase()} />
-              <p className="text-sm text-ink-3">
-                {agent.toolNames.length} tools available ·{' '}
-                {agent.messages.length} conversation entries
-              </p>
-              {agent.messages.length === 0 && (
-                <p className="text-sm text-ink-3">
-                  No activity yet. Start a conversation with {agent.name}.
-                </p>
-              )}
-              {agent.messages
-                .slice(-30)
-                .reverse()
-                .map((message) => (
-                  <article
-                    key={message.id}
-                    className="space-y-2 rounded-xl border border-line p-4"
-                  >
-                    <p className="text-xs text-ink-3">
-                      {message.role} ·{' '}
-                      {message.roomId?.startsWith('peer:')
-                        ? 'Agent conversation'
-                        : 'Direct conversation'}{' '}
-                      · {new Date(message.created_at_ms).toLocaleString()}
-                    </p>
-                    <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-                      {message.content.text}
-                    </p>
-                  </article>
-                ))}
-            </section>
-          )}
-          {profileTab === 'profile' && (
-            <>
-              <AgentProfileDetails
-                key={agent.id}
-                agent={agent}
+            <div>
+              <label className={labelCls} htmlFor="settings-name">
+                Name
+              </label>
+              <input
+                id="settings-name"
+                aria-label="Name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
                 disabled={controlsDisabled}
+                className="field"
               />
-              <AgentFilesPanel agentId={agent.id} />
-              {/* System prompt */}
-              <section className="space-y-2.5">
-                <SectionTitle>Personality & instructions</SectionTitle>
-                <p className="text-sm leading-relaxed text-ink-3">
-                  Describe their role, voice, priorities, and how you want them
-                  to work. These instructions shape the next conversation turn.
-                </p>
-                <label className={labelCls} htmlFor="personality-preset">
-                  Add a personality style
+            </div>
+          </section>
+
+          <section
+            className="settings-group"
+            aria-labelledby="settings-personality"
+          >
+            <h3 id="settings-personality" className="settings-group-title">
+              Personality & instructions
+            </h3>
+            <p className="settings-group-help">
+              Their role, voice, priorities, and how you want them to work.
+              Changes apply from the next reply.
+            </p>
+            <label className={labelCls} htmlFor="personality-preset">
+              Add a personality style
+            </label>
+            <select
+              id="personality-preset"
+              className="field"
+              disabled={controlsDisabled}
+              value=""
+              onChange={(event) => {
+                const style = PERSONALITY_STYLES[event.target.value];
+                if (style)
+                  setSystem(
+                    (current) =>
+                      `${current.replace(/(?:^|\n\n)\[Personality style\][\s\S]*?\[\/Personality style\]/g, '').trim()}\n\n[Personality style]\n${style}\n[/Personality style]`,
+                  );
+              }}
+            >
+              <option value="">Choose a style…</option>
+              <option value="calm">Calm & thoughtful</option>
+              <option value="creative">Creative & curious</option>
+              <option value="direct">Direct & practical</option>
+              <option value="proactive">Organized & proactive</option>
+            </select>
+            <textarea
+              aria-label="System prompt"
+              value={system}
+              onChange={(e) => setSystem(e.target.value)}
+              disabled={controlsDisabled}
+              rows={7}
+              placeholder="Leave empty to use the default built from this profile."
+              className="field resize-y leading-relaxed"
+            />
+          </section>
+
+          <details className="settings-group settings-advanced">
+            <summary>Instruction files</summary>
+            <AgentFilesPanel agentId={agent.id} />
+          </details>
+        </>
+      )}
+
+      {shows('model') && (
+        <section className="settings-group" aria-labelledby="settings-model">
+          <h3 id="settings-model" className="settings-group-title">
+            Provider and model
+          </h3>
+          <p className="settings-group-help">
+            The model {agent.name} thinks with. Switching keeps every
+            conversation.
+          </p>
+          <div>
+            <label className={labelCls} htmlFor="settings-provider">
+              Provider
+            </label>
+            <select
+              id="settings-provider"
+              aria-label="Provider"
+              value={provider}
+              disabled={controlsDisabled}
+              onChange={(e) => {
+                const next = e.target.value;
+                setProvider(next);
+                const options = MODEL_SUGGESTIONS[next] ?? [];
+                setModel(next === 'chatgpt' ? '' : (options[0] ?? '__custom__'));
+              }}
+              className="field"
+            >
+              {/* Keep the current provider selectable even if the daemon
+              catalog is still loading or lacks it. */}
+              {(providers ?? [])
+                .map((p) => p.id)
+                .concat(
+                  providers?.some((p) => p.id === agent.provider) ||
+                    !agent.provider
+                    ? []
+                    : [agent.provider],
+                )
+                .filter((id, i, all) => all.indexOf(id) === i)
+                .map((id) => (
+                  <option key={id} value={id}>
+                    {id === 'chatgpt'
+                      ? 'ChatGPT subscription'
+                      : (providers?.find((p) => p.id === id)?.label ?? id)}
+                  </option>
+                ))}
+            </select>
+            {providers && provider !== 'chatgpt' && (
+              <p className="settings-field-note">
+                {providers.find((p) => p.id === provider)?.configured
+                  ? 'Key configured on the server.'
+                  : 'No key configured for this provider on the server.'}
+              </p>
+            )}
+          </div>
+          {provider === 'chatgpt' ? (
+            <ChatGptModelSelect
+              id="settings-chatgpt-model"
+              scopeKey={JSON.stringify([agent.id, modelScope.revision])}
+              connectionPending={modelScope.pending}
+              model={model}
+              customModel={customModel}
+              onModelChange={setModel}
+              onCustomModelChange={setCustomModel}
+              disabled={controlsDisabled}
+            />
+          ) : (
+            <>
+              <div>
+                <label className={labelCls} htmlFor="settings-model-id">
+                  Model
                 </label>
                 <select
-                  id="personality-preset"
+                  id="settings-model-id"
+                  aria-label="Model"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  disabled={controlsDisabled}
                   className="field"
-                  disabled={controlsDisabled}
-                  value=""
-                  onChange={(event) => {
-                    const styles: Record<string, string> = {
-                      calm: 'Be calm, patient, and thoughtful. Explain clearly and ask when the request is ambiguous.',
-                      creative:
-                        'Be imaginative, curious, and encouraging. Offer concrete creative options and help develop promising ideas.',
-                      direct:
-                        'Be direct, practical, and concise. Lead with the outcome and explain important trade-offs.',
-                      proactive:
-                        'Be organized and proactive during assigned work. Identify useful next steps within the agreed scope and existing tool permissions. Do not assume permission for external actions or background work.',
-                    };
-                    if (styles[event.target.value])
-                      setSystem(
-                        (current) =>
-                          `${current.replace(/(?:^|\n\n)\[Personality style\][\s\S]*?\[\/Personality style\]/g, '').trim()}\n\n[Personality style]\n${styles[event.target.value]}\n[/Personality style]`,
-                      );
-                  }}
                 >
-                  <option value="">Choose a style…</option>
-                  <option value="calm">Calm & thoughtful</option>
-                  <option value="creative">Creative & curious</option>
-                  <option value="direct">Direct & practical</option>
-                  <option value="proactive">Organized & proactive</option>
-                </select>
-                <textarea
-                  aria-label="System prompt"
-                  value={system}
-                  onChange={(e) => setSystem(e.target.value)}
-                  disabled={controlsDisabled}
-                  rows={6}
-                  placeholder="Leave empty for the daemon default."
-                  className="field resize-y leading-relaxed"
-                />
-                <p className="font-mono text-[10px] text-ink-3">
-                  cleared = daemon builds its default prompt from the agent
-                  profile
-                </p>
-              </section>
-
-              {/* Runtime info (read-only) */}
-              <section className="space-y-2.5">
-                <SectionTitle>Runtime</SectionTitle>
-                <InfoRow label="Status" value={agent.status.toLowerCase()} />
-                <InfoRow
-                  label="Created"
-                  value={new Date(agent.created_at_ms).toLocaleString([], {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                />
-                <InfoRow
-                  label="Tokens"
-                  value={formatTokens(agent.token_usage.total_tokens)}
-                />
-              </section>
-
-              {/* Workspace identity (read-only — editing is a follow-up) */}
-              {workspace?.configured && workspace.workspace !== null ? (
-                <section className="space-y-2.5">
-                  <SectionTitle>Workspace</SectionTitle>
-                  <InfoRow
-                    label="Company"
-                    value={workspace.workspace.companyName}
-                    mono={false}
-                  />
-                  <InfoRow
-                    label="Mission"
-                    value={workspace.workspace.mission}
-                    mono={false}
-                  />
-                  <InfoRow
-                    label="Folder"
-                    value={workspace.workspace.rootPath}
-                  />
-                </section>
-              ) : null}
-
-              {/* Editable identity */}
-              <section className="space-y-2.5">
-                <SectionTitle>Identity</SectionTitle>
-                <div>
-                  <label className={labelCls}>Name</label>
-                  <input
-                    aria-label="Name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    disabled={controlsDisabled}
-                    className="field"
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>Provider</label>
-                  <select
-                    aria-label="Provider"
-                    value={provider}
-                    disabled={controlsDisabled}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setProvider(next);
-                      const options = MODEL_SUGGESTIONS[next] ?? [];
-                      setModel(
-                        next === 'chatgpt' ? '' : (options[0] ?? '__custom__'),
-                      );
-                    }}
-                    className="field"
-                  >
-                    {/* Keep the current provider selectable even if the daemon
-                    catalog is still loading or lacks it. */}
-                    {(providers ?? [])
-                      .map((p) => p.id)
-                      .concat(
-                        providers?.some((p) => p.id === agent.provider) ||
-                          !agent.provider
-                          ? []
-                          : [agent.provider],
-                      )
-                      .filter((id, i, all) => all.indexOf(id) === i)
-                      .map((id) => (
-                        <option key={id} value={id}>
-                          {id === 'chatgpt'
-                            ? 'ChatGPT subscription'
-                            : (providers?.find((p) => p.id === id)?.label ??
-                              id)}
-                        </option>
-                      ))}
-                  </select>
-                  {providers && provider !== 'chatgpt' && (
-                    <p className="mt-1.5 font-mono text-[10px] text-ink-3">
-                      {providers.find((p) => p.id === provider)?.configured
-                        ? 'key configured on the daemon'
-                        : 'no key configured for this provider on the daemon'}
-                    </p>
-                  )}
-                </div>
-                {provider === 'chatgpt' ? (
-                  <ChatGptModelSelect
-                    id="settings-chatgpt-model"
-                    scopeKey={JSON.stringify([agent.id, modelScope.revision])}
-                    connectionPending={modelScope.pending}
-                    model={model}
-                    customModel={customModel}
-                    onModelChange={setModel}
-                    onCustomModelChange={setCustomModel}
-                    disabled={controlsDisabled}
-                  />
-                ) : (
-                  <>
-                    <div>
-                      <label className={labelCls}>Model</label>
-                      <select
-                        aria-label="Model"
-                        value={model}
-                        onChange={(e) => setModel(e.target.value)}
-                        disabled={controlsDisabled}
-                        className="field"
-                      >
-                        {(MODEL_SUGGESTIONS[provider] ?? []).map((m) => (
-                          <option key={m} value={m}>
-                            {m}
-                          </option>
-                        ))}
-                        <option value="__custom__">custom…</option>
-                      </select>
-                    </div>
-                    {model === '__custom__' && (
-                      <input
-                        aria-label="Custom model"
-                        value={customModel}
-                        onChange={(e) => setCustomModel(e.target.value)}
-                        disabled={controlsDisabled}
-                        placeholder="model id, e.g. llama3.1"
-                        className="field animate-fade-in"
-                      />
-                    )}
-                  </>
-                )}
-                {provider === 'chatgpt' && (
-                  <ChatGptConnection
-                    key={agent.id}
-                    onConnectionChange={refreshProviders}
-                    onModelScopeChange={(pending) =>
-                      setModelScope((current) => ({
-                        revision: current.revision + 1,
-                        pending,
-                      }))
-                    }
-                  />
-                )}
-              </section>
-
-              {/* Workspace access */}
-              <section className="space-y-2.5">
-                <SectionTitle>Workspace access</SectionTitle>
-                {agent.toolNames.some((name) =>
-                  /^mcp_[0-9a-f]{32}_[0-9a-f]{16}$/.test(name),
-                ) && (
-                  <p className="text-xs leading-relaxed text-ink-3">
-                    External tool permissions are managed in Connectors.
-                    Choosing a standard access profile replaces these
-                    permissions when you save; saved connections and reviews are
-                    kept.
-                  </p>
-                )}
-                {derivedAccess === 'custom' ? (
-                  <div className="rounded-xl border border-amber/25 bg-amber/[0.05] p-3.5">
-                    <p className="text-sm font-semibold text-ink">
-                      Custom access
-                    </p>
-                    <p className="mt-1 text-xs leading-relaxed text-ink-2">
-                      This agent has a custom tool set. Choose a standard
-                      profile to replace it when you save.
-                    </p>
-                    <p className="mt-2 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-                      {agent.toolNames.length} tools configured
-                    </p>
-                    <p className="mt-1 break-words font-mono text-[10px] leading-relaxed text-ink-3">
-                      {agent.toolNames.join(', ') || 'No tools configured'}
-                    </p>
-                  </div>
-                ) : null}
-                <fieldset disabled={controlsDisabled} className="space-y-2">
-                  <legend className={labelCls}>Access profile</legend>
-                  {ACCESS_ORDER.map((profileName) => {
-                    const profile = ACCESS_PROFILES[profileName];
-                    const inputId = `settings-access-${profileName}`;
-
-                    return (
-                      <div
-                        key={profileName}
-                        className={`rounded-xl border p-3.5 transition ${
-                          accessSelection === profileName
-                            ? 'border-accent/50 bg-accent/[0.07]'
-                            : 'border-line bg-white/[0.015] hover:border-line-strong'
-                        }`}
-                      >
-                        <input
-                          id={inputId}
-                          type="radio"
-                          name="settings-access"
-                          value={profileName}
-                          checked={accessSelection === profileName}
-                          onChange={() => {
-                            setAccessSelection(profileName);
-                            setAccessChanged(true);
-                            setAllowMemoryRemove(false);
-                            setAllowMemoryConsolidate(false);
-                            setAllowConversationRead(false);
-                            setAllowDocumentRead(false);
-                            setAllowWebSearch(false);
-                            setAllowWebFetch(false);
-                            setBrowserGrants([]);
-                          }}
-                          className="mr-3 h-4 w-4 align-top"
-                        />
-                        <label
-                          htmlFor={inputId}
-                          className="inline cursor-pointer"
-                        >
-                          <span className="font-medium text-ink">
-                            {profile.label}
-                          </span>
-                          <span className="mt-1 block pl-7 text-sm text-ink-2">
-                            {profile.summary}
-                          </span>
-                          <span className="mt-1 block pl-7 text-xs text-ink-3">
-                            {profile.risk}
-                          </span>
-                        </label>
-                      </div>
-                    );
-                  })}
-                  {[
-                    {
-                      id: 'web-search',
-                      label: 'Allow web search',
-                      checked: allowWebSearch,
-                      setChecked: setAllowWebSearch,
-                      help: "Sends the query to Exa's anonymous public service, which may be rate-limited. Existing Network approval rules still apply.",
-                    },
-                    {
-                      id: 'web-fetch',
-                      label: 'Allow web page reads',
-                      checked: allowWebFetch,
-                      setChecked: setAllowWebFetch,
-                      help: 'Sends the selected URL to the public site. Existing Network approval rules still apply.',
-                    },
-                  ].map(({ id, label, checked, setChecked, help }) => (
-                    <div
-                      key={id}
-                      className="rounded-xl border border-line bg-white/[0.015] p-3.5"
-                    >
-                      <div className="flex items-start gap-3">
-                        <input
-                          id={`settings-${id}`}
-                          type="checkbox"
-                          aria-describedby={`settings-${id}-help`}
-                          checked={checked}
-                          onChange={(event) => setChecked(event.target.checked)}
-                          className="mt-0.5 h-4 w-4 shrink-0"
-                        />
-                        <label
-                          htmlFor={`settings-${id}`}
-                          className="cursor-pointer font-medium text-ink"
-                        >
-                          {label}
-                        </label>
-                      </div>
-                      <p
-                        id={`settings-${id}-help`}
-                        className="mt-1 pl-7 text-sm text-ink-2"
-                      >
-                        {help}
-                      </p>
-                    </div>
+                  {(MODEL_SUGGESTIONS[provider] ?? []).map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
                   ))}
-                  <div className="rounded-xl border border-line bg-white/[0.015] p-3.5">
-                    <p className="font-medium text-ink">Browser tool access</p>
-                    <p className="mt-1 text-sm text-ink-2">
-                      Each chat task also needs an installed browser policy.
-                      Existing action approval rules still apply.
-                    </p>
-                    {BROWSER_TOOL_ACCESS.map(({ name, label }) => (
-                      <label key={name} className="mt-2 block text-sm text-ink">
-                        <input
-                          type="checkbox"
-                          checked={browserGrants.includes(name)}
-                          onChange={(event) =>
-                            setBrowserGrants((current) =>
-                              event.target.checked
-                                ? [
-                                    ...current.filter((tool) => tool !== name),
-                                    name,
-                                  ]
-                                : current.filter((tool) => tool !== name),
-                            )
-                          }
-                          className="mr-2"
-                        />
-                        {label}
-                      </label>
-                    ))}
-                  </div>
-                  <div className="rounded-xl border border-line bg-white/[0.015] p-3.5">
-                    <div className="flex items-start gap-3">
-                      <input
-                        id="settings-document-read"
-                        type="checkbox"
-                        aria-describedby="settings-document-read-help"
-                        checked={allowDocumentRead}
-                        onChange={(event) =>
-                          setAllowDocumentRead(event.target.checked)
-                        }
-                        className="mt-0.5 h-4 w-4 shrink-0"
-                      />
-                      <label
-                        htmlFor="settings-document-read"
-                        className="cursor-pointer font-medium text-ink"
-                      >
-                        Allow reading workspace documents
-                      </label>
-                    </div>
-                    <p
-                      id="settings-document-read-help"
-                      className="mt-1 pl-7 text-sm text-ink-2"
-                    >
-                      Allows this agent to read a selected DOCX, PDF, or XLSX as
-                      bounded untrusted content. The original file is not
-                      uploaded.
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-line bg-white/[0.015] p-3.5">
-                    <div className="flex items-start gap-3">
-                      <input
-                        id="settings-memory-remove"
-                        type="checkbox"
-                        aria-describedby="settings-memory-remove-help"
-                        checked={allowMemoryRemove}
-                        onChange={(event) =>
-                          setAllowMemoryRemove(event.target.checked)
-                        }
-                        className="mt-0.5 h-4 w-4 shrink-0"
-                      />
-                      <label
-                        htmlFor="settings-memory-remove"
-                        className="cursor-pointer font-medium text-ink"
-                      >
-                        Allow removing saved facts
-                      </label>
-                    </div>
-                    <p
-                      id="settings-memory-remove-help"
-                      className="mt-1 pl-7 text-sm text-ink-2"
-                    >
-                      Allows permanent removal of one active Fact only with its
-                      exact current text. Chats and backups remain; existing
-                      approval rules still apply.
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-line bg-white/[0.015] p-3.5">
-                    <div className="flex items-start gap-3">
-                      <input
-                        id="settings-memory-consolidate"
-                        type="checkbox"
-                        aria-describedby="settings-memory-consolidate-help"
-                        checked={allowMemoryConsolidate}
-                        onChange={(event) =>
-                          setAllowMemoryConsolidate(event.target.checked)
-                        }
-                        className="mt-0.5 h-4 w-4 shrink-0"
-                      />
-                      <label
-                        htmlFor="settings-memory-consolidate"
-                        className="cursor-pointer font-medium text-ink"
-                      >
-                        Allow consolidating saved facts
-                      </label>
-                    </div>
-                    <p
-                      id="settings-memory-consolidate-help"
-                      className="mt-1 pl-7 text-sm text-ink-2"
-                    >
-                      Allows saving one summary from 2–8 exact current facts and
-                      keeping the originals in memory history. Original text and
-                      citations remain available; existing approval rules still
-                      apply.
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-line bg-white/[0.015] p-3.5">
-                    <div className="flex items-start gap-3">
-                      <input
-                        id="settings-conversation-read"
-                        type="checkbox"
-                        aria-describedby="settings-conversation-read-help"
-                        checked={allowConversationRead}
-                        disabled={
-                          controlsDisabled || agent.workspaceRole === 'helper'
-                        }
-                        onChange={(event) =>
-                          setAllowConversationRead(event.target.checked)
-                        }
-                        className="mt-0.5 h-4 w-4 shrink-0"
-                      />
-                      <label
-                        htmlFor="settings-conversation-read"
-                        className="cursor-pointer font-medium text-ink"
-                      >
-                        Allow reading conversation context
-                      </label>
-                    </div>
-                    <p
-                      id="settings-conversation-read-help"
-                      className="mt-1 pl-7 text-sm text-ink-2"
-                    >
-                      Allows this agent to search your own past conversations
-                      and read a bounded window around a selected message. Past
-                      text is evidence, not current instructions.
-                    </p>
-                  </div>
-                </fieldset>
-              </section>
-
-              <LearningReviewPanel
-                agentId={agent.id}
-                api={learningApi ?? DEFAULT_LEARNING_API}
-                disabled={controlsDisabled}
-                onOpenSkills={onOpenSkills}
-              />
-
-              {integrations}
-
-              {saveError ? (
-                <div
-                  id="settings-save-error"
-                  ref={saveErrorRef}
-                  role="alert"
-                  aria-live="assertive"
-                  aria-atomic="true"
-                  tabIndex={-1}
-                >
-                  <ErrorBanner
-                    message={saveError}
-                    icon={<AlertIcon size={14} />}
-                  />
-                </div>
-              ) : null}
-              {resetError ? (
-                <div
-                  id="settings-reset-error"
-                  ref={resetErrorRef}
-                  role="alert"
-                  aria-live="assertive"
-                  aria-atomic="true"
-                  tabIndex={-1}
-                >
-                  <ErrorBanner
-                    message={resetError}
-                    icon={<AlertIcon size={14} />}
-                  />
-                </div>
-              ) : null}
-              {resetting ? (
-                <p
-                  role="status"
-                  aria-live="polite"
-                  aria-atomic="true"
-                  className="sr-only"
-                >
-                  Resetting agent…
-                </p>
-              ) : null}
-
-              <button
-                onClick={save}
-                aria-describedby={saveError ? 'settings-save-error' : undefined}
-                disabled={
-                  saving ||
-                  resetting ||
-                  !dirty ||
-                  !resolvedModel ||
-                  !name.trim()
-                }
-                className={`${primaryBtnCls} w-full py-2.5`}
-              >
-                {saving
-                  ? 'Saving…'
-                  : savedFlash
-                    ? 'Saved ✓'
-                    : dirty
-                      ? 'Save changes'
-                      : 'No changes'}
-              </button>
-
-              {/* Danger zone */}
-              <section className="rounded-xl border border-danger/20 bg-danger/[0.04] p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-xs font-semibold text-danger">
-                      Reset agent
-                    </div>
-                    <div className="mt-0.5 text-[11px] leading-relaxed text-danger">
-                      deletes the agent and its entire conversation
-                    </div>
-                  </div>
-                  <button
-                    onClick={resetAgent}
-                    aria-describedby={
-                      resetError ? 'settings-reset-error' : undefined
-                    }
-                    disabled={resetting || saving}
-                    className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-danger/30 bg-danger/10 px-3 py-1.5 text-xs font-medium text-danger transition hover:bg-danger/20 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <TrashIcon size={12} />
-                    {resetting ? 'Resetting…' : 'Reset'}
-                  </button>
-                </div>
-              </section>
+                  <option value="__custom__">custom…</option>
+                </select>
+              </div>
+              {model === '__custom__' && (
+                <input
+                  aria-label="Custom model"
+                  value={customModel}
+                  onChange={(e) => setCustomModel(e.target.value)}
+                  disabled={controlsDisabled}
+                  placeholder="model id, e.g. llama3.1"
+                  className="field animate-fade-in"
+                />
+              )}
             </>
           )}
-        </div>
-      </aside>
-    </>
+          {provider === 'chatgpt' && (
+            <ChatGptConnection
+              key={agent.id}
+              onConnectionChange={refreshProviders}
+              onModelScopeChange={(pending) =>
+                setModelScope((current) => ({
+                  revision: current.revision + 1,
+                  pending,
+                }))
+              }
+            />
+          )}
+        </section>
+      )}
+
+      {shows('access') && (
+        <section className="settings-group" aria-labelledby="settings-access">
+          <h3 id="settings-access" className="settings-group-title">
+            What {agent.name} can do
+          </h3>
+          <p className="settings-group-help">
+            Pick how far {agent.name} may act on its own. Rules below decide
+            when it still asks you first.
+          </p>
+          {agent.toolNames.some((name) =>
+            /^mcp_[0-9a-f]{32}_[0-9a-f]{16}$/.test(name),
+          ) && (
+            <p className="settings-group-help">
+              External tool permissions are managed in Connectors. Choosing a
+              standard access profile replaces these permissions when you
+              save; saved connections and reviews are kept.
+            </p>
+          )}
+          {derivedAccess === 'custom' ? (
+            <div className="settings-custom-access">
+              <p className="font-semibold text-ink">Custom access</p>
+              <p>
+                This agent has a custom tool set. Choose a standard profile to
+                replace it when you save.
+              </p>
+              <p className="settings-field-note">
+                {agent.toolNames.length} tools configured
+              </p>
+              <p className="settings-field-note break-words">
+                {agent.toolNames.join(', ') || 'No tools configured'}
+              </p>
+            </div>
+          ) : null}
+          <fieldset disabled={controlsDisabled} className="settings-fieldset">
+            <legend className={labelCls}>Access profile</legend>
+            <div className="settings-access-options">
+              {ACCESS_ORDER.map((profileName) => {
+                const profile = ACCESS_PROFILES[profileName];
+                const inputId = `settings-access-${profileName}`;
+                return (
+                  <div
+                    key={profileName}
+                    className={`settings-access-option${accessSelection === profileName ? ' is-selected' : ''}`}
+                  >
+                    <input
+                      id={inputId}
+                      type="radio"
+                      name="settings-access"
+                      value={profileName}
+                      checked={accessSelection === profileName}
+                      onChange={() => {
+                        setAccessSelection(profileName);
+                        setAccessChanged(true);
+                        setAllowMemoryRemove(false);
+                        setAllowMemoryConsolidate(false);
+                        setAllowConversationRead(false);
+                        setAllowDocumentRead(false);
+                        setAllowWebSearch(false);
+                        setAllowWebFetch(false);
+                        setBrowserGrants([]);
+                      }}
+                    />
+                    <label htmlFor={inputId}>
+                      <span className="settings-access-name">
+                        {profile.label}
+                      </span>
+                      <span className="settings-access-summary">
+                        {profile.summary}
+                      </span>
+                      <span className="settings-access-risk">
+                        {profile.risk}
+                      </span>
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
+            <SectionTitle>Extra abilities</SectionTitle>
+            <div className="settings-abilities">
+              {abilities.map(
+                ({ id, label, checked, setChecked, help, disabled }) => (
+                  <AbilityToggle
+                    key={id}
+                    id={id}
+                    label={label}
+                    help={help}
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={setChecked}
+                  />
+                ),
+              )}
+            </div>
+            <SectionTitle>Browser</SectionTitle>
+            <div className="settings-ability is-list">
+              <p>
+                Each chat task also needs an installed browser policy. Existing
+                action approval rules still apply.
+              </p>
+              {BROWSER_TOOL_ACCESS.map(({ name, label }) => (
+                <label key={name}>
+                  <input
+                    type="checkbox"
+                    checked={browserGrants.includes(name)}
+                    onChange={(event) =>
+                      setBrowserGrants((current) =>
+                        event.target.checked
+                          ? [...current.filter((tool) => tool !== name), name]
+                          : current.filter((tool) => tool !== name),
+                      )
+                    }
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        </section>
+      )}
+
+      <div className={`settings-save${dirty && !saving ? ' is-dirty' : ''}`}>
+        {saveError ? (
+          <div
+            id="settings-save-error"
+            ref={saveErrorRef}
+            role="alert"
+            aria-live="assertive"
+            aria-atomic="true"
+            tabIndex={-1}
+          >
+            <ErrorBanner message={saveError} icon={<AlertIcon size={14} />} />
+          </div>
+        ) : null}
+        {resetError ? (
+          <div
+            id="settings-reset-error"
+            ref={resetErrorRef}
+            role="alert"
+            aria-live="assertive"
+            aria-atomic="true"
+            tabIndex={-1}
+          >
+            <ErrorBanner message={resetError} icon={<AlertIcon size={14} />} />
+          </div>
+        ) : null}
+        {resetting ? (
+          <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+            Resetting agent…
+          </p>
+        ) : null}
+        <button
+          onClick={save}
+          aria-describedby={saveError ? 'settings-save-error' : undefined}
+          disabled={
+            saving || resetting || !dirty || !resolvedModel || !name.trim()
+          }
+          className={`${primaryBtnCls} settings-save-button`}
+        >
+          {saving
+            ? 'Saving…'
+            : savedFlash
+              ? 'Saved ✓'
+              : dirty
+                ? 'Save changes'
+                : 'No changes'}
+        </button>
+      </div>
+
+      {shows('profile') && (
+        <section className="settings-danger" aria-labelledby="settings-reset">
+          <div>
+            <h3 id="settings-reset">Reset {agent.name}</h3>
+            <p>Deletes the companion and every conversation with it.</p>
+          </div>
+          <button
+            onClick={resetAgent}
+            aria-describedby={resetError ? 'settings-reset-error' : undefined}
+            disabled={resetting || saving}
+          >
+            <TrashIcon size={12} />
+            {resetting ? 'Resetting…' : 'Reset'}
+          </button>
+        </section>
+      )}
+    </div>
   );
 }

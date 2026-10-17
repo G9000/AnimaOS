@@ -129,7 +129,6 @@ describe('Anima operator visual contract', () => {
     const composer = cssRule(styles, '.safe-composer');
     const dock = cssRule(styles, '.safe-bottom-dock');
     const workspace = cssRule(styles, '.workspace-mobile-safe');
-    const settings = cssRule(styles, '.safe-settings-sheet');
     const orbPulse = between(styles, '@keyframes orb-pulse', '.animate-orb');
 
     expect(index).toContain('viewport-fit=cover');
@@ -152,13 +151,9 @@ describe('Anima operator visual contract', () => {
     expect(read('components/WorkspaceShell.tsx')).toContain(
       "'safe-bottom-dock glass-strong absolute",
     );
-    expect(read('components/SettingsPanel.tsx')).toContain(
-      'safe-settings-sheet',
-    );
-    expect(settings).toContain('padding-top: var(--safe-area-top)');
-    expect(settings).toContain('padding-right: var(--safe-area-right)');
-    expect(settings).toContain('padding-bottom: var(--safe-area-bottom)');
-    expect(settings).toContain('padding-left: var(--safe-area-left)');
+    // Settings render inside the app frame, so they take no safe area of their own.
+    expect(read('components/SettingsPanel.tsx')).not.toContain('--safe-area-');
+    expect(read('components/SettingsPanel.tsx')).not.toContain('fixed inset-0');
     expect(styles.match(/env\(safe-area-inset-bottom/g)).toHaveLength(1);
     for (const workspaceBottomConsumer of [composer, dock, workspace]) {
       expect(workspaceBottomConsumer).not.toContain('--safe-area-bottom');
@@ -208,8 +203,8 @@ describe('Anima operator visual contract', () => {
     );
     expect(read('components/WorkspaceShell.tsx')).toContain("'sidebar'");
     expect(read('components/WorkspaceShell.tsx')).toContain("'bottom-dock'");
-    expect(read('components/SettingsPanel.tsx')).toContain(
-      'data-surface="settings-sheet-drawer"',
+    expect(read('components/WorkspaceShell.tsx')).toContain(
+      'aria-label="Settings"',
     );
     expect(production).toContain('data-motion="agent-orb"');
   });

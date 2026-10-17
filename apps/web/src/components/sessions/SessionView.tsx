@@ -36,6 +36,7 @@ import type { KnownRunAttachments } from '../../lib/run-attachments';
 import { BrowserTaskControls } from './BrowserTaskControls';
 import type { NativeVoiceScope } from '../voice/NativeTranscription';
 import { NativeSpeech } from '../voice/NativeSpeech';
+import { SessionSkillDrafts } from '../learning/SessionSkillDrafts';
 
 export interface SessionComposerState {
   draft: string;
@@ -108,6 +109,13 @@ export interface SessionViewProps {
     selection: BrowserSelection | null;
     attachments: readonly UploadedAttachment[];
     onSelection(selection: BrowserSelection | null): void;
+  };
+  /** Skill drafts learned in this chat, offered under its transcript. */
+  skillDrafts?: {
+    version: number;
+    epoch: number;
+    enabled: boolean;
+    onReview?: () => void;
   };
 }
 
@@ -211,7 +219,7 @@ function SessionHeader({
           </button>
         </form>
       ) : (
-        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
+        <h2 className="session-view-title min-w-0 flex-1 truncate text-sm font-semibold text-ink">
           {session.title}
         </h2>
       )}
@@ -295,6 +303,7 @@ export function SessionView({
   onEditAutomation,
   notice = null,
   browserTask,
+  skillDrafts,
 }: SessionViewProps) {
   // The session record names its agent, so a helper's session saves to that
   // helper even when the agents list does not hold it (then `agent` is the
@@ -409,11 +418,21 @@ export function SessionView({
         readAloud={readAloud}
         knownAttachments={knownAttachments}
       />
+      {session?.kind === 'chat' && skillDrafts && (
+        <SessionSkillDrafts
+          sessionId={session.id}
+          version={skillDrafts.version}
+          epoch={skillDrafts.epoch}
+          enabled={skillDrafts.enabled}
+          onReview={skillDrafts.onReview}
+        />
+      )}
       {readAloud.error && (
         <p role="alert" className="px-4 text-sm text-danger">
           {readAloud.error}
         </p>
       )}
+      <div className="session-tools">
       {browserTask && (!session || session.kind === 'chat') && (
         <BrowserTaskControls
           key={voiceKey}
@@ -462,6 +481,7 @@ export function SessionView({
             }
           />
         )}
+      </div>
       {footer.kind === 'composer' ? (
         <Composer
           agentName={agent.name}

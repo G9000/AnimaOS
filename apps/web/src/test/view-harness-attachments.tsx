@@ -162,7 +162,19 @@ export function registerAttachmentJourneys({
         act(() => recognition.onstart?.());
         const lateResult = recognition.onresult;
         const lateStart = speak.mock.calls[0][0].onstart;
-        await user.click(screen.getByRole('button', { name: destination }));
+        if (destination === 'Work') {
+          // Pages live behind the command menu and settings, not a sidebar.
+          await user.click(
+            screen.getByRole('button', { name: 'Open command menu' }),
+          );
+          await user.type(
+            screen.getByRole('combobox', { name: 'Search commands' }),
+            'Go to Work',
+          );
+          await user.keyboard('{Enter}');
+        } else {
+          await user.click(screen.getByRole('button', { name: destination }));
+        }
         expect(recognition.abort).toHaveBeenCalledOnce();
         expect(cancel).toHaveBeenCalledTimes(2);
         expect(recognition.onresult).toBeNull();

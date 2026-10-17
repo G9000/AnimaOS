@@ -1,0 +1,1440 @@
+/* Scenic shell: the conversation sits on the garden scene, everything else is
+ * a square, solid surface on top of it. Loaded after the studio sheets. */
+
+.scenic-shell .studio-main {
+  background: #0b0d10;
+  overflow: hidden;
+}
+
+.scenic-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      to bottom,
+      rgb(5 8 10 / 0.35) 0%,
+      rgb(5 8 10 / 0) 18%,
+      rgb(5 8 10 / 0.05) 40%,
+      rgb(5 8 10 / 0.72) 74%,
+      rgb(5 8 10 / 0.92) 100%
+    ),
+    url('./assets/onboarding-garden.jpg') center / cover no-repeat;
+}
+
+.scenic-shell:has(.settings-window) .scenic-backdrop::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgb(5 8 10 / 0.6);
+}
+
+.scenic-shell .studio-topbar.scenic-topbar {
+  position: relative;
+  z-index: 3;
+  min-height: 68px;
+  padding: 16px 28px;
+  border: 0;
+  background: transparent;
+}
+
+.scenic-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.scenic-wordmark {
+  flex: none;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: #fff;
+  text-shadow: 0 1px 12px rgb(0 0 0 / 0.5);
+}
+
+.scenic-divider {
+  color: rgb(255 255 255 / 0.35);
+}
+
+.scenic-thread {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: min(360px, 48vw);
+  min-height: 34px;
+  padding: 0 10px 0 12px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 2px;
+  background: rgb(22 28 33 / 0.55);
+  color: rgb(255 255 255 / 0.92);
+  font-size: 13px;
+  backdrop-filter: blur(20px);
+}
+
+button.scenic-thread:hover,
+button.scenic-thread[aria-expanded='true'] {
+  background: rgb(30 38 44 / 0.75);
+  border-color: rgb(255 255 255 / 0.26);
+}
+
+.scenic-thread-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.scenic-shell .companion-status {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.62);
+  text-shadow: 0 1px 10px rgb(0 0 0 / 0.6);
+}
+
+.scenic-shell .companion-status p {
+  margin: 0;
+  color: rgb(255 255 255 / 0.82);
+}
+
+.scenic-shell .companion-status > span:last-child {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.scenic-shell .studio-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scenic-shell .studio-tool-button,
+.scenic-shell .studio-command-trigger {
+  border-color: rgb(255 255 255 / 0.14);
+  border-radius: 2px;
+  background: rgb(22 28 33 / 0.55);
+  color: rgb(255 255 255 / 0.88);
+  backdrop-filter: blur(20px);
+}
+
+.scenic-shell .studio-tool-button:hover,
+.scenic-shell .studio-command-trigger:hover {
+  border-color: rgb(255 255 255 / 0.28);
+  background: rgb(30 38 44 / 0.8);
+  color: #fff;
+}
+
+.scenic-shell .studio-view {
+  z-index: 1;
+}
+
+/* Settings window: the pages behind the gear, one square surface. */
+.settings-window {
+  position: absolute;
+  inset: 4px 24px 24px;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 4px;
+  background: #0d1013;
+  box-shadow: 0 30px 80px rgb(0 0 0 / 0.6);
+}
+
+.settings-window-nav.studio-sidebar {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 252px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 12px;
+  border-right: 1px solid rgb(255 255 255 / 0.07);
+  background: #0a0d0f;
+}
+
+.settings-window-title {
+  margin: 0 10px 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.settings-window-nav .studio-presence {
+  margin: 0 0 6px;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.scenic-shell .studio-navigation {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  overflow-y: auto;
+}
+
+.studio-nav-group {
+  margin: 0;
+  padding: 14px 10px 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+
+.scenic-shell .studio-nav-item.is-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--color-ink-2);
+  font-size: 13px;
+  text-align: left;
+}
+
+.scenic-shell .studio-nav-item.is-row:hover {
+  background: rgb(255 255 255 / 0.05);
+  color: var(--color-ink);
+}
+
+.scenic-shell .studio-nav-item.is-row[aria-current='page'] {
+  background: rgb(255 255 255 / 0.09);
+  color: var(--color-ink);
+}
+
+.scenic-shell .studio-nav-item.is-row[aria-current='page']::after {
+  content: none;
+}
+
+.scenic-shell .studio-nav-item.is-row > span:first-of-type {
+  flex: 1;
+}
+
+.scenic-shell .studio-nav-item .nav-badge,
+.scenic-shell .nav-badge {
+  border-radius: 2px;
+  background: var(--color-accent);
+  color: var(--color-accent-fg);
+}
+
+.scenic-shell .studio-nav-item.is-tab {
+  display: inline-flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 64px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--color-ink-2);
+  font-size: 10px;
+}
+
+.scenic-shell .studio-nav-item.is-tab[aria-current='page'] {
+  background: rgb(255 255 255 / 0.1);
+  color: var(--color-ink);
+}
+
+.settings-window-content {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.settings-window-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 24px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.07);
+  font-size: 13px;
+  color: var(--color-ink-2);
+}
+
+.settings-window-head strong {
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+.scenic-shell .settings-window-head .studio-tool-button {
+  background: transparent;
+  backdrop-filter: none;
+}
+
+.settings-window-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Square up the shared page surfaces inside the window. */
+.settings-window-page .rounded-xl,
+.settings-window-page .rounded-2xl,
+.settings-window-page .rounded-lg,
+.settings-window-page .rounded-full,
+.settings-window-page .field,
+.settings-window-page .glass,
+.settings-window-page .glass-strong {
+  border-radius: 2px;
+}
+
+/* Thread switcher: a panel hanging off the thread button on wide screens,
+ * a drawer on phones. */
+.session-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px;
+}
+
+.session-drawer-panel.studio-sidebar {
+  border-radius: 0;
+  background: rgb(16 22 26 / 0.94);
+  backdrop-filter: blur(32px);
+}
+
+.session-drawer-panel .rounded-lg,
+.session-drawer-panel .rounded-xl {
+  border-radius: 2px;
+}
+
+@media (min-width: 768px) {
+  .session-drawer {
+    align-items: flex-start;
+  }
+
+  .session-drawer-panel.studio-sidebar {
+    position: absolute;
+    top: 64px;
+    left: 24px;
+    z-index: 1;
+    width: 360px;
+    max-height: calc(100% - 96px);
+    padding: 0 0 8px;
+    border: 1px solid rgb(255 255 255 / 0.12);
+    border-radius: 4px;
+    box-shadow: 0 24px 60px rgb(0 0 0 / 0.55);
+  }
+
+  .session-drawer-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgb(0 0 0 / 0.25);
+  }
+}
+
+@media (max-width: 767px) {
+  .scenic-shell .studio-topbar.scenic-topbar {
+    min-height: 54px;
+    padding: 10px 14px;
+  }
+
+  .scenic-shell .companion-status,
+  .scenic-hide-narrow {
+    display: none;
+  }
+
+  .scenic-wordmark {
+    font-size: 17px;
+  }
+
+  .settings-window {
+    inset: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .settings-window-page {
+    padding-bottom: 72px;
+  }
+}
+
+.scenic-wordmark {
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.scenic-shell .studio-tool-button.scenic-waiting {
+  border-color: rgb(var(--color-accent-rgb) / 0.55);
+  background: rgb(var(--color-accent-rgb) / 0.16);
+  color: #fff;
+}
+
+.scenic-waiting i {
+  width: 6px;
+  height: 6px;
+  background: var(--color-accent);
+}
+
+/* ── Conversation on the scene ── */
+
+.agent-avatar {
+  border-radius: 2px;
+  background:
+    radial-gradient(circle at 50% 50%, #f4f3ef 0 9%, transparent 22%),
+    radial-gradient(
+      circle at 50% 50%,
+      rgb(var(--color-accent-rgb) / 0.95) 0 24%,
+      rgb(var(--color-accent-rgb) / 0.35) 46%,
+      transparent 68%
+    ),
+    #0b0b0a;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14);
+}
+
+.scenic-reply-avatar {
+  flex: none;
+  padding-top: 2px;
+}
+
+.scenic-shell .studio-messages {
+  max-width: 760px;
+  gap: 22px;
+}
+
+.scenic-shell .scenic-user-bubble {
+  border-color: rgb(255 255 255 / 0.12);
+  border-radius: 4px;
+  background: rgb(22 28 33 / 0.62);
+  box-shadow: none;
+  backdrop-filter: blur(24px);
+  color: #fff;
+}
+
+.scenic-shell .scenic-agent-text {
+  padding: 4px 0 0;
+  font-size: 15px;
+  line-height: 1.65;
+  color: #fff;
+  text-shadow: 0 1px 12px rgb(0 0 0 / 0.6);
+}
+
+.scenic-shell .studio-message-meta {
+  color: rgb(255 255 255 / 0.55);
+}
+
+/* In-chat cards (tools, approvals, outcomes, helpers): solid, square, quiet. */
+.scenic-shell .studio-messages .glass,
+.scenic-shell .studio-messages .glass-strong {
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(15 19 22 / 0.9);
+  box-shadow: none;
+  backdrop-filter: blur(24px);
+}
+
+.scenic-shell .studio-messages .rounded-xl,
+.scenic-shell .studio-messages .rounded-2xl,
+.scenic-shell .studio-messages .rounded-lg {
+  border-radius: 4px;
+}
+
+.scenic-shell .studio-messages .rounded-full {
+  border-radius: 2px;
+}
+
+.scenic-shell .studio-messages .bg-panel-2\/90:not(.scenic-user-bubble) {
+  background: rgb(15 19 22 / 0.9);
+}
+
+/* Welcome: a greeting low over the scene, sky left open. */
+.scenic-shell .studio-welcome.scenic-welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  min-height: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 24px 28px;
+  text-align: center;
+}
+
+.scenic-welcome-orb {
+  width: 56px;
+  height: 56px;
+  border-radius: 4px;
+  background:
+    radial-gradient(circle at 50% 50%, #f4f3ef 0 9%, transparent 22%),
+    radial-gradient(
+      circle at 50% 50%,
+      rgb(var(--color-accent-rgb) / 0.95) 0 24%,
+      rgb(var(--color-accent-rgb) / 0.35) 46%,
+      transparent 68%
+    ),
+    #0b0b0a;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.16);
+}
+
+.scenic-shell .scenic-welcome .studio-hero-title {
+  margin: 4px 0 0;
+  font-size: 44px;
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+  color: #fff;
+  text-shadow: 0 2px 24px rgb(0 0 0 / 0.55);
+}
+
+.scenic-shell .scenic-welcome .studio-hero-description {
+  margin: 0;
+  max-width: none;
+  font-size: 15px;
+  color: rgb(255 255 255 / 0.82);
+  text-shadow: 0 1px 12px rgb(0 0 0 / 0.6);
+}
+
+.scenic-shell .scenic-welcome .studio-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.scenic-shell .scenic-welcome .studio-suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 2px;
+  background: rgb(22 28 33 / 0.55);
+  color: rgb(255 255 255 / 0.92);
+  font-size: 13px;
+  backdrop-filter: blur(20px);
+}
+
+.scenic-shell .scenic-welcome .studio-suggestion:hover {
+  transform: none;
+  border-color: rgb(255 255 255 / 0.3);
+  background: rgb(30 38 44 / 0.75);
+  box-shadow: none;
+}
+
+.scenic-shell .scenic-welcome .studio-suggestion-icon {
+  width: auto;
+  height: auto;
+  border: 0;
+  color: rgb(255 255 255 / 0.7);
+}
+
+/* Composer: a light bar on the scene. */
+.scenic-shell .studio-composer {
+  background: none;
+  padding-bottom: 22px;
+}
+
+.scenic-shell .studio-composer > div {
+  max-width: 760px;
+}
+
+.scenic-shell .studio-composer-box {
+  border: 1px solid rgb(255 255 255 / 0.45);
+  border-radius: 4px;
+  background: rgb(244 243 239 / 0.93);
+  box-shadow: 0 10px 40px rgb(0 0 0 / 0.35);
+  backdrop-filter: blur(24px);
+}
+
+.scenic-shell .studio-composer-box textarea {
+  color: #121212;
+}
+
+.scenic-shell .studio-composer-box textarea::placeholder {
+  color: #6e6e6e;
+}
+
+.scenic-shell .studio-composer-box button {
+  border-radius: 2px;
+  color: #3a3a3a;
+}
+
+.scenic-shell .studio-composer-box button[aria-label='Send'],
+.scenic-shell .studio-composer-box button[aria-label='Stop'] {
+  border: 0;
+  background: #121212;
+  color: #fff;
+  box-shadow: none;
+}
+
+.scenic-shell .studio-composer > div > .mt-2 {
+  color: rgb(255 255 255 / 0.55);
+}
+
+.scenic-shell .studio-draft-recovery {
+  border-radius: 4px;
+  background: rgb(15 19 22 / 0.92);
+}
+
+/* Session header (rename, archive, export) sits quietly on the scene. */
+.scenic-shell .session-view-header {
+  border-bottom: 0;
+  background: transparent;
+}
+
+.scenic-shell .session-kind-badge {
+  border-color: rgb(255 255 255 / 0.2);
+  border-radius: 2px;
+  color: rgb(255 255 255 / 0.75);
+}
+
+/* ── Polish after the first real render ── */
+
+.scenic-shell .companion-status .scenic-quiet {
+  display: none;
+}
+
+.scenic-shell .scenic-welcome .studio-suggestion {
+  min-height: 0;
+}
+
+.scenic-shell .scenic-welcome .studio-suggestion > span:last-child {
+  display: inline;
+}
+
+/* Voice and recording controls: one quiet row under the input bar. */
+.composer-voice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.composer-voice:empty {
+  display: none;
+}
+
+.scenic-shell .composer-voice section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.scenic-shell .composer-voice p {
+  margin: 0;
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.55);
+}
+
+.scenic-shell .composer-voice button,
+.scenic-shell .session-tools button,
+.scenic-shell .session-tools select,
+.scenic-shell .session-tools summary {
+  border-radius: 2px;
+}
+
+.scenic-shell .composer-voice button {
+  min-height: 28px;
+  padding: 3px 10px;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  background: rgb(22 28 33 / 0.6);
+  color: rgb(255 255 255 / 0.88);
+  font-size: 12px;
+  backdrop-filter: blur(16px);
+}
+
+.scenic-shell .composer-hints {
+  color: rgb(255 255 255 / 0.5);
+}
+
+/* Browser task and spoken replies share the conversation column. */
+.session-tools {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.session-tools:empty {
+  display: none;
+}
+
+.scenic-shell .session-tools > * {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 2px;
+  background: rgb(15 19 22 / 0.72);
+  color: rgb(255 255 255 / 0.75);
+  backdrop-filter: blur(16px);
+}
+
+/* The thread pill already names the thread; the header keeps it for
+ * assistive tech and shows only its actions. */
+.scenic-shell .session-view-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.scenic-shell .session-view-header {
+  justify-content: flex-end;
+  gap: 6px;
+  min-height: 0;
+  padding: 0 28px;
+}
+
+.scenic-shell .session-view-header button {
+  min-height: 26px;
+  padding: 2px 10px;
+  border-radius: 2px;
+  font-size: 12px;
+  background: rgb(22 28 33 / 0.55);
+  backdrop-filter: blur(16px);
+}
+
+.scenic-shell .session-usage-line {
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.6);
+}
+
+.scenic-shell .studio-conversation-tools {
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 6px 24px 0;
+  border-bottom: 0;
+}
+
+.scenic-shell .studio-conversation-toolbar strong,
+.scenic-shell .studio-conversation-toolbar small {
+  color: rgb(255 255 255 / 0.7);
+}
+
+.scenic-shell .studio-conversation-toolbar button {
+  border-radius: 2px;
+  background: rgb(22 28 33 / 0.55);
+}
+
+.scenic-shell .studio-composer-box button:not([aria-label='Send']):not([aria-label='Stop']) {
+  border: 0;
+  background: transparent;
+}
+
+.session-source {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(255 255 255 / 0.7);
+}
+
+.scenic-shell .studio-message-meta button {
+  border: 0;
+  background: transparent;
+  color: rgb(255 255 255 / 0.55);
+}
+
+.scenic-shell .studio-message-meta button:hover {
+  color: #fff;
+}
+
+/* ── In-chat cards ── */
+
+.scenic-shell .approval-card {
+  border: 1px solid rgb(var(--color-accent-rgb) / 0.45);
+  border-radius: 4px;
+  background: rgb(15 19 22 / 0.94);
+  backdrop-filter: blur(24px);
+}
+
+.scenic-shell .approval-card-header::before {
+  content: 'Needs your OK';
+  flex-basis: 100%;
+  margin-bottom: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+.scenic-shell .approval-card-header {
+  flex-wrap: wrap;
+}
+
+.scenic-shell .approval-card-arguments {
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 2px;
+  background: rgb(0 0 0 / 0.4);
+}
+
+.scenic-shell .approval-card-input {
+  border-radius: 2px;
+}
+
+.scenic-shell .approval-card-actions .studio-tool-button {
+  border-radius: 2px;
+  backdrop-filter: none;
+}
+
+.scenic-shell .approval-card-actions .studio-tool-button:first-child {
+  border-color: transparent;
+  background: #f4f3ef;
+  color: #121212;
+}
+
+.scenic-shell .approval-card-actions .approval-card-deny {
+  margin-left: auto;
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-danger);
+}
+
+.scenic-shell .approval-card-sent {
+  color: var(--color-mint);
+}
+
+/* Tool activity folds into one panel with divided steps. */
+.scenic-shell .tool-block-toggle,
+.scenic-shell .tool-block-label {
+  align-self: flex-start;
+  padding: 4px 10px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 2px;
+  background: rgb(15 19 22 / 0.72);
+  color: rgb(255 255 255 / 0.7);
+  backdrop-filter: blur(16px);
+}
+
+.scenic-shell .tool-block-steps {
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 4px;
+  background: rgb(15 19 22 / 0.9);
+  backdrop-filter: blur(24px);
+}
+
+.scenic-shell .tool-block-steps .tool-step {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.scenic-shell .tool-block-steps .tool-step + .tool-step {
+  border-top: 1px solid rgb(255 255 255 / 0.07);
+}
+
+.scenic-shell .tool-step-toggle {
+  padding: 9px 12px;
+}
+
+.scenic-shell .tool-step-result pre {
+  border-radius: 2px;
+}
+
+/* Helpers report in one line each. */
+.scenic-shell .helper-card {
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 4px;
+  background: rgb(15 19 22 / 0.9);
+  backdrop-filter: blur(24px);
+}
+
+/* Outcomes: a coloured edge says what happened. */
+.scenic-shell .run-outcome {
+  border: 0;
+  border-left: 2px solid rgb(255 255 255 / 0.3);
+  border-radius: 0;
+  background: rgb(15 19 22 / 0.88);
+  backdrop-filter: blur(16px);
+}
+
+.scenic-shell .run-outcome[data-outcome='failed'] {
+  border-left-color: var(--color-danger);
+}
+
+.scenic-shell .run-outcome .studio-tool-button,
+.scenic-shell .helper-card .studio-tool-button,
+.scenic-shell .automation-notice .studio-tool-button {
+  border-radius: 2px;
+  backdrop-filter: none;
+}
+
+.scenic-shell .automation-notice {
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 4px;
+  background: rgb(15 19 22 / 0.9);
+  backdrop-filter: blur(24px);
+}
+
+.scenic-shell .automation-notice .automation-badge {
+  margin-right: 6px;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 2px;
+  background: rgb(var(--color-accent-rgb) / 0.16);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+.scenic-shell .pending-message-label {
+  color: rgb(255 255 255 / 0.6);
+}
+
+/* Every page in the Settings window follows the square system, whatever its
+ * own sheet says. */
+.settings-window-page * {
+  border-radius: 2px !important;
+}
+
+.settings-window-page :is(section, article, details, fieldset)[class] {
+  border-radius: 4px !important;
+}
+
+.settings-window-nav .studio-presence * {
+  border-radius: 2px !important;
+}
+
+/* The learning loop, where it happens: a skill anima wants to keep. */
+.session-skill-drafts {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 4px 24px 8px 66px;
+}
+
+.learned-skill {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 16px;
+  border: 1px solid rgb(var(--color-accent-rgb) / 0.45);
+  border-radius: 4px;
+  background: rgb(15 19 22 / 0.94);
+  backdrop-filter: blur(24px);
+}
+
+.learned-skill-kicker {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+.learned-skill h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: #fff;
+}
+
+.learned-skill-desc,
+.learned-skill-outcome {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgb(255 255 255 / 0.72);
+}
+
+.learned-skill-outcome {
+  color: var(--color-mint);
+}
+
+.learned-skill-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.learned-skill-actions button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgb(255 255 255 / 0.18);
+  border-radius: 2px;
+  color: rgb(255 255 255 / 0.88);
+  font-size: 13px;
+}
+
+.learned-skill-actions button:disabled {
+  opacity: 0.5;
+}
+
+.learned-skill-actions .learned-skill-keep {
+  border-color: transparent;
+  background: #f4f3ef;
+  color: #121212;
+  font-weight: 500;
+}
+
+.learned-skill-actions .learned-skill-discard {
+  margin-left: auto;
+  border-color: transparent;
+  color: var(--color-danger);
+}
+
+.learned-skill-error {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--color-danger);
+}
+
+/* ── The companion's own settings pages (Profile, Model, Permissions) ── */
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  max-width: 680px;
+  padding: 24px;
+}
+
+.approvals-page .settings-form {
+  padding: 0;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-group-title,
+.runtime-section h2,
+.settings-advanced > summary {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.settings-group-help,
+.runtime-help {
+  margin: 0;
+  max-width: 60ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--color-ink-3);
+}
+
+.settings-field-note {
+  margin: 6px 0 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-ink-3);
+}
+
+.settings-advanced {
+  padding-top: 20px;
+  border-top: 1px solid rgb(255 255 255 / 0.07);
+}
+
+.settings-advanced > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-advanced > summary::after {
+  content: ' +';
+  color: var(--color-ink-3);
+}
+
+.settings-advanced[open] > summary::after {
+  content: ' –';
+}
+
+.settings-advanced[open] > summary {
+  margin-bottom: 12px;
+}
+
+.settings-custom-access {
+  padding: 14px;
+  border: 1px solid rgb(227 187 112 / 0.3);
+  font-size: 13px;
+  color: var(--color-ink-2);
+}
+
+.settings-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.settings-access-options {
+  display: grid;
+  gap: 8px;
+}
+
+@media (min-width: 900px) {
+  .settings-access-options {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.settings-access-option {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  background: rgb(255 255 255 / 0.02);
+  transition: border-color 120ms ease;
+}
+
+.settings-access-option:hover {
+  border-color: rgb(255 255 255 / 0.22);
+}
+
+.settings-access-option.is-selected {
+  border-color: rgb(var(--color-accent-rgb) / 0.6);
+  background: rgb(var(--color-accent-rgb) / 0.08);
+}
+
+.settings-access-option input {
+  align-self: flex-start;
+  margin-top: 4px;
+  flex: none;
+}
+
+.settings-access-option label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.settings-access-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+.settings-access-summary {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-ink-2);
+}
+
+.settings-access-risk {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-ink-3);
+}
+
+.settings-abilities {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgb(255 255 255 / 0.08);
+}
+
+.settings-ability {
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.settings-abilities .settings-ability + .settings-ability {
+  border-top: 1px solid rgb(255 255 255 / 0.06);
+}
+
+.settings-ability input {
+  align-self: flex-start;
+  margin-top: 4px;
+  flex: none;
+}
+
+.settings-ability label {
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+.settings-ability p {
+  margin: 3px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-ink-3);
+}
+
+.settings-ability.is-list {
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+}
+
+.settings-ability.is-list p {
+  margin: 0;
+}
+
+.settings-ability.is-list label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 400;
+  font-size: 14px;
+}
+
+/* The save bar stays in the flow until there is something to save, then
+ * holds to the bottom of the page so it is never scrolled away. */
+.settings-save {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-save.is-dirty {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-inline: -24px;
+  padding: 12px 24px;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  background: rgb(13 16 19 / 0.97);
+}
+
+.approvals-page .settings-save.is-dirty {
+  margin-inline: -24px;
+}
+
+.settings-form .settings-save-button {
+  align-self: flex-start;
+  min-width: 150px;
+  padding: 9px 18px;
+  border: 1px solid transparent;
+  background: #f4f3ef;
+  color: #121212;
+  box-shadow: none;
+  font-weight: 500;
+}
+
+.settings-form .settings-save-button:hover:not(:disabled) {
+  background: #fff;
+}
+
+.settings-form .settings-save-button:disabled {
+  border-color: rgb(255 255 255 / 0.12);
+  background: transparent;
+  color: var(--color-ink-3);
+  opacity: 1;
+}
+
+.settings-form input[type='file'] {
+  font-size: 13px;
+  color: var(--color-ink-3);
+}
+
+.settings-form input[type='file']::file-selector-button {
+  margin-right: 12px;
+  padding: 6px 12px;
+  border: 1px solid rgb(255 255 255 / 0.18);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--color-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.settings-form input[type='file']::file-selector-button:hover {
+  border-color: rgb(255 255 255 / 0.32);
+}
+
+.settings-danger {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgb(240 140 140 / 0.28);
+}
+
+.settings-danger h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-danger);
+}
+
+.settings-danger p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--color-ink-3);
+}
+
+.settings-danger button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgb(240 140 140 / 0.4);
+  color: var(--color-danger);
+  font-size: 13px;
+}
+
+.settings-danger button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.studio-nav-item:disabled,
+.settings-window-head .studio-tool-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Runtime: where the companion lives and where its commands run ── */
+
+.runtime-page {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  max-width: 720px;
+  padding: 24px;
+}
+
+.runtime-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.runtime-options {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid rgb(255 255 255 / 0.08);
+}
+
+.runtime-option {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  color: var(--color-ink-3);
+}
+
+.runtime-option + .runtime-option {
+  border-top: 1px solid rgb(255 255 255 / 0.06);
+}
+
+.runtime-option strong {
+  font-weight: 500;
+  color: var(--color-ink-2);
+}
+
+.runtime-option p {
+  margin: 4px 0 0;
+  max-width: 56ch;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.runtime-option.is-current {
+  background: rgb(var(--color-accent-rgb) / 0.07);
+  box-shadow: inset 2px 0 0 var(--color-accent);
+  color: var(--color-ink-2);
+}
+
+.runtime-option.is-current strong {
+  color: var(--color-ink);
+}
+
+.runtime-option-state {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.runtime-option.is-current .runtime-option-state {
+  color: var(--color-accent);
+}
+
+.runtime-facts {
+  display: grid;
+  margin: 0;
+  border: 1px solid rgb(255 255 255 / 0.08);
+}
+
+.runtime-fact {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 14px;
+}
+
+.runtime-fact + .runtime-fact {
+  border-top: 1px solid rgb(255 255 255 / 0.06);
+}
+
+.runtime-fact dt {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+
+.runtime-fact dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+  font-size: 13px;
+  color: var(--color-ink);
+}

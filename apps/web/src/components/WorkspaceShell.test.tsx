@@ -56,7 +56,6 @@ function Shell({ initialRoute = { kind: 'home' }, ...props }: ShellProps) {
       agents={props.agents ?? [main]}
       connection={props.connection ?? 'online'}
       conversation={props.conversation ?? <div>Workspace canvas</div>}
-      onOpenSettings={props.onOpenSettings ?? vi.fn()}
       route={route}
       navigate={(next) => setRoute(next)}
     />
@@ -114,8 +113,12 @@ describe('WorkspaceShell', () => {
       ],
     });
     const save = vi.spyOn(daemon, 'updateAgentTasks');
-    const view = render(<Shell connection="offline" />);
-    await userEvent.click(screen.getByRole('button', { name: 'Work' }));
+    const view = render(
+      <Shell
+        connection="offline"
+        initialRoute={{ kind: 'page', page: 'work' }}
+      />,
+    );
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled();
     expect(tasks).not.toHaveBeenCalled();
     await userEvent.click(
@@ -126,11 +129,21 @@ describe('WorkspaceShell', () => {
     ).toBeDisabled();
     expect(tasks).not.toHaveBeenCalled();
 
-    view.rerender(<Shell connection="online" />);
+    view.rerender(
+      <Shell
+        connection="online"
+        initialRoute={{ kind: 'page', page: 'work' }}
+      />,
+    );
     const task = await screen.findByLabelText('Task 1');
     expect(tasks).toHaveBeenCalledTimes(2); // One hub list and one editor read.
     fireEvent.change(task, { target: { value: 'Unsaved Work task' } });
-    view.rerender(<Shell connection="offline" />);
+    view.rerender(
+      <Shell
+        connection="offline"
+        initialRoute={{ kind: 'page', page: 'work' }}
+      />,
+    );
     expect(screen.getByLabelText('Task 1')).toBe(task);
     expect(task).toHaveValue('Unsaved Work task');
     expect(task).toBeDisabled();
@@ -139,7 +152,12 @@ describe('WorkspaceShell', () => {
     ).toBeDisabled();
     expect(tasks).toHaveBeenCalledTimes(2);
 
-    view.rerender(<Shell connection="online" />);
+    view.rerender(
+      <Shell
+        connection="online"
+        initialRoute={{ kind: 'page', page: 'work' }}
+      />,
+    );
     await waitFor(() => expect(task).toBeEnabled());
     expect(screen.getByLabelText('Task 1')).toBe(task);
     expect(task).toHaveValue('Unsaved Work task');
@@ -152,50 +170,30 @@ describe('WorkspaceShell', () => {
     render(<Shell onNewChat={onNewChat} />);
     expect(screen.getByText('Workspace canvas')).toBeVisible();
     expect(
+      screen.queryByRole('navigation', { name: 'Workspace navigation' }),
+    ).not.toBeInTheDocument();
+    expect(
       screen.queryByRole('button', { name: 'Operations' }),
     ).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'New chat' }));
     expect(onNewChat).toHaveBeenCalledOnce();
   });
 
-  it('shows the sessions list between the navigation and the status', () => {
-    render(<Shell sidebar={<div>Sessions list</div>} />);
-    const sidebar = screen.getByRole('complementary');
-    expect(within(sidebar).getByText('Sessions list')).toBeVisible();
-    expect(
-      within(sidebar)
-        .getByRole('navigation', { name: 'Workspace navigation' })
-        .compareDocumentPosition(within(sidebar).getByText('Sessions list')) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).not.toBe(0);
-  });
-
-  it('opens capabilities from the collapsible System group', async () => {
-    vi.spyOn(daemon, 'capabilities').mockResolvedValue({
-      schemaVersion: 1,
-      tools: [],
-      persistence: {
-        controlPlane: 'file',
-        memory: 'file',
-        executionJournal: false,
-      },
-      extensions: [],
-      limitations: [],
-    });
-    render(<Shell />);
-    expect(
-      screen.queryByRole('button', { name: 'Capabilities', exact: true }),
-    ).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'System' }));
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Capabilities', exact: true }),
+  it('names the agent and the open thread in the top bar', () => {
+    render(
+      <Shell
+        initialRoute={{ kind: 'session', sessionId: 'chat:plans' }}
+        sidebar={<div>Sessions list</div>}
+        sessions={[sessionFixture('chat:plans', { title: 'Weekend plans' })]}
+      />,
     );
     expect(
-      await screen.findByText('Tools follow your authority'),
+      screen.getByRole('heading', { name: 'Nova', level: 1 }),
     ).toBeVisible();
     expect(
-      screen.getByRole('button', { name: 'Capabilities', exact: true }),
-    ).toHaveAttribute('aria-current', 'page');
+      screen.getByRole('button', { name: 'Open sessions' }),
+    ).toHaveTextContent('Weekend plans');
+    expect(screen.queryByText('Sessions list')).not.toBeInTheDocument();
   });
 
   it('opens commands with Control K, filters actions and navigates with Enter', async () => {
@@ -205,21 +203,11 @@ describe('WorkspaceShell', () => {
     expect(screen.getByRole('dialog', { name: 'Command menu' })).toBeVisible();
     await user.type(
       screen.getByRole('combobox', { name: 'Search commands' }),
-      'connectors',
+      'connections',
     );
     await user.keyboard('{Enter}');
     expect(screen.getByText('Manage connections')).toBeVisible();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  });
-
-  it('can enter and leave focus mode without losing the conversation', async () => {
-    const user = userEvent.setup();
-    render(<Shell />);
-    await user.click(screen.getByRole('button', { name: 'Enter focus mode' }));
-    expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
-    expect(screen.getByText('Workspace canvas')).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Exit focus mode' }));
-    expect(screen.getByRole('complementary')).toBeVisible();
   });
 
   it('contains keyboard focus in commands and restores the opener on Escape', async () => {
@@ -255,10 +243,14 @@ describe('WorkspaceShell', () => {
     expect(screen.getByText('Workspace canvas')).toBeVisible();
   });
 
-  it('keeps helpers out of the top-level navigation', () => {
+  it('keeps helpers out of the navigation', () => {
     const nova = agent('agent-main', 'Nova', 1);
     render(
-      <Shell mainAgent={nova} agents={[nova, agent('scout', 'Scout', 2)]} />,
+      <Shell
+        mainAgent={nova}
+        agents={[nova, agent('scout', 'Scout', 2)]}
+        initialRoute={{ kind: 'page', page: 'memory' }}
+      />,
     );
     expect(
       screen.queryByRole('button', { name: 'Team' }),
@@ -266,22 +258,16 @@ describe('WorkspaceShell', () => {
     expect(
       screen.queryByRole('button', { name: 'Message Scout' }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText('Workspace canvas')).toBeVisible();
   });
 
-  it('uses a left sidebar and returns from a page to the mounted conversation', async () => {
-    render(<Shell />);
-    const navigation = screen.getByRole('navigation', {
+  it('opens pages in the Settings window and returns to the mounted conversation', async () => {
+    render(<Shell initialRoute={{ kind: 'page', page: 'work' }} />);
+    const page = screen.getByRole('region', { name: 'Settings' });
+    const navigation = within(page).getByRole('navigation', {
       name: 'Workspace navigation',
     });
     expect(navigation).toHaveAttribute('data-placement', 'sidebar');
     expect(navigation).toHaveAttribute('aria-orientation', 'vertical');
-    expect(navigation.closest('aside')?.nextElementSibling?.tagName).toBe(
-      'MAIN',
-    );
-    await userEvent.click(
-      within(navigation).getByRole('button', { name: 'Work' }),
-    );
     expect(
       within(navigation).getByRole('button', { name: 'Work' }),
     ).toHaveAttribute('aria-current', 'page');
@@ -290,6 +276,9 @@ describe('WorkspaceShell', () => {
       screen.getByRole('button', { name: 'Open companion chat' }),
     );
     expect(screen.getByText('Workspace canvas')).toBeVisible();
+    expect(
+      screen.queryByRole('region', { name: 'Settings' }),
+    ).not.toBeInTheDocument();
   });
 
   it('shows the conversation for a page the shell does not offer', () => {
@@ -305,48 +294,164 @@ describe('WorkspaceShell', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('opens Approvals from the navigation with its waiting badge', async () => {
+  it('groups settings by what the owner decides, the companion first', () => {
+    render(<Shell initialRoute={{ kind: 'page', page: 'skills' }} />);
+    const nav = screen.getByRole('navigation', {
+      name: 'Workspace navigation',
+    });
+    expect(
+      within(nav)
+        .getAllByRole('button')
+        .map((button) => button.textContent?.trim()),
+    ).toEqual([
+      'Profile',
+      'Model',
+      'Permissions',
+      'Skills',
+      'Memory',
+      'Tools',
+      'Connections',
+      'Automations',
+      'Work',
+      'Files',
+      'Runtime',
+      'Usage',
+      'Diagnostics',
+      'Logs',
+    ]);
+    expect(
+      within(nav)
+        .getAllByRole('group')
+        .map((group) => group.getAttribute('aria-label')),
+    ).toEqual(['Companion', 'Learning', 'Abilities', 'Activity', 'System']);
+  });
+
+  it('opens the companion pages from the window', async () => {
+    render(
+      <Shell
+        profile={<p>Profile page</p>}
+        model={<p>Model page</p>}
+        runtime={<p>Runtime page</p>}
+        initialRoute={{ kind: 'page', page: 'usage' }}
+      />,
+    );
+    for (const [label, content] of [
+      ['Profile', 'Profile page'],
+      ['Model', 'Model page'],
+      ['Runtime', 'Runtime page'],
+    ]) {
+      await userEvent.click(screen.getByRole('button', { name: label }));
+      expect(screen.getByText(content)).toBeVisible();
+      expect(screen.getByRole('button', { name: label })).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
+    }
+  });
+
+  it('holds the window on its page while a save or reset settles', () => {
+    render(
+      <Shell locked profile={<p>Profile page</p>} initialRoute={{ kind: 'page', page: 'profile' }} />,
+    );
+    const nav = screen.getByRole('navigation', {
+      name: 'Workspace navigation',
+    });
+    for (const button of within(nav).getAllByRole('button'))
+      expect(button).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Open companion chat' }),
+    ).toBeDisabled();
+  });
+
+  it.each([
+    ['Skills', 'Skills page'],
+    ['Memory', 'Memory page'],
+    ['Tools', null],
+    ['Connections', 'Connections page'],
+    ['Automations', 'Automations page'],
+    ['Usage', 'Usage page'],
+    ['Diagnostics', 'Health page'],
+    ['Logs', 'Logs page'],
+  ] as const)(
+    'opens %s from the window navigation and the command menu',
+    async (label, content) => {
+      vi.spyOn(daemon, 'capabilities').mockResolvedValue({
+        schemaVersion: 1,
+        tools: [],
+        persistence: {
+          controlPlane: 'file',
+          memory: 'file',
+          executionJournal: false,
+        },
+        extensions: [],
+        limitations: [],
+      });
+      const user = userEvent.setup();
+      render(
+        <Shell
+          initialRoute={{ kind: 'page', page: 'usage' }}
+          skills={<div>Skills page</div>}
+          memory={<div>Memory page</div>}
+          connectors={<div>Connections page</div>}
+          automations={<div>Automations page</div>}
+          usage={<div>Usage page</div>}
+          health={<div>Health page</div>}
+          logs={<div>Logs page</div>}
+        />,
+      );
+      const nav = screen.getByRole('navigation', {
+        name: 'Workspace navigation',
+      });
+      await user.click(within(nav).getByRole('button', { name: label }));
+      if (content) expect(screen.getByText(content)).toBeVisible();
+      else
+        expect(
+          await screen.findByText('Tools follow your authority'),
+        ).toBeVisible();
+      expect(within(nav).getByRole('button', { name: label })).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
+      expect(screen.getByRole('region', { name: 'Settings' })).toBeVisible();
+
+      await user.keyboard('{Control>}k{/Control}');
+      expect(
+        screen.getByRole('option', { name: new RegExp(`Go to ${label}`) }),
+      ).toBeVisible();
+    },
+  );
+
+  it('shows waiting approvals in the top bar and on Permissions', async () => {
     const user = userEvent.setup();
     render(
       <Shell approvals={<div>Approvals page</div>} pendingApprovals={2} />,
     );
-    const nav = screen.getByRole('navigation', {
-      name: 'Workspace navigation',
-    });
-
     await user.click(
-      within(nav).getByRole('button', { name: 'Approvals, 2 waiting' }),
+      screen.getByRole('button', { name: 'Approvals, 2 waiting' }),
     );
-
     expect(screen.getByText('Approvals page')).toBeVisible();
     expect(screen.getByText('Workspace canvas')).not.toBeVisible();
     expect(
-      within(nav).getByRole('button', { name: 'Approvals, 2 waiting' }),
+      within(
+        screen.getByRole('navigation', { name: 'Workspace navigation' }),
+      ).getByRole('button', { name: 'Permissions, 2 waiting' }),
     ).toHaveAttribute('aria-current', 'page');
   });
 
-  it('opens Automations from the navigation', async () => {
-    const user = userEvent.setup();
-    render(<Shell automations={<div>Automations page</div>} />);
-    const nav = screen.getByRole('navigation', {
-      name: 'Workspace navigation',
-    });
-
-    await user.click(within(nav).getByRole('button', { name: 'Automations' }));
-
-    expect(screen.getByText('Automations page')).toBeVisible();
-    expect(screen.getByText('Workspace canvas')).not.toBeVisible();
+  it('keeps the top bar quiet and names Permissions plainly when nothing waits', () => {
+    render(
+      <Shell
+        approvals={<div>Approvals page</div>}
+        initialRoute={{ kind: 'page', page: 'approvals' }}
+      />,
+    );
     expect(
-      within(nav).getByRole('button', { name: 'Automations' }),
-    ).toHaveAttribute('aria-current', 'page');
-  });
-
-  it('names the destination plainly when nothing waits', () => {
-    render(<Shell approvals={<div>Approvals page</div>} />);
+      screen.queryByRole('button', { name: /waiting/ }),
+    ).not.toBeInTheDocument();
     expect(
       within(
         screen.getByRole('navigation', { name: 'Workspace navigation' }),
-      ).getByRole('button', { name: 'Approvals' }),
+      ).getByRole('button', { name: 'Permissions' }),
     ).toBeVisible();
   });
 
@@ -371,7 +476,7 @@ describe('WorkspaceShell', () => {
       screen.getByRole('option', { name: /Review tool approvals/ }),
     ).toHaveTextContent('1 waiting for you');
     expect(
-      screen.getByRole('option', { name: /Go to Approvals/ }),
+      screen.getByRole('option', { name: /Go to Permissions/ }),
     ).toBeVisible();
     expect(
       screen.queryByRole('option', { name: /Old archive/ }),
@@ -392,127 +497,7 @@ describe('WorkspaceShell', () => {
     expect(screen.getByText('Approvals page')).toBeVisible();
   });
 
-  it('opens Skills from the navigation and the command menu', async () => {
-    const user = userEvent.setup();
-    render(<Shell skills={<div>Skills page</div>} />);
-    const nav = screen.getByRole('navigation', {
-      name: 'Workspace navigation',
-    });
-
-    await user.click(within(nav).getByRole('button', { name: 'Skills' }));
-    expect(screen.getByText('Skills page')).toBeVisible();
-    expect(within(nav).getByRole('button', { name: 'Skills' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
-
-    await user.keyboard('{Control>}k{/Control}');
-    expect(screen.getByRole('option', { name: /Go to Skills/ })).toBeVisible();
-  });
-
-  it('offers Memory between Automations and Skills', () => {
-    render(<Shell />);
-    const names = within(
-      screen.getByRole('navigation', { name: 'Workspace navigation' }),
-    )
-      .getAllByRole('button')
-      .map((button) => button.textContent);
-    const memory = names.findIndex((name) => name?.includes('Memory'));
-    expect(memory).toBeGreaterThan(-1);
-    expect(names[memory - 1]).toContain('Automations');
-    expect(names[memory + 1]).toContain('Skills');
-  });
-
-  it('opens Memory from the navigation and the command menu', async () => {
-    const user = userEvent.setup();
-    render(<Shell memory={<div>Memory page</div>} />);
-    const nav = screen.getByRole('navigation', {
-      name: 'Workspace navigation',
-    });
-
-    await user.click(within(nav).getByRole('button', { name: 'Memory' }));
-    expect(screen.getByText('Memory page')).toBeVisible();
-    expect(within(nav).getByRole('button', { name: 'Memory' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
-
-    await user.keyboard('{Control>}k{/Control}');
-    expect(screen.getByRole('option', { name: /Go to Memory/ })).toBeVisible();
-  });
-
-  it('the System group lists Usage, Logs, Health, Capabilities in order', async () => {
-    render(<Shell />);
-    await userEvent.click(screen.getByRole('button', { name: 'System' }));
-    const names = within(
-      screen.getByRole('navigation', { name: 'Workspace navigation' }),
-    )
-      .getAllByRole('button')
-      .map((button) => button.textContent ?? '');
-    const usage = names.findIndex((name) => name.includes('Usage'));
-    expect(usage).toBeGreaterThan(-1);
-    expect(names.slice(usage, usage + 4).map((name) => name.trim())).toEqual([
-      'Usage',
-      'Logs',
-      'Health',
-      'Capabilities',
-    ]);
-  });
-
-  it('Logs and Health open their pages and the command menu offers them', async () => {
-    const user = userEvent.setup();
-    render(
-      <Shell logs={<div>Logs page</div>} health={<div>Health page</div>} />,
-    );
-    const nav = screen.getByRole('navigation', {
-      name: 'Workspace navigation',
-    });
-
-    await user.click(within(nav).getByRole('button', { name: 'System' }));
-    await user.click(within(nav).getByRole('button', { name: 'Logs' }));
-    expect(screen.getByText('Logs page')).toBeVisible();
-    expect(within(nav).getByRole('button', { name: 'Logs' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
-    await user.click(within(nav).getByRole('button', { name: 'Health' }));
-    expect(screen.getByText('Health page')).toBeVisible();
-
-    await user.keyboard('{Control>}k{/Control}');
-    expect(screen.getByRole('option', { name: /Go to Logs/ })).toBeVisible();
-    expect(screen.getByRole('option', { name: /Go to Health/ })).toBeVisible();
-  });
-
-  it('Usage opens the usage page and the command menu offers Go to Usage', async () => {
-    const user = userEvent.setup();
-    render(<Shell usage={<div>Usage page</div>} />);
-    const nav = screen.getByRole('navigation', {
-      name: 'Workspace navigation',
-    });
-
-    await user.click(within(nav).getByRole('button', { name: 'System' }));
-    await user.click(within(nav).getByRole('button', { name: 'Usage' }));
-    expect(screen.getByText('Usage page')).toBeVisible();
-    expect(within(nav).getByRole('button', { name: 'Usage' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
-
-    await user.keyboard('{Control>}k{/Control}');
-    expect(screen.getByRole('option', { name: /Go to Usage/ })).toBeVisible();
-  });
-
-  it('shows the main agent identity in the sidebar presence block', () => {
-    render(<Shell connection="offline" />);
-    const sidebar = screen.getByRole('complementary');
-    expect(
-      within(sidebar).getByRole('heading', { name: 'Nova' }),
-    ).toBeVisible();
-    expect(within(sidebar).getByText('Welcome back')).toBeVisible();
-    expect(within(sidebar).getByText('Companion')).toBeVisible();
-  });
-
-  it('shows the persisted workspace avatar and uploads a replacement', async () => {
+  it('shows the workspace identity and uploads a replacement avatar from the window', async () => {
     const user = userEvent.setup();
     const onChangeWorkspaceAvatar = vi.fn().mockResolvedValue(undefined);
     Object.defineProperties(URL, {
@@ -524,10 +509,13 @@ describe('WorkspaceShell', () => {
     });
     render(
       <Shell
+        initialRoute={{ kind: 'page', page: 'memory' }}
         workspaceState={configuredWorkspace(true)}
         onChangeWorkspaceAvatar={onChangeWorkspaceAvatar}
       />,
     );
+    const sidebar = screen.getByRole('complementary');
+    expect(within(sidebar).getByText('Northwind Research')).toBeVisible();
     expect(
       screen
         .getByRole('button', { name: 'Change workspace avatar' })
@@ -543,21 +531,25 @@ describe('WorkspaceShell', () => {
     );
   });
 
-  it('shows a compact presence bar on mobile', () => {
-    mobile();
+  it('hides the company name when the workspace state is not configured', () => {
     render(
       <Shell
-        mainAgent={agent('agent-main', 'Nova', 1, { status: 'Running' })}
-        connection="offline"
+        initialRoute={{ kind: 'page', page: 'memory' }}
+        workspaceState={{
+          configured: false,
+          workspace: null,
+          defaultRoot: '/workspaces',
+        }}
       />,
     );
-    const bar = screen.getByRole('banner');
-    expect(within(bar).getByRole('heading', { name: 'Nova' })).toBeVisible();
-    expect(within(bar).getByRole('button', { name: 'Settings' })).toBeVisible();
+    expect(
+      within(screen.getByRole('complementary')).queryByText(
+        'Northwind Research',
+      ),
+    ).not.toBeInTheDocument();
   });
 
-  it('opens the sessions drawer from the mobile top bar', async () => {
-    mobile();
+  it('opens the thread switcher from the thread button', async () => {
     const user = userEvent.setup();
     render(<Shell sidebar={<div>Sessions list</div>} />);
     expect(screen.queryByText('Sessions list')).not.toBeInTheDocument();
@@ -749,77 +741,45 @@ describe('WorkspaceShell', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('exposes settings as a contextual action for the main agent', async () => {
-    const onOpenSettings = vi.fn();
-    render(<Shell onOpenSettings={onOpenSettings} />);
+  it('opens Settings on the companion profile from the top bar', async () => {
+    render(<Shell profile={<p>Profile page</p>} />);
     const settings = screen.getByRole('button', { name: 'Settings' });
     expect(settings).toHaveAttribute('title', 'Settings for Nova');
     await userEvent.click(settings);
-    expect(onOpenSettings).toHaveBeenCalledOnce();
+    expect(screen.getByText('Profile page')).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Settings' })).toBeVisible();
   });
 
-  it('places mobile navigation after workspace content in DOM and tab order', () => {
+  it('puts the window navigation after the page on mobile', () => {
     mobile();
     render(
-      <Shell conversation={<button type="button">Workspace action</button>} />,
+      <Shell
+        initialRoute={{ kind: 'page', page: 'usage' }}
+        usage={<button type="button">Usage action</button>}
+      />,
     );
-    const content = screen.getByRole('main');
     const navigation = screen.getByRole('navigation', {
       name: 'Workspace navigation',
     });
     expect(navigation).toHaveAttribute('data-placement', 'bottom-dock');
-    expect(content.parentElement?.nextElementSibling).toBe(navigation);
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
     expect(
-      within(navigation).getByRole('button', { name: 'Chats' }),
+      within(navigation).getByRole('button', { name: 'Usage' }),
     ).toHaveAttribute('aria-current', 'page');
     expect(
       screen
-        .getByRole('button', { name: 'Workspace action' })
-        .compareDocumentPosition(
-          within(navigation).getByRole('button', { name: 'Chats' }),
-        ) & Node.DOCUMENT_POSITION_FOLLOWING,
+        .getByRole('button', { name: 'Usage action' })
+        .compareDocumentPosition(navigation) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).not.toBe(0);
   });
 
-  it('shows the configured workspace company name next to the shell brand', () => {
-    render(<Shell workspaceState={configuredWorkspace(false)} />);
-    const sidebar = screen.getByRole('complementary');
-    expect(within(sidebar).getByText('Welcome back')).toBeVisible();
-    expect(within(sidebar).getByText('Northwind Research')).toBeVisible();
-  });
-
-  it('renders the presence block exactly as today when no workspace is configured', () => {
-    render(<Shell workspaceState={null} />);
-    const sidebar = screen.getByRole('complementary');
-    expect(within(sidebar).getByText('Welcome back')).toBeVisible();
-    expect(
-      within(sidebar).getByRole('heading', { name: 'Nova' }),
-    ).toBeVisible();
-    expect(
-      within(sidebar).queryByText('Northwind Research'),
-    ).not.toBeInTheDocument();
-  });
-
-  it('hides the company name when the workspace state is not configured', () => {
+  it('opens Connections as a page', () => {
     render(
       <Shell
-        workspaceState={{
-          configured: false,
-          workspace: null,
-          defaultRoot: '/workspaces',
-        }}
+        connectors={<div>Manage connections</div>}
+        initialRoute={{ kind: 'page', page: 'connectors' }}
       />,
     );
-    const sidebar = screen.getByRole('complementary');
-    expect(within(sidebar).getByText('Welcome back')).toBeVisible();
-    expect(
-      within(sidebar).queryByText('Northwind Research'),
-    ).not.toBeInTheDocument();
-  });
-
-  it('opens Connectors as a page', async () => {
-    render(<Shell connectors={<div>Manage connections</div>} />);
-    await userEvent.click(screen.getByRole('button', { name: 'Connectors' }));
     expect(screen.getByText('Manage connections')).toBeVisible();
     expect(
       screen.queryByRole('button', { name: 'Telegram' }),

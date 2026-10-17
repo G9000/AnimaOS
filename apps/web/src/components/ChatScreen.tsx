@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { ConversationTools } from './ConversationTools';
+import { AgentAvatar } from './AgentAvatar';
 import { CopyMessage } from './CopyMessage';
 import { SaveToMemory } from './memory/SaveToMemory';
 import type { SaveOutcome, SavedState } from '../hooks/useSaveToMemory';
@@ -81,9 +82,12 @@ const Bubble = memo(function Bubble({
   onSave,
   savedLookup,
   agentId,
+  agentName = '',
   readAloud,
 }: {
   message: ChatMessage;
+  /** Shown beside assistant replies so every reply is attributed. */
+  agentName?: string;
   /** Offers Save to memory on a user or assistant message with text. */
   onSave?: (message: ChatMessage) => Promise<SaveOutcome>;
   savedLookup?: (messageId: string) => SavedState | null;
@@ -97,16 +101,21 @@ const Bubble = memo(function Bubble({
   const flag = messageFlag(message);
   return (
     <div
-      className={`animate-msg-in flex ${isUser ? 'justify-end' : 'justify-start'}`}
+      className={`animate-msg-in flex ${isUser ? 'justify-end' : 'justify-start gap-3'}`}
     >
+      {!isUser && (
+        <span className="scenic-reply-avatar" aria-hidden>
+          <AgentAvatar id={agentId} name={agentName} size={30} />
+        </span>
+      )}
       <div
         className={`flex min-w-0 max-w-[85%] flex-col ${isUser ? 'items-end' : 'items-start'}`}
       >
         <div
-          className={`min-w-0 max-w-full break-words px-4 py-2.5 text-sm leading-relaxed ${
+          className={`min-w-0 max-w-full break-words text-sm leading-relaxed ${
             isUser
-              ? 'rounded-2xl rounded-br-md border border-line-strong bg-panel-2/90 text-ink shadow-lg shadow-black/25'
-              : 'glass rounded-2xl rounded-bl-md text-ink'
+              ? 'scenic-user-bubble border border-line-strong bg-panel-2/90 px-4 py-2.5 text-ink'
+              : 'scenic-agent-text text-ink'
           }`}
         >
           <MarkdownMessage>
@@ -171,6 +180,13 @@ function Sparkle() {
   return <BoltIcon size={13} />;
 }
 
+function greetingForNow(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning.';
+  if (hour < 18) return 'Good afternoon.';
+  return 'Good evening.';
+}
+
 function EmptyState({
   agentName,
   onPick,
@@ -179,42 +195,21 @@ function EmptyState({
   onPick: (text: string) => void;
 }) {
   return (
-    <div className="studio-welcome animate-rise-in">
-      <div className="studio-hero">
-        <div className="studio-hero-copy">
-          <p className="studio-eyebrow">
-            <span aria-hidden /> YOUR PERSONAL COMPANION
-          </p>
-          <h2
-            aria-label={`Say something to ${agentName}`}
-            className="studio-hero-title"
-          >
-            What’s on your mind?
-          </h2>
-          <p className="studio-hero-description">
-            I’m {agentName}. Let’s make a plan, work through an idea, or take
-            something off your list.
-          </p>
-          <div className="studio-hero-signature">
-            One companion. A little less to carry.
-          </div>
-        </div>
-        <div className="studio-sculpture" aria-hidden data-motion="agent-orb">
-          <div className="studio-orbit orbit-one" />
-          <div className="studio-orbit orbit-two" />
-          <div className="studio-orbit orbit-three" />
-          <div className="studio-sphere">
-            <span>✳</span>
-          </div>
-          <span className="studio-sculpture-label">POSSIBILITY, IN ORBIT</span>
-          <span className="studio-satellite satellite-one" />
-          <span className="studio-satellite satellite-two" />
-        </div>
-      </div>
-      <div className="studio-section-rule">
-        <span>A FEW PLACES TO START</span>
-        <span aria-hidden>01 — 03</span>
-      </div>
+    <div className="studio-welcome scenic-welcome animate-rise-in">
+      <span
+        className="scenic-welcome-orb agent-orb"
+        aria-hidden
+        data-motion="agent-orb"
+      />
+      <h2
+        aria-label={`Say something to ${agentName}`}
+        className="studio-hero-title"
+      >
+        {greetingForNow()}
+      </h2>
+      <p className="studio-hero-description">
+        Talk or type. {agentName} is listening.
+      </p>
       <div className="studio-suggestions">
         {SUGGESTIONS.map((s) => (
           <button
@@ -223,15 +218,10 @@ function EmptyState({
             onClick={() => onPick(s.text)}
             className="studio-suggestion group text-left"
           >
-            <span className="studio-suggestion-top">
-              <span className="studio-suggestion-icon">{s.icon}</span>
-              <span>{s.label}</span>
-              <span className="studio-suggestion-arrow" aria-hidden>
-                ↗
-              </span>
+            <span className="studio-suggestion-icon" aria-hidden>
+              {s.icon}
             </span>
-            <strong>{s.title}</strong>
-            <span className="studio-suggestion-detail">{s.detail}</span>
+            <span>{s.text}</span>
           </button>
         ))}
       </div>
@@ -307,7 +297,12 @@ const TranscriptEntry = memo(function TranscriptEntry({
   knownAttachments: KnownRunAttachments;
 }) {
   const renderBubble = (message: ChatMessage) => (
-    <Bubble message={message} agentId={agentId} readAloud={readAloud} />
+    <Bubble
+      message={message}
+      agentId={agentId}
+      agentName={agentName}
+      readAloud={readAloud}
+    />
   );
   switch (item.kind) {
     case 'message':
@@ -318,6 +313,7 @@ const TranscriptEntry = memo(function TranscriptEntry({
             onSave={actions?.onSaveToMemory}
             savedLookup={actions?.savedToMemory}
             agentId={agentId}
+            agentName={agentName}
             readAloud={readAloud}
           />
           {isAcceptedBudgetWrapupMessage(item.message) && (
@@ -335,7 +331,11 @@ const TranscriptEntry = memo(function TranscriptEntry({
       return (
         <details className="revised-draft">
           <summary>Earlier draft (revised)</summary>
-          <Bubble message={item.message} agentId={agentId} />
+          <Bubble
+            message={item.message}
+            agentId={agentId}
+            agentName={agentName}
+          />
         </details>
       );
     case 'delegated':
@@ -830,6 +830,7 @@ export function Composer({
             )}
           </div>
         </AttachmentDropZone>
+        <div className="composer-voice">
         <DictationControl
           disabled={!canPick || voiceDisabled}
           conversationKey={conversationKey}
@@ -857,7 +858,8 @@ export function Composer({
             onUse={appendDictation}
           />
         )}
-        <div className="mt-2 flex items-center justify-between px-2 font-mono text-[10px] text-ink-3">
+        </div>
+        <div className="composer-hints mt-2 flex items-center justify-between px-2 font-mono text-[10px] text-ink-3">
           <span>
             {steerable
               ? // Ctrl+Enter on every non-Mac platform, never ⌘⏎ (S3b-E).

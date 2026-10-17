@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import {
   DEFAULT_APPROVAL_POLICY,
   POLICY_CLASSES,
@@ -182,6 +182,9 @@ export interface ApprovalsPageProps {
   /** The sessions list, for each card's "Open" button. */
   sessions: readonly Session[];
   onOpenSession: (approval: Approval) => void;
+  /** What the companion may do at all, shown between what waits now and
+   *  the rules for what it must ask. */
+  access?: ReactNode;
 }
 
 /** Spec §15.4: pending cards, rules and policy per class, and the 30-day
@@ -192,6 +195,7 @@ export function ApprovalsPage({
   streamOpen,
   sessions,
   onOpenSession,
+  access = null,
 }: ApprovalsPageProps) {
   const view = useApprovals({
     agentId,
@@ -254,6 +258,7 @@ export function ApprovalsPage({
           </div>
         )}
       </section>
+      {access}
       <section className="approvals-section" aria-labelledby="approvals-rules">
         <h2 id="approvals-rules">Rules</h2>
         <p className="approvals-help">

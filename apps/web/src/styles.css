@@ -11,6 +11,7 @@
 @import './memory.css';
 @import './system.css';
 @import './attachments.css';
+@import './scenic.css';
 
 @source '../../packages/ui/src/**/*.{ts,tsx}';
 
@@ -269,13 +270,6 @@ select.field option {
 
 .workspace-mobile-safe {
   padding-bottom: 5.5rem;
-}
-
-.safe-settings-sheet {
-  padding-top: var(--safe-area-top);
-  padding-right: var(--safe-area-right);
-  padding-bottom: var(--safe-area-bottom);
-  padding-left: var(--safe-area-left);
 }
 
 @media (min-width: 768px) {

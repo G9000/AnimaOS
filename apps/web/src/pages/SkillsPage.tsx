@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { DaemonHttpError } from '@animaOS-SWARM/sdk';
 import type { Skill, SkillDraftProposer, SkillFile } from '@animaOS-SWARM/sdk';
 
@@ -29,6 +29,9 @@ export interface SkillsPageProps {
   epoch: number;
   online: boolean;
   onOpenSession: (proposer: SkillDraftProposer) => void;
+  /** How the companion learns from finished tasks: its review switch and
+   *  the task reviews that propose skills. */
+  learning?: ReactNode;
 }
 
 type Editing = { skill: Skill | null; initial?: SkillEditorValue };
@@ -47,8 +50,17 @@ export function SkillsPage({
   epoch,
   online,
   onOpenSession,
+  learning = null,
 }: SkillsPageProps) {
   const view = useSkills({ version, epoch, enabled: online });
+  // Task reviews belong to the companion, so they show even when the
+  // skills folder cannot be read.
+  const learningSection = learning && (
+    <section className="skills-section" aria-labelledby="skills-learning">
+      <h2 id="skills-learning">Learning from finished tasks</h2>
+      {learning}
+    </section>
+  );
   const [editing, setEditing] = useState<Editing | null>(null);
   const [review, setReview] = useState<Review | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -128,6 +140,7 @@ export function SkillsPage({
         <p className="skills-empty" role="status">
           {view.unavailable}
         </p>
+        {learningSection}
       </div>
     );
   }
@@ -163,6 +176,7 @@ export function SkillsPage({
         )}
         {moreFiles && <p className="skills-empty">{moreFiles}</p>}
       </section>
+      {learningSection}
       <section className="skills-section" aria-labelledby="skills-list">
         <div className="skills-section-header">
           <h2 id="skills-list">Skills</h2>

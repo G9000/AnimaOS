@@ -16,9 +16,6 @@ function AgentIdentity({
   return (
     <div className="min-w-0">
       <div className="flex min-w-0 items-baseline gap-2">
-        <p className="shrink-0 font-mono text-[10px] uppercase tracking-[0.16em] text-ink-3">
-          Welcome back
-        </p>
         {companyName ? (
           <p
             className="truncate font-mono text-[10px] uppercase tracking-[0.16em] text-ink-2"
@@ -29,12 +26,13 @@ function AgentIdentity({
         ) : null}
       </div>
       <div className="mt-0.5 flex min-w-0 items-baseline gap-2">
-        <h1
+        {/* The top bar holds the page's h1; this is a caption. */}
+        <p
           className="truncate font-display text-base font-semibold tracking-tight text-ink"
           title={agent.name}
         >
           {agent.name}
-        </h1>
+        </p>
         <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-accent">
           {isMain ? 'Companion' : 'Helper'}
         </span>

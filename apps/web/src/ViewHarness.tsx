@@ -17,6 +17,10 @@ import {
 import { AlertIcon } from './components/icons';
 import { CompanionSetup } from './components/onboarding/CompanionSetup';
 import { SettingsPanel } from './components/SettingsPanel';
+import {
+  LearningReviewPanel,
+  type LearningReviewApi,
+} from './components/learning/LearningReviewPanel';
 import { ConnectorsView } from './components/ConnectorsView';
 import { SessionSidebar } from './components/sessions/SessionSidebar';
 import { SessionView } from './components/sessions/SessionView';
@@ -43,6 +47,7 @@ import { SkillsPage } from './pages/SkillsPage';
 import { HealthPage } from './pages/HealthPage';
 import { LogsPage } from './pages/LogsPage';
 import { UsagePage } from './pages/UsagePage';
+import { RuntimePage } from './pages/RuntimePage';
 import {
   SESSION_MESSAGES_LIVE_POLL_MS,
   SESSION_MESSAGES_POLL_MS,
@@ -112,6 +117,23 @@ const EMPTY_CHAT: ChatState = {
   delivery: null,
 };
 const HOME_CONVERSATION = 'home';
+
+const learningApi: LearningReviewApi = {
+  policy: (agentId, options) => daemon.learningPolicy(agentId, options),
+  setPolicy: (agentId, input) => daemon.setLearningPolicy(agentId, input),
+  listReviews: (agentId, options) =>
+    daemon.listLearningReviews(agentId, options),
+  getReview: (agentId, reviewId, options) =>
+    daemon.getLearningReview(agentId, reviewId, options),
+  cancelReview: (agentId, reviewId) =>
+    daemon.cancelLearningReview(agentId, reviewId),
+  decideProposal: (agentId, reviewId, proposalId, input) =>
+    daemon.decideLearningProposal(agentId, reviewId, proposalId, input),
+  listSkills: (options) => daemon.listSkills(options),
+  skill: (slug, options) => daemon.skill(slug, options),
+  createSkillDraft: (agentId, reviewId, proposalId, input) =>
+    daemon.createLearningSkillDraft(agentId, reviewId, proposalId, input),
+};
 
 function httpStatus(error: unknown): unknown {
   return typeof error === 'object' && error !== null && 'status' in error
@@ -565,7 +587,6 @@ export function ViewHarness() {
     null,
   );
   const [resetError, setResetError] = useState<string | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [mcpBusy, setMcpBusy] = useState(false);
   const mcpBusyRef = useRef(false);
@@ -580,7 +601,6 @@ export function ViewHarness() {
   const agentLifecycleGenerationRef = useRef(0);
   const settingsOperationGenerationRef = useRef<number | null>(null);
   const resetInFlightRef = useRef<AgentOperation | null>(null);
-  const settingsTriggerRef = useRef<HTMLElement | null>(null);
   const currentAgentIdRef = useRef<string | null>(null);
   const previousSelectedMainIdRef = useRef<string | null>(null);
 
@@ -645,7 +665,6 @@ export function ViewHarness() {
     currentAgentIdRef.current = agentId;
     settingsOperationGenerationRef.current = null;
     resetInFlightRef.current = null;
-    settingsTriggerRef.current = null;
     savingSettingsRef.current = false;
     mcpBusyRef.current = false;
     mcpPermissionsUnknownRef.current = false;
@@ -654,7 +673,6 @@ export function ViewHarness() {
     setSessionActionError(null);
     setSettingsSaveError(null);
     setResetError(null);
-    setShowSettings(false);
     setSavingSettings(false);
     setMcpBusy(false);
     setResetting(false);
@@ -720,6 +738,23 @@ export function ViewHarness() {
     setLegacyMigrationError,
   });
 
+  // While the stream is open agents are polled slowly; a page that edits the
+  // companion reads its record first so a save starts from the current one.
+  const editingPage =
+    route.kind === 'page' &&
+    (route.page === 'profile' ||
+      route.page === 'model' ||
+      route.page === 'approvals')
+      ? route.page
+      : null;
+  const refreshAgentsRef = useRef(refreshAgents);
+  refreshAgentsRef.current = refreshAgents;
+  useEffect(() => {
+    if (editingPage && streamOpen) void refreshAgentsRef.current();
+    // Only entering a page reads again, not every poll.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingPage]);
+
   const changeWorkspaceAvatar = useCallback(
     async (file: File) => {
       await daemon.uploadWorkspaceAvatar(file);
@@ -728,31 +763,6 @@ export function ViewHarness() {
     [refreshWorkspace],
   );
 
-  const openSettings = () => {
-    settingsTriggerRef.current =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    // Summaries carry no transcripts: Settings reads the full records.
-    if (streamOpen) void refreshAgents();
-    setShowSettings(true);
-  };
-  const closeSettings = () => {
-    if (
-      savingSettingsRef.current ||
-      mcpBusyRef.current ||
-      resetInFlightRef.current !== null
-    )
-      return;
-    setShowSettings(false);
-  };
-
-  useEffect(() => {
-    if (showSettings || !settingsTriggerRef.current) return;
-    const trigger = settingsTriggerRef.current;
-    settingsTriggerRef.current = null;
-    trigger.focus();
-  }, [showSettings]);
 
   const saveSettings = async (patch: AgentUpdateInput): Promise<boolean> => {
     if (
@@ -1086,7 +1096,7 @@ export function ViewHarness() {
     newChat,
     showCommands: () => setDraft('/'),
     search: setSessionQuery,
-    chooseModel: openSettings,
+    chooseModel: () => navigate({ kind: 'page', page: 'model' }),
     rename: renameSession,
     archive: archiveSession,
     exportSession,
@@ -1152,26 +1162,26 @@ export function ViewHarness() {
     );
   }
 
-  const settingsPanel = showSettings ? (
+  // The companion's own settings, split by what the owner is deciding: each
+  // page shows its part and keeps the save and reset guards.
+  // A save or reset holds the window on its page; an external tool grant
+  // keeps running when the owner leaves Connections.
+  const settingsBusy = savingSettings || resetting;
+  const settingsPage = (sections: Parameters<typeof SettingsPanel>[0]['sections']) => (
     <SettingsPanel
-      online={connection === 'online'}
+      key={sections?.join()}
       refreshProviders={retryProviders}
       agent={agent}
       providers={providers}
-      workspace={workspace}
       saving={savingSettings || mcpBusy}
       resetting={resetting}
       saveError={settingsSaveError}
       resetError={resetError}
       saveSettings={saveSettings}
       resetAgent={resetAgent}
-      close={closeSettings}
-      onOpenSkills={() => {
-        closeSettings();
-        navigate({ kind: 'page', page: 'skills' });
-      }}
+      sections={sections}
     />
-  ) : null;
+  );
 
   const sidebar = (
     <SessionSidebar
@@ -1224,6 +1234,12 @@ export function ViewHarness() {
           ),
       }}
       session={viewedSession}
+      skillDrafts={{
+        version: live.state.skillsVersion,
+        epoch: live.state.epoch,
+        enabled: connection === 'online',
+        onReview: () => navigate({ kind: 'page', page: 'skills' }),
+      }}
       messages={routeSessionId ? chatMessages : []}
       knownAttachments={sends.knownRunAttachments}
       pending={openPending}
@@ -1247,7 +1263,7 @@ export function ViewHarness() {
       composer={{
         draft,
         conversationKey: activeChatKey,
-        voiceDisabled: showSettings || conversationHidden,
+        voiceDisabled: conversationHidden,
         nativeVoice:
           agentId && (!activeSession || activeSession.kind === 'chat')
             ? {
@@ -1402,12 +1418,7 @@ export function ViewHarness() {
 
   return (
     <>
-      <div
-        data-testid="workspace-background"
-        className="contents"
-        aria-hidden={showSettings || undefined}
-        inert={showSettings || undefined}
-      >
+      <div data-testid="workspace-background" className="contents">
         <WorkspaceShell
           mainAgent={mainAgent ?? agent}
           agents={agents}
@@ -1415,7 +1426,16 @@ export function ViewHarness() {
           route={route}
           navigate={navigate}
           onNewChat={newChat}
-          onOpenSettings={openSettings}
+          locked={settingsBusy}
+          profile={settingsPage(['profile'])}
+          model={settingsPage(['model'])}
+          runtime={
+            <RuntimePage
+              agent={agent}
+              workspace={workspace}
+              online={connection === 'online'}
+            />
+          }
           onChangeWorkspaceAvatar={changeWorkspaceAvatar}
           onPickPrompt={(prompt) =>
             setDraft((current) =>
@@ -1458,7 +1478,7 @@ export function ViewHarness() {
                   if (isCurrentAgentOperation(operation)) {
                     mcpPermissionsUnknownRef.current = true;
                     setSettingsSaveError(
-                      'External tool permissions need a fresh read. Close Settings and refresh status in Connectors before saving changes.',
+                      'External tool permissions need a fresh read. Refresh status in Connections before saving changes.',
                     );
                   }
                   throw caught;
@@ -1467,7 +1487,7 @@ export function ViewHarness() {
                 if (canonical.state.id !== agent.id) {
                   mcpPermissionsUnknownRef.current = true;
                   setSettingsSaveError(
-                    'External tool permissions need a fresh read. Close Settings and refresh status in Connectors before saving changes.',
+                    'External tool permissions need a fresh read. Refresh status in Connections before saving changes.',
                   );
                   throw new Error('Permission read did not match this agent.');
                 }
@@ -1486,7 +1506,7 @@ export function ViewHarness() {
                   return;
                 mcpPermissionsUnknownRef.current = true;
                 setSettingsSaveError(
-                  'External tool permissions need a fresh read. Close Settings and refresh status in Connectors before saving changes.',
+                  'External tool permissions need a fresh read. Refresh status in Connections before saving changes.',
                 );
               }}
               telegram={
@@ -1528,6 +1548,7 @@ export function ViewHarness() {
                   sessionId: approval.sessionId,
                 })
               }
+              access={settingsPage(['access'])}
             />
           }
           automations={
@@ -1584,6 +1605,13 @@ export function ViewHarness() {
                   sessionId: proposer.sessionId,
                 })
               }
+              learning={
+                <LearningReviewPanel
+                  agentId={agent.id}
+                  api={learningApi}
+                  disabled={settingsBusy || mcpBusy}
+                />
+              }
             />
           }
           pendingApprovals={pendingApprovalCount(
@@ -1599,7 +1627,6 @@ export function ViewHarness() {
           conversationRoute={conversationRoute}
         />
       </div>
-      {settingsPanel}
     </>
   );
 }

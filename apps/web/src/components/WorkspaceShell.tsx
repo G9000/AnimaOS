@@ -12,23 +12,29 @@ import { CommandMenu, type StudioCommand } from './CommandMenu';
 import { PROMPT_LIBRARY } from '../lib/prompt-library';
 import { sessionKey } from '../lib/session-groups';
 import {
+  AgentsIcon,
   BoltIcon,
   ChartIcon,
   ChipIcon,
+  ChevronIcon,
   ClockIcon,
   GearIcon,
   HeartIcon,
   LogIcon,
+  PlusIcon,
   PulseIcon,
-  SendIcon,
   ShieldIcon,
   SparkIcon,
+  XIcon,
 } from './icons';
 import { ghostBtnCls } from './ui-bits';
 
 /** Pages this release renders; the other hash pages open the conversation
  *  until their milestones build them. */
 export const AVAILABLE_PAGES = [
+  'profile',
+  'model',
+  'runtime',
   'approvals',
   'automations',
   'memory',
@@ -52,30 +58,54 @@ interface Destination {
   icon: ReactNode;
 }
 
-const PRIMARY_DESTINATIONS: Destination[] = [
-  { page: 'approvals', label: 'Approvals', icon: <ShieldIcon size={16} /> },
+interface DestinationGroup {
+  label: string;
+  items: Destination[];
+}
+
+/** Settings are grouped by what the owner is deciding, not by daemon feature. */
+const DESTINATION_GROUPS: DestinationGroup[] = [
   {
-    page: 'automations',
-    label: 'Automations',
-    icon: <ClockIcon size={16} />,
+    label: 'Companion',
+    items: [
+      { page: 'profile', label: 'Profile', icon: <AgentsIcon size={15} /> },
+      { page: 'model', label: 'Model', icon: <ChipIcon size={15} /> },
+      { page: 'approvals', label: 'Permissions', icon: <ShieldIcon size={15} /> },
+    ],
   },
-  { page: 'memory', label: 'Memory', icon: <ChipIcon size={16} /> },
-  { page: 'skills', label: 'Skills', icon: <BoltIcon size={16} /> },
-  { page: 'work', label: 'Work', icon: <SparkIcon size={16} /> },
-  { page: 'files', label: 'Files', icon: <PulseIcon size={16} /> },
-  { page: 'connectors', label: 'Connectors', icon: <GearIcon size={16} /> },
-];
-const SYSTEM_DESTINATIONS: Destination[] = [
-  { page: 'usage', label: 'Usage', icon: <ChartIcon size={16} /> },
-  { page: 'logs', label: 'Logs', icon: <LogIcon size={16} /> },
-  { page: 'health', label: 'Health', icon: <HeartIcon size={16} /> },
   {
-    page: 'capabilities',
-    label: 'Capabilities',
-    icon: <SparkIcon size={16} />,
+    label: 'Learning',
+    items: [
+      { page: 'skills', label: 'Skills', icon: <BoltIcon size={15} /> },
+      { page: 'memory', label: 'Memory', icon: <PulseIcon size={15} /> },
+    ],
+  },
+  {
+    label: 'Abilities',
+    items: [
+      { page: 'capabilities', label: 'Tools', icon: <SparkIcon size={15} /> },
+      { page: 'connectors', label: 'Connections', icon: <GearIcon size={15} /> },
+    ],
+  },
+  {
+    label: 'Activity',
+    items: [
+      { page: 'automations', label: 'Automations', icon: <ClockIcon size={15} /> },
+      { page: 'work', label: 'Work', icon: <SparkIcon size={15} /> },
+      { page: 'files', label: 'Files', icon: <LogIcon size={15} /> },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { page: 'runtime', label: 'Runtime', icon: <HeartIcon size={15} /> },
+      { page: 'usage', label: 'Usage', icon: <ChartIcon size={15} /> },
+      { page: 'health', label: 'Diagnostics', icon: <PulseIcon size={15} /> },
+      { page: 'logs', label: 'Logs', icon: <LogIcon size={15} /> },
+    ],
   },
 ];
-const DESTINATIONS = [...PRIMARY_DESTINATIONS, ...SYSTEM_DESTINATIONS];
+const DESTINATIONS = DESTINATION_GROUPS.flatMap((group) => group.items);
 
 export function availablePage(route: HashRoute): AvailablePage | null {
   return route.kind === 'page' &&
@@ -108,26 +138,24 @@ function DestinationNavigation({
   page,
   navigate,
   placement,
-  onOpenChats,
   pendingApprovals,
+  locked,
 }: {
   page: AvailablePage | null;
   navigate: Navigate;
   placement: 'sidebar' | 'bottom-dock';
-  onOpenChats: () => void;
   pendingApprovals: number;
+  locked: boolean;
 }) {
   const sidebar = placement === 'sidebar';
-  const [systemOpen, setSystemOpen] = useState(false);
-  const systemExpanded =
-    systemOpen || SYSTEM_DESTINATIONS.some((item) => item.page === page);
-  const itemClass = `studio-nav-item inline-flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${sidebar ? 'w-full justify-start text-left' : 'min-w-16 shrink-0 flex-col gap-1 text-[10px]'}`;
+  const itemClass = `studio-nav-item ${sidebar ? 'is-row' : 'is-tab'}`;
   const destination = (item: Destination) => {
     const waiting = item.page === 'approvals' ? pendingApprovals : 0;
     return (
       <button
         key={item.page}
         type="button"
+        disabled={locked}
         onClick={() => navigate({ kind: 'page', page: item.page })}
         aria-current={page === item.page ? 'page' : undefined}
         aria-label={
@@ -152,40 +180,16 @@ function DestinationNavigation({
       data-placement={placement}
       className={
         sidebar
-          ? 'studio-navigation flex shrink-0 flex-col gap-1 p-3'
-          : 'safe-bottom-dock glass-strong absolute inset-x-3 z-30 flex items-center gap-1 overflow-x-auto rounded-2xl p-1.5'
+          ? 'studio-navigation'
+          : 'safe-bottom-dock glass-strong absolute inset-x-0 bottom-0 z-30 flex items-center gap-1 overflow-x-auto p-1.5'
       }
     >
-      {!sidebar && (
-        <button
-          type="button"
-          onClick={onOpenChats}
-          aria-current={page === null ? 'page' : undefined}
-          aria-label="Chats"
-          className={itemClass}
-        >
-          <SendIcon size={16} />
-          <span>Chats</span>
-        </button>
-      )}
-      {PRIMARY_DESTINATIONS.map((item) => destination(item))}
-      {sidebar ? (
-        <>
-          <button
-            type="button"
-            className={itemClass}
-            aria-expanded={systemExpanded}
-            onClick={() => setSystemOpen((open) => !open)}
-          >
-            <GearIcon size={16} />
-            <span>System</span>
-          </button>
-          {systemExpanded &&
-            SYSTEM_DESTINATIONS.map((item) => destination(item))}
-        </>
-      ) : (
-        SYSTEM_DESTINATIONS.map((item) => destination(item))
-      )}
+      {DESTINATION_GROUPS.map((group) => (
+        <div key={group.label} role="group" aria-label={group.label} className="contents">
+          {sidebar && <p className="studio-nav-group">{group.label}</p>}
+          {group.items.map((item) => destination(item))}
+        </div>
+      ))}
     </nav>
   );
 }
@@ -193,9 +197,9 @@ function DestinationNavigation({
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-/** The sessions list on mobile: a modal drawer rendered outside the inert
- *  shell. It takes focus, keeps Tab inside, and closes on Escape; the shell
- *  returns focus to the Open sessions button. */
+/** The thread switcher: a modal panel rendered outside the inert shell. It
+ *  takes focus, keeps Tab inside, and closes on Escape; the shell returns
+ *  focus to the thread button. */
 function SessionDrawer({
   children,
   onClose,
@@ -271,8 +275,9 @@ function SessionDrawer({
         tabIndex={-1}
         className="session-drawer-panel studio-sidebar"
       >
-        <div className="flex items-center justify-between gap-2 p-3">
+        <div className="session-drawer-head">
           <button type="button" className={ghostBtnCls} onClick={onNewChat}>
+            <PlusIcon size={14} />
             New chat
           </button>
           <button
@@ -281,13 +286,27 @@ function SessionDrawer({
             aria-label="Close sessions"
             onClick={onClose}
           >
-            ×
+            <XIcon size={14} />
           </button>
         </div>
         {children}
       </div>
       <div className="session-drawer-backdrop" aria-hidden onClick={onClose} />
     </div>
+  );
+}
+
+function routeSession(
+  route: HashRoute,
+  sessions: readonly Session[],
+): Session | null {
+  if (route.kind !== 'session') return null;
+  return (
+    sessions.find(
+      (session) =>
+        session.id === route.sessionId &&
+        (!route.agentId || session.agentId === route.agentId),
+    ) ?? null
   );
 }
 
@@ -312,7 +331,10 @@ export function WorkspaceShell({
   sessions = [],
   onOpenSession,
   workspaceState = null,
-  onOpenSettings,
+  profile = null,
+  model = null,
+  runtime = null,
+  locked = false,
   onChangeWorkspaceAvatar = ignoreWorkspaceAvatarChange,
   onPickPrompt,
   onNewChat,
@@ -326,10 +348,10 @@ export function WorkspaceShell({
   conversation: ReactNode;
   /** The chat or session a page returns to; defaults to the last one visited. */
   conversationRoute?: HashRoute;
-  /** The sessions list for the desktop sidebar and the mobile drawer. */
+  /** The sessions list shown by the thread switcher. */
   sidebar?: ReactNode | null;
   connectors?: ReactNode | null;
-  /** The Approvals page, shown at `#/approvals`. */
+  /** The Approvals page, shown at `#/approvals` as Permissions. */
   approvals?: ReactNode | null;
   /** The Automations page, shown at `#/automations`. */
   automations?: ReactNode | null;
@@ -341,15 +363,20 @@ export function WorkspaceShell({
   usage?: ReactNode | null;
   /** The Logs page, shown at `#/logs`. */
   logs?: ReactNode | null;
-  /** The Health page, shown at `#/health`. */
+  /** The Health page, shown at `#/health` as Diagnostics. */
   health?: ReactNode | null;
   /** Approvals waiting for the owner, for the destination's badge. */
   pendingApprovals?: number;
-  /** The listed sessions the command menu offers by title. */
+  /** The listed sessions the command menu and thread button use. */
   sessions?: readonly Session[];
   onOpenSession?: (session: Session) => void;
   workspaceState?: DaemonWorkspaceState | null;
-  onOpenSettings: () => void;
+  /** The companion's own settings pages: identity, model, and runtime. */
+  profile?: ReactNode | null;
+  model?: ReactNode | null;
+  runtime?: ReactNode | null;
+  /** Holds the Settings window on its page while a save or reset settles. */
+  locked?: boolean;
   onChangeWorkspaceAvatar?: (file: File) => Promise<void>;
   onPickPrompt?: (prompt: string) => void;
   onNewChat?: () => void;
@@ -360,10 +387,9 @@ export function WorkspaceShell({
   );
   const lastConversation = conversationRoute ?? visitedConversation;
   const [commandsOpen, setCommandsOpen] = useState(false);
-  const [focusMode, setFocusMode] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const desktopNavigation = useDesktopNavigation();
-  const drawerShown = drawerOpen && !desktopNavigation && sidebar !== null;
+  const drawerShown = drawerOpen && sidebar !== null;
   const sessionsButtonRef = useRef<HTMLButtonElement>(null);
   const drawerWasShown = useRef(false);
   useEffect(() => {
@@ -382,6 +408,8 @@ export function WorkspaceShell({
   ).length;
   const newChat = onNewChat ?? (() => navigate({ kind: 'home' }));
   const openConversation = () => navigate(lastConversation);
+  const currentSession = routeSession(lastConversation, sessions);
+  const threadTitle = currentSession?.title || 'New chat';
 
   useEffect(() => {
     if (route.kind === 'session' || route.kind === 'home')
@@ -430,24 +458,6 @@ export function WorkspaceShell({
       group: 'Navigate',
       run: () => navigate({ kind: 'page', page: item.page }),
     })),
-    {
-      id: 'settings',
-      title: 'Companion settings',
-      description: 'Identity, model, and access',
-      group: 'Navigate',
-      run: () => requestAnimationFrame(onOpenSettings),
-    },
-    ...(desktopNavigation
-      ? [
-          {
-            id: 'focus',
-            title: focusMode ? 'Exit focus mode' : 'Enter focus mode',
-            description: 'More room for your conversation',
-            group: 'View',
-            run: () => setFocusMode((value) => !value),
-          },
-        ]
-      : []),
     ...(onOpenSession
       ? sessions
           .filter((session) => !session.archived)
@@ -479,59 +489,64 @@ export function WorkspaceShell({
       : []),
   ];
 
+  const pageLabel = page
+    ? (DESTINATIONS.find((item) => item.page === page)?.label ?? null)
+    : null;
+
   return (
     <>
       <div
-        className={`studio-shell companion-shell relative z-[1] flex min-h-0 flex-1 flex-col ${focusMode ? 'is-focused' : ''}`}
+        className="studio-shell companion-shell scenic-shell relative z-[1] flex min-h-0 flex-1 flex-col"
         inert={commandsOpen || drawerShown || undefined}
         aria-hidden={commandsOpen || drawerShown || undefined}
       >
-        {!desktopNavigation && (
-          <AgentPresence
-            agent={mainAgent}
-            connection={connection}
-            companyName={companyName}
-            placement="mobile-bar"
-            hasAvatar={hasAvatar}
-            onChangeWorkspaceAvatar={onChangeWorkspaceAvatar}
-            onOpenSettings={onOpenSettings}
-          />
-        )}
         <div className="studio-frame relative flex min-h-0 flex-1">
-          {desktopNavigation && !focusMode && (
-            <aside className="studio-sidebar relative z-20 flex w-60 shrink-0 flex-col border-r border-line">
-              <div className="studio-brand">
-                <span className="studio-brand-mark" aria-hidden>
-                  ✳
+          <main className="studio-main workspace-mobile-safe relative min-h-0 min-w-0 flex-1">
+            <div className="scenic-backdrop" aria-hidden />
+            <div className="studio-topbar scenic-topbar">
+              <div className="scenic-identity">
+                <h1 className="scenic-wordmark" title={mainAgent.name}>
+                  {mainAgent.name}
+                </h1>
+                <span className="scenic-divider" aria-hidden>
+                  /
                 </span>
-                <span>Anima</span>
+                {sidebar !== null ? (
+                  <button
+                    ref={sessionsButtonRef}
+                    type="button"
+                    className="scenic-thread"
+                    aria-label="Open sessions"
+                    aria-expanded={drawerOpen}
+                    aria-haspopup="dialog"
+                    onClick={() => setDrawerOpen(true)}
+                  >
+                    {currentSession &&
+                      currentSession.kind !== 'chat' &&
+                      (currentSession.kind === 'telegram' ||
+                        currentSession.kind === 'discord') && (
+                        <span className="session-kind-badge">
+                          {currentSession.kind === 'telegram'
+                            ? 'Telegram'
+                            : 'Discord'}
+                        </span>
+                      )}
+                    <span className="scenic-thread-title">{threadTitle}</span>
+                    <ChevronIcon size={13} />
+                  </button>
+                ) : (
+                  <span className="scenic-thread">
+                    <span className="scenic-thread-title">{threadTitle}</span>
+                  </span>
+                )}
               </div>
-              <AgentPresence
-                agent={mainAgent}
-                connection={connection}
-                companyName={companyName}
-                placement="sidebar"
-                hasAvatar={hasAvatar}
-                onChangeWorkspaceAvatar={onChangeWorkspaceAvatar}
-              />
-              <div className="shrink-0 px-3 pt-3">
-                <button
-                  type="button"
-                  className={`${ghostBtnCls} w-full justify-center`}
-                  onClick={newChat}
-                >
-                  New chat
-                </button>
-              </div>
-              <DestinationNavigation
-                page={page}
-                navigate={navigate}
-                placement="sidebar"
-                onOpenChats={openConversation}
-                pendingApprovals={pendingApprovals}
-              />
-              {sidebar}
               <div className="companion-status" role="status">
+                <span
+                  className={`studio-connection ${connection === 'online' ? 'is-online' : 'is-offline'}`}
+                >
+                  <i aria-hidden />
+                  {connection === 'online' ? 'Connected' : 'Offline'}
+                </span>
                 <p>
                   {connection === 'offline'
                     ? 'Cannot reach your companion'
@@ -539,7 +554,13 @@ export function WorkspaceShell({
                       ? 'Working on your request'
                       : 'Ready when you are'}
                 </p>
-                <span>
+                <span
+                  className={
+                    connection === 'online' && workingHelpers === 0
+                      ? 'scenic-quiet'
+                      : undefined
+                  }
+                >
                   {connection === 'offline'
                     ? 'Check the server connection.'
                     : workingHelpers > 0
@@ -547,61 +568,28 @@ export function WorkspaceShell({
                       : 'Your conversations stay with you.'}
                 </span>
               </div>
-              <div className="border-t border-line p-3">
-                <button
-                  type="button"
-                  onClick={onOpenSettings}
-                  className={`${ghostBtnCls} w-full justify-start`}
-                  aria-label="Settings"
-                  title={`Settings for ${mainAgent.name}`}
-                >
-                  <GearIcon size={15} />
-                  <span>Settings</span>
-                </button>
-              </div>
-            </aside>
-          )}
-          <main className="studio-main spatial-canvas workspace-mobile-safe relative min-h-0 min-w-0 flex-1">
-            <div className="studio-topbar">
-              {!desktopNavigation && sidebar !== null && (
-                <button
-                  ref={sessionsButtonRef}
-                  type="button"
-                  className="studio-tool-button"
-                  aria-label="Open sessions"
-                  aria-expanded={drawerOpen}
-                  onClick={() => setDrawerOpen(true)}
-                >
-                  ☰
-                </button>
-              )}
-              <div className="studio-breadcrumb">
-                <strong>
-                  {page
-                    ? DESTINATIONS.find((item) => item.page === page)?.label
-                    : mainAgent.name}
-                </strong>
-                {page === null && (
-                  <span className="companion-model">{mainAgent.model}</span>
-                )}
-              </div>
-              <span
-                className={`studio-connection ${connection === 'online' ? 'is-online' : 'is-offline'}`}
-              >
-                <i aria-hidden />
-                {connection === 'online' ? 'Connected' : 'Offline'}
-              </span>
               <div className="studio-topbar-actions">
-                {page !== null && (
+                {pendingApprovals > 0 && (
                   <button
                     type="button"
-                    className="studio-tool-button"
-                    aria-label="Open companion chat"
-                    onClick={openConversation}
+                    className="studio-tool-button scenic-waiting"
+                    aria-label={`Approvals, ${pendingApprovals} waiting`}
+                    onClick={() =>
+                      navigate({ kind: 'page', page: 'approvals' })
+                    }
                   >
-                    Back to chat
+                    <i aria-hidden />
+                    {pendingApprovals} waiting
                   </button>
                 )}
+                <button
+                  type="button"
+                  className="studio-tool-button"
+                  onClick={newChat}
+                >
+                  <PlusIcon size={14} />
+                  <span className="sr-only">New chat</span>
+                </button>
                 <button
                   type="button"
                   className="studio-command-trigger"
@@ -612,19 +600,16 @@ export function WorkspaceShell({
                   <span className="studio-command-trigger-label">Search</span>
                   <kbd>Ctrl K</kbd>
                 </button>
-                {desktopNavigation && (
-                  <button
-                    type="button"
-                    className="studio-tool-button"
-                    onClick={() => setFocusMode((value) => !value)}
-                    aria-label={
-                      focusMode ? 'Exit focus mode' : 'Enter focus mode'
-                    }
-                    aria-pressed={focusMode}
-                  >
-                    {focusMode ? '↙' : '⛶'}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => navigate({ kind: 'page', page: 'profile' })}
+                  aria-current={page !== null ? 'page' : undefined}
+                  className="studio-tool-button scenic-settings"
+                  aria-label="Settings"
+                  title={`Settings for ${mainAgent.name}`}
+                >
+                  <GearIcon size={15} />
+                </button>
               </div>
             </div>
             <div className="studio-view">
@@ -632,45 +617,105 @@ export function WorkspaceShell({
               <div className="companion-chat-panel" hidden={page !== null}>
                 {conversation}
               </div>
-              {page === 'approvals' ? (
-                approvals
-              ) : page === 'automations' ? (
-                automations
-              ) : page === 'memory' ? (
-                memory
-              ) : page === 'skills' ? (
-                skills
-              ) : page === 'usage' ? (
-                usage
-              ) : page === 'logs' ? (
-                logs
-              ) : page === 'health' ? (
-                health
-              ) : page === 'connectors' ? (
-                connectors
-              ) : page === 'files' ? (
-                <WorkspaceFiles online={connection === 'online'} />
-              ) : page === 'capabilities' ? (
-                <WorkspaceCapabilities online={connection === 'online'} />
-              ) : page === 'work' ? (
-                <WorkspaceHub
-                  agents={[mainAgent]}
-                  online={connection === 'online'}
-                  initialSection="Tasks"
-                />
-              ) : null}
+              {page !== null && (
+                <section
+                  className="settings-window"
+                  aria-label="Settings"
+                >
+                  {desktopNavigation && (
+                    <aside className="studio-sidebar settings-window-nav">
+                      <p className="settings-window-title">Settings</p>
+                      <AgentPresence
+                        agent={mainAgent}
+                        connection={connection}
+                        companyName={companyName}
+                        placement="sidebar"
+                        hasAvatar={hasAvatar}
+                        onChangeWorkspaceAvatar={onChangeWorkspaceAvatar}
+                      />
+                      <DestinationNavigation
+                        page={page}
+                        navigate={navigate}
+                        placement="sidebar"
+                        pendingApprovals={pendingApprovals}
+                        locked={locked}
+                      />
+                    </aside>
+                  )}
+                  <div className="settings-window-content">
+                    <div className="settings-window-head">
+                      <strong>{pageLabel}</strong>
+                      {locked && (
+                        <span id="settings-window-locked" className="sr-only">
+                          Settings stay on this page until the change finishes.
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        className="studio-tool-button"
+                        aria-label="Open companion chat"
+                        aria-describedby={
+                          locked ? 'settings-window-locked' : undefined
+                        }
+                        disabled={locked}
+                        onClick={openConversation}
+                      >
+                        <span className="scenic-hide-narrow">Back to chat</span>
+                        <XIcon size={14} />
+                      </button>
+                    </div>
+                    <div className="settings-window-page">
+                      {page === 'profile' ? (
+                        profile
+                      ) : page === 'model' ? (
+                        model
+                      ) : page === 'runtime' ? (
+                        runtime
+                      ) : page === 'approvals' ? (
+                        approvals
+                      ) : page === 'automations' ? (
+                        automations
+                      ) : page === 'memory' ? (
+                        memory
+                      ) : page === 'skills' ? (
+                        skills
+                      ) : page === 'usage' ? (
+                        usage
+                      ) : page === 'logs' ? (
+                        logs
+                      ) : page === 'health' ? (
+                        health
+                      ) : page === 'connectors' ? (
+                        connectors
+                      ) : page === 'files' ? (
+                        <WorkspaceFiles online={connection === 'online'} />
+                      ) : page === 'capabilities' ? (
+                        <WorkspaceCapabilities
+                          online={connection === 'online'}
+                        />
+                      ) : page === 'work' ? (
+                        <WorkspaceHub
+                          agents={[mainAgent]}
+                          online={connection === 'online'}
+                          initialSection="Tasks"
+                        />
+                      ) : null}
+                    </div>
+                    {!desktopNavigation && (
+                      <DestinationNavigation
+                        page={page}
+                        navigate={navigate}
+                        placement="bottom-dock"
+                        pendingApprovals={pendingApprovals}
+                        locked={locked}
+                      />
+                    )}
+                  </div>
+                </section>
+              )}
             </div>
           </main>
         </div>
-        {!desktopNavigation && (
-          <DestinationNavigation
-            page={page}
-            navigate={navigate}
-            placement="bottom-dock"
-            onOpenChats={openConversation}
-            pendingApprovals={pendingApprovals}
-          />
-        )}
       </div>
       {drawerShown && (
         <SessionDrawer

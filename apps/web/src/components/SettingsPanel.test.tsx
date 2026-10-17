@@ -19,11 +19,9 @@ import {
   daemon,
   type AgentUpdateInput,
   type DaemonProvider,
-  type DaemonWorkspaceState,
 } from '../lib/daemon-api';
 import type { AgentDetail } from '../lib/types';
-import type { LearningReviewApi } from './learning/LearningReviewPanel';
-import { SettingsPanel } from './SettingsPanel';
+import { SettingsPanel, type SettingsSection } from './SettingsPanel';
 
 // Preview transport/lifecycle are covered by AgentFilesPanel.test.tsx. Keep
 // settings focus and save tests independent of an owner network request.
@@ -73,82 +71,29 @@ function agent(overrides: Partial<AgentDetail> = {}): AgentDetail {
 function renderPanel(
   currentAgent: AgentDetail,
   overrides: Partial<{
-    online: boolean;
     saving: boolean;
     resetting: boolean;
     saveError: string | null;
     resetError: string | null;
-    workspace: DaemonWorkspaceState | null;
-    learningApi: LearningReviewApi;
     saveSettings: (patch: AgentUpdateInput) => Promise<boolean>;
     resetAgent: () => void;
-    close: () => void;
+    sections: readonly SettingsSection[];
   }> = {},
 ) {
   const props = {
     agent: currentAgent,
-    online: true,
     providers,
     saving: false,
     resetting: false,
     saveError: null,
     resetError: null,
-    workspace: null,
     saveSettings: vi.fn(async () => true),
     resetAgent: vi.fn(),
-    close: vi.fn(),
-    learningApi: learningApiMock(),
     ...overrides,
   };
 
   return { ...render(<SettingsPanel {...props} />), props };
 }
-
-function learningApiMock(): LearningReviewApi {
-  return {
-    policy: vi.fn(async () => ({
-      autoEnabled: false,
-      dailyLimit: 2,
-      pendingLimit: 10,
-      timeoutMs: 20_000,
-    })),
-    setPolicy: vi.fn(async (_agentId, input) => ({
-      ...{
-        autoEnabled: false,
-        dailyLimit: 2,
-        pendingLimit: 10,
-        timeoutMs: 20_000,
-      },
-      ...input,
-    })),
-    listReviews: vi.fn(async () => []),
-    getReview: vi.fn(async () => {
-      throw new Error('No review fixture');
-    }),
-    cancelReview: vi.fn(async () => {
-      throw new Error('No review fixture');
-    }),
-    decideProposal: vi.fn(async () => {
-      throw new Error('No review fixture');
-    }),
-    listSkills: vi.fn(async () => []),
-    skill: vi.fn(async () => ({ skill: null, file: null })),
-    createSkillDraft: vi.fn(async () => {
-      throw new Error('No skill draft fixture');
-    }),
-  };
-}
-
-const configuredWorkspace: DaemonWorkspaceState = {
-  configured: true,
-  workspace: {
-    rootPath: '/workspaces/northwind',
-    companyName: 'Northwind Research',
-    mission: 'Map supply chains',
-    values: ['rigor'],
-  },
-  defaultRoot: '/workspaces',
-};
 
 describe('m83 independent owner web permissions', () => {
   afterEach(() => vi.restoreAllMocks());
@@ -293,55 +238,6 @@ describe('m83 independent owner web permissions', () => {
         screen.getByRole('checkbox', { name: 'Allow web page reads' }),
       ).toBeDisabled();
     }
-  });
-});
-
-describe('SettingsPanel Tasks connection', () => {
-  afterEach(() => vi.restoreAllMocks());
-
-  it('opens Tasks offline without reading and revalidates on reconnect', async () => {
-    const tasks = vi.spyOn(daemon, 'agentTasks').mockResolvedValue({
-      revision: '1',
-      tasks: [],
-    });
-    const view = renderPanel(agent(), { online: false });
-    fireEvent.click(screen.getByRole('button', { name: 'tasks' }));
-    expect(
-      screen.getByRole('button', { name: 'Refresh tasks' }),
-    ).toBeDisabled();
-    expect(tasks).not.toHaveBeenCalled();
-    view.rerender(<SettingsPanel {...view.props} online />);
-    expect(await screen.findByLabelText('New agent task')).toBeEnabled();
-    expect(tasks).toHaveBeenCalledTimes(1);
-    expect(tasks).toHaveBeenCalledWith('agent-main');
-  });
-
-  it('keeps the same Tasks editor and unsaved draft read-only across a disconnect', async () => {
-    const tasks = vi.spyOn(daemon, 'agentTasks').mockResolvedValue({
-      revision: '1',
-      tasks: [
-        { content: 'Saved task', activeForm: 'Saved task', status: 'pending' },
-      ],
-    });
-    const save = vi.spyOn(daemon, 'updateAgentTasks');
-    const view = renderPanel(agent());
-    fireEvent.click(screen.getByRole('button', { name: 'tasks' }));
-    const task = await screen.findByLabelText('Task 1');
-    fireEvent.change(task, { target: { value: 'Unsaved Settings task' } });
-    view.rerender(<SettingsPanel {...view.props} online={false} />);
-    expect(screen.getByLabelText('Task 1')).toBe(task);
-    expect(task).toHaveValue('Unsaved Settings task');
-    expect(task).toBeDisabled();
-    expect(
-      screen.getByRole('button', { name: 'Refresh tasks' }),
-    ).toBeDisabled();
-    expect(tasks).toHaveBeenCalledTimes(1);
-    view.rerender(<SettingsPanel {...view.props} online />);
-    await waitFor(() => expect(task).toBeEnabled());
-    expect(screen.getByLabelText('Task 1')).toBe(task);
-    expect(task).toHaveValue('Unsaved Settings task');
-    expect(tasks).toHaveBeenCalledTimes(2);
-    expect(save).not.toHaveBeenCalled();
   });
 });
 
@@ -545,110 +441,7 @@ describe('M49 Settings subscription models', () => {
   });
 });
 
-describe('SettingsPanel workspace section', () => {
-  it('shows the configured workspace as read-only company, mission, and folder rows', () => {
-    renderPanel(agent(), { workspace: configuredWorkspace });
-
-    const heading = screen.getByRole('heading', {
-      level: 4,
-      name: 'Workspace',
-    });
-    expect(heading).toBeVisible();
-    expect(screen.getByText('Company')).toBeVisible();
-    expect(screen.getByText('Northwind Research')).toBeVisible();
-    expect(screen.getByText('Mission')).toBeVisible();
-    expect(screen.getByText('Map supply chains')).toBeVisible();
-    expect(screen.getByText('Folder')).toBeVisible();
-    expect(screen.getByText('/workspaces/northwind')).toBeVisible();
-    // Read-only: the workspace values are not editable controls.
-    expect(screen.queryByDisplayValue('Northwind Research')).toBeNull();
-    expect(screen.queryByDisplayValue('Map supply chains')).toBeNull();
-  });
-
-  it('places the workspace section above the identity settings', () => {
-    renderPanel(agent(), { workspace: configuredWorkspace });
-
-    const workspaceHeading = screen.getByRole('heading', {
-      level: 4,
-      name: 'Workspace',
-    });
-    const identityHeading = screen.getByRole('heading', {
-      level: 4,
-      name: 'Identity',
-    });
-    expect(
-      workspaceHeading.compareDocumentPosition(identityHeading) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).not.toBe(0);
-  });
-
-  it.each([null, { configured: false, workspace: null, defaultRoot: '/w' }])(
-    'hides the workspace section when workspace state is %o',
-    (workspace) => {
-      renderPanel(agent(), { workspace });
-
-      expect(
-        screen.queryByRole('heading', { level: 4, name: 'Workspace' }),
-      ).not.toBeInTheDocument();
-      expect(screen.queryByText('Company')).not.toBeInTheDocument();
-      expect(
-        screen.getByRole('heading', { level: 4, name: 'Identity' }),
-      ).toBeVisible();
-    },
-  );
-});
-
 describe('SettingsPanel access', () => {
-  it('M38_learning_policy_checkbox_is_visible_and_defaults_off', async () => {
-    renderPanel(agent());
-
-    expect(
-      await screen.findByRole('checkbox', {
-        name: 'Automatically review completed tasks',
-      }),
-    ).not.toBeChecked();
-  });
-
-  it('M38_saves_learning_opt_in_through_its_own_policy_route', async () => {
-    const user = userEvent.setup();
-    const view = renderPanel(agent());
-    const checkbox = await screen.findByRole('checkbox', {
-      name: 'Automatically review completed tasks',
-    });
-    await waitFor(() => expect(checkbox).toBeEnabled());
-
-    await user.click(checkbox);
-
-    await waitFor(() =>
-      expect(view.props.learningApi.setPolicy).toHaveBeenCalledWith(
-        'agent-main',
-        { autoEnabled: true },
-      ),
-    );
-    expect(view.props.saveSettings).not.toHaveBeenCalled();
-    expect(checkbox).toBeChecked();
-  });
-
-  it('M38_retains_default_off_policy_when_opt_in_save_fails', async () => {
-    const user = userEvent.setup();
-    const api = learningApiMock();
-    api.setPolicy = vi.fn(async () => {
-      throw new Error('Policy save failed');
-    });
-    renderPanel(agent(), { learningApi: api });
-    const checkbox = await screen.findByRole('checkbox', {
-      name: 'Automatically review completed tasks',
-    });
-    await waitFor(() => expect(checkbox).toBeEnabled());
-
-    await user.click(checkbox);
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Policy save failed',
-    );
-    expect(checkbox).not.toBeChecked();
-  });
-
   it('M41_opt_in_adds_only_conversation_window_read_and_preserves_custom_grants', async () => {
     const user = userEvent.setup();
     const currentTools = [
@@ -1043,28 +836,23 @@ describe('SettingsPanel access', () => {
     expect(removeFacts).toBeChecked();
   });
 
-  it('opens as a labelled modal and keeps keyboard focus inside it', async () => {
-    const user = userEvent.setup();
-    renderPanel(agent());
+  it('shows only the sections its page is about', () => {
+    const view = renderPanel(agent(), { sections: ['access'] });
+    expect(screen.getByRole('radio', { name: /^Collaborate/ })).toBeVisible();
+    expect(screen.queryByRole('textbox', { name: 'Name' })).toBeNull();
+    expect(screen.queryByRole('combobox', { name: 'Provider' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reset' })).toBeNull();
 
-    const dialog = screen.getByRole('dialog', { name: 'Agent settings' });
-    const close = screen.getByRole('button', { name: 'Close settings' });
-    expect(dialog).toHaveAttribute('aria-modal', 'true');
-    expect(dialog).toHaveAttribute('aria-labelledby', 'settings-heading');
-    expect(close).toHaveFocus();
+    view.rerender(<SettingsPanel {...view.props} sections={['model']} />);
+    expect(screen.getByRole('combobox', { name: 'Provider' })).toBeVisible();
+    expect(screen.queryByRole('radio')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reset' })).toBeNull();
 
-    const focusable = Array.from(
-      dialog.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      ),
-    );
-    const last = focusable.at(-1);
-    expect(last).toBeDefined();
-
-    await user.tab({ shift: true });
-    expect(last).toHaveFocus();
-    await user.tab();
-    expect(close).toHaveFocus();
+    view.rerender(<SettingsPanel {...view.props} sections={['profile']} />);
+    expect(screen.getByRole('textbox', { name: 'Name' })).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'System prompt' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Reset' })).toBeVisible();
+    expect(screen.queryByRole('combobox', { name: 'Provider' })).toBeNull();
   });
 
   it.each<AccessProfile>(['observe', 'collaborate', 'operate'])(
@@ -1149,9 +937,7 @@ describe('SettingsPanel access', () => {
       screen.getByPlaceholderText('model id, e.g. llama3.1'),
       'anthropic/custom-model',
     );
-    const system = screen.getByPlaceholderText(
-      'Leave empty for the daemon default.',
-    );
+    const system = screen.getByRole('textbox', { name: 'System prompt' });
     await user.clear(system);
     await user.type(system, 'Be concise');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -1277,43 +1063,7 @@ describe('SettingsPanel access', () => {
     expect(screen.getByText('Resetting agent…', { exact: true })).toBeVisible();
   });
 
-  it.each([
-    { busyProp: 'saving', buttonName: 'Saving…', description: /saving/i },
-    {
-      busyProp: 'resetting',
-      buttonName: 'Resetting…',
-      description: /resetting/i,
-    },
-  ] as const)(
-    'blocks every close trigger while $busyProp and restores them after settlement',
-    async ({ busyProp, buttonName, description }) => {
-      const user = userEvent.setup();
-      const close = vi.fn();
-      const view = renderPanel(agent(), { [busyProp]: true, close });
 
-      expect(screen.getByRole('button', { name: buttonName })).toBeDisabled();
-      const closeButton = screen.getByRole('button', {
-        name: 'Close settings',
-      });
-      expect(closeButton).toBeDisabled();
-      expect(closeButton).toHaveAccessibleDescription(description);
-
-      await user.click(closeButton);
-      fireEvent.click(screen.getByTestId('settings-backdrop'));
-      await user.keyboard('{Escape}');
-      expect(close).not.toHaveBeenCalled();
-
-      view.rerender(
-        <SettingsPanel {...view.props} saving={false} resetting={false} />,
-      );
-
-      expect(closeButton).toBeEnabled();
-      await user.keyboard('{Escape}');
-      fireEvent.click(screen.getByTestId('settings-backdrop'));
-      await user.click(closeButton);
-      expect(close).toHaveBeenCalledTimes(3);
-    },
-  );
 });
 
 it('M43 keeps native, dormant external and custom permissions during unrelated saves and optional toggles', async () => {

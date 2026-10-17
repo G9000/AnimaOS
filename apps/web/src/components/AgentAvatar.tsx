@@ -28,12 +28,13 @@ export function AgentAvatar({
   }, [id]);
   return (
     <span
-      className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-lg bg-accent/15 font-semibold"
+      className="agent-avatar inline-flex shrink-0 items-center justify-center overflow-hidden font-semibold"
       style={{ width: size, height: size }}
+      data-default={failed || undefined}
+      title={failed ? name : undefined}
     >
-      {failed ? (
-        name.slice(0, 1).toUpperCase()
-      ) : (
+      {/* No uploaded image: the default orb (styled) stands in for the agent. */}
+      {failed ? null : (
         <img
           key={`${id}:${revision}`}
           src={`/api/agents/${encodeURIComponent(id)}/avatar?v=${revision}`}
