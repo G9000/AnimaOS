@@ -6,12 +6,10 @@ This repository is the whole stack: a Rust agent runtime, the daemon that hosts 
 
 ![anima listening in immersive mode](docs/images/immersive-listening.webp)
 
-> The screens in this README come from the design file, [`design/design.pen`](design/design.pen). Some of them, such as immersive mode, are designed but not built yet. [Status](#status) lists what works today.
-
 ## What anima does
 
 - **One companion, everywhere.** Chat in the web console, or message it on Telegram or Discord. It's one conversation with one memory, and each message shows where it came from.
-- **Talk or type.** You can dictate, have replies read aloud, and send recorded audio for transcription. Immersive mode, which is designed, is a near-empty screen built around anima's orb. Say "Hey anima" or hold Space to talk, and hear the answer or read it.
+- **Talk or type.** You can dictate, have replies read aloud, and send recorded audio for transcription. Immersive mode is a near-empty screen built around anima's orb. Say "Hey anima" or hold Space to talk, and hear the answer or read it.
 - **Helpers for big jobs.** anima can delegate to a small team of helper agents, such as a researcher, a coder and a reviewer. It supervises them and reports back with a result you can review, like a patch with its tests.
 - **Asks before it acts.** Anything that runs commands, sends messages or changes files goes through approvals you control. Each one can be allowed once, for this chat, or always, or denied.
 - **Learns from your work.** It keeps memory of what matters, reviews finished tasks, and drafts reusable skills. Nothing is kept until you approve it.
@@ -31,7 +29,7 @@ This repository is the whole stack: a Rust agent runtime, the daemon that hosts 
 | ![Learned a skill](docs/images/immersive-learned-skill.webp) | ![Looking back](docs/images/immersive-looking-back.webp) |
 | **Learning.** When a task goes well, anima offers to keep how it did it as a skill. | **Looking back.** Scroll up in immersive mode to see the same thread you see in chat. |
 
-Chat and voice share the same conversation. Everything said by voice lands in the chat thread, and every decision has a button, a spoken answer and a key. The full mapping is the "Chat ⇄ Voice parity" frame in the design file.
+Chat and voice share the same conversation. Everything said by voice lands in the chat thread, and every decision has a button, a spoken answer and a key.
 
 ## Status
 
@@ -45,8 +43,8 @@ Chat and voice share the same conversation. Everything said by voice lands in th
 | Voice: browser dictation, read aloud, recorded-audio transcription and selected-reply speech (the last two are server opt-ins) | Built |
 | Reviewed MCP tools, community bundles, documents, web search, scoped browser work | Built, with the scope limits described in [docs/companion](docs/companion) |
 | One-owner VPS deployment | Built; some acceptance checks are still manual ([guide](deploy/vps/README.md)) |
-| Immersive mode: orb, wake word, hotkey, hands-free flow | Designed |
-| Dark "Halo" background for the chat, and the swarm exchange views shown above | Designed |
+| Immersive mode: orb, wake word, hotkey, hands-free flow | Coming next |
+| Dark "Halo" background for the chat, and the swarm exchange views | Coming next |
 
 ## Quick start
 
@@ -77,7 +75,7 @@ Open [localhost:4200](http://localhost:4200), set up your companion and connect 
 | `apps/server` | The legacy local TypeScript server, kept during the restructuring. |
 | `tools/workspace-dev` | The `bun dev` launcher, which picks the host and starts the browser apps. |
 | `deploy/vps` | Docker Compose, Caddy and the daemon image for a one-owner server. |
-| `design/` | The pen.dev design file, its shader and exported screens. |
+| `design/` | The pen.dev design file and the orb shader. |
 
 More detail: [Rust daemon architecture](docs/rust-daemon-architecture.md), [swarm architecture](docs/swarm-architecture.md), [package maturity](docs/package-maturity-scorecard.md).
 
@@ -93,7 +91,7 @@ The interface is designed in [pen.dev](https://pen.dev) before it is built. [`de
 
 The orb is a shader, [`design/shaders/presence.glsl`](design/shaders/presence.glsl).
 
-UI changes start in the design file and are built from it. The images in [`docs/images`](docs/images) are exports of those frames.
+UI changes start in the design file and are built from it.
 
 ## Development
 
