@@ -1,6 +1,6 @@
 # animaOS-SWARM
 
-**anima** is a voice-first personal AI companion that you own. It runs on your computer or your own server, answers you in its web console, Telegram or Discord, brings in helper agents for bigger jobs, asks before it acts, and gets better at your work over time.
+**anima** is a personal AI that you own. It runs on your computer or your own server, answers you in its web console, Telegram or Discord, brings in helper agents for bigger jobs, asks before it acts, and gets better at your work over time.
 
 This repository is the whole stack: a Rust agent runtime, the daemon that hosts it, the TypeScript SDK, and the web console.
 
@@ -11,7 +11,7 @@ This repository is the whole stack: a Rust agent runtime, the daemon that hosts 
 ## What anima does
 
 - **One companion, everywhere.** Chat in the web console, or message it on Telegram or Discord. It's one conversation with one memory, and each message shows where it came from.
-- **Voice first.** You can dictate, have replies read aloud, and send recorded audio for transcription. Immersive mode, which is designed, goes further: a near-empty screen built around anima's orb. Say "Hey anima" or hold Space to talk, and hear the answer or read it.
+- **Talk or type.** You can dictate, have replies read aloud, and send recorded audio for transcription. Immersive mode, which is designed, is a near-empty screen built around anima's orb. Say "Hey anima" or hold Space to talk, and hear the answer or read it.
 - **Helpers for big jobs.** anima can delegate to a small team of helper agents, such as a researcher, a coder and a reviewer. It supervises them and reports back with a result you can review, like a patch with its tests.
 - **Asks before it acts.** Anything that runs commands, sends messages or changes files goes through approvals you control. Each one can be allowed once, for this chat, or always, or denied.
 - **Learns from your work.** It keeps memory of what matters, reviews finished tasks, and drafts reusable skills. Nothing is kept until you approve it.
@@ -45,7 +45,7 @@ Chat and voice share the same conversation. Everything said by voice lands in th
 | Voice: browser dictation, read aloud, recorded-audio transcription and selected-reply speech (the last two are server opt-ins) | Built |
 | Reviewed MCP tools, community bundles, documents, web search, scoped browser work | Built, with the scope limits described in [docs/companion](docs/companion) |
 | One-owner VPS deployment | Built; some acceptance checks are still manual ([guide](deploy/vps/README.md)) |
-| Immersive mode: orb, wake word, hotkey, voice-first flow | Designed |
+| Immersive mode: orb, wake word, hotkey, hands-free flow | Designed |
 | Dark "Halo" background for the chat, and the swarm exchange views shown above | Designed |
 
 ## Quick start
