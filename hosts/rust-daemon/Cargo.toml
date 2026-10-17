@@ -46,6 +46,8 @@ uuid = { version = "1", features = ["v4"] }
 utoipa = { version = "5.4.0", features = ["axum_extras"] }
 utoipa-scalar = { version = "0.3", features = ["axum"] }
 zeroize = "1.8"
+twilight-gateway = { version = "=0.17.1", default-features = false, features = ["rustls-webpki-roots"] }
+twilight-model = "=0.17.1"
 
 [target.'cfg(windows)'.dependencies]
 rfd = "0.17.2"

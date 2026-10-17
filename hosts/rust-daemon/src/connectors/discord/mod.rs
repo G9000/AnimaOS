@@ -2,6 +2,7 @@
 pub(crate) mod client;
 pub(crate) mod credentials;
 mod delivery;
+pub(crate) mod gateway;
 mod inbound;
 mod lifecycle;
 pub(crate) mod model;
@@ -11,6 +12,7 @@ mod runtime_tests;
 pub(crate) mod text;
 #[cfg(test)]
 mod text_tests;
+mod typing;
 use crate::agent_runs::AgentRunCoordinator;
 use crate::app::SharedDaemonState;
 use crate::connectors::registry::ConnectorRegistry;
@@ -32,6 +34,8 @@ const MAX_TERMINAL_INBOUND: usize = 1000;
 pub(crate) enum DiscordRuntimeStatus {
     Disabled,
     Ready,
+    Connecting,
+    Reconnecting,
     CredentialRequired,
     Error,
     Degraded,
@@ -46,6 +50,7 @@ pub(crate) enum DiscordManagerError {
     Conflict,
     InvalidToken,
     Transport,
+    Provider(DiscordTransportError),
     Credential,
     Persistence,
     Backpressure,
@@ -62,6 +67,24 @@ impl std::fmt::Display for DiscordManagerError {
             Self::Conflict => "Discord selection conflicts with existing state",
             Self::InvalidToken => "Discord rejected the bot credential",
             Self::Transport => "Discord transport unavailable",
+            Self::Provider(error) => match error {
+                DiscordTransportError::PermissionDenied => {
+                    "Discord denied access; check the bot's channel permissions"
+                }
+                DiscordTransportError::HttpStatus { status: 404 } => {
+                    "Discord could not find the selected channel"
+                }
+                DiscordTransportError::RateLimited { .. } => {
+                    "Discord is limiting requests; wait before retrying"
+                }
+                DiscordTransportError::Transport => "The daemon could not reach Discord",
+                DiscordTransportError::Configuration => "Discord client configuration failed",
+                DiscordTransportError::InvalidResponse
+                | DiscordTransportError::ResponseTooLarge => {
+                    "Discord returned an unexpected response"
+                }
+                _ => "Discord could not complete the request",
+            },
             Self::Credential => "Discord credential requires reconciliation",
             Self::Persistence => "Discord state could not be saved",
             Self::Backpressure => "Discord backlog capacity is exhausted",
@@ -116,6 +139,9 @@ pub(crate) struct DiscordManager {
     runs: AgentRunCoordinator,
     credentials: Arc<dyn DiscordCredentialStore>,
     registry: Arc<ConnectorRegistry>,
+    gateway: Option<Arc<dyn gateway::GatewayFactory>>,
+    gateway_states: Arc<Mutex<HashMap<String, (u64, gateway::GatewayHealth)>>>,
+    typing_workers: Arc<Mutex<HashMap<String, typing::TypingWorker>>>,
     lifecycle: Arc<Mutex<()>>,
     transaction: Arc<Mutex<()>>,
     statuses: Arc<Mutex<HashMap<String, DiscordRuntimeStatus>>>,
@@ -137,6 +163,9 @@ impl Clone for DiscordManager {
             runs: self.runs.clone(),
             credentials: self.credentials.clone(),
             registry: self.registry.clone(),
+            gateway: self.gateway.clone(),
+            gateway_states: self.gateway_states.clone(),
+            typing_workers: self.typing_workers.clone(),
             lifecycle: self.lifecycle.clone(),
             transaction: self.transaction.clone(),
             statuses: self.statuses.clone(),
@@ -167,6 +196,9 @@ impl DiscordManager {
             runs,
             credentials,
             registry,
+            gateway: None,
+            gateway_states: Arc::new(Mutex::new(HashMap::new())),
+            typing_workers: Arc::new(Mutex::new(HashMap::new())),
             lifecycle: Arc::new(Mutex::new(())),
             transaction,
             statuses: Arc::new(Mutex::new(HashMap::new())),
@@ -308,6 +340,15 @@ impl DiscordManager {
                 return DiscordRuntimeStatus::Degraded;
             }
         }
+        if self.gateway.is_some() {
+            match self.gateway_health(id).await {
+                Some(health) if health.status != DiscordRuntimeStatus::Ready => {
+                    return health.status
+                }
+                None => return DiscordRuntimeStatus::Connecting,
+                _ => {}
+            }
+        }
         self.statuses
             .lock()
             .await
@@ -326,6 +367,13 @@ impl DiscordManager {
         {
             return Some("Delivery is uncertain. Inspect Discord and acknowledge suppression before continuing. Retry cannot resend this output.");
         }
+        if let Some(warning) = self
+            .gateway_health(id)
+            .await
+            .and_then(|health| health.warning)
+        {
+            return Some(warning);
+        }
         self.warnings.lock().await.get(id).copied()
     }
     async fn set_status(
@@ -334,11 +382,18 @@ impl DiscordManager {
         status: DiscordRuntimeStatus,
         warning: Option<&'static str>,
     ) {
-        self.statuses.lock().await.insert(id.into(), status);
+        let mut statuses = self.statuses.lock().await;
+        let mut warnings = self.warnings.lock().await;
+        let paused = self.paused.lock().unwrap_or_else(|e| e.into_inner());
+        // A REST success/ack racing a fatal Gateway error cannot restore online readiness.
+        if status == DiscordRuntimeStatus::Ready && paused.contains(id) {
+            return;
+        }
+        statuses.insert(id.into(), status);
         if let Some(w) = warning {
-            self.warnings.lock().await.insert(id.into(), w);
+            warnings.insert(id.into(), w);
         } else {
-            self.warnings.lock().await.remove(id);
+            warnings.remove(id);
         }
     }
     pub(crate) async fn get(
@@ -382,8 +437,26 @@ fn transport_error(error: DiscordTransportError) -> DiscordManagerError {
     match error {
         DiscordTransportError::Authentication => DiscordManagerError::InvalidToken,
         DiscordTransportError::InvalidInput => DiscordManagerError::InvalidInput,
-        _ => DiscordManagerError::Transport,
+        _ => DiscordManagerError::Provider(error),
     }
+}
+
+fn setup_error(step: &'static str, error: DiscordTransportError) -> DiscordManagerError {
+    // Keep provider bodies, request headers, and credentials out of diagnostics.
+    let http_status = match error {
+        DiscordTransportError::HttpStatus { status } => Some(status),
+        DiscordTransportError::Authentication => Some(401),
+        DiscordTransportError::PermissionDenied => Some(403),
+        DiscordTransportError::RateLimited { .. } => Some(429),
+        _ => None,
+    };
+    tracing::warn!(
+        step,
+        category = error.category(),
+        http_status,
+        "Discord setup failed"
+    );
+    transport_error(error)
 }
 
 pub(crate) fn request_outbound_stop(record: &mut DiscordOutboundRecord) -> bool {

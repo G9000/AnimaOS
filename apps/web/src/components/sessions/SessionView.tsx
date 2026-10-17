@@ -375,6 +375,60 @@ export function SessionView({
     ((session?.activeRuns ?? 0) > 0 &&
       !runs.some((item) => !isTerminalRunStatus(item.run.status)));
   const footer = sessionFooter(session, telegramAvailable, discordAvailable);
+  // Browser task and spoken replies are extra inputs: they live behind the
+  // composer's + button, or stand alone when the session has no composer.
+  const sessionTools = (
+    <>
+      {browserTask && (!session || session.kind === 'chat') && (
+        <BrowserTaskControls
+          key={voiceKey}
+          agentId={agent.id}
+          runId={
+            runs
+              .filter((item) =>
+                runs.some(
+                  ({ run }) =>
+                    run.status === 'running' ||
+                    run.status === 'awaiting_approval',
+                )
+                  ? item.run.status === 'running' ||
+                    item.run.status === 'awaiting_approval'
+                  : item.run.status !== 'queued',
+              )
+              .reduce<
+                (typeof runs)[number] | null
+              >((latest, item) => (!latest || item.run.createdAtMs > latest.run.createdAtMs ? item : latest), null)
+              ?.run.id ?? null
+          }
+          disabled={
+            composer.disabled || composer.sending || Boolean(composer.runActive)
+          }
+          offline={composer.offline}
+          attachments={browserTask.attachments}
+          selection={browserTask.selection}
+          onSelection={browserTask.onSelection}
+        />
+      )}
+      {session?.kind === 'chat' &&
+        composer.nativeVoice?.agentId === session.agentId &&
+        composer.nativeVoice.sessionId === session.id && (
+          <NativeSpeech
+            agentId={session.agentId}
+            sessionId={session.id}
+            conversationKey={voiceKey}
+            messages={messages}
+            disabled={
+              missing ||
+              composer.disabled ||
+              composer.offline ||
+              composer.sending ||
+              Boolean(composer.runActive) ||
+              composer.voiceDisabled === true
+            }
+          />
+        )}
+    </>
+  );
   return (
     <section
       className="flex h-full min-h-0 flex-col"
@@ -432,56 +486,9 @@ export function SessionView({
           {readAloud.error}
         </p>
       )}
-      <div className="session-tools">
-      {browserTask && (!session || session.kind === 'chat') && (
-        <BrowserTaskControls
-          key={voiceKey}
-          agentId={agent.id}
-          runId={
-            runs
-              .filter((item) =>
-                runs.some(
-                  ({ run }) =>
-                    run.status === 'running' ||
-                    run.status === 'awaiting_approval',
-                )
-                  ? item.run.status === 'running' ||
-                    item.run.status === 'awaiting_approval'
-                  : item.run.status !== 'queued',
-              )
-              .reduce<
-                (typeof runs)[number] | null
-              >((latest, item) => (!latest || item.run.createdAtMs > latest.run.createdAtMs ? item : latest), null)
-              ?.run.id ?? null
-          }
-          disabled={
-            composer.disabled || composer.sending || Boolean(composer.runActive)
-          }
-          offline={composer.offline}
-          attachments={browserTask.attachments}
-          selection={browserTask.selection}
-          onSelection={browserTask.onSelection}
-        />
+      {footer.kind !== 'composer' && (
+        <div className="session-tools">{sessionTools}</div>
       )}
-      {session?.kind === 'chat' &&
-        composer.nativeVoice?.agentId === session.agentId &&
-        composer.nativeVoice.sessionId === session.id && (
-          <NativeSpeech
-            agentId={session.agentId}
-            sessionId={session.id}
-            conversationKey={voiceKey}
-            messages={messages}
-            disabled={
-              missing ||
-              composer.disabled ||
-              composer.offline ||
-              composer.sending ||
-              Boolean(composer.runActive) ||
-              composer.voiceDisabled === true
-            }
-          />
-        )}
-      </div>
       {footer.kind === 'composer' ? (
         <Composer
           agentName={agent.name}
@@ -514,6 +521,7 @@ export function SessionView({
             session?.kind === 'discord' ? undefined : composer.attachments
           }
           savedAttachmentCount={composer.savedAttachmentCount}
+          tools={sessionTools}
         />
       ) : (
         <div className="session-footer-note" role="note">

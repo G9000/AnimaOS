@@ -133,8 +133,12 @@ export function MicrophoneCapture({
       : null;
 
   return (
-    <section className="mt-2 px-2" aria-label="Audio recording">
-      <p className="mb-2 text-xs text-ink-3">
+    <section
+      className="studio-audio-recording"
+      aria-label="Audio recording"
+      data-live={state.status !== 'idle' || undefined}
+    >
+      <p className="studio-audio-note">
         Recordings stay on this device until you choose Add recording.
       </p>
       {(state.status === 'idle' || state.status === 'error') && (

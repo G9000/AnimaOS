@@ -96,3 +96,16 @@ export const HeartIcon = (p: IconProps) =>
   );
 export const ChartIcon = (p: IconProps) =>
   base(p, <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />);
+export const MicIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+    </>,
+  );
+export const PaperclipIcon = (p: IconProps) =>
+  base(
+    p,
+    <path d="m21 11-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4L15.5 7" />,
+  );

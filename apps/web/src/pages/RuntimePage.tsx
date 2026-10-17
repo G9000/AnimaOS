@@ -106,7 +106,10 @@ export function RuntimePage({
           Every surface reaches the same companion: this app, Telegram, and
           Discord all talk to one place.
         </p>
-        <OptionList label={`Where ${agent.name} lives`} options={HOME_OPTIONS} />
+        <OptionList
+          label={`Where ${agent.name} lives`}
+          options={HOME_OPTIONS}
+        />
       </section>
 
       <section className="runtime-section" aria-labelledby="runtime-commands">
@@ -115,7 +118,10 @@ export function RuntimePage({
       </section>
 
       {configured && (
-        <section className="runtime-section" aria-labelledby="runtime-workspace">
+        <section
+          className="runtime-section"
+          aria-labelledby="runtime-workspace"
+        >
           <h2 id="runtime-workspace">Workspace</h2>
           <dl className="runtime-facts">
             <Fact label="Company" value={configured.companyName} />

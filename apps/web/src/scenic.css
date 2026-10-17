@@ -23,6 +23,60 @@
     url('./assets/onboarding-garden.jpg') center / cover no-repeat;
 }
 
+/* Reading veil: once a conversation has messages, the scene steps back
+ * behind a soft, slightly blurred band under the message column, so text
+ * reads the same over sky, cloud, or foliage. The edges stay painted, and
+ * the welcome keeps the whole scene. */
+.scenic-backdrop::before {
+  --veil-half: 440px;
+  --veil-feather: 180px;
+  --veil-band: linear-gradient(
+    to right,
+    transparent calc(50% - var(--veil-half) - var(--veil-feather)),
+    #000 calc(50% - var(--veil-half)),
+    #000 calc(50% + var(--veil-half)),
+    transparent calc(50% + var(--veil-half) + var(--veil-feather))
+  );
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: rgb(7 10 12 / 0.74);
+  backdrop-filter: blur(10px) saturate(0.85);
+  -webkit-mask-image: var(--veil-band);
+  mask-image: var(--veil-band);
+  transition: opacity 500ms ease;
+}
+
+.scenic-shell:has(.studio-messages) .scenic-backdrop {
+  box-shadow: inset 0 0 0 100vmax rgb(5 8 10 / 0.18);
+}
+
+.scenic-shell:has(.studio-messages) .scenic-backdrop::before {
+  opacity: 1;
+}
+
+/* Phones have no room for painted edges: the veil covers the width. */
+@media (max-width: 767px) {
+  .scenic-backdrop::before {
+    background: rgb(7 10 12 / 0.66);
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
+
+/* Messages fade out under the top bar instead of being cut by it. */
+.scenic-shell .studio-message-scroller:has(.studio-messages) {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 28px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 28px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scenic-backdrop::before {
+    transition: none;
+  }
+}
+
 .scenic-shell:has(.settings-window) .scenic-backdrop::after {
   content: '';
   position: absolute;
@@ -412,37 +466,6 @@ button.scenic-thread[aria-expanded='true'] {
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14);
 }
 
-.scenic-reply-avatar {
-  flex: none;
-  padding-top: 2px;
-}
-
-.scenic-shell .studio-messages {
-  max-width: 760px;
-  gap: 22px;
-}
-
-.scenic-shell .scenic-user-bubble {
-  border-color: rgb(255 255 255 / 0.12);
-  border-radius: 4px;
-  background: rgb(22 28 33 / 0.62);
-  box-shadow: none;
-  backdrop-filter: blur(24px);
-  color: #fff;
-}
-
-.scenic-shell .scenic-agent-text {
-  padding: 4px 0 0;
-  font-size: 15px;
-  line-height: 1.65;
-  color: #fff;
-  text-shadow: 0 1px 12px rgb(0 0 0 / 0.6);
-}
-
-.scenic-shell .studio-message-meta {
-  color: rgb(255 255 255 / 0.55);
-}
-
 /* In-chat cards (tools, approvals, outcomes, helpers): solid, square, quiet. */
 .scenic-shell .studio-messages .glass,
 .scenic-shell .studio-messages .glass-strong {
@@ -549,49 +572,6 @@ button.scenic-thread[aria-expanded='true'] {
   color: rgb(255 255 255 / 0.7);
 }
 
-/* Composer: a light bar on the scene. */
-.scenic-shell .studio-composer {
-  background: none;
-  padding-bottom: 22px;
-}
-
-.scenic-shell .studio-composer > div {
-  max-width: 760px;
-}
-
-.scenic-shell .studio-composer-box {
-  border: 1px solid rgb(255 255 255 / 0.45);
-  border-radius: 4px;
-  background: rgb(244 243 239 / 0.93);
-  box-shadow: 0 10px 40px rgb(0 0 0 / 0.35);
-  backdrop-filter: blur(24px);
-}
-
-.scenic-shell .studio-composer-box textarea {
-  color: #121212;
-}
-
-.scenic-shell .studio-composer-box textarea::placeholder {
-  color: #6e6e6e;
-}
-
-.scenic-shell .studio-composer-box button {
-  border-radius: 2px;
-  color: #3a3a3a;
-}
-
-.scenic-shell .studio-composer-box button[aria-label='Send'],
-.scenic-shell .studio-composer-box button[aria-label='Stop'] {
-  border: 0;
-  background: #121212;
-  color: #fff;
-  box-shadow: none;
-}
-
-.scenic-shell .studio-composer > div > .mt-2 {
-  color: rgb(255 255 255 / 0.55);
-}
-
 .scenic-shell .studio-draft-recovery {
   border-radius: 4px;
   background: rgb(15 19 22 / 0.92);
@@ -623,58 +603,13 @@ button.scenic-thread[aria-expanded='true'] {
   display: inline;
 }
 
-/* Voice and recording controls: one quiet row under the input bar. */
-.composer-voice {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.composer-voice:empty {
-  display: none;
-}
-
-.scenic-shell .composer-voice section {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-}
-
-.scenic-shell .composer-voice p {
-  margin: 0;
-  font-size: 11px;
-  color: rgb(255 255 255 / 0.55);
-}
-
-.scenic-shell .composer-voice button,
 .scenic-shell .session-tools button,
 .scenic-shell .session-tools select,
 .scenic-shell .session-tools summary {
   border-radius: 2px;
 }
 
-.scenic-shell .composer-voice button {
-  min-height: 28px;
-  padding: 3px 10px;
-  border: 1px solid rgb(255 255 255 / 0.16);
-  background: rgb(22 28 33 / 0.6);
-  color: rgb(255 255 255 / 0.88);
-  font-size: 12px;
-  backdrop-filter: blur(16px);
-}
-
-.scenic-shell .composer-hints {
-  color: rgb(255 255 255 / 0.5);
-}
-
-/* Browser task and spoken replies share the conversation column. */
+/* Browser task and spoken replies, for a session without a composer. */
 .session-tools {
   width: 100%;
   max-width: 760px;
@@ -746,11 +681,6 @@ button.scenic-thread[aria-expanded='true'] {
   background: rgb(22 28 33 / 0.55);
 }
 
-.scenic-shell .studio-composer-box button:not([aria-label='Send']):not([aria-label='Stop']) {
-  border: 0;
-  background: transparent;
-}
-
 .session-source {
   flex: none;
   padding: 1px 6px;
@@ -761,16 +691,6 @@ button.scenic-thread[aria-expanded='true'] {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgb(255 255 255 / 0.7);
-}
-
-.scenic-shell .studio-message-meta button {
-  border: 0;
-  background: transparent;
-  color: rgb(255 255 255 / 0.55);
-}
-
-.scenic-shell .studio-message-meta button:hover {
-  color: #fff;
 }
 
 /* ── In-chat cards ── */
@@ -827,18 +747,6 @@ button.scenic-thread[aria-expanded='true'] {
 
 .scenic-shell .approval-card-sent {
   color: var(--color-mint);
-}
-
-/* Tool activity folds into one panel with divided steps. */
-.scenic-shell .tool-block-toggle,
-.scenic-shell .tool-block-label {
-  align-self: flex-start;
-  padding: 4px 10px;
-  border: 1px solid rgb(255 255 255 / 0.1);
-  border-radius: 2px;
-  background: rgb(15 19 22 / 0.72);
-  color: rgb(255 255 255 / 0.7);
-  backdrop-filter: blur(16px);
 }
 
 .scenic-shell .tool-block-steps {
@@ -1437,4 +1345,521 @@ button.scenic-thread[aria-expanded='true'] {
   text-align: right;
   font-size: 13px;
   color: var(--color-ink);
+}
+
+/* ── Conversation ──
+ * A reply is a turn under the companion's name and orb; the owner's words
+ * sit in a slim glass bubble on the right. Both read at 15px. Actions
+ * (copy, read aloud, save) appear on hover or focus, and stay visible on
+ * touch screens and under the latest message. */
+
+.scenic-shell .studio-messages {
+  max-width: 760px;
+  gap: 8px;
+  padding-top: 28px;
+  padding-bottom: 28px;
+}
+
+.chat-turn {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.chat-turn.is-user {
+  align-items: flex-end;
+  margin-top: 6px;
+}
+
+.chat-agent-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.scenic-reply-avatar {
+  display: inline-flex;
+  flex: none;
+}
+
+.chat-agent-name {
+  font-weight: 500;
+  color: rgb(255 255 255 / 0.92);
+}
+
+.chat-time {
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.42);
+  font-variant-numeric: tabular-nums;
+}
+
+.scenic-shell .chat-turn .scenic-agent-text {
+  max-width: 68ch;
+  padding: 0 0 0 30px;
+  font-size: 15px;
+  line-height: 1.7;
+  color: rgb(255 255 255 / 0.9);
+  text-shadow: none;
+}
+
+.scenic-shell .chat-turn .scenic-user-bubble {
+  max-width: min(78%, 560px);
+  padding: 9px 14px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 4px;
+  background: rgb(255 255 255 / 0.08);
+  box-shadow: none;
+  backdrop-filter: blur(20px);
+  font-size: 15px;
+  line-height: 1.6;
+  color: #fff;
+}
+
+/* Consecutive replies (or a reply after its own tool work) read as one
+ * turn: the name and orb show once. */
+.studio-message-anchor:has(.chat-turn.is-agent, .tool-block)
+  + .studio-message-anchor
+  > .chat-turn.is-agent
+  > .chat-agent-head {
+  display: none;
+}
+
+.chat-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 12px;
+  min-height: 20px;
+  padding: 2px 0 0;
+  font-family: var(--font-sans, inherit);
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.chat-turn.is-agent .chat-actions {
+  padding-left: 30px;
+}
+
+.chat-turn:hover .chat-actions,
+.chat-turn:focus-within .chat-actions,
+.studio-message-anchor:last-child .chat-actions,
+.studio-message-anchor:nth-last-child(2):has(+ .chat-thinking) .chat-actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .chat-actions {
+    opacity: 1;
+  }
+}
+
+.scenic-shell .chat-actions button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgb(255 255 255 / 0.5);
+  font: inherit;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.scenic-shell .chat-actions button:hover:not(:disabled),
+.scenic-shell .chat-actions button[aria-pressed='true'] {
+  color: #fff;
+}
+
+.scenic-shell .chat-actions [role='status']:empty {
+  display: none;
+}
+
+/* Tool work reads as a quiet aside under the reply column. */
+.scenic-shell .studio-messages .tool-block {
+  margin-left: 30px;
+}
+
+.scenic-shell .tool-block-toggle,
+.scenic-shell .tool-block-label {
+  align-self: flex-start;
+  padding: 2px 0 2px 10px;
+  border: 0;
+  border-left: 2px solid rgb(255 255 255 / 0.18);
+  border-radius: 0;
+  background: transparent;
+  color: rgb(255 255 255 / 0.55);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  backdrop-filter: none;
+}
+
+.scenic-shell .tool-block-toggle:hover {
+  border-left-color: var(--color-accent);
+  color: #fff;
+}
+
+.chat-thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  font-size: 13px;
+  color: rgb(255 255 255 / 0.6);
+}
+
+.chat-thinking-orb {
+  width: 22px;
+  height: 22px;
+  border-radius: 2px;
+}
+
+.chat-thinking .typing-dot {
+  border-radius: 1px;
+}
+
+/* ── Composer ──
+ * One slim glass bar: + (attach, record, browser, voice reply), the
+ * message, the microphone, Send. Everything else waits behind +. */
+
+.scenic-shell .studio-composer {
+  padding: 8px 16px 20px;
+  background: none;
+}
+
+.scenic-shell .studio-composer > div {
+  max-width: 760px;
+}
+
+/* The base studio sheet gives the box 12px padding and a 48px textarea;
+ * the bar is 50px tall in all. */
+.scenic-shell .studio-composer-box.composer-bar {
+  position: relative;
+  align-items: flex-end;
+  min-height: 0;
+  padding: 5px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 4px;
+  background: rgb(18 22 26 / 0.82);
+  box-shadow: 0 12px 36px rgb(0 0 0 / 0.35);
+  backdrop-filter: blur(24px);
+}
+
+.scenic-shell .studio-composer-box.composer-bar:focus-within {
+  border-color: rgb(255 255 255 / 0.3);
+}
+
+.scenic-shell .composer-bar textarea {
+  min-height: 38px;
+  padding: 7px 6px;
+  color: #fff;
+}
+
+.scenic-shell .composer-bar button {
+  margin: 0;
+}
+
+.scenic-shell .composer-bar textarea::placeholder {
+  color: rgb(255 255 255 / 0.45);
+}
+
+.scenic-shell .composer-bar .composer-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: rgb(255 255 255 / 0.62);
+  font-size: 0;
+}
+
+.scenic-shell .composer-bar .composer-icon:hover:not(:disabled),
+.scenic-shell .composer-bar .composer-icon[aria-expanded='true'],
+.scenic-shell .composer-bar .composer-icon[aria-pressed='true'] {
+  background: rgb(255 255 255 / 0.08);
+  color: #fff;
+}
+
+.scenic-shell .composer-bar .composer-icon[aria-pressed='true'] {
+  color: var(--color-accent);
+}
+
+.scenic-shell .composer-bar .composer-icon:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.scenic-shell .composer-bar .composer-send {
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 2px;
+  background: #f4f3ef;
+  color: #121212;
+  box-shadow: none;
+}
+
+.scenic-shell .composer-bar .composer-send:disabled {
+  background: rgb(255 255 255 / 0.1);
+  color: rgb(255 255 255 / 0.4);
+}
+
+/* Dictation sits in the bar; what it hears floats just above it. */
+.studio-dictation-control.is-compact {
+  display: contents;
+}
+
+.studio-dictation-control.is-compact [role='status'],
+.studio-dictation-control.is-compact [role='alert'] {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  left: 0;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 4px;
+  background: rgb(15 19 22 / 0.94);
+  font-size: 12px;
+}
+
+/* The + tray: closed, it shows only what is live; open, every extra input. */
+.composer-tray {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.composer-tray:not([data-open]) > :not([data-live]) {
+  display: none;
+}
+
+.composer-tray:not([data-open]):not(:has(> [data-live])) {
+  display: none;
+}
+
+.composer-tray[data-open] {
+  padding: 10px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 4px;
+  background: rgb(15 19 22 / 0.94);
+  backdrop-filter: blur(24px);
+  animation: tray-in 140ms ease-out;
+}
+
+@keyframes tray-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-tray[data-open] {
+    animation: none;
+  }
+}
+
+.scenic-shell .composer-tray > * {
+  margin: 0;
+  color: rgb(255 255 255 / 0.78);
+  font-size: 12px;
+}
+
+.scenic-shell .composer-tray[data-open] > * + * {
+  padding-top: 8px;
+  border-top: 1px solid rgb(255 255 255 / 0.07);
+}
+
+.studio-audio-recording {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.studio-audio-note {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.5);
+}
+
+.scenic-shell .composer-tray button,
+.scenic-shell .composer-tray select,
+.scenic-shell .composer-tray summary {
+  border-radius: 2px;
+}
+
+.scenic-shell .composer-tray .studio-attachment-picker button,
+.scenic-shell .composer-tray .studio-tool-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  background: transparent;
+  color: rgb(255 255 255 / 0.88);
+  font-size: 12px;
+  backdrop-filter: none;
+}
+
+.scenic-shell .composer-tray .studio-attachment-picker button:hover:not(:disabled),
+.scenic-shell .composer-tray .studio-tool-button:hover:not(:disabled) {
+  border-color: rgb(255 255 255 / 0.32);
+  color: #fff;
+}
+
+.scenic-shell .composer-tray .rounded-xl,
+.scenic-shell .composer-tray .border-t {
+  border: 0;
+  border-radius: 0;
+}
+
+.scenic-shell .composer-tray section {
+  padding-inline: 0;
+}
+
+.scenic-shell .composer-hints {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: rgb(255 255 255 / 0.5);
+}
+
+@media (max-width: 767px) {
+  .scenic-shell .studio-composer {
+    padding: 6px 10px 12px;
+  }
+
+  .scenic-shell .chat-turn .scenic-agent-text,
+  .chat-turn.is-agent .chat-actions {
+    padding-left: 0;
+  }
+
+  .scenic-shell .studio-messages .tool-block {
+    margin-left: 0;
+  }
+}
+
+/* ── Rhythm and chrome ── */
+
+/* Turns breathe; the parts of one turn sit close. */
+/* Items that render nothing (a settled review offer) take no gap. */
+.studio-message-anchor:empty {
+  display: none;
+}
+
+.studio-message-anchor:has(> .chat-turn.is-user),
+.studio-message-anchor:has(> .chat-turn.is-user) + .studio-message-anchor {
+  margin-top: 12px;
+}
+
+.studio-message-anchor:first-of-type:has(> .chat-turn) {
+  margin-top: 0;
+}
+
+.scenic-shell .studio-messages .tool-block {
+  gap: 4px;
+  max-width: calc(100% - 30px);
+}
+
+/* The base sheet shrinks the composer's last row to 8px on phones; the bar
+ * is that row now. 16px also keeps iOS from zooming into the field. */
+.scenic-shell .studio-composer > div > :last-child {
+  font-size: inherit;
+}
+
+.scenic-shell .composer-bar textarea {
+  font-size: 15px;
+}
+
+@media (max-width: 767px) {
+  .scenic-shell .composer-bar textarea {
+    font-size: 16px;
+  }
+}
+
+/* The + tray: quick inputs on one row, larger tools below. */
+.composer-tray[data-open] {
+  flex-flow: row wrap;
+  align-items: flex-start;
+}
+
+.composer-tray[data-open] > :not(.studio-attachment-picker, .studio-audio-recording) {
+  flex-basis: 100%;
+}
+
+.scenic-shell .composer-tray[data-open] > * + * {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.scenic-shell .composer-tray[data-open] > :not(.studio-attachment-picker, .studio-audio-recording) {
+  padding-top: 8px;
+  border-top: 1px solid rgb(255 255 255 / 0.07);
+}
+
+.studio-audio-note {
+  order: 2;
+}
+
+.scenic-shell .composer-tray details > summary {
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+.scenic-shell .composer-tray select {
+  max-width: 100%;
+}
+
+/* The conversation toolbar keeps Search and Export; its label is for
+ * assistive tech only. */
+.scenic-shell .studio-conversation-toolbar > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.scenic-shell .studio-conversation-toolbar {
+  justify-content: flex-end;
+}
+
+.scenic-shell .studio-conversation-tools {
+  padding-top: 0;
+}
+
+.scenic-shell .studio-conversation-toolbar button,
+.scenic-shell .session-view-header button {
+  border-color: transparent;
+  background: transparent;
+  color: rgb(255 255 255 / 0.6);
+  backdrop-filter: none;
+}
+
+.scenic-shell .studio-conversation-toolbar button:hover,
+.scenic-shell .session-view-header button:hover {
+  border-color: rgb(255 255 255 / 0.16);
+  color: #fff;
+}
+
+@media (max-width: 767px) {
+  .scenic-shell .session-usage-line {
+    display: none;
+  }
 }

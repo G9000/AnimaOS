@@ -342,7 +342,10 @@ export function SettingsPanel({
     <div className="settings-form" aria-busy={controlsDisabled}>
       {shows('profile') && (
         <>
-          <section className="settings-group" aria-labelledby="settings-identity">
+          <section
+            className="settings-group"
+            aria-labelledby="settings-identity"
+          >
             <h3 id="settings-identity" className="settings-group-title">
               Identity
             </h3>
@@ -440,7 +443,9 @@ export function SettingsPanel({
                 const next = e.target.value;
                 setProvider(next);
                 const options = MODEL_SUGGESTIONS[next] ?? [];
-                setModel(next === 'chatgpt' ? '' : (options[0] ?? '__custom__'));
+                setModel(
+                  next === 'chatgpt' ? '' : (options[0] ?? '__custom__'),
+                );
               }}
               className="field"
             >
@@ -545,8 +550,8 @@ export function SettingsPanel({
           ) && (
             <p className="settings-group-help">
               External tool permissions are managed in Connectors. Choosing a
-              standard access profile replaces these permissions when you
-              save; saved connections and reviews are kept.
+              standard access profile replaces these permissions when you save;
+              saved connections and reviews are kept.
             </p>
           )}
           {derivedAccess === 'custom' ? (
@@ -677,7 +682,12 @@ export function SettingsPanel({
           </div>
         ) : null}
         {resetting ? (
-          <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+          <p
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className="sr-only"
+          >
             Resetting agent…
           </p>
         ) : null}

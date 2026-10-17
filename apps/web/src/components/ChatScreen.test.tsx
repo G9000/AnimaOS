@@ -879,7 +879,7 @@ describe('MessageList', () => {
     ).toBeVisible();
   });
 
-  it('allows rich-content bubbles to shrink within their width cap', () => {
+  it('lets rich content shrink inside its turn instead of overflowing', () => {
     const scrollerRef = { current: null };
     render(
       <MessageList
@@ -892,9 +892,11 @@ describe('MessageList', () => {
 
     for (const message of screen.getAllByTestId('markdown-message')) {
       expect(message.parentElement).toHaveClass('min-w-0', 'max-w-full');
+      // The reading width itself (68ch, or 78% for a bubble) is set in CSS.
       expect(message.parentElement?.parentElement).toHaveClass(
-        'max-w-[85%]',
+        'chat-turn',
         'min-w-0',
+        'max-w-full',
       );
     }
   });
@@ -1325,6 +1327,35 @@ describe('Composer commands and live replies', () => {
       ...overrides,
     };
   }
+
+  it('keeps extra inputs behind + and shows no hint while idle', async () => {
+    const user = userEvent.setup();
+    render(
+      <Composer
+        {...composerProps({
+          attachments: { items: [], onAdd: vi.fn(), onRemove: vi.fn() },
+          tools: <p>Browser task controls</p>,
+        })}
+      />,
+    );
+    const more = screen.getByRole('button', { name: 'More input options' });
+    const tray = document.getElementById(more.getAttribute('aria-controls')!)!;
+    expect(more).toHaveAttribute('aria-expanded', 'false');
+    expect(tray).not.toHaveAttribute('data-open');
+    expect(within(tray).getByText('Browser task controls')).toBeInTheDocument();
+    expect(
+      within(tray).getByRole('button', { name: 'Attach files' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/send · ⇧⏎/)).toBeNull();
+
+    await user.click(more);
+    expect(more).toHaveAttribute('aria-expanded', 'true');
+    expect(tray).toHaveAttribute('data-open');
+    within(tray).getByRole('button', { name: 'Attach files' }).focus();
+    await user.keyboard('{Escape}');
+    expect(tray).not.toHaveAttribute('data-open');
+    expect(more).toHaveFocus();
+  });
 
   it('shows Record audio for an attach-capable composer without requesting microphone access', () => {
     const getUserMedia = vi.fn();

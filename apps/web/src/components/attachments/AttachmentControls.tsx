@@ -5,6 +5,7 @@ import {
   type DragEvent,
   type ClipboardEvent,
 } from 'react';
+import { PaperclipIcon } from '../icons';
 export function AttachmentDropZone({
   disabled,
   onAdd,
@@ -95,7 +96,8 @@ export function AttachmentControls({
         aria-label="Attach files"
         onClick={() => input.current?.click()}
       >
-        📎
+        <PaperclipIcon size={14} />
+        <span aria-hidden>Attach files</span>
       </button>
       <input
         ref={input}

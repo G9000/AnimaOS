@@ -13,8 +13,15 @@ type Call = (String, String, serde_json::Value);
 struct Fixture {
     responses: StdMutex<VecDeque<(u16, String, Vec<(String, String)>)>>,
     calls: StdMutex<Vec<Call>>,
+    user_agents: StdMutex<Vec<Option<String>>>,
 }
 async fn handler(State(fixture): State<Arc<Fixture>>, request: Request<Body>) -> Response {
+    fixture.user_agents.lock().unwrap().push(
+        request
+            .headers()
+            .get("user-agent")
+            .map(|value| value.to_str().unwrap().to_owned()),
+    );
     let uri = request.uri().to_string();
     let auth = request
         .headers()
@@ -49,6 +56,7 @@ async fn fixture(
     let fixture = Arc::new(Fixture {
         responses: StdMutex::new(responses.into()),
         calls: StdMutex::new(Vec::new()),
+        user_agents: StdMutex::new(Vec::new()),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -69,6 +77,38 @@ fn json(value: serde_json::Value) -> (u16, String, Vec<(String, String)>) {
 }
 fn message(id: u64) -> serde_json::Value {
     serde_json::json!({"id":id.to_string(),"channel_id":"42","guild_id":"7","author":{"id":"9","bot":false},"content":"fixture","type":0})
+}
+
+#[tokio::test]
+async fn discord_requests_identify_the_client_with_the_required_user_agent() {
+    let (client, fixture, task) = fixture(vec![json(serde_json::json!({
+        "id": "9", "username": "fixture", "bot": true
+    }))])
+    .await;
+    let token = DiscordBotToken::parse("fixture-token").unwrap();
+    client.get_me(&token).await.unwrap();
+    assert_eq!(
+        fixture.user_agents.lock().unwrap().as_slice(),
+        &[Some(format!(
+            "DiscordBot (https://github.com/G9000/animaOS-SWARM, {})",
+            env!("CARGO_PKG_VERSION")
+        ))]
+    );
+    task.abort();
+}
+
+#[tokio::test]
+async fn discord_typing_accepts_the_providers_empty_no_content_response() {
+    let (client, fixture, task) = fixture(vec![(204, String::new(), vec![])]).await;
+    let token = DiscordBotToken::parse("typing-fixture").unwrap();
+    let result: Result<(), _> = client
+        .request(&token, Method::POST, "channels/42/typing", None)
+        .await;
+    assert_eq!(result, Ok(()));
+    let calls = fixture.calls.lock().unwrap();
+    assert_eq!(calls[0].0, "/api/v10/channels/42/typing");
+    assert_eq!(calls[0].2, serde_json::Value::Null);
+    task.abort();
 }
 
 #[tokio::test]

@@ -69,6 +69,12 @@ use std::sync::atomic::AtomicU64;
 use tokio::sync::{RwLock, Semaphore};
 #[derive(Default)]
 struct FakeTransport {
+    typing_calls: AtomicUsize,
+    typing_inflight: AtomicUsize,
+    typing_gate: AtomicBool,
+    typing_entered: SemaphoreHolder,
+    typing_release: SemaphoreHolder,
+    typing_results: StdMutex<VecDeque<Result<(), DiscordTransportError>>>,
     latest: AtomicU64,
     baseline: StdMutex<Option<String>>,
     sends: AtomicUsize,
@@ -87,6 +93,26 @@ impl Default for SemaphoreHolder {
 }
 #[async_trait::async_trait]
 impl DiscordTransport for FakeTransport {
+    async fn send_typing(&self, _: &DiscordBotToken, _: &str) -> Result<(), DiscordTransportError> {
+        struct InFlight<'a>(&'a AtomicUsize);
+        impl Drop for InFlight<'_> {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+        self.typing_calls.fetch_add(1, Ordering::SeqCst);
+        self.typing_inflight.fetch_add(1, Ordering::SeqCst);
+        let _inflight = InFlight(&self.typing_inflight);
+        self.typing_entered.0.add_permits(1);
+        if self.typing_gate.load(Ordering::SeqCst) {
+            self.typing_release.0.acquire().await.unwrap().forget();
+        }
+        self.typing_results
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or(Ok(()))
+    }
     async fn get_me(
         &self,
         _: &DiscordBotToken,
@@ -1060,3 +1086,39 @@ async fn contradictory_delivery_snapshot_is_rejected_before_any_restore_mutation
         DiscordDeliveryState::Unknown
     );
 }
+#[test]
+fn setup_transport_errors_retain_safe_actionable_reasons() {
+    use super::*;
+    for (error, expected) in [
+        (
+            DiscordTransportError::PermissionDenied,
+            "Discord denied access; check the bot's channel permissions",
+        ),
+        (
+            DiscordTransportError::HttpStatus { status: 404 },
+            "Discord could not find the selected channel",
+        ),
+        (
+            DiscordTransportError::RateLimited {
+                retry_after_ms: 1000,
+                global: false,
+            },
+            "Discord is limiting requests; wait before retrying",
+        ),
+        (
+            DiscordTransportError::InvalidResponse,
+            "Discord returned an unexpected response",
+        ),
+        (
+            DiscordTransportError::Transport,
+            "The daemon could not reach Discord",
+        ),
+    ] {
+        assert_eq!(transport_error(error).to_string(), expected);
+    }
+}
+
+#[path = "gateway_tests.rs"]
+mod gateway_tests;
+#[path = "typing_tests.rs"]
+mod typing_tests;

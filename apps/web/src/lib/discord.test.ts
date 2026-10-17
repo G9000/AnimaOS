@@ -2,12 +2,55 @@ import { describe, expect, it } from 'vitest';
 import {
   discordApprovedUsers,
   discordCanReply,
+  discordStatusLabel,
   discordWarning,
   isDiscordSnowflake,
+  safeDiscordError,
 } from './discord';
 import { discordFixture } from '../test/discord';
 
 describe('Discord selected authority and delivery state', () => {
+  it('distinguishes gateway connection progress and missing intent from readiness', () => {
+    expect(
+      discordStatusLabel(
+        'connecting' as Parameters<typeof discordStatusLabel>[0],
+      ),
+    ).toBe('Connecting…');
+    expect(
+      discordStatusLabel(
+        'reconnecting' as Parameters<typeof discordStatusLabel>[0],
+      ),
+    ).toBe('Reconnecting…');
+    expect(discordStatusLabel('ready')).toBe('Online · listening');
+    expect(discordWarning('gatewayDisallowedIntents')).toContain(
+      'Message Content',
+    );
+  });
+  it('shows actionable allowlisted setup errors without displaying provider bodies', () => {
+    for (const [code, status, expected] of [
+      ['discord_permission_denied', 422, 'View Channel'],
+      ['discord_channel_not_found', 422, 'could not find'],
+      ['discord_rate_limited', 503, 'limiting requests'],
+      ['discord_invalid_response', 502, 'unexpected response'],
+      ['discord_network_error', 503, 'could not reach Discord'],
+      ['connector_token_invalid', 422, 'bot token'],
+    ] as const) {
+      const result = safeDiscordError({
+        status,
+        body: { code, error: 'provider-secret' },
+      });
+      expect(result).toContain(expected);
+      expect(result).not.toContain('provider-secret');
+    }
+    expect(
+      safeDiscordError({
+        status: 503,
+        body: { code: 'provider-secret', error: 'provider-secret' },
+      }),
+    ).toBe(
+      'Discord request failed. Refresh status and check the connection setup.',
+    );
+  });
   it('keeps canonical u64 IDs as strings and rejects empty, duplicate or out-of-range selection', () => {
     expect(isDiscordSnowflake('18446744073709551615')).toBe(true);
     for (const invalid of [

@@ -382,8 +382,10 @@ impl DiscordManager {
             }
             Ok(())
         };
-        self.runs
-            .run_accepted_with_commit(request, run_id, commit, rollback)
+        let typing = self.start_typing(&c, &run_id, epoch).await;
+        let result = self
+            .runs
+            .run_accepted_with_commit(request, run_id.clone(), commit, rollback)
             .await
             .map_err(|e| {
                 if crate::agent_runs::is_shutting_down(&e) {
@@ -391,7 +393,10 @@ impl DiscordManager {
                 } else {
                     DiscordManagerError::Persistence
                 }
-            })?;
+            });
+        drop(typing);
+        self.stop_typing_run(&c.id, &run_id).await;
+        result?;
         Ok(())
     }
 }

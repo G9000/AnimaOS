@@ -15,7 +15,14 @@ import { CopyMessage } from './CopyMessage';
 import { SaveToMemory } from './memory/SaveToMemory';
 import type { SaveOutcome, SavedState } from '../hooks/useSaveToMemory';
 import type { AgentDetail, ChatMessage } from '../lib/types';
-import { AlertIcon, BoltIcon, PulseIcon, SendIcon, StopIcon } from './icons';
+import {
+  AlertIcon,
+  BoltIcon,
+  PlusIcon,
+  PulseIcon,
+  SendIcon,
+  StopIcon,
+} from './icons';
 import { MarkdownMessage } from './MarkdownMessage';
 import { ErrorBanner, formatTime } from './ui-bits';
 import { isMacPlatform } from '../lib/platform';
@@ -99,54 +106,58 @@ const Bubble = memo(function Bubble({
   }
   const isUser = message.role === 'User';
   const flag = messageFlag(message);
+  const time = formatTime(message.created_at_ms);
+  // A reply is a turn under the companion's name; the owner's words sit in
+  // a slim bubble on the right. Actions stay out of the way until wanted.
   return (
     <div
-      className={`animate-msg-in flex ${isUser ? 'justify-end' : 'justify-start gap-3'}`}
+      className={`chat-turn min-w-0 max-w-full animate-msg-in ${isUser ? 'is-user' : 'is-agent'}`}
     >
       {!isUser && (
-        <span className="scenic-reply-avatar" aria-hidden>
-          <AgentAvatar id={agentId} name={agentName} size={30} />
-        </span>
+        <div className="chat-agent-head">
+          <span className="scenic-reply-avatar" aria-hidden>
+            <AgentAvatar id={agentId} name={agentName} size={22} />
+          </span>
+          {agentName && <span className="chat-agent-name">{agentName}</span>}
+          <span className="chat-time">{time}</span>
+          {flag && <span className="message-flag">{flag}</span>}
+        </div>
       )}
       <div
-        className={`flex min-w-0 max-w-[85%] flex-col ${isUser ? 'items-end' : 'items-start'}`}
+        className={`chat-body min-w-0 max-w-full break-words ${
+          isUser
+            ? 'scenic-user-bubble border border-line-strong bg-panel-2/90 text-ink'
+            : 'scenic-agent-text text-ink'
+        }`}
       >
-        <div
-          className={`min-w-0 max-w-full break-words text-sm leading-relaxed ${
-            isUser
-              ? 'scenic-user-bubble border border-line-strong bg-panel-2/90 px-4 py-2.5 text-ink'
-              : 'scenic-agent-text text-ink'
-          }`}
-        >
-          <MarkdownMessage>
-            {revealInvisible(message.content.text).text}
-          </MarkdownMessage>
-          {message.content.attachments && (
-            <MessageAttachments
-              agentId={agentId}
-              attachments={message.content.attachments}
-            />
-          )}
-        </div>
-        <div className="studio-message-meta mt-1 px-1 font-mono text-[10px] text-ink-3">
-          <span>{formatTime(message.created_at_ms)}</span>
-          {flag && <span className="message-flag">{flag}</span>}
-          <CopyMessage text={message.content.text} />
-          {!isUser && readAloud && (
-            <ReadAloud
-              messageId={message.id}
-              text={message.content.text}
-              controller={readAloud}
-            />
-          )}
-          {onSave && message.content.text.trim() !== '' && (
-            <SaveToMemory
-              message={message}
-              save={onSave}
-              saved={savedLookup?.(message.id) ?? null}
-            />
-          )}
-        </div>
+        <MarkdownMessage>
+          {revealInvisible(message.content.text).text}
+        </MarkdownMessage>
+        {message.content.attachments && (
+          <MessageAttachments
+            agentId={agentId}
+            attachments={message.content.attachments}
+          />
+        )}
+      </div>
+      <div className="chat-actions studio-message-meta">
+        {isUser && <span className="chat-time">{time}</span>}
+        {isUser && flag && <span className="message-flag">{flag}</span>}
+        <CopyMessage text={message.content.text} />
+        {!isUser && readAloud && (
+          <ReadAloud
+            messageId={message.id}
+            text={message.content.text}
+            controller={readAloud}
+          />
+        )}
+        {onSave && message.content.text.trim() !== '' && (
+          <SaveToMemory
+            message={message}
+            save={onSave}
+            saved={savedLookup?.(message.id) ?? null}
+          />
+        )}
       </div>
     </div>
   );
@@ -231,8 +242,9 @@ function EmptyState({
 
 function ThinkingIndicator({ name }: { name: string }) {
   return (
-    <div className="animate-fade-in flex items-center gap-3 px-1 py-1">
-      <div className="flex items-center gap-1.5">
+    <div className="chat-thinking animate-fade-in">
+      <span className="chat-thinking-orb agent-orb" aria-hidden />
+      <div className="flex items-center gap-1.5" aria-hidden>
         {[0, 1, 2].map((i) => (
           <span
             key={i}
@@ -241,7 +253,7 @@ function ThinkingIndicator({ name }: { name: string }) {
           />
         ))}
       </div>
-      <span className="text-shimmer font-mono text-[11px]">
+      <span className="chat-thinking-label text-shimmer">
         {name} is thinking
       </span>
     </div>
@@ -586,6 +598,7 @@ export function Composer({
   savedAttachmentCount = 0,
   voiceDisabled = false,
   nativeVoice,
+  tools,
 }: {
   agentName: string;
   /** The textarea's name and placeholder; defaults to "Message <agent>". */
@@ -616,6 +629,9 @@ export function Composer({
   voiceDisabled?: boolean;
   nativeVoice?: NativeVoiceScope;
   savedAttachmentCount?: number;
+  /** The session's own input tools (browser task, spoken replies), kept
+   *  with Attach and Record behind the composer's + button. */
+  tools?: ReactNode;
   attachments?: {
     items: readonly AttachmentDraft[];
     onAdd(files: readonly File[]): void;
@@ -635,6 +651,10 @@ export function Composer({
     changeDraft(`${previous}${previous ? ' ' : ''}${text}`);
   };
   const menuId = useId();
+  const trayId = useId();
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreButton = useRef<HTMLButtonElement>(null);
+  const hasTray = Boolean(attachments || tools);
   const [activeIndex, setActiveIndex] = useState(0);
   const [dismissedFor, setDismissedFor] = useState<string | null>(null);
   const [blurred, setBlurred] = useState(false);
@@ -744,13 +764,66 @@ export function Composer({
             {attachments.error}
           </p>
         )}
-        <AttachmentDropZone disabled={!canPick} onAdd={attachments?.onAdd}>
-          <div className="studio-composer-box glass-strong focus-glow flex items-end gap-2 rounded-2xl p-2 transition-all duration-200">
+        {hasTray && (
+          // Closed, the tray shows only what is live: a recording, audio to
+          // transcribe. Opened from +, it offers every extra input.
+          <div
+            id={trayId}
+            className="composer-tray"
+            data-open={moreOpen || undefined}
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape' || event.defaultPrevented) return;
+              event.preventDefault();
+              setMoreOpen(false);
+              moreButton.current?.focus();
+            }}
+          >
             {attachments && (
               <AttachmentControls
                 disabled={!canPick}
                 onAdd={attachments.onAdd}
               />
+            )}
+            {attachments && (
+              <MicrophoneCapture
+                key={conversationKey ?? ''}
+                conversationKey={conversationKey ?? ''}
+                disabled={!conversationKey || !canPick || voiceDisabled}
+                onAdd={attachments.onAdd}
+              />
+            )}
+            {nativeVoice && attachments && (
+              <NativeTranscription
+                key={JSON.stringify([
+                  conversationKey,
+                  nativeVoice.agentId,
+                  nativeVoice.sessionId,
+                ])}
+                scope={nativeVoice}
+                conversationKey={conversationKey}
+                items={attachments.items}
+                disabled={!canPick || voiceDisabled}
+                onUse={appendDictation}
+              />
+            )}
+            {tools}
+          </div>
+        )}
+        <AttachmentDropZone disabled={!canPick} onAdd={attachments?.onAdd}>
+          <div className="studio-composer-box composer-bar glass-strong focus-glow flex items-end gap-1 p-1.5 transition-all duration-200">
+            {hasTray && (
+              <button
+                ref={moreButton}
+                type="button"
+                className="composer-icon composer-more"
+                aria-label="More input options"
+                aria-expanded={moreOpen}
+                aria-controls={trayId}
+                title="Attach files, record audio, and more"
+                onClick={() => setMoreOpen((open) => !open)}
+              >
+                <PlusIcon size={16} />
+              </button>
             )}
             <textarea
               data-workspace-composer
@@ -806,16 +879,22 @@ export function Composer({
                 selected ? `${menuId}-${selected.name}` : undefined
               }
               placeholder={`${inputLabel}…`}
-              className="max-h-48 flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-relaxed text-ink placeholder-ink-3 outline-none"
+              className="max-h-48 flex-1 resize-none bg-transparent px-2 py-[7px] text-[15px] leading-6 text-ink placeholder-ink-3 outline-none"
+            />
+            <DictationControl
+              compact
+              disabled={!canPick || voiceDisabled}
+              conversationKey={conversationKey}
+              onTranscript={appendDictation}
             />
             {runActive && onStop ? (
               <button
                 type="button"
                 onClick={onStop}
                 aria-label="Stop"
-                className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-line-strong bg-panel-2 text-ink transition hover:bg-panel active:scale-95"
+                className="composer-send flex shrink-0 cursor-pointer items-center justify-center transition active:scale-95"
               >
-                <StopIcon size={15} />
+                <StopIcon size={14} />
               </button>
             ) : (
               <button
@@ -823,59 +902,31 @@ export function Composer({
                 onClick={() => onSend()}
                 disabled={!canSend}
                 aria-label="Send"
-                className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-accent text-accent-fg shadow-lg shadow-accent/25 transition hover:bg-accent/90 active:scale-95 disabled:cursor-not-allowed disabled:opacity-25 disabled:shadow-none disabled:active:scale-100"
+                className="composer-send flex shrink-0 cursor-pointer items-center justify-center transition active:scale-95 disabled:cursor-not-allowed disabled:active:scale-100"
               >
-                <SendIcon size={15} />
+                <SendIcon size={14} />
               </button>
             )}
           </div>
         </AttachmentDropZone>
-        <div className="composer-voice">
-        <DictationControl
-          disabled={!canPick || voiceDisabled}
-          conversationKey={conversationKey}
-          onTranscript={appendDictation}
-        />
-        {attachments && (
-          <MicrophoneCapture
-            key={conversationKey ?? ''}
-            conversationKey={conversationKey ?? ''}
-            disabled={!conversationKey || !canPick || voiceDisabled}
-            onAdd={attachments.onAdd}
-          />
+        {/* A hint only when there is something to know. */}
+        {(steerable || offline || sending || runActive) && (
+          <div className="composer-hints">
+            {steerable && (
+              <span>
+                {/* Ctrl+Enter on every non-Mac platform, never ⌘⏎ (S3b-E). */}
+                {`⏎ queue · ${isMacPlatform() ? '⌘⏎' : 'Ctrl+Enter'} steer · ⇧⏎ new line`}
+              </span>
+            )}
+            <span>
+              {offline
+                ? 'Offline · your draft stays here'
+                : sending
+                  ? 'Working on your message…'
+                  : 'Replying · you can keep writing'}
+            </span>
+          </div>
         )}
-        {nativeVoice && attachments && (
-          <NativeTranscription
-            key={JSON.stringify([
-              conversationKey,
-              nativeVoice.agentId,
-              nativeVoice.sessionId,
-            ])}
-            scope={nativeVoice}
-            conversationKey={conversationKey}
-            items={attachments.items}
-            disabled={!canPick || voiceDisabled}
-            onUse={appendDictation}
-          />
-        )}
-        </div>
-        <div className="composer-hints mt-2 flex items-center justify-between px-2 font-mono text-[10px] text-ink-3">
-          <span>
-            {steerable
-              ? // Ctrl+Enter on every non-Mac platform, never ⌘⏎ (S3b-E).
-                `⏎ queue · ${isMacPlatform() ? '⌘⏎' : 'Ctrl+Enter'} steer · ⇧⏎ new line`
-              : '⏎ send · ⇧⏎ new line'}
-          </span>
-          <span>
-            {offline
-              ? 'Offline · your draft stays here'
-              : sending
-                ? 'Working on your message…'
-                : runActive
-                  ? 'Replying · you can keep writing'
-                  : 'Your space. Your pace.'}
-          </span>
-        </div>
       </div>
     </div>
   );

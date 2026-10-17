@@ -208,7 +208,8 @@ export function NativeTranscription({
   if (!audio.length) return null;
   return (
     <section
-      className="mt-2 rounded-xl border border-line p-3 text-xs text-ink-2"
+      className="studio-native-transcription mt-2 rounded-xl border border-line p-3 text-xs text-ink-2"
+      data-live
       aria-label="Native audio transcription"
     >
       <label htmlFor={selectId}>Audio to transcribe</label>{' '}

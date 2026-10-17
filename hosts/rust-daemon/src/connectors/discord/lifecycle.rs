@@ -46,19 +46,22 @@ impl DiscordManager {
             }
         }
         let adapter = self.registry.discord(&token, &channel);
-        let bot = adapter.identify().await.map_err(transport_error)?;
+        let bot = adapter
+            .identify()
+            .await
+            .map_err(|error| setup_error("identify_bot", error))?;
         let metadata = self
             .native()?
             .get_channel(&token, &channel)
             .await
-            .map_err(transport_error)?;
+            .map_err(|error| setup_error("get_channel", error))?;
         if metadata.id != channel || metadata.guild_id != guild {
             return Err(DiscordManagerError::Conflict);
         }
         self.native()?
             .latest_cursor(&token, &channel)
             .await
-            .map_err(transport_error)?;
+            .map_err(|error| setup_error("read_channel_history", error))?;
         let id = format!("discord-{}", uuid::Uuid::new_v4());
         let now = now_ms();
         let record = DiscordConnectorRecord {
@@ -560,6 +563,7 @@ impl DiscordManager {
     }
     async fn stop_worker(&self, id: &str) {
         self.revoke(id);
+        self.stop_typing_connector(id).await;
         let running = {
             let state = self.state.read().await;
             state
@@ -603,7 +607,20 @@ impl DiscordManager {
         let manager = self.worker_context();
         let id = c.id.clone();
         let mut close = self.close.clone();
+        let gateway_record = c.clone();
         let join = tokio::spawn(async move {
+            let wake = Arc::new(Notify::new());
+            let gateway_stop = tokio_util::sync::CancellationToken::new();
+            let gateway = manager.gateway.as_ref().map(|_| {
+                let manager = manager.worker_context();
+                let c = gateway_record.clone();
+                let token = token.clone();
+                let wake = wake.clone();
+                let stop = gateway_stop.clone();
+                tokio::spawn(async move {
+                    manager.run_gateway(c, token, epoch, wake, stop).await;
+                })
+            });
             loop {
                 if *stopped.borrow() || *close.borrow() || !manager.authority_current(&id, epoch) {
                     break;
@@ -626,6 +643,9 @@ impl DiscordManager {
                 let result = tokio::select! { biased; _=stopped.changed()=>break,_=close.changed()=>break,result=poll=>result };
                 match result {
                     Ok(batch) => {
+                        manager
+                            .set_status(&id, DiscordRuntimeStatus::Ready, None)
+                            .await;
                         if let Err(error) =
                             manager.accept_batch_captured(&current, epoch, batch).await
                         {
@@ -676,7 +696,11 @@ impl DiscordManager {
                     let _ = manager.process_one_captured(id.clone(), epoch).await;
                     let _ = manager.deliver_captured(&current, epoch, &token).await;
                 }
-                tokio::select! {_=stopped.changed()=>break,_=close.changed()=>break,_=tokio::time::sleep(std::time::Duration::from_secs(5))=>{}}
+                tokio::select! {_=stopped.changed()=>break,_=close.changed()=>break,_=wake.notified()=>{},_=tokio::time::sleep(std::time::Duration::from_secs(5))=>{}}
+            }
+            gateway_stop.cancel();
+            if let Some(gateway) = gateway {
+                let _ = gateway.await;
             }
         });
         self.workers
@@ -761,6 +785,7 @@ impl DiscordManager {
     }
     pub(crate) async fn shutdown(&self) {
         self.request_shutdown().await;
+        self.drain_typing().await;
         let workers = std::mem::take(&mut *self.workers.lock().await);
         for (_, worker) in workers {
             let _ = worker.join.await;

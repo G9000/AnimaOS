@@ -1,5 +1,6 @@
 //! Owner-only native Discord routes; authorize before body/state/network access.
 use super::{contracts::*, http::json_response, AppState};
+use crate::connectors::discord::client::DiscordTransportError;
 use crate::connectors::discord::credentials::DiscordBotToken;
 use crate::connectors::discord::{
     DiscordConnectorRecord, DiscordDeliveryState, DiscordManagerError, DiscordRuntimeStatus,
@@ -38,6 +39,26 @@ pub(super) fn manager_error(e: DiscordManagerError) -> Response {
         DiscordManagerError::InvalidToken => {
             (StatusCode::UNPROCESSABLE_ENTITY, "connector_token_invalid")
         }
+        DiscordManagerError::Provider(error) => match error {
+            DiscordTransportError::PermissionDenied => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "discord_permission_denied",
+            ),
+            DiscordTransportError::HttpStatus { status: 404 } => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "discord_channel_not_found",
+            ),
+            DiscordTransportError::RateLimited { .. } => {
+                (StatusCode::SERVICE_UNAVAILABLE, "discord_rate_limited")
+            }
+            DiscordTransportError::InvalidResponse | DiscordTransportError::ResponseTooLarge => {
+                (StatusCode::BAD_GATEWAY, "discord_invalid_response")
+            }
+            DiscordTransportError::Transport => {
+                (StatusCode::SERVICE_UNAVAILABLE, "discord_network_error")
+            }
+            _ => (StatusCode::BAD_GATEWAY, "discord_provider_unavailable"),
+        },
         _ => (StatusCode::SERVICE_UNAVAILABLE, "connector_unavailable"),
     };
     error(status, code, &e.to_string())
@@ -120,6 +141,8 @@ async fn response(state: &AppState, c: &DiscordConnectorRecord) -> DiscordConnec
         status: match status {
             DiscordRuntimeStatus::Disabled => "disabled",
             DiscordRuntimeStatus::Ready => "ready",
+            DiscordRuntimeStatus::Connecting => "connecting",
+            DiscordRuntimeStatus::Reconnecting => "reconnecting",
             DiscordRuntimeStatus::CredentialRequired => "credentialRequired",
             DiscordRuntimeStatus::Error => "error",
             DiscordRuntimeStatus::Degraded => "degraded",
@@ -182,7 +205,7 @@ pub(super) async fn list(
         &DiscordConnectorsEnvelope { connectors },
     ))
 }
-#[utoipa::path(post,path="/api/agents/{agent_id}/connectors/discord",tag="connectors",params(("agent_id"=String,Path)),request_body=DiscordCreateRequest,responses((status=201,body=DiscordConnectorEnvelope),(status=400,body=ConnectorErrorBody),(status=403,body=ConnectorErrorBody),(status=409,body=ConnectorErrorBody),(status=422,body=ConnectorErrorBody),(status=503,body=ConnectorErrorBody)))]
+#[utoipa::path(post,path="/api/agents/{agent_id}/connectors/discord",tag="connectors",params(("agent_id"=String,Path)),request_body=DiscordCreateRequest,responses((status=201,body=DiscordConnectorEnvelope),(status=400,body=ConnectorErrorBody),(status=403,body=ConnectorErrorBody),(status=409,body=ConnectorErrorBody),(status=422,body=ConnectorErrorBody),(status=502,body=ConnectorErrorBody),(status=503,body=ConnectorErrorBody)))]
 pub(super) async fn create(
     State(state): State<AppState>,
     Path(agent): Path<String>,
@@ -227,7 +250,7 @@ pub(super) async fn create(
     )
     .await
 }
-#[utoipa::path(post,path="/api/agents/{agent_id}/connectors/discord/{connector_id}/activate",tag="connectors",params(("agent_id"=String,Path),("connector_id"=String,Path)),responses((status=200,body=DiscordConnectorEnvelope),(status=400,body=ConnectorErrorBody),(status=403,body=ConnectorErrorBody),(status=404,body=ConnectorErrorBody),(status=409,body=ConnectorErrorBody),(status=503,body=ConnectorErrorBody)))]
+#[utoipa::path(post,path="/api/agents/{agent_id}/connectors/discord/{connector_id}/activate",tag="connectors",params(("agent_id"=String,Path),("connector_id"=String,Path)),responses((status=200,body=DiscordConnectorEnvelope),(status=400,body=ConnectorErrorBody),(status=403,body=ConnectorErrorBody),(status=404,body=ConnectorErrorBody),(status=409,body=ConnectorErrorBody),(status=422,body=ConnectorErrorBody),(status=502,body=ConnectorErrorBody),(status=503,body=ConnectorErrorBody)))]
 pub(super) async fn activate(
     State(state): State<AppState>,
     Path((agent, id)): Path<(String, String)>,
@@ -246,7 +269,7 @@ pub(super) async fn activate(
     )
     .await
 }
-#[utoipa::path(put,path="/api/agents/{agent_id}/connectors/discord/{connector_id}/credential",tag="connectors",params(("agent_id"=String,Path),("connector_id"=String,Path)),request_body=DiscordCredentialRequest,responses((status=200,body=DiscordConnectorEnvelope),(status=400,body=ConnectorErrorBody),(status=403,body=ConnectorErrorBody),(status=404,body=ConnectorErrorBody),(status=409,body=ConnectorErrorBody),(status=503,body=ConnectorErrorBody)))]
+#[utoipa::path(put,path="/api/agents/{agent_id}/connectors/discord/{connector_id}/credential",tag="connectors",params(("agent_id"=String,Path),("connector_id"=String,Path)),request_body=DiscordCredentialRequest,responses((status=200,body=DiscordConnectorEnvelope),(status=400,body=ConnectorErrorBody),(status=403,body=ConnectorErrorBody),(status=404,body=ConnectorErrorBody),(status=409,body=ConnectorErrorBody),(status=422,body=ConnectorErrorBody),(status=502,body=ConnectorErrorBody),(status=503,body=ConnectorErrorBody)))]
 pub(super) async fn replace(
     State(state): State<AppState>,
     Path((agent, id)): Path<(String, String)>,
@@ -273,7 +296,7 @@ pub(super) async fn replace(
     )
     .await
 }
-#[utoipa::path(patch,path="/api/agents/{agent_id}/connectors/discord/{connector_id}",tag="connectors",params(("agent_id"=String,Path),("connector_id"=String,Path)),request_body=DiscordEnabledRequest,responses((status=200,body=DiscordConnectorEnvelope),(status=400,body=ConnectorErrorBody),(status=403,body=ConnectorErrorBody),(status=404,body=ConnectorErrorBody),(status=409,body=ConnectorErrorBody),(status=503,body=ConnectorErrorBody)))]
+#[utoipa::path(patch,path="/api/agents/{agent_id}/connectors/discord/{connector_id}",tag="connectors",params(("agent_id"=String,Path),("connector_id"=String,Path)),request_body=DiscordEnabledRequest,responses((status=200,body=DiscordConnectorEnvelope),(status=400,body=ConnectorErrorBody),(status=403,body=ConnectorErrorBody),(status=404,body=ConnectorErrorBody),(status=409,body=ConnectorErrorBody),(status=422,body=ConnectorErrorBody),(status=502,body=ConnectorErrorBody),(status=503,body=ConnectorErrorBody)))]
 pub(super) async fn set_enabled(
     State(state): State<AppState>,
     Path((agent, id)): Path<(String, String)>,
@@ -296,7 +319,7 @@ pub(super) async fn set_enabled(
     )
     .await
 }
-#[utoipa::path(post,path="/api/agents/{agent_id}/connectors/discord/{connector_id}/restart",tag="connectors",params(("agent_id"=String,Path),("connector_id"=String,Path)),responses((status=200,body=DiscordConnectorEnvelope),(status=400,body=ConnectorErrorBody),(status=403,body=ConnectorErrorBody),(status=404,body=ConnectorErrorBody),(status=409,body=ConnectorErrorBody),(status=503,body=ConnectorErrorBody)))]
+#[utoipa::path(post,path="/api/agents/{agent_id}/connectors/discord/{connector_id}/restart",tag="connectors",params(("agent_id"=String,Path),("connector_id"=String,Path)),responses((status=200,body=DiscordConnectorEnvelope),(status=400,body=ConnectorErrorBody),(status=403,body=ConnectorErrorBody),(status=404,body=ConnectorErrorBody),(status=409,body=ConnectorErrorBody),(status=422,body=ConnectorErrorBody),(status=502,body=ConnectorErrorBody),(status=503,body=ConnectorErrorBody)))]
 pub(super) async fn restart(
     State(state): State<AppState>,
     Path((agent, id)): Path<(String, String)>,
@@ -315,7 +338,7 @@ pub(super) async fn restart(
     )
     .await
 }
-#[utoipa::path(post,path="/api/agents/{agent_id}/connectors/discord/{connector_id}/retry",tag="connectors",params(("agent_id"=String,Path),("connector_id"=String,Path)),responses((status=200,body=DiscordConnectorEnvelope),(status=400,body=ConnectorErrorBody),(status=403,body=ConnectorErrorBody),(status=404,body=ConnectorErrorBody),(status=409,body=ConnectorErrorBody),(status=503,body=ConnectorErrorBody)))]
+#[utoipa::path(post,path="/api/agents/{agent_id}/connectors/discord/{connector_id}/retry",tag="connectors",params(("agent_id"=String,Path),("connector_id"=String,Path)),responses((status=200,body=DiscordConnectorEnvelope),(status=400,body=ConnectorErrorBody),(status=403,body=ConnectorErrorBody),(status=404,body=ConnectorErrorBody),(status=409,body=ConnectorErrorBody),(status=422,body=ConnectorErrorBody),(status=502,body=ConnectorErrorBody),(status=503,body=ConnectorErrorBody)))]
 pub(super) async fn retry(
     State(state): State<AppState>,
     Path((agent, id)): Path<(String, String)>,
@@ -329,7 +352,7 @@ pub(super) async fn retry(
     }
     envelope(&state, state.discord.retry(agent, id).await, StatusCode::OK).await
 }
-#[utoipa::path(post,path="/api/agents/{agent_id}/connectors/discord/{connector_id}/outbound/suppress",tag="connectors",params(("agent_id"=String,Path),("connector_id"=String,Path)),request_body=DiscordSuppressRequest,responses((status=200,body=DiscordConnectorEnvelope),(status=400,body=ConnectorErrorBody),(status=403,body=ConnectorErrorBody),(status=404,body=ConnectorErrorBody),(status=409,body=ConnectorErrorBody),(status=503,body=ConnectorErrorBody)))]
+#[utoipa::path(post,path="/api/agents/{agent_id}/connectors/discord/{connector_id}/outbound/suppress",tag="connectors",params(("agent_id"=String,Path),("connector_id"=String,Path)),request_body=DiscordSuppressRequest,responses((status=200,body=DiscordConnectorEnvelope),(status=400,body=ConnectorErrorBody),(status=403,body=ConnectorErrorBody),(status=404,body=ConnectorErrorBody),(status=409,body=ConnectorErrorBody),(status=422,body=ConnectorErrorBody),(status=502,body=ConnectorErrorBody),(status=503,body=ConnectorErrorBody)))]
 pub(super) async fn suppress(
     State(state): State<AppState>,
     Path((agent, id)): Path<(String, String)>,
@@ -355,7 +378,7 @@ pub(super) async fn suppress(
     )
     .await
 }
-#[utoipa::path(delete,path="/api/agents/{agent_id}/connectors/discord/{connector_id}",tag="connectors",params(("agent_id"=String,Path),("connector_id"=String,Path)),responses((status=200,body=DeleteResponse),(status=403,body=ConnectorErrorBody),(status=404,body=ConnectorErrorBody),(status=409,body=ConnectorErrorBody),(status=503,body=ConnectorErrorBody)))]
+#[utoipa::path(delete,path="/api/agents/{agent_id}/connectors/discord/{connector_id}",tag="connectors",params(("agent_id"=String,Path),("connector_id"=String,Path)),responses((status=200,body=DeleteResponse),(status=403,body=ConnectorErrorBody),(status=404,body=ConnectorErrorBody),(status=409,body=ConnectorErrorBody),(status=422,body=ConnectorErrorBody),(status=502,body=ConnectorErrorBody),(status=503,body=ConnectorErrorBody)))]
 pub(super) async fn delete(
     State(state): State<AppState>,
     Path((agent, id)): Path<(String, String)>,
@@ -388,6 +411,60 @@ mod tests {
     use super::*;
     use axum::body::{to_bytes, Body};
     use tower::ServiceExt;
+    #[tokio::test]
+    async fn provider_errors_have_distinct_safe_codes_and_no_store() {
+        for (provider, status, code) in [
+            (
+                DiscordTransportError::PermissionDenied,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "discord_permission_denied",
+            ),
+            (
+                DiscordTransportError::HttpStatus { status: 404 },
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "discord_channel_not_found",
+            ),
+            (
+                DiscordTransportError::RateLimited {
+                    retry_after_ms: 1000,
+                    global: false,
+                },
+                StatusCode::SERVICE_UNAVAILABLE,
+                "discord_rate_limited",
+            ),
+            (
+                DiscordTransportError::Transport,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "discord_network_error",
+            ),
+            (
+                DiscordTransportError::InvalidResponse,
+                StatusCode::BAD_GATEWAY,
+                "discord_invalid_response",
+            ),
+            (
+                DiscordTransportError::ResponseTooLarge,
+                StatusCode::BAD_GATEWAY,
+                "discord_invalid_response",
+            ),
+            (
+                DiscordTransportError::HttpStatus { status: 500 },
+                StatusCode::BAD_GATEWAY,
+                "discord_provider_unavailable",
+            ),
+        ] {
+            let response = manager_error(DiscordManagerError::Provider(provider));
+            assert_eq!(response.status(), status);
+            assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+            let bytes = to_bytes(response.into_body(), 8192).await.unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(body["code"], code);
+            assert!(
+                body["error"].as_str().unwrap().starts_with("Discord")
+                    || body["error"].as_str().unwrap().starts_with("The daemon")
+            );
+        }
+    }
     #[tokio::test]
     async fn authorization_precedes_body_and_unknown_owner_scope_and_every_native_response_is_no_store(
     ) {

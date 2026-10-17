@@ -763,7 +763,6 @@ export function ViewHarness() {
     [refreshWorkspace],
   );
 
-
   const saveSettings = async (patch: AgentUpdateInput): Promise<boolean> => {
     if (
       !agent ||
@@ -1167,7 +1166,9 @@ export function ViewHarness() {
   // A save or reset holds the window on its page; an external tool grant
   // keeps running when the owner leaves Connections.
   const settingsBusy = savingSettings || resetting;
-  const settingsPage = (sections: Parameters<typeof SettingsPanel>[0]['sections']) => (
+  const settingsPage = (
+    sections: Parameters<typeof SettingsPanel>[0]['sections'],
+  ) => (
     <SettingsPanel
       key={sections?.join()}
       refreshProviders={retryProviders}

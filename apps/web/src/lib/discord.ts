@@ -5,7 +5,9 @@ import type {
 
 const STATUS: Record<DiscordConnectorStatus, string> = {
   disabled: 'Saved · disabled',
-  ready: 'Listening',
+  ready: 'Online · listening',
+  connecting: 'Connecting…',
+  reconnecting: 'Reconnecting…',
   credentialRequired: 'Token required',
   error: 'Setup needs attention',
   degraded: 'Paused · needs attention',
@@ -42,6 +44,31 @@ export function discordCanReply(connector: DiscordConnector | null): boolean {
 
 /** Only static, locally written messages reach setup UI, never provider bodies. */
 export function safeDiscordError(error: unknown): string {
+  const body =
+    typeof error === 'object' && error !== null && 'body' in error
+      ? error.body
+      : null;
+  const code =
+    typeof body === 'object' && body !== null && 'code' in body
+      ? body.code
+      : null;
+  // Never render backend/provider text, even for recognized error codes.
+  switch (code) {
+    case 'connector_token_invalid':
+      return 'Discord rejected the bot token. Enter a valid token from the Bot page in the Discord Developer Portal.';
+    case 'discord_permission_denied':
+      return 'Discord denied access. Install the bot in the selected server and grant View Channel, Read Message History, and Send Messages for this channel.';
+    case 'discord_channel_not_found':
+      return 'Discord could not find the selected channel. Check the channel ID and the bot’s access to that channel.';
+    case 'discord_rate_limited':
+      return 'Discord is limiting requests. Wait before retrying setup.';
+    case 'discord_invalid_response':
+      return 'Discord returned an unexpected response. Select a regular server text channel; threads, forums, and voice channels are unsupported.';
+    case 'discord_network_error':
+      return 'The daemon could not reach Discord. Check the daemon computer’s network, proxy, firewall, and TLS connection.';
+    case 'discord_provider_unavailable':
+      return 'Discord could not complete the request. Wait and try again; check the daemon log for the failed setup step and HTTP status.';
+  }
   const status =
     typeof error === 'object' && error !== null && 'status' in error
       ? error.status
@@ -59,6 +86,14 @@ export function safeDiscordError(error: unknown): string {
 export function discordWarning(warning: string | null): string | null {
   if (!warning) return null;
   const key = warning.replace(/[_\s-]/g, '').toLowerCase();
+  if (key.includes('disallowedintents'))
+    return 'Enable Message Content intent in Discord Developer Portal → Bot → Privileged Gateway Intents, then restart this connection.';
+  if (key.includes('gatewayidentity') || key.includes('gatewayauthentication'))
+    return 'Discord rejected the Gateway bot identity or token. Replace the token with one for this connection’s bot.';
+  if (key.includes('gatewaydisconnected'))
+    return 'The live Discord connection was interrupted. Anima is reconnecting and reconciling missed messages.';
+  if (key.includes('gateway'))
+    return 'The live Discord connection needs attention. Check the bot configuration and restart this connection.';
   if (key.includes('backlog') || key.includes('capacity'))
     return 'The catch-up limit was reached. Intake is paused to avoid skipping messages; inspect the channel before reconnecting.';
   if (key.includes('permission'))

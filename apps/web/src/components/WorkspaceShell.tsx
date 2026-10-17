@@ -70,7 +70,11 @@ const DESTINATION_GROUPS: DestinationGroup[] = [
     items: [
       { page: 'profile', label: 'Profile', icon: <AgentsIcon size={15} /> },
       { page: 'model', label: 'Model', icon: <ChipIcon size={15} /> },
-      { page: 'approvals', label: 'Permissions', icon: <ShieldIcon size={15} /> },
+      {
+        page: 'approvals',
+        label: 'Permissions',
+        icon: <ShieldIcon size={15} />,
+      },
     ],
   },
   {
@@ -84,13 +88,21 @@ const DESTINATION_GROUPS: DestinationGroup[] = [
     label: 'Abilities',
     items: [
       { page: 'capabilities', label: 'Tools', icon: <SparkIcon size={15} /> },
-      { page: 'connectors', label: 'Connections', icon: <GearIcon size={15} /> },
+      {
+        page: 'connectors',
+        label: 'Connections',
+        icon: <GearIcon size={15} />,
+      },
     ],
   },
   {
     label: 'Activity',
     items: [
-      { page: 'automations', label: 'Automations', icon: <ClockIcon size={15} /> },
+      {
+        page: 'automations',
+        label: 'Automations',
+        icon: <ClockIcon size={15} />,
+      },
       { page: 'work', label: 'Work', icon: <SparkIcon size={15} /> },
       { page: 'files', label: 'Files', icon: <LogIcon size={15} /> },
     ],
@@ -185,7 +197,12 @@ function DestinationNavigation({
       }
     >
       {DESTINATION_GROUPS.map((group) => (
-        <div key={group.label} role="group" aria-label={group.label} className="contents">
+        <div
+          key={group.label}
+          role="group"
+          aria-label={group.label}
+          className="contents"
+        >
           {sidebar && <p className="studio-nav-group">{group.label}</p>}
           {group.items.map((item) => destination(item))}
         </div>
@@ -618,10 +635,7 @@ export function WorkspaceShell({
                 {conversation}
               </div>
               {page !== null && (
-                <section
-                  className="settings-window"
-                  aria-label="Settings"
-                >
+                <section className="settings-window" aria-label="Settings">
                   {desktopNavigation && (
                     <aside className="studio-sidebar settings-window-nav">
                       <p className="settings-window-title">Settings</p>

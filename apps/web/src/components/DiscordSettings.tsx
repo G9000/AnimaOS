@@ -290,11 +290,12 @@ export function DiscordSettings(p: DiscordSettingsProps) {
       </p>
       <p className="text-xs leading-relaxed text-ink-3">
         Use a private, low-volume channel and exact approved sender IDs. Privacy
-        is your confirmation; Anima cannot verify who else can view it.
-        Listening status does not verify Message Content intent. REST polling
-        takes seconds and can miss messages deleted before polling; edits,
-        delete events, reactions, threads, voice, and Discord slash commands are
-        unavailable. Stop runs from the web conversation.
+        is your confirmation; Anima cannot verify who else can view it. Online
+        status follows the live Discord connection. Typing appears while the
+        assistant is working. Message events trigger catch-up, with periodic
+        history checks for recovery. Messages deleted before catch-up can be
+        missed; edits, delete events, reactions, threads, voice, and Discord
+        slash commands are unavailable. Stop runs from the web conversation.
       </p>
       {p.connectors.map((c) => (
         <DiscordConnection key={`${p.agentId}:${c.id}`} {...p} connector={c} />

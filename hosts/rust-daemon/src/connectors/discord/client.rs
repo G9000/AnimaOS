@@ -76,6 +76,13 @@ impl fmt::Display for DiscordTransportError {
 impl std::error::Error for DiscordTransportError {}
 #[async_trait]
 pub(crate) trait DiscordTransport: Send + Sync {
+    async fn send_typing(
+        &self,
+        _token: &DiscordBotToken,
+        _channel_id: &str,
+    ) -> Result<(), DiscordTransportError> {
+        Ok(())
+    }
     async fn get_me(
         &self,
         token: &DiscordBotToken,
@@ -132,6 +139,11 @@ impl DiscordClient {
     fn build(base: &str) -> Result<Self, DiscordTransportError> {
         Ok(Self {
             client: Client::builder()
+                .user_agent(concat!(
+                    "DiscordBot (https://github.com/G9000/animaOS-SWARM, ",
+                    env!("CARGO_PKG_VERSION"),
+                    ")"
+                ))
                 .redirect(Policy::none())
                 .connect_timeout(Duration::from_secs(5))
                 .timeout(Duration::from_secs(15))
@@ -196,7 +208,12 @@ impl DiscordClient {
         if let Some(body) = body {
             request = request.json(&body);
         }
-        let response = request.send().await.map_err(|_| {
+        let response = request.send().await.map_err(|error| {
+            tracing::warn!(
+                timeout = error.is_timeout(),
+                connection = error.is_connect(),
+                "Discord HTTP request failed"
+            );
             if sending {
                 DiscordTransportError::Uncertain
             } else {
@@ -263,7 +280,13 @@ impl DiscordClient {
                 _ => DiscordTransportError::HttpStatus { status },
             });
         }
-        serde_json::from_slice(&bytes).map_err(|_| {
+        // Discord's ephemeral typing endpoint acknowledges success with an empty 204.
+        let bytes = if status == 204 && bytes.is_empty() {
+            b"null".as_slice()
+        } else {
+            bytes.as_slice()
+        };
+        serde_json::from_slice(bytes).map_err(|_| {
             if sending {
                 DiscordTransportError::Uncertain
             } else {
@@ -399,6 +422,20 @@ impl WireMessage {
 }
 #[async_trait]
 impl DiscordTransport for DiscordClient {
+    async fn send_typing(
+        &self,
+        token: &DiscordBotToken,
+        channel: &str,
+    ) -> Result<(), DiscordTransportError> {
+        validate_id(channel)?;
+        self.request(
+            token,
+            Method::POST,
+            &format!("channels/{channel}/typing"),
+            None,
+        )
+        .await
+    }
     async fn get_me(
         &self,
         token: &DiscordBotToken,

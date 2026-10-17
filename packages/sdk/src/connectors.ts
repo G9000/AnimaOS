@@ -30,6 +30,8 @@ export interface DriveConnectResult {
 }
 
 export type DiscordConnectorStatus =
+  | 'connecting'
+  | 'reconnecting'
   | 'disabled'
   | 'ready'
   | 'credentialRequired'
