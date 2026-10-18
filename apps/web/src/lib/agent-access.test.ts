@@ -48,6 +48,18 @@ const OPERATE_TOOLS = [
   'bg_output',
   'bg_stop',
   'bg_list',
+  'bg_wait',
+  'app_start',
+  'app_send',
+  'app_read',
+  'app_stop',
+  'app_list',
+  'acp_start',
+  'acp_prompt',
+  'acp_read',
+  'acp_cancel',
+  'acp_stop',
+  'acp_list',
 ];
 
 function agent(id: string, createdAtMs: number): AgentDetail {
@@ -103,6 +115,32 @@ describe('workspace access profiles', () => {
 
   it('returns the exact Operate tools', () => {
     expect(toolNamesForProfile('operate')).toEqual(OPERATE_TOOLS);
+  });
+
+  it('lets only Operate start, drive and stop apps and coding agents', () => {
+    const appTools = [
+      'bg_wait',
+      'app_start',
+      'app_send',
+      'app_read',
+      'app_stop',
+      'app_list',
+      'acp_start',
+      'acp_prompt',
+      'acp_read',
+      'acp_cancel',
+      'acp_stop',
+      'acp_list',
+    ];
+    expect(toolNamesForProfile('operate')).toEqual(
+      expect.arrayContaining(appTools),
+    );
+    for (const tool of appTools) {
+      expect(toolNamesForProfile('collaborate')).not.toContain(tool);
+    }
+    expect(ACCESS_PROFILES.operate.summary).toBe(
+      'Edits files, runs commands and uses any app on this computer.',
+    );
   });
 
   it('returns defensive tool arrays', () => {

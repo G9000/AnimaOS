@@ -1153,7 +1153,7 @@ async fn a_rule_never_covers_a_command_with_shell_operators() {
             name: "bash".into(),
             args: std::collections::BTreeMap::from([(
                 "command".to_string(),
-                anima_core::DataValue::String("git status; rm -rf ~".into()),
+                anima_core::DataValue::String("git status; ls -la".into()),
             )]),
         }]),
         Step::Text(vec!["ok"]),
@@ -1211,7 +1211,7 @@ async fn a_rule_never_covers_a_command_with_shell_operators() {
 
     let asked = pending_approvals(&coordinator, 1).await.remove(0);
     assert_eq!(asked.tool, "bash");
-    assert!(asked.arguments.contains("git status; rm -rf ~"));
+    assert!(asked.arguments.contains("git status; ls -la"));
     coordinator
         .decide_approval(&asked.id, decision(ApprovalDecisionKind::Deny, 1))
         .await

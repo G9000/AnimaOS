@@ -111,6 +111,8 @@ pub(crate) enum SessionOrigin {
     Job,
     Delegation,
     Peer,
+    /// A conversation imported from another coding tool (`foreign_sessions`).
+    Import,
 }
 
 impl SessionOrigin {
@@ -124,7 +126,37 @@ impl SessionOrigin {
             Self::Job => "job",
             Self::Delegation => "delegation",
             Self::Peer => "peer",
+            Self::Import => "import",
         }
+    }
+}
+
+/// Where an imported session came from (`foreign_sessions`): the tool, its
+/// own session id when the log names one, the hash of the log's path (the
+/// handle the browse routes hand out), and the project folder. Imports of
+/// the same conversation into the same agent are deduplicated on it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ImportedFrom {
+    /// `claude-code` or `codex`.
+    pub(crate) tool: String,
+    #[serde(default)]
+    pub(crate) foreign_session_id: Option<String>,
+    pub(crate) path_hash: String,
+    #[serde(default)]
+    pub(crate) cwd: Option<String>,
+}
+
+impl ImportedFrom {
+    /// The same foreign conversation: the same tool and foreign session id,
+    /// or the same log when the log names no id.
+    pub(crate) fn same_conversation(&self, other: &Self) -> bool {
+        self.tool == other.tool
+            && match (&self.foreign_session_id, &other.foreign_session_id) {
+                (Some(mine), Some(theirs)) => mine == theirs,
+                (None, None) => self.path_hash == other.path_hash,
+                _ => false,
+            }
     }
 }
 
@@ -268,6 +300,9 @@ pub(crate) struct SessionRecord {
     /// `approvals::MAX_SESSION_ALLOWANCES`; they end with the session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) session_allowances: Vec<crate::approvals::SessionAllowance>,
+    /// Provenance of a session imported from another coding tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) imported_from: Option<ImportedFrom>,
 }
 
 impl SessionRecord {
@@ -304,6 +339,7 @@ impl SessionRecord {
             pruned_through: None,
             room_id: room,
             session_allowances: Vec::new(),
+            imported_from: None,
         }
     }
 

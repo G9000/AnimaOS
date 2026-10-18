@@ -1,0 +1,16 @@
+[package]
+name = "anima-worktree"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Host-agnostic git worktree isolation for helper agents, driven through a hardened git CLI."
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "=3.27.0"

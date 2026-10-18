@@ -1,6 +1,8 @@
 import { useId, useState } from 'react';
 
+import { parseCodingSession } from '../../lib/coding-sessions';
 import { formatElapsed, type ToolStep } from '../../lib/transcript';
+import { CodingSessionCard } from '../coding/CodingSessionCard';
 import { toolWebSources } from '../../lib/web-sources';
 
 const STATUS_LABELS: Record<ToolStep['status'], string> = {
@@ -11,7 +13,18 @@ const STATUS_LABELS: Record<ToolStep['status'], string> = {
 
 /** One tool call (spec §15.2): name, short arguments, a spinner then ✓ or ✗,
  *  its duration, and an expandable result. */
-export function ToolStepCard({ step }: { step: ToolStep }) {
+export function ToolStepCard({
+  step,
+  agentId,
+  pinned = false,
+}: {
+  step: ToolStep;
+  /** The agent that ran it, for an app session's Stop. */
+  agentId?: string;
+  /** Its session's latest snapshot is already shown under the steps: the
+   *  result opens as plain text. */
+  pinned?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const resultId = useId();
   const sources = toolWebSources(step.name, step.status, step.sources);
@@ -56,7 +69,11 @@ export function ToolStepCard({ step }: { step: ToolStep }) {
                 : 'No result was recorded.'}
             </p>
           ) : (
-            <pre>{step.result}</pre>
+            <StepResult
+              result={step.result}
+              agentId={agentId}
+              pinned={pinned}
+            />
           )}
           {step.truncated && (
             <p className="tool-step-note">Result shortened to 2 KiB.</p>
@@ -83,5 +100,24 @@ export function ToolStepCard({ step }: { step: ToolStep }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** An app or coding-agent snapshot as its card; anything else, or one cut
+ *  short, as the plain result. */
+function StepResult({
+  result,
+  agentId,
+  pinned,
+}: {
+  result: string;
+  agentId?: string;
+  pinned: boolean;
+}) {
+  const session = pinned ? null : parseCodingSession(result);
+  return session ? (
+    <CodingSessionCard session={session} agentId={agentId} />
+  ) : (
+    <pre>{result}</pre>
   );
 }

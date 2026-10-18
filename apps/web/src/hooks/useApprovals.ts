@@ -23,6 +23,8 @@ export interface ApprovalsOptions {
   streamOpen: boolean;
   /** `LiveState.epoch`: bumped by every snapshot and resync. */
   epoch: number;
+  /** Bumped when the policy changed outside this page: read it again. */
+  policyRevision?: number;
 }
 
 export interface ApprovalsView {
@@ -63,6 +65,7 @@ export function useApprovals({
   streamApprovals,
   streamOpen,
   epoch,
+  policyRevision = 0,
 }: ApprovalsOptions): ApprovalsView {
   const [readPending, setReadPending] = useState<Approval[]>([]);
   const [decided, setDecided] = useState<Approval[]>([]);
@@ -152,7 +155,7 @@ export function useApprovals({
       },
     );
     return () => controller.abort();
-  }, [agentId, reads, setError]);
+  }, [agentId, reads, policyRevision, setError]);
 
   const pending = useMemo(
     () => (streamOpen ? pendingApprovals(streamApprovals) : readPending),

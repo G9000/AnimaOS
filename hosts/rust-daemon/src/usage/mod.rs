@@ -38,6 +38,8 @@ pub(crate) enum UsageSource {
     Compaction,
     Profile,
     Agency,
+    /// The autonomy smart check judging a risky command.
+    Approval,
 }
 
 impl UsageSource {
@@ -54,6 +56,7 @@ impl UsageSource {
             Self::Compaction => "compaction",
             Self::Profile => "profile",
             Self::Agency => "agency",
+            Self::Approval => "approval",
         }
     }
 }

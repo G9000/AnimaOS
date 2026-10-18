@@ -13,6 +13,8 @@ pub(super) struct CapturedSource {
     pub(super) brief: String,
     pub(super) digest: String,
     pub(super) anchors: Vec<String>,
+    /// Settled tool calls in the source run, before the brief's bound.
+    pub(super) action_count: usize,
     pub(super) config: AgentConfig,
     pub(super) adapter: Arc<dyn ModelAdapter>,
 }
@@ -170,6 +172,7 @@ pub(super) async fn capture_source(
         rendered = brief.to_string();
     }
     Ok(CapturedSource {
+        action_count: run.action_receipts.len(),
         session_id: run.session_id,
         brief: rendered,
         digest,

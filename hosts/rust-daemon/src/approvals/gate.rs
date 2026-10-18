@@ -235,6 +235,16 @@ impl ApprovalGate {
         if risk_class(&call.name) == RiskClass::Read {
             return GateOutcome::Proceed;
         }
+        use crate::approvals::autonomy::{command_of, Floor, SmartVerdict};
+        let floor = self.coordinator.approval_floor(agent, call).await;
+        if let Floor::Blocked(reason) = &floor {
+            return GateOutcome::Refuse(TaskResult::error(
+                format!(
+                    "Blocked: this command {reason}, so it never runs, in any mode. Don't retry it or work around it; tell the owner what you wanted to do."
+                ),
+                0,
+            ));
+        }
         match self
             .coordinator
             .approval_verdict(agent, &self.run.session_id, call)
@@ -246,7 +256,35 @@ impl ApprovalGate {
             Verdict::Ask if is_helper_config(&agent.config) => {
                 GateOutcome::Refuse(TaskResult::error(HELPER_NEEDS_APPROVAL, 0))
             }
-            Verdict::Ask => self.ask(agent, call).await,
+            Verdict::Ask => {
+                let floor_only = matches!(floor, Floor::Dangerous(_))
+                    && self
+                        .coordinator
+                        .approval_policy_verdict(agent, &self.run.session_id, call)
+                        .await
+                        == Verdict::Allow;
+                if let (true, Floor::Dangerous(why), Some(command)) =
+                    (floor_only, &floor, command_of(call))
+                {
+                    match self
+                        .coordinator
+                        .smart_check(agent, &self.run.session_id, command, why)
+                        .await
+                    {
+                        SmartVerdict::Approve => return GateOutcome::Proceed,
+                        SmartVerdict::Deny => {
+                            return GateOutcome::Refuse(TaskResult::error(
+                                format!(
+                                    "Denied by the owner's smart check: this command {why} and did not look like a safe step. Ask the owner if it is really needed."
+                                ),
+                                0,
+                            ))
+                        }
+                        SmartVerdict::Escalate => {}
+                    }
+                }
+                self.ask(agent, call).await
+            }
         }
     }
 
@@ -462,6 +500,7 @@ mod tests {
                 run_id: "run-1",
                 call: &call,
                 timeout_ms: 1_000,
+                reason: None,
             },
             1,
         );

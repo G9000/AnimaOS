@@ -36,6 +36,7 @@ import {
 import { PendingMessage, RunActivity, ToolBlock } from './sessions/RunActivity';
 import { RunOutcomeCard } from './sessions/RunOutcomeCard';
 import { TaskReviewAction } from './learning/TaskReviewAction';
+import { TaskReviewProvider } from './learning/TaskReviewContext';
 import { DelegatedTurn, TrimmedDivider } from './sessions/TranscriptNotes';
 import { slashSuggestions, type SlashCommand } from '../lib/slash-commands';
 import { SlashCommandMenu } from './sessions/SlashCommandMenu';
@@ -168,12 +169,12 @@ const Bubble = memo(function Bubble({
         {onSave &&
           message.role === 'User' &&
           message.content.text.trim() !== '' && (
-          <SaveToMemory
-            message={message}
-            save={onSave}
-            saved={savedLookup?.(message.id) ?? null}
-          />
-        )}
+            <SaveToMemory
+              message={message}
+              save={onSave}
+              saved={savedLookup?.(message.id) ?? null}
+            />
+          )}
       </div>
     </div>
   );
@@ -423,13 +424,7 @@ const TranscriptEntry = memo(function TranscriptEntry({
         />
       );
     case 'learning-review':
-      return (
-        <TaskReviewAction
-          run={item.run}
-          agentId={agentId}
-          requestReview={actions?.onRequestLearningReview}
-        />
-      );
+      return <TaskReviewAction run={item.run} />;
     case 'pending':
       return (
         <PendingMessage
@@ -516,6 +511,10 @@ export const MessageList = memo(function MessageList({
     [items, agent.messages],
   );
   const anchorsByItem = useMemo(() => anchorsFor(transcript), [transcript]);
+  const showsReviews = useMemo(
+    () => transcript.some((item) => item.kind === 'learning-review'),
+    [transcript],
+  );
   const days = useMemo(() => dayDividers(transcript), [transcript]);
   const jumpToMessage = useCallback((id: string) => {
     atBottom.current = false;
@@ -633,65 +632,71 @@ export const MessageList = memo(function MessageList({
               <EmptyState agentName={agent.name} onPick={onSuggestion} />
             ))
           ) : (
-            <div className="studio-messages mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-6 sm:px-6">
-              {hasOlder && onLoadOlder && (
-                <button
-                  type="button"
-                  className="studio-tool-button session-load-older"
-                  onClick={onLoadOlder}
-                  disabled={loadingOlder}
-                >
-                  {loadingOlder
-                    ? 'Loading older messages…'
-                    : 'Load older messages'}
-                </button>
-              )}
-              {transcript.map((item, index) => {
-                const ids = anchorsByItem[index];
-                // This item's own last-registered element, so cleanup
-                // only ever removes what THIS ref put there — never a
-                // different item's registration for the same id.
-                let ownElement: HTMLDivElement | null = null;
-                return (
-                  <div
-                    key={item.key}
-                    ref={(element) => {
-                      if (element) {
-                        ownElement = element;
-                        for (const id of ids)
-                          messageElements.current.set(id, element);
-                      } else {
-                        for (const id of ids)
-                          if (messageElements.current.get(id) === ownElement)
-                            messageElements.current.delete(id);
-                        ownElement = null;
-                      }
-                    }}
-                    data-search-match={
-                      (highlightedMessageId !== null &&
-                        ids.includes(highlightedMessageId)) ||
-                      undefined
-                    }
-                    className="studio-message-anchor"
+            <TaskReviewProvider
+              agentId={agent.id}
+              active={showsReviews}
+              api={actions?.taskReviews}
+            >
+              <div className="studio-messages mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-6 sm:px-6">
+                {hasOlder && onLoadOlder && (
+                  <button
+                    type="button"
+                    className="studio-tool-button session-load-older"
+                    onClick={onLoadOlder}
+                    disabled={loadingOlder}
                   >
-                    {days[index] && (
-                      <div className="chat-day" role="separator">
-                        <span>{days[index]}</span>
-                      </div>
-                    )}
-                    <TranscriptEntry
-                      item={item}
-                      agentName={agent.name}
-                      actions={actions}
-                      agentId={agent.id}
-                      readAloud={readAloud}
-                      knownAttachments={knownAttachments}
-                    />
-                  </div>
-                );
-              })}
-              {sending && <ThinkingIndicator name={agent.name} />}
-            </div>
+                    {loadingOlder
+                      ? 'Loading older messages…'
+                      : 'Load older messages'}
+                  </button>
+                )}
+                {transcript.map((item, index) => {
+                  const ids = anchorsByItem[index];
+                  // This item's own last-registered element, so cleanup
+                  // only ever removes what THIS ref put there — never a
+                  // different item's registration for the same id.
+                  let ownElement: HTMLDivElement | null = null;
+                  return (
+                    <div
+                      key={item.key}
+                      ref={(element) => {
+                        if (element) {
+                          ownElement = element;
+                          for (const id of ids)
+                            messageElements.current.set(id, element);
+                        } else {
+                          for (const id of ids)
+                            if (messageElements.current.get(id) === ownElement)
+                              messageElements.current.delete(id);
+                          ownElement = null;
+                        }
+                      }}
+                      data-search-match={
+                        (highlightedMessageId !== null &&
+                          ids.includes(highlightedMessageId)) ||
+                        undefined
+                      }
+                      className="studio-message-anchor"
+                    >
+                      {days[index] && (
+                        <div className="chat-day" role="separator">
+                          <span>{days[index]}</span>
+                        </div>
+                      )}
+                      <TranscriptEntry
+                        item={item}
+                        agentName={agent.name}
+                        actions={actions}
+                        agentId={agent.id}
+                        readAloud={readAloud}
+                        knownAttachments={knownAttachments}
+                      />
+                    </div>
+                  );
+                })}
+                {sending && <ThinkingIndicator name={agent.name} />}
+              </div>
+            </TaskReviewProvider>
           )}
         </div>
         {awayFromBottom && (

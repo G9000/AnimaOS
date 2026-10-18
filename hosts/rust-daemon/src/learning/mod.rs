@@ -7,9 +7,9 @@ mod skill_source;
 mod tests;
 
 pub(crate) use records::{
-    LearningDecision, LearningPolicy, LearningPolicyResponse, LearningProposal, LearningRegistry,
-    LearningReviewRecord, LearningReviewState, LearningSkillDraftRequest, LearningSkillSource,
-    LearningSnapshot, LearningTrigger,
+    LearningDecision, LearningMode, LearningPolicy, LearningPolicyResponse, LearningProposal,
+    LearningRegistry, LearningReviewRecord, LearningReviewState, LearningSkillDraftRequest,
+    LearningSkillSource, LearningSnapshot, LearningTrigger,
 };
 pub(crate) use service::LearningService;
 pub(crate) use skill_source::validate_skill_source;

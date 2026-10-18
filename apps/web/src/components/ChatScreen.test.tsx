@@ -2,11 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentDetail, ChatMessage } from '../lib/types';
-import {
-  createDaemonClient,
-  type LearningReview,
-  type Run,
-} from '@animaOS-SWARM/sdk';
+import { createDaemonClient, type Run } from '@animaOS-SWARM/sdk';
 import { toChatMessage } from '../lib/daemon-api';
 import { formatTime } from './ui-bits';
 import { Composer, MessageList } from './ChatScreen';
@@ -277,95 +273,31 @@ describe('m83 visible search provenance', () => {
   );
 });
 
+function settledReceipts(count: number): NonNullable<Run['actionReceipts']> {
+  return Array.from({ length: count }, (_, index) => ({
+    toolCallId: `call-settled-${index}`,
+    name: 'memory_search',
+    status: 'succeeded' as const,
+    startedAtMs: 1,
+    finishedAtMs: 2,
+    durationMs: 1,
+    argumentsPreview: '{}',
+    argumentsTruncated: false,
+    resultPreview: 'ok',
+    resultTruncated: false,
+    durability: 'persistent' as const,
+  }));
+}
+
 describe('MessageList', () => {
-  it('M38_offers_review_for_a_completed_task_with_tool_activity', async () => {
-    const user = userEvent.setup();
-    const completedRun = runFixture('completed-task', {
-      status: 'completed',
-      startedAtMs: 1_725_000_030_000,
-      finishedAtMs: 1_725_000_090_000,
-      toolsStarted: ['memory_search'],
-      replyMessageId: 'task-reply',
-      actionReceipts: [
-        {
-          toolCallId: 'call-1',
-          name: 'memory_search',
-          status: 'succeeded',
-          startedAtMs: 1_725_000_040_000,
-          finishedAtMs: 1_725_000_041_000,
-          durationMs: 1_000,
-          argumentsPreview: '{}',
-          argumentsTruncated: false,
-          resultPreview: 'Found one note.',
-          resultTruncated: false,
-          durability: 'persistent',
-        },
-      ],
-    });
-    const taskMessages: AgentDetail['messages'] = [
-      {
-        id: 'task-request',
-        role: 'User',
-        content: { text: 'Find the relevant note.' },
-        created_at_ms: 1_725_000_020_000,
-      },
-      {
-        id: 'task-reply',
-        role: 'Assistant',
-        content: {
-          text: 'The note says to review the draft.',
-          metadata: { runId: completedRun.id },
-        },
-        created_at_ms: 1_725_000_090_000,
-      },
-    ];
-    const review = {
-      id: 'review-1',
-      agentId: 'agent-1',
-      sourceRunId: completedRun.id,
-      sessionId: completedRun.sessionId,
-      trigger: 'manual',
-      policyVersion: 1,
-      evidenceDigest: 'digest',
-      evidenceBrief: 'Task evidence.',
-      evidenceAnchors: [completedRun.id],
-      state: 'queued',
-      reservedAtMs: 1,
-      model: 'gpt-5.5',
-      usageComplete: false,
-      proposals: [],
-    } satisfies LearningReview;
-    const onRequestLearningReview = vi.fn(async () => review);
-
-    render(
-      <MessageList
-        agent={{ ...agent, messages: taskMessages }}
-        sending={false}
-        scrollerRef={{ current: null }}
-        onSuggestion={vi.fn()}
-        items={buildTranscript({
-          messages: taskMessages,
-          runs: [emptyLiveRun(completedRun)],
-        })}
-        actions={{ onRequestLearningReview }}
-      />,
-    );
-
-    const reviewTask = screen.getByRole('button', { name: 'Review this task' });
-    expect(reviewTask).toBeVisible();
-    await user.click(reviewTask);
-    expect(onRequestLearningReview).toHaveBeenCalledWith(completedRun);
-    expect(
-      await screen.findByRole('button', { name: 'Review requested' }),
-    ).toBeDisabled();
-  });
-
   const ineligibleCompletedRuns: Array<[string, Partial<Run>]> = [
     ['legacy missing receipt data', { actionReceipts: undefined }],
+    ['short task (two tool calls)', { actionReceipts: settledReceipts(2) }],
     [
       'started receipt',
       {
         actionReceipts: [
+          ...settledReceipts(2),
           {
             toolCallId: 'call-1',
             name: 'memory_search',
@@ -386,6 +318,7 @@ describe('MessageList', () => {
       'temporary receipt',
       {
         actionReceipts: [
+          ...settledReceipts(2),
           {
             toolCallId: 'call-1',
             name: 'memory_search',
@@ -421,21 +354,7 @@ describe('MessageList', () => {
         finishedAtMs: 3,
         toolsStarted: ['memory_search'],
         replyMessageId: 'reply',
-        actionReceipts: [
-          {
-            toolCallId: 'call-1',
-            name: 'memory_search',
-            status: 'succeeded',
-            startedAtMs: 1,
-            finishedAtMs: 2,
-            durationMs: 1,
-            argumentsPreview: '{}',
-            argumentsTruncated: false,
-            resultPreview: 'ok',
-            resultTruncated: false,
-            durability: 'persistent',
-          },
-        ],
+        actionReceipts: settledReceipts(3),
       });
       const messages: AgentDetail['messages'] = [
         {
@@ -1277,7 +1196,12 @@ describe('M53 accepted budget wrap-up notice', () => {
     const onSaveToMemory = vi
       .fn()
       .mockResolvedValue({ kind: 'saved', shortened: false });
-    const onRequestLearningReview = vi.fn();
+    const taskReviews = {
+      policy: vi.fn(),
+      listReviews: vi.fn(),
+      requestReview: vi.fn(),
+      undoLesson: vi.fn(),
+    };
     const onOpenSession = vi.fn();
     const readAloud = {
       supported: true,
@@ -1294,7 +1218,7 @@ describe('M53 accepted budget wrap-up notice', () => {
       sending: false,
       scrollerRef: { current: null },
       onSuggestion: vi.fn(),
-      actions: { onSaveToMemory, onRequestLearningReview, onOpenSession },
+      actions: { onSaveToMemory, taskReviews, onOpenSession },
       readAloud,
     };
     try {
@@ -1315,7 +1239,8 @@ describe('M53 accepted budget wrap-up notice', () => {
       expect(fetch).not.toHaveBeenCalled();
       expect(onSaveToMemory).not.toHaveBeenCalled();
       expect(readAloud.read).not.toHaveBeenCalled();
-      expect(onRequestLearningReview).not.toHaveBeenCalled();
+      expect(taskReviews.policy).not.toHaveBeenCalled();
+      expect(taskReviews.requestReview).not.toHaveBeenCalled();
       expect(onOpenSession).not.toHaveBeenCalled();
 
       await user.click(screen.getByRole('button', { name: 'Copy message' }));

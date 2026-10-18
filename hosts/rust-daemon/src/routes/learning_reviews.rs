@@ -155,6 +155,34 @@ pub(super) async fn decide_proposal(
     )
 }
 
+#[utoipa::path(post, path = "/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}/undo", tag="learning",
+    params(("agent_id"=String, Path),("review_id"=String, Path),("proposal_id"=String, Path)), request_body=LearningUndoRequest,
+    responses((status=200, description="Free-mode lesson forgotten: its memory is deleted and the proposal dismissed", body=LearningReviewEnvelope),
+    (status=400, description="Invalid fields", body=ErrorBody), (status=403, description="Local owner required", body=ErrorBody),
+    (status=404, description="Lesson not found", body=ErrorBody), (status=409, description="Not a kept lesson, or a stale version", body=ErrorBody),
+    (status=503, description="Save failed", body=ErrorBody)))]
+pub(super) async fn undo_lesson(
+    State(state): State<AppState>,
+    Path((agent_id, review_id, proposal_id)): Path<(String, String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, false) {
+        return response;
+    }
+    let input: LearningUndoRequest = match body(&state, request).await {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    review_response(
+        StatusCode::OK,
+        state
+            .agent_runs
+            .learning()
+            .undo_lesson(&agent_id, &review_id, &proposal_id, input.expected_version)
+            .await,
+    )
+}
+
 #[utoipa::path(post, path = "/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}/skill-draft", tag="learning",
     params(("agent_id"=String, Path),("review_id"=String, Path),("proposal_id"=String, Path)), request_body=LearningSkillDraftRequest,
     responses((status=201, description="Pending reviewed skill draft; approval remains separate", body=super::contracts::SkillDraftEnvelope),

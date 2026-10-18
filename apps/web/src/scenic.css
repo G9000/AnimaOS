@@ -1175,6 +1175,31 @@ button.scenic-thread[aria-expanded='true'] {
   color: var(--color-ink-3);
 }
 
+.settings-access-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-ink-3);
+}
+
+.settings-access-note-link {
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  color: var(--color-ink);
+  cursor: pointer;
+}
+
+.settings-access-note-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .settings-abilities {
   display: flex;
   flex-direction: column;
@@ -2625,6 +2650,40 @@ button.scenic-thread[aria-expanded='true'] {
   color: #f59a9a;
 }
 
+.plan-card-note {
+  border-color: rgb(255 255 255 / 0.14);
+}
+
+.plan-card-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  background: rgb(255 255 255 / 0.02);
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.7);
+}
+
+.plan-card-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #e94dab;
+}
+
+.plan-card-status button {
+  margin-left: auto;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 3px;
+  background: rgb(255 255 255 / 0.04);
+  font-size: 12px;
+  font-weight: 500;
+  color: rgb(255 255 255 / 0.85);
+}
+
 /* ── Weekly report ── */
 
 .weekly-report-scrim {
@@ -2891,4 +2950,9 @@ button.scenic-thread[aria-expanded='true'] {
   color: rgb(255 255 255 / 0.75);
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+/* A review line with nothing to say leaves no gap in the transcript. */
+.studio-message-anchor:empty {
+  display: none;
 }

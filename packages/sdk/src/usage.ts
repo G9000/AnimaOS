@@ -11,7 +11,8 @@ export type UsageSource =
   | 'title'
   | 'compaction'
   | 'profile'
-  | 'agency';
+  | 'agency'
+  | 'approval';
 export type PricingSource =
   | 'table'
   | 'override'

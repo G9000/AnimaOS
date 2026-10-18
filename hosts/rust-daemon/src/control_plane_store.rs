@@ -198,6 +198,20 @@ pub(crate) struct ControlPlaneSnapshot {
     pub(crate) approval_policies: Vec<crate::approvals::AgentApprovalPolicy>,
     #[serde(default)]
     pub(crate) approval_rules: Vec<crate::approvals::ApprovalRule>,
+    /// Keys the owner hands to each agent's coding apps (names only).
+    #[serde(default)]
+    pub(crate) coding_keys: Vec<crate::coding_keys::AgentCodingKeys>,
+    /// How much each agent asks (Free / Strict / Custom) and its floor
+    /// extras; agents without a record are Custom.
+    #[serde(default)]
+    pub(crate) agent_autonomy: Vec<crate::approvals::autonomy::AgentAutonomy>,
+    /// Skills agents in Free saved themselves, newest last (at most 200),
+    /// for the owner's undo.
+    #[serde(default)]
+    pub(crate) skill_ledger: Vec<crate::skills::ledger::SkillLedgerEntry>,
+    /// Repositories where helper worktrees were created, for the startup sweep.
+    #[serde(default)]
+    pub(crate) helper_worktree_repos: Vec<String>,
     /// The skills registry (spec §8.1); workspace-wide.
     #[serde(default)]
     pub(crate) skills: Vec<crate::skills::SkillRecord>,
@@ -665,6 +679,10 @@ impl ControlPlaneSnapshot {
             approvals: vec![],
             approval_policies: vec![],
             approval_rules: vec![],
+            coding_keys: vec![],
+            agent_autonomy: vec![],
+            skill_ledger: vec![],
+            helper_worktree_repos: vec![],
             skills: vec![],
             skill_drafts: vec![],
             schedule_fires: vec![],

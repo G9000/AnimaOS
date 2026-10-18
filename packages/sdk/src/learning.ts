@@ -11,6 +11,9 @@ export type LearningReviewState =
   | 'interrupted'
   | 'failed';
 export type LearningProposalDecision = 'pending' | 'dismissed' | 'acknowledged';
+/** `free`: long tasks are reviewed by themselves and lessons are kept at
+ *  once, with Undo. `strict`: every lesson waits for the owner. */
+export type LearningMode = 'free' | 'strict';
 
 export interface LearningProposal {
   id: string;
@@ -20,6 +23,8 @@ export interface LearningProposal {
   decision: LearningProposalDecision;
   decisionVersion: number;
   skillDraftId?: string | null;
+  /** The memory a Free-mode lesson was kept as; Undo forgets it. */
+  memoryId?: string | null;
 }
 
 export interface LearningSkillDraftInput {
@@ -57,12 +62,21 @@ export interface LearningReview {
 }
 
 export interface LearningPolicy {
+  mode?: LearningMode;
   autoEnabled: boolean;
   dailyLimit: number;
   pendingLimit: number;
   timeoutMs: number;
   /** The transport may remain active after its returned-result deadline. */
   physicalReviewerActive?: boolean;
+  /** The rolling window `dailyLimit` applies to (24 hours). */
+  windowMs?: number;
+  /** Workspace-wide reviews still available in the current window. */
+  remaining?: number;
+  /** When the next review becomes available; `null` while one is. */
+  nextAvailableAtMs?: number | null;
+  /** Automatic review only follows tasks with this many tool calls. */
+  autoMinActions?: number;
 }
 
 export type LearningDecision = Extract<
@@ -119,6 +133,21 @@ export class LearningClient {
     const response = await this.client.requestJson<{ review: LearningReview }>(
       `${agentPath(agentId)}/learning-reviews/${encodeURIComponent(reviewId)}`,
       { signal: options.signal },
+    );
+    return response.review;
+  }
+
+  /** Forgets a kept Free-mode lesson: its memory is deleted, the proposal
+   *  dismissed. */
+  async undoLesson(
+    agentId: string,
+    reviewId: string,
+    proposalId: string,
+    input: { expectedVersion: number },
+  ): Promise<LearningReview> {
+    const response = await this.client.requestJson<{ review: LearningReview }>(
+      `${agentPath(agentId)}/learning-reviews/${encodeURIComponent(reviewId)}/proposals/${encodeURIComponent(proposalId)}/undo`,
+      { method: 'POST', body: input },
     );
     return response.review;
   }

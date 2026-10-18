@@ -343,6 +343,90 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+/** A key the owner may hand to coding apps this agent starts (fixed set;
+ *  the value never leaves the daemon). */
+export interface CodingKey {
+  name: string;
+  label: string;
+  /** The daemon's secret store holds a value for it. */
+  saved: boolean;
+  /** Handed to coding apps this agent starts. */
+  enabled: boolean;
+}
+
+/** How much an agent asks before it acts (spec 2026-10-19). `custom`
+ *  is never sent: it shows when the class policy matches neither preset. */
+export type AutonomyMode = 'free' | 'strict' | 'custom';
+
+/** The most deny patterns, and the longest one, the daemon keeps. */
+export const MAX_DENY_PATTERNS = 50;
+export const MAX_DENY_PATTERN_CHARS = 200;
+
+export interface AgentAutonomy {
+  mode: AutonomyMode;
+  /** The agent's own model judges risky commands before the owner is asked. */
+  smartCheck: boolean;
+  /** The owner's always-blocked command globs (`*`, `?`). */
+  denyPatterns: string[];
+  policy: ApprovalPolicy;
+}
+
+export interface AutonomyPatch {
+  mode?: Exclude<AutonomyMode, 'custom'>;
+  smartCheck?: boolean;
+  denyPatterns?: string[];
+}
+
+export type ForeignSource = 'claude-code' | 'codex';
+
+/** A Claude Code or Codex conversation on this computer. `handle` stands
+ *  for its file; the daemon never sends paths. */
+export interface ForeignSession {
+  handle: string;
+  source: ForeignSource;
+  title: string;
+  cwd: string | null;
+  /** Epoch milliseconds. */
+  modifiedAt: number;
+  sizeBytes: number;
+  foreignSessionId: string | null;
+}
+
+export interface ForeignSessionPreview {
+  title: string;
+  cwd: string | null;
+  source: ForeignSource;
+  messageCount: number;
+  messages: { role: 'user' | 'assistant'; text: string; at: number | null }[];
+}
+
+export interface ForeignImport {
+  sessionId: string;
+  title: string;
+  messageCount: number;
+  alreadyImported: boolean;
+}
+
+/** A coding CLI the daemon looked for on this computer. */
+export interface CodingApp {
+  id: string;
+  name: string;
+  found: boolean;
+  version: string | null;
+  /** Set when it is installed but cannot start. */
+  problem: string | null;
+  bundleId: string;
+  /** Its know-how bundle's manifest, installed through the community
+   *  bundle review. */
+  manifestText: string;
+}
+
+/** A know-how bundle the daemon ships (the generic coding handoff). */
+export interface CodingKnowHow {
+  bundleId: string;
+  manifestText: string;
+}
+
 /** Error.message prefix returned by the daemon when no generative provider is available. */
 export const PROFILE_GENERATION_UNAVAILABLE = 'PROFILE_GENERATION_UNAVAILABLE';
 
@@ -484,6 +568,12 @@ export const daemon = {
   ) => setupClient.learning.getReview(agentId, reviewId, options),
   cancelLearningReview: (agentId: string, reviewId: string) =>
     setupClient.learning.cancelReview(agentId, reviewId),
+  undoLearningLesson: (
+    agentId: string,
+    reviewId: string,
+    proposalId: string,
+    input: { expectedVersion: number },
+  ) => setupClient.learning.undoLesson(agentId, reviewId, proposalId, input),
   decideLearningProposal: (
     agentId: string,
     reviewId: string,
@@ -681,6 +771,61 @@ export const daemon = {
       body: JSON.stringify(input),
     }),
   health: () => request<{ status: string }>('/health'),
+
+  /** Coding apps (app and ACP sessions the agent drives). */
+  stopAppSession: (agentId: string, sessionId: string) =>
+    request<{ stopped: boolean; treeGone: boolean }>(
+      `/agents/${encodeURIComponent(agentId)}/app-sessions/${encodeURIComponent(sessionId)}/stop`,
+      { method: 'POST' },
+    ),
+  cancelAcpTurn: (agentId: string, sessionId: string) =>
+    request<{ cancelled: boolean }>(
+      `/agents/${encodeURIComponent(agentId)}/acp-sessions/${encodeURIComponent(sessionId)}/cancel`,
+      { method: 'POST' },
+    ),
+  stopAcpSession: (agentId: string, sessionId: string) =>
+    request<{ stopped: boolean; treeGone: boolean }>(
+      `/agents/${encodeURIComponent(agentId)}/acp-sessions/${encodeURIComponent(sessionId)}/stop`,
+      { method: 'POST' },
+    ),
+  /** How much the agent asks; owner-only. A helper's answer is 409. */
+  autonomy: (agentId: string) =>
+    request<AgentAutonomy>(
+      `/agents/${encodeURIComponent(agentId)}/autonomy`,
+    ),
+  setAutonomy: (agentId: string, patch: AutonomyPatch) =>
+    request<AgentAutonomy>(
+      `/agents/${encodeURIComponent(agentId)}/autonomy`,
+      { method: 'PUT', body: JSON.stringify(patch) },
+    ),
+  codingKeys: (agentId: string) =>
+    request<{ keys: CodingKey[] }>(
+      `/agents/${encodeURIComponent(agentId)}/coding-keys`,
+    ),
+  setCodingKeys: (agentId: string, enabled: string[]) =>
+    request<{ keys: CodingKey[] }>(
+      `/agents/${encodeURIComponent(agentId)}/coding-keys`,
+      { method: 'PUT', body: JSON.stringify({ enabled }) },
+    ),
+  foreignSessions: (source: ForeignSource, cursor?: string | null) =>
+    request<{ sessions: ForeignSession[]; nextCursor: string | null }>(
+      `/foreign-sessions?source=${encodeURIComponent(source)}${
+        cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
+      }`,
+    ),
+  foreignSessionPreview: (handle: string) =>
+    request<ForeignSessionPreview>(
+      `/foreign-sessions/${encodeURIComponent(handle)}/preview`,
+    ),
+  importForeignSession: (agentId: string, handle: string) =>
+    request<ForeignImport>(
+      `/agents/${encodeURIComponent(agentId)}/foreign-sessions/${encodeURIComponent(handle)}/import`,
+      { method: 'POST' },
+    ),
+  codingApps: () =>
+    request<{ apps: CodingApp[]; handoff: CodingKnowHow | null }>(
+      '/coding-apps',
+    ),
 
   listProviders: () => request<{ providers: DaemonProvider[] }>('/providers'),
 
@@ -1006,4 +1151,20 @@ export function toChatMessage(message: SessionMessage): ChatMessage {
     },
     created_at_ms: message.createdAtMs,
   };
+}
+
+/** Installs a shipped know-how bundle for an agent through the usual
+ *  community bundle review: its skills arrive as drafts the owner approves. */
+export async function installKnowHow(
+  agentId: string,
+  manifestText: string,
+): Promise<void> {
+  const review = await communityBundlesOwnerApi.review(agentId, {
+    manifestText,
+    programBindings: {},
+  });
+  await communityBundlesOwnerApi.install(agentId, {
+    reviewId: review.id,
+    reviewDigest: review.reviewDigest,
+  });
 }

@@ -1,4 +1,7 @@
 //! Reviewed declarative content/configuration. No installer or execution engine.
+#[cfg(test)]
+#[path = "coding_agent_bundles_tests.rs"]
+mod coding_agent_bundles_tests;
 mod records;
 mod service;
 #[cfg(test)]

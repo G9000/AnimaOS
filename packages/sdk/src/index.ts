@@ -80,6 +80,7 @@ export type {
   DocumentOmission,
   PdfDocumentOmission,
   XlsxDocumentOmission,
+  SessionImportedFrom,
   SessionOrigin,
   SessionPage,
   SessionSummary,
@@ -141,6 +142,7 @@ export type {
 } from './mcp.js';
 export type {
   LearningDecision,
+  LearningMode,
   LearningPolicy,
   LearningProposal,
   LearningProposalDecision,

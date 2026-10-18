@@ -907,6 +907,7 @@ fn approval_events_carry_the_approval_json() {
             run_id: "run_1",
             call: &call,
             timeout_ms: 1_000,
+            reason: None,
         },
         10,
     );

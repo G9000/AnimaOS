@@ -2587,3 +2587,34 @@ fn unconfigured_tool_recovery_never_reinterprets_a_configured_host_refusal_or_ca
     );
     assert!(!actual.content.text.contains(UNCONFIGURED_REFUSAL));
 }
+
+fn tool_rounds_used(config: AgentConfig, host_default: Option<usize>) -> usize {
+    let model = Arc::new(BudgetWrapupModel::default());
+    let mut runtime = AgentRuntime::new(config, model);
+    if let Some(rounds) = host_default {
+        runtime.set_default_tool_iterations(rounds);
+    }
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    block_on(runtime.run_with_context_and_tools(
+        Vec::new(),
+        text("Read until told to stop"),
+        |_, _, _| {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async { TaskResult::success(text("Read completed"), 1) }
+        },
+    ));
+    calls.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+#[test]
+fn a_host_default_sets_the_tool_budget_only_when_the_agent_leaves_it_unset() {
+    let mut unset = budget_config(0);
+    unset.settings.as_mut().unwrap().max_tool_iterations = None;
+    assert_eq!(
+        tool_rounds_used(unset.clone(), None),
+        super::MAX_TOOL_ITERATIONS
+    );
+    assert_eq!(tool_rounds_used(unset, Some(12)), 12);
+    // The agent's own setting always wins.
+    assert_eq!(tool_rounds_used(budget_config(3), Some(12)), 3);
+}

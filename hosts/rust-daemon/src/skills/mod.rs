@@ -6,6 +6,7 @@
 pub(crate) mod disk;
 pub(crate) mod drafts;
 pub(crate) mod file;
+pub(crate) mod ledger;
 pub(crate) mod registry;
 pub(crate) mod runtime;
 pub(crate) mod scanner;
@@ -73,7 +74,7 @@ pub(crate) const FILE_DRAFT_ID_PREFIX: &str = "file:";
 pub(crate) const DRAFT_ID_PREFIX: &str = "skd_";
 /// The user message metadata of a `/skill` message (spec §3.3, §8.3).
 pub(crate) const SKILL_METADATA_KEY: &str = "skill";
-/// Slugs a route segment or Windows already uses: `POST /api/skills/import`
+/// Slugs a route segment or Windows already uses: `POST /api/skills/import`,
 /// and the device names (Windows tools, Explorer, OneDrive, and git cannot
 /// open or delete such a folder; the list applies on every platform because
 /// workspaces are portable).
@@ -422,6 +423,10 @@ pub(crate) struct SkillDraft {
     pub(crate) status: DraftStatus,
     #[serde(default)]
     pub(crate) decided_at_ms: Option<u64>,
+    /// Who decided it when it was not the owner: `autonomy:free` for a
+    /// proposal approved automatically because its agent runs in Free.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) decided_by: Option<String>,
 }
 
 impl SkillDraft {
@@ -448,6 +453,7 @@ impl SkillDraft {
             created_at_ms: now_ms,
             status: DraftStatus::Pending,
             decided_at_ms: None,
+            decided_by: None,
         }
     }
 

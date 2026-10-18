@@ -85,6 +85,7 @@ pub(crate) fn decided_approval(
             run_id: "run_conformance",
             call: &call,
             timeout_ms: 1_000,
+            reason: None,
         },
         created_at_ms,
     );

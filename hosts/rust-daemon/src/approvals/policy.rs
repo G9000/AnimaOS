@@ -25,6 +25,11 @@ const READ_TOOLS: &[&str] = &[
     "calculate",
     "bg_list",
     "bg_output",
+    "bg_wait",
+    "app_read",
+    "app_list",
+    "acp_read",
+    "acp_list",
     "list_workspace_agents",
     "list_helper_runs",
     "calendar_list_events",
@@ -61,6 +66,8 @@ const WRITE_TOOLS: &[&str] = &[
     "calendar_create_event",
     "calendar_update_event",
     "calendar_delete_event",
+    // A coding agent's edit, delete or move request (ACP), judged as a write.
+    "acp_edit",
 ];
 const EXEC_TOOLS: &[&str] = &[
     "execute_code",
@@ -71,8 +78,19 @@ const EXEC_TOOLS: &[&str] = &[
     "browser_observe",
     "browser_act",
     "browser_transfer",
+    "app_start",
+    "app_send",
+    "app_stop",
+    "acp_start",
+    "acp_prompt",
+    "acp_cancel",
+    "acp_stop",
+    // A coding agent's command request (ACP), and anything it asks that
+    // has no narrower class.
+    "acp_execute",
+    "acp_other",
 ];
-const NETWORK_TOOLS: &[&str] = &["web_fetch", "exa_search", "web_search"];
+const NETWORK_TOOLS: &[&str] = &["web_fetch", "exa_search", "web_search", "acp_fetch"];
 
 #[test]
 fn m83_anonymous_search_uses_ordinary_network_approval_class() {
@@ -185,6 +203,11 @@ fn named_class(tool: &str) -> Option<RiskClass> {
         .map(|(_, class)| *class)
 }
 
+/// Names that are judged like tools but never run as one: what a coding
+/// agent asks to do over ACP. Rules may name them.
+pub(crate) const PERMISSION_ONLY_TOOLS: &[&str] =
+    &["acp_edit", "acp_execute", "acp_fetch", "acp_other"];
+
 /// A tool's class; one the table does not name is `exec` (spec §7.1).
 pub(crate) fn risk_class(tool: &str) -> RiskClass {
     named_class(tool).unwrap_or(RiskClass::Exec)
@@ -201,9 +224,13 @@ pub(crate) fn is_classified(tool: &str) -> bool {
 /// first; `any` fits every tool.
 pub(crate) fn matcher_kinds(tool: &str) -> &'static [MatcherKind] {
     match tool {
-        "bash" | "bg_start" => &[MatcherKind::CommandPrefix, MatcherKind::Any],
-        "write_file" | "edit_file" | "multi_edit" => &[MatcherKind::PathGlob, MatcherKind::Any],
-        "web_fetch" => &[MatcherKind::Domain, MatcherKind::Any],
+        "bash" | "bg_start" | "app_start" | "acp_start" | "acp_execute" => {
+            &[MatcherKind::CommandPrefix, MatcherKind::Any]
+        }
+        "write_file" | "edit_file" | "multi_edit" | "acp_edit" => {
+            &[MatcherKind::PathGlob, MatcherKind::Any]
+        }
+        "web_fetch" | "acp_fetch" => &[MatcherKind::Domain, MatcherKind::Any],
         _ => &[MatcherKind::Any],
     }
 }
@@ -527,6 +554,49 @@ pub(crate) fn evaluate(
     }
 }
 
+/// [`evaluate`] with the autonomy floor on top: a blocked command is denied
+/// whatever the policy says; a command that is hard to undo asks unless an
+/// owner rule or session allowance covers it; a plan in Free mode follows its
+/// class (it is shown, not asked).
+pub(crate) fn evaluate_with_floor(
+    policy: &ApprovalPolicy,
+    rules: &[&ApprovalRule],
+    allowances: &[SessionAllowance],
+    call: &ToolCall,
+    autonomy: &super::autonomy::AgentAutonomy,
+) -> Verdict {
+    use super::autonomy::{command_of, floor, Floor};
+    let covered = || {
+        rules
+            .iter()
+            .any(|rule| rule.tool == call.name && matcher_matches(&rule.matcher, call))
+            || allowances.iter().any(|allowance| {
+                allowance.tool == call.name && matcher_matches(&allowance.matcher, call)
+            })
+    };
+    if let Some(command) = command_of(call) {
+        match floor(command, autonomy) {
+            Floor::Blocked(_) => return Verdict::Deny,
+            Floor::Dangerous(_) => {
+                return match evaluate(policy, rules, allowances, call) {
+                    Verdict::Deny => Verdict::Deny,
+                    _ if covered() => Verdict::Allow,
+                    _ => Verdict::Ask,
+                };
+            }
+            Floor::Ordinary => {}
+        }
+    }
+    if call.name == crate::tools::PLAN_TOOL && autonomy.is_free() {
+        return match policy.action(risk_class(&call.name)) {
+            Some(PolicyAction::Deny) => Verdict::Deny,
+            Some(PolicyAction::Ask) if !covered() => Verdict::Ask,
+            _ => Verdict::Allow,
+        };
+    }
+    evaluate(policy, rules, allowances, call)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -586,6 +656,7 @@ mod tests {
                     "calculate",
                     "bg_list",
                     "bg_output",
+                    "bg_wait",
                     "list_workspace_agents",
                     "list_helper_runs",
                     "calendar_list_events",
@@ -1223,5 +1294,68 @@ mod tests {
             "a domain rule trusts the host on any port"
         );
         assert!(url_in_domain("http://evil.net@example.com/", "example.com"));
+    }
+
+    #[test]
+    fn the_floor_blocks_asks_and_lets_free_plans_through() {
+        use crate::approvals::autonomy::{AgentAutonomy, AutonomyMode};
+        let free = AgentAutonomy {
+            mode: AutonomyMode::Free,
+            ..Default::default()
+        };
+        let strict = AgentAutonomy {
+            mode: AutonomyMode::Strict,
+            ..Default::default()
+        };
+        let free_policy = AutonomyMode::Free.preset().unwrap();
+        let strict_policy = AutonomyMode::Strict.preset().unwrap();
+        let run = |command: &str| call("bash", &[("command", command)]);
+        // Blocked whatever the policy and rules say.
+        let everything = ApprovalRule {
+            id: "r".into(),
+            agent_id: "a".into(),
+            tool: "bash".into(),
+            matcher: ApprovalMatcher::any(),
+            created_at_ms: 1,
+            from_approval_id: None,
+        };
+        assert_eq!(
+            evaluate_with_floor(&free_policy, &[&everything], &[], &run("rm -rf /"), &free),
+            Verdict::Deny
+        );
+        // Hard to undo: asks in Free, unless a rule covers it.
+        assert_eq!(
+            evaluate_with_floor(&free_policy, &[], &[], &run("git push --force"), &free),
+            Verdict::Ask
+        );
+        assert_eq!(
+            evaluate_with_floor(
+                &free_policy,
+                &[&everything],
+                &[],
+                &run("git push --force"),
+                &free
+            ),
+            Verdict::Allow
+        );
+        // Ordinary work runs in Free and asks in Strict.
+        assert_eq!(
+            evaluate_with_floor(&free_policy, &[], &[], &run("npm test"), &free),
+            Verdict::Allow
+        );
+        assert_eq!(
+            evaluate_with_floor(&strict_policy, &[], &[], &run("npm test"), &strict),
+            Verdict::Ask
+        );
+        // A plan is shown in Free and asked in Strict.
+        let plan = call(crate::tools::PLAN_TOOL, &[("title", "Fix it")]);
+        assert_eq!(
+            evaluate_with_floor(&free_policy, &[], &[], &plan, &free),
+            Verdict::Allow
+        );
+        assert_eq!(
+            evaluate_with_floor(&strict_policy, &[], &[], &plan, &strict),
+            Verdict::Ask
+        );
     }
 }

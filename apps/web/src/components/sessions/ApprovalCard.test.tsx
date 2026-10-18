@@ -219,3 +219,45 @@ describe('ApprovalCard', () => {
       expect(screen.getByRole('button', { name })).toBeEnabled();
   });
 });
+
+describe('ApprovalCard for a coding agent', () => {
+  it('shows what the coding agent wants as labelled rows and keeps the full request one click away', () => {
+    const approval = approvalFixture('apr_acp', {
+      tool: 'acp_edit',
+      class: 'write',
+      arguments: JSON.stringify({
+        agent: 'Claude Agent',
+        title: 'Edit sum.js',
+        file_path: '/Users/ana/work/calc/sum.js',
+        locations: ['/Users/ana/work/calc/sum.js'],
+        sessionId: 'acp-1',
+      }),
+    });
+    render(<ApprovalCard canPersist approval={approval} />);
+    const card = screen.getByRole('region', { name: 'Approval needed: acp_edit' });
+    expect(within(card).getByText('Claude Agent wants to edit sum.js. It waits until you answer.')).toBeVisible();
+    expect(within(card).getByText('File')).toBeVisible();
+    expect(within(card).getByText('~/work/calc/sum.js')).toBeVisible();
+    expect(within(card).getByText('acp-1')).toBeVisible();
+    const raw = within(card).getByText('Full request').closest('details');
+    expect(raw).not.toHaveAttribute('open');
+    expect(within(card).getByLabelText('Arguments')).toHaveTextContent('"file_path"');
+  });
+});
+
+describe('ApprovalCard reason', () => {
+  it('says why a dangerous command asks, and nothing for other approvals', () => {
+    const { rerender } = render(
+      <ApprovalCard
+        approval={approvalFixture('apr_1', { reason: 'dangerous_command' })}
+      />,
+    );
+    expect(
+      screen.getByText('Asked because this command is hard to undo.'),
+    ).toBeVisible();
+    rerender(<ApprovalCard approval={approvalFixture('apr_2')} />);
+    expect(
+      screen.queryByText('Asked because this command is hard to undo.'),
+    ).toBeNull();
+  });
+});

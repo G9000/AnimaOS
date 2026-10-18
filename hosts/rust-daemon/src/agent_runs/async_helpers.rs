@@ -12,8 +12,8 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use super::{
-    helper_config, helper_parent, is_workspace_manager, AgentRunCoordinator, AgentRunRequest,
-    RunRoom, HELPER_MAX_RUNS, MAX_HELPERS_PER_COMPANION,
+    helper_parent, is_workspace_manager, AgentRunCoordinator, AgentRunRequest, RunRoom,
+    HELPER_MAX_RUNS, MAX_HELPERS_PER_COMPANION,
 };
 use crate::live::{run_status_event, LiveEventBody};
 use crate::runs::{
@@ -39,6 +39,20 @@ pub(super) fn operation_key(
     ]))
     .expect("string tuple serializes");
     Ok(format!("helper-{operation}:{:x}", Sha256::digest(bytes)))
+}
+
+/// A worktree launch has its own domain, so a replay with different
+/// worktree arguments is refused like any other changed launch.
+fn worktree_fingerprint(name: &str, task: &str, completion: &str, repo: &str) -> String {
+    let bytes = serde_json::to_vec(&json!([
+        "anima.async-helper.launch.worktree.v1",
+        name,
+        task,
+        completion,
+        repo
+    ]))
+    .expect("string tuple serializes");
+    format!("{:x}", Sha256::digest(bytes))
 }
 
 fn fingerprint(name: &str, task: &str, completion: &str) -> String {
@@ -206,6 +220,9 @@ impl AgentRunCoordinator {
                 entry["pendingSteerCount"] = json!(record.pending_steers.len());
                 entry["consumedSteerCount"] = json!(record.steered_keys.len());
                 entry["unconsumedSteerCount"] = json!(helper.unconsumed_steers.len());
+                if let Some(worktree) = &helper.worktree {
+                    entry["worktree"] = worktree.public_json(true);
+                }
                 entry["unconsumedSteers"] =
                     json!(helper.unconsumed_steers.iter().map(|steer| json!({
                     "acceptanceKey": steer.idempotency_key, "acceptedAtMs": steer.accepted_at_ms,
@@ -384,11 +401,27 @@ impl AgentRunCoordinator {
         task: String,
         completion: String,
         starts: Arc<AtomicUsize>,
+        worktree_repo: Option<String>,
     ) -> Result<String, String> {
         let coordinator = self.clone();
         // The mutation finishes even if its tool caller disconnects during save.
         tokio::spawn(async move {
-            coordinator
+            // Git runs before the transaction, never under the state lock. An
+            // assignment that does not take the worktree discards it.
+            let worktree = match &worktree_repo {
+                Some(repo) => {
+                    let workspace = coordinator
+                        .state
+                        .read()
+                        .await
+                        .workspace
+                        .as_ref()
+                        .map(|workspace| workspace.root_path.clone());
+                    Some(super::worktrees::create(workspace, repo.clone()).await?)
+                }
+                None => None,
+            };
+            let result = coordinator
                 .accept_async_helper_owned(
                     owner,
                     parent,
@@ -397,8 +430,15 @@ impl AgentRunCoordinator {
                     task,
                     completion,
                     starts,
+                    worktree_repo.zip(worktree.clone()),
                 )
-                .await
+                .await;
+            if let Some(worktree) = &worktree {
+                if !matches!(result, Ok((_, true))) {
+                    super::worktrees::discard(worktree).await;
+                }
+            }
+            result.map(|(answer, _)| answer)
         })
         .await
         .map_err(|_| "Helper acceptance worker stopped".to_string())?
@@ -414,7 +454,8 @@ impl AgentRunCoordinator {
         task: String,
         completion: String,
         starts: Arc<AtomicUsize>,
-    ) -> Result<String, String> {
+        worktree: Option<(String, super::worktrees::HelperWorktree)>,
+    ) -> Result<(String, bool), String> {
         if name.trim().is_empty()
             || name.len() > 80
             || task.trim().is_empty()
@@ -424,7 +465,21 @@ impl AgentRunCoordinator {
             return Err("name, task and completion must be within their supported bounds".into());
         }
         let key = operation_key("launch", &parent, &tool_call_id)?;
-        let digest = fingerprint(&name, &task, &completion);
+        let digest = match &worktree {
+            None => fingerprint(&name, &task, &completion),
+            Some((repo, _)) => worktree_fingerprint(&name, &task, &completion, repo),
+        };
+        let worktree = worktree.map(|(_, worktree)| worktree);
+        let run_text = match &worktree {
+            Some(worktree) => {
+                let text = format!("{task}{}", super::worktrees::task_note(worktree));
+                if text.len() > 32_768 {
+                    return Err("The task is too long to add the worktree instructions".into());
+                }
+                text
+            }
+            None => task.clone(),
+        };
         let transaction = self.control_plane_transaction().await;
         let (record, helper_id, baseline, slot, persist) = {
             let mut guard = self.state.write().await;
@@ -442,7 +497,7 @@ impl AgentRunCoordinator {
                             .into(),
                     );
                 }
-                return Ok(handle(original).to_string());
+                return Ok((handle(original).to_string(), false));
             }
             let origin = if completion == "origin" {
                 let origin =
@@ -501,7 +556,7 @@ impl AgentRunCoordinator {
                 self.try_slot_lease(&helper.state.id, HELPER_MAX_RUNS)
                     .map(|slot| (helper.clone(), slot))
             });
-            let config = helper_config(&parent_agent, name);
+            let config = super::helper_config_in(&parent_agent, name, worktree.as_ref());
             let (helper, baseline, slot) = if let Some((helper, slot)) = available {
                 let previous = helper.state.config;
                 guard.restore_agent_config(&helper.state.id, config);
@@ -545,7 +600,7 @@ impl AgentRunCoordinator {
                     source: RunSource::Delegation,
                     source_ref: None,
                     idempotency_key: None,
-                    text: task,
+                    text: run_text,
                     model: helper.state.config.model.clone(),
                     provider: helper.state.config.provider.clone(),
                     parent_run_id: Some(parent.run_id.clone()),
@@ -570,7 +625,11 @@ impl AgentRunCoordinator {
                     }
                 },
                 unconsumed_steers: Vec::new(),
+                worktree: worktree.clone(),
             });
+            if let Some(worktree) = &worktree {
+                super::worktrees::remember_repo(&mut guard.helper_worktree_repos, worktree);
+            }
             guard.runs.insert(record.clone());
             (
                 record,
@@ -643,7 +702,7 @@ impl AgentRunCoordinator {
         };
         self.enqueue_internal(&record, self.helper_start(request));
         drop(transaction);
-        Ok(answer)
+        Ok((answer, worktree.is_some()))
     }
 }
 

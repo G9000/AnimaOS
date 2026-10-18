@@ -124,6 +124,9 @@ pub(crate) struct SkillDraftResponse {
     /// `pending`, `approved`, or `rejected`.
     pub(crate) status: String,
     pub(crate) decided_at_ms: Option<u64>,
+    /// `autonomy:free` when the draft was approved automatically because its
+    /// agent runs in Free; `null` when the owner decided it (or it waits).
+    pub(crate) decided_by: Option<String>,
     /// Why a file draft's `SKILL.md` is not valid.
     pub(crate) problem: Option<String>,
 }
@@ -153,6 +156,7 @@ impl From<&DraftView> for SkillDraftResponse {
             created_at_ms: draft.created_at_ms,
             status: draft.status.as_str().into(),
             decided_at_ms: draft.decided_at_ms,
+            decided_by: draft.decided_by.clone(),
             problem: view.problem.clone(),
         }
     }
@@ -183,4 +187,19 @@ pub(crate) struct SkillDraftEnvelope {
 pub(crate) struct ApprovedSkillDraftEnvelope {
     pub(crate) skill: SkillResponse,
     pub(crate) draft: SkillDraftResponse,
+}
+
+/// Skills agents in Free saved themselves, newest first.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub(crate) struct SkillLedgerEnvelope {
+    pub(crate) entries: Vec<crate::skills::ledger::SkillLedgerEntry>,
+}
+
+/// An automatic change, undone: the skill with its previous content back, or
+/// `removed` when the agent had created it.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub(crate) struct SkillRevertResponse {
+    /// `null` when the skill was removed.
+    pub(crate) skill: Option<SkillResponse>,
+    pub(crate) removed: bool,
 }

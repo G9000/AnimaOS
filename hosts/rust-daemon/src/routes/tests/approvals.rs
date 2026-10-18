@@ -54,6 +54,7 @@ fn pending(agent: &str, session: &str, run: &str, at_ms: u64) -> ApprovalRequest
             run_id: run,
             call: &remember(),
             timeout_ms: 60_000,
+            reason: None,
         },
         at_ms,
     )

@@ -23,6 +23,9 @@ pub(crate) struct AsyncHelper {
     pub(crate) completion: HelperCompletionState,
     #[serde(default)]
     pub(crate) unconsumed_steers: Vec<RunSteer>,
+    /// The assignment's isolated git worktree and, once the run ended, its report.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) worktree: Option<crate::agent_runs::worktrees::HelperWorktree>,
 }
 
 /// Host-derived effective limits, frozen with this immutable assignment.

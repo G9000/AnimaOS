@@ -13,7 +13,7 @@ use super::approvals::STATUS_INVALID;
 use super::contracts::{
     ApprovedSkillDraftEnvelope, ErrorBody, SkillDeleteResponse, SkillDetailEnvelope,
     SkillDraftEnvelope, SkillDraftResponse, SkillDraftsEnvelope, SkillEnvelope, SkillFileResponse,
-    SkillResponse, SkillsEnvelope,
+    SkillLedgerEnvelope, SkillResponse, SkillRevertResponse, SkillsEnvelope,
 };
 use super::http::{json_response, read_limited_body, request_query};
 use super::jobs::{authorize, no_store};
@@ -22,6 +22,7 @@ use super::multipart::{
 };
 use super::sessions::rejected;
 use super::{parse_json_body, ApiError, AppState};
+use crate::skills::ledger::{RevertOutcome, MAX_SKILL_LEDGER_PAGE};
 use crate::skills::{
     DraftApproval, SkillContent, SkillError, IMPORT_NOT_MULTIPART, IMPORT_TOO_LARGE,
     MAX_SKILL_IMPORT_BYTES, SKILLS_NEED_WORKSPACE, SKILL_SLUG_INVALID,
@@ -276,6 +277,80 @@ pub(super) async fn approve_skill(
             StatusCode::OK,
             &SkillEnvelope {
                 skill: SkillResponse::from(&record),
+            },
+        ),
+        Err(error) => skill_error(error),
+    }
+}
+
+/// Ledger entries `GET /api/skill-ledger` returns without a `limit`.
+const DEFAULT_SKILL_LEDGER_PAGE: usize = 50;
+pub(super) const SKILL_LEDGER_LIMIT_INVALID: &str = "limit must be from 1 to 100";
+
+#[utoipa::path(get, path = "/api/skill-ledger", tag = "skills",
+    params(("limit" = Option<usize>, Query, description = "1–100, default 50")),
+    responses(
+        (status = 200, description = "Skills agents in Free saved themselves, newest first (the newest 200 are kept)", body = SkillLedgerEnvelope),
+        (status = 400, description = "An invalid limit", body = ErrorBody),
+        (status = 403, description = "Local owner required", body = ErrorBody)
+    ))]
+pub(super) async fn skill_ledger(State(state): State<AppState>, request: Request) -> Response {
+    if let Err(response) = authorize(&state, &request, true) {
+        return response;
+    }
+    let params = match request_query(request.uri()) {
+        Ok(params) => params,
+        Err(()) => return rejected(ApiError::bad_request_static("malformed query")),
+    };
+    let limit = match params.get("limit").map(String::as_str) {
+        None | Some("") => DEFAULT_SKILL_LEDGER_PAGE,
+        Some(value) => match value
+            .parse::<usize>()
+            .ok()
+            .filter(|limit| (1..=MAX_SKILL_LEDGER_PAGE).contains(limit))
+        {
+            Some(limit) => limit,
+            None => return rejected(ApiError::bad_request_static(SKILL_LEDGER_LIMIT_INVALID)),
+        },
+    };
+    answer(
+        StatusCode::OK,
+        &SkillLedgerEnvelope {
+            entries: state.agent_runs.skills().ledger(limit).await,
+        },
+    )
+}
+
+#[utoipa::path(post, path = "/api/skills/{slug}/revert-last", tag = "skills",
+    params(("slug" = String, Path)),
+    responses(
+        (status = 200, description = "The newest automatic change undone: the previous approved content is back, or the skill the agent created is removed (its folder is in .anima-trash/skills)", body = SkillRevertResponse),
+        (status = 403, description = "Local owner required", body = ErrorBody),
+        (status = 404, description = "No automatic change to undo for this skill", body = ErrorBody),
+        (status = 409, description = "No workspace is configured, the skill changed since the agent saved it, or its previous content was not kept", body = ErrorBody),
+        (status = 503, description = "The file or the registry could not be saved; the skill stays as it was", body = ErrorBody)
+    ))]
+pub(super) async fn revert_last_skill_change(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, false) {
+        return response;
+    }
+    match state.agent_runs.skills().revert_last(&slug).await {
+        Ok(RevertOutcome::Restored(record)) => answer(
+            StatusCode::OK,
+            &SkillRevertResponse {
+                skill: Some(SkillResponse::from(&record)),
+                removed: false,
+            },
+        ),
+        Ok(RevertOutcome::Removed) => answer(
+            StatusCode::OK,
+            &SkillRevertResponse {
+                skill: None,
+                removed: true,
             },
         ),
         Err(error) => skill_error(error),

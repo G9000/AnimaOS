@@ -351,7 +351,7 @@ pub(super) async fn put_approval_policy(
     // caller disconnects.
     let operation = tokio::spawn(async move {
         let transaction = state.agent_runs.control_plane_transaction().await;
-        let (previous, persist) = {
+        let (previous, previous_autonomy, persist) = {
             let mut guard = state.daemon.write().await;
             match guard.agents.get(&agent_id) {
                 None => return rejected(ApiError::not_found()),
@@ -360,16 +360,21 @@ pub(super) async fn put_approval_policy(
                 }
                 Some(_) => {}
             }
+            let previous_autonomy = guard.autonomy_of(&agent_id);
             let previous = guard.approvals.set_policy(&agent_id, policy);
-            (previous, guard.control_plane_persist_request())
+            // A class choice made by hand is Custom unless it equals a preset.
+            guard.autonomy.follow_policy(&agent_id, &policy);
+            (
+                previous,
+                previous_autonomy,
+                guard.control_plane_persist_request(),
+            )
         };
         if let Err(error) = persist.save().await {
-            state
-                .daemon
-                .write()
-                .await
-                .approvals
-                .restore_policy(&agent_id, previous);
+            let mut guard = state.daemon.write().await;
+            guard.approvals.restore_policy(&agent_id, previous);
+            guard.autonomy.set(previous_autonomy);
+            drop(guard);
             return rejected(ApiError::service_unavailable(error.to_string()));
         }
         drop(transaction);
@@ -479,7 +484,9 @@ pub(super) async fn create_approval_rule(
                 }
                 Some(_) => {}
             }
-            if guard.tool_registry.lookup(&tool).is_none() {
+            if guard.tool_registry.lookup(&tool).is_none()
+                && !crate::approvals::policy::PERMISSION_ONLY_TOOLS.contains(&tool.as_str())
+            {
                 return rejected(ApiError::bad_request_static(UNKNOWN_RULE_TOOL));
             }
             if risk_class(&tool) == RiskClass::Read {

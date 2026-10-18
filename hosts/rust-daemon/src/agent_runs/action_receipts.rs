@@ -206,11 +206,19 @@ impl RunActionJournal {
             .try_read()
             .map_err(|_| "Checkpoint authority is busy; no file effect was admitted")?;
         self.check_owner(&guard, true)?;
-        if guard
-            .workspace
-            .as_ref()
-            .map(|value| value.root_path.as_path())
-            != Some(workspace)
+        // A worktree helper's checkpoints follow its own checkout; every
+        // other run must still match the global workspace exactly.
+        let expected_workspace = guard
+            .agents
+            .get(&self.run.agent_id)
+            .and_then(|agent| super::worktrees::run_root(agent.config()))
+            .or_else(|| {
+                guard
+                    .workspace
+                    .as_ref()
+                    .map(|value| value.root_path.clone())
+            });
+        if expected_workspace.as_deref() != Some(workspace)
             || guard.checkpoint_root.as_deref() != Some(store)
         {
             return Err("Checkpoint workspace or host configuration changed".into());

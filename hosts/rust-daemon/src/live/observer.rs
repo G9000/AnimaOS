@@ -245,7 +245,15 @@ impl RunObserver for RunEvents {
                 } else {
                     Vec::new()
                 };
-                let (result_preview, truncated) = preview(&result);
+                // App and coding-agent results keep a card-shaped preview.
+                let (result_preview, truncated) = if name.starts_with("app_")
+                    || name.starts_with("acp_")
+                {
+                    crate::tools::process::live::session_preview(&result, super::MAX_PREVIEW_BYTES)
+                        .map_or_else(|| preview(&result), |compact| (compact, false))
+                } else {
+                    preview(&result)
+                };
                 inner.hub.runs().tool_finished(
                     &inner.run_id,
                     &step_id,

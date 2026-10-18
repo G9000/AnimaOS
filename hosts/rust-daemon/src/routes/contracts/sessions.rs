@@ -156,6 +156,22 @@ pub(crate) struct SessionResponse {
     /// Only single-session GET includes this live conversation estimate.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) context_usage: Option<SessionContextUsageResponse>,
+    /// Only an imported session (`origin: import`) carries its provenance.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) imported_from: Option<ImportedFromResponse>,
+}
+
+/// Where an imported session came from.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ImportedFromResponse {
+    /// `claude-code` or `codex`.
+    pub(crate) tool: String,
+    pub(crate) foreign_session_id: Option<String>,
+    /// The handle of the imported log.
+    pub(crate) path_hash: String,
+    /// The project folder the conversation ran in.
+    pub(crate) cwd: Option<String>,
 }
 
 impl From<&SessionView> for SessionResponse {
@@ -210,6 +226,15 @@ impl From<&SessionView> for SessionResponse {
             }),
             usage: None,
             context_usage: None,
+            imported_from: record
+                .imported_from
+                .as_ref()
+                .map(|imported| ImportedFromResponse {
+                    tool: imported.tool.clone(),
+                    foreign_session_id: imported.foreign_session_id.clone(),
+                    path_hash: imported.path_hash.clone(),
+                    cwd: imported.cwd.clone(),
+                }),
         }
     }
 }

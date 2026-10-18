@@ -3,6 +3,7 @@ import type { Approval, LearningReview, Session } from '@animaOS-SWARM/sdk';
 
 import type { DoneToday } from '../components/inbox/NeedsYouPanel';
 import { daemon, type TelegramConnector } from '../lib/daemon-api';
+import { onLearningReviewsChanged } from '../lib/inbox-events';
 import { doneActions, needsYouItems } from '../lib/needs-you';
 
 /** Sessions read for "Done today": the most recently active ones. */
@@ -34,6 +35,13 @@ export function useNeedsYou({
   const [done, setDone] = useState<DoneToday>({ state: 'loading' });
   const doneRequest = useRef(0);
 
+  // A review settling in the chat makes the suggestions here stale.
+  const [reviewsChanged, setReviewsChanged] = useState(0);
+  useEffect(
+    () => onLearningReviewsChanged(() => setReviewsChanged((n) => n + 1)),
+    [],
+  );
+
   useEffect(() => {
     setReviews([]);
     if (!agentId || !online) return;
@@ -44,7 +52,7 @@ export function useNeedsYou({
       // Reviews are optional here: Skills shows their errors.
       .catch(() => undefined);
     return () => controller.abort();
-  }, [agentId, online, refreshKey]);
+  }, [agentId, online, refreshKey, reviewsChanged]);
 
   const items = useMemo(
     () => needsYouItems({ approvals, telegram, reviews }),
@@ -56,7 +64,10 @@ export function useNeedsYou({
   const loadDone = useCallback(async () => {
     const request = ++doneRequest.current;
     if (!agentId || !online) {
-      setDone({ state: 'error', message: 'Reconnect to see today’s activity.' });
+      setDone({
+        state: 'error',
+        message: 'Reconnect to see today’s activity.',
+      });
       return;
     }
     setDone({ state: 'loading' });

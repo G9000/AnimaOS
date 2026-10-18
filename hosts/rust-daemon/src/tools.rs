@@ -13,7 +13,7 @@ mod mcp;
 #[cfg(test)]
 mod mcp_tests;
 mod memory;
-mod process;
+pub(crate) mod process;
 mod skills;
 mod team;
 #[cfg(test)]
@@ -668,6 +668,9 @@ impl ToolExecutionContext {
     }
 }
 
+const WORKTREE_PARAMETER: &str = "Run the helper in its own git worktree of repo (default false); refused outside a git repository with a commit";
+const REPO_PARAMETER: &str = "Workspace-relative folder inside the git repository to isolate (default \".\"); only with worktree: true";
+
 pub(crate) fn ctx_workspace_root(context: &ToolExecutionContext) -> Option<&Path> {
     context.workspace_root.as_deref()
 }
@@ -678,7 +681,24 @@ pub(crate) fn ctx_workspace_root(context: &ToolExecutionContext) -> Option<&Path
 pub(crate) fn is_process_tool(name: &str) -> bool {
     matches!(
         name,
-        "execute_code" | "bash" | "bg_start" | "bg_output" | "bg_stop" | "bg_list"
+        "execute_code"
+            | "bash"
+            | "bg_start"
+            | "bg_output"
+            | "bg_wait"
+            | "bg_stop"
+            | "bg_list"
+            | "app_start"
+            | "app_send"
+            | "app_read"
+            | "app_stop"
+            | "app_list"
+            | "acp_start"
+            | "acp_prompt"
+            | "acp_read"
+            | "acp_cancel"
+            | "acp_stop"
+            | "acp_list"
     )
 }
 
@@ -692,8 +712,8 @@ impl ToolRegistry {
         registry.register(tool_descriptor("execute_code", "Execute an explicitly configured local Python one-shot program with an exact native-tool grant intersection. Requires both execute_code and bash grants, current execution approval and durable per-call receipts. Missing interpreter is unavailable. Local mode is not a filesystem or network sandbox. Printed verification claims remain untrusted; cleanup uncertainty retains physical capacity.", code_parameters), execute_code);
         registry.register(tool_descriptor("list_workspace_agents", "Read the actual live workspace agent roster, including IDs, roles, and current status.", object_parameters(vec![])), team::list_workspace_agents);
         registry.register(tool_descriptor("delegate_to_agent", "Assign a bounded task to an existing specialist and wait for its recorded result. Use an agent ID from the roster. Delegation cannot grant tools or permissions you do not have.", object_parameters(vec![required_parameter("agent_id", non_blank_string_parameter("Existing specialist ID")), required_parameter("task", non_blank_string_parameter("Self-contained task, relevant context, and expected deliverable"))])), team::delegate_to_agent);
-        registry.register(tool_descriptor("spawn_helper", "Run a bounded task with a helper and wait for its saved result. Reuses an idle helper or creates one, up to four busy helpers and four starts per companion run. Only the companion can spawn helpers; helpers inherit its current tool permissions except shell/background-process tools, and cannot contact or create other agents. Each helper has at most eight tool turns and a two-minute execution deadline; completed effects are not rolled back. Future companion runs receive a fresh start allowance and reuse idle slots.", object_parameters(vec![required_parameter("name", non_blank_string_parameter("Short helper label, at most 80 bytes")), required_parameter("task", non_blank_string_parameter("Self-contained task, relevant context, and expected deliverable, at most 32768 bytes"))])), team::spawn_helper);
-        registry.register(tool_descriptor("spawn_helper_async", "Accept a bounded helper assignment and return its saved Queued run handle before execution. Requires an explicit grant. Four helper agents and four starts are shared with synchronous spawn_helper; helpers retain the existing inherited tool subset and approvals. Completion defaults to the saved original Chat. Explicit origin completes the exact ordinary native job attempt after all required callbacks settle; workflow, schedule and connector origins are unsupported. Use manual elsewhere. Bounds are eight tool turns, two minutes, at most 4096 output tokens per response and eight lifetime steer operations.", object_parameters(vec![required_parameter("name", non_blank_string_parameter("Helper label, at most 80 bytes")), required_parameter("task", non_blank_string_parameter("Task, at most 32768 bytes")), optional_parameter("completion", string_enum_parameter("Completion destination", &["chat", "manual", "origin"]))])), team::async_helper_operation);
+        registry.register(tool_descriptor("spawn_helper", "Run a bounded task with a helper and wait for its saved result. Reuses an idle helper or creates one, up to four busy helpers and four starts per companion run. Only the companion can spawn helpers; helpers inherit its current tool permissions except shell/background-process tools, and cannot contact or create other agents. Each helper has at most eight tool turns and a two-minute execution deadline; completed effects are not rolled back. Future companion runs receive a fresh start allowance and reuse idle slots. With worktree: true the helper edits an isolated git worktree of the repo instead of the shared checkout; the result reports its changed files and how to review and merge them.", object_parameters(vec![required_parameter("name", non_blank_string_parameter("Short helper label, at most 80 bytes")), required_parameter("task", non_blank_string_parameter("Self-contained task, relevant context, and expected deliverable, at most 32768 bytes")), optional_parameter("worktree", boolean_parameter(WORKTREE_PARAMETER)), optional_parameter("repo", string_parameter(REPO_PARAMETER))])), team::spawn_helper);
+        registry.register(tool_descriptor("spawn_helper_async", "Accept a bounded helper assignment and return its saved Queued run handle before execution. Requires an explicit grant. Four helper agents and four starts are shared with synchronous spawn_helper; helpers retain the existing inherited tool subset and approvals. Completion defaults to the saved original Chat. Explicit origin completes the exact ordinary native job attempt after all required callbacks settle; workflow, schedule and connector origins are unsupported. Use manual elsewhere. Bounds are eight tool turns, two minutes, at most 4096 output tokens per response and eight lifetime steer operations. With worktree: true the helper edits an isolated git worktree; its completion reports the changes.", object_parameters(vec![required_parameter("name", non_blank_string_parameter("Helper label, at most 80 bytes")), required_parameter("task", non_blank_string_parameter("Task, at most 32768 bytes")), optional_parameter("completion", string_enum_parameter("Completion destination", &["chat", "manual", "origin"])), optional_parameter("worktree", boolean_parameter(WORKTREE_PARAMETER)), optional_parameter("repo", string_parameter(REPO_PARAMETER))])), team::async_helper_operation);
         registry.register(tool_descriptor("list_helper_runs", "Inspect only this companion's async helper assignments and bounded committed results. An immutable run_id can retrieve one exact assignment. Acceptance and helper assertions are not independent validation.", object_parameters(vec![optional_parameter("run_id", non_blank_string_parameter("Exact immutable child run handle")), optional_parameter("limit", bounded_integer_parameter("Maximum assignments, default 10", 1, 20))])), team::async_helper_operation);
         registry.register(tool_descriptor("steer_helper", "Save additional untrusted task input for one exact Running or AwaitingApproval helper with an open inbox. At most eight accepted steer operations over the assignment lifetime; exact retries are free. Acceptance does not mean the model read the input.", object_parameters(vec![required_parameter("run_id", non_blank_string_parameter("Exact immutable child run handle")), required_parameter("message", non_blank_string_parameter("Additional task input, at most 32768 bytes"))])), team::async_helper_operation);
         registry.register(tool_descriptor("stop_helper", "Save a stop and suppress this helper assignment's completion, including after the child finished. Stops any admitted continuation before signalling. This does not undo completed effects or promise completed cleanup.", object_parameters(vec![required_parameter("run_id", non_blank_string_parameter("Exact immutable child run handle"))])), team::async_helper_operation);
@@ -1003,7 +1023,7 @@ impl ToolRegistry {
         registry.register(
             tool_descriptor(
                 "propose_skill",
-                "Propose a reusable skill (instructions saved as skills/<slug>/SKILL.md) for the owner to review on the Skills page. Nothing becomes a skill until the owner approves it.",
+                "Propose a reusable skill (instructions saved as skills/<slug>/SKILL.md) for the owner. Depending on the owner's autonomy setting it either waits for the owner's review on the Skills page or is saved and active at once (the owner can undo it); the result says which.",
                 object_parameters(vec![
                     required_parameter(
                         "name",
@@ -1370,6 +1390,20 @@ impl ToolRegistry {
                         "cwd",
                         string_parameter("Workspace-relative working directory"),
                     ),
+                    optional_parameter(
+                        "notify_on_exit",
+                        boolean_parameter(
+                            "Wake this conversation with a note when the command exits on its own (default true)",
+                        ),
+                    ),
+                    optional_parameter(
+                        "notify_on",
+                        array_parameter(
+                            "Wake this conversation once per pattern when a new output line matches it while the command runs (at most 4; text, or /regex/)",
+                            non_blank_string_parameter("Text or /regex/ (max 256 chars)"),
+                            None,
+                        ),
+                    ),
                 ]),
             ),
             process::execute_bg_start,
@@ -1390,6 +1424,30 @@ impl ToolRegistry {
         );
         registry.register(
             tool_descriptor(
+                "bg_wait",
+                "Wait for a background process to exit or print a pattern, then return its unread output",
+                object_parameters(vec![
+                    required_parameter("id", non_blank_string_parameter("Background process id")),
+                    optional_parameter(
+                        "timeout_ms",
+                        bounded_integer_parameter(
+                            "Longest wait in milliseconds (default 30000)",
+                            1,
+                            120_000,
+                        ),
+                    ),
+                    optional_parameter(
+                        "until",
+                        non_blank_string_parameter(
+                            "Return once new output contains this text; /regex/ for a pattern (max 256 chars)",
+                        ),
+                    ),
+                ]),
+            ),
+            process::execute_bg_wait,
+        );
+        registry.register(
+            tool_descriptor(
                 "bg_stop",
                 "Stop a running background process",
                 object_parameters(vec![required_parameter(
@@ -1407,6 +1465,7 @@ impl ToolRegistry {
             ),
             process::execute_bg_list,
         );
+        register_live_session_tools(&mut registry);
         registry.register(
             tool_descriptor(
                 "send_message",
@@ -1704,6 +1763,167 @@ fn object_parameters(parameters: Vec<SchemaParameter>) -> BTreeMap<String, DataV
 
 fn object_parameter(parameters: Vec<SchemaParameter>) -> DataValue {
     DataValue::Object(object_parameters(parameters))
+}
+
+/// Interactive apps and coding agents an agent keeps open across turns.
+fn register_live_session_tools(registry: &mut ToolRegistry) {
+    let id = || {
+        required_parameter(
+            "id",
+            non_blank_string_parameter("Session id from app_start or acp_start"),
+        )
+    };
+    let cwd = || {
+        optional_parameter(
+            "cwd",
+            string_parameter("Workspace-relative working directory"),
+        )
+    };
+    let until = || {
+        optional_parameter(
+            "until",
+            non_blank_string_parameter(
+                "Return once the screen or new output shows this text; /regex/ for a pattern (max 256 chars)",
+            ),
+        )
+    };
+    let wait_ms = |description: &str| {
+        optional_parameter(
+            "wait_ms",
+            bounded_integer_parameter(description, 0, 120_000),
+        )
+    };
+    registry.register(
+        tool_descriptor(
+            "app_start",
+            "Start a program on a real terminal (for interactive or full-screen apps such as claude, codex, opencode, a REPL) and return its screen. At most 4 apps and coding agents open at once; idle ones stop after 30 minutes.",
+            object_parameters(vec![
+                required_parameter(
+                    "command",
+                    non_blank_string_parameter("Command line to run, as in a shell"),
+                ),
+                cwd(),
+                optional_parameter(
+                    "cols",
+                    bounded_integer_parameter("Terminal width (default 120)", 20, 300),
+                ),
+                optional_parameter(
+                    "rows",
+                    bounded_integer_parameter("Terminal height (default 40)", 5, 100),
+                ),
+            ]),
+        ),
+        process::execute_app_start,
+    );
+    registry.register(
+        tool_descriptor(
+            "app_send",
+            "Type text and/or press keys in an app session, then return its screen. Text is typed literally; press Enter to submit.",
+            object_parameters(vec![
+                id(),
+                optional_parameter("text", string_parameter("Text to type")),
+                optional_parameter(
+                    "keys",
+                    array_parameter(
+                        "Keys to press after the text, in order: Enter, Tab, BackTab, Esc, Up, Down, Left, Right, Home, End, PageUp, PageDown, Backspace, Delete, Space, Ctrl+C, Ctrl+D, Ctrl+L, Ctrl+Z",
+                        non_blank_string_parameter("Key name"),
+                        None,
+                    ),
+                ),
+            ]),
+        ),
+        process::execute_app_send,
+    );
+    registry.register(
+        tool_descriptor(
+            "app_read",
+            "Read an app session's screen and the output since your last read. Optionally wait for text to appear or for output to settle.",
+            object_parameters(vec![
+                id(),
+                wait_ms("Longest wait in milliseconds; without until, returns once output settles"),
+                until(),
+            ]),
+        ),
+        process::execute_app_read,
+    );
+    registry.register(
+        tool_descriptor(
+            "app_stop",
+            "Stop an app session and every process it started",
+            object_parameters(vec![id()]),
+        ),
+        process::execute_app_stop,
+    );
+    registry.register(
+        tool_descriptor(
+            "app_list",
+            "List this agent's app sessions",
+            object_parameters(Vec::new()),
+        ),
+        process::execute_app_list,
+    );
+    registry.register(
+        tool_descriptor(
+            "acp_start",
+            "Start a coding agent that speaks the Agent Client Protocol (e.g. npx -y @agentclientprotocol/claude-agent-acp, codex-acp, opencode acp, gemini --acp). Its edit and command requests go through your owner's approvals.",
+            object_parameters(vec![
+                required_parameter(
+                    "command",
+                    non_blank_string_parameter("Command line that starts the ACP agent"),
+                ),
+                cwd(),
+                optional_parameter(
+                    "session_id",
+                    non_blank_string_parameter("The coding agent's own session id, to resume it"),
+                ),
+            ]),
+        ),
+        process::execute_acp_start,
+    );
+    registry.register(
+        tool_descriptor(
+            "acp_prompt",
+            "Send a prompt to a coding agent and wait up to wait_ms (default 30000) for it to finish; returns its messages, steps, plan and status",
+            object_parameters(vec![
+                id(),
+                required_parameter("text", non_blank_string_parameter("The prompt")),
+                wait_ms("Longest wait in milliseconds (default 30000)"),
+            ]),
+        ),
+        process::execute_acp_prompt,
+    );
+    registry.register(
+        tool_descriptor(
+            "acp_read",
+            "Read what a coding agent did since your last read, optionally waiting for its turn to finish",
+            object_parameters(vec![id(), wait_ms("Longest wait in milliseconds (default 0)")]),
+        ),
+        process::execute_acp_read,
+    );
+    registry.register(
+        tool_descriptor(
+            "acp_cancel",
+            "Cancel a coding agent's current turn; the session stays open",
+            object_parameters(vec![id()]),
+        ),
+        process::execute_acp_cancel,
+    );
+    registry.register(
+        tool_descriptor(
+            "acp_stop",
+            "Stop a coding agent and every process it started",
+            object_parameters(vec![id()]),
+        ),
+        process::execute_acp_stop,
+    );
+    registry.register(
+        tool_descriptor(
+            "acp_list",
+            "List this agent's coding agent sessions",
+            object_parameters(Vec::new()),
+        ),
+        process::execute_acp_list,
+    );
 }
 
 fn string_parameter(description: &str) -> DataValue {

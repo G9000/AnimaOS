@@ -50,6 +50,7 @@ pub(crate) async fn handle_create_agent(
         let snapshot = guard
             .create_agent(config)
             .map_err(|message| ApiError::bad_request(message))?;
+        guard.start_free(&snapshot.state.id);
         (snapshot, guard.control_plane_persist_request())
     };
     persist_request

@@ -24,6 +24,9 @@ pub enum Containment {
     JobObject,
     Cgroup,
     ProcessGroup,
+    /// Windows app sessions: the tree is killed as it stands at Stop; a
+    /// descendant whose parent already exited is missed.
+    ProcessTree,
 }
 
 pub struct Custody {
@@ -104,6 +107,79 @@ impl Custody {
         let _ = child;
     }
 
+    /// Records a leader spawned outside process-wrap, such as a PTY child. It
+    /// must already lead its own process group (a PTY child calls `setsid`).
+    pub fn attach_leader(&mut self, pid: u32) {
+        #[cfg(unix)]
+        {
+            self.pgid = i32::try_from(pid).ok().map(nix::unistd::Pid::from_raw);
+        }
+        #[cfg(not(unix))]
+        let _ = pid;
+    }
+
+    /// Signals the whole tree without waiting, for drop paths that cannot
+    /// await [`Custody::retire_group`].
+    pub fn kill_now(&self) {
+        #[cfg(unix)]
+        if let Some(pgid) = self.pgid {
+            let _ = nix::sys::signal::killpg(pgid, nix::sys::signal::Signal::SIGKILL);
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(leaf) = &self.cgroup {
+            leaf.kill();
+        }
+    }
+
+    /// [`Custody::retire`] for a leader recorded with [`Custody::attach_leader`].
+    /// `reaped` resolves once the caller has waited on the leader.
+    #[cfg(unix)]
+    pub async fn retire_group(&self, reaped: impl std::future::Future<Output = bool>) -> bool {
+        use nix::{
+            errno::Errno,
+            sys::signal::{killpg, Signal},
+        };
+        let Some(pgid) = self.pgid else {
+            return false;
+        };
+        // ESRCH: already gone; EPERM: unreaped zombies on macOS (see retire).
+        let killed = match killpg(pgid, Signal::SIGKILL) {
+            Ok(()) | Err(Errno::ESRCH | Errno::EPERM) => true,
+            Err(_) => false,
+        };
+        self.await_group_gone(pgid, killed, reaped.await).await
+    }
+
+    /// Kills members that left the group (cgroup only), then waits until no
+    /// member of the tree is left.
+    #[cfg(unix)]
+    async fn await_group_gone(&self, pgid: nix::unistd::Pid, killed: bool, reaped: bool) -> bool {
+        use nix::{errno::Errno, sys::signal::killpg};
+        #[cfg(target_os = "linux")]
+        let killed = killed && self.cgroup.as_ref().is_none_or(cgroup::Leaf::kill);
+        let deadline = tokio::time::Instant::now() + RETIRE_LIMIT;
+        loop {
+            let group_empty = killpg(pgid, None) == Err(Errno::ESRCH);
+            #[cfg(target_os = "linux")]
+            let group_empty = group_empty
+                && self
+                    .cgroup
+                    .as_ref()
+                    .is_none_or(|leaf| leaf.populated() == Some(false));
+            if group_empty {
+                #[cfg(target_os = "linux")]
+                if let Some(leaf) = &self.cgroup {
+                    leaf.remove();
+                }
+                return killed && reaped;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
     /// The cgroup shell wrapper exits 125, before any output, if it could not
     /// join; the program itself never ran.
     pub fn join_failed(&self, exit_code: i32, produced_output: bool) -> bool {
@@ -119,39 +195,22 @@ impl Custody {
         }
         #[cfg(unix)]
         {
-            use nix::{errno::Errno, sys::signal::killpg};
+            use nix::errno::Errno;
             let Some(pgid) = self.pgid else {
                 return false;
             };
-            // A group whose members all exited already reports ESRCH.
+            // A group whose members all exited already reports ESRCH; macOS
+            // reports EPERM while they are unreaped zombies. Either way
+            // await_group_gone proves the group empty before success.
             let killed = match child.start_kill() {
                 Ok(()) => true,
-                Err(error) => error.raw_os_error() == Some(Errno::ESRCH as i32),
+                Err(error) => matches!(
+                    error.raw_os_error(),
+                    Some(code) if code == Errno::ESRCH as i32 || code == Errno::EPERM as i32
+                ),
             };
-            #[cfg(target_os = "linux")]
-            let killed = killed && self.cgroup.as_ref().is_none_or(cgroup::Leaf::kill);
             let reaped = child.wait().await.is_ok();
-            let deadline = tokio::time::Instant::now() + RETIRE_LIMIT;
-            loop {
-                let group_empty = killpg(pgid, None) == Err(Errno::ESRCH);
-                #[cfg(target_os = "linux")]
-                let group_empty = group_empty
-                    && self
-                        .cgroup
-                        .as_ref()
-                        .is_none_or(|leaf| leaf.populated() == Some(false));
-                if group_empty {
-                    #[cfg(target_os = "linux")]
-                    if let Some(leaf) = &self.cgroup {
-                        leaf.remove();
-                    }
-                    return killed && reaped;
-                }
-                if tokio::time::Instant::now() >= deadline {
-                    return false;
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
+            self.await_group_gone(pgid, killed, reaped).await
         }
         #[cfg(not(any(windows, unix)))]
         {

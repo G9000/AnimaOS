@@ -235,6 +235,9 @@ impl AgentRunCoordinator {
             "replyMessageId": child.reply_message_id, "launchParentRunId": helper.parent_run_id,
             "resultText": preview, "resultTruncated": result.len() > preview.len()
         });
+        if let Some(worktree) = &helper.worktree {
+            envelope["worktree"] = worktree.public_json(false);
+        }
         let text = loop {
             envelope["resultText"] = serde_json::Value::String(preview.clone());
             envelope["resultTruncated"] = serde_json::Value::Bool(result.len() > preview.len());

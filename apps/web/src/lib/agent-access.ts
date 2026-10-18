@@ -54,6 +54,18 @@ const OPERATE_TOOLS = [
   'bg_output',
   'bg_stop',
   'bg_list',
+  'bg_wait',
+  'app_start',
+  'app_send',
+  'app_read',
+  'app_stop',
+  'app_list',
+  'acp_start',
+  'acp_prompt',
+  'acp_read',
+  'acp_cancel',
+  'acp_stop',
+  'acp_list',
 ] as const;
 
 export const ACCESS_PROFILES = {
@@ -71,8 +83,9 @@ export const ACCESS_PROFILES = {
   },
   operate: {
     label: 'Operate',
-    summary: 'Inspect, update, and run work in the workspace.',
-    risk: 'Can execute shell commands and manage background processes.',
+    summary:
+      'Edits files, runs commands and uses any app on this computer.',
+    risk: 'Can run shell commands, background work and apps such as coding agents. Rules still apply.',
     tools: OPERATE_TOOLS,
   },
 } as const;

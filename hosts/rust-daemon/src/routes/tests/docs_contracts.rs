@@ -42,7 +42,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 205, "complete registered operation count");
+    assert_eq!(actual.len(), 219, "complete registered operation count");
     let message_search_additions = [("GET", "/api/agents/{agent_id}/message-search")];
     for (method, path) in message_search_additions {
         assert!(
@@ -100,11 +100,77 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             "explicit speech operation must be registered"
         );
     }
+    let autonomy_additions = [
+        ("GET", "/api/agents/{agent_id}/autonomy"),
+        ("PUT", "/api/agents/{agent_id}/autonomy"),
+    ];
+    let learning_undo_additions = [(
+        "POST",
+        "/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}/undo",
+    )];
+    for (method, path) in learning_undo_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "Free-mode lesson undo must be registered"
+        );
+    }
+    let skill_ledger_additions = [
+        ("GET", "/api/skill-ledger"),
+        ("POST", "/api/skills/{slug}/revert-last"),
+    ];
+    for (method, path) in skill_ledger_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "skill ledger operation must be registered"
+        );
+    }
+    let coding_additions = [
+        ("GET", "/api/agents/{agent_id}/coding-keys"),
+        ("PUT", "/api/agents/{agent_id}/coding-keys"),
+        (
+            "POST",
+            "/api/agents/{agent_id}/app-sessions/{session_id}/stop",
+        ),
+        (
+            "POST",
+            "/api/agents/{agent_id}/acp-sessions/{session_id}/stop",
+        ),
+        (
+            "POST",
+            "/api/agents/{agent_id}/acp-sessions/{session_id}/cancel",
+        ),
+        ("GET", "/api/coding-apps"),
+    ];
+    for (method, path) in coding_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "coding app operation must be registered"
+        );
+    }
+    let import_additions = [
+        ("GET", "/api/foreign-sessions"),
+        ("GET", "/api/foreign-sessions/{handle}/preview"),
+        (
+            "POST",
+            "/api/agents/{agent_id}/foreign-sessions/{handle}/import",
+        ),
+    ];
+    for (method, path) in import_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "foreign session import operation must be registered"
+        );
+    }
     assert_eq!(
         actual
             .iter()
             .filter(|(method, path)| {
-                !speech_additions.contains(&(method.as_str(), path.as_str()))
+                !coding_additions.contains(&(method.as_str(), path.as_str()))
+                    && !autonomy_additions.contains(&(method.as_str(), path.as_str()))
+                    && !skill_ledger_additions.contains(&(method.as_str(), path.as_str()))
+                    && !learning_undo_additions.contains(&(method.as_str(), path.as_str()))
+                    && !import_additions.contains(&(method.as_str(), path.as_str()))
+                    && !speech_additions.contains(&(method.as_str(), path.as_str()))
                     && !message_search_additions.contains(&(method.as_str(), path.as_str()))
                     && !credential_additions.contains(&(method.as_str(), path.as_str()))
                     && !report_additions.contains(&(method.as_str(), path.as_str()))
@@ -138,6 +204,11 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             .iter()
             .filter(
                 |(method, path)| !additions.contains(&(method.as_str(), path.as_str()))
+                    && !coding_additions.contains(&(method.as_str(), path.as_str()))
+                    && !autonomy_additions.contains(&(method.as_str(), path.as_str()))
+                    && !skill_ledger_additions.contains(&(method.as_str(), path.as_str()))
+                    && !learning_undo_additions.contains(&(method.as_str(), path.as_str()))
+                    && !import_additions.contains(&(method.as_str(), path.as_str()))
                     && !message_search_additions.contains(&(method.as_str(), path.as_str()))
                     && !speech_additions.contains(&(method.as_str(), path.as_str()))
                     && !credential_additions.contains(&(method.as_str(), path.as_str()))

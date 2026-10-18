@@ -1,8 +1,21 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { ChatGptClient, type ChatGptModelsSnapshot } from '@animaOS-SWARM/sdk';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { daemon, type DaemonProvider } from '../../lib/daemon-api';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from 'vitest';
+import { DEFAULT_APPROVAL_POLICY } from '@animaOS-SWARM/sdk';
+import {
+  communityBundlesOwnerApi,
+  daemon,
+  type DaemonProvider,
+} from '../../lib/daemon-api';
 import { CompanionSetup } from './CompanionSetup';
 
 const providers: DaemonProvider[] = [
@@ -25,8 +38,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
   localStorage.clear();
 });
+let setAutonomy: MockInstance<typeof daemon.setAutonomy>;
 beforeEach(() => {
   vi.spyOn(daemon, 'inspectWorkspace').mockResolvedValue({ found: false });
+  setAutonomy = vi.spyOn(daemon, 'setAutonomy').mockImplementation(
+    async (_id, patch) => ({
+      mode: patch.mode ?? 'free',
+      smartCheck: false,
+      denyPatterns: [],
+      policy: DEFAULT_APPROVAL_POLICY,
+    }),
+  );
 });
 
 function renderSetup(
@@ -508,6 +530,109 @@ describe('CompanionSetup', () => {
       expect.arrayContaining(['bash', 'browser_navigate', 'browser_observe']),
     );
     expect(agent.tools).not.toContain('browser_act');
+  });
+
+  it('starts Free, saves it after creating, and Operate no longer changes the class policy', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
+    vi.spyOn(daemon, 'bootstrapWorkspace').mockResolvedValue({
+      agent: { state: { id: 'main' } },
+    } as never);
+    const setPolicy = vi.spyOn(daemon, 'setApprovalPolicy');
+    const onCreated = vi.fn();
+    renderSetup({ onCreated });
+    const user = userEvent.setup();
+    await toAccess(user);
+    expect(screen.getByRole('radio', { name: /^Free/ })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /^Strict/ })).not.toBeChecked();
+    await user.click(screen.getByRole('radio', { name: /Operate/ }));
+    await user.click(button('Continue'));
+    await user.click(await screen.findByRole('button', { name: 'Finish setup' }));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
+    expect(setAutonomy).toHaveBeenCalledWith('main', { mode: 'free' });
+    expect(setPolicy).not.toHaveBeenCalled();
+  });
+
+  it('saves Strict when chosen, and a failed save never blocks the new companion', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
+    vi.spyOn(daemon, 'bootstrapWorkspace').mockResolvedValue({
+      agent: { state: { id: 'main' } },
+    } as never);
+    setAutonomy.mockRejectedValue(new Error('daemon down'));
+    const onCreated = vi.fn();
+    renderSetup({ onCreated });
+    const user = userEvent.setup();
+    await toAccess(user);
+    await user.click(screen.getByRole('radio', { name: /^Strict/ }));
+    await user.click(button('Continue'));
+    await user.click(await screen.findByRole('button', { name: 'Finish setup' }));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
+    expect(setAutonomy).toHaveBeenCalledWith('main', { mode: 'strict' });
+  });
+
+  it('starts from Coder: Operate, the coding apps found, and their know-how without blocking creation', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
+    const create = vi.spyOn(daemon, 'bootstrapWorkspace').mockResolvedValue({
+      agent: { state: { id: 'coder', name: 'Coder' } },
+    } as never);
+    const setPolicy = vi.spyOn(daemon, 'setApprovalPolicy');
+    vi.spyOn(daemon, 'codingApps').mockResolvedValue({
+      apps: [
+        { id: 'claude-code', name: 'Claude Code', found: true, version: '2.1.286', problem: null, bundleId: 'anima.coding.claude-code', manifestText: 'claude-manifest' },
+        { id: 'codex', name: 'Codex', found: true, version: null, problem: "installed but won't start", bundleId: 'anima.coding.codex', manifestText: 'codex-manifest' },
+        { id: 'opencode', name: 'OpenCode', found: false, version: null, problem: null, bundleId: 'anima.coding.opencode', manifestText: 'opencode-manifest' },
+      ],
+      handoff: { bundleId: 'anima.coding.delegate', manifestText: 'handoff-manifest' },
+    });
+    const review = vi
+      .spyOn(communityBundlesOwnerApi, 'review')
+      .mockImplementation(async (_agentId, input) => {
+        if (input.manifestText === 'handoff-manifest') throw new Error('bad manifest');
+        return { id: `review-${input.manifestText}`, reviewDigest: 'digest' } as never;
+      });
+    const install = vi
+      .spyOn(communityBundlesOwnerApi, 'install')
+      .mockResolvedValue({} as never);
+    const onCreated = vi.fn();
+    renderSetup({ onCreated });
+    const user = userEvent.setup();
+    await start(user);
+    await user.click(button('Continue'));
+    await user.click(button('Coder'));
+    expect(screen.getByRole('textbox', { name: 'Agent name' })).toHaveValue('Coder');
+    expect(screen.getByRole('textbox', { name: "What it's for" })).toHaveValue(
+      'Hands coding work to the coding apps on this computer, then reads the changes and runs the checks itself.',
+    );
+    await user.click(button('Continue'));
+    expect(screen.getByRole('radio', { name: /Operate/ })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /^Free/ })).toBeChecked();
+    const chips = await screen.findByRole('list', { name: 'Coding apps on this computer' });
+    expect(chips).toHaveTextContent('Claude CodeFound · 2.1.286');
+    expect(chips).toHaveTextContent('CodexNeeds reinstall');
+    expect(chips).toHaveTextContent('OpenCodeNot found');
+    await user.click(button('Continue'));
+    await user.click(await screen.findByRole('button', { name: 'Finish setup' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      "know-how for handing off work didn't install",
+    );
+    const agent = create.mock.calls[0][0].agent;
+    expect(agent.name).toBe('Coder');
+    expect(agent.tools).toEqual(expect.arrayContaining(['app_start', 'acp_start']));
+    expect(agent.system).toContain('Hands coding work to the coding apps');
+    expect(setAutonomy).toHaveBeenCalledWith('coder', { mode: 'free' });
+    expect(setPolicy).not.toHaveBeenCalled();
+    // Codex is found but broken, so it gets no know-how.
+    expect(review.mock.calls.map(([, input]) => input.manifestText)).toEqual([
+      'claude-manifest',
+      'handoff-manifest',
+    ]);
+    expect(install).toHaveBeenCalledWith('coder', {
+      reviewId: 'review-claude-manifest',
+      reviewDigest: 'digest',
+    });
+    expect(install).toHaveBeenCalledTimes(1);
+    expect(onCreated).not.toHaveBeenCalled();
+    await user.click(button('Continue'));
+    expect(onCreated).toHaveBeenCalledOnce();
   });
 
   it('uploads a chosen avatar after the companion is created', async () => {

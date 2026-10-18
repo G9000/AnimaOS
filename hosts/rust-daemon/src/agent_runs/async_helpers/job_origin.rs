@@ -347,6 +347,7 @@ mod tests {
                 reserved_run_id: "callback-first".into(),
             },
             unconsumed_steers: vec![],
+            worktree: None,
         });
         let mut second = first.clone();
         second.id = "child-second".into();

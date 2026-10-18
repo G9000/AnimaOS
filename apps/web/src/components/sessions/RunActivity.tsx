@@ -14,7 +14,14 @@ import type { ChatMessage } from '../../lib/types';
 import { ApprovalCard } from './ApprovalCard';
 import { AutomationNoticeCard } from './AutomationNoticeCard';
 import { HelperCard } from './HelperCard';
+import { PlanNoteCard } from './PlanCard';
 import { ToolStepCard } from './ToolStepCard';
+import { CodingSessionCard } from '../coding/CodingSessionCard';
+import {
+  mergeAcpSnapshots,
+  parseCodingSession,
+  type CodingSessionView,
+} from '../../lib/coding-sessions';
 import { AttachmentReferences } from '../attachments/AttachmentReferences';
 import { messageAttachment } from '../../lib/attachments';
 import {
@@ -57,6 +64,60 @@ function stepKeys(steps: readonly ToolStep[]): string[] {
   });
 }
 
+interface SessionSnapshot {
+  session: CodingSessionView;
+  /** Where its latest snapshot is among the steps. */
+  index: number;
+  typed: number;
+}
+
+/** The latest snapshot of each app or coding-agent session the steps
+ *  touched, in the order they first appear. */
+function sessionSnapshots(steps: readonly ToolStep[]): SessionSnapshot[] {
+  const byId = new Map<string, SessionSnapshot>();
+  steps.forEach((step, index) => {
+    if (step.status !== 'success') return;
+    const parsed = parseCodingSession(step.result);
+    if (!parsed) return;
+    const key = `${parsed.kind}:${parsed.id}`;
+    const known = byId.get(key);
+    const session =
+      parsed.kind === 'acp_session' && known?.session.kind === 'acp_session'
+        ? mergeAcpSnapshots(known.session, parsed)
+        : parsed;
+    const typed =
+      (known?.typed ?? 0) + (step.name === 'app_send' ? 1 : 0);
+    byId.set(key, { session, index, typed });
+  });
+  // A later call on the same session that is still running (a prompt the
+  // coding agent is working on, maybe waiting on an approval) outranks the
+  // last finished snapshot's status.
+  steps.forEach((step, index) => {
+    if (step.status !== 'running') return;
+    const kind = step.name.startsWith('acp_')
+      ? 'acp_session'
+      : step.name.startsWith('app_')
+        ? 'app_session'
+        : null;
+    const id = /(?:^|,\s*)id:\s*([a-z]+-\d+)/.exec(step.argumentsPreview)?.[1];
+    if (!kind || !id) return;
+    const known = byId.get(`${kind}:${id}`);
+    if (!known || known.index > index) return;
+    const status = known.session.status;
+    if (status === 'stopped' || status === 'exited') return;
+    byId.set(`${kind}:${id}`, {
+      ...known,
+      session: { ...known.session, status: 'running' } as CodingSessionView,
+    });
+  });
+  return [...byId.values()];
+}
+
+function typedNote(typed: number): string | undefined {
+  if (typed === 0) return undefined;
+  return `Typed ${typed} ${typed === 1 ? 'message' : 'messages'}`;
+}
+
 /** Tool requests as cards (spec §15.2): open while the run works, then
  *  collapsed to "N tool requests · Ns". */
 export function ToolBlock({
@@ -64,11 +125,14 @@ export function ToolBlock({
   active,
   elapsedMs,
   actions,
+  onStop,
 }: {
   steps: readonly ToolStep[];
   active: boolean;
   elapsedMs?: number;
   actions?: TranscriptActions;
+  /** Stops the run these steps belong to (a plan card's Stop). */
+  onStop?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const count = steps.length;
@@ -81,6 +145,9 @@ export function ToolBlock({
     : `${count} ${count === 1 ? 'tool request' : 'tool requests'} · ${formatElapsed(total)}`;
   const expanded = active || open;
   const keys = stepKeys(steps);
+  const agentId = actions?.sessionAgentId;
+  const snapshots = sessionSnapshots(steps);
+  const pinned = new Set(snapshots.map((snapshot) => snapshot.index));
   // Spec §15.2: an automation the companion created stays visible with
   // Undo, even when the block is collapsed.
   const notices: Automation[] = [];
@@ -89,8 +156,23 @@ export function ToolBlock({
     if (automation && !notices.some((known) => known.id === automation.id))
       notices.push(automation);
   }
+  // A plan the agent showed and started on its own (Free autonomy); one
+  // waiting for the owner is an approval card instead.
+  const plans = steps.flatMap((step, index) =>
+    step.status === 'success' && step.plan
+      ? [{ plan: step.plan, key: keys[index] }]
+      : [],
+  );
   return (
     <div className="tool-block" data-active={active || undefined}>
+      {plans.map(({ plan, key }) => (
+        <PlanNoteCard
+          key={key}
+          plan={plan}
+          working={active}
+          onStop={active ? onStop : undefined}
+        />
+      ))}
       {active ? (
         <p className="tool-block-label">{label}</p>
       ) : (
@@ -114,12 +196,27 @@ export function ToolBlock({
                   onOpen={actions?.onOpenSession}
                 />
               ) : (
-                <ToolStepCard step={step} />
+                <ToolStepCard
+                  step={step}
+                  agentId={agentId}
+                  pinned={pinned.has(index)}
+                />
               )}
             </li>
           ))}
         </ul>
       )}
+      {snapshots.map(({ session, typed, index }) => (
+        // A newer snapshot mounts afresh: a local Stop or Cancel no longer
+        // stands in for what the daemon reported.
+        <CodingSessionCard
+          key={`${session.kind}:${session.id}:${keys[index]}`}
+          session={session}
+          agentId={agentId}
+          active={active}
+          footer={typedNote(typed)}
+        />
+      ))}
       {notices.map((automation) => (
         <AutomationNoticeCard
           key={automation.id}
@@ -222,6 +319,11 @@ export function RunActivity({
           active={active}
           elapsedMs={active ? elapsed : undefined}
           actions={actions}
+          onStop={
+            active && actions?.onStopRun
+              ? () => actions.onStopRun?.(run)
+              : undefined
+          }
         />
       )}
       {live.approvals.map((approval) => (

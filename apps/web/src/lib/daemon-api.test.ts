@@ -1090,3 +1090,50 @@ it('uses same-origin selected Drive status, consent and local disconnect transpo
     selectedFileIds: ['File_1'],
   });
 });
+
+describe('coding apps', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('stops, cancels and reads keys at the agent-scoped paths', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => Response.json({ keys: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    await daemon.stopAppSession('agent /?', 'app-3');
+    await daemon.cancelAcpTurn('agent /?', 'acp-1');
+    await daemon.stopAcpSession('agent /?', 'acp-1');
+    await daemon.setCodingKeys('agent /?', ['OPENAI_API_KEY']);
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['/api/agents/agent%20%2F%3F/app-sessions/app-3/stop', 'POST'],
+      ['/api/agents/agent%20%2F%3F/acp-sessions/acp-1/cancel', 'POST'],
+      ['/api/agents/agent%20%2F%3F/acp-sessions/acp-1/stop', 'POST'],
+      ['/api/agents/agent%20%2F%3F/coding-keys', 'PUT'],
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[3][1]!.body as string)).toEqual({
+      enabled: ['OPENAI_API_KEY'],
+    });
+  });
+
+  it('reads and changes how much an agent asks', async () => {
+    const autonomy = {
+      mode: 'strict',
+      smartCheck: false,
+      denyPatterns: ['rm -rf build/*'],
+      policy: { write: 'ask', exec: 'ask', network: 'allow', delegate: 'ask' },
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => Response.json(autonomy));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(daemon.autonomy('agent /?')).resolves.toEqual(autonomy);
+    await daemon.setAutonomy('agent /?', { mode: 'strict', smartCheck: true });
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['/api/agents/agent%20%2F%3F/autonomy', undefined],
+      ['/api/agents/agent%20%2F%3F/autonomy', 'PUT'],
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[1][1]!.body as string)).toEqual({
+      mode: 'strict',
+      smartCheck: true,
+    });
+  });
+});

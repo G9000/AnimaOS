@@ -123,5 +123,8 @@ export function useChatGptModels(scopeKey: string, enabled = true) {
     busy: enabled && (result?.owner !== owner || result?.busy === true),
     error: result?.owner === owner ? result.error : null,
     refresh: () => request(true),
+    /** Re-reads the snapshot without contacting ChatGPT, e.g. after the
+     *  account was connected somewhere this picker did not see. */
+    reload: () => request(false),
   };
 }

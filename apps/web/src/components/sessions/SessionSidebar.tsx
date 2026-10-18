@@ -163,6 +163,11 @@ function SessionRow({
               {SESSION_KIND_LABELS[session.kind]}
             </span>
           )}
+          {session.origin === 'import' && (
+            <span className="session-source" aria-hidden>
+              {session.importedFrom?.tool === 'codex' ? 'Codex' : 'Claude Code'}
+            </span>
+          )}
           {session.pendingApprovals > 0 && (
             <span className="session-approval-badge" aria-hidden>
               {session.pendingApprovals}

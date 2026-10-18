@@ -10,8 +10,8 @@ const groups = [
   ],
   [
     'terminal',
-    'Coding & processes',
-    'Run commands and manage local development work.',
+    'Apps & terminals',
+    'Run commands, background work and any app on this computer, such as coding agents.',
   ],
   [
     'memory',

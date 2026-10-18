@@ -104,3 +104,16 @@ async fn unix_setsid_escape_is_killed_only_with_a_cgroup() {
     assert!(retired);
     assert_eq!(alive, !cgroup, "cgroup={cgroup}");
 }
+
+/// A leader that exited but was not reaped yet leaves a group of zombies;
+/// macOS answers `killpg` on such a group with EPERM, not ESRCH. Stop must
+/// still prove the tree gone.
+#[cfg(unix)]
+#[tokio::test]
+async fn retire_of_an_exited_unreaped_leader_proves_the_tree_gone() {
+    let root = tempfile::tempdir().unwrap();
+    let (custody, mut child) = launch(root.path(), "process.exit(0)");
+    // Let it exit without anyone waiting on it.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(custody.retire(&mut child).await);
+}

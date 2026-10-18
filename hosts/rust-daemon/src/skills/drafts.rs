@@ -222,6 +222,18 @@ impl SkillService {
         id: &str,
         approval: DraftApproval,
     ) -> Result<ApprovedDraft, SkillError> {
+        self.approve_draft_by(id, approval, None).await
+    }
+
+    /// `approve_draft`, recording who approved it when it was not the owner
+    /// (`decided_by`, e.g. `autonomy:free`). Every approval takes this one
+    /// path, so hashing, pinning, the file write, and the scan agree.
+    pub(crate) async fn approve_draft_by(
+        &self,
+        id: &str,
+        approval: DraftApproval,
+        decided_by: Option<String>,
+    ) -> Result<ApprovedDraft, SkillError> {
         if let Some(body) = &approval.body {
             validate_body(body).map_err(SkillError::invalid)?;
         }
@@ -334,6 +346,7 @@ impl SkillService {
                     skills.put(record).map_err(SkillError::conflict)?;
                     let mut draft = previous_draft.clone();
                     draft.decide(DraftStatus::Approved, now_ms);
+                    draft.decided_by = decided_by;
                     skills.put_draft(draft.clone());
                     skills.prune_decided(now_ms);
                     let undo_slug = slug.clone();

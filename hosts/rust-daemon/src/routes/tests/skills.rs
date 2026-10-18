@@ -832,3 +832,137 @@ async fn a_session_message_can_carry_an_enabled_skill() {
     assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
     assert_eq!(json_body(refused).await["error"], SKILL_NOT_RUNNABLE);
 }
+
+/// A daemon with one companion in Free and the skill it saved itself.
+async fn free_agent_saved(label: &str) -> (Arc<RwLock<DaemonState>>, std::path::PathBuf) {
+    let (state, root) = daemon(label);
+    let agent = {
+        let mut guard = state.write().await;
+        let agent = guard
+            .create_agent(crate::agent_runs::test_support::companion_config(
+                "companion",
+            ))
+            .unwrap()
+            .state
+            .id;
+        guard.start_free(&agent);
+        agent
+    };
+    let mut proposed = proposal("Notes");
+    proposed.by.agent_id = agent;
+    let outcome = crate::skills::test_support::service(&state)
+        .propose_from_agent(proposed)
+        .await
+        .unwrap();
+    assert!(matches!(
+        outcome,
+        crate::skills::ledger::ProposeOutcome::Activated { .. }
+    ));
+    (state, root)
+}
+
+#[tokio::test]
+async fn the_skill_ledger_lists_and_undoes_what_a_free_agent_saved() {
+    let (state, root) = free_agent_saved("routes-ledger").await;
+    let app = router(state, DaemonConfig::default());
+
+    let ledger = send(&app, "GET", "/api/skill-ledger?limit=5", None).await;
+    assert_eq!(ledger.status(), StatusCode::OK);
+    assert_eq!(ledger.headers()["cache-control"], "no-store");
+    let ledger = json_body(ledger).await;
+    let entries = ledger["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["skillSlug"], "notes");
+    assert_eq!(entries[0]["action"], "created");
+    assert_eq!(entries[0]["runId"], "run_1");
+    assert_eq!(entries[0]["revertedAt"], Value::Null);
+    let decided =
+        json_body(send(&app, "GET", "/api/skill-drafts?status=decided", None).await).await;
+    assert_eq!(decided["drafts"][0]["decidedBy"], "autonomy:free");
+    for limit in ["0", "101", "x"] {
+        let response = send(
+            &app,
+            "GET",
+            &format!("/api/skill-ledger?limit={limit}"),
+            None,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{limit}");
+    }
+
+    let undone = send(&app, "POST", "/api/skills/notes/revert-last", None).await;
+    assert_eq!(undone.status(), StatusCode::OK);
+    assert_eq!(undone.headers()["cache-control"], "no-store");
+    let undone = json_body(undone).await;
+    assert_eq!(undone["removed"], true);
+    assert_eq!(undone["skill"], Value::Null);
+    assert!(!root.join("skills/notes/SKILL.md").exists());
+    let again = send(&app, "POST", "/api/skills/notes/revert-last", None).await;
+    assert_eq!(again.status(), StatusCode::NOT_FOUND);
+    assert_eq!(again.headers()["cache-control"], "no-store");
+    let ledger = json_body(send(&app, "GET", "/api/skill-ledger", None).await).await;
+    assert!(ledger["entries"][0]["revertedAt"].is_u64());
+}
+
+#[tokio::test]
+async fn revert_last_restores_the_previous_content_through_the_route() {
+    let (state, root) = daemon("routes-ledger-update");
+    let app = router(state.clone(), DaemonConfig::default());
+    let before = json_body(send(&app, "PUT", "/api/skills/notes", Some(notes())).await).await;
+    let agent = {
+        let mut guard = state.write().await;
+        let agent = guard
+            .create_agent(crate::agent_runs::test_support::companion_config(
+                "companion",
+            ))
+            .unwrap()
+            .state
+            .id;
+        guard.start_free(&agent);
+        agent
+    };
+    let mut proposed = proposal("notes");
+    proposed.by.agent_id = agent;
+    proposed.body = "Do it better.".into();
+    crate::skills::test_support::service(&state)
+        .propose_from_agent(proposed)
+        .await
+        .unwrap();
+    assert_ne!(
+        std::fs::read_to_string(root.join("skills/notes/SKILL.md")).unwrap(),
+        skill_text("notes")
+    );
+
+    let undone = json_body(send(&app, "POST", "/api/skills/notes/revert-last", None).await).await;
+    assert_eq!(undone["removed"], false);
+    assert_eq!(
+        undone["skill"]["approvedHash"],
+        before["skill"]["approvedHash"]
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("skills/notes/SKILL.md")).unwrap(),
+        skill_text("notes")
+    );
+}
+
+#[tokio::test]
+async fn the_skill_ledger_routes_require_the_owner() {
+    let (state, root) = free_agent_saved("routes-ledger-auth").await;
+    let app = router(state, DaemonConfig::default());
+    for (method, uri) in [
+        ("GET", "/api/skill-ledger"),
+        ("POST", "/api/skills/notes/revert-last"),
+    ] {
+        let refused = app
+            .clone()
+            .oneshot(request(method, uri, "https://untrusted.example", None))
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), StatusCode::FORBIDDEN, "{method} {uri}");
+        assert_eq!(refused.headers()["cache-control"], "no-store");
+    }
+    assert!(
+        root.join("skills/notes/SKILL.md").exists(),
+        "nothing was undone"
+    );
+}

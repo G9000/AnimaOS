@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   daemon,
+  installKnowHow,
   MODEL_SUGGESTIONS,
+  type CodingApp,
+  type CodingKnowHow,
   type DaemonProvider,
   type DaemonSnapshot,
   type DaemonWorkspaceState,
@@ -38,6 +41,24 @@ const ACCESS_ORDER: readonly AccessProfile[] = [
   'operate',
 ];
 const WEB_READ_TOOLS = ['browser_navigate', 'browser_observe'];
+
+/** The "Coder" starting point: Operate, the coding apps' know-how, and a
+ *  persona that hands implementation to them and verifies their work. */
+export const CODER_TEMPLATE = {
+  name: 'Coder',
+  purpose:
+    'Hands coding work to the coding apps on this computer, then reads the changes and runs the checks itself.',
+  instruction:
+    'You delegate implementation to the coding apps on this computer (such as Claude Code, Codex, OpenCode or Gemini CLI) and verify their work: read the diff and run the checks yourself before you report. Never type credentials into an app; if one is not signed in, ask the owner to sign in.',
+} as const;
+
+type CodingApps = { apps: CodingApp[]; handoff: CodingKnowHow | null };
+
+function codingAppState(app: CodingApp): string {
+  if (app.found && !app.problem)
+    return app.version ? `Found · ${app.version}` : 'Found';
+  return app.problem ? 'Needs reinstall' : 'Not found';
+}
 
 const SOURCES: Record<ModelSource, { title: string; summary: string }> = {
   chatgpt: {
@@ -123,7 +144,7 @@ function Option({
   checked: boolean;
   disabled?: boolean;
   onChange(): void;
-  title: string;
+  title: ReactNode;
   summary?: string;
   children?: ReactNode;
 }) {
@@ -168,6 +189,18 @@ export function CompanionSetup({
   const sourceChosen = useRef(false);
   const [modelScope, setModelScope] = useState({ revision: 0, pending: false });
   const [access, setAccess] = useState<AccessProfile>('collaborate');
+  // How much it asks, separate from what it can use; new agents start Free.
+  const [autonomy, setAutonomy] = useState<'free' | 'strict'>('free');
+  const [coder, setCoder] = useState(false);
+  const [purpose, setPurpose] = useState('');
+  const [codingApps, setCodingApps] = useState<CodingApps | null>(null);
+  const [codingAppsError, setCodingAppsError] = useState(false);
+  // Set when the agent exists but some know-how did not install: a quiet
+  // note, then Continue.
+  const [knowHowNote, setKnowHowNote] = useState<{
+    note: string;
+    agent: DaemonSnapshot;
+  } | null>(null);
   const [browseWeb, setBrowseWeb] = useState(false);
   const [voiceURI, setVoiceURI] = useState<string | null>(null);
   const [speakingVoice, setSpeakingVoice] = useState<string | null>(null);
@@ -253,6 +286,35 @@ export function CompanionSetup({
   useEffect(() => {
     headingRef.current?.focus();
   }, [step]);
+  useEffect(() => {
+    if (!coder) return;
+    let current = true;
+    setCodingAppsError(false);
+    daemon.codingApps().then(
+      (result) => {
+        if (current)
+          setCodingApps({ apps: result.apps, handoff: result.handoff ?? null });
+      },
+      () => {
+        if (current) setCodingAppsError(true);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [coder]);
+  const startFromCoder = () => {
+    setCoder(true);
+    setName(CODER_TEMPLATE.name);
+    setPurpose(CODER_TEMPLATE.purpose);
+    setAccess('operate');
+  };
+  const startBlank = () => {
+    setCoder(false);
+    setName('Anima');
+    setPurpose('');
+    setAccess('collaborate');
+  };
 
   const refreshProviders = async () => {
     if (retryingRef.current) return;
@@ -394,6 +456,8 @@ export function CompanionSetup({
       ...(owner ? [`The owner's name is ${owner}.`] : []),
       'Help with everyday plans, research, files, reminders, and connected tools. Be warm, concise, practical, and honest about what you can actually do.',
       PERSONALITIES[personality].instruction,
+      ...(purpose.trim() ? [`What you are for: ${purpose.trim()}`] : []),
+      ...(coder ? [CODER_TEMPLATE.instruction] : []),
       'Use available memory tools to recall relevant preferences. Distinguish facts the owner stated from your own guesses and accept corrections.',
       'Handle simple work yourself. When available and useful, spawn or reuse a helper for a bounded part of the current task. Remain responsible for checking the result and responding to the owner. Helpers cannot gain permissions you do not have.',
       'Only act within the requested scope and granted tool permissions. Ask before spending money, publishing, deleting important data, or sending consequential external messages. Never claim a task, reminder, delegation, or recovery succeeded without a recorded result.',
@@ -451,8 +515,23 @@ export function CompanionSetup({
         // The companion exists either way; a failed upload keeps the default orb.
         await daemon.setAgentAvatar(agentId, avatar.file).catch(() => undefined);
       }
+      if (agentId) {
+        // The daemon starts new agents Free; the choice is saved either way,
+        // and one that fails to save never blocks the new agent.
+        await daemon
+          .setAutonomy(agentId, { mode: autonomy })
+          .catch(() => undefined);
+      }
+      const missed =
+        agentId && coder ? await installCodingKnowHow(agentId) : [];
       if (keepVoice) savePreferredVoice(voiceURI);
-      if (mounted.current) onCreated(result.agent);
+      if (!mounted.current) return;
+      if (missed.length > 0)
+        setKnowHowNote({
+          note: `${result.agent?.state?.name ?? name.trim()} is ready, but know-how for ${missed.join(', ')} didn't install. You can add it later in Settings › Tools › Community bundles.`,
+          agent: result.agent,
+        });
+      else onCreated(result.agent);
     } catch (caught) {
       if (mounted.current) setError(errorText(caught));
     } finally {
@@ -460,8 +539,31 @@ export function CompanionSetup({
       if (mounted.current) setCreating(false);
     }
   };
+  /** Installs know-how for every coding app that is found and starts,
+   *  plus the generic handoff; returns what did not install. A broken
+   *  install gets none: the agent could not use it anyway. */
+  const installCodingKnowHow = async (agentId: string): Promise<string[]> => {
+    const found =
+      codingApps?.apps.filter((app) => app.found && !app.problem) ?? [];
+    const bundles = [
+      ...found.map((app) => ({ label: app.name, manifest: app.manifestText })),
+      ...(codingApps?.handoff
+        ? [{ label: 'handing off work', manifest: codingApps.handoff.manifestText }]
+        : []),
+    ];
+    const missed: string[] = [];
+    for (const bundle of bundles) {
+      try {
+        await installKnowHow(agentId, bundle.manifest);
+      } catch {
+        missed.push(bundle.label);
+      }
+    }
+    if (codingAppsError) missed.push('the coding apps');
+    return missed;
+  };
   const next = async () => {
-    if (preview) return;
+    if (preview || knowHowNote) return;
     if (step === 'welcome' && workspaceReady) goTo('model');
     else if (step === 'model' && modelReady) goTo('you');
     else if (step === 'you' && youReady) goTo('access');
@@ -591,7 +693,26 @@ export function CompanionSetup({
     </button>
   );
 
-  if (step === 'welcome') {
+  if (knowHowNote) {
+    body = (
+      <>
+        {heading('Almost there', 'One thing to know before you start.')}
+        <p className="onboarding__hint" role="status">
+          {knowHowNote.note}
+        </p>
+      </>
+    );
+    footer = (
+      <button
+        type="button"
+        className="onboarding__button onboarding__button--primary"
+        onClick={() => onCreated(knowHowNote.agent)}
+      >
+        Continue
+        <span aria-hidden="true">→</span>
+      </button>
+    );
+  } else if (step === 'welcome') {
     body = (
       <>
         {heading(
@@ -844,6 +965,31 @@ export function CompanionSetup({
           'Introductions',
           'Defaults are fine. You can change all of this later.',
         )}
+        <p className="onboarding__hint onboarding__template">
+          {coder ? (
+            <>
+              Starting from Coder ·{' '}
+              <button
+                type="button"
+                className="onboarding__link"
+                onClick={startBlank}
+              >
+                Start blank
+              </button>
+            </>
+          ) : (
+            <>
+              Start from:{' '}
+              <button
+                type="button"
+                className="onboarding__link"
+                onClick={startFromCoder}
+              >
+                Coder
+              </button>
+            </>
+          )}
+        </p>
         <div className="onboarding__section">
           <label htmlFor="companion-owner" className="onboarding__label">
             Your name
@@ -906,6 +1052,21 @@ export function CompanionSetup({
             </div>
           </div>
         </div>
+        {(coder || purpose) && (
+          <div className="onboarding__section">
+            <label htmlFor="companion-purpose" className="onboarding__label">
+              What it's for
+            </label>
+            <textarea
+              id="companion-purpose"
+              className="onboarding__input"
+              rows={3}
+              maxLength={600}
+              value={purpose}
+              onChange={(event) => setPurpose(event.target.value)}
+            />
+          </div>
+        )}
         <div className="onboarding__section">
           <span id="onboarding-personality-label" className="onboarding__label">
             Personality
@@ -967,6 +1128,58 @@ export function CompanionSetup({
               </div>
               <p className="onboarding__hint">{ACCESS_PROFILES[access].risk}</p>
             </div>
+            {coder && (
+              <div className="onboarding__section">
+                <span className="onboarding__label">
+                  Coding apps on this computer{' '}
+                  <span className="onboarding__hint">
+                    know-how installs for the ones found
+                  </span>
+                </span>
+                {codingAppsError ? (
+                  <p className="onboarding__hint">
+                    Couldn't check for coding apps. You can add their know-how
+                    later in Settings › Tools.
+                  </p>
+                ) : codingApps === null ? (
+                  <p className="onboarding__hint">Looking for coding apps…</p>
+                ) : (
+                  <ul
+                    className="coding-app-chips"
+                    aria-label="Coding apps on this computer"
+                  >
+                    {codingApps.apps.map((app) => {
+                      const state = codingAppState(app);
+                      return (
+                        <li
+                          key={app.id}
+                          className="coding-app-chip"
+                          data-state={
+                            app.found && !app.problem
+                              ? 'found'
+                              : app.problem
+                                ? 'problem'
+                                : 'missing'
+                          }
+                        >
+                          <span className="coding-app-chip-name">
+                            <span aria-hidden="true">
+                              {app.found && !app.problem
+                                ? '✓'
+                                : app.problem
+                                  ? '!'
+                                  : '○'}
+                            </span>{' '}
+                            {app.name}
+                          </span>
+                          <span className="coding-app-chip-state">{state}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            )}
             <label className="onboarding__option onboarding__options">
               <input
                 type="checkbox"
@@ -983,6 +1196,36 @@ export function CompanionSetup({
               </span>
               <span className="onboarding__switch" aria-hidden="true" />
             </label>
+            <div className="onboarding__section">
+              <span id="onboarding-autonomy-label" className="onboarding__label">
+                How much should it ask?
+              </span>
+              <div
+                role="radiogroup"
+                aria-labelledby="onboarding-autonomy-label"
+                className="onboarding__options onboarding__options--pair"
+              >
+                <Option
+                  name="onboarding-autonomy"
+                  checked={autonomy === 'free'}
+                  onChange={() => setAutonomy('free')}
+                  title={
+                    <>
+                      Free{' '}
+                      <span className="onboarding__tag">Recommended</span>
+                    </>
+                  }
+                  summary="Works on its own and tells you what it did. Dangerous things still ask."
+                />
+                <Option
+                  name="onboarding-autonomy"
+                  checked={autonomy === 'strict'}
+                  onChange={() => setAutonomy('strict')}
+                  title="Strict"
+                  summary="Asks before it changes or runs anything."
+                />
+              </div>
+            </div>
           </>
         )}
       </>

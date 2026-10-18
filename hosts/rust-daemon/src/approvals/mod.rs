@@ -3,6 +3,7 @@
 //! add the approval records (`registry`) and the gate in `execute_tool`
 //! (`gate`).
 
+pub(crate) mod autonomy;
 pub(crate) mod gate;
 pub(crate) mod policy;
 pub(crate) mod registry;

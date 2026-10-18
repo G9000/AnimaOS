@@ -167,7 +167,72 @@ impl DaemonState {
 
     /// What `call` needs in `session_id` (spec §7.2). A helper answers to
     /// its companion's policy and rules and has no session allowances.
-    pub(crate) fn approval_verdict(
+    /// A new owner-made agent starts in Free (spec 2026-10-19). Helpers are
+    /// left alone: they use their companion's.
+    pub(crate) fn start_free(&mut self, agent_id: &str) {
+        use crate::approvals::autonomy::{AgentAutonomy, AutonomyMode};
+        let helper = self
+            .agents
+            .get(agent_id)
+            .is_some_and(|runtime| is_helper_config(runtime.config()));
+        if helper {
+            return;
+        }
+        if let Some(policy) = AutonomyMode::Free.preset() {
+            self.approvals.set_policy(agent_id, policy);
+        }
+        self.autonomy.set(AgentAutonomy {
+            agent_id: agent_id.to_string(),
+            mode: AutonomyMode::Free,
+            ..Default::default()
+        });
+    }
+
+    /// The autonomy that governs `agent_id`: a helper's is its companion's.
+    /// `agent_id`'s own record; an agent saved before autonomy existed reads
+    /// as the preset its class policy equals, or Custom.
+    pub(crate) fn autonomy_of(&self, agent_id: &str) -> crate::approvals::autonomy::AgentAutonomy {
+        self.autonomy.stored(agent_id).unwrap_or_else(|| {
+            crate::approvals::autonomy::AgentAutonomy {
+                agent_id: agent_id.to_string(),
+                mode: crate::approvals::autonomy::AutonomyMode::matching(
+                    &self.approvals.policy(agent_id),
+                ),
+                ..Default::default()
+            }
+        })
+    }
+
+    pub(crate) fn agent_autonomy(
+        &self,
+        agent_id: &str,
+    ) -> crate::approvals::autonomy::AgentAutonomy {
+        let owner = self
+            .agents
+            .get(agent_id)
+            .and_then(|runtime| config_helper_parent(runtime.config()).map(str::to_string))
+            .unwrap_or_else(|| agent_id.to_string());
+        self.autonomy_of(&owner)
+    }
+
+    /// What the floor says about `call` for `agent`, before any policy.
+    pub(crate) fn approval_floor(
+        &self,
+        agent: &AgentState,
+        call: &ToolCall,
+    ) -> crate::approvals::autonomy::Floor {
+        use crate::approvals::autonomy::{command_of, floor, Floor};
+        let owner = config_helper_parent(&agent.config).unwrap_or(agent.id.as_str());
+        match command_of(call) {
+            Some(command) => floor(command, &self.autonomy_of(owner)),
+            None => Floor::Ordinary,
+        }
+    }
+
+    /// The verdict from the owner's policy, rules and allowances alone, as if
+    /// the autonomy floor were not there; the smart check only stands in for
+    /// asks the floor added.
+    pub(crate) fn approval_policy_verdict(
         &self,
         agent: &AgentState,
         session_id: &str,
@@ -185,6 +250,27 @@ impl DaemonState {
                 .unwrap_or(&[])
         };
         evaluate(&policy, &rules, allowances, call)
+    }
+
+    pub(crate) fn approval_verdict(
+        &self,
+        agent: &AgentState,
+        session_id: &str,
+        call: &ToolCall,
+    ) -> Verdict {
+        let owner = config_helper_parent(&agent.config).unwrap_or(agent.id.as_str());
+        let policy = self.approvals.policy(owner);
+        let rules = self.approvals.rules_for(owner);
+        let autonomy = self.autonomy_of(owner);
+        let allowances: &[SessionAllowance] = if is_helper_config(&agent.config) {
+            &[]
+        } else {
+            self.sessions
+                .get(&agent.id, session_id)
+                .map(|session| session.session_allowances.as_slice())
+                .unwrap_or(&[])
+        };
+        crate::approvals::policy::evaluate_with_floor(&policy, &rules, allowances, call, &autonomy)
     }
 
     /// Records a pending approval for `ask` and moves its run to
@@ -217,6 +303,24 @@ impl DaemonState {
                 run_id: &ask.run.run_id,
                 call: &ask.call,
                 timeout_ms: ask.timeout_ms,
+                reason: {
+                    use crate::approvals::autonomy::{command_of, floor, Floor};
+                    let owner = self
+                        .agents
+                        .get(&ask.run.agent_id)
+                        .and_then(|runtime| {
+                            config_helper_parent(runtime.config()).map(str::to_string)
+                        })
+                        .unwrap_or_else(|| ask.run.agent_id.clone());
+                    command_of(&ask.call)
+                        .filter(|command| {
+                            matches!(
+                                floor(command, &self.autonomy_of(&owner)),
+                                Floor::Dangerous(_)
+                            )
+                        })
+                        .map(|_| "dangerous_command")
+                },
             },
             now_ms,
         );

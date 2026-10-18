@@ -115,10 +115,14 @@ export function useTranscriptActions({
   const canResend = resendable && session?.capabilities.send === true;
   const compactable = session?.capabilities.compact ? session : null;
   const canUndo = undoAutomation !== undefined;
+  const sessionAgentId = session?.agentId;
   return useMemo<TranscriptActions>(
     () => ({
       ...(cancellable
-        ? { onCancelQueued: (run: Run) => latestRef.current.stopRun(run) }
+        ? {
+            onCancelQueued: (run: Run) => latestRef.current.stopRun(run),
+            onStopRun: (run: Run) => latestRef.current.stopRun(run),
+          }
         : {}),
       onCancelPending: (key) => latestRef.current.cancelPending(key),
       ...(canResend
@@ -156,6 +160,7 @@ export function useTranscriptActions({
           }
         : {}),
       ...(companionId ? { companionAgentId: companionId } : {}),
+      ...(sessionAgentId ? { sessionAgentId } : {}),
     }),
     [
       cancellable,
@@ -165,6 +170,7 @@ export function useTranscriptActions({
       resent,
       compacting,
       companionId,
+      sessionAgentId,
       automations,
       canUndo,
     ],

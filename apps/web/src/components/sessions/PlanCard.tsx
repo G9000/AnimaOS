@@ -159,3 +159,55 @@ export function PlanCard({
     </section>
   );
 }
+
+/** A plan the agent showed and started on its own (Free autonomy): the
+ *  same card without approval buttons, and Stop while the run works. */
+export function PlanNoteCard({
+  plan,
+  working,
+  onStop,
+}: {
+  plan: Plan;
+  /** The run that made it is still working. */
+  working: boolean;
+  /** Stops that run; offered only while it works. */
+  onStop?: () => void;
+}) {
+  const text = (value: string) => revealHiddenCharacters(value);
+  return (
+    <section
+      className="plan-card plan-card-note"
+      aria-label={`Plan: ${plan.title}`}
+    >
+      <header className="plan-card-head">
+        <strong>Plan · {text(plan.title)}</strong>
+        <span>
+          {plan.steps.length} {plan.steps.length === 1 ? 'step' : 'steps'}
+        </span>
+      </header>
+      <ol className="plan-card-steps">
+        {plan.steps.map((step, index) => (
+          <li key={index}>
+            <span className="plan-card-number">{index + 1}</span>
+            <span className="plan-card-action">{text(step.action)}</span>
+            {step.asksFirst && <span className="plan-card-asks">Asks first</span>}
+          </li>
+        ))}
+      </ol>
+      {plan.estimate && (
+        <p className="plan-card-estimate">{text(plan.estimate)}</p>
+      )}
+      {working && (
+        <div className="plan-card-status">
+          <span className="plan-card-dot" aria-hidden="true" />
+          <span>Working on it</span>
+          {onStop && (
+            <button type="button" onClick={onStop}>
+              Stop
+            </button>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}

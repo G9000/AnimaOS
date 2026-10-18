@@ -1,7 +1,6 @@
 import {
   isTerminalRunStatus,
   type Automation,
-  type LearningReview,
   type Run,
   type SessionMessageAttachment,
   type WebSource,
@@ -9,6 +8,8 @@ import {
 
 import type { SaveOutcome, SavedState } from '../hooks/useSaveToMemory';
 import type { ApprovalDecide } from './approvals';
+import { PLAN_TOOL, parsePlan, type Plan } from './plan';
+import { REVIEW_MIN_ACTIONS, type TaskReviewApi } from './task-reviews';
 import { emptyLiveRun, stepRunId, type LiveRun } from './session-events';
 import type { ChatMessage } from './types';
 import { toolWebSources } from './web-sources';
@@ -51,6 +52,18 @@ export interface ToolStep {
   runId: string | null;
   helper: ToolHelper | null;
   sources?: WebSource[];
+  /** A `propose_plan` call's plan, when its arguments hold one. */
+  plan?: Plan;
+}
+
+/** The plan in a `propose_plan` call's arguments (an object, or JSON text
+ *  that may be cut short), as a step field. */
+function planField(name: string, args: unknown): { plan?: Plan } {
+  if (name !== PLAN_TOOL) return {};
+  const plan = parsePlan(
+    typeof args === 'string' ? args : JSON.stringify(args ?? null),
+  );
+  return plan ? { plan } : {};
 }
 
 /** A message the daemon has not accepted yet, or a steer not yet applied. */
@@ -78,11 +91,14 @@ type ToolsItem = Extract<TranscriptItem, { kind: 'tools' }>;
 /** What the owner can do from the transcript. */
 export interface TranscriptActions {
   onCancelQueued?: (run: Run) => void;
+  /** Stops a run in progress (a plan card's Stop). */
+  onStopRun?: (run: Run) => void;
   /** Takes back a message the daemon has not accepted (S3b-I). */
   onCancelPending?: (key: string) => void;
   onSendAgain?: (run: Run) => void;
-  /** Starts one advice-only review of an eligible completed task. */
-  onRequestLearningReview?: (run: Run) => Promise<LearningReview>;
+  /** Reads and starts advice-only reviews of finished tasks; the daemon's
+   *  learning routes when absent. */
+  taskReviews?: TaskReviewApi;
   /** Runs already sent again from this page: their Retry or Send again is
    *  used up. */
   resentRunIds?: ReadonlySet<string>;
@@ -96,6 +112,9 @@ export interface TranscriptActions {
   /** The companion whose transcript this is: only its approvals offer
    *  "Always allow", as rules for other agents are not managed here yet. */
   companionAgentId?: string;
+  /** The agent whose session this is: it owns the app and coding-agent
+   *  sessions its tool steps show, so their Stop goes to it. */
+  sessionAgentId?: string;
   /** The automation a `create_automation` call made, for its notice card
    *  (spec §15.2). */
   automationNotice?: (step: ToolStep) => Automation | null;
@@ -295,6 +314,7 @@ export function liveToolSteps(live: LiveRun): ToolStep[] {
       result: card.resultPreview,
       truncated: card.truncated,
       ...(sources.length ? { sources } : {}),
+      ...planField(card.name, card.argumentsPreview),
       runId: live.run.id,
       helper: toolHelper(
         card.name,
@@ -420,7 +440,8 @@ function canReviewCompletedRun(run: Run, hasLinkedReply: boolean): boolean {
     hasLinkedReply &&
     isOwnerWritten(run) &&
     receipts !== undefined &&
-    receipts.length > 0 &&
+    // Short tasks hold too little to learn from; their card is noise.
+    receipts.length >= REVIEW_MIN_ACTIONS &&
     receipts.every(
       (receipt) =>
         receipt.status !== 'started' && receipt.durability === 'persistent',
@@ -616,6 +637,7 @@ export function buildHistory(input: HistoryInput): TranscriptHistory {
             truncated: false,
             runId,
             helper: toolHelper(call.name, call.args, null),
+            ...planField(call.name, call.args),
           }),
         );
         // Re-checked after the reset just above: a message with both text

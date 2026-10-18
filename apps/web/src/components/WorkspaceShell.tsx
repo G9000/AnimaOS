@@ -38,6 +38,8 @@ import {
   SparkIcon,
   XIcon,
 } from './icons';
+import { ImportConversationDialog } from './sessions/ImportConversationDialog';
+import { onOpenInbox } from '../lib/inbox-events';
 
 /** Pages this release renders; the other hash pages open the conversation
  *  until their milestones build them. */
@@ -231,10 +233,13 @@ function SessionDrawer({
   children,
   onClose,
   onNewChat,
+  onImport,
 }: {
   children: ReactNode;
   onClose: () => void;
   onNewChat: () => void;
+  /** Opens the dialog that imports a Claude Code or Codex conversation. */
+  onImport?: () => void;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
@@ -325,6 +330,15 @@ function SessionDrawer({
           started, group chats, and conversations from before it.
         </p>
         {children}
+        {onImport && (
+          <button
+            type="button"
+            className="session-drawer-import"
+            onClick={onImport}
+          >
+            Import from Claude Code or Codex
+          </button>
+        )}
       </div>
       <div className="session-drawer-backdrop" aria-hidden onClick={onClose} />
     </div>
@@ -471,6 +485,7 @@ export function WorkspaceShell({
   const lastConversation = conversationRoute ?? visitedConversation;
   const [commandsOpen, setCommandsOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const desktopNavigation = useDesktopNavigation();
   const drawerShown = drawerOpen && sidebar !== null;
   const sessionsButtonRef = useRef<HTMLButtonElement>(null);
@@ -818,9 +833,28 @@ export function WorkspaceShell({
             setDrawerOpen(false);
             newChat();
           }}
+          onImport={() => {
+            setDrawerOpen(false);
+            setImportOpen(true);
+          }}
         >
           {sidebar}
         </SessionDrawer>
+      )}
+      {importOpen && (
+        <ImportConversationDialog
+          agentId={mainAgent.id}
+          agentName={mainAgent.name}
+          onClose={() => setImportOpen(false)}
+          onImported={(imported) => {
+            setImportOpen(false);
+            navigate({
+              kind: 'session',
+              agentId: mainAgent.id,
+              sessionId: imported.sessionId,
+            });
+          }}
+        />
       )}
       {commandsOpen && (
         <CommandMenu
@@ -844,6 +878,8 @@ function InboxButton({
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
+  // The chat's "Open Inbox" on a suggested lesson.
+  useEffect(() => onOpenInbox(() => setOpen(true)), []);
   useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => {

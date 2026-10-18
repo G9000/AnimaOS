@@ -180,6 +180,10 @@ pub(super) fn spawn_helper(
         let (Some(name), Some(task)) = (arg("name"), arg("task")) else {
             return TaskResult::error("name and task are required", 0);
         };
+        let worktree = match worktree_request(&call) {
+            Ok(worktree) => worktree,
+            Err(error) => return TaskResult::error(error, 0),
+        };
         if context
             .helper_starts
             .fetch_update(
@@ -195,7 +199,7 @@ pub(super) fn spawn_helper(
             );
         }
         match coordinator
-            .spawn_helper(agent.id, name, task, context.run_link.clone())
+            .spawn_helper_in(agent.id, name, task, context.run_link.clone(), worktree)
             .await
         {
             Ok(text) => TaskResult::success(
@@ -248,6 +252,10 @@ pub(super) fn async_helper_operation(
                     )
                 }
             };
+            let worktree = match worktree_request(&call) {
+                Ok(worktree) => worktree,
+                Err(error) => return TaskResult::error(error, 0),
+            };
             coordinator
                 .accept_async_helper(
                     agent.id,
@@ -257,6 +265,7 @@ pub(super) fn async_helper_operation(
                     task,
                     completion,
                     context.helper_starts,
+                    worktree,
                 )
                 .await
         } else {
@@ -275,4 +284,34 @@ pub(super) fn async_helper_operation(
             Err(error) => TaskResult::error(error, 0),
         }
     })
+}
+
+impl ToolExecutionContext {
+    /// Points a worktree helper's tools at its own checkout.
+    pub(crate) fn with_workspace_root(mut self, root: Option<std::path::PathBuf>) -> Self {
+        self.workspace_root = root;
+        self
+    }
+}
+
+/// `worktree`/`repo` arguments: `Some(repo)` when a worktree is requested.
+fn worktree_request(call: &ToolCall) -> Result<Option<String>, String> {
+    let requested = match call.args.get("worktree") {
+        None => false,
+        Some(DataValue::Bool(value)) => *value,
+        Some(_) => return Err("worktree must be a boolean".into()),
+    };
+    let repo = match call.args.get("repo") {
+        None => None,
+        Some(DataValue::String(value)) if value.len() <= 1024 => Some(value.trim().to_owned()),
+        Some(_) => return Err("repo must be a workspace-relative path string".into()),
+    };
+    match (requested, repo) {
+        (true, repo) => Ok(Some(
+            repo.filter(|repo| !repo.is_empty())
+                .unwrap_or_else(|| ".".into()),
+        )),
+        (false, Some(_)) => Err("repo is only used with worktree: true".into()),
+        (false, None) => Ok(None),
+    }
 }

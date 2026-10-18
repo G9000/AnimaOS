@@ -234,6 +234,7 @@ async fn the_snapshot_lists_the_pending_approvals_of_its_runs() {
                     run_id: run,
                     call: &call,
                     timeout_ms: 60_000,
+                    reason: None,
                 },
                 5,
             ));

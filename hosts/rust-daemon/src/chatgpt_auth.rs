@@ -64,6 +64,7 @@ pub(crate) use models::{ChatGptModelEntry, ChatGptModelsSnapshot, ModelsError};
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const SERVICE: &str = "anima.chatgpt.subscription.v1";
 const ACCOUNT: &str = "account";
+const SINGLE: &str = "credential";
 const AUTH: &str = "https://auth.openai.com";
 const VAULT_ERROR: &str = "ChatGPT credential vault is unavailable";
 const AUTH_ERROR: &str = "ChatGPT authorization failed; start sign-in again";
@@ -299,6 +300,26 @@ pub(crate) struct ChatGptAuth {
     models_epoch: Arc<std::sync::atomic::AtomicU64>,
     models_refresh: Arc<Mutex<()>>,
     models_transport: Arc<dyn models::ModelsTransport>,
+    layout: VaultLayout,
+}
+/// How the credential is laid out in the OS vault.
+///
+/// Windows Credential Manager caps each secret at 2560 bytes, so Windows keeps
+/// immutable chunks behind a manifest. macOS asks for keychain access once per
+/// item, so macOS and Linux store one item and migrate chunked logins forward.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VaultLayout {
+    Single,
+    Chunked,
+}
+impl VaultLayout {
+    fn native() -> Self {
+        if cfg!(windows) {
+            Self::Chunked
+        } else {
+            Self::Single
+        }
+    }
 }
 impl ChatGptAuth {
     pub fn new() -> Self {
@@ -327,9 +348,24 @@ impl ChatGptAuth {
             models_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             models_refresh: Arc::new(Mutex::new(())),
             models_transport: Arc::new(models::UnavailableModelsTransport),
+            layout: VaultLayout::native(),
         }
     }
+    #[cfg(test)]
+    fn with_layout(mut self, layout: VaultLayout) -> Self {
+        self.layout = layout;
+        self
+    }
+    /// The active credential generation, whichever layout holds it.
     fn manifest(&self) -> Result<Option<Manifest>, String> {
+        if self.layout == VaultLayout::Single {
+            if let Some((manifest, _)) = self.load_single()? {
+                return Ok(Some(manifest));
+            }
+        }
+        self.chunk_manifest()
+    }
+    fn chunk_manifest(&self) -> Result<Option<Manifest>, String> {
         self.vault
             .load(SERVICE, ACCOUNT)
             .map_err(|_| VAULT_ERROR.to_string())?
@@ -353,7 +389,40 @@ impl ChatGptAuth {
     // Return the manifest actually used for the immutable chunk reads. Never
     // associate a loaded credential with a second, potentially newer manifest.
     fn load_with_manifest(&self) -> Result<Option<(Manifest, Credential)>, String> {
-        let Some(m) = self.manifest()? else {
+        if self.layout == VaultLayout::Single {
+            // The single item wins; chunks left beside it are migration leftovers.
+            if let Some(found) = self.load_single()? {
+                return Ok(Some(found));
+            }
+        }
+        self.load_chunked()
+    }
+    fn load_single(&self) -> Result<Option<(Manifest, Credential)>, String> {
+        let Some(payload) = self
+            .vault
+            .load(SERVICE, SINGLE)
+            .map_err(|_| VAULT_ERROR.to_string())?
+        else {
+            return Ok(None);
+        };
+        if payload.len() > 65536 {
+            return Err(VAULT_ERROR.into());
+        }
+        let stored: StoredCredential =
+            serde_json::from_str(&payload).map_err(|_| VAULT_ERROR.to_string())?;
+        if stored.version != 2 || uuid::Uuid::parse_str(&stored.generation).is_err() {
+            return Err(VAULT_ERROR.into());
+        }
+        let credential = validated(stored.credential)?;
+        let manifest = Manifest {
+            version: 2,
+            generation: stored.generation,
+            chunks: 0,
+        };
+        Ok(Some((manifest, credential)))
+    }
+    fn load_chunked(&self) -> Result<Option<(Manifest, Credential)>, String> {
+        let Some(m) = self.chunk_manifest()? else {
             return Ok(None);
         };
         let mut payload = Zeroizing::new(String::new());
@@ -368,14 +437,8 @@ impl ChatGptAuth {
             }
             payload.push_str(&chunk);
         }
-        let credential: Credential =
-            serde_json::from_str(&payload).map_err(|_| VAULT_ERROR.to_string())?;
-        if credential.access_token.is_empty()
-            || credential.refresh_token.is_empty()
-            || credential.account_id.is_empty()
-        {
-            return Err(VAULT_ERROR.into());
-        }
+        let credential =
+            validated(serde_json::from_str(&payload).map_err(|_| VAULT_ERROR.to_string())?)?;
         Ok(Some((m, credential)))
     }
     fn clean_chunks(&self, m: &Manifest) -> Result<(), String> {
@@ -406,7 +469,7 @@ impl ChatGptAuth {
         {
             return Err(VAULT_ERROR.into());
         }
-        let active = self.manifest()?;
+        let active = self.chunk_manifest()?;
         for generation in journal {
             // A failed manifest write may have succeeded. Never remove active secrets.
             if active
@@ -425,8 +488,52 @@ impl ChatGptAuth {
         self.save_with_manifest(c).map(|_| ())
     }
     fn save_with_manifest(&self, c: &Credential) -> Result<Manifest, String> {
+        match self.layout {
+            VaultLayout::Single => self.save_single(c),
+            VaultLayout::Chunked => self.save_chunked(c),
+        }
+    }
+    fn save_single(&self, c: &Credential) -> Result<Manifest, String> {
+        let manifest = Manifest {
+            version: 2,
+            generation: uuid::Uuid::new_v4().to_string(),
+            chunks: 0,
+        };
+        let payload = Zeroizing::new(
+            serde_json::to_string(&StoredCredentialRef {
+                version: manifest.version,
+                generation: &manifest.generation,
+                credential: c,
+            })
+            .map_err(|_| VAULT_ERROR.to_string())?,
+        );
+        if payload.len() > 65536 {
+            return Err(VAULT_ERROR.into());
+        }
+        self.vault
+            .put(SERVICE, SINGLE, &payload)
+            .map_err(|_| VAULT_ERROR.to_string())?;
+        // The single item is authoritative from here on. Chunks from an older
+        // layout are leftovers; a failed removal retries on the next save or
+        // disconnect and never hides the credential just written.
+        let _ = self.remove_chunked();
+        Ok(manifest)
+    }
+    fn remove_chunked(&self) -> Result<(), String> {
         self.recover_cleanup()?;
-        let previous = self.manifest()?;
+        if let Some(active) = self.chunk_manifest()? {
+            // Keep the manifest until every chunk is removed, so deletion can retry
+            // after a failure or process exit without forgetting remaining secrets.
+            self.clean_chunks(&active)?;
+            self.vault
+                .delete(SERVICE, ACCOUNT)
+                .map_err(|_| VAULT_ERROR.to_string())?;
+        }
+        Ok(())
+    }
+    fn save_chunked(&self, c: &Credential) -> Result<Manifest, String> {
+        self.recover_cleanup()?;
+        let previous = self.chunk_manifest()?;
         let payload =
             Zeroizing::new(serde_json::to_string(c).map_err(|_| VAULT_ERROR.to_string())?);
         if payload.len() > 65536 {
@@ -470,16 +577,12 @@ impl ChatGptAuth {
         Ok(manifest)
     }
     fn disconnect_vault(&self) -> Result<(), String> {
-        self.recover_cleanup()?;
-        if let Some(active) = self.manifest()? {
-            // Keep the manifest until every chunk is removed, so deletion can retry
-            // after a failure or process exit without forgetting remaining secrets.
-            self.clean_chunks(&active)?;
-            self.vault
-                .delete(SERVICE, ACCOUNT)
-                .map_err(|_| VAULT_ERROR.to_string())?;
-        }
-        Ok(())
+        // Chunks go first: a failure must leave the single item in place rather
+        // than let an older chunked login resurface after a partial disconnect.
+        self.remove_chunked()?;
+        self.vault
+            .delete(SERVICE, SINGLE)
+            .map_err(|_| VAULT_ERROR.to_string())
     }
     pub async fn status(&self) -> Result<Status, String> {
         let l = self.lifecycle.lock().await;
@@ -594,9 +697,16 @@ impl ChatGptAuth {
         let _refresh = self.refresh_lock.lock().await;
         let (generation, manifest, c) = {
             let l = self.lifecycle.lock().await;
-            let Some((manifest, credential)) = self.load_with_manifest()? else {
+            let Some((mut manifest, credential)) = self.load_with_manifest()? else {
                 return Ok(None);
             };
+            if self.layout == VaultLayout::Single && manifest.version == 1 {
+                // Move a login saved in chunks into one item. On failure the
+                // chunks stay untouched and remain usable.
+                if let Ok(migrated) = self.save_with_manifest(&credential) {
+                    manifest = migrated;
+                }
+            }
             (l.generation, manifest, credential)
         };
         if c.expires_at_ms > now_ms() + 60_000 {
@@ -773,6 +883,31 @@ impl AuthTransport for UnavailableTransport {
         Err("ChatGPT sign-in is unavailable in this runtime".into())
     }
 }
+fn validated(credential: Credential) -> Result<Credential, String> {
+    if credential.access_token.is_empty()
+        || credential.refresh_token.is_empty()
+        || credential.account_id.is_empty()
+    {
+        return Err(VAULT_ERROR.into());
+    }
+    Ok(credential)
+}
+/// Single-item layout (version 2): the generation lives beside the credential,
+/// so one read yields a consistent pair.
+#[derive(Deserialize)]
+struct StoredCredential {
+    version: u8,
+    generation: String,
+    credential: Credential,
+}
+#[derive(Serialize)]
+struct StoredCredentialRef<'a> {
+    version: u8,
+    generation: &'a str,
+    credential: &'a Credential,
+}
+/// Identifies one credential generation. Version 1 is the chunked layout
+/// (`chunks` items keyed by generation); version 2 is the single item.
 #[derive(Clone, Serialize, Deserialize)]
 struct Manifest {
     version: u8,
@@ -817,7 +952,8 @@ mod vault_and_generation_tests {
     #[tokio::test]
     async fn windows_sized_vault_chunks_round_trip_rotate_and_disconnect() {
         let vault = Arc::new(LimitedVault(InMemoryOAuthAppVault::default()));
-        let service = ChatGptAuth::with_dependencies(vault.clone(), Arc::new(UnavailableTransport));
+        let service = ChatGptAuth::with_dependencies(vault.clone(), Arc::new(UnavailableTransport))
+            .with_layout(VaultLayout::Chunked);
         service.save(&credential("first")).unwrap();
         let old = service.manifest().unwrap().unwrap();
         assert!(old.chunks > 1);
@@ -933,7 +1069,8 @@ mod cleanup_tests {
     #[tokio::test]
     async fn failed_disconnect_retains_manifest_until_retry_removes_all_secrets() {
         let vault = Arc::new(FailingVault::default());
-        let service = ChatGptAuth::with_dependencies(vault.clone(), Arc::new(UnavailableTransport));
+        let service = ChatGptAuth::with_dependencies(vault.clone(), Arc::new(UnavailableTransport))
+            .with_layout(VaultLayout::Chunked);
         service.save(&credential()).unwrap();
         vault.fail_delete.store(true, Ordering::SeqCst);
         assert!(service.cancel(true).await.is_err());
@@ -944,12 +1081,14 @@ mod cleanup_tests {
     #[tokio::test]
     async fn manifest_failure_staged_chunks_recover_on_restarted_service_retry() {
         let vault = Arc::new(FailingVault::default());
-        let service = ChatGptAuth::with_dependencies(vault.clone(), Arc::new(UnavailableTransport));
+        let service = ChatGptAuth::with_dependencies(vault.clone(), Arc::new(UnavailableTransport))
+            .with_layout(VaultLayout::Chunked);
         service.save(&credential()).unwrap();
         vault.fail_manifest.store(true, Ordering::SeqCst);
         assert!(service.save(&credential()).is_err());
         let restored =
-            ChatGptAuth::with_dependencies(vault.clone(), Arc::new(UnavailableTransport));
+            ChatGptAuth::with_dependencies(vault.clone(), Arc::new(UnavailableTransport))
+                .with_layout(VaultLayout::Chunked);
         restored.save(&credential()).unwrap();
         restored.cancel(true).await.unwrap();
         assert!(vault.keys.lock().unwrap().is_empty());
@@ -957,14 +1096,134 @@ mod cleanup_tests {
     #[tokio::test]
     async fn rotation_cleanup_failure_journal_survives_until_retry() {
         let vault = Arc::new(FailingVault::default());
-        let service = ChatGptAuth::with_dependencies(vault.clone(), Arc::new(UnavailableTransport));
+        let service = ChatGptAuth::with_dependencies(vault.clone(), Arc::new(UnavailableTransport))
+            .with_layout(VaultLayout::Chunked);
         service.save(&credential()).unwrap();
         vault.fail_delete.store(true, Ordering::SeqCst);
         assert!(service.save(&credential()).is_err());
         assert!(service.load().unwrap().is_some());
         let restored =
-            ChatGptAuth::with_dependencies(vault.clone(), Arc::new(UnavailableTransport));
+            ChatGptAuth::with_dependencies(vault.clone(), Arc::new(UnavailableTransport))
+                .with_layout(VaultLayout::Chunked);
         restored.cancel(true).await.unwrap();
         assert!(vault.keys.lock().unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod single_layout_tests {
+    use super::*;
+    use crate::connectors::oauth_apps::OAuthVaultError;
+    use std::{
+        collections::BTreeSet,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Mutex as StdMutex,
+        },
+    };
+    #[derive(Default)]
+    struct TrackingVault {
+        inner: InMemoryOAuthAppVault,
+        keys: StdMutex<BTreeSet<String>>,
+        fail_chunk_delete: AtomicBool,
+    }
+    impl TrackingVault {
+        fn keys(&self) -> Vec<String> {
+            self.keys.lock().unwrap().iter().cloned().collect()
+        }
+    }
+    impl OAuthVaultBackend for TrackingVault {
+        fn load(&self, s: &str, a: &str) -> Result<Option<Zeroizing<String>>, OAuthVaultError> {
+            self.inner.load(s, a)
+        }
+        fn put(&self, s: &str, a: &str, p: &str) -> Result<(), OAuthVaultError> {
+            self.inner.put(s, a, p)?;
+            self.keys.lock().unwrap().insert(a.into());
+            Ok(())
+        }
+        fn delete(&self, s: &str, a: &str) -> Result<(), OAuthVaultError> {
+            if a.contains('.') && self.fail_chunk_delete.load(Ordering::SeqCst) {
+                return Err(OAuthVaultError::Unavailable);
+            }
+            self.inner.delete(s, a)?;
+            self.keys.lock().unwrap().remove(a);
+            Ok(())
+        }
+    }
+    fn credential(account: &str) -> Credential {
+        Credential {
+            access_token: "jwt".repeat(1400),
+            refresh_token: "refresh".repeat(500),
+            account_id: account.into(),
+            plan_type: Some("plus".into()),
+            expires_at_ms: now_ms() + 3600_000,
+        }
+    }
+    fn service(vault: &Arc<TrackingVault>, layout: VaultLayout) -> ChatGptAuth {
+        ChatGptAuth::with_dependencies(vault.clone(), Arc::new(UnavailableTransport))
+            .with_layout(layout)
+    }
+    fn chunked_login(vault: &Arc<TrackingVault>) {
+        service(vault, VaultLayout::Chunked)
+            .save(&credential("legacy"))
+            .unwrap();
+        assert!(vault.keys().len() > 2, "legacy login is spread over chunks");
+    }
+
+    #[test]
+    fn native_layout_chunks_only_on_windows() {
+        assert_eq!(VaultLayout::native() == VaultLayout::Chunked, cfg!(windows));
+    }
+
+    #[tokio::test]
+    async fn single_layout_keeps_one_item_through_rotation_and_disconnect() {
+        let vault = Arc::new(TrackingVault::default());
+        let auth = service(&vault, VaultLayout::Single);
+        auth.save(&credential("first")).unwrap();
+        assert_eq!(vault.keys(), vec![SINGLE.to_string()]);
+        let first = auth.manifest().unwrap().unwrap().generation;
+        auth.save(&credential("second")).unwrap();
+        assert_eq!(vault.keys(), vec![SINGLE.to_string()]);
+        let (manifest, loaded) = auth.load_with_manifest().unwrap().unwrap();
+        assert_ne!(manifest.generation, first);
+        assert_eq!(loaded.account_id, "second");
+        assert_eq!(loaded.access_token.len(), 4200);
+        auth.cancel(true).await.unwrap();
+        assert!(auth.load().unwrap().is_none());
+        assert!(vault.keys().is_empty());
+    }
+
+    #[tokio::test]
+    async fn chunked_login_survives_upgrade_and_migrates_on_first_use() {
+        let vault = Arc::new(TrackingVault::default());
+        chunked_login(&vault);
+        let auth = service(&vault, VaultLayout::Single);
+        let status = auth.status().await.unwrap();
+        assert!(status.connected);
+        assert_eq!(status.account_id.as_deref(), Some("legacy"));
+        let (_, account) = auth.usable_credential().await.unwrap();
+        assert_eq!(account, "legacy");
+        assert_eq!(vault.keys(), vec![SINGLE.to_string()]);
+        assert_eq!(auth.manifest().unwrap().unwrap().version, 2);
+        let restarted = service(&vault, VaultLayout::Single);
+        assert_eq!(restarted.load().unwrap().unwrap().account_id, "legacy");
+    }
+
+    #[tokio::test]
+    async fn failed_legacy_cleanup_keeps_new_item_and_disconnect_retries() {
+        let vault = Arc::new(TrackingVault::default());
+        chunked_login(&vault);
+        vault.fail_chunk_delete.store(true, Ordering::SeqCst);
+        let auth = service(&vault, VaultLayout::Single);
+        auth.save(&credential("fresh")).unwrap();
+        assert!(vault.keys().len() > 1, "chunks remain after failed cleanup");
+        assert_eq!(auth.load().unwrap().unwrap().account_id, "fresh");
+        // A partial disconnect never lets the older chunked login resurface.
+        assert!(auth.cancel(true).await.is_err());
+        assert_eq!(auth.load().unwrap().unwrap().account_id, "fresh");
+        vault.fail_chunk_delete.store(false, Ordering::SeqCst);
+        auth.cancel(true).await.unwrap();
+        assert!(auth.load().unwrap().is_none());
+        assert!(vault.keys().is_empty());
     }
 }

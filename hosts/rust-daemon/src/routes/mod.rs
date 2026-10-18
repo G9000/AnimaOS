@@ -4,17 +4,20 @@ mod agent_files;
 mod agents;
 mod approvals;
 mod attachments;
+mod autonomy;
 mod browser;
 #[cfg(test)]
 mod browser_tests;
 mod capabilities;
 mod chatgpt;
+mod coding;
 mod community_bundles;
 mod connectors;
 mod contracts;
 mod discord;
 mod events;
 mod folder_picker;
+mod foreign_sessions;
 mod gcalendar;
 mod gdrive;
 mod goals;
@@ -211,14 +214,16 @@ use crate::runtime_model::provider_summaries;
         runs::start_session_run, runs::list_session_runs, runs::get_run, runs::stop_run,
         learning_reviews::request_review, learning_reviews::list_reviews,
         learning_reviews::get_review, learning_reviews::cancel_review,
-        learning_reviews::decide_proposal, learning_reviews::adopt_skill, learning_reviews::get_policy, learning_reviews::set_policy,
+        learning_reviews::decide_proposal, learning_reviews::undo_lesson, learning_reviews::adopt_skill, learning_reviews::get_policy, learning_reviews::set_policy,
         approvals::list_approvals, approvals::decide_approval, approvals::get_approval_policy,
-        approvals::put_approval_policy, approvals::list_approval_rules, approvals::create_approval_rule,
+        approvals::put_approval_policy, autonomy::get_autonomy, autonomy::put_autonomy, coding::stop_app_session, coding::stop_acp_session, coding::cancel_acp_session,
+        coding::get_coding_keys, coding::put_coding_keys, coding::list_coding_apps,
+        foreign_sessions::list_foreign_sessions, foreign_sessions::preview_foreign_session, foreign_sessions::import_foreign_session, approvals::list_approval_rules, approvals::create_approval_rule,
         approvals::delete_approval_rule,
         skills::list_skills, skills::get_skill, skills::put_skill, skills::patch_skill,
         skills::delete_skill, skills::approve_skill,
         skills::list_skill_drafts, skills::approve_skill_draft, skills::reject_skill_draft,
-        skills::import_skill,
+        skills::import_skill, skills::skill_ledger, skills::revert_last_skill_change,
         memory_edits::patch_memory, memory_edits::delete_memory,
         memory_views::get_views, memory_views::candidates, memory_views::select_views, memory_views::correct_source,
         memory_edits::list_facts, memory_edits::patch_fact, memory_edits::delete_fact,
@@ -974,6 +979,10 @@ fn router_with_services_with_policies_and_integrations(
             get(learning_reviews::get_policy).patch(learning_reviews::set_policy),
         )
         .route(
+            "/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}/undo",
+            axum::routing::post(learning_reviews::undo_lesson),
+        )
+        .route(
             "/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}/skill-draft",
             axum::routing::post(learning_reviews::adopt_skill),
         )
@@ -991,6 +1000,39 @@ fn router_with_services_with_policies_and_integrations(
             get(approvals::get_approval_policy).put(approvals::put_approval_policy),
         )
         .route(
+            "/api/agents/{agent_id}/autonomy",
+            get(autonomy::get_autonomy).put(autonomy::put_autonomy),
+        )
+        .route(
+            "/api/agents/{agent_id}/app-sessions/{session_id}/stop",
+            axum::routing::post(coding::stop_app_session),
+        )
+        .route(
+            "/api/agents/{agent_id}/acp-sessions/{session_id}/stop",
+            axum::routing::post(coding::stop_acp_session),
+        )
+        .route(
+            "/api/agents/{agent_id}/acp-sessions/{session_id}/cancel",
+            axum::routing::post(coding::cancel_acp_session),
+        )
+        .route(
+            "/api/agents/{agent_id}/coding-keys",
+            get(coding::get_coding_keys).put(coding::put_coding_keys),
+        )
+        .route("/api/coding-apps", get(coding::list_coding_apps))
+        .route(
+            "/api/foreign-sessions",
+            get(foreign_sessions::list_foreign_sessions),
+        )
+        .route(
+            "/api/foreign-sessions/{handle}/preview",
+            get(foreign_sessions::preview_foreign_session),
+        )
+        .route(
+            "/api/agents/{agent_id}/foreign-sessions/{handle}/import",
+            axum::routing::post(foreign_sessions::import_foreign_session),
+        )
+        .route(
             "/api/agents/{agent_id}/approval-rules",
             get(approvals::list_approval_rules).post(approvals::create_approval_rule),
         )
@@ -1006,6 +1048,7 @@ fn router_with_services_with_policies_and_integrations(
             "/api/skills/import",
             axum::routing::post(skills::import_skill),
         )
+        .route("/api/skill-ledger", get(skills::skill_ledger))
         .route("/api/skill-drafts", get(skills::list_skill_drafts))
         .route(
             "/api/skill-drafts/{draft_id}/approve",
@@ -1025,6 +1068,10 @@ fn router_with_services_with_policies_and_integrations(
         .route(
             "/api/skills/{slug}/approve",
             axum::routing::post(skills::approve_skill),
+        )
+        .route(
+            "/api/skills/{slug}/revert-last",
+            axum::routing::post(skills::revert_last_skill_change),
         )
         .route("/api/status", get(status::get_status))
         .route("/api/logs", get(logs::list_logs))
@@ -2636,9 +2683,11 @@ mod tests {
     mod approvals;
     mod attachments;
     mod automations;
+    mod autonomy;
     mod capabilities;
     mod docs_contracts;
     mod events;
+    mod foreign_sessions;
     mod goals;
     mod jobs;
     mod learning_reviews;

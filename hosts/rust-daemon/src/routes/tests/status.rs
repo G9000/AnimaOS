@@ -299,6 +299,7 @@ async fn status_counts_pending_approvals_runs_and_subscribers() {
             run_id: "run_x",
             call: &call,
             timeout_ms: 60_000,
+            reason: None,
         },
         20,
     ));

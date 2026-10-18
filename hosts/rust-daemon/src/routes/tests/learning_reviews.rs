@@ -443,6 +443,10 @@ async fn learning_routes_document_and_enforce_the_owner_before_body_or_source_ac
             "PATCH",
             format!("{}/missing/proposals/missing", fixture.list_uri()),
         ),
+        (
+            "POST",
+            format!("{}/missing/proposals/missing/undo", fixture.list_uri()),
+        ),
     ];
     for (method, uri) in operations {
         let denied = fixture
@@ -491,6 +495,10 @@ async fn learning_routes_document_and_enforce_the_owner_before_body_or_source_ac
             "/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}",
             vec!["patch"],
         ),
+        (
+            "/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}/undo",
+            vec!["post"],
+        ),
     ] {
         for method in methods {
             assert!(
@@ -511,8 +519,9 @@ async fn learning_policy_is_default_off_and_only_the_owner_can_change_the_opt_in
     assert_eq!(
         json_body(defaults).await,
         json!({
-            "autoEnabled": false, "dailyLimit": 2, "pendingLimit": 10, "timeoutMs": 20000,
-            "physicalReviewerActive": false
+            "mode": "strict", "autoEnabled": false, "dailyLimit": 2, "pendingLimit": 10, "timeoutMs": 20000,
+            "physicalReviewerActive": false, "windowMs": 86_400_000, "remaining": 2,
+            "nextAvailableAtMs": null, "autoMinActions": 5
         })
     );
     for enabled in [true, false] {
@@ -526,8 +535,9 @@ async fn learning_policy_is_default_off_and_only_the_owner_can_change_the_opt_in
         assert_eq!(saved.status(), StatusCode::OK);
         assert_no_store(&saved);
         let expected = json!({
-            "autoEnabled": enabled, "dailyLimit": 2, "pendingLimit": 10, "timeoutMs": 20000,
-            "physicalReviewerActive": false
+            "mode": "strict", "autoEnabled": enabled, "dailyLimit": 2, "pendingLimit": 10, "timeoutMs": 20000,
+            "physicalReviewerActive": false, "windowMs": 86_400_000, "remaining": 2,
+            "nextAvailableAtMs": null, "autoMinActions": 5
         });
         assert_eq!(json_body(saved).await, expected);
         assert_eq!(

@@ -23,6 +23,112 @@ initial controlled loopback/Windows boundary is narrower than general public
 browsing or account automation; current acceptance status is in the
 [handover](../../docs/superpowers/handover/2026-09-28-companion-console.md).
 
+## Using apps
+
+An agent uses the apps on this computer the way a person would, with general
+tools plus know-how (skills); no app has a built-in integration.
+
+- **Policy.** `bash`, `bg_start`, `app_start`, `app_send`, `acp_start` and
+  `acp_prompt` are Exec class. With the daemon default (`exec: ask`) each one
+  waits for the owner. Picking **Operate** in Settings or onboarding also sets
+  `exec: allow`, so an Operate agent runs commands and apps without asking.
+  Rules still apply: a command-prefix rule such as "allow `claude`" covers
+  `bash`, `bg_start`, `app_start` and `acp_start`.
+- **Background commands.** `bg_start` runs under process custody with the
+  shell allowlist environment plus `PAGER=cat`/`GIT_PAGER=cat`. `bg_wait`
+  blocks until a job exits, prints a pattern, or times out (max 120 s). A job
+  that ends on its own wakes the agent in the conversation that started it,
+  unless the agent already saw the exit or stopped it.
+  `notify_on` (up to 4 texts or `/regex/`) also wakes it once per pattern
+  when a new output line matches while the job keeps running, unless the
+  agent has already read that line.
+- **App sessions.** `app_start` opens a program on a real terminal (ConPTY on
+  Windows, a PTY elsewhere, 120×40 by default). `app_send` types text and named
+  keys (multi-line text goes in as one bracketed paste when the app asks for
+  it), `app_read` returns the visible screen and new output and can wait for
+  text or for output to settle, `app_stop` ends the app and its tree. On
+  Unix the daemon answers the terminal queries full-screen apps block on
+  (cursor position from the real screen, size, status, device attributes).
+  Limits: a 1 MiB transcript (2,000 lines), 2,000 lines of scrollback, a
+  16 KiB read.
+- **Coding agents over ACP.** `acp_start` runs any Agent Client Protocol
+  agent (`npx -y @agentclientprotocol/claude-agent-acp`, `codex-acp`,
+  `opencode acp`, `gemini --acp`); `acp_prompt`, `acp_read`, `acp_cancel` and
+  `acp_stop` drive it. Its permission requests become ordinary approvals named
+  `acp_edit` (write), `acp_execute` (exec), `acp_fetch` (network) and
+  `acp_other` (exec), judged by the same policy and rules (Anima switches an agent that offers
+  session modes into its asking mode, `default` for Claude Code, so it asks
+  before editing); reads never ask,
+  and Anima never answers "allow always" for the owner. File reads and writes
+  are confined to the session folder. An agent that needs a sign-in reports
+  it; Anima never signs in for the owner.
+- **Sessions.** At most 4 app and coding-agent sessions per agent, both kinds
+  together. They outlive a run, stop after 30 minutes idle, and die with the
+  daemon. The chat shows each one as a live card with Stop (and Cancel turn
+  for coding agents).
+- **Keys.** Coding apps use their own sign-in by default. Per agent, the owner
+  may hand them `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`,
+  `CLAUDE_CODE_OAUTH_TOKEN` or `OPENROUTER_API_KEY` (Settings › Permissions ›
+  Keys for coding apps); values come from the daemon's own environment and
+  never pass through the model. Off by default.
+- **Know-how.** The bundles in [`bundles/coding-agents`](../../bundles/coding-agents)
+  teach an agent to drive Claude Code, Codex, OpenCode and Gemini CLI, and
+  how to hand off and check coding work. Install them in Settings › Tools ›
+  Community bundles, or pick the **Coder** starting point in onboarding,
+  which offers the ones for apps it finds on this computer.
+- **Containment.** Windows background commands and Linux with a delegated
+  cgroup v2 contain every descendant. macOS and Linux without delegation use
+  a process group, so a descendant that calls `setsid` escapes it. Windows app
+  sessions cannot join a Job Object without unsafe code: Stop kills the tree
+  as it stands (`taskkill /T /F`), and a descendant whose parent already
+  exited is missed.
+
+## Importing Claude Code and Codex conversations
+
+The owner can bring a conversation from Claude Code or Codex into an agent. It
+becomes an ordinary chat of that agent (`origin: "import"`, title
+`Imported · <title>`); sending a message in it is a normal run whose earlier
+turns are the imported ones, which is how an imported conversation is resumed.
+Logs are only ever read.
+
+- **Sources.** Claude Code: `$CLAUDE_CONFIG_DIR/projects/*/*.jsonl`, else
+  `~/.claude/projects/*/*.jsonl` (sub-agent sidechains and meta records are
+  skipped; a `custom-title` or `summary` record names it). Codex:
+  `$CODEX_HOME/sessions/**/rollout-*.jsonl`, else `~/.codex/sessions/**`
+  (developer/system messages and sub-agent or reviewer threads are skipped).
+  A blank override counts as unset.
+- **What is imported.** User and assistant text, with a tool call shown as
+  `[ran tool: <name>]` and an image as `[image]`; tool results, thinking and
+  reasoning are dropped, as are injected wrappers such as `<system-reminder>`,
+  `<environment_context>`, `<command-name>` and `<local-command-stdout>`.
+  Consecutive turns of one role are merged so roles alternate. Each turn keeps
+  its log timestamp when it has one.
+- **Limits.** Logs over 32 MiB are refused (`413`). At most 2000 messages are
+  imported, the newest, after a first `[Earlier messages not imported]` note;
+  each message is cut to 16 KiB. With a durable history store the newest 200
+  stay in the hot transcript and the rest are written straight to the history
+  store, as if hot-tail pruning had already run. An import counts against the
+  60 new sessions per agent per minute.
+- **Redaction.** Imported text, previews and titles mask private-key blocks and
+  every secret shape the log redactor knows: `sk-…`, `sk-ant-…`, `ghp_…`,
+  `xox…-`, `AKIA…`, bearer tokens, JWTs, `password=`/`token=`/`api_key=`
+  assignments and long mixed-case tokens.
+- **Dedupe.** Importing the same conversation (same tool and foreign session
+  id, or the same log when it names no id) into the same agent again returns
+  the existing session with `alreadyImported: true`.
+
+`GET /api/foreign-sessions?source=claude-code|codex&cursor=` lists logs newest
+first, 50 per page, as `{ sessions: [{ handle, source, title, cwd, modifiedAt,
+sizeBytes, foreignSessionId }], nextCursor }`. A `handle` is the hex SHA-256 of
+the log's resolved path; paths are never accepted or returned, and only regular
+files inside the roots (no escaping symlinks) have handles.
+`GET /api/foreign-sessions/{handle}/preview` returns `{ title, cwd, source,
+messageCount, messages }` with the newest 40 messages (`{ role, text, at }`,
+text at most 2000 characters). `POST /api/agents/{agent_id}/foreign-sessions/{handle}/import`
+returns `{ sessionId, title, messageCount, alreadyImported }` (`201` new,
+`200` already imported; `404` unknown agent or handle, `409` helper agent,
+`422` no readable messages). All three are owner-only and `no-store`.
+
 ## API route inventory
 
 This marked inventory follows `ApiDoc::openapi()`. Detailed authorization and limits
@@ -127,6 +233,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/search`                                                                                |
 | `GET`    | `/api/skill-drafts`                                                                          |
 | `GET`    | `/api/skills`                                                                                |
+| `GET`    | `/api/skill-ledger`                                                                          |
 | `GET`    | `/api/skills/{slug}`                                                                         |
 | `GET`    | `/api/status`                                                                                |
 | `GET`    | `/api/swarms`                                                                                |
@@ -188,6 +295,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/jobs/{job_id}/review`                                                |
 | `POST`   | `/api/agents/{agent_id}/learning-reviews/{review_id}/cancel`                                 |
 | `POST`   | `/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}/skill-draft`    |
+| `POST`   | `/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}/undo`           |
 | `POST`   | `/api/agents/{agent_id}/main-chat`                                                           |
 | `POST`   | `/api/agents/{agent_id}/mcp-connections`                                                     |
 | `POST`   | `/api/agents/{agent_id}/mcp-connections/{connection_id}/connect`                             |
@@ -224,6 +332,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/skill-drafts/{draft_id}/reject`                                                        |
 | `POST`   | `/api/skills/import`                                                                         |
 | `POST`   | `/api/skills/{slug}/approve`                                                                 |
+| `POST`   | `/api/skills/{slug}/revert-last`                                                             |
 | `POST`   | `/api/swarms`                                                                                |
 | `POST`   | `/api/swarms/{swarm_id}/run`                                                                 |
 | `POST`   | `/api/workspace/bootstrap`                                                                   |
@@ -241,7 +350,17 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `PUT`    | `/api/usage/pricing`                                                                         |
 | `PUT`    | `/api/workspace`                                                                             |
 | `PUT`    | `/api/workspace/avatar`                                                                      |
-
+| `GET`    | `/api/agents/{agent_id}/coding-keys`                                                         |
+| `PUT`    | `/api/agents/{agent_id}/coding-keys`                                                         |
+| `POST`   | `/api/agents/{agent_id}/app-sessions/{session_id}/stop`                                      |
+| `POST`   | `/api/agents/{agent_id}/acp-sessions/{session_id}/stop`                                      |
+| `POST`   | `/api/agents/{agent_id}/acp-sessions/{session_id}/cancel`                                    |
+| `GET`    | `/api/coding-apps`                                                                           |
+| `GET`    | `/api/foreign-sessions`                                                                      |
+| `GET`    | `/api/foreign-sessions/{handle}/preview`                                                     |
+| `POST`   | `/api/agents/{agent_id}/foreign-sessions/{handle}/import`                                    |
+| `GET`    | `/api/agents/{agent_id}/autonomy`                                                            |
+| `PUT`    | `/api/agents/{agent_id}/autonomy`                                                            |
 <!-- openapi-route-inventory:end -->
 
 ### Current workspace report downloads
@@ -633,6 +752,8 @@ Retrying a create whose save failed, or approving a stored draft for a new slug 
 | `POST`   | `/api/skill-drafts/{draft_id}/approve` | Approve a draft, with an optional edited `{ "body" }`; a file draft needs `{ "hash" }`, the `fileHash` the owner reviewed. Writes `SKILL.md` through the hardened writer (an unedited file draft keeps its file) and pins its hash; returns `{ skill, draft }`. `400` for a missing hash or an invalid file; `404` for an unknown draft; `409` once decided, (`SKILL.md changed since you reviewed it; reload and review it again`) when the file moved on, or past 200 skills; `503` when it cannot be saved (the draft stays pending).                                                                                                                                            |
 | `POST`   | `/api/skill-drafts/{draft_id}/reject`  | Reject a draft; returns `{ draft }`. A rejected file draft stays hidden until its file changes; the file stays in the workspace. `404` for an unknown draft; `409` once decided.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `POST`   | `/api/skills/import`                   | Multipart `file` (a `SKILL.md`, at most 64 KiB) and optional `slug` (otherwise derived from the name); returns `201` with a pending `{ draft }`. The form is read by a strict bounded parser: at most 80 KiB in all, 8 parts, 2 KiB of headers a part, 64 KiB a part, CRLF line ends, and no text before the first boundary. `400` (`Send the SKILL.md file as multipart/form-data in a field named file`) for anything that is not such a form, (`The imported file must be at most 64 KiB`) for an oversized request or file, or the file's problem or an invalid slug; `409` when 10 imports already wait. `GET /api/skills/import` answers `405` (`import` is a reserved slug). |
+| `GET`    | `/api/skill-ledger`                    | `?limit=` 1–100 (default 50): skills agents in Free saved themselves, newest first (the newest 200 are kept), as `{ entries }`, each `{ id, agentId, skillSlug, action: "created" or "updated", previousContent, previousContentHash, contentHash, at, runId, revertedAt }`. Such a save approves the agent's draft at once through the same path as the owner's approval, with `decidedBy: "autonomy:free"` on the draft. `400` for an invalid limit.                                                                                                                                                                                                                                     |
+| `POST`   | `/api/skills/{slug}/revert-last`       | Undo the newest automatic change to the skill: its previous approved content comes back (`{ skill, removed: false }`), or a skill the agent created is deleted to the trash (`{ skill: null, removed: true }`). `404` when there is no automatic change to undo; `409` when the skill changed since the agent saved it, or its previous content was not kept; `503` when it cannot be saved. `ledger` is a reserved slug.                                                                                                                                                                                                                                                           |
 
 ### Usage and pricing
 
@@ -800,6 +921,44 @@ bun x nx run rust-daemon:dev
 ```
 
 If you want the raw daemon process without the Nx wrapper, use the `cargo run -p anima-daemon` profiles below.
+
+### macOS keychain prompts after rebuilds
+
+The daemon keeps the ChatGPT login and connector secrets in the login keychain.
+Debug builds are ad-hoc signed, so keychain **Always Allow** is tied to one
+binary and every rebuild asks again. `rust-daemon:dev`, `rust-daemon:build`,
+`bun run daemon`, and `bun dev --host rust` build through
+`tools/workspace-dev/src/rust-daemon-dev.ts`, which re-signs the binary with a
+stable identity when `ANIMAOS_DEV_SIGNING_IDENTITY` is set. When it is unset, or
+off macOS, the step is skipped. Plain `cargo run -p anima-daemon` is never re-signed.
+
+One-time setup:
+
+1. Open **Keychain Access** and choose **Keychain Access > Certificate
+   Assistant > Create a Certificate…**.
+2. Name it `AnimaOS Dev Signing`, set **Identity Type** to **Self-Signed Root**
+   and **Certificate Type** to **Code Signing**, then click **Create**. Keep the
+   default login keychain.
+3. Open the new certificate (in **My Certificates**), expand **Trust**, set
+   **Code Signing** to **Always Trust**, and close the window to save.
+4. Check that it is usable: `security find-identity -v -p codesigning` lists
+   `"AnimaOS Dev Signing"`.
+5. Add `export ANIMAOS_DEV_SIGNING_IDENTITY="AnimaOS Dev Signing"` to
+   `~/.zshrc` and open a new terminal.
+
+On the next start, macOS asks once whether `codesign` may use the signing key.
+Choose **Always Allow**. The daemon then asks once for each existing secret,
+because those items still trust only the old ad-hoc build. Choose **Always
+Allow** for each, or disconnect and reconnect the account so the signed build
+recreates the items. After that, rebuilds and restarts should not prompt again.
+`codesign -dvv target/debug/anima-daemon` shows `Identifier=dev.animaos.anima-daemon`
+and `Authority=AnimaOS Dev Signing` when signing worked.
+
+On macOS and Linux the ChatGPT login is a single keychain item
+(`anima.chatgpt.subscription.v1` / `credential`). Windows keeps the chunked
+layout (500-character chunks, a manifest, and a cleanup journal) because Windows
+Credential Manager caps each secret at 2560 bytes. A login saved in chunks by an
+older build still loads, and moves to the single item the first time it is used.
 
 For local memory development, the simplest durable profile is:
 
@@ -1154,6 +1313,28 @@ callers can collect results manually, and ordinary Jobs can await origin-bound
 results. Continuations recheck current authority and require their own approvals.
 Stop does not undo completed effects. Restart closes uncertain work for review
 instead of replaying it automatically.
+
+#### Helper worktrees
+
+`spawn_helper` and `spawn_helper_async` accept `worktree: true` (and an
+optional workspace-relative `repo`, default `.`). The daemon then creates a git
+worktree at `<repo top level>/.worktrees/anima-helper-<id>` on branch
+`anima-helper/<id>` from the current `HEAD`, and the helper's file tools work
+there instead of the shared checkout. Agent files, memory and attachments keep
+the global workspace, and the helper loses the shared task-list tools. Helpers
+still cannot run git; the daemon does every git call itself, with hooks,
+fsmonitor, filters, pagers, credential helpers and global config disabled and a
+30-second limit per call. `.worktrees/` is added to `.git/info/exclude`; no
+tracked file is changed.
+
+Outside a git repository with at least one commit the spawn is refused; it never
+falls back to the shared checkout. When the helper's run ends the daemon inspects
+the worktree. If nothing changed it removes the worktree and branch; otherwise it
+keeps them. The parent gets a `worktree` object (in the synchronous result, the
+async completion envelope and `list_helper_runs`) with the path, branch, base
+commit, changed files, diff stat and how to review, merge or remove the work.
+On start the daemon sweeps clean helper worktrees with no unmerged commits from
+the workspace repository and from the repositories it remembers.
 
 ### Explicit local Python execution
 

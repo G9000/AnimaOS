@@ -114,10 +114,90 @@ export function approvalHeadline(approval: Approval): {
   }
   const args = parseArguments(approval.arguments);
   const main = mainArgument(args);
+  const coding = codingAgentRequest(approval.tool, args);
+  if (coding)
+    return {
+      title: revealHiddenCharacters(coding),
+      detail: codingTarget(args) || 'Open the chat to see it.',
+    };
   return {
     title: `${CLASS_LABELS[approval.class]} · ${revealHiddenCharacters(approval.tool)}`,
     detail: main ? revealHiddenCharacters(main) : 'Open the chat to see it.',
   };
+}
+
+/** Approvals a coding agent raised through ACP: not real tools, one per
+ *  risk class of what it wants to do. */
+export const ACP_APPROVAL_TOOLS: ReadonlySet<string> = new Set([
+  'acp_edit',
+  'acp_execute',
+  'acp_fetch',
+  'acp_other',
+]);
+
+/** "Codex wants to edit src/upload.ts", from the coding agent's own name
+ *  and title for the step; null when either is missing. */
+function codingAgentRequest(
+  tool: string,
+  args: Record<string, unknown> | null,
+): string | null {
+  if (!ACP_APPROVAL_TOOLS.has(tool) || !args) return null;
+  const agent = typeof args.agent === 'string' ? args.agent.trim() : '';
+  const title = typeof args.title === 'string' ? args.title.trim() : '';
+  if (!agent || !title) return null;
+  return `${agent} wants to ${title.charAt(0).toLowerCase()}${title.slice(1)}`;
+}
+
+/** The coding agent's request in a few words, for an ACP approval. */
+export function codingAgentHeadline(approval: Approval): string | null {
+  return codingAgentRequest(approval.tool, parseArguments(approval.arguments));
+}
+
+/** The parts of a coding agent's request an owner decides on, as labelled
+ *  rows; null for other approvals. Paths under a home folder read as ~. */
+export function codingAgentDetails(
+  approval: Approval,
+): { label: string; value: string }[] | null {
+  if (!ACP_APPROVAL_TOOLS.has(approval.tool)) return null;
+  const args = parseArguments(approval.arguments);
+  if (!args) return null;
+  const home = (path: string) =>
+    path.replace(/^(?:\/Users|\/home)\/[^/]+(?=\/|$)/, '~');
+  const text = (key: string) =>
+    typeof args[key] === 'string' && (args[key] as string).trim() !== ''
+      ? revealHiddenCharacters((args[key] as string).trim())
+      : null;
+  const rows: { label: string; value: string }[] = [];
+  const file = text('file_path');
+  const command = text('command');
+  const url = text('url');
+  if (file) rows.push({ label: 'File', value: home(file) });
+  if (command) rows.push({ label: 'Command', value: command });
+  if (url) rows.push({ label: 'Address', value: url });
+  if (!file && Array.isArray(args.locations)) {
+    const paths = args.locations
+      .filter((path): path is string => typeof path === 'string')
+      .map((path) => home(revealHiddenCharacters(path)));
+    if (paths.length > 0) rows.push({ label: 'Files', value: paths.join(', ') });
+  }
+  const session = text('sessionId');
+  if (session) rows.push({ label: 'Session', value: session });
+  return rows.length > 0 ? rows : null;
+}
+
+/** What the coding agent's step touches: its file, command or page, else
+ *  the paths it lists. */
+function codingTarget(args: Record<string, unknown> | null): string {
+  for (const key of ['file_path', 'command', 'url']) {
+    const value = args?.[key];
+    if (typeof value === 'string' && value.trim() !== '')
+      return revealHiddenCharacters(value);
+  }
+  const locations = args?.locations;
+  if (!Array.isArray(locations)) return '';
+  return revealHiddenCharacters(
+    locations.filter((item) => typeof item === 'string').join(', '),
+  );
 }
 
 /** Tools that only look: never listed among what the agent did. Task-list
@@ -137,6 +217,11 @@ const QUIET_TOOLS: ReadonlySet<string> = new Set([
   'calculate',
   'bg_list',
   'bg_output',
+  'bg_wait',
+  'app_read',
+  'app_list',
+  'acp_read',
+  'acp_list',
   'list_workspace_agents',
   'list_helper_runs',
   'calendar_list_events',
@@ -157,6 +242,13 @@ const ACTION_LABELS: Record<string, string> = {
   bash: 'Ran a command',
   bg_start: 'Started a background command',
   bg_stop: 'Stopped a background command',
+  app_start: 'Started an app',
+  app_send: 'Typed into an app',
+  app_stop: 'Stopped an app',
+  acp_start: 'Started a coding agent',
+  acp_prompt: 'Asked a coding agent',
+  acp_cancel: 'Interrupted a coding agent',
+  acp_stop: 'Stopped a coding agent',
   execute_code: 'Ran code',
   web_fetch: 'Opened a web page',
   web_search: 'Searched the web',

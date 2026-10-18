@@ -311,3 +311,27 @@ describe('ChatGPT account model picker', () => {
     expect(ChatGptClient.prototype.refreshModels).not.toHaveBeenCalled();
   });
 });
+
+describe('ChatGptModelSelect after a connection made elsewhere', () => {
+  beforeEach(() => {
+    vi.spyOn(ChatGptClient.prototype, 'models');
+    vi.spyOn(ChatGptClient.prototype, 'refreshModels');
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('re-reads instead of staying stuck when the picker last saw no connection', async () => {
+    vi.mocked(ChatGptClient.prototype.models)
+      .mockResolvedValueOnce(snapshot({ state: 'disconnected', models: [] }))
+      .mockResolvedValueOnce(snapshot({ state: 'stale' }));
+    const user = userEvent.setup();
+    render(<Picker />);
+    await screen.findByText(/Connect ChatGPT to refresh model metadata/);
+    const refresh = screen.getByRole('button', { name: 'Refresh models' });
+    expect(refresh).toBeEnabled();
+    await user.click(refresh);
+    expect(
+      await screen.findByRole('option', { name: 'synthetic-model-a (unverified)' }),
+    ).toBeInTheDocument();
+    expect(ChatGptClient.prototype.refreshModels).not.toHaveBeenCalled();
+  });
+});

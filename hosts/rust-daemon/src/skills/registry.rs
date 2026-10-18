@@ -138,6 +138,7 @@ fn file_draft(slug: &str, file: &ScannedFile) -> SkillDraft {
         created_at_ms: millis(file.modified),
         status: DraftStatus::Pending,
         decided_at_ms: None,
+        decided_by: None,
     }
 }
 

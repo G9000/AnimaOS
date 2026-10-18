@@ -951,6 +951,29 @@ describe('SettingsPanel access', () => {
     });
   });
 
+  it('saves only the tools when Operate is chosen: Autonomy decides when it asks', async () => {
+    const user = userEvent.setup();
+    const saveSettings = vi.fn(async () => true);
+    const network = vi.spyOn(globalThis, 'fetch');
+    renderPanel(agent(), { saveSettings, sections: ['access'] });
+    await user.click(screen.getByRole('radio', { name: /^Operate/ }));
+    expect(
+      screen.getByText(
+        'Operate lets Nova run commands and apps. Autonomy decides when it asks first.',
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Change in Autonomy' }),
+    ).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith({
+        tools: toolNamesForProfile('operate'),
+      }),
+    );
+    expect(network).not.toHaveBeenCalled();
+  });
+
   it('retains the draft and focuses an announced save error', async () => {
     const user = userEvent.setup();
     const currentAgent = agent({

@@ -17,6 +17,10 @@ import {
   revealHiddenCharacters,
   type ApprovalDecide,
 } from '../../lib/approvals';
+import {
+  codingAgentDetails,
+  codingAgentHeadline,
+} from '../../lib/needs-you';
 import { PLAN_TOOL, parsePlan } from '../../lib/plan';
 import { formatTime } from '../ui-bits';
 import { PlanCard } from './PlanCard';
@@ -158,6 +162,8 @@ function ToolApprovalCard({
     else setSent(decision);
   };
 
+  const coding = codingAgentHeadline(approval);
+  const codingRows = codingAgentDetails(approval);
   const decisions = DECISIONS.filter(
     (decision) => canPersist || decision !== 'allow_always',
   );
@@ -176,11 +182,39 @@ function ToolApprovalCard({
         </span>
         {context}
       </header>
-      <p className="approval-card-lead">This call waits for your approval.</p>
-      {/* The model wrote these: a text node, never markup (spec §14). */}
-      <pre className="approval-card-arguments" aria-label="Arguments">
-        {revealHiddenCharacters(approval.arguments)}
-      </pre>
+      {approval.reason === 'dangerous_command' && (
+        <p className="approval-card-lead approval-card-reason">
+          Asked because this command is hard to undo.
+        </p>
+      )}
+      <p className="approval-card-lead">
+        {coding
+          ? `${revealHiddenCharacters(coding)}. It waits until you answer.`
+          : 'This call waits for your approval.'}
+      </p>
+      {codingRows ? (
+        <>
+          <dl className="approval-card-details">
+            {codingRows.map((row) => (
+              <div key={row.label} className="approval-card-detail">
+                <dt>{row.label}</dt>
+                <dd>{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+          <details className="approval-card-raw">
+            <summary>Full request</summary>
+            <pre className="approval-card-arguments" aria-label="Arguments">
+              {revealHiddenCharacters(approval.arguments)}
+            </pre>
+          </details>
+        </>
+      ) : (
+        /* The model wrote these: a text node, never markup (spec §14). */
+        <pre className="approval-card-arguments" aria-label="Arguments">
+          {revealHiddenCharacters(approval.arguments)}
+        </pre>
+      )}
       {approval.argumentsTruncated && (
         <p className="approval-card-note">Arguments shortened to 16 KiB.</p>
       )}

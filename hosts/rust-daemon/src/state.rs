@@ -4,6 +4,7 @@ mod live_state;
 mod run_commit;
 pub(crate) mod run_stop;
 mod runtime_events;
+mod session_import;
 mod session_state;
 mod skill_state;
 mod swarm_relationships;
@@ -1610,6 +1611,8 @@ pub(crate) struct DaemonState {
     /// One ephemeral shared local interpreter service; no kernels restore.
     pub(crate) tool_rpc_service: Arc<crate::tool_rpc::ToolRpcService>,
     pub(crate) checkpoint_root: Option<std::path::PathBuf>,
+    /// Repositories where helper worktrees were created (bounded), swept on start.
+    pub(crate) helper_worktree_repos: Vec<String>,
     pub(crate) browser_setup: Option<crate::browser::config::VerifiedBrowserSetup>,
     /// Ephemeral acknowledged browser grant epochs. Scopes are never restored.
     pub(crate) browser_permission_epochs: HashMap<String, u64>,
@@ -1643,6 +1646,10 @@ pub(crate) struct DaemonState {
     pub(crate) sessions: crate::sessions::SessionRegistry,
     /// Pending and not-yet-mirrored approvals, policies, and rules (spec §7).
     pub(crate) approvals: crate::approvals::ApprovalRegistry,
+    /// How much each agent asks: Free, Strict or Custom.
+    pub(crate) autonomy: crate::approvals::autonomy::AutonomyRegistry,
+    /// Skills agents in Free saved themselves, newest last (at most 200).
+    pub(crate) skill_ledger: Vec<crate::skills::ledger::SkillLedgerEntry>,
     /// Skill records, drafts, and the last scan (spec §8).
     pub(crate) skills: crate::skills::SkillRegistry,
     /// Automation fires the history store does not hold yet (spec §9.1).
@@ -2215,6 +2222,7 @@ impl DaemonState {
             browser_service: None,
             tool_rpc_service: crate::tool_rpc::ToolRpcService::disabled(),
             checkpoint_root: None,
+            helper_worktree_repos: Vec::new(),
             browser_setup: None,
             browser_permission_epochs: HashMap::new(),
             mcp_publication: crate::mcp::McpRegistry::default().published(),
@@ -2248,6 +2256,8 @@ impl DaemonState {
             learning_slots: Arc::new(tokio::sync::Semaphore::new(1)),
             sessions: crate::sessions::SessionRegistry::default(),
             approvals: crate::approvals::ApprovalRegistry::default(),
+            autonomy: crate::approvals::autonomy::AutonomyRegistry::default(),
+            skill_ledger: Vec::new(),
             skills: crate::skills::SkillRegistry::default(),
             schedule_fires: crate::schedules::FireLog::default(),
             pricing_overrides: Vec::new(),
@@ -2507,6 +2517,10 @@ impl DaemonState {
         snapshot.approvals = approvals.approvals;
         snapshot.approval_policies = approvals.policies;
         snapshot.approval_rules = approvals.rules;
+        snapshot.coding_keys = crate::coding_keys::records(&self.live_agent_ids());
+        snapshot.agent_autonomy = self.autonomy.snapshot(&self.live_agent_ids());
+        snapshot.skill_ledger = self.skill_ledger.clone();
+        snapshot.helper_worktree_repos = self.helper_worktree_repos.clone();
         let skills = self.skills.snapshot();
         snapshot.skills = skills.skills;
         snapshot.skill_drafts = skills.drafts;
@@ -2750,6 +2764,11 @@ impl DaemonState {
             &self.live_agent_ids(),
             anima_core::primitives::now_millis(),
         );
+        crate::coding_keys::sync(&snapshot.coding_keys);
+        self.autonomy =
+            crate::approvals::autonomy::AutonomyRegistry::restored(snapshot.agent_autonomy.clone());
+        self.skill_ledger = crate::skills::ledger::restored(snapshot.skill_ledger.clone());
+        self.helper_worktree_repos = snapshot.helper_worktree_repos.clone();
         // A deleted session's approvals never reach the history store.
         let sessions = &self.sessions;
         self.approvals

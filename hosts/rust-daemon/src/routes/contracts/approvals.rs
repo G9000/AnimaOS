@@ -83,6 +83,10 @@ pub(crate) struct ApprovalResponse {
     /// Send it back with a decision.
     pub(crate) revision: u64,
     pub(crate) resolution: Option<ApprovalResolutionResponse>,
+    /// `dangerous_command` when it asked because the command is hard to
+    /// undo; absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) reason: Option<String>,
 }
 
 impl From<&ApprovalRequest> for ApprovalResponse {
@@ -106,6 +110,7 @@ impl From<&ApprovalRequest> for ApprovalResponse {
             expires_at_ms: approval.expires_at_ms,
             status: approval.status.as_str().into(),
             revision: approval.revision,
+            reason: approval.reason.clone(),
             resolution: approval
                 .resolution
                 .as_ref()

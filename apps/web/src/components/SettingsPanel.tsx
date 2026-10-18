@@ -286,6 +286,7 @@ export function SettingsPanel({
       );
     }
     if (Object.keys(patch).length === 0) return;
+    // The access profile only picks tools; Autonomy decides when it asks.
     if (await saveSettings(patch)) {
       setSavedFlash(true);
       setTimeout(() => setSavedFlash(false), 2000);
@@ -613,6 +614,26 @@ export function SettingsPanel({
                 );
               })}
             </div>
+            {accessSelection === 'operate' && (
+              <p className="settings-access-note">
+                <span aria-hidden="true">↳</span>
+                <span>
+                  Operate lets {agent.name} run commands and apps. Autonomy
+                  decides when it asks first.
+                </span>
+                <button
+                  type="button"
+                  className="settings-access-note-link"
+                  onClick={() =>
+                    document
+                      .getElementById('approvals-autonomy')
+                      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                  }
+                >
+                  Change in Autonomy
+                </button>
+              </p>
+            )}
             <SectionTitle>Extra abilities</SectionTitle>
             <div className="settings-abilities">
               {abilities.map(

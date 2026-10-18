@@ -4,7 +4,14 @@ use std::collections::{BTreeMap, HashSet};
 use utoipa::ToSchema;
 
 pub(super) const POLICY_VERSION: u32 = 1;
+/// Reviews admitted per rolling window, shared by manual and automatic
+/// triggers. A rolling window has no calendar day, so no host time zone can
+/// move the reset away from what the owner sees.
 pub(super) const DAILY_LIMIT: usize = 2;
+pub(super) const WINDOW_MS: u64 = 86_400_000;
+/// Automatic review only follows tasks with at least this many tool calls;
+/// short tasks would spend the shared budget on little evidence.
+pub(super) const AUTO_MIN_ACTIONS: usize = 5;
 pub(super) const PENDING_LIMIT: usize = 10;
 pub(super) const RETAINED_LIMIT: usize = 1000;
 pub(super) const BRIEF_LIMIT: usize = 12 * 1024;
@@ -33,6 +40,17 @@ impl LearningReviewState {
     pub(super) fn pending(self) -> bool {
         matches!(self, Self::Queued | Self::Running)
     }
+}
+/// How lessons from automatic reviews are kept.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum LearningMode {
+    /// Long tasks are reviewed by themselves and their lessons are saved to
+    /// memory at once; the owner can undo each one.
+    #[default]
+    Free,
+    /// Every lesson waits in the Inbox until the owner accepts it.
+    Strict,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -84,6 +102,9 @@ pub(crate) struct LearningProposal {
     pub(crate) decision_version: u64,
     #[serde(default)]
     pub(crate) skill_draft_id: Option<String>,
+    /// The memory a Free-mode lesson was saved as; Undo deletes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) memory_id: Option<String>,
 }
 
 /// Immutable lineage for an explicitly reviewed procedural handoff. Advice
@@ -147,11 +168,19 @@ pub(crate) struct LearningPolicy {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LearningPolicyResponse {
+    pub(crate) mode: LearningMode,
     pub(crate) auto_enabled: bool,
     pub(crate) daily_limit: usize,
     pub(crate) pending_limit: usize,
     pub(crate) timeout_ms: u64,
     pub(crate) physical_reviewer_active: bool,
+    /// The rolling window `daily_limit` applies to.
+    pub(crate) window_ms: u64,
+    /// Workspace-wide reviews still admissible in the current window.
+    pub(crate) remaining: usize,
+    /// When the next review becomes admissible; `None` while one is.
+    pub(crate) next_available_at_ms: Option<u64>,
+    pub(crate) auto_min_actions: usize,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct LearningSnapshot {
@@ -255,6 +284,10 @@ impl LearningRegistry {
                             || id.len() > 100
                             || !handoffs.insert(id)
                     })
+                    || proposal
+                        .memory_id
+                        .as_ref()
+                        .is_some_and(|id| id.is_empty() || id.len() > 128)
                     || !proposal_ids.insert(&proposal.id)
                     || proposal.observation.trim().is_empty()
                     || proposal.suggestion.trim().is_empty()
@@ -281,14 +314,46 @@ impl LearningRegistry {
     pub(super) fn enabled(&self, agent: &str) -> bool {
         self.policies.get(agent).copied().unwrap_or(false)
     }
-    pub(super) fn policy(&self, agent: &str) -> LearningPolicyResponse {
+    pub(super) fn policy(
+        &self,
+        agent: &str,
+        now: u64,
+        mode: LearningMode,
+    ) -> LearningPolicyResponse {
+        let (remaining, next_available_at_ms) = self.availability(now);
         LearningPolicyResponse {
+            mode,
             auto_enabled: self.enabled(agent),
             daily_limit: DAILY_LIMIT,
             pending_limit: PENDING_LIMIT,
             timeout_ms: TIMEOUT_MS,
             physical_reviewer_active: false,
+            window_ms: WINDOW_MS,
+            remaining,
+            next_available_at_ms,
+            auto_min_actions: AUTO_MIN_ACTIONS,
         }
+    }
+    /// Reservations inside the window ending at `now`, oldest first.
+    fn in_window(&self, now: u64) -> Vec<u64> {
+        let start = now.saturating_sub(WINDOW_MS);
+        let mut times: Vec<u64> = self
+            .reviews
+            .values()
+            .map(|record| record.reserved_at_ms)
+            .filter(|at| *at > start)
+            .collect();
+        times.sort_unstable();
+        times
+    }
+    /// Remaining admissions and, when none remain, when the oldest counted
+    /// reservation leaves the window.
+    pub(super) fn availability(&self, now: u64) -> (usize, Option<u64>) {
+        let times = self.in_window(now);
+        let remaining = DAILY_LIMIT.saturating_sub(times.len());
+        let next =
+            (remaining == 0).then(|| times[times.len() - DAILY_LIMIT].saturating_add(WINDOW_MS));
+        (remaining, next)
     }
     pub(super) fn reserve(
         &mut self,
@@ -310,16 +375,10 @@ impl LearningRegistry {
                 "Learning review storage limit reached",
             ));
         }
-        if self
-            .reviews
-            .values()
-            .filter(|record| {
-                record.reserved_at_ms / 86_400_000 == review.reserved_at_ms / 86_400_000
-            })
-            .count()
-            >= DAILY_LIMIT
-        {
-            return Err(ApiError::conflict("Learning review daily budget exhausted"));
+        if self.in_window(review.reserved_at_ms).len() >= DAILY_LIMIT {
+            return Err(ApiError::conflict(format!(
+                "Task reviews are used up for now ({DAILY_LIMIT} per 24 hours)"
+            )));
         }
         if self
             .reviews
@@ -328,7 +387,9 @@ impl LearningRegistry {
             .count()
             >= PENDING_LIMIT
         {
-            return Err(ApiError::conflict("Learning review pending limit reached"));
+            return Err(ApiError::conflict(
+                "Too many task reviews are waiting to run; try again shortly",
+            ));
         }
         self.reviews.insert(review.id.clone(), review.clone());
         Ok(review)

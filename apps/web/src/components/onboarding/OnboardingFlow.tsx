@@ -64,6 +64,8 @@ interface OnboardingDraft {
   model: string;
   customModel: string;
   access: AccessProfile;
+  /** How much the new agents ask; the daemon starts them Free. */
+  autonomy: 'free' | 'strict';
 }
 
 const INITIAL_DRAFT: OnboardingDraft = {
@@ -77,6 +79,7 @@ const INITIAL_DRAFT: OnboardingDraft = {
   model: '',
   customModel: '',
   access: 'collaborate',
+  autonomy: 'free',
 };
 
 const PROVIDER_CATALOG_CHANGED_ERROR =
@@ -104,6 +107,23 @@ function workspaceComplete(workspace: WorkspaceDraft): boolean {
     workspace.companyName.trim() &&
     workspace.mission.trim() &&
     workspace.rootPath.trim(),
+  );
+}
+
+/** Saves the chosen autonomy for each new agent. One that fails to save
+ *  keeps the daemon's default (Free) and never blocks the new agents. */
+async function saveAutonomy(
+  snapshots: readonly DaemonSnapshot[],
+  mode: 'free' | 'strict',
+) {
+  await Promise.all(
+    snapshots.map((snapshot) =>
+      snapshot?.state?.id
+        ? daemon
+            .setAutonomy(snapshot.state.id, { mode })
+            .catch(() => undefined)
+        : undefined,
+    ),
   );
 }
 
@@ -943,6 +963,7 @@ export function OnboardingFlow({
           system: managerProfile.system,
           tools: toolNamesForProfile(draft.access),
         });
+        await saveAutonomy([response.agent], draft.autonomy);
         if (mountedRef.current) {
           onCreated(response.agent);
         }
@@ -978,6 +999,10 @@ export function OnboardingFlow({
           tools: toolNamesForProfile(draft.access),
         },
       });
+      await saveAutonomy(
+        [response.agent, ...(response.workers ?? [])],
+        draft.autonomy,
+      );
       if (mountedRef.current) {
         onCreated(response.agent);
       }
@@ -1348,6 +1373,8 @@ export function OnboardingFlow({
             <AccessStep
               access={draft.access}
               onAccessChange={(access) => updateDraft('access', access)}
+              autonomy={draft.autonomy}
+              onAutonomyChange={(autonomy) => updateDraft('autonomy', autonomy)}
             />
           </div>
         </>

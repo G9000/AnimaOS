@@ -1,13 +1,15 @@
 //! `load_skill` and `propose_skill` (spec §8.3). `load_skill` reads an
 //! owner-approved skill's instructions, checked against the hash the owner
 //! approved; `propose_skill` leaves a draft for the owner and never touches
-//! `SKILL.md`.
+//! `SKILL.md`, except in Free, where the draft is approved at once through
+//! the owner's approval path and logged in the skill ledger for undo.
 
 use anima_core::{AgentState, Content, DataValue, Message, TaskResult, ToolCall};
 use futures::future::BoxFuture;
 
 use super::ToolExecutionContext;
 use crate::agent_runs::is_helper_config;
+use crate::skills::ledger::{activated_reply, ProposeOutcome};
 use crate::skills::{
     proposed_reply, Proposal, ProposedBy, SkillError, HELPERS_CANNOT_PROPOSE_SKILLS,
     PROPOSAL_NOT_SAVED, SKILLS_UNAVAILABLE, SKILL_INSTRUCTIONS_HEADER,
@@ -88,8 +90,13 @@ pub(super) fn propose_skill(
             body: body.to_string(),
             slug: text_arg(&call, "slug").map(str::to_string),
         };
-        match coordinator.skills().propose(proposal).await {
-            Ok(draft) => text(proposed_reply(&draft)),
+        // Autonomy spec 2026-10-19: in Free the skill is approved at once
+        // (marked `autonomy:free`, logged for the owner's undo).
+        match coordinator.skills().propose_from_agent(proposal).await {
+            Ok(ProposeOutcome::Drafted(draft)) => text(proposed_reply(&draft)),
+            Ok(ProposeOutcome::Activated { approved, action }) => {
+                text(activated_reply(&approved, action))
+            }
             Err(SkillError::Unavailable(_)) => TaskResult::error(PROPOSAL_NOT_SAVED, 0),
             Err(error) => TaskResult::error(error.message(), 0),
         }

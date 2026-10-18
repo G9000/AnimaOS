@@ -362,6 +362,10 @@ async fn serve_with_state_and_voice(
     scheduler.start().await;
     // Spec §8.1: the startup rescan, then one every 60 seconds.
     skills.start();
+    // Stale helper worktrees are swept off the request path.
+    tokio::spawn(crate::agent_runs::worktrees::startup_sweep(Arc::clone(
+        &browser_state,
+    )));
     let shutdown_live = live.clone();
     let drain_expired = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let workflow_expired = Arc::clone(&drain_expired);

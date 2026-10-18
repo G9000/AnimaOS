@@ -48,6 +48,42 @@ fn m38_shared_daily_reservations_are_not_refunded_by_cancel_failure_or_restart()
 }
 
 #[test]
+fn the_review_budget_rolls_over_24_hours_instead_of_a_utc_day() {
+    const HOUR: u64 = 3_600_000;
+    let mut registry = LearningRegistry::default();
+    let late = 10 * WINDOW_MS - HOUR;
+    assert_eq!(registry.availability(late), (DAILY_LIMIT, None));
+    registry.reserve(record("first", late)).unwrap();
+    registry.reserve(record("second", late + 1)).unwrap();
+    // Two hours later is a new UTC day, but not a new budget.
+    let after_midnight = late + 2 * HOUR;
+    assert_eq!(
+        registry.availability(after_midnight),
+        (0, Some(late + WINDOW_MS))
+    );
+    let refused = registry
+        .reserve(record("third", after_midnight))
+        .unwrap_err();
+    assert!(refused.message().contains("used up"));
+    assert_eq!(
+        registry.availability(late + WINDOW_MS),
+        (1, None),
+        "the oldest review leaves the window"
+    );
+    registry.reserve(record("third", late + WINDOW_MS)).unwrap();
+    assert_eq!(
+        registry.availability(late + WINDOW_MS),
+        (0, Some(late + 1 + WINDOW_MS))
+    );
+    assert_eq!(
+        registry
+            .policy("owner", late + WINDOW_MS, LearningMode::Strict)
+            .next_available_at_ms,
+        Some(late + 1 + WINDOW_MS)
+    );
+}
+
+#[test]
 fn m38_manual_automatic_dedup_and_evidence_conflict_keep_one_attempt() {
     let mut registry = LearningRegistry::default();
     let original = registry.reserve(record("same", 1)).unwrap();
@@ -118,6 +154,7 @@ fn m38_snapshot_validation_rejects_duplicate_attempts_unknown_anchors_and_hidden
         decision: LearningDecision::Pending,
         decision_version: 0,
         skill_draft_id: None,
+        memory_id: None,
     });
     assert!(LearningRegistry::validate(&snapshot).is_err());
     snapshot.reviews[0].proposals[0].anchors = vec!["reply".into()];

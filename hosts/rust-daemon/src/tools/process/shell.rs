@@ -1,10 +1,13 @@
-#[cfg(not(windows))]
-use std::io::{BufRead, BufReader};
+use std::ffi::OsString;
 use std::path::Path;
 use std::process::{Command, Stdio};
+#[cfg(windows)]
 use std::sync::{Arc, Mutex};
+#[cfg(windows)]
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(windows)]
+use std::time::Instant;
 
 use anima_core::CancelSignal;
 
@@ -26,9 +29,11 @@ pub(super) const BASH_CLEANUP_UNKNOWN: &str = "Command cleanup is uncertain; eff
 #[cfg(windows)]
 const BASH_CLEANUP_DISABLED: &str = "Shell execution is disabled after uncertain cleanup; restart the daemon before another command";
 
-/// How the polling loop ended, when it did not return a stop.
+/// How the Unix polling loop ended.
+#[cfg(not(windows))]
 enum Waited {
     Exited(std::process::ExitStatus),
+    Stopped,
     TimedOut,
 }
 
@@ -68,6 +73,25 @@ const SHELL_ENV_ALLOWLIST: &[&str] = &[
     "PROCESSOR_ARCHITECTURE",
     "NUMBER_OF_PROCESSORS",
 ];
+
+/// Variables every shell tool child gets on top of the allowlist, so a pager
+/// never waits for input that cannot come.
+const SHELL_ENV_FIXED: &[(&str, &str)] = &[("PAGER", "cat"), ("GIT_PAGER", "cat")];
+
+/// The whole environment of a `bash` or `bg_start` child; callers apply it
+/// after `env_clear`.
+pub(super) fn shell_env() -> Vec<(&'static str, OsString)> {
+    let mut env = SHELL_ENV_ALLOWLIST
+        .iter()
+        .filter_map(|name| std::env::var_os(name).map(|value| (*name, value)))
+        .collect::<Vec<_>>();
+    env.extend(
+        SHELL_ENV_FIXED
+            .iter()
+            .map(|(name, value)| (*name, OsString::from(value))),
+    );
+    env
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in super::super) struct BashCommandResult {
@@ -111,114 +135,136 @@ pub(in super::super) fn execute_bash_command_from_root(
             cwd,
             "bash",
         )?;
-        let (executable, flags) = resolve_shell_launcher()?;
-
-        let mut builder = Command::new(&executable);
-        builder
-            .args(&flags)
-            .arg(command)
-            .current_dir(&cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .env_clear();
-        for name in SHELL_ENV_ALLOWLIST {
-            if let Ok(value) = std::env::var(name) {
-                builder.env(name, value);
-            }
-        }
-        let mut child = builder
-            .spawn()
-            .map_err(|error| format!("bash failed to start command: {error}"))?;
-
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| "bash stdout could not be captured".to_string())?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| "bash stderr could not be captured".to_string())?;
-
-        let stdout_buffer = Arc::new(Mutex::new(String::new()));
-        let stderr_buffer = Arc::new(Mutex::new(String::new()));
-
-        let stdout_thread = spawn_output_capture(stdout, Arc::clone(&stdout_buffer), false);
-        let stderr_thread = spawn_output_capture(stderr, Arc::clone(&stderr_buffer), true);
-
-        let start = Instant::now();
-        let waited = loop {
-            if let Some(status) = child
-                .try_wait()
-                .map_err(|error| format!("bash failed while waiting for command: {error}"))?
-            {
-                break Waited::Exited(status);
-            }
-
-            if cancel.is_some_and(|signal| signal.is_cancelled()) {
-                // Kills the direct child only (spec §4.6: "kills its child
-                // process"); a process the command started keeps running, and a
-                // process-group kill is later work (audit M11). The answer comes
-                // at once: the capture threads are left to end on their own when
-                // the last holder of the pipes closes them, so such a process
-                // cannot keep the stopped run waiting (Task 8 fix round 1).
-                child
-                    .kill()
-                    .map_err(|error| format!("bash failed to stop the command: {error}"))?;
-                let _ = child.wait();
-                return Ok(BashCommandResult {
-                    status: "error",
-                    output: BASH_STOPPED.to_string(),
-                });
-            }
-
-            if start.elapsed() >= Duration::from_millis(timeout_ms) {
-                child
-                    .kill()
-                    .map_err(|error| format!("bash failed to stop timed out command: {error}"))?;
-                let _ = child.wait();
-                break Waited::TimedOut;
-            }
-
-            thread::sleep(Duration::from_millis(10));
-        };
-
-        let _ = stdout_thread.join();
-        let _ = stderr_thread.join();
-
-        let stdout_text = stdout_buffer
-            .lock()
-            .map_err(|_| "bash stdout lock poisoned".to_string())?
-            .clone();
-        let stderr_text = stderr_buffer
-            .lock()
-            .map_err(|_| "bash stderr lock poisoned".to_string())?
-            .clone();
-
-        let exit_status = match waited {
-            Waited::Exited(status) => status,
-            Waited::TimedOut => {
-                return Ok(BashCommandResult {
-                    status: "error",
-                    output: format!("Command timed out after {timeout_ms}ms"),
-                });
-            }
-        };
-
-        let exit_code = exit_status.code().unwrap_or(-1);
-        let combined = if stdout_text.trim().is_empty() {
-            stderr_text.clone()
-        } else if stderr_text.trim().is_empty() {
-            stdout_text.clone()
-        } else {
-            format!("{}\n{}", stdout_text.trim_end(), stderr_text.trim_end())
-        };
-
-        Ok(BashCommandResult {
-            status: if exit_code == 0 { "success" } else { "error" },
-            output: truncate_shell_output(&combined),
-        })
+        let (executable, mut args) = resolve_shell_launcher()?;
+        args.push(command.to_string());
+        let cancel = cancel.cloned();
+        let timeout = Duration::from_millis(timeout_ms);
+        super::run_on_process_runtime(run_unix_shell(executable, args, cwd, timeout, cancel))
+            .unwrap_or_else(|| Err("bash worker stopped unexpectedly".to_string()))
     }
+}
+
+/// Runs one foreground command under `Custody`, so a timeout or a stop
+/// retires the whole process tree (audit M11), not only the shell.
+#[cfg(not(windows))]
+async fn run_unix_shell(
+    executable: String,
+    args: Vec<String>,
+    cwd: std::path::PathBuf,
+    timeout: Duration,
+    cancel: Option<CancelSignal>,
+) -> Result<BashCommandResult, String> {
+    use process_wrap::tokio::CommandWrap;
+
+    let timed_out = || BashCommandResult {
+        status: "error",
+        output: format!("Command timed out after {}ms", timeout.as_millis()),
+    };
+    let stopped = || BashCommandResult {
+        status: "error",
+        output: BASH_STOPPED.to_string(),
+    };
+    let is_cancelled = || cancel.as_ref().is_some_and(CancelSignal::is_cancelled);
+
+    let (mut custody, mut native) = anima_process::Custody::prepare(Path::new(&executable), args);
+    native
+        .current_dir(&cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env_clear()
+        .envs(shell_env());
+    let mut wrapped = CommandWrap::from(native);
+    custody.wrap(&mut wrapped);
+    let mut child = wrapped
+        .spawn()
+        .map_err(|error| format!("bash failed to start command: {error}"))?;
+    custody.attach(child.as_ref());
+    let (Some(stdout), Some(stderr)) = (child.stdout().take(), child.stderr().take()) else {
+        custody.retire(&mut child).await;
+        return Err("bash output could not be captured".to_string());
+    };
+    let mut stdout_task = tokio::spawn(capture_async(stdout, false));
+    let mut stderr_task = tokio::spawn(capture_async(stderr, true));
+
+    let deadline = tokio::time::Instant::now() + timeout;
+    let poll = Duration::from_millis(10);
+    let waited = loop {
+        match tokio::time::timeout(poll, child.inner_mut().wait()).await {
+            Ok(Ok(status)) => break Waited::Exited(status),
+            Ok(Err(error)) => {
+                custody.retire(&mut child).await;
+                return Err(format!("bash failed while waiting for command: {error}"));
+            }
+            Err(_) => {}
+        }
+        if is_cancelled() {
+            break Waited::Stopped;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            break Waited::TimedOut;
+        }
+    };
+    let status = match waited {
+        Waited::Exited(status) => status,
+        Waited::Stopped | Waited::TimedOut => {
+            // The answer does not wait for the capture tasks: a process that
+            // escaped the tree may still hold the pipes.
+            custody.retire(&mut child).await;
+            return Ok(if matches!(waited, Waited::Stopped) {
+                stopped()
+            } else {
+                timed_out()
+            });
+        }
+    };
+
+    // The shell exited. A descendant still holding its output pipes keeps
+    // the capture open only until the deadline or a stop; then the tree is
+    // retired so the call cannot hang past its timeout.
+    let mut captured = (None, None);
+    loop {
+        if captured.0.is_none() && stdout_task.is_finished() {
+            captured.0 = Some((&mut stdout_task).await.unwrap_or_default());
+        }
+        if captured.1.is_none() && stderr_task.is_finished() {
+            captured.1 = Some((&mut stderr_task).await.unwrap_or_default());
+        }
+        if captured.0.is_some() && captured.1.is_some() {
+            break;
+        }
+        if is_cancelled() {
+            custody.retire(&mut child).await;
+            return Ok(stopped());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            custody.retire(&mut child).await;
+            return Ok(timed_out());
+        }
+        tokio::time::sleep(poll).await;
+    }
+    let (stdout_text, stderr_text) = (
+        captured.0.unwrap_or_default(),
+        captured.1.unwrap_or_default(),
+    );
+
+    let exit_code = status.code().unwrap_or(-1);
+    let produced_output = !stdout_text.is_empty() || !stderr_text.is_empty();
+    if custody.join_failed(exit_code, produced_output) {
+        return Err("bash could not place the command in its process container".to_string());
+    }
+    let combined = if stdout_text.trim().is_empty() {
+        stderr_text
+    } else if stderr_text.trim().is_empty() {
+        stdout_text
+    } else {
+        format!("{}\n{}", stdout_text.trim_end(), stderr_text.trim_end())
+    };
+
+    Ok(BashCommandResult {
+        status: if exit_code == 0 { "success" } else { "error" },
+        output: truncate_shell_output(&combined),
+    })
 }
 
 #[cfg(windows)]
@@ -349,12 +395,8 @@ fn execute_windows_from_root(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .env_clear();
-    for name in SHELL_ENV_ALLOWLIST {
-        if let Ok(value) = std::env::var(name) {
-            builder.env(name, value);
-        }
-    }
+        .env_clear()
+        .envs(shell_env());
     use process_wrap::std::{CommandWrap, CreationFlags, JobObject};
     let mut wrapped = CommandWrap::from(builder);
     let mut creation = CreationFlags(Default::default());
@@ -633,43 +675,44 @@ fn shell_candidate_exists(executable: &str) -> bool {
         .is_ok_and(|status| status.success())
 }
 
+/// Captures one stream line by line, keeping at most
+/// `BASH_MAX_CAPTURE_BYTES`; the rest is drained and discarded.
 #[cfg(not(windows))]
-fn spawn_output_capture<R>(
-    reader: R,
-    buffer: Arc<Mutex<String>>,
-    stderr: bool,
-) -> thread::JoinHandle<()>
+async fn capture_async<R>(reader: R, stderr: bool) -> String
 where
-    R: std::io::Read + Send + 'static,
+    R: tokio::io::AsyncRead + Unpin,
 {
-    thread::spawn(move || {
-        let mut local = String::new();
-        let mut truncated = false;
-        let reader = BufReader::new(reader);
-        for line in reader.lines() {
-            let Ok(line) = line else {
-                break;
-            };
-            if truncated {
-                continue;
-            }
-            let prefix_len = if stderr { "[stderr] ".len() } else { 0 };
-            if local.len() + prefix_len + line.len() + 1 > BASH_MAX_CAPTURE_BYTES {
-                local.push_str("\n[output capture limit reached; further bytes discarded]\n");
-                truncated = true;
-                continue;
-            }
-            if stderr {
-                local.push_str("[stderr] ");
-            }
-            local.push_str(&line);
-            local.push('\n');
+    use tokio::io::AsyncBufReadExt;
+    let mut reader = tokio::io::BufReader::new(reader);
+    let mut local = String::new();
+    let mut truncated = false;
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        match reader.read_until(b'\n', &mut line).await {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
         }
-
-        if let Ok(mut output) = buffer.lock() {
-            output.push_str(&local);
+        if truncated {
+            continue;
         }
-    })
+        if line.last() == Some(&b'\n') {
+            line.pop();
+        }
+        let text = String::from_utf8_lossy(&line);
+        let prefix_len = if stderr { "[stderr] ".len() } else { 0 };
+        if local.len() + prefix_len + text.len() + 1 > BASH_MAX_CAPTURE_BYTES {
+            local.push_str("\n[output capture limit reached; further bytes discarded]\n");
+            truncated = true;
+            continue;
+        }
+        if stderr {
+            local.push_str("[stderr] ");
+        }
+        local.push_str(&text);
+        local.push('\n');
+    }
+    local
 }
 
 #[cfg(any(windows, test))]
@@ -920,6 +963,92 @@ mod capture_tests {
             "the fused branch must precede owner thread/work creation"
         );
         assert!(finished.load(Ordering::SeqCst) && !retained.load(Ordering::SeqCst));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod custody_tests {
+    use super::*;
+
+    fn marker_alive(marker: &str) -> bool {
+        std::process::Command::new("pgrep")
+            .args(["-f", marker])
+            .output()
+            .is_ok_and(|output| output.status.success())
+    }
+
+    fn unique_sleep_marker() -> String {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos();
+        format!("sleep 30.{}{}", std::process::id(), nanos % 100_000)
+    }
+
+    #[test]
+    fn bash_timeout_retires_a_grandchild() {
+        let root = tempfile::tempdir().unwrap();
+        let marker = unique_sleep_marker();
+        let result = execute_bash_command_from_root(
+            root.path(),
+            &format!("{marker} & sleep 5"),
+            400,
+            ".",
+            None,
+        )
+        .unwrap();
+        assert_eq!(result.output, "Command timed out after 400ms");
+        assert!(!marker_alive(&marker), "the timeout left {marker} running");
+    }
+
+    #[test]
+    fn bash_stop_retires_a_grandchild_and_answers_promptly() {
+        let root = tempfile::tempdir().unwrap();
+        let marker = unique_sleep_marker();
+        let cancel = CancelSignal::new();
+        let stopper = cancel.clone();
+        let canceller = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            stopper.cancel();
+        });
+        let started = std::time::Instant::now();
+        let result = execute_bash_command_from_root(
+            root.path(),
+            &format!("{marker} & sleep 20"),
+            60_000,
+            ".",
+            Some(&cancel),
+        )
+        .unwrap();
+        canceller.join().unwrap();
+        assert_eq!(result.output, BASH_STOPPED);
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(!marker_alive(&marker), "the stop left {marker} running");
+    }
+
+    #[test]
+    fn bash_sees_the_allowlist_and_pager_cat_but_not_daemon_secrets() {
+        std::env::set_var("ANIMA_TEST_SECRET", "do-not-leak-bash");
+        let root = tempfile::tempdir().unwrap();
+        let result = execute_bash_command_from_root(root.path(), "env", 10_000, ".", None).unwrap();
+        assert_eq!(result.status, "success", "{}", result.output);
+        assert!(!result.output.contains("ANIMA_TEST_SECRET"));
+        assert!(result.output.contains("PAGER=cat") && result.output.contains("GIT_PAGER=cat"));
+    }
+
+    #[test]
+    fn bash_output_after_the_shell_exits_is_still_captured() {
+        let root = tempfile::tempdir().unwrap();
+        let result = execute_bash_command_from_root(
+            root.path(),
+            "echo out; echo err >&2; exit 4",
+            10_000,
+            ".",
+            None,
+        )
+        .unwrap();
+        assert_eq!(result.status, "error");
+        assert_eq!(result.output, "out\n[stderr] err");
     }
 }
 

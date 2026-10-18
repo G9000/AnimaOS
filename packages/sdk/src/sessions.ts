@@ -19,7 +19,8 @@ export type SessionOrigin =
   | 'schedule'
   | 'job'
   | 'delegation'
-  | 'peer';
+  | 'peer'
+  | 'import';
 export type SessionTitleSource =
   | 'first_message'
   | 'generated'
@@ -89,6 +90,13 @@ export interface SessionMatch {
   snippet: string;
 }
 
+export interface SessionImportedFrom {
+  tool: 'claude-code' | 'codex';
+  foreignSessionId: string | null;
+  pathHash: string;
+  cwd: string | null;
+}
+
 /** A session with the daemon's derived fields (spec §3.2). */
 export interface Session {
   id: string;
@@ -117,6 +125,8 @@ export interface Session {
   pendingApprovals: number;
   unread: boolean;
   capabilities: SessionCapabilities;
+  /** Where an imported conversation came from (origin `import`). */
+  importedFrom?: SessionImportedFrom | null;
   match?: SessionMatch;
   /** The session's usage totals; present only on a single-session read. */
   usage?: UsageTotals | null;

@@ -9,6 +9,8 @@ import {
   type Session,
 } from '@animaOS-SWARM/sdk';
 
+import { AutonomyCard } from '../components/autonomy/AutonomyCard';
+import { CodingKeys } from '../components/coding/CodingKeys';
 import { ApprovalCard } from '../components/sessions/ApprovalCard';
 import { useApprovals, type ApprovalsView } from '../hooks/useApprovals';
 import {
@@ -185,6 +187,8 @@ export interface ApprovalsPageProps {
   /** What the companion may do at all, shown between what waits now and
    *  the rules for what it must ask. */
   access?: ReactNode;
+  /** Bumped when the policy changed elsewhere: read it again. */
+  policyRevision?: number;
 }
 
 /** Spec §15.4: pending cards, rules and policy per class, and the 30-day
@@ -196,13 +200,26 @@ export function ApprovalsPage({
   sessions,
   onOpenSession,
   access = null,
+  policyRevision = 0,
 }: ApprovalsPageProps) {
-  const view = useApprovals({
+  // An autonomy preset rewrites the class rules, and a class rule may turn
+  // the autonomy Custom: each side reads the other again after a change.
+  const [presetRevision, setPresetRevision] = useState(0);
+  const [classRevision, setClassRevision] = useState(0);
+  const approvals = useApprovals({
     agentId,
     streamApprovals: live.approvals,
     streamOpen,
     epoch: live.epoch,
+    policyRevision: policyRevision + presetRevision,
   });
+  const view: ApprovalsView = {
+    ...approvals,
+    setPolicyAction: async (klass, action) => {
+      await approvals.setPolicyAction(klass, action);
+      setClassRevision((value) => value + 1);
+    },
+  };
   const titles = new Map(
     sessions.map((session) => [sessionKey(session), session.title]),
   );
@@ -258,7 +275,13 @@ export function ApprovalsPage({
           </div>
         )}
       </section>
+      <AutonomyCard
+        agentId={agentId}
+        revision={policyRevision + classRevision}
+        onModeChanged={() => setPresetRevision((value) => value + 1)}
+      />
       {access}
+      <CodingKeys agentId={agentId} />
       <section className="approvals-section" aria-labelledby="approvals-rules">
         <h2 id="approvals-rules">Rules</h2>
         <p className="approvals-help">

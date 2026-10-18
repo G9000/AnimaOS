@@ -70,6 +70,13 @@ beforeEach(() => {
     rules: [gitRule],
     tools,
   });
+  vi.spyOn(daemon, 'codingKeys').mockResolvedValue({ keys: [] });
+  vi.spyOn(daemon, 'autonomy').mockResolvedValue({
+    mode: 'strict',
+    smartCheck: false,
+    denyPatterns: [],
+    policy: DEFAULT_APPROVAL_POLICY,
+  });
 });
 
 afterEach(() => {
@@ -248,6 +255,52 @@ describe('ApprovalsPage', () => {
       cursor: '10:apr_new',
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it('reads autonomy again after a class rule changes, and the rules after a preset', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(daemon, 'setApprovalPolicy').mockImplementation(
+      async (_agentId, policy) => policy,
+    );
+    const read = vi.mocked(daemon.autonomy);
+    read.mockResolvedValueOnce({
+      mode: 'strict',
+      smartCheck: false,
+      denyPatterns: [],
+      policy: DEFAULT_APPROVAL_POLICY,
+    });
+    read.mockResolvedValue({
+      mode: 'custom',
+      smartCheck: false,
+      denyPatterns: [],
+      policy: { ...DEFAULT_APPROVAL_POLICY, exec: 'deny' },
+    });
+    vi.spyOn(daemon, 'setAutonomy').mockResolvedValue({
+      mode: 'free',
+      smartCheck: false,
+      denyPatterns: [],
+      policy: { write: 'allow', exec: 'allow', network: 'allow', delegate: 'allow' },
+    });
+    renderPage();
+    expect(await screen.findByRole('radio', { name: /^Strict/ })).toBeChecked();
+    const exec = await screen.findByRole('region', { name: 'Runs commands' });
+    const policy = within(exec).getByRole('combobox', {
+      name: 'Policy for Runs commands',
+    });
+    await waitFor(() => expect(policy).toBeEnabled());
+    await user.selectOptions(policy, 'Deny');
+    expect(
+      await screen.findByText("You've set your own rules below."),
+    ).toBeVisible();
+    expect(read).toHaveBeenCalledTimes(2);
+
+    const policyReads = vi.mocked(daemon.approvalPolicy).mock.calls.length;
+    await user.click(screen.getByRole('radio', { name: /^Free/ }));
+    await waitFor(() =>
+      expect(vi.mocked(daemon.approvalPolicy).mock.calls.length).toBe(
+        policyReads + 1,
+      ),
+    );
   });
 
   it('sets each class’s policy and manages its rules', async () => {

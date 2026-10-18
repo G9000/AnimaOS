@@ -698,10 +698,15 @@ describe('WorkspaceShell', () => {
     ).toHaveFocus();
     await user.tab();
     expect(search).toHaveFocus();
+    const importButton = within(drawer).getByRole('button', {
+      name: 'Import from Claude Code or Codex',
+    });
+    await user.tab();
+    expect(importButton).toHaveFocus();
     await user.tab();
     expect(newChat).toHaveFocus();
     await user.tab({ shift: true });
-    expect(search).toHaveFocus();
+    expect(importButton).toHaveFocus();
     await user.keyboard('{Escape}');
     expect(
       screen.queryByRole('dialog', { name: 'History' }),

@@ -7,7 +7,7 @@
 //! nothing done while holding it can emit a `tracing` event (this module and
 //! `logs/redact.rs` contain no logging macros; a test checks it).
 
-mod redact;
+pub(crate) mod redact;
 
 use std::collections::VecDeque;
 use std::fmt::{self, Write as _};

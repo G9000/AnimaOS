@@ -1,6 +1,6 @@
 use super::super::{
-    AuthTransport, Device, InMemoryOAuthAppVault, OAuthVaultBackend, UnavailableTransport, ACCOUNT,
-    SERVICE,
+    AuthTransport, Device, InMemoryOAuthAppVault, OAuthVaultBackend, UnavailableTransport,
+    VaultLayout, ACCOUNT, SERVICE,
 };
 use super::*;
 use async_trait::async_trait;
@@ -796,7 +796,8 @@ async fn m49_chatgpt_models_load_pairs_credentials_with_the_manifest_actually_re
         next: StdMutex::new(None),
         armed: AtomicBool::new(false),
     });
-    let service = ChatGptAuth::with_dependencies(vault.clone(), Arc::new(UnavailableTransport));
+    let service = ChatGptAuth::with_dependencies(vault.clone(), Arc::new(UnavailableTransport))
+        .with_layout(VaultLayout::Chunked);
     service.save(&credential("account-a", false)).unwrap();
     let a = service.manifest().unwrap().unwrap();
     let chunks = (0..a.chunks)
@@ -849,7 +850,8 @@ async fn m49_chatgpt_models_revalidation_rejects_manifest_replaced_during_its_re
         armed: AtomicBool::new(false),
     });
     let fake = FakeModels::new();
-    let mut service = ChatGptAuth::with_dependencies(vault.clone(), Arc::new(UnavailableTransport));
+    let mut service = ChatGptAuth::with_dependencies(vault.clone(), Arc::new(UnavailableTransport))
+        .with_layout(VaultLayout::Chunked);
     service.models_transport = fake.clone();
     service.save(&credential("account-a", false)).unwrap();
     let context = service.usable_context(true).await.unwrap().unwrap();

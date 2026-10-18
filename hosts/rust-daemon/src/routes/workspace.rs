@@ -453,7 +453,10 @@ pub(crate) async fn handle_bootstrap_workspace(
         }
         for (config, _) in &team {
             match guard.create_agent(config.clone()) {
-                Ok(snapshot) => snapshots.push(snapshot),
+                Ok(snapshot) => {
+                    guard.start_free(&snapshot.state.id);
+                    snapshots.push(snapshot)
+                }
                 Err(error) => {
                     for snapshot in &snapshots {
                         guard.remove_agent(&snapshot.state.id);
@@ -726,7 +729,10 @@ pub(crate) async fn handle_resume_workspace(
         for config in configs_to_create {
             let agent_name = config.name.clone();
             match guard.create_agent(config) {
-                Ok(snapshot) => created.push((snapshot.state.id.clone(), snapshot)),
+                Ok(snapshot) => {
+                    guard.start_free(&snapshot.state.id);
+                    created.push((snapshot.state.id.clone(), snapshot))
+                }
                 Err(message) => {
                     failure = Some(ApiError::bad_request(format!(
                         "anima.yaml: agent {agent_name}: {message}"

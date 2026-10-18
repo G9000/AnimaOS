@@ -812,3 +812,155 @@ describe('PendingMessage', () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe('ToolBlock coding-agent status', () => {
+  const started: ToolStep = {
+    ...step,
+    stepId: 'run_1:2',
+    toolCallId: 'call_acp_start',
+    name: 'acp_start',
+    argumentsPreview: 'command: codex-acp, cwd: calc',
+    status: 'success',
+    result: JSON.stringify({
+      kind: 'acp_session',
+      id: 'acp-1',
+      command: 'codex-acp',
+      cwd: '/w/calc',
+      agent: { name: 'Codex' },
+      status: 'idle',
+      events: [],
+    }),
+  };
+
+  it('shows a coding agent as running while a later prompt to it is still in flight', () => {
+    const prompting: ToolStep = {
+      ...step,
+      stepId: 'run_1:3',
+      toolCallId: 'call_acp_prompt',
+      name: 'acp_prompt',
+      argumentsPreview: 'id: acp-1, text: Fix the bug',
+      status: 'running',
+      result: null,
+    };
+    render(<ToolBlock steps={[started, prompting]} active />);
+    expect(screen.getAllByText(/RUNNING/i)[0]).toBeVisible();
+    expect(screen.queryByText(/^IDLE$/i)).toBeNull();
+  });
+
+  it('keeps the finished status once nothing for that session is running', () => {
+    render(<ToolBlock steps={[started]} active={false} />);
+    expect(screen.getAllByText(/IDLE/i)[0]).toBeInTheDocument();
+  });
+});
+
+describe('Plan shown in Free autonomy', () => {
+  const planArgs = {
+    title: 'Lisbon trip',
+    steps: [
+      'Compare flights',
+      { action: 'Text Mimi the dates', asks_first: true },
+    ],
+  };
+
+  it('shows a started plan as a card with Stop while the run works', async () => {
+    const user = userEvent.setup();
+    const run = runFixture('run_plan', {
+      status: 'running',
+      startedAtMs: Date.now(),
+    });
+    const onStopRun = vi.fn();
+    render(
+      <RunActivity
+        agentName="Nova"
+        renderMessage={renderMessage}
+        actions={{ onStopRun }}
+        live={{
+          ...emptyLiveRun(run),
+          tools: [
+            {
+              stepId: 'run_plan:1',
+              toolCallId: 'call_plan',
+              name: 'propose_plan',
+              argumentsPreview: JSON.stringify(planArgs),
+              argumentsTruncated: false,
+              status: 'success',
+              durationMs: 2,
+              resultPreview: 'Plan shown; go ahead.',
+              truncated: false,
+            },
+          ],
+        }}
+      />,
+    );
+    const card = screen.getByRole('region', { name: 'Plan: Lisbon trip' });
+    expect(within(card).getByText('Plan · Lisbon trip')).toBeVisible();
+    expect(within(card).getByText('Compare flights')).toBeVisible();
+    expect(within(card).getByText('Asks first')).toBeVisible();
+    expect(within(card).getByText('Working on it')).toBeVisible();
+    expect(
+      within(card).queryByRole('button', { name: 'Start plan' }),
+    ).toBeNull();
+    await user.click(within(card).getByRole('button', { name: 'Stop' }));
+    expect(onStopRun).toHaveBeenCalledWith(run);
+  });
+
+  it('keeps a finished plan from history, without Stop, and skips one still running or refused', () => {
+    const transcript = buildTranscript({
+      messages: [
+        {
+          id: 'assistant-plan',
+          role: 'Assistant',
+          content: {
+            text: '',
+            metadata: {
+              runId: 'run_plan',
+              stepId: 'run_plan:1',
+              toolCalls: [
+                { id: 'call-plan', name: 'propose_plan', args: planArgs },
+              ],
+            },
+          },
+          created_at_ms: 1,
+        },
+        {
+          id: 'tool-plan',
+          role: 'Tool',
+          content: {
+            text: JSON.stringify({
+              status: 'success',
+              data: 'Plan shown; go ahead.',
+              error: null,
+              durationMs: 1,
+            }),
+            metadata: {
+              runId: 'run_plan',
+              stepId: 'run_plan:1',
+              toolCallId: 'call-plan',
+            },
+          },
+          created_at_ms: 2,
+        },
+      ],
+    });
+    const block = transcript.find((item) => item.kind === 'tools');
+    if (!block || block.kind !== 'tools') throw new Error('no tool block');
+    const { rerender } = render(
+      <ToolBlock steps={block.steps} active={false} onStop={vi.fn()} />,
+    );
+    const card = screen.getByRole('region', { name: 'Plan: Lisbon trip' });
+    expect(within(card).queryByText('Working on it')).toBeNull();
+    expect(within(card).queryByRole('button', { name: 'Stop' })).toBeNull();
+
+    for (const status of ['running', 'error'] as const) {
+      rerender(
+        <ToolBlock
+          steps={block.steps.map((item) => ({ ...item, status }))}
+          active
+        />,
+      );
+      expect(
+        screen.queryByRole('region', { name: 'Plan: Lisbon trip' }),
+      ).toBeNull();
+    }
+  });
+});

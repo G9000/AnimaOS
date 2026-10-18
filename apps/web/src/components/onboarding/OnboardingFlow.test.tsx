@@ -154,6 +154,12 @@ beforeEach(() => {
     workspace: null,
     defaultRoot: '',
   });
+  vi.spyOn(daemon, 'setAutonomy').mockImplementation(async (_id, patch) => ({
+    mode: patch.mode ?? 'free',
+    smartCheck: false,
+    denyPatterns: [],
+    policy: { write: 'allow', exec: 'allow', network: 'allow', delegate: 'allow' },
+  }));
 });
 
 afterEach(() => {
@@ -936,7 +942,7 @@ describe('OnboardingFlow', () => {
     ).toBeVisible();
     expect(
       screen.getByText(
-        'Can execute shell commands and manage background processes.',
+        'Can run shell commands, background work and apps such as coding agents. Rules still apply.',
       ),
     ).toBeVisible();
     expect(
@@ -1004,6 +1010,25 @@ describe('OnboardingFlow', () => {
     });
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith(created));
     expect(bootstrapWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it('saves the chosen autonomy for the new manager; Free by default', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(daemon, 'bootstrapWorkspace').mockResolvedValue({
+      workspace: { ...WORKSPACE, values: [] },
+      agent: snapshot(),
+    } as never);
+    const onCreated = vi.fn();
+    renderFlow({ onCreated });
+    await goToManager(user);
+    expect(screen.getByRole('radio', { name: /^Free/ })).toBeChecked();
+    await user.click(screen.getByRole('radio', { name: /^Operate/ }));
+    await user.click(screen.getByRole('radio', { name: /^Strict/ }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Create workspace' }));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
+    expect(daemon.setAutonomy).toHaveBeenCalledWith('agent-1', { mode: 'strict' });
+    expect(daemon.setAutonomy).toHaveBeenCalledOnce();
   });
 
   it('re-uses createAgent and prefills the draft when the workspace is already configured', async () => {

@@ -91,8 +91,12 @@ fn metadata(name: &str) -> (&'static str, Vec<&'static str>) {
             ("documents", vec!["A configured workspace, explicit document opt-in, and an explicit agent tool grant."]),
         "todo_read" | "todo_write" =>
             ("workspace", vec!["An agent-owned task list in the workspace. Creating a task does not enable a schedule."]),
-        "bash" | "bg_start" | "bg_output" | "bg_stop" | "bg_list" =>
+        "bash" | "bg_start" | "bg_output" | "bg_wait" | "bg_stop" | "bg_list" =>
             ("terminal", vec!["Shell access. Programs run with the daemon user's operating-system permissions."]),
+        name if name.starts_with("app_") =>
+            ("terminal", vec!["Interactive apps on a real terminal, with the daemon user's operating-system permissions. At most four apps and coding agents open per agent."]),
+        name if name.starts_with("acp_") =>
+            ("terminal", vec!["Coding agents over the Agent Client Protocol. Their edit, command and fetch requests go through the owner's approvals."]),
         "memory_search" | "memory_add" | "memory_update" | "memory_remove" | "memory_consolidate" | "recent_memories" =>
             ("memory", vec!["Agent memory access. Persistence depends on the configured memory storage."]),
         "spawn_helper" =>

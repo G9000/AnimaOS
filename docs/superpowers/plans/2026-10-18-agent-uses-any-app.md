@@ -2,6 +2,7 @@
 
 **Goal:** like a person, the AnimaOS agent can use **any app on the computer** (Claude Code, Codex, OpenCode, git, Python, a REPL, a full-screen terminal app) through general abilities plus know-how. No app needs a built-in integration. It's free by default, and the owner makes it stricter through settings.
 **Decided with the owner (2026-10-18):** an agent on Operate runs commands without asking. Vendor-specific coding tools are gone. Interactive app sessions are in scope now. Follow-ups use each CLI's own session resume. The agent picks a freedom level per task; the owner's ceiling is the Run commands policy plus rules.
+**Coding agent parity:** [`2026-10-18-coding-agents-parity.md`](2026-10-18-coding-agents-parity.md) amends steps 2, 3, 4 and 6 and adds wake-on-exit, login passthrough, per-CLI bundles and an ACP client, all in the first round.
 **Rules:** update `design/design.pen` (pen.dev MCP) **before** any UI code. Keep reusable engine code in `packages/*` and host wiring in `hosts/rust-daemon`. `unsafe_code` is forbidden workspace-wide. Commit nothing unless the owner asks.
 
 ## Already done (cleanup, uncommitted)

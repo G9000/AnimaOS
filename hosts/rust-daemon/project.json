@@ -8,7 +8,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": ".",
-        "command": "cargo run -p anima-daemon"
+        "command": "bun tools/workspace-dev/src/rust-daemon-dev.ts"
       },
       "inputs": [
         "default",
@@ -28,7 +28,7 @@
       ],
       "options": {
         "cwd": ".",
-        "command": "cargo build -p anima-daemon"
+        "command": "bun tools/workspace-dev/src/rust-daemon-dev.ts --build-only"
       },
       "inputs": [
         "default",

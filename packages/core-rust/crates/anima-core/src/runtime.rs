@@ -81,6 +81,8 @@ pub struct AgentRuntimeSnapshot {
 pub struct AgentRuntime {
     agent_files: crate::RenderedAgentFiles,
     host_guidance: String,
+    /// The host's tool-round budget for agents whose settings leave it unset.
+    host_tool_iterations: Option<usize>,
     state: AgentState,
     messages: Vec<Message>,
     last_task: Option<TaskResult<Content>>,
@@ -149,6 +151,7 @@ impl AgentRuntime {
             control: None,
             agent_files: crate::RenderedAgentFiles::default(),
             host_guidance: String::new(),
+            host_tool_iterations: None,
         }
     }
 
@@ -192,6 +195,7 @@ impl AgentRuntime {
             control: None,
             agent_files: crate::RenderedAgentFiles::default(),
             host_guidance: String::new(),
+            host_tool_iterations: None,
         }
     }
 
@@ -203,6 +207,12 @@ impl AgentRuntime {
         self.agent_files = files;
     }
     /// Mandatory code-owned guidance, independent of SOUL and legacy persona.
+    /// Sets the tool-round budget used when the agent's own settings leave
+    /// `max_tool_iterations` unset; an explicit setting always wins.
+    pub fn set_default_tool_iterations(&mut self, rounds: usize) {
+        self.host_tool_iterations = Some(rounds);
+    }
+
     pub fn set_host_guidance(&mut self, guidance: String) {
         self.host_guidance = guidance;
     }
@@ -484,6 +494,7 @@ impl AgentRuntime {
             .settings
             .as_ref()
             .and_then(|settings| settings.max_tool_iterations)
+            .or(self.host_tool_iterations)
             .unwrap_or(MAX_TOOL_ITERATIONS);
 
         loop {

@@ -78,6 +78,9 @@ export interface Approval {
   /** Send it back with a decision. */
   revision: number;
   resolution: ApprovalResolution | null;
+  /** Why it asks when the policy alone would allow it: `dangerous_command`
+   *  for a command that is hard to undo. Absent on older records. */
+  reason?: string;
 }
 
 export interface ApprovalRule {

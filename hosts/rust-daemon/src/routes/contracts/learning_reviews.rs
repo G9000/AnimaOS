@@ -19,6 +19,12 @@ pub(crate) struct LearningDecisionRequest {
     pub(crate) expected_version: u64,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LearningUndoRequest {
+    pub(crate) expected_version: u64,
+}
+
 #[derive(Serialize, ToSchema)]
 pub(crate) struct LearningReviewEnvelope {
     pub(crate) review: LearningReviewRecord,

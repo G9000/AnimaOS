@@ -10,7 +10,10 @@ workspace = true
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "1", features = ["process", "time"] }
+tokio = { version = "1", features = ["macros", "process", "sync", "time"] }
+portable-pty = "=0.9.0"
+vt100 = "=0.16.2"
+regex = "1"
 process-wrap = { version = "=10.0.1", default-features = false, features = ["tokio1", "creation-flags", "job-object", "kill-on-drop", "process-group"] }
 
 [target.'cfg(unix)'.dependencies]

@@ -11,8 +11,11 @@ anima-core = { path = "../../packages/core-rust/crates/anima-core" }
 anima-document-content = { path = "../../packages/core-rust/crates/anima-document-content" }
 anima-model-adapters = { path = "../../packages/core-rust/crates/anima-model-adapters" }
 anima-memory = { path = "../../packages/core-rust/crates/anima-memory", features = ["locomo-eval"] }
+anima-acp = { path = "../../packages/core-rust/crates/anima-acp" }
+anima-process = { path = "../../packages/core-rust/crates/anima-process" }
 anima-schedule = { path = "../../packages/core-rust/crates/anima-schedule" }
 anima-swarm = { path = "../../packages/core-rust/crates/anima-swarm" }
+anima-worktree = { path = "../../packages/core-rust/crates/anima-worktree" }
 atomicwrites = "0.4.4"
 cap-std = "3.4.5"
 cap-fs-ext = "3.4.5"

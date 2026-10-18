@@ -142,6 +142,44 @@ describe('approvalHeadline', () => {
       detail: '2 steps · nothing starts until you say so',
     });
   });
+
+  it.each([
+    ['acp_edit', 'write', { file_path: 'src/upload.ts' }, 'src/upload.ts'],
+    ['acp_execute', 'exec', { command: 'npm test' }, 'npm test'],
+    ['acp_fetch', 'network', { url: 'https://example.com' }, 'https://example.com'],
+    ['acp_other', 'exec', {}, 'src/a.ts, src/b.ts'],
+  ] as const)(
+    'names the coding agent and what it wants to do for %s',
+    (tool, klass, extra, detail) => {
+      const request = approval({
+        tool,
+        class: klass,
+        arguments: JSON.stringify({
+          agent: 'Codex',
+          sessionId: 'acp-1',
+          title: 'Edit src/upload.ts',
+          locations: ['src/a.ts', 'src/b.ts'],
+          ...extra,
+        }),
+      });
+      expect(approvalHeadline(request)).toEqual({
+        title: 'Codex wants to edit src/upload.ts',
+        detail,
+      });
+    },
+  );
+
+  it('falls back to the usual headline when a coding agent request is incomplete', () => {
+    const request = approval({
+      tool: 'acp_edit',
+      class: 'write',
+      arguments: JSON.stringify({ title: 'Edit x', file_path: 'x' }),
+    });
+    expect(approvalHeadline(request)).toEqual({
+      title: 'Changes files and records · acp_edit',
+      detail: 'x',
+    });
+  });
 });
 
 describe('parsePlan', () => {
@@ -201,6 +239,30 @@ describe('doneActions', () => {
     ).toEqual([
       { title: 'Ran a command', detail: 'git push', failed: true },
       { title: 'Changed a file', detail: 'anima.toml', failed: false },
+    ]);
+  });
+
+  it('labels app and coding agent work and keeps their reads quiet', () => {
+    const actions = doneActions([
+      run([
+        receipt('app_start', { command: 'claude' }, 'succeeded', 10),
+        receipt('app_send', { id: 'app-1', text: 'fix it' }, 'succeeded', 11),
+        receipt('app_stop', { id: 'app-1' }, 'succeeded', 12),
+        receipt('acp_start', { command: 'codex-acp' }, 'succeeded', 13),
+        receipt('acp_prompt', { id: 'acp-1', text: 'go' }, 'succeeded', 14),
+        receipt('acp_stop', { id: 'acp-1' }, 'succeeded', 15),
+        ...['bg_wait', 'app_read', 'app_list', 'acp_read', 'acp_list'].map(
+          (name, index) => receipt(name, { id: 'x' }, 'succeeded', 20 + index),
+        ),
+      ]),
+    ]);
+    expect(actions.map(({ title }) => title)).toEqual([
+      'Stopped a coding agent',
+      'Asked a coding agent',
+      'Started a coding agent',
+      'Stopped an app',
+      'Typed into an app',
+      'Started an app',
     ]);
   });
 });

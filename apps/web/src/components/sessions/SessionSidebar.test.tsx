@@ -54,6 +54,23 @@ afterEach(() => {
 });
 
 describe('SessionSidebar', () => {
+  it('tags an imported conversation with the app it came from', () => {
+    const imported = sessionFixture('chat:imported-1', {
+      title: 'Imported · Fix flaky upload test',
+      origin: 'import',
+      importedFrom: {
+        tool: 'codex',
+        foreignSessionId: 'c-1',
+        pathHash: 'abc',
+        cwd: '/Users/ana/code/uploader',
+      },
+      lastActivityAtMs: NOW.getTime() - HOUR,
+    });
+    renderSidebar({ sessions: [imported] });
+    const row = screen.getByRole('button', { name: 'Imported · Fix flaky upload test' });
+    expect(within(row).getByText('Codex')).toBeInTheDocument();
+  });
+
   it('groups by day, nests helpers, and marks unread, working, and current rows', async () => {
     const plans = sessionFixture('chat:plans', {
       title: 'Plans',

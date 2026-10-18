@@ -122,6 +122,10 @@ pub(crate) struct ApprovalRequest {
     pub(crate) revision: u64,
     #[serde(default)]
     pub(crate) resolution: Option<ApprovalResolution>,
+    /// Why it asked when its class alone would not have: `dangerous_command`
+    /// for a command that is hard to undo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reason: Option<String>,
 }
 
 /// What a new request is about.
@@ -132,6 +136,7 @@ pub(crate) struct PendingApprovalStart<'a> {
     pub(crate) run_id: &'a str,
     pub(crate) call: &'a ToolCall,
     pub(crate) timeout_ms: u64,
+    pub(crate) reason: Option<&'static str>,
 }
 
 /// `call`'s arguments as JSON text, cut to `MAX_APPROVAL_ARGUMENTS_BYTES` on
@@ -167,6 +172,7 @@ impl ApprovalRequest {
             status: ApprovalStatus::Pending,
             revision: 1,
             resolution: None,
+            reason: start.reason.map(str::to_string),
         }
     }
 
@@ -577,6 +583,7 @@ mod tests {
                 run_id: run,
                 call: &call,
                 timeout_ms: 1_000,
+                reason: None,
             },
             at_ms,
         );
@@ -650,6 +657,7 @@ mod tests {
                 run_id: "run_1",
                 call: &call,
                 timeout_ms: 60_000,
+                reason: None,
             },
             1_000,
         );
