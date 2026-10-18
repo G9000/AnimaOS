@@ -26,6 +26,8 @@ export type HashRoute =
       sessionId: string;
       /** Set for another agent's session, such as a helper's. */
       agentId?: string;
+      /** An exact saved message, loaded as a bounded historical window. */
+      messageId?: string;
     }
   | { kind: 'page'; page: HashPage };
 
@@ -35,7 +37,19 @@ const ROUTE_ID = /^[A-Za-z0-9._:-]{1,200}$/;
 /** `#/s/<sessionId>`, `#/s/<agentId>/<sessionId>` for another agent's
  *  session, or `#/<page>`; anything else is a new chat. */
 export function parseHashRoute(hash: string): HashRoute {
-  const path = hash.startsWith('#') ? hash.slice(1) : hash;
+  const raw = hash.startsWith('#') ? hash.slice(1) : hash;
+  const queryAt = raw.indexOf('?');
+  const path = queryAt < 0 ? raw : raw.slice(0, queryAt);
+  const query = new URLSearchParams(queryAt < 0 ? '' : raw.slice(queryAt + 1));
+  const target = query.get('messageId');
+  const messageId =
+    query.getAll('messageId').length === 1 &&
+    target?.trim() &&
+    new TextEncoder().encode(target).length <= 256 &&
+    !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(target)
+      ? target
+      : undefined;
+  const anchor = messageId ? { messageId } : {};
   if (path.startsWith('/s/')) {
     try {
       const parts = path
@@ -43,9 +57,15 @@ export function parseHashRoute(hash: string): HashRoute {
         .split('/')
         .map((part) => decodeURIComponent(part));
       if (parts.every((part) => ROUTE_ID.test(part))) {
-        if (parts.length === 1) return { kind: 'session', sessionId: parts[0] };
+        if (parts.length === 1)
+          return { kind: 'session', sessionId: parts[0], ...anchor };
         if (parts.length === 2)
-          return { kind: 'session', agentId: parts[0], sessionId: parts[1] };
+          return {
+            kind: 'session',
+            agentId: parts[0],
+            sessionId: parts[1],
+            ...anchor,
+          };
       }
     } catch {
       // A malformed escape opens a new chat.
@@ -63,9 +83,14 @@ export function formatHashRoute(route: HashRoute): string {
     case 'home':
       return '#/';
     case 'session':
-      return route.agentId
-        ? `#/s/${encodeURIComponent(route.agentId)}/${encodeURIComponent(route.sessionId)}`
-        : `#/s/${encodeURIComponent(route.sessionId)}`;
+      return (
+        (route.agentId
+          ? `#/s/${encodeURIComponent(route.agentId)}/${encodeURIComponent(route.sessionId)}`
+          : `#/s/${encodeURIComponent(route.sessionId)}`) +
+        (route.messageId
+          ? `?${new URLSearchParams({ messageId: route.messageId })}`
+          : '')
+      );
     case 'page':
       return `#/${route.page}`;
   }

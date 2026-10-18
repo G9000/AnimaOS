@@ -17,7 +17,7 @@ One native batch and final SDK/web review fed one combined fix wave. A later act
 ## Source-backed starting point
 
 - `AGENTS.md`: reusable runtime code stays under `packages/*`; runnable host code stays under `hosts/*`; root owns current required Nx gates.
-- `docs/companion/parity-roadmap.md`, PAR-04: manifest, compatible runtime, permissions, digest, attribution and a reproducible lifecycle example remain queued.
+- A manifest, compatible runtime, permissions, digest, attribution and a reproducible lifecycle example remain queued.
 - The roadmap separates implementation, local acceptance, account acceptance and host acceptance; one fixture cannot establish general package safety or parity.
 - `docs/superpowers/plans/2026-10-14-companion-mcp-stdio-m44.md`: immutable absolute stdio launch, disabled saves, separate connect, exact reviewed descriptors, four global connections and shared call policy.
 - Its current refinement makes stdio execution Windows-only; other hosts fail before lookup/reservation/spawn. HTTP remains portable.
@@ -292,4 +292,4 @@ The actual console exposed a within-TTL review conflict after an unchanged backg
 
 All six exact owned synthetic processes stopped, ports4200/8081 free and the created tab closed. Zero runtime model tasks/messages/tokens, ordinary profiles/accounts, database servers/containers/Docker55432 or public deployment. Quiet forced-daemon recovery is not graceful-shutdown evidence. Controlled deterministic calls do not prove provider task quality, arbitrary executable/server safety, publisher authenticity, external filesystem atomicity or full Hermes parity. Uncertain storage acknowledgements are inspected as actual committed snapshots; prior explicit approvals may remain and final erase may already be absent, as ruled above.
 
-Exact REDs, review dispositions, corrections, proof files, publication and verified merge settlement live in `.superpowers/sdd/2026-10-14-companion-community-packages-m45/progress.md`. See [bundle use/contribution instructions](../../companion/community-bundles.md), [harness evidence](../../companion/harness-acceptance.md) and [remaining parity](../../companion/parity-roadmap.md). M45/PR51 is verified merged at802bb366539ee3533f4f5ec04b8fed38fd3e0497; M46 now has a bound lean plan and delegated interface preparation, with implementation/acceptance pending.
+Exact REDs, review dispositions, corrections, proof files, publication and verified merge settlement live in `.superpowers/sdd/2026-10-14-companion-community-packages-m45/progress.md`. See [bundle use/contribution instructions](../../companion/community-bundles.md), [harness evidence](../../companion/harness-acceptance.md) and remaining parity. M45/PR51 is verified merged at802bb366539ee3533f4f5ec04b8fed38fd3e0497; M46 now has a bound lean plan and delegated interface preparation, with implementation/acceptance pending.

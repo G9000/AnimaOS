@@ -232,6 +232,10 @@ pub(crate) struct SessionRecord {
     pub(crate) last_read_at_ms: Option<u64>,
     #[serde(default)]
     pub(crate) archived: bool,
+    /// The companion's durable primary web conversation. Older snapshots
+    /// have no designation until the owner resolves it for the first time.
+    #[serde(default)]
+    pub(crate) main_chat: bool,
     #[serde(default)]
     pub(crate) parent_session_id: Option<String>,
     #[serde(default)]
@@ -289,6 +293,7 @@ impl SessionRecord {
             last_activity_at_ms: now_ms,
             last_read_at_ms: None,
             archived: false,
+            main_chat: false,
             parent_session_id: None,
             parent_run_id: None,
             parent_agent_id: None,
@@ -308,7 +313,22 @@ impl SessionRecord {
     }
 
     pub(crate) fn capabilities(&self, schedule_exists: bool) -> SessionCapabilities {
-        self.kind.capabilities(schedule_exists)
+        let mut capabilities = self.kind.capabilities(schedule_exists);
+        if self.main_chat {
+            capabilities.archive = false;
+            capabilities.delete = false;
+        }
+        capabilities
+    }
+
+    /// Main identity is independent of availability: an archived designation
+    /// must survive restore so resolution reports a conflict, not a new chat.
+    pub(crate) fn has_main_chat_identity(&self) -> bool {
+        self.kind == SessionKind::Chat
+            && self.origin == SessionOrigin::Web
+            && self.parent_session_id.is_none()
+            && self.parent_run_id.is_none()
+            && self.parent_agent_id.is_none()
     }
 }
 
@@ -477,7 +497,7 @@ pub(crate) struct TitleContext<'a> {
 
 /// `"{label} · {detail}"`, truncated to the title limit; `fallback` (usually
 /// just `label`) when there is no detail. Shared by every `system`-sourced
-/// title: Telegram, check-in, job, and the calendar write follow-up.
+/// title, including connector and other host-originated follow-ups.
 pub(crate) fn labelled_title(label: &str, detail: Option<String>, fallback: &str) -> String {
     detail
         .map(|detail| truncate_chars(&format!("{label} · {detail}"), MAX_SESSION_TITLE_CHARS))
@@ -577,24 +597,6 @@ pub(crate) fn is_owner_web_turn(message: &Message) -> bool {
             metadata_str(message, "source"),
             Some("telegramThread" | "discordThread")
         )
-}
-
-/// The `sourceRef` prefix the calendar connector's own write-confirmation
-/// follow-up uses (`connectors::gcalendar::notify_agent_write_applied`), so
-/// the producer and `is_calendar_write_followup` never drift apart.
-pub(crate) const CALENDAR_WRITE_SOURCE_REF_PREFIX: &str = "calendar-write:";
-
-/// The metadata key that follow-up's run content carries its calendar
-/// summary under, so the session title can use the structured value
-/// directly instead of parsing it back out of the confirmation prose.
-pub(crate) const CALENDAR_SUMMARY_METADATA_KEY: &str = "calendarSummary";
-
-/// The daemon's own confirmation follow-up after a calendar write is applied
-/// (`sourceRef = calendar-write:<id>`). It runs with `source: api` like an
-/// owner call, but it is not the owner's own turn (Controller ruling, M2
-/// pre-flight audit): its session is titled `system`, not marked owner-read.
-pub(crate) fn is_calendar_write_followup(source_ref: Option<&str>) -> bool {
-    source_ref.is_some_and(|source_ref| source_ref.starts_with(CALENDAR_WRITE_SOURCE_REF_PREFIX))
 }
 
 /// Where each turn starts; the single definition lives in `anima-core`
@@ -726,6 +728,30 @@ impl SessionRegistry {
         self.records.len()
     }
 
+    /// First designation only: newest activity, then creation, then the
+    /// lexicographically smallest ID. Pending deletion is supplied by the
+    /// owner of the control-plane state, not inferred from history rows.
+    pub(crate) fn main_chat_candidate(
+        &self,
+        agent_id: &str,
+        pending_deletion: impl Fn(&SessionRecord) -> bool,
+    ) -> Option<&SessionRecord> {
+        self.records()
+            .filter(|record| {
+                record.agent_id == agent_id
+                    && record.has_main_chat_identity()
+                    && !record.archived
+                    && !pending_deletion(record)
+            })
+            .min_by(|left, right| {
+                right
+                    .last_activity_at_ms
+                    .cmp(&left.last_activity_at_ms)
+                    .then_with(|| right.created_at_ms.cmp(&left.created_at_ms))
+                    .then_with(|| left.id.cmp(&right.id))
+            })
+    }
+
     /// Records to save, sorted, without sessions of agents that no longer exist.
     pub(crate) fn snapshot_records(&self, live_agents: &HashSet<String>) -> Vec<SessionRecord> {
         let mut records = self
@@ -744,6 +770,7 @@ impl SessionRegistry {
 
     pub(crate) fn validate(records: &[SessionRecord]) -> Result<(), String> {
         let mut keys = HashSet::new();
+        let mut main_chat_owners = HashSet::new();
         for record in records {
             if !is_valid_session_id(&record.id) {
                 return Err(format!("session id '{}' is invalid", record.id));
@@ -756,6 +783,20 @@ impl SessionRegistry {
                     "duplicate session '{}' for agent '{}'",
                     record.id, record.agent_id
                 ));
+            }
+            if record.main_chat {
+                if !record.has_main_chat_identity() {
+                    return Err(format!(
+                        "main chat '{}' must be a parentless Web Chat",
+                        record.id
+                    ));
+                }
+                if !main_chat_owners.insert(record.agent_id.as_str()) {
+                    return Err(format!(
+                        "duplicate main chat for agent '{}'",
+                        record.agent_id
+                    ));
+                }
             }
             let title_chars = record.title.chars().count();
             if title_chars == 0 || title_chars > MAX_SESSION_TITLE_CHARS {

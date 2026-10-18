@@ -108,6 +108,51 @@ fn normalize_line_endings(input: &str) -> String {
     input.replace("\r\n", "\n")
 }
 
+/// Prepare the same edit bytes without performing an effect. The checkpoint
+/// adapter supplies the observed raw bytes and owns the eventual held write.
+pub(in super::super) fn prepare_edit_bytes(
+    original: Option<&[u8]>,
+    old_string: &str,
+    new_string: &str,
+    path: &str,
+) -> Result<Vec<u8>, String> {
+    let content =
+        std::str::from_utf8(original.ok_or_else(|| format!("edit_file file not found: {path}"))?)
+            .map_err(|_| format!("edit_file failed to read {path}: invalid UTF-8"))?;
+    apply_single_edit(
+        &normalize_line_endings(content),
+        &normalize_line_endings(old_string),
+        new_string,
+        path,
+    )
+    .map(String::into_bytes)
+}
+
+pub(in super::super) fn prepare_multi_edit_bytes(
+    original: Option<&[u8]>,
+    edits: &[FileEditOperation],
+    path: &str,
+) -> Result<Vec<u8>, String> {
+    if edits.is_empty() {
+        return Err("No edits provided".into());
+    }
+    let content =
+        std::str::from_utf8(original.ok_or_else(|| format!("multi_edit file not found: {path}"))?)
+            .map_err(|_| format!("multi_edit failed to read {path}: invalid UTF-8"))?;
+    let mut dry_run = normalize_line_endings(content);
+    for (index, edit) in edits.iter().enumerate() {
+        dry_run = apply_edit_for_multi(
+            &dry_run,
+            &normalize_line_endings(&edit.old_string),
+            &edit.new_string,
+            path,
+            index,
+            edits.len(),
+        )?;
+    }
+    Ok(dry_run.into_bytes())
+}
+
 fn unescape_over_escaped(input: &str) -> String {
     input
         .replace("\\\\n", "__BACKSLASH_N__")

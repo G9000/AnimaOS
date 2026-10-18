@@ -1,4 +1,11 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { ConnectorsView } from './ConnectorsView';
@@ -43,6 +50,191 @@ const draft = {
   state: 'pending',
   error: null,
 };
+
+it('fp02 suppresses all connector reads and actions while offline, including timer and manual refresh', async () => {
+  vi.useFakeTimers();
+  try {
+    render(
+      <ConnectorsView
+        agentId="main"
+        telegram={null}
+        online={false}
+        epoch={1}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh Gmail' }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(45_000);
+    });
+    expect(api.oauthAppStatus).not.toHaveBeenCalled();
+    expect(api.calendarStatus).not.toHaveBeenCalled();
+    expect(api.mailStatus).not.toHaveBeenCalled();
+    expect(api.driveStatus).not.toHaveBeenCalled();
+    expect(mcpOwnerApi.list).not.toHaveBeenCalled();
+    expect(communityBundlesOwnerApi.list).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole('button', { name: 'Save Google OAuth app' }),
+    ).toBeDisabled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('fp02 reconnect discards stale mailbox reads before starting dependent inbox reads', async () => {
+  let finish!: (value: unknown) => void;
+  api.mailStatus.mockImplementation((_owner, provider) =>
+    provider === 'gmail'
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : Promise.resolve({ configured: false, connector: null }),
+  );
+  const view = render(
+    <ConnectorsView agentId="main" telegram={null} online epoch={1} />,
+  );
+  view.rerender(
+    <ConnectorsView agentId="main" telegram={null} online={false} epoch={1} />,
+  );
+  await act(async () => {
+    finish({ configured: true, connector });
+  });
+  expect(api.mailMessages).not.toHaveBeenCalled();
+  expect(api.mailDrafts).not.toHaveBeenCalled();
+  expect(screen.queryByText('owner@example.com')).not.toBeInTheDocument();
+  api.mailStatus.mockResolvedValue({ configured: false, connector: null });
+  view.rerender(
+    <ConnectorsView agentId="main" telegram={null} online epoch={2} />,
+  );
+  await waitFor(() => expect(api.mailStatus).toHaveBeenCalledTimes(4));
+});
+
+it('fp02 obsolete credential save never refetches or clears retained ordinary fields', async () => {
+  let finish!: (value: unknown) => void;
+  api.configureOauthApp.mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const user = userEvent.setup();
+  const view = render(
+    <ConnectorsView agentId="main" telegram={null} online epoch={1} />,
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Save Google OAuth app' }),
+    ).toBeEnabled(),
+  );
+  fireEvent.change(screen.getByLabelText('Google client ID'), {
+    target: { value: 'retained-id' },
+  });
+  fireEvent.change(screen.getByLabelText('Google client secret'), {
+    target: { value: 'synthetic-secret' },
+  });
+  await user.click(
+    screen.getByRole('button', { name: 'Save Google OAuth app' }),
+  );
+  view.rerender(
+    <ConnectorsView agentId="main" telegram={null} online={false} epoch={1} />,
+  );
+  const reads = api.oauthAppStatus.mock.calls.length;
+  await act(async () => {
+    finish({ configured: true });
+  });
+  expect(api.oauthAppStatus).toHaveBeenCalledTimes(reads);
+  expect(screen.getByLabelText('Google client ID')).toHaveValue('retained-id');
+  expect(screen.getByLabelText('Google client secret')).toHaveValue('');
+  expect(api.configureOauthApp).toHaveBeenCalledTimes(1);
+});
+
+it('fp02 lifetime change clears unsubmitted OAuth secrets while retaining ordinary drafts', async () => {
+  const view = render(
+    <ConnectorsView agentId="main" telegram={null} online epoch={1} />,
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Save Google OAuth app' }),
+    ).toBeEnabled(),
+  );
+  fireEvent.change(screen.getByLabelText('Google client ID'), {
+    target: { value: 'retained-id' },
+  });
+  fireEvent.change(screen.getByLabelText('Google client secret'), {
+    target: { value: 'synthetic-secret' },
+  });
+  fireEvent.change(screen.getByLabelText('Connection label'), {
+    target: { value: 'Draft connection' },
+  });
+  view.rerender(
+    <ConnectorsView agentId="main" telegram={null} online={false} epoch={1} />,
+  );
+  expect(screen.getByLabelText('Google client secret')).toHaveValue('');
+  expect(screen.getByLabelText('Google client ID')).toHaveValue('retained-id');
+  expect(screen.getByLabelText('Connection label')).toHaveValue(
+    'Draft connection',
+  );
+});
+
+it('fp02 overlapping explicit status reconciliation cannot release a pending bundle mutation lock', async () => {
+  const bundle = communityBundle();
+  vi.mocked(communityBundlesOwnerApi.list).mockResolvedValue([bundle]);
+  vi.spyOn(communityBundlesOwnerApi, 'get').mockResolvedValue(bundle);
+  let finishMutation!: (value: typeof bundle) => void;
+  vi.spyOn(communityBundlesOwnerApi, 'setEnabled').mockReturnValue(
+    new Promise((resolve) => {
+      finishMutation = resolve;
+    }),
+  );
+  let finishRead!: (value: []) => void;
+  const canonical = vi.fn().mockResolvedValue(undefined);
+  const busy = vi.fn();
+  const user = userEvent.setup();
+  const view = render(
+    <ConnectorsView
+      agentId="main"
+      telegram={null}
+      onMcpGrantsChanged={canonical}
+      onMcpBusyChanged={busy}
+    />,
+  );
+  const card = within(
+    await screen.findByRole('article', {
+      name: 'Community bundle Violet bundle',
+    }),
+  );
+  await user.click(card.getByRole('button', { name: 'Inspect bundle' }));
+  await waitFor(() =>
+    expect(card.getByRole('button', { name: 'Disable bundle' })).toBeEnabled(),
+  );
+  vi.mocked(mcpOwnerApi.list).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finishRead = resolve;
+    }),
+  );
+  await user.click(screen.getByRole('button', { name: 'Refresh status' }));
+  await user.click(card.getByRole('button', { name: 'Disable bundle' }));
+  await act(async () => {
+    finishRead([]);
+  });
+  await waitFor(() => expect(canonical).toHaveBeenCalledTimes(1));
+  const external = within(
+    within(view.container).getByRole('region', {
+      name: 'External tools (MCP)',
+    }),
+  );
+  expect(
+    external.getByRole('textbox', { name: 'Connection label' }),
+  ).toBeDisabled();
+  expect(busy).toHaveBeenLastCalledWith(true);
+  await act(async () => {
+    finishMutation({
+      ...bundle,
+      enabled: false,
+      state: 'disabled',
+      version: 4,
+    });
+  });
+  await waitFor(() => expect(busy).toHaveBeenLastCalledWith(false));
+});
 beforeEach(() => {
   vi.resetAllMocks();
   vi.spyOn(mcpOwnerApi, 'list').mockResolvedValue([]);

@@ -86,7 +86,7 @@ Delegated helpers cannot execute shell commands or manage background processes, 
 
 ## Backup
 
-Run these operator commands from `deploy/vps` during a quiet period. They are documented procedures, not commands executed during M10 verification. Stop both services so JSON, both SQLite databases (including `-wal`/`-shm` sidecars), uploads and keyring files are copied consistently. The archive includes `.env`, private keys, files, memory and account credentials: encrypt it before copying it off the VPS, restrict access and never commit it. Record repository revision, image IDs, snapshot version (currently **13**) and archive identity together.
+Run these operator commands from `deploy/vps` during a quiet period. They are documented procedures, not commands executed during M10 verification. Stop both services so JSON, both SQLite databases (including `-wal`/`-shm` sidecars), uploads and keyring files are copied consistently. The archive includes `.env`, private keys, files, memory and account credentials: encrypt it before copying it off the VPS, restrict access and never commit it. Record repository revision, image IDs, the actual snapshot version from that generation and archive identity together; resolve the supported version against `CONTROL_PLANE_STORE_VERSION` in the matching daemon source.
 
 ```sh
 mkdir -p backups

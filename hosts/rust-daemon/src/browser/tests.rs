@@ -9,7 +9,7 @@ use crate::attachments::{files::save_upload, AttachmentKind, AttachmentRecord};
 use crate::control_plane_store::{ControlPlaneStoreConfig, WorkspaceConfig};
 use crate::runs::{RunLink, RunSource, RunStatus};
 use crate::state::DaemonState;
-use anima_core::browser::{
+use anima_service_adapters::browser::{
     BrowserControl, BrowserEffect, BrowserError, BrowserErrorCode, BrowserLimits, BrowserMethod,
     BrowserPort, BrowserRoute, BrowserScope, BrowserSession,
 };
@@ -726,7 +726,7 @@ async fn m63_public_metadata_does_not_grant_browser_tools_or_accept_inputs() {
             .capture_dispatch(
                 &f.run,
                 &call,
-                anima_core::browser::BrowserOperation::Navigate {
+                anima_service_adapters::browser::BrowserOperation::Navigate {
                     route_id: "page".into(),
                 },
                 None,
@@ -769,7 +769,7 @@ async fn m63_public_metadata_does_not_grant_browser_tools_or_accept_inputs() {
         .capture_dispatch(
             &granted.run,
             &call,
-            anima_core::browser::BrowserOperation::Navigate {
+            anima_service_adapters::browser::BrowserOperation::Navigate {
                 route_id: "page".into(),
             },
             None,

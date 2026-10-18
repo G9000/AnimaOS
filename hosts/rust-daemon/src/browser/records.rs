@@ -1,4 +1,6 @@
-use anima_core::browser::{scope_digest, validate_scope, BrowserScope, MAX_BROWSER_SAFE_INTEGER};
+use anima_service_adapters::browser::{
+    scope_digest, validate_scope, BrowserScope, MAX_BROWSER_SAFE_INTEGER,
+};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use utoipa::ToSchema;
@@ -100,11 +102,9 @@ impl InstalledBrowserPolicies {
                 if public_policies > 1
                     || !policy.template.origin.starts_with("https://")
                     || !policy.template.input_ids.is_empty()
-                    || policy
-                        .template
-                        .routes
-                        .iter()
-                        .any(|route| route.method != anima_core::browser::BrowserMethod::Get)
+                    || policy.template.routes.iter().any(|route| {
+                        route.method != anima_service_adapters::browser::BrowserMethod::Get
+                    })
                 {
                     return Err(BrowserServiceError::Invalid);
                 }
@@ -232,8 +232,8 @@ pub(crate) struct BrowserLimitsView {
     pub(crate) output_bytes: u32,
     pub(crate) screenshot_bytes: u32,
 }
-impl From<&anima_core::browser::BrowserLimits> for BrowserLimitsView {
-    fn from(l: &anima_core::browser::BrowserLimits) -> Self {
+impl From<&anima_service_adapters::browser::BrowserLimits> for BrowserLimitsView {
+    fn from(l: &anima_service_adapters::browser::BrowserLimits) -> Self {
         Self {
             actions: l.actions,
             requests: l.requests,

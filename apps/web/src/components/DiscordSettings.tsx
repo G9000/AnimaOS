@@ -12,6 +12,9 @@ import {
 import { SectionTitle, primaryBtnCls } from './ui-bits';
 
 interface DiscordSettingsProps {
+  online?: boolean;
+  epoch?: number;
+  disabled?: boolean;
   agentId: string;
   connectors: DiscordConnector[];
   busy: string | null;
@@ -47,11 +50,12 @@ function DiscordConnection({
     setReplacing(false);
     setReviewing(false);
     setDeleting(false);
-  }, [p.agentId, c.id]);
+  }, [p.agentId, c.id, p.online, p.epoch]);
   useLayoutEffect(() => {
     if (c.unknownOutbound === 0) setReviewing(false);
   }, [c.unknownOutbound]);
-  const disabled = p.busy !== null || p.loading;
+  const disabled =
+    p.disabled || p.online === false || p.busy !== null || p.loading;
   const warning = discordWarning(c.warning);
   const submitReplacement = () => {
     const value = token.trim();
@@ -251,8 +255,13 @@ export function DiscordSettings(p: DiscordSettingsProps) {
     setUsers('');
     setPrivateConfirmed(false);
   }, [p.agentId]);
+  useLayoutEffect(() => {
+    setToken('');
+    setPrivateConfirmed(false);
+  }, [p.online, p.epoch]);
   const approved = discordApprovedUsers(users);
-  const disabled = p.busy !== null || p.loading;
+  const disabled =
+    p.disabled || p.online === false || p.busy !== null || p.loading;
   const valid =
     token.trim() &&
     isDiscordSnowflake(guild) &&

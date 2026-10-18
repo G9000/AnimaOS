@@ -18,6 +18,32 @@ use tokio::sync::RwLock;
 use zeroize::Zeroizing;
 
 use crate::agent_runs::{AgentRunCoordinator, AgentRunRequest, RunRoom};
+
+const CALENDAR_WRITE_SOURCE_REF_PREFIX: &str = "calendar-write:";
+const CALENDAR_SUMMARY_METADATA_KEY: &str = "calendarSummary";
+
+fn followup_context(summary: Option<&str>) -> crate::agent_runs::SystemFollowup {
+    crate::agent_runs::SystemFollowup {
+        title: crate::sessions::labelled_title(
+            "Calendar",
+            summary.and_then(crate::sessions::derived_title),
+            "Calendar update",
+        ),
+    }
+}
+
+/// Upgrade adapter-owned legacy references without changing persisted identity.
+/// New follow-ups supply their origin through the typed coordinator ingress.
+pub(crate) fn restore_followup_origins(records: &mut [crate::runs::RunRecord]) {
+    for record in records {
+        if record.system_followup.is_none() {
+            record.system_followup =
+                Some(record.source_ref.as_deref().is_some_and(|reference| {
+                    reference.starts_with(CALENDAR_WRITE_SOURCE_REF_PREFIX)
+                }));
+        }
+    }
+}
 use crate::app::SharedDaemonState;
 use crate::connectors::oauth_apps::{OAuthAppService, OAuthProvider, ResolvedOAuthApp};
 use crate::runs::RunSource;
@@ -942,35 +968,35 @@ impl CalendarManager {
     fn notify_agent_write_applied(&self, write: &CalendarPendingWriteRecord) {
         let coordinator = self.agent_runs.clone();
         let agent_id = write.agent_id.clone();
-        let reference = format!(
-            "{}{}",
-            crate::sessions::CALENDAR_WRITE_SOURCE_REF_PREFIX,
-            write.id
-        );
+        let reference = format!("{}{}", CALENDAR_WRITE_SOURCE_REF_PREFIX, write.id);
         let text = format!(
             "Calendar change confirmed and applied: {}. Continue the conversation accordingly.",
             write.summary
         );
         let summary_metadata = std::collections::BTreeMap::from([(
-            crate::sessions::CALENDAR_SUMMARY_METADATA_KEY.to_string(),
+            CALENDAR_SUMMARY_METADATA_KEY.to_string(),
             anima_core::DataValue::String(write.summary.clone()),
         )]);
+        let followup = followup_context(Some(&write.summary));
         tokio::spawn(async move {
             let _ = coordinator
-                .run(AgentRunRequest {
-                    agent_id,
-                    content: anima_core::Content {
-                        text,
-                        metadata: Some(summary_metadata),
-                        ..Default::default()
+                .run_system_followup(
+                    AgentRunRequest {
+                        agent_id,
+                        content: anima_core::Content {
+                            text,
+                            metadata: Some(summary_metadata),
+                            ..Default::default()
+                        },
+                        room: RunRoom::Generated,
+                        idempotency_key: Some(reference.clone()),
+                        // Daemon-internal follow-ups are recorded like API runs.
+                        source: RunSource::Api,
+                        source_ref: Some(reference),
+                        parent: None,
                     },
-                    room: RunRoom::Generated,
-                    idempotency_key: Some(reference.clone()),
-                    // Daemon-internal follow-ups are recorded like API runs.
-                    source: RunSource::Api,
-                    source_ref: Some(reference),
-                    parent: None,
-                })
+                    followup,
+                )
                 .await;
         });
     }

@@ -8,14 +8,14 @@ use crate::attachments::{files::read_attachment_bytes, AttachmentKind, Attachmen
 use crate::control_plane_store::WorkspaceConfig;
 use crate::runs::RunSource;
 use crate::sessions::SessionKind;
-use anima_core::browser::{
+use anima_core::{primitives::now_millis, CancelSignal};
+use anima_service_adapters::browser::{
     scope_digest, BrowserControl, BrowserEffect, BrowserError, BrowserErrorCode, BrowserMethod,
     BrowserPort, BrowserScope, BrowserSession, MAX_BROWSER_SAFE_INTEGER,
 };
-use anima_core::browser::{
+use anima_service_adapters::browser::{
     validate_observation, validate_operation, BrowserArtifactKind, BrowserClose, BrowserOperation,
 };
-use anima_core::{primitives::now_millis, CancelSignal};
 use async_trait::async_trait;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -687,7 +687,8 @@ impl BrowserService {
         scope.id = id.clone();
         scope.revision = version;
         scope.input_ids = input.selected_input_ids.clone();
-        anima_core::browser::validate_scope(&scope).map_err(|_| BrowserServiceError::Invalid)?;
+        anima_service_adapters::browser::validate_scope(&scope)
+            .map_err(|_| BrowserServiceError::Invalid)?;
         let view = BrowserScopeView {
             id,
             agent_id: agent.into(),
@@ -954,7 +955,7 @@ fn document_view(w: &BrowserDocumentWitness) -> BrowserDocumentView {
     }
 }
 fn observed_digest(
-    observation: &anima_core::browser::BrowserObservation,
+    observation: &anima_service_adapters::browser::BrowserObservation,
 ) -> Result<String, BrowserError> {
     // Validated observation objects have fixed ASCII keys and safe integer
     // numbers. Sorted serde_json maps encode their RFC8785 form exactly.

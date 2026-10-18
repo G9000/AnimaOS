@@ -55,7 +55,7 @@ pub(crate) fn transcription_service_from_env() -> crate::voice::VoiceService {
     }
     let Some(definition) = provider_definitions().iter().find(|d| d.id == "openai") else {
         return crate::voice::VoiceService::configured(
-            anima_core::audio_content::TranscriptionAvailability::Unavailable,
+            anima_service_adapters::audio_content::TranscriptionAvailability::Unavailable,
             None,
         );
     };
@@ -63,7 +63,7 @@ pub(crate) fn transcription_service_from_env() -> crate::voice::VoiceService {
         .unwrap_or_else(|| definition.default_base_url.to_owned());
     if !canonical_transcription_base(&base) {
         return crate::voice::VoiceService::configured(
-            anima_core::audio_content::TranscriptionAvailability::UnsupportedConfiguration,
+            anima_service_adapters::audio_content::TranscriptionAvailability::UnsupportedConfiguration,
             None,
         );
     }
@@ -80,7 +80,7 @@ fn canonical_transcription_base(base: &str) -> bool {
     )
 }
 fn transcription_service_for_config(base: &str, key: Option<String>) -> crate::voice::VoiceService {
-    use anima_core::audio_content::TranscriptionAvailability as Availability;
+    use anima_service_adapters::audio_content::TranscriptionAvailability as Availability;
     if !canonical_transcription_base(base) {
         return crate::voice::VoiceService::configured(
             Availability::UnsupportedConfiguration,
@@ -102,7 +102,7 @@ fn transcription_service_for_config(base: &str, key: Option<String>) -> crate::v
 #[cfg(test)]
 mod speech_configuration_tests {
     use super::*;
-    use anima_core::SpeechAvailability as Availability;
+    use anima_service_adapters::SpeechAvailability as Availability;
 
     #[test]
     fn speech_requires_independent_opt_in_and_only_canonical_platform_configuration() {
@@ -165,7 +165,7 @@ pub(crate) fn speech_service_from_env() -> crate::speech::SpeechService {
     }
     let Some(definition) = provider_definitions().iter().find(|d| d.id == "openai") else {
         return crate::speech::SpeechService::configured(
-            anima_core::SpeechAvailability::Unavailable,
+            anima_service_adapters::SpeechAvailability::Unavailable,
             None,
         );
     };
@@ -184,7 +184,7 @@ fn speech_service_for_config(
     key: Option<String>,
 ) -> crate::speech::SpeechService {
     use crate::speech::SpeechService;
-    use anima_core::SpeechAvailability as Availability;
+    use anima_service_adapters::SpeechAvailability as Availability;
     if !matches!(enabled, Some("true" | "1")) {
         return SpeechService::disabled();
     }
@@ -205,7 +205,7 @@ fn speech_service_for_config(
 #[cfg(test)]
 mod transcription_configuration_tests {
     use super::*;
-    use anima_core::audio_content::TranscriptionAvailability as Availability;
+    use anima_service_adapters::audio_content::TranscriptionAvailability as Availability;
     #[test]
     fn only_canonical_openai_api_configuration_is_eligible_without_discovery() {
         for base in [

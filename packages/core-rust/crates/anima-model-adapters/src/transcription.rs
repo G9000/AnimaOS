@@ -6,8 +6,11 @@
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
-use anima_core::audio_content::{validate_transcript_text, WavAudio, MAX_TRANSCRIPT_BYTES};
-use anima_core::{CancelSignal, TranscriptionAvailability, TranscriptionError, TranscriptionPort};
+use anima_core::CancelSignal;
+use anima_service_adapters::audio_content::{
+    validate_transcript_text, WavAudio, MAX_TRANSCRIPT_BYTES,
+};
+use anima_service_adapters::{TranscriptionAvailability, TranscriptionError, TranscriptionPort};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::StreamExt;

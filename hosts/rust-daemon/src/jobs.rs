@@ -20,6 +20,7 @@ pub(crate) const JOB_STOPPED_ERROR: &str = "Stopped by owner; inspect effects be
 
 mod goals;
 pub(crate) use goals::{validate_goals, GoalRecord, GoalStatus, GoalView};
+pub(crate) mod helper_completion;
 mod records;
 pub(crate) use records::{
     AgentJobAttempt, AgentJobRecord, AgentJobStatus, JobOutputReview, JobReviewDecision,
@@ -241,6 +242,9 @@ impl JobService {
                 attempts: vec![],
                 goal_id,
                 stop_requested_at_ms: None,
+                pending_delegations: None,
+                final_output: None,
+                delegation_evidence: None,
             };
             state.jobs.insert(job.id.clone(), job.clone());
             Ok(job)
@@ -313,6 +317,8 @@ impl JobService {
             job.finished_at_ms = None;
             job.result = None;
             job.error = None;
+            job.final_output = None;
+            job.delegation_evidence = None;
             Ok(job.clone())
         })
         .await
@@ -353,6 +359,19 @@ impl JobService {
         decision: JobReviewDecision,
         note: &str,
     ) -> Result<AgentJobRecord, JobError> {
+        self.review_output_with_binding(agent_id, id, revision, decision, note, None)
+            .await
+    }
+
+    pub(crate) async fn review_output_with_binding(
+        &self,
+        agent_id: &str,
+        id: &str,
+        revision: u64,
+        decision: JobReviewDecision,
+        note: &str,
+        binding: Option<crate::runs::DelegationOutputBinding>,
+    ) -> Result<AgentJobRecord, JobError> {
         if note.len() > 4000
             || (decision == JobReviewDecision::ChangesRequested && note.trim().is_empty())
         {
@@ -368,6 +387,19 @@ impl JobService {
                     "Only the latest completed output can be reviewed".into(),
                 ));
             }
+            match (&job.final_output, &binding) {
+                (Some(output), Some(binding))
+                    if output.validate(job.result.as_deref()).is_ok()
+                        && binding.generation == output.generation
+                        && binding.sha256 == output.sha256 => {}
+                (None, None) => {}
+                _ => {
+                    return Err(JobError::Conflict(
+                        "Review must name the exact current final output generation and digest"
+                            .into(),
+                    ))
+                }
+            }
             job.preserve_legacy_attempt();
             if job
                 .attempts
@@ -379,12 +411,17 @@ impl JobService {
                 ));
             }
             advance(job);
+            let (final_output_generation, final_output_sha256) = binding
+                .map(|binding| (Some(binding.generation), Some(binding.sha256)))
+                .unwrap_or((None, None));
             job.attempts.last_mut().unwrap().review = Some(JobOutputReview {
                 decision,
                 note,
                 reviewed_at_ms: job.updated_at_ms,
+                final_output_generation,
+                final_output_sha256,
             });
-            Ok(job.clone())
+            Ok(state.jobs[&id].clone())
         })
         .await
     }
@@ -406,15 +443,21 @@ impl JobService {
             return Ok(());
         }
         self.mutate(|state| {
-            for job in state
+            let interrupted: Vec<_> = state
                 .jobs
-                .values_mut()
-                .filter(|j| j.status == AgentJobStatus::Running)
-            {
-                settle_uncertain(
-                    job,
-                    "Daemon restarted during this attempt; inspect effects before retrying",
-                );
+                .values()
+                .filter(|j| {
+                    matches!(
+                        j.status,
+                        AgentJobStatus::Running | AgentJobStatus::PendingDelegations
+                    )
+                })
+                .map(|job| job.id.clone())
+                .collect();
+            for id in interrupted {
+                let message =
+                    "Daemon restarted during this attempt; inspect effects before retrying";
+                settle_uncertain(state.jobs.get_mut(&id).unwrap(), message);
             }
             Ok(())
         })
@@ -497,7 +540,11 @@ impl JobService {
                     .cloned()
                     .collect()
             };
-            queued.sort_by_key(|j| (j.created_at_ms, j.id.clone()));
+            queued.sort_by(|a, b| {
+                a.created_at_ms
+                    .cmp(&b.created_at_ms)
+                    .then_with(|| a.id.cmp(&b.id))
+            });
             for candidate in queued {
                 if *self
                     .closing
@@ -596,6 +643,10 @@ impl JobService {
                 ticket,
                 move |state, outcome| {
                     let result = &outcome.result;
+                    if helper_completion::commit_pending(state,&commit_id,revision,outcome)? {
+                        return Ok(());
+                    }
+                    let uncertain=helper_completion::has_uncertain_effects(state,&outcome.run_id);
                     let current = state
                         .jobs
                         .get_mut(&commit_id)
@@ -606,6 +657,10 @@ impl JobService {
                         || outcome.status == RunStatus::Cancelled
                     {
                         record_stop(current);
+                        return Ok(());
+                    }
+                    if uncertain {
+                        settle_uncertain(current,"A native effect has no proven terminal receipt; inspect effects before retrying");
                         return Ok(());
                     }
                     current.status = if result.status == TaskStatus::Success {
@@ -640,6 +695,7 @@ impl JobService {
             let id = job.id.clone();
             let result = self
                 .mutate(move |state| {
+                    helper_completion::attach_failed_source(state, &id);
                     if let Some(current) = state
                         .jobs
                         .get_mut(&id)
@@ -657,6 +713,7 @@ impl JobService {
                 // Persistence is unavailable. Preserve uncertainty in RAM, and the saved
                 // running claim becomes needs_review on restart; neither can replay.
                 let _transaction = self.runs.control_plane_transaction().await;
+                helper_completion::attach_failed_source(&mut *self.state.write().await, &job.id);
                 if let Some(current) = self
                     .state
                     .write()
@@ -678,7 +735,14 @@ impl JobService {
 fn ensure_capacity(jobs: &HashMap<String, AgentJobRecord>) -> Result<(), JobError> {
     if jobs
         .values()
-        .filter(|j| matches!(j.status, AgentJobStatus::Queued | AgentJobStatus::Running))
+        .filter(|j| {
+            matches!(
+                j.status,
+                AgentJobStatus::Queued
+                    | AgentJobStatus::Running
+                    | AgentJobStatus::PendingDelegations
+            )
+        })
         .count()
         >= MAX_ACTIVE
     {
@@ -752,6 +816,8 @@ fn record_stop(job: &mut AgentJobRecord) {
                 error: job.error.clone(),
                 result_truncated: false,
                 review: None,
+                final_output: None,
+                delegation_evidence: job.delegation_evidence.clone(),
             });
         }
     }
@@ -759,6 +825,14 @@ fn record_stop(job: &mut AgentJobRecord) {
 /// An attempt whose outcome is unknown: stopped when its stop marker was
 /// saved, otherwise needing review with `error`.
 fn settle_uncertain(job: &mut AgentJobRecord, error: &str) {
+    if let Some(pending) = job.pending_delegations.take() {
+        let mut evidence = crate::runs::DelegationEvidence::review(pending, error);
+        if job.stop_requested_at_ms.is_some() {
+            evidence.disposition = crate::runs::DelegationDisposition::Suppressed;
+            evidence.reason = JOB_STOPPED_ERROR.into();
+        }
+        job.delegation_evidence = Some(evidence);
+    }
     if job.stop_requested_at_ms.is_some() {
         record_stop(job);
     } else {
@@ -788,5 +862,7 @@ fn preview(value: &str) -> String {
     value[..end].to_owned()
 }
 
+#[cfg(test)]
+mod helper_completion_tests;
 #[cfg(test)]
 mod tests;

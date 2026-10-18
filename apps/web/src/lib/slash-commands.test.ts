@@ -31,6 +31,17 @@ describe('parseSlashCommand', () => {
 });
 
 describe('SLASH_COMMANDS', () => {
+  it('/new remains a compatibility command for returning to the main chat', () => {
+    expect(parseSlashCommand('/new')?.command.description).toBe(
+      'Return to the main chat',
+    );
+    const resumeMain = vi.fn();
+    expect(
+      runSlashCommand(parseSlashCommand('/new')!, { new: resumeMain }),
+    ).toBeNull();
+    expect(resumeMain).toHaveBeenCalledOnce();
+  });
+
   it('/usage is offered before /help', () => {
     const names = SLASH_COMMANDS.map((command) => command.name);
     expect(names.indexOf('usage')).toBeGreaterThan(-1);

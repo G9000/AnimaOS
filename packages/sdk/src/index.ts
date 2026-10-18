@@ -60,6 +60,7 @@ export type {
   SessionCapabilities,
   SessionCompactionError,
   SessionContextTrimmed,
+  SessionContextUsage,
   SessionKind,
   SessionListOptions,
   SessionMatch,
@@ -72,6 +73,9 @@ export type {
   SessionMessageXlsxExtraction,
   SessionMessageOptions,
   SessionMessagePage,
+  SessionMessageSearchHit,
+  SessionMessageSearchPage,
+  SessionMessageSearchOptions,
   DocumentExtractionStatus,
   DocumentOmission,
   PdfDocumentOmission,
@@ -84,6 +88,9 @@ export type {
 } from './sessions.js';
 export { RunsClient, isTerminalRunStatus } from './runs.js';
 export type {
+  AsyncHelperSummary,
+  HelperCompletionDisposition,
+  HelperCompletionOrigin,
   ActionReceipt,
   Run,
   RunMode,
@@ -305,6 +312,8 @@ export type {
   AgentJobRetryInput,
   AgentJobReviewInput,
   AgentJobAttempt,
+  PendingDelegations,
+  DelegatedFinalOutput,
   AgentTask,
   AgentTasks,
   AgentSchedule,

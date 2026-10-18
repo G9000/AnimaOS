@@ -5,7 +5,7 @@ use crate::connectors::discord::{
     model::{DiscordBotIdentity, DiscordMessageBatch, DiscordSendReceipt, DiscordSnowflake},
     text::valid_chunk,
 };
-use anima_core::connectors::{
+use anima_service_adapters::connectors::{
     ConnectorErrorKind, ConnectorFailure, ConnectorReceiveRequest, ConnectorSendRequest,
     ConnectorTransport as AsyncConnectorTransport,
 };

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDaemonClient } from './index.js';
+import type { AgentTasks } from './agents.js';
 
 function transport(payload: unknown) {
   const requests: { url: string; init?: RequestInit }[] = [];
@@ -14,6 +15,27 @@ function transport(payload: unknown) {
 }
 
 describe('agent transport', () => {
+  it('FP03 preserves identity and cancellation and accepts a cleared parent omitted on reload', async () => {
+    const saved: AgentTasks = { revision: 'structured-r1', tasks: [
+      { id: 'root', content: 'Root work', activeForm: 'Planning work', status: 'completed' },
+      { id: 'child', parent: 'root', content: 'Child work', activeForm: 'Checking work', status: 'cancelled' },
+    ] };
+    expect(await transport(saved).agents.tasks('agent/a')).toEqual(saved);
+    const cleared: AgentTasks = { revision: 'structured-r2', tasks: [saved.tasks[0], {
+      id: 'child', content: 'Child work', activeForm: 'Checking work', status: 'cancelled',
+    }] };
+    const { agents, requests } = transport(cleared);
+    const patch: AgentTasks = { ...saved, tasks: [saved.tasks[0], { ...saved.tasks[1], parent: null }] };
+    expect(await agents.updateTasks('agent/a', patch)).toEqual(cleared);
+    expect(JSON.parse(requests[0].init?.body as string)).toEqual(patch);
+    expect((await agents.tasks('agent/a')).tasks[1]).not.toHaveProperty('parent');
+    const legacy: AgentTasks = { revision: 'legacy-r1', tasks: [{ content: 'Legacy work', activeForm: 'Working', status: 'pending' }] };
+    const legacyTransport = transport(legacy);
+    await legacyTransport.agents.updateTasks('agent/a', legacy);
+    const written = JSON.parse(legacyTransport.requests[0].init?.body as string);
+    expect(written.tasks[0]).not.toHaveProperty('id');
+    expect(written.tasks[0]).not.toHaveProperty('parent');
+  });
   it('includes a stable room ID alongside content without changing legacy runs', async () => {
     const { agents, requests } = transport({});
     const input = { text: 'Hello', metadata: { source: 'direct' } };

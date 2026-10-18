@@ -125,6 +125,12 @@ pub(crate) fn capture(
 }
 
 impl ProtectedWrite {
+    /// Compare the exact captured raw preimage, rather than reopening a path.
+    /// The checkpoint adapter retains this state through its final write lease.
+    pub(crate) fn matches_preimage(&self, source: Option<&[u8]>) -> bool {
+        source.map(digest) == self.revision
+    }
+
     pub(crate) fn approval_call(&self, call: &ToolCall) -> ToolCall {
         let mut args = BTreeMap::new();
         args.insert(EXACT_MARKER.into(), DataValue::Bool(true));

@@ -5,7 +5,7 @@ use crate::connectors::telegram::{
 use crate::connectors::{
     TelegramBotIdentity, TelegramChatKind, TelegramChatMetadata, TelegramSenderMetadata,
 };
-use anima_core::connectors::{
+use anima_service_adapters::connectors::{
     ConnectorErrorKind, ConnectorFailure, ConnectorReceiveRequest, ConnectorSendRequest,
     ConnectorTransport as AsyncConnectorTransport,
 };

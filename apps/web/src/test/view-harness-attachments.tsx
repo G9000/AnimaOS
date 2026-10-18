@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, it, vi } from 'vitest';
 import type { Session } from '@animaOS-SWARM/sdk';
@@ -305,7 +305,65 @@ export function registerAttachmentJourneys({
     ).toHaveLength(9);
   });
 
-  it('uploads a new-chat batch into one session and sends attachment-only input with those IDs', async () => {
+  it('keeps an in-flight upload when returning to the already-open main chat', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+    vi.spyOn(daemon, 'listAgents').mockResolvedValue({
+      agents: [snapshot('agent-a', 'Alpha', 1)],
+    });
+    mockProviders();
+    const pending =
+      deferred<
+        Awaited<
+          ReturnType<typeof attachmentTransport.uploadAttachmentWithProgress>
+        >
+      >();
+    const upload = vi
+      .spyOn(attachmentTransport, 'uploadAttachmentWithProgress')
+      .mockReturnValue(pending.promise);
+    render(<ViewHarness />);
+    await waitFor(() => expect(window.location.hash).toBe('#/s/chat%3Anew-1'));
+    await user.upload(
+      screen.getByLabelText('Choose attachments'),
+      new File(['one'], 'ongoing.txt'),
+    );
+    await waitFor(() => expect(upload).toHaveBeenCalledOnce());
+    await user.click(screen.getByRole('button', { name: 'History' }));
+    await user.click(
+      within(screen.getByRole('dialog', { name: 'History' })).getByRole(
+        'button',
+        { name: 'Main chat' },
+      ),
+    );
+    expect(window.location.hash).toBe('#/s/chat%3Anew-1');
+    await act(async () =>
+      pending.resolve({
+        id: 'att_ongoing',
+        name: 'ongoing.txt',
+        mime: 'text/plain',
+        size: 3,
+        kind: 'text',
+        path: 'attachments/ongoing.txt',
+        createdAtMs: 1,
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() =>
+      expect(daemon.startRun).toHaveBeenCalledWith(
+        'agent-a',
+        'chat:new-1',
+        { text: '', mode: 'queue', attachmentIds: ['att_ongoing'] },
+        expect.any(String),
+      ),
+    );
+    expect(daemon.ensureMainSession).toHaveBeenCalledOnce();
+    expect(daemon.createSession).not.toHaveBeenCalled();
+  });
+
+  it('uploads a batch into the durable main session and sends attachment-only input with those IDs', async () => {
     const user = userEvent.setup();
     const alpha = snapshot('agent-a', 'Alpha', 1);
     vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
@@ -326,6 +384,9 @@ export function registerAttachmentJourneys({
     await screen.findByPlaceholderText('Message Alpha…');
     const first = new File(['one'], 'one.txt');
     const second = new File(['two'], 'two.txt');
+    await waitFor(() =>
+      expect(screen.getByLabelText('Choose attachments')).toBeEnabled(),
+    );
     await user.upload(screen.getByLabelText('Choose attachments'), [
       first,
       second,
@@ -334,7 +395,12 @@ export function registerAttachmentJourneys({
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled(),
     );
-    expect(daemon.createSession).toHaveBeenCalledOnce();
+    expect(daemon.ensureMainSession).toHaveBeenCalledExactlyOnceWith('agent-a');
+    expect(upload.mock.calls.map((call) => call[1])).toEqual([
+      'chat:new-1',
+      'chat:new-1',
+    ]);
+    expect(daemon.createSession).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() =>
       expect(daemon.startRun).toHaveBeenCalledWith(
@@ -344,7 +410,8 @@ export function registerAttachmentJourneys({
         expect.any(String),
       ),
     );
-    expect(daemon.createSession).toHaveBeenCalledOnce();
+    expect(daemon.ensureMainSession).toHaveBeenCalledOnce();
+    expect(daemon.createSession).not.toHaveBeenCalled();
   });
 
   it('restores a rejected attachment-only message manually with its metadata, IDs and original retry key', async () => {

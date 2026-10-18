@@ -35,7 +35,7 @@ export const SKILL_NOT_IN_TELEGRAM_CHAT =
 export const SLASH_COMMANDS: readonly (SlashCommand & {
   name: SlashCommandName;
 })[] = [
-  { name: 'new', description: 'Start a new chat' },
+  { name: 'new', description: 'Return to the main chat' },
   { name: 'stop', description: 'Stop the reply in progress' },
   {
     name: 'rename',

@@ -144,4 +144,4 @@ Hermes source, with its MIT notice retained. See the
 and [M55 PDF plan](../superpowers/plans/2026-10-16-companion-pdf-understanding-m55.md)
 for scope, limits and verification. PDF extraction directly uses pinned Rust
 libraries rather than a converter process. See the
-[M66 XLSX plan](../superpowers/plans/2026-10-16-companion-xlsx-m66.md) for the stored-cell reader. Public Hermes XLSX informed the behavior; its Python runtime was not imported. See the [parity roadmap](parity-roadmap.md) for the remaining media work.
+[M66 XLSX plan](../superpowers/plans/2026-10-16-companion-xlsx-m66.md) for the stored-cell reader. Public Hermes XLSX informed the behavior; its Python runtime was not imported.

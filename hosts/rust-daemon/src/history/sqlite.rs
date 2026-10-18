@@ -11,8 +11,9 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 
 use super::{
     message_ordinal, role_name, search_tokens, searchable_text, to_i64, validate_after_query,
-    validate_filtered_query, ApprovalPageQuery, FilteredSessionSearchQuery, HistoryError,
-    HistoryMessage, HistoryStore, MessageAfterQuery, MessagePageQuery, UsagePageQuery,
+    validate_filtered_message_query, validate_filtered_query, ApprovalPageQuery,
+    FilteredMessageSearchQuery, FilteredSessionSearchQuery, HistoryError, HistoryMessage,
+    HistoryStore, MessageAfterQuery, MessagePageQuery, UsagePageQuery,
 };
 use crate::approvals::ApprovalRequest;
 use crate::attachments::AttachmentRecord;
@@ -924,6 +925,52 @@ impl HistoryStore for SqliteHistoryStore {
         .await
     }
 
+    async fn search_messages_filtered(
+        &self,
+        query: &FilteredMessageSearchQuery,
+    ) -> Result<Vec<HistoryMessage>, HistoryError> {
+        validate_filtered_message_query(query)?;
+        let tokens = search_tokens(&query.query);
+        if tokens.is_empty() || query.session_ids.is_empty() || query.limit == 0 {
+            return Ok(Vec::new());
+        }
+        let query = query.clone();
+        let fts = tokens
+            .iter()
+            .map(|token| format!("\"{}\"*", token.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" ");
+        self.run(move |connection| {
+            use rusqlite::types::Value;
+            let after = query.session_ids.len() + query.excluded_message_ids.len() + 3;
+            let before = after + 1;
+            let limit = before + 1;
+            let mut values = vec![Value::Text(fts), Value::Text(query.agent_id)];
+            values.extend(query.session_ids.iter().cloned().map(Value::Text));
+            values.extend(query.excluded_message_ids.iter().cloned().map(Value::Text));
+            values.push(query.after_ms.map(to_i64).transpose()?.map_or(Value::Null, Value::Integer));
+            values.push(query.before_ms.map(to_i64).transpose()?.map_or(Value::Null, Value::Integer));
+            values.push(Value::Integer(query.limit as i64));
+            let exclude = if query.excluded_message_ids.is_empty() { String::new() } else {
+                format!("AND messages.id NOT IN ({})", placeholders(query.session_ids.len() + 3, query.excluded_message_ids.len()))
+            };
+            let sql = format!(
+                "SELECT messages.agent_id, messages.session_id, messages.hidden, messages.record
+                 FROM messages_fts JOIN messages ON messages.rowid = messages_fts.rowid
+                 WHERE messages_fts MATCH ?1 AND messages.agent_id = ?2
+                   AND messages.session_id IN ({}) AND messages.hidden = 0 AND messages.role <> 'system'
+                   {exclude}
+                   AND (?{after} IS NULL OR messages.created_at_ms >= ?{after})
+                   AND (?{before} IS NULL OR messages.created_at_ms < ?{before})
+                 ORDER BY messages.created_at_ms DESC, messages.ordinal DESC, messages.id DESC LIMIT ?{limit}",
+                placeholders(3, query.session_ids.len())
+            );
+            let mut statement = connection.prepare(&sql)?;
+            let rows = statement.query_map(params_from_iter(values.iter()), raw_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+            decode(rows)
+        }).await
+    }
+
     async fn search_sessions_filtered(
         &self,
         query: &FilteredSessionSearchQuery,
@@ -1100,6 +1147,24 @@ mod tests {
             1,
             "rows and the FTS index survive a reopen"
         );
+        let matches = reopened
+            .search_messages_filtered(&super::super::FilteredMessageSearchQuery {
+                agent_id: "agent-1".into(),
+                session_ids: vec!["chat:a".into()],
+                excluded_message_ids: Vec::new(),
+                query: "persisted".into(),
+                after_ms: None,
+                before_ms: None,
+                limit: 21,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            matches.len(),
+            1,
+            "bounded scoped message search survives reopening"
+        );
+        assert_eq!(matches[0].message.id, "msg-5-1");
         let connection = Connection::open(&temp.0).unwrap();
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))

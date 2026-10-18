@@ -625,3 +625,4 @@ fn test_config() -> AgentConfig {
 include!("../attachment_tests.rs");
 
 mod delivery;
+mod main_chat;

@@ -54,6 +54,7 @@ import {
   type SessionListOptions,
   type SessionMessage,
   type SessionMessageOptions,
+  type SessionMessageSearchOptions,
   type SessionUpdateInput,
   type SkillDraftApproval,
   type SkillInput,
@@ -503,6 +504,8 @@ export const daemon = {
     setupClient.sessions.list(agentId, options),
   getSession: (agentId: string, sessionId: string) =>
     setupClient.sessions.get(agentId, sessionId),
+  ensureMainSession: (agentId: string): Promise<Session> =>
+    setupClient.sessions.main(agentId),
   createSession: (
     agentId: string,
     input: { title?: string } = {},
@@ -524,6 +527,10 @@ export const daemon = {
     sessionId: string,
     options: SessionMessageOptions = {},
   ) => setupClient.sessions.messages(agentId, sessionId, options),
+  searchSessionMessages: (
+    agentId: string,
+    options: SessionMessageSearchOptions,
+  ) => setupClient.sessions.searchMessages(agentId, options),
   exportSession: (agentId: string, sessionId: string) =>
     setupClient.sessions.exportMarkdown(agentId, sessionId),
   /** Accepts a message into a session (spec §4.2). */

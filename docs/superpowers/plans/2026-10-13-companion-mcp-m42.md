@@ -16,7 +16,6 @@ a daemon-owned transport/connection manager. Discovery publishes review candidat
 
 ## 1. Locked backlog and proposed sequencing
 
-- PAR-04 in `docs/companion/parity-roadmap.md` remains authoritative.
 - M42 proposes one Streamable HTTP client path, owner APIs, reviewed descriptors,
   exact configured grants, actual dispatcher bridge, bounded lifecycle and fake acceptance.
 - Next transport milestone: owned stdio commands, safe environment, bounded framing,
@@ -282,7 +281,7 @@ a daemon-owned transport/connection manager. Discovery publishes review candidat
 
 ## 13. Primary source evidence
 
-- [Locked Anima parity roadmap](../../companion/parity-roadmap.md).
+- Locked Anima parity roadmap.
 - [Official SDK tagged manifest: version/license/MSRV](https://github.com/modelcontextprotocol/rust-sdk/blob/rmcp-v3.5.1/Cargo.toml).
 - [Tagged feature/dependency manifest](https://github.com/modelcontextprotocol/rust-sdk/blob/rmcp-v3.5.1/crates/rmcp/Cargo.toml).
 - [SSE dependency tagged version/license](https://github.com/4t145/sse-stream/blob/release-0.2.4/Cargo.toml).

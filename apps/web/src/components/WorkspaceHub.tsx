@@ -82,6 +82,7 @@ async function loadEntries(
         pending: 'Pending',
         in_progress: 'In progress',
         completed: 'Completed',
+        cancelled: 'Cancelled',
       }[item.status],
     }));
   }

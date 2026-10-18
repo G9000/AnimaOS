@@ -98,7 +98,9 @@ export function WorkspaceDashboard({
   const owner = (id: string) =>
     agents.find((agent) => agent.id === id)?.name ?? 'Agent';
   const tasks =
-    snapshot?.tasks.filter((task) => task.status !== 'completed') ?? [];
+    snapshot?.tasks.filter(
+      (task) => task.status === 'pending' || task.status === 'in_progress',
+    ) ?? [];
   const upcoming =
     snapshot?.schedules
       .filter((schedule) => schedule.enabled)

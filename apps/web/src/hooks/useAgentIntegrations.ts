@@ -8,6 +8,7 @@ import {
 
 import { daemon, type TelegramConnector } from '../lib/daemon-api';
 import { safeIntegrationError } from '../lib/telegram';
+import { useConnectorLifetime } from './useConnectorLifetime';
 
 type ConnectorBusy =
   | 'connect'
@@ -18,7 +19,12 @@ type ConnectorBusy =
   | null;
 
 /** The companion's connectors and their setup actions (Connectors page). */
-export function useAgentIntegrations(agentId: string | null) {
+export function useAgentIntegrations(
+  agentId: string | null,
+  online = true,
+  epoch = 0,
+) {
+  const scope = useConnectorLifetime(agentId, online, epoch);
   const generation = useRef(0);
   const connectorMutation = useRef(0);
   const connectorBusyRef = useRef(false);
@@ -36,11 +42,16 @@ export function useAgentIntegrations(agentId: string | null) {
     setConnectorBusy(null);
     connectorBusyRef.current = false;
     setConnectorError(null);
-    setLoading(Boolean(agentId));
-  }, [agentId]);
+    setLoading(Boolean(agentId) && online);
+    return () => {
+      generation.current++;
+      connectorMutation.current++;
+    };
+  }, [agentId, online, epoch]);
 
   const refresh = useCallback(async () => {
-    if (!agentId) return;
+    if (!scope.isCurrent(scope.token) || !agentId || connectorBusyRef.current)
+      return;
     const requestGeneration = generation.current;
     const connectorRequest = connectorMutation.current;
     setLoading(true);
@@ -48,6 +59,7 @@ export function useAgentIntegrations(agentId: string | null) {
       const { connectors: listed } = await daemon.listConnectors(agentId);
       if (
         requestGeneration !== generation.current ||
+        !scope.isCurrent(scope.token) ||
         connectorRequest !== connectorMutation.current
       )
         return;
@@ -56,14 +68,19 @@ export function useAgentIntegrations(agentId: string | null) {
     } catch (caught) {
       if (
         requestGeneration !== generation.current ||
+        !scope.isCurrent(scope.token) ||
         connectorRequest !== connectorMutation.current
       )
         return;
       setConnectorError(safeIntegrationError(caught));
     } finally {
-      if (requestGeneration === generation.current) setLoading(false);
+      if (
+        requestGeneration === generation.current &&
+        scope.isCurrent(scope.token)
+      )
+        setLoading(false);
     }
-  }, [agentId]);
+  }, [agentId, scope.token, scope.isCurrent]);
 
   useEffect(() => {
     void refresh();
@@ -75,7 +92,8 @@ export function useAgentIntegrations(agentId: string | null) {
       action: () => Promise<T>,
       apply: (value: T) => void,
     ) => {
-      if (!agentId || connectorBusyRef.current) return false;
+      if (!scope.isCurrent(scope.token) || !agentId || connectorBusyRef.current)
+        return false;
       const lifetime = generation.current;
       const mutation = ++connectorMutation.current;
       setConnectorBusy(kind);
@@ -85,6 +103,7 @@ export function useAgentIntegrations(agentId: string | null) {
         const value = await action();
         if (
           lifetime !== generation.current ||
+          !scope.isCurrent(scope.token) ||
           mutation !== connectorMutation.current
         )
           return false;
@@ -93,6 +112,7 @@ export function useAgentIntegrations(agentId: string | null) {
       } catch (error) {
         if (
           lifetime === generation.current &&
+          scope.isCurrent(scope.token) &&
           mutation === connectorMutation.current
         ) {
           setConnectorError(safeIntegrationError(error));
@@ -101,6 +121,7 @@ export function useAgentIntegrations(agentId: string | null) {
       } finally {
         if (
           lifetime === generation.current &&
+          scope.isCurrent(scope.token) &&
           mutation === connectorMutation.current
         ) {
           connectorBusyRef.current = false;
@@ -108,7 +129,7 @@ export function useAgentIntegrations(agentId: string | null) {
         }
       }
     },
-    [agentId],
+    [agentId, scope.token, scope.isCurrent],
   );
 
   const upsertConnector = (connector: TelegramConnector) =>
@@ -166,7 +187,7 @@ export function useAgentIntegrations(agentId: string | null) {
     [agentId, connectorAction],
   );
 
-  const visible = owner === agentId;
+  const visible = owner === agentId && scope.isCurrent(scope.token);
   return {
     connectors: visible ? connectors : [],
     loading,

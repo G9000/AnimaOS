@@ -6,6 +6,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+anima-service-adapters = { path = "../anima-service-adapters" }
 anima-core = { path = "../anima-core" }
 async-trait = "0.1"
 bytes = "=1.11.1"

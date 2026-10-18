@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useConnectorLifetime } from '../../hooks/useConnectorLifetime';
 import {
   mcpOwnerApi,
   type McpConnection,
@@ -68,6 +69,8 @@ function launchIssue(
 export function McpConnectionsPanel({
   agentId,
   disabled = false,
+  online = true,
+  epoch: connectionEpoch = 0,
   permissionsUncertain = false,
   permissionsBusy = false,
   onGrantsChanged,
@@ -77,6 +80,8 @@ export function McpConnectionsPanel({
 }: {
   agentId: string;
   disabled?: boolean;
+  online?: boolean;
+  epoch?: number;
   permissionsUncertain?: boolean;
   permissionsBusy?: boolean;
   onGrantsChanged?: (toolNames: string[]) => void | Promise<void>;
@@ -84,7 +89,9 @@ export function McpConnectionsPanel({
   onPermissionsUncertain?: () => void;
   api?: McpOwnerApi;
 }) {
+  const lifetime = useConnectorLifetime(agentId, online, connectionEpoch);
   const [connections, setConnections] = useState<McpConnection[]>([]);
+  const [rowsLifetime, setRowsLifetime] = useState<object | null>(null);
   const [toolNames, setToolNames] = useState<string[] | null>(null);
   const [label, setLabel] = useState('');
   const [endpoint, setEndpoint] = useState('');
@@ -100,13 +107,23 @@ export function McpConnectionsPanel({
   const [needsRefresh, setNeedsRefresh] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const generation = useRef(0);
+  const previousLifetime = useRef(lifetime.token);
+  if (previousLifetime.current !== lifetime.token) {
+    previousLifetime.current = lifetime.token;
+    generation.current++;
+  }
   const readGeneration = useRef(0);
   const locked = useRef(false);
   const currentAgent = useRef(agentId);
   currentAgent.current = agentId;
 
   async function refresh(signal?: AbortSignal, explicit = false) {
-    if (locked.current || (explicit && permissionsBusy)) return;
+    if (
+      !lifetime.isCurrent(lifetime.token) ||
+      locked.current ||
+      (explicit && permissionsBusy)
+    )
+      return;
     const epoch = generation.current;
     const read = ++readGeneration.current;
     const owner = agentId;
@@ -127,7 +144,7 @@ export function McpConnectionsPanel({
         try {
           await onGrantsChanged?.(names);
         } finally {
-          onBusyChanged?.(false);
+          if (lifetime.matches(lifetime.token)) onBusyChanged?.(false);
         }
         if (
           epoch !== generation.current ||
@@ -137,6 +154,7 @@ export function McpConnectionsPanel({
           return;
       }
       setConnections(rows);
+      setRowsLifetime(lifetime.token);
       setToolNames(names);
       setNeedsRefresh(false);
       setError(null);
@@ -161,11 +179,8 @@ export function McpConnectionsPanel({
     }
   }
 
-  useEffect(() => {
-    generation.current += 1;
-    locked.current = false;
+  useLayoutEffect(() => {
     setConnections([]);
-    setToolNames(null);
     setLabel('');
     setEndpoint('');
     setConnectionType('streamableHttp');
@@ -173,11 +188,20 @@ export function McpConnectionsPanel({
     setArgumentsText('');
     setPassEmptyArgument(false);
     setTrustedLocalCode(false);
+  }, [agentId, api]);
+
+  useLayoutEffect(() => {
+    generation.current += 1;
+    locked.current = false;
+    setToolNames(null);
+    setRowsLifetime(null);
+    setTrustedLocalCode(false);
     setBusy(false);
-    setNeedsRefresh(false);
+    setLoading(online);
+    setNeedsRefresh(!online);
     setError(null);
     const controller = new AbortController();
-    void refresh(controller.signal);
+    if (online) void refresh(controller.signal);
     return () => {
       controller.abort();
       generation.current += 1;
@@ -185,9 +209,10 @@ export function McpConnectionsPanel({
     };
     // An owner change invalidates every read and mutation from the previous view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentId, api]);
+  }, [agentId, api, lifetime.token]);
 
   function replace(connection: McpConnection) {
+    setRowsLifetime(lifetime.token);
     setConnections((current) => {
       const exists = current.some((row) => row.id === connection.id);
       return exists
@@ -201,7 +226,14 @@ export function McpConnectionsPanel({
     accepted: (value: T) => void | Promise<void>,
     affectsPermissions = false,
   ) {
-    if (disabled || loading || needsRefresh || locked.current) return;
+    if (
+      !lifetime.isCurrent(lifetime.token) ||
+      disabled ||
+      loading ||
+      needsRefresh ||
+      locked.current
+    )
+      return;
     locked.current = true;
     const epoch = generation.current;
     const owner = agentId;
@@ -228,12 +260,17 @@ export function McpConnectionsPanel({
       }
       // The parent owns the cross-panel lock until this request settles, even
       // if navigation unmounted this panel. Its callback fences the owner.
-      onBusyChanged?.(false);
+      if (lifetime.matches(lifetime.token)) onBusyChanged?.(false);
     }
   }
 
   const blocked =
-    disabled || loading || busy || needsRefresh || permissionsUncertain;
+    !online ||
+    disabled ||
+    loading ||
+    busy ||
+    needsRefresh ||
+    permissionsUncertain;
   const launchArgs =
     argumentsText === ''
       ? passEmptyArgument
@@ -262,7 +299,7 @@ export function McpConnectionsPanel({
         </div>
         <button
           className={button}
-          disabled={busy || loading || permissionsBusy}
+          disabled={!online || busy || loading || permissionsBusy}
           onClick={() => void refresh(undefined, true)}
         >
           Refresh status
@@ -447,6 +484,9 @@ export function McpConnectionsPanel({
         <ConnectionCard
           key={`${agentId}:${row.id}`}
           connection={row}
+          stale={!online || loading || needsRefresh}
+          showSavedTools={online && rowsLifetime === lifetime.token}
+          lifetime={lifetime.token}
           toolNames={toolNames}
           blocked={blocked}
           save={(patch, saved) =>
@@ -580,6 +620,9 @@ function Descriptor({ tool }: { tool: McpToolDescriptor }) {
 
 function ConnectionCard({
   connection: row,
+  stale,
+  showSavedTools,
+  lifetime,
   toolNames,
   blocked,
   save,
@@ -593,6 +636,9 @@ function ConnectionCard({
   remove,
 }: {
   connection: McpConnection;
+  stale: boolean;
+  showSavedTools: boolean;
+  lifetime: object;
   toolNames: string[] | null;
   blocked: boolean;
   save: (
@@ -625,8 +671,11 @@ function ConnectionCard({
   useEffect(() => {
     // A refreshed version or endpoint requires deliberate re-entry.
     setBearerToken('');
-  }, [row.endpoint, row.version]);
+  }, [row.endpoint, row.version, lifetime]);
   const [confirmRemove, setConfirmRemove] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    setConfirmRemove(null);
+  }, [lifetime]);
   const local = row.transport === 'stdio';
   const bearerEligible = !local && row.endpoint.startsWith('https://');
   const wireBusy =
@@ -640,7 +689,9 @@ function ConnectionCard({
       className="space-y-3 rounded-xl border border-line p-4"
     >
       <h3 className="break-words font-medium">{row.label}</h3>
-      <p className="text-xs text-ink-3">{statusText(row)}</p>
+      <p className="text-xs text-ink-3">
+        {stale ? 'Status unavailable — refresh to verify' : statusText(row)}
+      </p>
       {local ? (
         <div className="space-y-1 text-xs text-ink-3">
           <p>Local process — saved launch</p>
@@ -708,9 +759,8 @@ function ConnectionCard({
               disabled={blocked || wireBusy || bearerToken.length === 0}
               onClick={() => {
                 const submitted = bearerToken;
-                void saveBearerCredential(submitted).finally(() =>
-                  setBearerToken(''),
-                );
+                setBearerToken('');
+                void saveBearerCredential(submitted);
               }}
             >
               {row.hasBearerCredential
@@ -722,9 +772,8 @@ function ConnectionCard({
                 className={button}
                 disabled={blocked || wireBusy}
                 onClick={() => {
-                  void clearBearerCredential().finally(() =>
-                    setBearerToken(''),
-                  );
+                  setBearerToken('');
+                  void clearBearerCredential();
                 }}
               >
                 Clear bearer credential
@@ -855,7 +904,7 @@ function ConnectionCard({
           </div>
         </div>
       )}
-      {row.candidates.length > 0 && (
+      {showSavedTools && row.candidates.length > 0 && (
         <div className="space-y-3">
           <h4 className="text-sm font-medium">Available tools</h4>
           {row.candidates.map((tool) => {
@@ -891,12 +940,13 @@ function ConnectionCard({
           })}
         </div>
       )}
-      {row.reviewedTools.length > 0 && (
+      {showSavedTools && row.reviewedTools.length > 0 && (
         <div className="space-y-3">
           <h4 className="text-sm font-medium">Reviewed permissions</h4>
           {row.reviewedTools.map((tool) => {
             const granted = toolNames?.includes(tool.alias) ?? false;
             const usable =
+              !stale &&
               row.enabled &&
               connected &&
               row.candidates.some(

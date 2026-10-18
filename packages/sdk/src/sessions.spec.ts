@@ -29,6 +29,134 @@ const session = {
 };
 
 describe('sessions client', () => {
+  it('searches individual saved messages with a scoped encoded query and cancellation', async () => {
+    const page = {
+      results: [
+        {
+          sessionId: 'chat:1',
+          title: 'Plans',
+          messageId: 'old-1',
+          role: 'user',
+          createdAtMs: 1,
+          snippet: 'cobalt plan',
+        },
+        {
+          sessionId: 'chat:1',
+          title: 'Plans',
+          messageId: 'old-2',
+          role: 'assistant',
+          createdAtMs: 2,
+          snippet: 'cobalt answer',
+        },
+      ],
+      hasMore: true,
+    };
+    const { sessions, requests } = transport(() => Response.json(page));
+    const controller = new AbortController();
+    expect(
+      await sessions.searchMessages('agent/a', {
+        q: 'cobalt & plan',
+        limit: 20,
+        signal: controller.signal,
+      }),
+    ).toEqual(page);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe(
+      '/api/agents/agent%2Fa/message-search?q=cobalt+%26+plan&limit=20',
+    );
+    expect(requests[0].init?.signal).toBe(controller.signal);
+  });
+
+  it('reads an exact historical message window without changing ordinary paging', async () => {
+    const page = {
+      messages: [],
+      nextBefore: 'older',
+      anchorMessageId: 'msg/a ?1',
+      hasNewer: true,
+    };
+    const { sessions, requests } = transport(() => Response.json(page));
+    expect(
+      await sessions.messages('agent/a', 'chat:1', { anchor: 'msg/a ?1' }),
+    ).toEqual(page);
+    expect(requests[0].url).toBe(
+      '/api/agents/agent%2Fa/sessions/chat%3A1/messages?anchor=msg%2Fa+%3F1',
+    );
+  });
+
+  it('surfaces message search failure without a legacy fallback', async () => {
+    const { sessions, requests } = transport(() =>
+      Response.json({ error: 'history unavailable' }, { status: 503 }),
+    );
+    await expect(
+      sessions.searchMessages('agent/a', { q: 'cobalt' }),
+    ).rejects.toMatchObject({ status: 503, message: 'history unavailable' });
+    expect(requests).toHaveLength(1);
+  });
+
+  it.each([200, 201])(
+    'resolves the main chat through the encoded sibling route (%s)',
+    async (status) => {
+      const main = { ...session, mainChat: true };
+      const { sessions, requests } = transport(() =>
+        Response.json({ session: main }, { status }),
+      );
+
+      expect(await sessions.main('agent/a ?')).toEqual(main);
+      expect(requests).toHaveLength(1);
+      expect(requests[0].url).toBe('/api/agents/agent%2Fa%20%3F/main-chat');
+      expect(requests[0].init?.method).toBe('POST');
+      expect(JSON.parse(String(requests[0].init?.body))).toEqual({});
+    },
+  );
+
+  it.each([401, 409, 503])(
+    'surfaces main-chat errors without creating a session (%s)',
+    async (status) => {
+      const { sessions, requests } = transport(() =>
+        Response.json({ error: 'main chat unavailable' }, { status }),
+      );
+
+      await expect(sessions.main('agent/a')).rejects.toMatchObject({
+        status,
+        message: 'main chat unavailable',
+      });
+      expect(requests.map(({ url }) => url)).toEqual([
+        '/api/agents/agent%2Fa/main-chat',
+      ]);
+    },
+  );
+
+  it('requires a daemon update when main-chat is missing for an existing agent', async () => {
+    const { sessions, requests } = transport((url) =>
+      url.endsWith('/main-chat')
+        ? Response.json({ error: 'not found' }, { status: 404 })
+        : Response.json({ agent: { state: { id: 'agent/a' } } }),
+    );
+
+    const failure = sessions.main('agent/a');
+    await expect(failure).rejects.toBeInstanceOf(DaemonTooOldError);
+    await expect(failure).rejects.toMatchObject({ code: 'daemon_too_old' });
+    await expect(failure).rejects.toThrow(/main chat.*update the daemon/i);
+    expect(requests.map(({ url }) => url)).toEqual([
+      '/api/agents/agent%2Fa/main-chat',
+      '/api/agents/agent%2Fa',
+    ]);
+  });
+
+  it('keeps main-chat not-found when the agent is also missing', async () => {
+    const { sessions, requests } = transport(() =>
+      Response.json({ error: 'agent not found' }, { status: 404 }),
+    );
+
+    const failure = sessions.main('missing');
+    await expect(failure).rejects.toBeInstanceOf(DaemonHttpError);
+    await expect(failure).rejects.not.toBeInstanceOf(DaemonTooOldError);
+    expect(requests.map(({ url }) => url)).toEqual([
+      '/api/agents/missing/main-chat',
+      '/api/agents/missing',
+    ]);
+  });
+
   it('m83 preserves the narrow saved source projection and legacy messages without searching on reload', async () => {
     const sources = [
       { title: 'Returned source', url: 'https://example.com/exact?x=1&y=2' },

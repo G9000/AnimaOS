@@ -101,12 +101,12 @@ struct RealDocxExtractor;
 impl crate::attachments::documents::worker::DocumentExtractor for RealDocxExtractor {
     async fn extract(
         &self,
-        format: anima_core::document_content::DocumentFormat,
+        format: anima_service_adapters::document_content::DocumentFormat,
         bytes: Vec<u8>,
         cancel: anima_core::CancelSignal,
         _deadline: Option<tokio::time::Instant>,
     ) -> Result<
-        anima_core::document_content::ExtractedDocumentText,
+        anima_service_adapters::document_content::ExtractedDocumentText,
         crate::attachments::documents::worker::WorkerFailure,
     > {
         if cancel.is_cancelled() {
@@ -1058,7 +1058,7 @@ fn attachment_openapi_routes_and_schema_are_registered() {
 
 #[test]
 fn document_extraction_projection_is_user_selected_only_and_private_data_never_public() {
-    use anima_core::document_content::*;
+    use anima_service_adapters::document_content::*;
     let mut row = crate::history::conformance::attachment_record("att-doc", "agent", "chat:files");
     row.name = "selected.docx".into();
     row.mime = crate::attachments::documents::DOCX_MIME.into();
@@ -1196,7 +1196,7 @@ fn document_extraction_projection_is_user_selected_only_and_private_data_never_p
 
 #[test]
 fn pdf_projection_is_closed_has_honest_coverage_and_refuses_mismatched_format() {
-    use anima_core::document_content::*;
+    use anima_service_adapters::document_content::*;
     let mut row = crate::history::conformance::attachment_record("att-pdf", "agent", "chat:files");
     row.name = "selected.pdf".into();
     row.mime = crate::attachments::documents::PDF_MIME.into();
@@ -1309,7 +1309,7 @@ fn pdf_projection_is_closed_has_honest_coverage_and_refuses_mismatched_format() 
 
 #[test]
 fn m66_xlsx_projection_exposes_only_closed_coverage_for_the_selected_source() {
-    use anima_core::document_content::*;
+    use anima_service_adapters::document_content::*;
     let mut row = crate::history::conformance::attachment_record("att-xlsx", "agent", "chat:files");
     row.name = "selected.xlsx".into();
     row.mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet".into();

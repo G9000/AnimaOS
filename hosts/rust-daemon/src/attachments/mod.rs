@@ -41,7 +41,7 @@ impl AttachmentKind {
             Self::Image => MAX_IMAGE_BYTES,
             Self::Text => MAX_TEXT_BYTES,
             Self::Document => MAX_DOCUMENT_BYTES,
-            Self::Audio => anima_core::audio_content::MAX_AUDIO_INPUT_BYTES,
+            Self::Audio => anima_service_adapters::audio_content::MAX_AUDIO_INPUT_BYTES,
         }
     }
 }

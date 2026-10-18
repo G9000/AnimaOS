@@ -31,12 +31,16 @@ fn default_max_attempts() -> u32 {
 }
 
 #[derive(Deserialize, ToSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct ReviewJobRequest {
     revision: u64,
     decision: JobReviewDecision,
     #[serde(default)]
     note: String,
+    #[serde(default)]
+    final_output_generation: Option<u64>,
+    #[serde(default)]
+    final_output_sha256: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -186,15 +190,27 @@ pub(super) async fn review_job(
         Ok(input) => input,
         Err(response) => return response,
     };
+    let binding = match (input.final_output_generation, input.final_output_sha256) {
+        (None, None) => None,
+        (Some(generation), Some(sha256)) => {
+            Some(crate::runs::DelegationOutputBinding { generation, sha256 })
+        }
+        _ => {
+            return error_response(JobError::Validation(
+                "Final output generation and digest must be supplied together".into(),
+            ))
+        }
+    };
     job_response(
         state
             .jobs
-            .review_output(
+            .review_output_with_binding(
                 &agent_id,
                 &job_id,
                 input.revision,
                 input.decision,
                 &input.note,
+                binding,
             )
             .await,
     )

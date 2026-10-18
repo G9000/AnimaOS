@@ -14,6 +14,9 @@ export function TelegramSettings({
   restart,
   disconnect,
   refresh,
+  online = true,
+  epoch = 0,
+  disabled: parentDisabled = false,
 }: {
   connector: TelegramConnector | null;
   busy: string | null;
@@ -24,6 +27,9 @@ export function TelegramSettings({
   restart: (connectorId: string) => Promise<boolean>;
   disconnect: (connectorId: string) => Promise<boolean>;
   refresh?: () => Promise<void>;
+  online?: boolean;
+  epoch?: number;
+  disabled?: boolean;
 }) {
   const [token, setToken] = useState('');
   const [replacing, setReplacing] = useState(false);
@@ -32,19 +38,17 @@ export function TelegramSettings({
     setToken('');
     setReplacing(false);
     setConfirmDisconnect(false);
-  }, [connector?.id]);
+  }, [connector?.id, online, epoch]);
   const submit = async () => {
+    if (!online || parentDisabled || busy !== null) return;
     const value = token.trim();
     if (!value) return;
-    try {
-      if (connector) await replace(connector.id, value);
-      else await connect(value);
-    } finally {
-      setToken('');
-      setReplacing(false);
-    }
+    setToken('');
+    setReplacing(false);
+    if (connector) await replace(connector.id, value);
+    else await connect(value);
   };
-  const disabled = busy !== null;
+  const disabled = parentDisabled || !online || busy !== null;
   return (
     <section className="space-y-3">
       <SectionTitle>Telegram</SectionTitle>

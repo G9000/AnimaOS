@@ -243,6 +243,8 @@ async fn supervision_legacy_output_and_invalid_history_validation() {
         decision: JobReviewDecision::ChangesRequested,
         note: " ".into(),
         reviewed_at_ms: bad.updated_at_ms,
+        final_output_generation: None,
+        final_output_sha256: None,
     });
     assert!(bad.validate().is_err());
     let _ = std::fs::remove_file(path);

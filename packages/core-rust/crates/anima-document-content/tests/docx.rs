@@ -1,10 +1,10 @@
 use std::io::Write;
 
-use anima_core::document_content::{
+use anima_document_content::extract_docx;
+use anima_service_adapters::document_content::{
     render_document_snapshots, validate_document_extraction, DocumentExtractionStatus as Status,
     DocumentLocator, DocumentOmission as Omission, DocumentSnapshot,
 };
-use anima_document_content::extract_docx;
 use rawzip::{CompressionMethod, ZipArchive, ZipArchiveWriter};
 
 const TYPES: &str = r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#;

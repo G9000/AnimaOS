@@ -5,7 +5,7 @@ use crate::mcp::{McpConnectionRecord, McpManager, McpRegistry, McpStdioSpec};
 use crate::skills::{
     compose_skill_file, parse_skill_file, skill_hash, DraftSource, SkillDraft, SkillRegistry,
 };
-use anima_core::community_bundles::{
+use anima_service_adapters::community_bundles::{
     parse_manifest, validate_manifest, ManifestComponent, RuntimeCompatibility,
 };
 use std::collections::{BTreeMap, HashSet};
@@ -181,7 +181,9 @@ impl BundleService {
             &runtime(),
         )
         .map_err(|error| {
-            if error == anima_core::community_bundles::ManifestError::IncompatibleRuntime {
+            if error
+                == anima_service_adapters::community_bundles::ManifestError::IncompatibleRuntime
+            {
                 BundleError::Conflict
             } else {
                 BundleError::Invalid

@@ -1,7 +1,14 @@
 //! The companion's automation tools (spec §9.3): `create_automation`,
-//! `list_automations`, and `pause_automation`. Each reaches only the calling
+//! `list_automations`, `pause_automation`, update/resume/delete and manual trigger. Each reaches only the calling
 //! agent's own automations, through `AutomationService` (so the limits and
 //! the hidden-text checks apply), and refuses helpers.
+
+mod lifecycle;
+#[cfg(test)]
+mod lifecycle_tests;
+pub(super) use lifecycle::{
+    delete_automation, resume_automation, trigger_automation, update_automation,
+};
 
 use anima_core::primitives::now_millis;
 use anima_core::{AgentState, Content, DataValue, Message, TaskResult, ToolCall};
@@ -40,7 +47,13 @@ const DAY_MS: u64 = 24 * HOUR_MS;
 pub(crate) fn is_automation_tool(name: &str) -> bool {
     matches!(
         name,
-        "create_automation" | "list_automations" | "pause_automation"
+        "create_automation"
+            | "list_automations"
+            | "pause_automation"
+            | "update_automation"
+            | "resume_automation"
+            | "delete_automation"
+            | "trigger_automation"
     )
 }
 
@@ -299,6 +312,14 @@ pub(super) fn create_automation(
         };
         let mut input =
             AutomationInput::owner(agent.id.clone(), prompt.to_string(), trigger, target);
+        let authority = match lifecycle::authority(
+            &context,
+            crate::schedules::automations::AutomationRunTool::Create,
+            &call,
+        ) {
+            Ok(authority) => authority,
+            Err(error) => return TaskResult::error(error, 0),
+        };
         input.name = text_arg(&call, "name")
             .filter(|name| !name.trim().is_empty())
             .map(str::to_string);
@@ -310,7 +331,7 @@ pub(super) fn create_automation(
             tool_call_id: call.id.clone(),
         };
         let now = now_millis();
-        match service.create(input, now).await {
+        match service.create_from_run(input, now, authority).await {
             Ok((record, _)) => {
                 let next =
                     preview(&record.trigger, record.active_hours.as_ref(), now).unwrap_or_default();
@@ -361,9 +382,17 @@ pub(super) fn pause_automation(
         let Some(coordinator) = context.team.clone() else {
             return TaskResult::error(AUTOMATIONS_UNAVAILABLE, 0);
         };
+        let authority = match lifecycle::authority(
+            &context,
+            crate::schedules::automations::AutomationRunTool::Pause,
+            &call,
+        ) {
+            Ok(authority) => authority,
+            Err(error) => return TaskResult::error(error, 0),
+        };
         match coordinator
             .automations()
-            .pause(&agent.id, id, now_millis())
+            .pause_from_run(&agent.id, id, now_millis(), authority)
             .await
         {
             Ok((record, changed)) => text(paused_reply(&record, changed)),
@@ -376,6 +405,24 @@ pub(super) fn pause_automation(
 mod tests {
     use super::*;
     use crate::schedules::{test_automation, ActiveHours};
+
+    #[test]
+    fn fp04_automation_lifecycle_tools_are_explicitly_registered_and_classified() {
+        let registry = crate::tools::ToolRegistry::new();
+        for (name, risk) in [
+            ("update_automation", crate::approvals::RiskClass::Write),
+            ("resume_automation", crate::approvals::RiskClass::Write),
+            ("delete_automation", crate::approvals::RiskClass::Write),
+            ("trigger_automation", crate::approvals::RiskClass::Delegate),
+        ] {
+            assert!(
+                registry.resolve_descriptors([name]).is_ok(),
+                "missing lifecycle capability {name}"
+            );
+            assert!(is_automation_tool(name), "helpers must exclude {name}");
+            assert_eq!(crate::approvals::risk_class(name), risk);
+        }
+    }
 
     #[test]
     fn the_tool_strings_are_the_specs() {

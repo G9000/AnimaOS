@@ -98,7 +98,7 @@ pub(crate) fn validate_upload(
     }
     let valid = match extension.as_str() {
         "wav" => {
-            use anima_core::audio_content::{AudioValidationError, WavAudio};
+            use anima_service_adapters::audio_content::{AudioValidationError, WavAudio};
             WavAudio::parse(bytes.to_vec()).map_err(|error| match error {
                 AudioValidationError::Unsupported => AttachmentError::AudioUnsupported,
                 AudioValidationError::TooLarge => AttachmentError::TooLarge,

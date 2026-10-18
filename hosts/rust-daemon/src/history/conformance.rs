@@ -9,8 +9,9 @@ use async_trait::async_trait;
 use tokio::sync::Semaphore;
 
 use super::{
-    ApprovalPageQuery, FilteredSessionSearchQuery, HistoryError, HistoryMessage, HistoryStore,
-    MemoryHistoryStore, MessageAfterQuery, MessagePageQuery, UsagePageQuery,
+    ApprovalPageQuery, FilteredMessageSearchQuery, FilteredSessionSearchQuery, HistoryError,
+    HistoryMessage, HistoryStore, MemoryHistoryStore, MessageAfterQuery, MessagePageQuery,
+    UsagePageQuery,
 };
 use crate::approvals::{
     ApprovalDecisionKind, ApprovalRequest, ApprovalResolution, ApprovalStatus,
@@ -1325,6 +1326,70 @@ pub(crate) async fn assert_history_store_m41_conformance(store: &dyn HistoryStor
             .unwrap()),
         [nine.message.id]
     );
+    let message_query = FilteredMessageSearchQuery {
+        agent_id: agent.clone(),
+        session_ids: vec![
+            "filtered:a".into(),
+            "filtered:b".into(),
+            "filtered:counter".into(),
+        ],
+        excluded_message_ids: vec![shadowed.message.id.clone()],
+        query: "deplo buil".into(),
+        after_ms: Some(base + 200),
+        before_ms: Some(base + 400),
+        limit: 5,
+    };
+    assert_eq!(
+        ids(store
+            .search_messages_filtered(&message_query)
+            .await
+            .unwrap()),
+        [
+            counter.message.id.clone(),
+            id(360, 10),
+            id(360, 9),
+            b.message.id.clone(),
+            a.message.id.clone()
+        ],
+        "individual matches retain several messages in one session and filter before topN"
+    );
+    let mut small = message_query.clone();
+    small.limit = 1;
+    assert_eq!(
+        store.search_messages_filtered(&small).await.unwrap(),
+        [counter.clone()]
+    );
+    small.session_ids = vec!["filtered:a".into()];
+    assert_eq!(
+        store.search_messages_filtered(&small).await.unwrap(),
+        [a.clone()]
+    );
+    small.excluded_message_ids.clear();
+    assert_eq!(
+        store.search_messages_filtered(&small).await.unwrap(),
+        [shadowed.clone()]
+    );
+    small.query = "!!!".into();
+    assert!(store
+        .search_messages_filtered(&small)
+        .await
+        .unwrap()
+        .is_empty());
+    for case in 0..6 {
+        let mut invalid = message_query.clone();
+        match case {
+            0 => invalid.limit = 22,
+            1 => invalid.session_ids = vec!["s".into(); 501],
+            2 => invalid.excluded_message_ids = vec!["m".into(); 5001],
+            3 => invalid.query = "n".repeat(201),
+            4 => invalid.before_ms = invalid.after_ms,
+            _ => invalid.agent_id = "bad\0id".into(),
+        }
+        assert!(
+            store.search_messages_filtered(&invalid).await.is_err(),
+            "message search bounds case {case}"
+        );
+    }
     let mut query = FilteredSessionSearchQuery {
         agent_id: agent.clone(),
         session_ids: vec!["filtered:a".into(), "filtered:b".into()],
@@ -1471,6 +1536,7 @@ pub(crate) struct FlakyHistoryStore {
     panic_on_write: AtomicBool,
     existence_gate: Mutex<Option<StoreGate>>,
     message_read_gate: Mutex<Option<(usize, StoreGate)>>,
+    message_search_gate: Mutex<Option<StoreGate>>,
     /// The text of the injected failure; a default when unset.
     failure_text: Mutex<Option<String>>,
 }
@@ -1494,6 +1560,7 @@ impl FlakyHistoryStore {
             panic_on_write: AtomicBool::new(false),
             existence_gate: Mutex::new(None),
             message_read_gate: Mutex::new(None),
+            message_search_gate: Mutex::new(None),
             failure_text: Mutex::new(None),
         }
     }
@@ -1557,6 +1624,18 @@ impl FlakyHistoryStore {
             .message_read_gate
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((skip, gate.clone()));
+        gate
+    }
+
+    pub(crate) fn hold_next_message_search(&self) -> StoreGate {
+        let gate = StoreGate {
+            entered: Arc::new(Semaphore::new(0)),
+            release: Arc::new(Semaphore::new(0)),
+        };
+        *self
+            .message_search_gate
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some(gate.clone());
         gate
     }
 
@@ -1833,6 +1912,27 @@ impl HistoryStore for FlakyHistoryStore {
     ) -> Result<Vec<HistoryMessage>, HistoryError> {
         self.check()?;
         self.inner.search_sessions(agent_ids, query, limit).await
+    }
+
+    async fn search_messages_filtered(
+        &self,
+        query: &FilteredMessageSearchQuery,
+    ) -> Result<Vec<HistoryMessage>, HistoryError> {
+        self.check()?;
+        let gate = self
+            .message_search_gate
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take();
+        if let Some(gate) = gate {
+            gate.entered.add_permits(1);
+            gate.release
+                .acquire()
+                .await
+                .map_err(|_| HistoryError::new("test release closed"))?
+                .forget();
+        }
+        self.inner.search_messages_filtered(query).await
     }
 
     async fn search_sessions_filtered(

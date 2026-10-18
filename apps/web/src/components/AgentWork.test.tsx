@@ -34,6 +34,86 @@ function taskList(content: string, revision = 'original'): AgentTasks {
   };
 }
 
+it('retains a saved cancelled status while editing an existing task', async () => {
+  const saved: AgentTasks = {
+    revision: 'cancelled',
+    tasks: [
+      {
+        id: 'stopped',
+        content: 'Stopped work',
+        activeForm: 'Stopping work',
+        status: 'cancelled',
+      },
+    ],
+  };
+  vi.spyOn(daemon, 'agentTasks').mockResolvedValue(saved);
+  const update = vi
+    .spyOn(daemon, 'updateAgentTasks')
+    .mockImplementation(async (_id, payload) => payload);
+  render(<AgentTasksView agentId="researcher" name="Researcher" online />);
+  expect(await screen.findByLabelText('Task 1 status')).toHaveValue(
+    'cancelled',
+  );
+  expect(screen.getByRole('option', { name: 'Cancelled' })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Task 1'), {
+    target: { value: 'Stopped work with saved notes' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save tasks' }));
+  await waitFor(() =>
+    expect(update).toHaveBeenCalledWith('researcher', {
+      revision: saved.revision,
+      tasks: [
+        {
+          ...saved.tasks[0],
+          content: 'Stopped work with saved notes',
+          activeForm: 'Stopped work with saved notes',
+        },
+      ],
+    }),
+  );
+});
+
+it('FP03 gives an ID-aware appended task one stable identity across failed save retries', async () => {
+  const generated = '12345678-1234-1234-1234-123456789012';
+  const uuid = vi.spyOn(crypto, 'randomUUID').mockReturnValue(generated);
+  const saved: AgentTasks = {
+    revision: 'structured',
+    tasks: [
+      {
+        id: 'root',
+        content: 'Root work',
+        activeForm: 'Working',
+        status: 'pending',
+      },
+    ],
+  };
+  vi.spyOn(daemon, 'agentTasks').mockResolvedValue(saved);
+  const update = vi
+    .spyOn(daemon, 'updateAgentTasks')
+    .mockRejectedValueOnce(new Error('Save unavailable'))
+    .mockImplementation(async (_id, payload) => payload);
+  render(<AgentTasksView agentId="researcher" name="Researcher" online />);
+  fireEvent.change(await screen.findByLabelText('New agent task'), {
+    target: { value: 'New work' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Add task' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save tasks' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Save unavailable',
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Save tasks' }));
+  await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+  const first = update.mock.calls[0][1];
+  expect(first.tasks[1]).toEqual({
+    id: generated,
+    content: 'New work',
+    activeForm: 'New work',
+    status: 'pending',
+  });
+  expect(update.mock.calls[1][1]).toEqual(first);
+  expect(uuid).toHaveBeenCalledTimes(1);
+});
+
 function telegramConnector(approved: boolean): TelegramConnector {
   return {
     id: 'tg-1',

@@ -17,7 +17,9 @@ import {
   revealHiddenCharacters,
   type ApprovalDecide,
 } from '../../lib/approvals';
+import { PLAN_TOOL, parsePlan } from '../../lib/plan';
 import { formatTime } from '../ui-bits';
+import { PlanCard } from './PlanCard';
 
 const DECISIONS: readonly ApprovalDecision[] = [
   'allow_once',
@@ -91,12 +93,24 @@ function MatcherEditor({
  * shown as plain text, and the four decisions with an optional note and an
  * editable scope for "for this session" and "always".
  */
-export function ApprovalCard({
-  approval,
-  onDecide,
-  context,
-  canPersist = false,
-}: {
+export function ApprovalCard(props: ApprovalCardProps) {
+  // A plan reads as steps; one cut short falls back to the plain card.
+  const plan =
+    props.approval.tool === PLAN_TOOL ? parsePlan(props.approval.arguments) : null;
+  return plan ? (
+    <PlanCard
+      approval={props.approval}
+      plan={plan}
+      onDecide={props.onDecide}
+      canPersist={props.canPersist ?? false}
+      context={props.context}
+    />
+  ) : (
+    <ToolApprovalCard {...props} />
+  );
+}
+
+interface ApprovalCardProps {
   approval: Approval;
   onDecide?: ApprovalDecide;
   /** Shown in the header, such as the session the call came from. */
@@ -104,7 +118,14 @@ export function ApprovalCard({
   /** Offer "Always allow": only for the companion's calls; another
    *  agent's rules are not managed in this console yet. */
   canPersist?: boolean;
-}) {
+}
+
+function ToolApprovalCard({
+  approval,
+  onDecide,
+  context,
+  canPersist = false,
+}: ApprovalCardProps) {
   const [note, setNote] = useState('');
   const [matcher, setMatcher] = useState<ApprovalMatcher>(
     approval.suggestedMatcher,

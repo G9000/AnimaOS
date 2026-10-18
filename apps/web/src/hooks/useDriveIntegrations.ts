@@ -15,6 +15,7 @@ import {
   INVALID_DRIVE_CONSENT,
   safeDriveError,
 } from '../lib/drive-selection';
+import { useConnectorLifetime } from './useConnectorLifetime';
 
 export const DRIVE_CONSENT_POLL_MS = 15_000;
 const MAX_CONSENT_POLLS = 40;
@@ -25,7 +26,15 @@ interface StatusRead {
 }
 
 /** Mounted only on the Drive setup surface. Pending consent polling is bounded. */
-export function useDriveIntegrations(agentId: string | null) {
+export function useDriveIntegrations(
+  agentId: string | null,
+  online = true,
+  epoch = 0,
+  disabled = false,
+) {
+  const scope = useConnectorLifetime(agentId, online, epoch);
+  const allowed = useRef(!disabled);
+  allowed.current = !disabled;
   const lifetime = useRef(0);
   const revision = useRef(0);
   const activeAgent = useRef(agentId);
@@ -47,7 +56,7 @@ export function useDriveIntegrations(agentId: string | null) {
     setOwner(agentId);
     setStatus(null);
     setConsentUrl(null);
-    setLoading(Boolean(agentId));
+    setLoading(Boolean(agentId) && online);
     setAvailable(false);
     setBusy(false);
     setError(null);
@@ -56,17 +65,24 @@ export function useDriveIntegrations(agentId: string | null) {
       revision.current++;
       activeAgent.current = null;
     };
-  }, [agentId]);
+  }, [agentId, online, epoch]);
 
   const refreshStatus = useCallback(
     async (preserveError = false): Promise<void> => {
-      if (!agentId || activeAgent.current !== agentId || locked.current) return;
+      if (
+        !scope.isCurrent(scope.token) ||
+        !agentId ||
+        activeAgent.current !== agentId ||
+        locked.current
+      )
+        return;
       const generation = lifetime.current;
       while (read.current?.generation === generation) {
         const previous = read.current;
         await previous.promise;
         if (
           generation !== lifetime.current ||
+          !scope.isCurrent(scope.token) ||
           activeAgent.current !== agentId ||
           locked.current
         )
@@ -86,6 +102,7 @@ export function useDriveIntegrations(agentId: string | null) {
           const next = await daemon.driveStatus(agentId);
           if (
             generation !== lifetime.current ||
+            !scope.isCurrent(scope.token) ||
             requestRevision !== revision.current
           )
             return;
@@ -96,6 +113,7 @@ export function useDriveIntegrations(agentId: string | null) {
         } catch (caught) {
           if (
             generation !== lifetime.current ||
+            !scope.isCurrent(scope.token) ||
             requestRevision !== revision.current
           )
             return;
@@ -106,17 +124,18 @@ export function useDriveIntegrations(agentId: string | null) {
           );
         } finally {
           if (read.current === claim) read.current = null;
-          if (generation === lifetime.current) setLoading(false);
+          if (generation === lifetime.current && scope.isCurrent(scope.token))
+            setLoading(false);
         }
       })();
       await claim.promise;
     },
-    [agentId],
+    [agentId, scope.token, scope.isCurrent],
   );
   useEffect(() => {
     void refreshStatus();
   }, [refreshStatus]);
-  const visible = owner === agentId;
+  const visible = owner === agentId && scope.isCurrent(scope.token);
   const pendingId =
     visible && status?.connector?.status === 'pairing'
       ? status.connector.id
@@ -142,7 +161,13 @@ export function useDriveIntegrations(agentId: string | null) {
         apply: (next: DriveStatus, url?: string | null) => void,
       ) => Promise<void>,
     ) => {
-      if (!agentId || activeAgent.current !== agentId || locked.current)
+      if (
+        !scope.isCurrent(scope.token) ||
+        !allowed.current ||
+        !agentId ||
+        activeAgent.current !== agentId ||
+        locked.current
+      )
         return false;
       const generation = lifetime.current;
       const requestRevision = ++revision.current;
@@ -152,7 +177,9 @@ export function useDriveIntegrations(agentId: string | null) {
       setError(null);
       setConsentUrl(null);
       const current = () =>
-        generation === lifetime.current && requestRevision === revision.current;
+        scope.isCurrent(scope.token) &&
+        generation === lifetime.current &&
+        requestRevision === revision.current;
       try {
         await run((next, url = null) => {
           if (current()) {
@@ -172,7 +199,7 @@ export function useDriveIntegrations(agentId: string | null) {
         }
       }
     },
-    [agentId, refreshStatus],
+    [agentId, refreshStatus, scope.token, scope.isCurrent],
   );
   return {
     status: visible ? status : null,

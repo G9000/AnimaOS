@@ -21,6 +21,7 @@ pub(crate) mod timing;
 pub(crate) use timing::ActiveHours;
 pub(crate) mod automations;
 pub(crate) mod history;
+mod trigger;
 #[cfg(test)]
 pub(crate) use automations::test_automation;
 pub(crate) use automations::{
@@ -35,6 +36,7 @@ pub(crate) use automations::{
     TOO_MANY_AUTOMATIONS,
 };
 pub(crate) use history::{FireLog, ScheduleFireRecord};
+pub(crate) use trigger::SchedulerTrigger;
 
 const CHECKIN_SENTINEL: &str = "CHECKIN_OK";
 const CHECKIN_SUFFIX: &str = "(This is a scheduled check-in. If you have nothing worth saying right now, reply with exactly CHECKIN_OK and nothing else.)";
@@ -232,7 +234,7 @@ impl SchedulerService {
         runs: AgentRunCoordinator,
         connectors: ConnectorManager,
     ) -> Self {
-        Self {
+        let service = Self {
             inner: Arc::new(SchedulerInner {
                 state,
                 runs,
@@ -243,7 +245,12 @@ impl SchedulerService {
                 claim_gate: std::sync::Mutex::new(None),
             }),
             worker: Arc::new(Mutex::new(None)),
-        }
+        };
+        service
+            .inner
+            .runs
+            .bind_scheduler_trigger(SchedulerTrigger::new(&service.inner));
+        service
     }
 
     pub(crate) async fn start(&self) {
@@ -385,11 +392,9 @@ impl SchedulerService {
         agent_id: &str,
         schedule_id: &str,
     ) -> Result<ScheduledPromptRecord, ScheduleError> {
-        let inner = Arc::clone(&self.inner);
-        let (agent_id, schedule_id) = (agent_id.to_string(), schedule_id.to_string());
-        tokio::spawn(async move { run_now_inner(&inner, &agent_id, &schedule_id, now_ms()).await })
+        SchedulerTrigger::new(&self.inner)
+            .run_now(agent_id, schedule_id)
             .await
-            .unwrap_or(Err(ScheduleError::Persistence))
     }
 
     async fn tick_inner(inner: &Arc<SchedulerInner>, now: u64) -> Result<usize, ScheduleError> {
@@ -489,6 +494,7 @@ async fn run_now_inner(
     agent_id: &str,
     schedule_id: &str,
     now: u64,
+    source: Option<automations::AutomationRunAuthority>,
 ) -> Result<ScheduledPromptRecord, ScheduleError> {
     let owned = inner
         .state
@@ -511,7 +517,7 @@ async fn run_now_inner(
     if jobs.len() >= MAX_ACTIVE_SCHEDULES {
         return Err(ScheduleError::Busy(TOO_MANY_RUNNING_AUTOMATIONS));
     }
-    let record = claim_manual(inner, agent_id, schedule_id, now).await?;
+    let record = claim_manual(inner, agent_id, schedule_id, now, source.as_ref()).await?;
     let job = {
         let (inner, record) = (Arc::clone(inner), record.clone());
         tokio::spawn(async move { execute_claimed(&inner, record, now).await })
@@ -527,10 +533,17 @@ async fn claim_manual(
     agent_id: &str,
     schedule_id: &str,
     now: u64,
+    source: Option<&automations::AutomationRunAuthority>,
 ) -> Result<ScheduledPromptRecord, ScheduleError> {
     let _transaction = inner.runs.control_plane_transaction().await;
     let (claimed, previous, persist) = {
         let mut state = inner.state.write().await;
+        if let Some(source) = source {
+            source.validate(&state, agent_id)?;
+            if !SchedulerTrigger::source_is_active(&state, agent_id, source.link()) {
+                return Err(ScheduleError::Rejected("Only an active direct user run with a current trigger grant can trigger an automation; scheduled and delegated runs cannot trigger more runs".into()));
+            }
+        }
         // Hold the leaf only through this synchronous claim, never across save/execute.
         let closing = inner
             .closing
@@ -745,7 +758,7 @@ async fn claim_due(
             }
             Err(error) => return Err(error),
         };
-        claimed.updated_at_ms = now.max(claimed.created_at_ms);
+        claimed.updated_at_ms = now.max(claimed.created_at_ms).max(previous.updated_at_ms);
         state.schedules.insert(id.to_string(), claimed.clone());
         (
             claim,
@@ -1166,7 +1179,19 @@ mod tests {
     }
 
     pub(super) fn service_with_daemon(
+        daemon: DaemonState,
+    ) -> (
+        SchedulerService,
+        SharedDaemonState,
+        String,
+        ConnectorManager,
+    ) {
+        service_with_daemon_and_budget(daemon, 2)
+    }
+
+    fn service_with_daemon_and_budget(
         mut daemon: DaemonState,
+        permits: usize,
     ) -> (
         SchedulerService,
         SharedDaemonState,
@@ -1193,7 +1218,7 @@ mod tests {
             .state
             .id;
         let state = Arc::new(RwLock::new(daemon));
-        let runs = AgentRunCoordinator::new(Arc::clone(&state), Arc::new(Semaphore::new(2)));
+        let runs = AgentRunCoordinator::new(Arc::clone(&state), Arc::new(Semaphore::new(permits)));
         let connectors = ConnectorManager::new(
             Arc::clone(&state),
             runs.clone(),
@@ -1347,9 +1372,7 @@ mod tests {
             entered: entered.clone(),
             release: release.clone(),
         }));
-        let (mut service, state, first, _) = service_with_daemon(daemon);
-        Arc::get_mut(&mut service.inner).unwrap().runs =
-            AgentRunCoordinator::new(state.clone(), Arc::new(Semaphore::new(8)));
+        let (service, state, first, _) = service_with_daemon_and_budget(daemon, 8);
         let second = {
             let mut state = state.write().await;
             let mut config = state.get_agent(&first).unwrap().state.config;
@@ -1645,6 +1668,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fp01_automatic_claim_preserves_update_time_after_clock_rollback() {
+        let (service, state, agent_id, _) = service();
+        let mut record = automations::test_automation(&agent_id, "fp01-clock-claim");
+        record.updated_at_ms = 100_000;
+        state
+            .write()
+            .await
+            .schedules
+            .insert(record.id.clone(), record.clone());
+        let claimed = claim_due(&service.inner, &record.id, 90_000)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(claimed.updated_at_ms, record.updated_at_ms);
+        assert_eq!(claimed.next_due_at_ms, 130_000);
+        assert_eq!(claimed.last_fired.as_ref().unwrap().fired_at_ms, 90_000);
+        record_outcome(
+            &service.inner,
+            &record.id,
+            ScheduleOutcomeStatus::Silent,
+            None,
+            90_000,
+            None,
+        )
+        .await
+        .unwrap();
+        let bytes = serde_json::to_vec(&state.read().await.control_plane_snapshot()).unwrap();
+        let mut restored = DaemonState::new();
+        restored
+            .restore_control_plane_snapshot(serde_json::from_slice(&bytes).unwrap())
+            .expect("a clock-corrected claim and outcome retain strict restore invariants");
+        let completed = &restored.schedules[&record.id];
+        assert_eq!(completed.updated_at_ms, 100_000);
+        assert_eq!(
+            completed.last_safe_outcome.as_ref().unwrap().occurred_at_ms,
+            90_000
+        );
+        assert_eq!(completed.counters.runs, 1);
+    }
+
+    #[tokio::test]
     async fn claiming_new_occurrence_clears_previous_outcome() {
         let (service, state, agent_id, _) = service();
         let record = due_schedule(&service, &agent_id).await;
@@ -1718,9 +1782,7 @@ mod tests {
             entered: entered.clone(),
             release: release.clone(),
         }));
-        let (mut service, state, first, _) = service_with_daemon(daemon);
-        Arc::get_mut(&mut service.inner).unwrap().runs =
-            AgentRunCoordinator::new(state.clone(), Arc::new(Semaphore::new(64)));
+        let (service, state, first, _) = service_with_daemon_and_budget(daemon, 64);
         due_schedule(&service, &first).await;
         due_schedule(&service, &first).await;
         for n in 0..10 {
@@ -2095,6 +2157,8 @@ mod tests {
 
 #[cfg(test)]
 mod run_now_tests;
+#[cfg(test)]
+mod trigger_tests;
 
 #[cfg(test)]
 #[path = "schedules/shutdown_tests.rs"]

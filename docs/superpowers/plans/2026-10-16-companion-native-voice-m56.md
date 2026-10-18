@@ -47,10 +47,9 @@ transcript. Freeze interfaces only after M55 settlement and root risk rulings.
 
 ## Source evidence and reuse decision
 
-Repository instructions in `AGENTS.md` and `docs/companion/parity-roadmap.md`
+Repository instructions in `AGENTS.md`
 keep reusable engine code under `packages/*`, host process/HTTP under
-`hosts/*`, and host selection in `tools/workspace-dev`. PAR-07 lines 171–177
-calls for provider-neutral transcription/speech ports, explicit microphone
+`hosts/*`, and host selection in `tools/workspace-dev`. This slice calls for provider-neutral transcription/speech ports, explicit microphone
 permission, selected voice attachments through the bounded attachment
 lifecycle, duration/bytes/lifetime/output/retention bounds, cancellation,
 clear unsupported states, no hidden upload or speech authority, and mocked

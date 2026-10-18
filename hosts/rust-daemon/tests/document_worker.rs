@@ -1,7 +1,7 @@
 //! Physical CLI entry acceptance, without starting the daemon or any services.
 #![cfg(windows)]
 
-use anima_core::document_content::{
+use anima_service_adapters::document_content::{
     validate_document_extraction, DocumentFormat, ExtractedDocumentText, XlsxSheetVisibility,
 };
 use process_wrap::tokio::{CommandWrap, CreationFlags, JobObject, KillOnDrop};

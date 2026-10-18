@@ -91,7 +91,7 @@ pub(crate) fn attachment_content(
     let mut metadata = existing_metadata.unwrap_or_default();
     metadata.remove(ATTACHMENT_RECORDS_KEY);
     metadata.remove(ATTACHMENT_INPUT_TEXT_KEY);
-    metadata.remove(anima_core::document_content::DOCUMENT_EXTRACTS_METADATA_KEY);
+    metadata.remove(anima_service_adapters::document_content::DOCUMENT_EXTRACTS_METADATA_KEY);
     if records.is_empty() {
         return Content {
             text: text.into(),
@@ -119,7 +119,7 @@ pub(crate) fn attachment_content(
             ),
             AttachmentKind::Document
                 if crate::attachments::documents::document_format(row)
-                    == Some(anima_core::document_content::DocumentFormat::Pdf) =>
+                    == Some(anima_service_adapters::document_content::DocumentFormat::Pdf) =>
             {
                 format!(
                     "Attached document: {} ({}). Original saved; any admitted PDF excerpt covers the text layer only, without OCR or visual layout.",

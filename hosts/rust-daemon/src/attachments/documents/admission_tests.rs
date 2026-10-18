@@ -4,7 +4,7 @@ use crate::{
     runs::{RunRecord, RunStart},
     sessions::{SessionRecord, TitleSource},
 };
-use anima_core::document_content::{
+use anima_service_adapters::document_content::{
     document_rendered_bytes, parse_document_snapshots, DocumentBlock, DocumentLocator, PdfCoverage,
     XlsxCoverage, XlsxSheetCoverage, XlsxSheetVisibility,
 };

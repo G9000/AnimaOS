@@ -8,8 +8,8 @@ dynamic ABI, process/WASM loader, or connector sandbox.
 
 ## Where code belongs
 
-- Portable metadata and transport contracts: `anima_core::connectors` in
-  `packages/core-rust/crates/anima-core/src/connectors`.
+- Portable metadata and transport contracts: `anima_service_adapters::connectors`
+  in `packages/core-rust/crates/anima-service-adapters/src/connectors`.
 - Native Telegram bridge: `src/connectors/adapters/telegram.rs` in this host.
 - Native Discord bridge and lifecycle: `src/connectors/adapters/discord.rs` and
   `src/connectors/discord/` in this host.
@@ -17,7 +17,7 @@ dynamic ABI, process/WASM loader, or connector sandbox.
 - Host authorization, credential storage, pairing, lifecycle, durable inbound
   admission and outbound settlement: existing connector runtime modules.
 
-`ConnectorRegistry` in core is an immutable metadata catalog. Construction and
+`ConnectorRegistry` in the adapter crate is an immutable metadata catalog. Construction and
 lookup do not discover, execute, activate, install, or authorize a transport.
 Descriptors contain a protocol ID, contract revision, display name, transport
 kind, supported operations and source label. They never contain credentials or
@@ -32,7 +32,7 @@ without treating remote input as host authority. The following shape is illustra
 use existing crates and your adapter's native types, rather than adding dependencies:
 
 ```rust
-use anima_core::connectors::{
+use anima_service_adapters::connectors::{
     ConnectorReceiveRequest, ConnectorSendRequest, ConnectorTransport,
 };
 use async_trait::async_trait;

@@ -92,3 +92,42 @@ it('scopes jobs, preserves idempotency and revision inputs, and propagates confl
     client.agents.cancelJob('agent/a', 'job/1', { revision: 2 }),
   ).rejects.toBeInstanceOf(DaemonHttpError);
 });
+
+it('preserves delegated output identity across fetch and exact review submission', async () => {
+  const finalOutput = {
+    generation: 2,
+    sha256: 'b'.repeat(64),
+    outputs: [
+      {
+        runId: 'callback',
+        replyMessageId: 'reply',
+        outputSha256: 'a'.repeat(64),
+        preview: 'bounded result',
+        previewTruncated: true,
+      },
+    ],
+  };
+  const payload = { id: 'job/1', status: 'completed', finalOutput };
+  const requests: { url: string; init?: RequestInit }[] = [];
+  const client = createDaemonClient({
+    baseUrl: '',
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init });
+      return Response.json(init?.method ? payload : { jobs: [payload] });
+    },
+  });
+  expect((await client.agents.jobs('agent/a'))[0].finalOutput).toEqual(
+    finalOutput,
+  );
+  const review = {
+    revision: 7,
+    decision: 'accepted' as const,
+    note: 'Exact output reviewed',
+    finalOutputGeneration: 2,
+    finalOutputSha256: finalOutput.sha256,
+  };
+  await client.agents.reviewJob('agent/a', 'job/1', review);
+  expect(requests[1].url).toBe('/api/agents/agent%2Fa/jobs/job%2F1/review');
+  expect(JSON.parse(requests[1].init?.body as string)).toEqual(review);
+  expect(requests).toHaveLength(2);
+});

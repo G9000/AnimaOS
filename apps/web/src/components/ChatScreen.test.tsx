@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentDetail, ChatMessage } from '../lib/types';
@@ -559,6 +559,135 @@ describe('MessageList', () => {
     expect(screen.getByRole('status')).toHaveTextContent('No matches');
   });
 
+  it('waits for a route target to mount, jumps once and replays only for a new request key', () => {
+    const scrollIntoView = vi.fn();
+    const previous = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      const onLoadOlder = vi.fn();
+      const onJumpToLatest = vi.fn();
+      const scrollerRef = { current: null as HTMLDivElement | null };
+      const props = {
+        sending: false,
+        scrollerRef,
+        onSuggestion: vi.fn(),
+        hasOlder: true,
+        onLoadOlder,
+        highlightMessageId: 'deep-hit',
+        jumpRequestKey: 1,
+        onJumpToLatest,
+      };
+      const view = render(
+        <MessageList {...props} agent={{ ...agent, messages: [] }} />,
+      );
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      const loaded = {
+        ...messages[0],
+        id: 'deep-hit',
+        content: { text: 'A deep saved match' },
+      };
+      view.rerender(
+        <MessageList {...props} agent={{ ...agent, messages: [loaded] }} />,
+      );
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+      const anchor = screen
+        .getByText('A deep saved match')
+        .closest('.studio-message-anchor');
+      expect(anchor).toHaveAttribute('data-search-match', 'true');
+      const scroller = screen.getByLabelText('Conversation with Nova');
+      Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, value: 1200 },
+        clientHeight: { configurable: true, value: 400 },
+      });
+      scroller.scrollTop = 100;
+      view.rerender(
+        <MessageList
+          {...props}
+          agent={{
+            ...agent,
+            messages: [loaded, { ...messages[1], id: 'new-live-message' }],
+          }}
+        />,
+      );
+      expect(scroller.scrollTop).toBe(100);
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      scroller.scrollTop = 0;
+      fireEvent.scroll(scroller);
+      expect(onLoadOlder).not.toHaveBeenCalled();
+      view.rerender(
+        <MessageList
+          {...props}
+          jumpRequestKey={2}
+          agent={{ ...agent, messages: [loaded] }}
+        />,
+      );
+      expect(scrollIntoView).toHaveBeenCalledTimes(2);
+      fireEvent.click(screen.getByRole('button', { name: '↓ Jump to latest' }));
+      expect(onJumpToLatest).toHaveBeenCalledOnce();
+      view.rerender(
+        <MessageList
+          {...props}
+          highlightMessageId={null}
+          agent={{ ...agent, messages: [loaded, messages[1]] }}
+        />,
+      );
+      expect(scroller.scrollTop).toBe(1200);
+      expect(
+        screen
+          .getByText('A deep saved match')
+          .closest('.studio-message-anchor'),
+      ).not.toHaveAttribute('data-search-match');
+    } finally {
+      Element.prototype.scrollIntoView = previous;
+    }
+  });
+
+  it('waits for the confirmed window before consuming an already mounted target or replay', () => {
+    const scrollIntoView = vi.fn();
+    const previous = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      const savedAgent = {
+        ...agent,
+        messages: [{ ...messages[0], id: 'saved-hit' }],
+      };
+      const props = {
+        agent: savedAgent,
+        sending: false,
+        scrollerRef: { current: null as HTMLDivElement | null },
+        onSuggestion: vi.fn(),
+        highlightMessageId: 'saved-hit',
+        jumpRequestKey: 1,
+      };
+      const view = render(<MessageList {...props} jumpReady={false} />);
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      const scroller = screen.getByLabelText('Conversation with Nova');
+      Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, value: 1200 },
+        clientHeight: { configurable: true, value: 400 },
+      });
+      scroller.scrollTop = 100;
+      view.rerender(<MessageList {...props} sending jumpReady={false} />);
+      expect(scroller.scrollTop).toBe(100);
+      expect(scrollIntoView).not.toHaveBeenCalled();
+
+      view.rerender(<MessageList {...props} jumpReady />);
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+      view.rerender(
+        <MessageList {...props} jumpRequestKey={2} jumpReady={false} />,
+      );
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      view.rerender(<MessageList {...props} jumpRequestKey={2} jumpReady />);
+      expect(scrollIntoView).toHaveBeenCalledTimes(2);
+      view.rerender(<MessageList {...props} jumpRequestKey={2} jumpReady />);
+      expect(scrollIntoView).toHaveBeenCalledTimes(2);
+    } finally {
+      Element.prototype.scrollIntoView = previous;
+    }
+  });
+
   it('copies original message Markdown', async () => {
     const user = userEvent.setup();
     render(
@@ -575,7 +704,7 @@ describe('MessageList', () => {
     expect(await navigator.clipboard.readText()).toBe('**bold**');
     expect(screen.getByRole('button', { name: 'Copied' })).toBeVisible();
   });
-  it('offers Save to memory on user and assistant messages only when the action is provided', async () => {
+  it('offers Save to memory on the owner’s messages only, and only when the action is provided', async () => {
     const user = userEvent.setup();
     const onSaveToMemory = vi
       .fn()
@@ -601,12 +730,12 @@ describe('MessageList', () => {
         actions={{ onSaveToMemory }}
       />,
     );
-    // The user and the assistant message, not the system or tool ones.
+    // The owner's message: the agent decides what of its replies to keep.
     const buttons = screen.getAllByRole('button', { name: 'Save to memory' });
-    expect(buttons).toHaveLength(2);
+    expect(buttons).toHaveLength(1);
 
-    await user.click(buttons[1]);
-    expect(onSaveToMemory).toHaveBeenCalledWith(messages[1]);
+    await user.click(buttons[0]);
+    expect(onSaveToMemory).toHaveBeenCalledWith(messages[0]);
     expect(
       await screen.findByRole('button', { name: '✓ Saved to memory' }),
     ).toBeDisabled();
@@ -646,8 +775,8 @@ describe('MessageList', () => {
       screen.getAllByRole('button', { name: '✓ Saved to memory' }),
     ).toHaveLength(1);
     expect(
-      screen.getAllByRole('button', { name: 'Save to memory' }),
-    ).toHaveLength(1);
+      screen.queryByRole('button', { name: 'Save to memory' }),
+    ).not.toBeInTheDocument();
   });
 
   it('renders Markdown bubbles, literal event pills, and tool results as cards', async () => {
@@ -1193,11 +1322,10 @@ describe('M53 accepted budget wrap-up notice', () => {
       expect(await navigator.clipboard.readText()).toBe(saved.content.text);
       await user.click(screen.getByRole('button', { name: 'Read aloud' }));
       expect(readAloud.read).toHaveBeenCalledWith(saved.id, saved.content.text);
-      await user.click(screen.getByRole('button', { name: 'Save to memory' }));
-      expect(onSaveToMemory.mock.calls[0][0]).toBe(saved);
+      // A reply is never offered for memory; the agent keeps what matters.
       expect(
-        await screen.findByRole('button', { name: '✓ Saved to memory' }),
-      ).toBeDisabled();
+        screen.queryByRole('button', { name: 'Save to memory' }),
+      ).not.toBeInTheDocument();
       expect(JSON.stringify(saved)).toBe(before);
       expect(fetch).not.toHaveBeenCalled();
     } finally {
@@ -1653,5 +1781,97 @@ describe('Composer commands and live replies', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
     fireEvent.focus(input);
     expect(screen.getByRole('listbox')).toBeInTheDocument();
+  });
+});
+
+it('tags an owner message that arrived from Telegram in the main chat', () => {
+  render(
+    <MessageList
+      agent={{
+        ...agent,
+        messages: [
+          {
+            id: 'from-telegram',
+            role: 'User',
+            content: {
+              text: 'Remind me at noon',
+              metadata: { source: 'telegram', connectorId: 'telegram-1' },
+            },
+            created_at_ms: 1_725_000_000_000,
+          },
+          {
+            id: 'typed-here',
+            role: 'User',
+            content: { text: 'Typed in the console' },
+            created_at_ms: 1_725_000_060_000,
+          },
+        ],
+      }}
+      sending={false}
+      scrollerRef={{ current: null }}
+      onSuggestion={vi.fn()}
+    />,
+  );
+  expect(screen.getAllByText('via Telegram')).toHaveLength(1);
+});
+
+describe('Composer one button', () => {
+  const base = {
+    agentName: 'Nova',
+    setDraft: vi.fn(),
+    sending: false,
+    disabled: false,
+    onSend: vi.fn(),
+    error: null,
+    onDismissError: vi.fn(),
+  };
+
+  it('shows the live orb and the mic until there is something to send', () => {
+    const { container, rerender } = render(<Composer {...base} draft="" />);
+    expect(container.querySelector('.composer-orb')).not.toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Send' }),
+    ).not.toBeInTheDocument();
+
+    rerender(<Composer {...base} draft="Plan the launch" />);
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+  });
+
+  it('keeps the mic while dictation listens, even once words arrive', async () => {
+    class Recognition {
+      static instance: Recognition;
+      continuous = false;
+      interimResults = false;
+      lang = '';
+      onstart: (() => void) | null = null;
+      onend: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onresult: (() => void) | null = null;
+      start = vi.fn();
+      stop = vi.fn();
+      abort = vi.fn();
+      constructor() {
+        Recognition.instance = this;
+      }
+    }
+    vi.stubGlobal('SpeechRecognition', Recognition);
+    vi.stubGlobal('webkitSpeechRecognition', undefined);
+    try {
+      const { rerender } = render(<Composer {...base} draft="" />);
+      await userEvent.click(
+        screen.getByRole('button', { name: 'Dictate message' }),
+      );
+      act(() => Recognition.instance.onstart?.());
+      // Dictated words land in the draft; the mic stays so they can stop.
+      rerender(<Composer {...base} draft="plan the launch" />);
+      expect(
+        screen.getByRole('button', { name: 'Stop dictation' }),
+      ).toBeVisible();
+      expect(
+        screen.queryByRole('button', { name: 'Send' }),
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

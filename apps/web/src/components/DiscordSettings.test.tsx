@@ -25,6 +25,23 @@ function props() {
 }
 
 describe('DiscordSettings', () => {
+  it('fp02 Discord clears unsubmitted secrets but retains selected IDs on reconnect', async () => {
+    const user = userEvent.setup();
+    const p = props();
+    const view = render(<DiscordSettings {...p} online epoch={1} />);
+    await user.type(
+      screen.getByLabelText('Discord bot token'),
+      'synthetic-secret',
+    );
+    await user.type(screen.getByLabelText('Server ID'), '123');
+    view.rerender(<DiscordSettings {...p} online={false} epoch={1} />);
+    expect(screen.getByLabelText('Discord bot token')).toHaveValue('');
+    expect(screen.getByLabelText('Server ID')).toHaveValue('123');
+    expect(
+      screen.getByRole('button', { name: 'Refresh Discord status' }),
+    ).toBeDisabled();
+  });
+
   it('requires selected IDs and owner privacy confirmation, clears submitted token immediately', async () => {
     const user = userEvent.setup();
     const p = props();

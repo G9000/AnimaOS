@@ -285,6 +285,10 @@ fn a_helper_never_gets_the_automation_tools() {
                 "create_automation",
                 "list_automations",
                 "pause_automation",
+                "update_automation",
+                "resume_automation",
+                "delete_automation",
+                "trigger_automation",
                 "calculate",
             ])
             .unwrap(),
@@ -301,4 +305,124 @@ fn a_helper_never_gets_the_automation_tools() {
         .map(|tool| tool.name)
         .collect();
     assert_eq!(names, ["calculate"]);
+}
+
+#[tokio::test]
+async fn fp04_update_resume_delete_are_scoped_and_preserve_other_automations() {
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![call(
+            "update_automation",
+            &[
+                ("id", "mine"),
+                ("name", "Revised check"),
+                ("prompt", "Report the revised check"),
+                ("schedule", "every 30 minutes"),
+            ],
+        )]),
+        Step::Tools(vec![call("resume_automation", &[("id", "mine")])]),
+        Step::Tools(vec![call("list_automations", &[])]),
+        Step::Tools(vec![call("delete_automation", &[("id", "theirs")])]),
+        Step::Tools(vec![independent_call(
+            "delete-mine",
+            "delete_automation",
+            &[("id", "mine")],
+        )]),
+        Step::Text(vec!["Done using the saved automation results."]),
+    ]);
+    let (coordinator, agent_id) = automating(
+        model,
+        &[
+            "update_automation",
+            "resume_automation",
+            "delete_automation",
+            "list_automations",
+        ],
+    )
+    .await;
+    {
+        let mut state = coordinator.state.write().await;
+        let other = state
+            .create_agent(companion_config("fp04-other"))
+            .unwrap()
+            .state
+            .id;
+        let mut mine = test_automation(&agent_id, "mine");
+        mine.enabled = false;
+        mine.trigger = ScheduleTrigger::Interval {
+            interval_ms: 600_000,
+        };
+        state.schedules.insert("mine".into(), mine);
+        state
+            .schedules
+            .insert("theirs".into(), test_automation(&other, "theirs"));
+    }
+    coordinator
+        .run(chat_request(
+            &agent_id,
+            "chat:fp04",
+            "Manage only my automations",
+        ))
+        .await
+        .unwrap();
+    let results = tool_results(&coordinator, &agent_id).await;
+    assert_eq!(results.len(), 5);
+    assert!(results[0].contains("Revised check"), "{results:?}");
+    assert!(results[1].contains("Resumed"), "{results:?}");
+    assert!(
+        results[2].contains("Revised check")
+            && results[2].contains("every 30 minutes")
+            && results[2].contains(", on;"),
+        "{results:?}"
+    );
+    assert!(results[3].contains(AUTOMATION_NOT_YOURS), "{results:?}");
+    assert!(results[4].contains("Deleted"), "{results:?}");
+    let state = coordinator.state.read().await;
+    assert!(!state.schedules.contains_key("mine"));
+    assert!(state.schedules["theirs"].enabled);
+}
+
+#[tokio::test]
+async fn fp04_invalid_or_too_frequent_agent_updates_preserve_the_record() {
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![call("update_automation", &[("id", "mine")])]),
+        Step::Tools(vec![independent_call(
+            "too-fast",
+            "update_automation",
+            &[("id", "mine"), ("schedule", "every minute")],
+        )]),
+        Step::Tools(vec![independent_call(
+            "foreign",
+            "update_automation",
+            &[("id", "other"), ("prompt", "Replace it")],
+        )]),
+        Step::Text(vec!["All refused changes remain unchanged."]),
+    ]);
+    let (coordinator, agent_id) = automating(model, &["update_automation"]).await;
+    let original = test_automation(&agent_id, "mine");
+    coordinator
+        .state
+        .write()
+        .await
+        .schedules
+        .insert("mine".into(), original.clone());
+    coordinator
+        .run(chat_request(
+            &agent_id,
+            "chat:fp04-refusal",
+            "Try bounded validation cases",
+        ))
+        .await
+        .unwrap();
+    let results = tool_results(&coordinator, &agent_id).await;
+    assert_eq!(results.len(), 3);
+    assert!(
+        results[0].contains("at least one field is required"),
+        "{results:?}"
+    );
+    assert!(
+        results[1].contains(AGENT_AUTOMATION_TOO_FREQUENT),
+        "{results:?}"
+    );
+    assert!(results[2].contains(AUTOMATION_NOT_YOURS), "{results:?}");
+    assert_eq!(coordinator.state.read().await.schedules["mine"], original);
 }

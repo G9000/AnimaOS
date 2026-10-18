@@ -1,8 +1,8 @@
-use anima_core::document_content::{
+use anima_document_content::{extract_document, extract_pdf};
+use anima_service_adapters::document_content::{
     render_document_snapshots, validate_document_extraction, DocumentExtractionStatus as Status,
     DocumentFormat, DocumentLocator, DocumentOmission as Omission, DocumentSnapshot, PdfCoverage,
 };
-use anima_document_content::{extract_document, extract_pdf};
 
 const SELECTED: &[u8] =
     include_bytes!("../../../../../hosts/rust-daemon/tests/fixtures/documents/m55-selected.pdf");

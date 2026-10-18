@@ -15,7 +15,7 @@ Use maintained Playwright-core1.59.1 already in bun.lock, Node>=18 (local22.12),
 
 ## Baseline evidence and limits (before M46 implementation)
 
-- The [PAR-05 roadmap](../../companion/parity-roadmap.md) locks interactive browser work after PAR-04.
+- The PAR-05 roadmap locks interactive browser work after PAR-04.
 - It requires navigation, accessibility/screenshots, click/type/scroll and selected
   upload/download, task isolation, guarded destinations, cancellation and an oracle.
 - At the M45 baseline, `BrowserPort` occurred only as a proposed fallback seam.

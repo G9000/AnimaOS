@@ -99,7 +99,9 @@ impl AttachmentModelAdapter {
                 .and_then(|metadata| metadata.remove(ATTACHMENT_RECORDS_KEY));
             if let Some(metadata) = &mut message.content.metadata {
                 metadata.remove(ATTACHMENT_INPUT_TEXT_KEY);
-                metadata.remove(anima_core::document_content::DOCUMENT_EXTRACTS_METADATA_KEY);
+                metadata.remove(
+                    anima_service_adapters::document_content::DOCUMENT_EXTRACTS_METADATA_KEY,
+                );
                 if metadata.is_empty() {
                     message.content.metadata = None;
                 }
@@ -158,7 +160,9 @@ impl AttachmentModelAdapter {
         reader: &AttachmentReader,
         count: &mut usize,
     ) {
-        use anima_core::document_content::{parse_document_snapshots, render_document_snapshots};
+        use anima_service_adapters::document_content::{
+            parse_document_snapshots, render_document_snapshots,
+        };
         if message.role != MessageRole::User
             || message.agent_id != self.agent_id
             || crate::sessions::session_id_for_room(&message.room_id) != self.session_id

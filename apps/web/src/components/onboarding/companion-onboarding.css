@@ -409,8 +409,31 @@
   position: relative;
   flex: 1;
   min-width: 0;
-  background: url('../../assets/onboarding-garden.jpg') center / cover
-    no-repeat;
+  overflow: hidden;
+  background: radial-gradient(
+    ellipse 80% 80% at 50% 50%,
+    #101820 0%,
+    #050608 72%
+  );
+}
+
+/* anima's orb fills the free side while you set it up. */
+.onboarding__orb {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(80%, 560px);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  opacity: 0.8;
+}
+
+.onboarding__orb::before {
+  content: '';
+  position: absolute;
+  inset: -40%;
+  z-index: -1;
+  background: radial-gradient(circle, rgb(233 77 171 / 0.2) 0%, transparent 60%);
 }
 
 .onboarding__preview {

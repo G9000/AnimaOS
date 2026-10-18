@@ -45,6 +45,11 @@ pub(crate) const TOOL_GRANTS: &[ToolGrantSet] = &[
         read_class: &["list_automations"],
         write_class: &["create_automation", "pause_automation"],
     },
+    ToolGrantSet {
+        id: "plan-first",
+        read_class: &[],
+        write_class: &[crate::tools::PLAN_TOOL],
+    },
 ];
 
 /// Legacy check-ins ran in a fresh `room-*` room per tick. Those rooms become
@@ -1329,7 +1334,8 @@ mod tests {
                 "propose_skill",
                 "list_automations",
                 "create_automation",
-                "pause_automation"
+                "pause_automation",
+                "propose_plan"
             ]
         );
         assert!(state.tool_grants_applied.contains("m5-skills"));

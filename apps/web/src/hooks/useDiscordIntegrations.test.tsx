@@ -38,6 +38,26 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe('useDiscordIntegrations', () => {
+  it('fp02 Discord suppresses offline reads and fences old epoch mutations', async () => {
+    const { result, rerender } = renderHook(
+      ({ online, epoch }) =>
+        useDiscordIntegrations('agent-a', true, online, epoch),
+      { initialProps: { online: false, epoch: 1 } },
+    );
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(daemon.discordConnectors).not.toHaveBeenCalled();
+    rerender({ online: true, epoch: 2 });
+    await waitFor(() => expect(result.current.available).toBe(true));
+    const old = result.current;
+    rerender({ online: true, epoch: 3 });
+    await act(async () => {
+      expect(await old.activate('connector-1')).toBe(false);
+    });
+    expect(daemon.activateDiscordConnector).not.toHaveBeenCalled();
+  });
+
   it('discards stale agent load and create results', async () => {
     let load!: (value: ReturnType<typeof discordFixture>[]) => void;
     let create!: (value: ReturnType<typeof discordFixture>) => void;

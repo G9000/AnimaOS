@@ -6,8 +6,8 @@ use super::{
     config::VerifiedBrowserInstallation,
     records::{digest_valid, valid_id},
 };
-pub(crate) use anima_core::browser::BrowserErrorCode;
-use anima_core::browser::{
+pub(crate) use anima_service_adapters::browser::BrowserErrorCode;
+use anima_service_adapters::browser::{
     scope_digest, validate_observation, validate_operation, validate_scope, BrowserArtifact,
     BrowserClose, BrowserControl, BrowserEffect, BrowserError, BrowserObservation,
     BrowserOperation, BrowserPort, BrowserScope, BrowserSession, MAX_BROWSER_SAFE_INTEGER,

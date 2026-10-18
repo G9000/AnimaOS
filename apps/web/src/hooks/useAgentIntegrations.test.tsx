@@ -41,6 +41,28 @@ beforeEach(() => {
 });
 
 describe('useAgentIntegrations', () => {
+  it('fp02 Telegram suppresses offline reads and rejects old epoch actions', async () => {
+    vi.mocked(daemon.listConnectors).mockResolvedValue({
+      connectors: [connector],
+    });
+    const { result, rerender } = renderHook(
+      ({ online, epoch }) => useAgentIntegrations('agent-a', online, epoch),
+      { initialProps: { online: false, epoch: 1 } },
+    );
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(daemon.listConnectors).not.toHaveBeenCalled();
+    rerender({ online: true, epoch: 2 });
+    await waitFor(() => expect(result.current.connectors).toHaveLength(1));
+    const old = result.current;
+    rerender({ online: true, epoch: 3 });
+    await act(async () => {
+      expect(await old.connectTelegram('synthetic')).toBe(false);
+    });
+    expect(daemon.createTelegramConnector).not.toHaveBeenCalled();
+  });
+
   it('reports a failed connectors read and leaves schedules to Work', async () => {
     vi.mocked(daemon.listConnectors).mockRejectedValue(
       new Error('connector failed'),

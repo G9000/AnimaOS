@@ -13,6 +13,34 @@ afterEach(() => {
 });
 
 describe('hash routes', () => {
+  it('retains an exact message anchor across reload and helper deep links', () => {
+    for (const route of [
+      {
+        kind: 'session' as const,
+        sessionId: 'chat:main',
+        messageId: 'msg/a ?1',
+      },
+      {
+        kind: 'session' as const,
+        agentId: 'helper-1',
+        sessionId: 'room:1',
+        messageId: 'msg-12-3',
+      },
+    ])
+      expect(parseHashRoute(formatHashRoute(route))).toEqual(route);
+    expect(parseHashRoute('#/s/chat%3Amain?messageId=msg%2Fa+%3F1')).toEqual({
+      kind: 'session',
+      sessionId: 'chat:main',
+      messageId: 'msg/a ?1',
+    });
+    for (const value of ['%00', 'x'.repeat(257), '']) {
+      expect(parseHashRoute(`#/s/chat%3Amain?messageId=${value}`)).toEqual({
+        kind: 'session',
+        sessionId: 'chat:main',
+      });
+    }
+  });
+
   it('parses sessions and pages and falls back to a new chat', () => {
     expect(parseHashRoute('')).toEqual({ kind: 'home' });
     expect(parseHashRoute('#/')).toEqual({ kind: 'home' });

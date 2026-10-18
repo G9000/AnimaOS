@@ -19,7 +19,7 @@ fn limits() -> io::Result<()> {
 
 fn frame(
     output: &mut impl Write,
-    value: &anima_core::document_content::ExtractedDocumentText,
+    value: &anima_service_adapters::document_content::ExtractedDocumentText,
 ) -> io::Result<()> {
     let bytes = serde_json::to_vec(value)?;
     output.write_all(&(bytes.len() as u32).to_le_bytes())?;
@@ -66,7 +66,7 @@ fn main() -> io::Result<()> {
         let mut input = io::stdin().lock();
         let mut format = [0; 1];
         input.read_exact(&mut format)?;
-        use anima_core::document_content::{
+        use anima_service_adapters::document_content::{
             DocumentExtractionStatus, DocumentFormat, ExtractedDocumentText, PdfCoverage,
         };
         let format = match format[0] {
@@ -127,7 +127,7 @@ fn main() -> io::Result<()> {
                 if !memory_refused || !child_refused {
                     return Err(io::Error::other("resource refusal missing"));
                 }
-                use anima_core::document_content::{
+                use anima_service_adapters::document_content::{
                     DocumentBlock, DocumentLocator, DocumentOmission,
                 };
                 frame(

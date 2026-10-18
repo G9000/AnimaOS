@@ -6,6 +6,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+anima-service-adapters = { path = "../../packages/core-rust/crates/anima-service-adapters" }
 anima-core = { path = "../../packages/core-rust/crates/anima-core" }
 anima-document-content = { path = "../../packages/core-rust/crates/anima-document-content" }
 anima-model-adapters = { path = "../../packages/core-rust/crates/anima-model-adapters" }

@@ -416,7 +416,7 @@ async fn a_failed_reconciliation_save_restores_the_counters_and_fires_exactly() 
 async fn run_now_refuses_an_occurrence_still_waiting_for_its_outcome() {
     let (service, _state, agent_id, _) = service();
     let record = later(&service, &agent_id).await;
-    claim_manual(&service.inner, &agent_id, &record.id, now_ms())
+    claim_manual(&service.inner, &agent_id, &record.id, now_ms(), None)
         .await
         .unwrap();
     assert_eq!(
@@ -429,7 +429,7 @@ async fn run_now_refuses_an_occurrence_still_waiting_for_its_outcome() {
 async fn a_restart_during_run_now_disables_the_automation_and_records_a_manual_fire() {
     let (service, state, agent_id, _) = service();
     let record = later(&service, &agent_id).await;
-    claim_manual(&service.inner, &agent_id, &record.id, now_ms())
+    claim_manual(&service.inner, &agent_id, &record.id, now_ms(), None)
         .await
         .unwrap();
 
@@ -767,7 +767,7 @@ async fn m79_explicit_manual_run_now_still_overrides_active_hours_without_moving
         .schedules
         .insert(before.id.clone(), before.clone());
     release.add_permits(1);
-    let claimed = run_now_inner(&service.inner, &agent, &before.id, at).await;
+    let claimed = run_now_inner(&service.inner, &agent, &before.id, at, None).await;
     m79_settle_jobs(&service).await;
     assert!(claimed.unwrap().last_fired.unwrap().manual);
     assert_eq!(calls.available_permits(), 1);

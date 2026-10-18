@@ -61,7 +61,8 @@ pub(crate) fn scope_is_current(state: &DaemonState, scope: &AgentFileScope) -> b
 }
 use super::{AcceptedAgentFiles, Availability};
 use crate::{app::SharedDaemonState, routes::ApiError, state::RunBuild};
-use anima_core::{AgentFileRenderBudget, CancelSignal, Content, TokenEstimator};
+use anima_core::{AgentFileRenderBudget, CancelSignal, Content};
+use anima_service_adapters::ServiceTokenEstimator as TokenEstimator;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,

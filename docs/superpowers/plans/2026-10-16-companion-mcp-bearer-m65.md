@@ -46,7 +46,7 @@ Exact owner contract when bound:
 - `hosts/rust-daemon/src/mcp/tests.rs`, `mcp/transport.rs` tests, `routes/mcp_tests.rs`: add store, transport, lifecycle and route regressions alongside existing MCP suites.
 - `packages/sdk/src/mcp.ts` and `mcp.spec.ts`: typed owner credential operations and boolean projection; no property returns token bytes.
 - `apps/web/src/components/mcp/McpConnectionsPanel.tsx` and its test: HTTPS-only password field, explicit save/replace/clear, configured marker, disabled/busy/error behavior, no echo or persistence.
-- Update relevant MCP owner docs and `docs/companion/parity-roadmap.md` only after implementation/acceptance are actually bound and passed.
+- Update relevant MCP owner docs only after implementation/acceptance are actually bound and passed.
 
 ## Test acceptance list
 

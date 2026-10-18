@@ -384,7 +384,12 @@ async fn a_failed_intent_save_denies_parallel_effects_and_future_calls() {
 
 #[tokio::test]
 async fn a_failed_outcome_save_never_exposes_or_later_saves_dirty_success() {
-    let fixture = ActionFixture::new("m21-outcome-failure", true).await;
+    let mut fixture = ActionFixture::new("m21-outcome-failure", true).await;
+    let review = anima_core::CompletionReview::default();
+    fixture.context = fixture
+        .context
+        .clone()
+        .with_completion_review(Some(review.clone()));
     let intent = fixture
         .coordinator
         .state
@@ -418,6 +423,22 @@ async fn a_failed_outcome_save_never_exposes_or_later_saves_dirty_success() {
         calling.await.unwrap().error.as_deref(),
         Some(RECEIPT_NOT_SAVED)
     );
+    let state = fixture.coordinator.state.read().await;
+    let decision = anima_core::Evaluator::evaluate(
+        &review,
+        &state.agents[&fixture.run.agent_id],
+        &tool_input(&fixture.run.agent_id, SESSION_ID),
+        &anima_core::Content::default(),
+    )
+    .await
+    .unwrap()
+    .decision;
+    assert_eq!(
+        decision,
+        anima_core::EvaluatorDecision::Accept,
+        "an actual file effect with failed outcome persistence is never successful review evidence"
+    );
+    drop(state);
     let public = fixture.public_run().await;
     assert_eq!(public["actionReceipts"][0]["status"], "started");
     assert!(public["actionReceipts"][0]["resultPreview"].is_null());

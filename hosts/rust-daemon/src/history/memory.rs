@@ -7,9 +7,10 @@ use std::sync::{Mutex, MutexGuard};
 use async_trait::async_trait;
 
 use super::{
-    search_tokens, searchable_text, text_matches, validate_after_query, validate_filtered_query,
-    ApprovalPageQuery, FilteredSessionSearchQuery, HistoryError, HistoryMessage, HistoryStore,
-    MessageAfterQuery, MessagePageQuery, UsagePageQuery, EPHEMERAL_HISTORY_MAX_ROWS,
+    search_tokens, searchable_text, text_matches, validate_after_query,
+    validate_filtered_message_query, validate_filtered_query, ApprovalPageQuery,
+    FilteredMessageSearchQuery, FilteredSessionSearchQuery, HistoryError, HistoryMessage,
+    HistoryStore, MessageAfterQuery, MessagePageQuery, UsagePageQuery, EPHEMERAL_HISTORY_MAX_ROWS,
 };
 use crate::approvals::ApprovalRequest;
 use crate::attachments::AttachmentRecord;
@@ -484,6 +485,46 @@ impl HistoryStore for MemoryHistoryStore {
         });
         rows.truncate(limit);
         Ok(rows)
+    }
+
+    async fn search_messages_filtered(
+        &self,
+        query: &FilteredMessageSearchQuery,
+    ) -> Result<Vec<HistoryMessage>, HistoryError> {
+        validate_filtered_message_query(query)?;
+        let tokens = search_tokens(&query.query);
+        if tokens.is_empty() || query.session_ids.is_empty() || query.limit == 0 {
+            return Ok(Vec::new());
+        }
+        let allowed: HashSet<_> = query.session_ids.iter().map(String::as_str).collect();
+        let excluded: HashSet<_> = query
+            .excluded_message_ids
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let tables = self.tables();
+        let mut rows: Vec<_> = tables
+            .messages
+            .values()
+            .map(|(_, row)| row)
+            .filter(|row| {
+                row.agent_id == query.agent_id
+                    && allowed.contains(row.session_id.as_str())
+                    && !excluded.contains(row.message.id.as_str())
+                    && !row.hidden
+                    && row.message.role != anima_core::MessageRole::System
+                    && query
+                        .after_ms
+                        .is_none_or(|after| row.message.created_at_ms >= after)
+                    && query
+                        .before_ms
+                        .is_none_or(|before| row.message.created_at_ms < before)
+                    && text_matches(searchable_text(&row.message), &tokens)
+            })
+            .collect();
+        rows.sort_by(|a, b| b.order().cmp(&a.order()));
+        rows.truncate(query.limit);
+        Ok(rows.into_iter().cloned().collect())
     }
 
     async fn search_sessions_filtered(

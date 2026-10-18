@@ -27,10 +27,16 @@ use crate::schedules::ScheduledPromptRecord;
 /// canonical memory references (M40); 17 adds reviewed HTTP MCP connection
 /// metadata (M42); 18 adds optional owned stdio MCP launch specifications
 /// (M44); 19 adds reviewed declarative bundle ownership and managed draft
-/// lineage (M45). Runtime transport sessions/processes are never persisted. Older
+/// lineage (M45); 20 adds typed async helper/completion lineage and saved
+/// execution bounds (FP05); 21 adds bounded pending-origin/final-output evidence
+/// on exact source attempts. Runtime transport sessions/processes are never persisted. Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 19;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 21;
+pub(crate) const ASYNC_HELPERS_STORE_VERSION: u32 = 20;
+pub(crate) const PRE_ASYNC_ORIGIN_BATCHES_BACKUP_SUFFIX: &str = ".pre-async-origin-batches.bak";
+pub(crate) const COMMUNITY_BUNDLES_STORE_VERSION: u32 = 19;
+pub(crate) const PRE_ASYNC_HELPERS_BACKUP_SUFFIX: &str = ".pre-async-helpers.bak";
 pub(crate) const MCP_STDIO_STORE_VERSION: u32 = 18;
 pub(crate) const PRE_COMMUNITY_BUNDLES_BACKUP_SUFFIX: &str = ".pre-community-bundles.bak";
 pub(crate) const MEMORY_VIEWS_STORE_VERSION: u32 = 16;
@@ -416,8 +422,12 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
             PRE_MCP_BACKUP_SUFFIX
         } else if loaded_version < MCP_STDIO_STORE_VERSION {
             PRE_MCP_STDIO_BACKUP_SUFFIX
-        } else {
+        } else if loaded_version < COMMUNITY_BUNDLES_STORE_VERSION {
             PRE_COMMUNITY_BUNDLES_BACKUP_SUFFIX
+        } else if loaded_version < ASYNC_HELPERS_STORE_VERSION {
+            PRE_ASYNC_HELPERS_BACKUP_SUFFIX
+        } else {
+            PRE_ASYNC_ORIGIN_BATCHES_BACKUP_SUFFIX
         });
         path.with_file_name(name)
     }
@@ -932,7 +942,7 @@ mod tests {
 
     #[test]
     fn the_version_constants() {
-        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 19);
+        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 21);
         assert_eq!(super::USAGE_STORE_VERSION, 10);
         assert_eq!(super::PRE_ATTACHMENTS_BACKUP_SUFFIX, ".pre-attachments.bak");
         assert_eq!(super::postgres_backup_key(10), "control_plane.backup.10");
@@ -1241,7 +1251,7 @@ mod discord_upgrade_tests {
         assert!(loaded.discord_connectors.is_empty());
         assert!(loaded.discord_inbound.is_empty());
         assert!(loaded.discord_outbound.is_empty());
-        assert_eq!(CONTROL_PLANE_STORE_VERSION, 19);
+        assert_eq!(CONTROL_PLANE_STORE_VERSION, 21);
         write_pre_upgrade_backup(&config, 11).await.unwrap();
         assert_eq!(
             std::fs::read_to_string(pre_discord_backup_path(&path)).unwrap(),
@@ -1397,7 +1407,7 @@ mod learning_snapshot_tests {
             std::fs::read_to_string(&old_backup).unwrap(),
             "older backup"
         );
-        assert_eq!(CONTROL_PLANE_STORE_VERSION, 19);
+        assert_eq!(CONTROL_PLANE_STORE_VERSION, 21);
         std::fs::remove_file(backup).unwrap();
         std::fs::remove_file(old_backup).unwrap();
         std::fs::remove_file(path).unwrap();

@@ -59,6 +59,43 @@ fn ids(value: &Value) -> Vec<String> {
 }
 
 #[tokio::test]
+async fn main_chat_discovery_falls_back_to_latest_hot_match_without_cold_evidence() {
+    let mut daemon = DaemonState::new();
+    let agent = daemon.create_agent(agent_config("owner")).unwrap().state.id;
+    let mut record = session(&agent, "chat:main", SessionKind::Chat, "Main");
+    record.main_chat = true;
+    daemon.sessions.insert(record);
+    seed_messages(
+        &mut daemon,
+        &agent,
+        vec![
+            message(
+                &agent,
+                "older",
+                "chat:main",
+                MessageRole::User,
+                "Nebula earlier question",
+                15,
+            ),
+            message(
+                &agent,
+                "newer",
+                "chat:main",
+                MessageRole::Assistant,
+                "Nebula latest answer",
+                16,
+            ),
+        ],
+    );
+    let state = Arc::new(RwLock::new(daemon));
+    let found = discover_conversations(&state, &agent, Some("chat:main"), discovery())
+        .await
+        .unwrap();
+    assert_eq!(found["status"], "found");
+    assert_eq!(found["results"][0]["matchMessageId"], "newer");
+}
+
+#[tokio::test]
 async fn discovery_filters_before_grouping_and_preserves_real_cold_anchor() {
     let mut daemon = DaemonState::new();
     let agent = daemon.create_agent(agent_config("owner")).unwrap().state.id;
@@ -859,4 +896,124 @@ async fn deleting_or_queueing_deletion_during_exact_read_removes_source_authorit
         assert_eq!(value["status"], "not_found");
         assert!(!value.to_string().contains("DELETED_SOURCE_SENTINEL"));
     }
+}
+
+#[tokio::test]
+async fn individual_message_search_rechecks_deletion_and_new_hot_visibility_after_store_io() {
+    for change in 0..4 {
+        let mut daemon = DaemonState::new();
+        let agent = daemon.create_agent(agent_config("owner")).unwrap().state.id;
+        daemon
+            .sessions
+            .insert(session(&agent, "chat:own", SessionKind::Chat, "Own"));
+        let store = Arc::new(FlakyHistoryStore::new());
+        store
+            .upsert_messages(&[history_message(
+                &agent,
+                "chat:own",
+                "source",
+                MessageRole::User,
+                "nebula private source",
+                10,
+            )])
+            .await
+            .unwrap();
+        let gate = store.hold_next_message_search();
+        daemon.set_history(HistoryService::new(store));
+        let state = Arc::new(RwLock::new(daemon));
+        let task_state = state.clone();
+        let task_agent = agent.clone();
+        let task = tokio::spawn(async move {
+            search_messages(
+                &task_state,
+                &task_agent,
+                MessageSearchRequest {
+                    query: "nebula".into(),
+                    limit: 20,
+                },
+            )
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(1), gate.entered.acquire())
+            .await
+            .expect("search reached store without holding daemon lock")
+            .unwrap()
+            .forget();
+        {
+            let mut guard = state.write().await;
+            match change {
+                0 => {
+                    guard.sessions.remove(&agent, "chat:own");
+                }
+                1 => guard
+                    .pending_history_deletions
+                    .push(h::HistoryDeletion::session(&agent, "chat:own")),
+                2 => seed_messages(
+                    &mut guard,
+                    &agent,
+                    vec![message(
+                        &agent,
+                        "source",
+                        "chat:own",
+                        MessageRole::User,
+                        "changed subject",
+                        10,
+                    )],
+                ),
+                _ => seed_messages(
+                    &mut guard,
+                    &agent,
+                    vec![
+                        crate::sessions::test_support::checkin_prompt(
+                            &agent,
+                            "source",
+                            "chat:own",
+                            "s1",
+                            "nebula private source",
+                            10,
+                        ),
+                        message(
+                            &agent,
+                            "silent",
+                            "chat:own",
+                            MessageRole::Assistant,
+                            "CHECKIN_OK",
+                            11,
+                        ),
+                    ],
+                ),
+            }
+        }
+        gate.release.add_permits(1);
+        let page = tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("search released")
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(
+            page.results.is_empty(),
+            "post-read authority change {change}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn custom_store_without_individual_filtered_search_is_explicitly_unavailable() {
+    let store = ExactReadStore::new(None, false);
+    let query = FilteredMessageSearchQuery {
+        agent_id: "owner".into(),
+        session_ids: vec!["chat:own".into()],
+        excluded_message_ids: Vec::new(),
+        query: "nebula".into(),
+        after_ms: None,
+        before_ms: None,
+        limit: 21,
+    };
+    assert!(store
+        .search_messages_filtered(&query)
+        .await
+        .unwrap_err()
+        .message()
+        .contains("unsupported"));
 }

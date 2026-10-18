@@ -123,15 +123,15 @@ M56 validation uses synthetic PCM silence, deterministic transcription ports,
 and finite loopback HTTP peers. It can establish request shape, source authority,
 byte limits, lifecycle and draft behavior. It does not establish spoken-audio
 accuracy, live provider availability, billing behavior, microphone support,
-connector voice support, or full assistant parity. M57
+connector voice support, or general assistant quality. M57
 adds fake-device lifecycle tests and evaluates the emitted worklet against the
 same independent WAV fixture. It does not activate a microphone or establish
 hardware compatibility, noisy-speech quality or live transcription accuracy.
 M58 adds native output with synthetic PCM/HTTP peers and fake playback tests;
 actual provider voice quality and device playback remain unverified.
 
-The Rust transport narrowly ports useful Hermes behavior with its pinned MIT
+The Rust transport retains its pinned MIT
 attribution in the model adapter's [notice](../../packages/core-rust/crates/anima-model-adapters/HERMES-NOTICE). Product controls retain Anima
 naming. See the [bound M56 plan](../superpowers/plans/2026-10-16-companion-native-voice-m56.md),
 the [M57 capture plan](../superpowers/plans/2026-10-16-companion-microphone-m57.md)
-and [parity roadmap](parity-roadmap.md) for remaining work.
+for scope and remaining limits.

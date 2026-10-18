@@ -4,7 +4,7 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 use super::shared::TokenUsageResponse;
-use crate::runs::RunRecord;
+use crate::runs::{HelperCompletionState, RunRecord};
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +32,85 @@ pub(crate) struct RunStopResponse {
 pub(crate) struct RunStepResponse {
     pub(crate) step_id: String,
     pub(crate) usage: TokenUsageResponse,
+}
+
+/// Response-only disposition; native launch keys and steer contents stay private.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub(crate) enum HelperCompletionDispositionResponse {
+    Manual,
+    AwaitingResult {
+        #[serde(rename = "reservedRunId")]
+        reserved_run_id: String,
+    },
+    AwaitingParent {
+        #[serde(rename = "reservedRunId")]
+        reserved_run_id: String,
+    },
+    Queued {
+        #[serde(rename = "runId")]
+        run_id: String,
+    },
+    Settled {
+        #[serde(rename = "runId")]
+        run_id: String,
+    },
+    ReviewRequired {
+        reason: String,
+        #[serde(rename = "runId", skip_serializing_if = "Option::is_none")]
+        run_id: Option<String>,
+    },
+    Suppressed {
+        reason: String,
+        #[serde(rename = "runId", skip_serializing_if = "Option::is_none")]
+        run_id: Option<String>,
+    },
+}
+
+impl From<&HelperCompletionState> for HelperCompletionDispositionResponse {
+    fn from(state: &HelperCompletionState) -> Self {
+        match state {
+            HelperCompletionState::Manual => Self::Manual,
+            HelperCompletionState::AwaitingResult { reserved_run_id } => Self::AwaitingResult {
+                reserved_run_id: reserved_run_id.clone(),
+            },
+            HelperCompletionState::AwaitingParent { reserved_run_id } => Self::AwaitingParent {
+                reserved_run_id: reserved_run_id.clone(),
+            },
+            HelperCompletionState::Queued { run_id } => Self::Queued {
+                run_id: run_id.clone(),
+            },
+            HelperCompletionState::Settled { run_id } => Self::Settled {
+                run_id: run_id.clone(),
+            },
+            HelperCompletionState::ReviewRequired { reason, run_id } => Self::ReviewRequired {
+                reason: reason.clone(),
+                run_id: run_id.clone(),
+            },
+            HelperCompletionState::Suppressed { reason, run_id } => Self::Suppressed {
+                reason: reason.clone(),
+                run_id: run_id.clone(),
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AsyncHelperSummaryResponse {
+    pub(crate) owner_agent_id: String,
+    pub(crate) owner_session_id: String,
+    pub(crate) parent_run_id: String,
+    pub(crate) completion: HelperCompletionDispositionResponse,
+    pub(crate) pending_steer_count: usize,
+    pub(crate) archive_unconsumed_count: usize,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HelperCompletionOriginResponse {
+    pub(crate) helper_run_id: String,
+    pub(crate) launch_parent_run_id: String,
 }
 
 /// A ledger run (spec §4.1) as clients see it.
@@ -66,6 +145,10 @@ pub(crate) struct RunResponse {
     pub(crate) parent_run_id: Option<String>,
     /// The committed final reply, once the run completed.
     pub(crate) reply_message_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) async_helper: Option<AsyncHelperSummaryResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) helper_completion: Option<HelperCompletionOriginResponse>,
 }
 
 impl From<&RunRecord> for RunResponse {
@@ -108,6 +191,23 @@ impl From<&RunRecord> for RunResponse {
             provider: record.provider.clone(),
             parent_run_id: record.parent_run_id.clone(),
             reply_message_id: record.reply_message_id.clone(),
+            async_helper: record
+                .async_helper
+                .as_ref()
+                .map(|helper| AsyncHelperSummaryResponse {
+                    owner_agent_id: helper.owner_agent_id.clone(),
+                    owner_session_id: helper.owner_session_id.clone(),
+                    parent_run_id: helper.parent_run_id.clone(),
+                    completion: HelperCompletionDispositionResponse::from(&helper.completion),
+                    pending_steer_count: record.pending_steers.len(),
+                    archive_unconsumed_count: helper.unconsumed_steers.len(),
+                }),
+            helper_completion: record.helper_completion.as_ref().map(|origin| {
+                HelperCompletionOriginResponse {
+                    helper_run_id: origin.helper_run_id.clone(),
+                    launch_parent_run_id: origin.launch_parent_run_id.clone(),
+                }
+            }),
         }
     }
 }
@@ -141,4 +241,82 @@ impl RunEnvelope {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RunsEnvelope {
     pub(crate) runs: Vec<RunResponse>,
+}
+
+#[cfg(test)]
+mod async_helper_response_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn record_with(fields: serde_json::Value) -> RunRecord {
+        let record = crate::history::conformance::terminal_run("helper", "helper:1");
+        let mut value = serde_json::to_value(record).unwrap();
+        for (key, value_field) in fields.as_object().unwrap() {
+            value[key] = value_field.clone();
+        }
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn fp05_public_run_omits_absent_async_origins() {
+        let record = record_with(json!({}));
+        let value = serde_json::to_value(RunResponse::from(&record)).unwrap();
+        assert!(value.get("asyncHelper").is_none());
+        assert!(value.get("helperCompletion").is_none());
+    }
+
+    #[test]
+    fn fp05_public_run_exposes_bounded_summary_without_private_steers_or_launch_keys() {
+        let states = vec![
+            json!({"state":"manual"}),
+            json!({"state":"awaiting_result","reservedRunId":"completion"}),
+            json!({"state":"awaiting_parent","reservedRunId":"completion"}),
+            json!({"state":"queued","runId":"completion"}),
+            json!({"state":"settled","runId":"completion"}),
+            json!({"state":"review_required","reason":"restart","runId":"completion"}),
+            json!({"state":"suppressed","reason":"stopped"}),
+        ];
+        for completion in states {
+            let steer = json!({"idempotencyKey":"secret-steer-key", "text":"private steer text", "attachmentIds":[], "skill":null, "acceptedAtMs":1});
+            let record = record_with(json!({
+                "asyncHelper": {
+                    "ownerAgentId":"owner", "ownerSessionId":"chat:owner", "parentRunId":"parent",
+                    "launchKey":"private-launch-key", "launchFingerprint":"a".repeat(64),
+                    "completion":completion, "unconsumedSteers":[steer.clone()]
+                },
+                "pendingSteers":[steer]
+            }));
+            let value = serde_json::to_value(RunResponse::from(&record)).unwrap();
+            assert_eq!(
+                value["asyncHelper"],
+                json!({
+                    "ownerAgentId":"owner", "ownerSessionId":"chat:owner", "parentRunId":"parent",
+                    "completion":completion, "pendingSteerCount":1, "archiveUnconsumedCount":1
+                })
+            );
+            let wire = value.to_string();
+            for private in [
+                "launchKey",
+                "launchFingerprint",
+                "private steer text",
+                "secret-steer-key",
+                "unconsumedSteers",
+            ] {
+                assert!(!wire.contains(private), "leaked {private}");
+            }
+        }
+    }
+
+    #[test]
+    fn fp05_public_run_exposes_typed_completion_lineage() {
+        let record = record_with(
+            json!({"helperCompletion":{"helperRunId":"child", "launchParentRunId":"parent"}}),
+        );
+        let value = serde_json::to_value(RunResponse::from(&record)).unwrap();
+        assert_eq!(
+            value["helperCompletion"],
+            json!({"helperRunId":"child", "launchParentRunId":"parent"})
+        );
+        assert!(value.get("asyncHelper").is_none());
+    }
 }

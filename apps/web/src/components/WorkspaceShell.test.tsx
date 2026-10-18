@@ -165,9 +165,8 @@ describe('WorkspaceShell', () => {
     expect(save).not.toHaveBeenCalled();
   });
 
-  it('lands on the conversation with a New chat action and no work dispatched', async () => {
-    const onNewChat = vi.fn();
-    render(<Shell onNewChat={onNewChat} />);
+  it('lands on the conversation naming the agent and what it is doing', () => {
+    render(<Shell />);
     expect(screen.getByText('Workspace canvas')).toBeVisible();
     expect(
       screen.queryByRole('navigation', { name: 'Workspace navigation' }),
@@ -175,11 +174,86 @@ describe('WorkspaceShell', () => {
     expect(
       screen.queryByRole('button', { name: 'Operations' }),
     ).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'New chat' }));
-    expect(onNewChat).toHaveBeenCalledOnce();
+    expect(
+      screen.getByRole('button', { name: 'Nova, switch agent' }),
+    ).toBeVisible();
+    expect(screen.getByRole('status')).toHaveTextContent('Ready');
+    // Already in the main chat: no control to go back to it.
+    expect(
+      screen.queryByRole('button', { name: 'Main chat', exact: true }),
+    ).not.toBeInTheDocument();
   });
 
-  it('names the agent and the open thread in the top bar', () => {
+  it('opens the inbox from the header and offers the weekly report in commands', async () => {
+    const user = userEvent.setup();
+    const onOpenReport = vi.fn();
+    render(
+      <Shell
+        inbox={{
+          count: 2,
+          render: (close) => (
+            <button type="button" onClick={close}>
+              Inbox contents
+            </button>
+          ),
+        }}
+        onOpenReport={onOpenReport}
+      />,
+    );
+    const button = screen.getByRole('button', { name: 'Inbox, 2 need you' });
+    await user.click(button);
+    expect(screen.getByRole('dialog', { name: 'Inbox' })).toBeVisible();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Inbox' })).not.toBeInTheDocument();
+    expect(button).toHaveFocus();
+
+    await user.click(screen.getByRole('button', { name: 'Open command menu' }));
+    await user.type(
+      screen.getByRole('combobox', { name: 'Search commands' }),
+      'weekly',
+    );
+    await user.keyboard('{Enter}');
+    expect(onOpenReport).toHaveBeenCalled();
+  });
+
+  it('switches to another companion and keeps helpers out of the list', async () => {
+    const user = userEvent.setup();
+    const onSelectAgent = vi.fn();
+    const main = agent('agent-main', 'Nova', 1);
+    render(
+      <Shell
+        mainAgent={main}
+        agents={[
+          main,
+          agent('agent-scout', 'Scout', 2, { status: 'Running' }),
+          agent('helper', 'Research', 3, { workspaceRole: 'helper' }),
+        ]}
+        onSelectAgent={onSelectAgent}
+      />,
+    );
+    const trigger = screen.getByRole('button', { name: 'Nova, switch agent' });
+    await user.click(trigger);
+    const menu = screen.getByRole('menu', { name: 'Your agents' });
+    expect(
+      within(menu).getByRole('menuitemradio', { name: /Nova/ }),
+    ).toHaveAttribute('aria-checked', 'true');
+    expect(
+      within(menu).getByRole('menuitemradio', { name: /Scout/ }),
+    ).toHaveTextContent('Working');
+    expect(
+      within(menu).queryByRole('menuitemradio', { name: /Research/ }),
+    ).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+
+    await user.click(trigger);
+    await user.click(screen.getByRole('menuitemradio', { name: /Scout/ }));
+    expect(onSelectAgent).toHaveBeenCalledWith('agent-scout');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('names the agent and shows a side thread next to the way back to the main chat', () => {
     render(
       <Shell
         initialRoute={{ kind: 'session', sessionId: 'chat:plans' }}
@@ -190,9 +264,11 @@ describe('WorkspaceShell', () => {
     expect(
       screen.getByRole('heading', { name: 'Nova', level: 1 }),
     ).toBeVisible();
+    expect(screen.getByText('Weekend plans')).toBeVisible();
     expect(
-      screen.getByRole('button', { name: 'Open sessions' }),
-    ).toHaveTextContent('Weekend plans');
+      screen.getByRole('button', { name: 'Main chat', exact: true }),
+    ).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('button', { name: 'History' })).toBeVisible();
     expect(screen.queryByText('Sessions list')).not.toBeInTheDocument();
   });
 
@@ -225,6 +301,42 @@ describe('WorkspaceShell', () => {
     expect(search).toHaveFocus();
     await user.keyboard('{Escape}');
     expect(opener).toHaveFocus();
+  });
+
+  it('opens saved message search with Meta K and forwards the exact selected match', async () => {
+    const match = {
+      sessionId: 'chat:plans',
+      title: 'Saved conversation',
+      messageId: 'deep-message',
+      role: 'user' as const,
+      createdAtMs: 1_725_000_000_000,
+      snippet: 'Unique saved message match',
+    };
+    const searchMessages = vi.fn(async () => ({
+      results: [match],
+      hasMore: false,
+    }));
+    const onOpenMessage = vi.fn();
+    render(
+      <Shell searchMessages={searchMessages} onOpenMessage={onOpenMessage} />,
+    );
+    const user = userEvent.setup();
+    await user.keyboard('{Meta>}k{/Meta}');
+    await user.type(
+      screen.getByRole('combobox', { name: 'Search commands' }),
+      'needle',
+    );
+    await user.click(
+      await screen.findByRole('option', { name: /Unique saved message match/ }),
+    );
+    expect(searchMessages).toHaveBeenCalledWith(
+      'needle',
+      expect.any(AbortSignal),
+    );
+    expect(onOpenMessage).toHaveBeenCalledWith(match);
+    expect(
+      screen.queryByRole('dialog', { name: 'Command menu' }),
+    ).not.toBeInTheDocument();
   });
 
   it('inserts a prompt from commands without invoking a send', async () => {
@@ -351,7 +463,11 @@ describe('WorkspaceShell', () => {
 
   it('holds the window on its page while a save or reset settles', () => {
     render(
-      <Shell locked profile={<p>Profile page</p>} initialRoute={{ kind: 'page', page: 'profile' }} />,
+      <Shell
+        locked
+        profile={<p>Profile page</p>}
+        initialRoute={{ kind: 'page', page: 'profile' }}
+      />,
     );
     const nav = screen.getByRole('navigation', {
       name: 'Workspace navigation',
@@ -553,14 +669,14 @@ describe('WorkspaceShell', () => {
     const user = userEvent.setup();
     render(<Shell sidebar={<div>Sessions list</div>} />);
     expect(screen.queryByText('Sessions list')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Open sessions' }));
-    const drawer = screen.getByRole('dialog', { name: 'Sessions' });
+    await user.click(screen.getByRole('button', { name: 'History' }));
+    const drawer = screen.getByRole('dialog', { name: 'History' });
     expect(within(drawer).getByText('Sessions list')).toBeVisible();
     await user.click(
-      within(drawer).getByRole('button', { name: 'Close sessions' }),
+      within(drawer).getByRole('button', { name: 'Close history' }),
     );
     expect(
-      screen.queryByRole('dialog', { name: 'Sessions' }),
+      screen.queryByRole('dialog', { name: 'History' }),
     ).not.toBeInTheDocument();
   });
 
@@ -568,17 +684,17 @@ describe('WorkspaceShell', () => {
     mobile();
     const user = userEvent.setup();
     render(<Shell sidebar={<input aria-label="Search sessions" />} />);
-    const opener = screen.getByRole('button', { name: 'Open sessions' });
+    const opener = screen.getByRole('button', { name: 'History' });
     await user.click(opener);
-    const drawer = screen.getByRole('dialog', { name: 'Sessions' });
-    const newChat = within(drawer).getByRole('button', { name: 'New chat' });
+    const drawer = screen.getByRole('dialog', { name: 'History' });
+    const newChat = within(drawer).getByRole('button', { name: 'Main chat' });
     const search = within(drawer).getByRole('textbox', {
       name: 'Search sessions',
     });
     expect(newChat).toHaveFocus();
     await user.tab();
     expect(
-      within(drawer).getByRole('button', { name: 'Close sessions' }),
+      within(drawer).getByRole('button', { name: 'Close history' }),
     ).toHaveFocus();
     await user.tab();
     expect(search).toHaveFocus();
@@ -588,7 +704,7 @@ describe('WorkspaceShell', () => {
     expect(search).toHaveFocus();
     await user.keyboard('{Escape}');
     expect(
-      screen.queryByRole('dialog', { name: 'Sessions' }),
+      screen.queryByRole('dialog', { name: 'History' }),
     ).not.toBeInTheDocument();
     expect(opener).toHaveFocus();
   });
@@ -621,9 +737,9 @@ describe('WorkspaceShell', () => {
         }
       />,
     );
-    const opener = screen.getByRole('button', { name: 'Open sessions' });
+    const opener = screen.getByRole('button', { name: 'History' });
     await user.click(opener);
-    const drawer = screen.getByRole('dialog', { name: 'Sessions' });
+    const drawer = screen.getByRole('dialog', { name: 'History' });
     // Everything behind the drawer is out of reach while it is open.
     expect(opener.closest('[inert]')).not.toBeNull();
     expect(screen.queryByRole('banner')).not.toBeInTheDocument();
@@ -642,20 +758,20 @@ describe('WorkspaceShell', () => {
     expect(drawer).toContainElement(document.activeElement as HTMLElement);
     await user.keyboard('{Escape}');
     expect(
-      screen.queryByRole('dialog', { name: 'Sessions' }),
+      screen.queryByRole('dialog', { name: 'History' }),
     ).not.toBeInTheDocument();
     expect(opener).toHaveFocus();
     expect(opener.closest('[inert]')).toBeNull();
 
     // Escape in a row menu or the rename field closes only that.
     await user.click(opener);
-    const reopened = screen.getByRole('dialog', { name: 'Sessions' });
+    const reopened = screen.getByRole('dialog', { name: 'History' });
     await user.click(
       within(reopened).getByRole('button', { name: 'Actions for Trip ideas' }),
     );
     await user.keyboard('{Escape}');
     expect(within(reopened).queryByRole('menu')).not.toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: 'Sessions' })).toBe(reopened);
+    expect(screen.getByRole('dialog', { name: 'History' })).toBe(reopened);
     await user.click(
       within(reopened).getByRole('button', { name: 'Actions for Trip ideas' }),
     );
@@ -669,7 +785,7 @@ describe('WorkspaceShell', () => {
     expect(
       within(reopened).queryByRole('textbox', { name: 'Rename Trip ideas' }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: 'Sessions' })).toBe(reopened);
+    expect(screen.getByRole('dialog', { name: 'History' })).toBe(reopened);
   });
 
   it('moves focus to the next row in the sessions drawer once an archived row leaves the list', async () => {
@@ -709,8 +825,8 @@ describe('WorkspaceShell', () => {
       );
     }
     render(<Shell sidebar={<ListedSidebar />} />);
-    await user.click(screen.getByRole('button', { name: 'Open sessions' }));
-    const drawer = screen.getByRole('dialog', { name: 'Sessions' });
+    await user.click(screen.getByRole('button', { name: 'History' }));
+    const drawer = screen.getByRole('dialog', { name: 'History' });
 
     await user.click(
       within(drawer).getByRole('button', { name: 'Actions for Trip ideas' }),
@@ -732,10 +848,16 @@ describe('WorkspaceShell', () => {
     render(
       <Shell
         mainAgent={main}
-        agents={[agent('helper', 'Research', 2, { status: 'Running' }), main]}
+        agents={[
+          agent('helper', 'Research', 2, {
+            status: 'Running',
+            workspaceRole: 'helper',
+          }),
+          main,
+        ]}
       />,
     );
-    expect(screen.getByText('1 helper is working')).toBeVisible();
+    expect(screen.getByRole('status')).toHaveTextContent('1 helper working');
     expect(
       screen.queryByRole('article', { name: 'Research agent' }),
     ).not.toBeInTheDocument();

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use anima_core::community_bundles::{CommunityManifest, ManifestPermissions};
+use anima_service_adapters::community_bundles::{CommunityManifest, ManifestPermissions};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 

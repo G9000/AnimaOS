@@ -9,9 +9,9 @@ use std::{
     time::Duration,
 };
 
-use anima_core::{
-    document_content::{DocumentFormat, ExtractedDocumentText, MAX_DOCUMENT_RENDERED_BYTES},
-    AgentConfigUpdate, CancelSignal, DataValue, MessageRole, ToolCall,
+use anima_core::{AgentConfigUpdate, CancelSignal, DataValue, MessageRole, ToolCall};
+use anima_service_adapters::document_content::{
+    DocumentFormat, ExtractedDocumentText, MAX_DOCUMENT_RENDERED_BYTES,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -165,7 +165,8 @@ async fn m67_workspace_xlsx_tool_reaches_next_model_request_with_source_and_cove
     assert!(tool.content.text.len() <= MAX_DOCUMENT_RENDERED_BYTES);
     assert!(tool.content.attachments.as_ref().is_none_or(Vec::is_empty));
     assert!(!tool.content.metadata.as_ref().is_some_and(|metadata| {
-        metadata.contains_key(anima_core::document_content::DOCUMENT_EXTRACTS_METADATA_KEY)
+        metadata
+            .contains_key(anima_service_adapters::document_content::DOCUMENT_EXTRACTS_METADATA_KEY)
     }));
 
     let extraction = &envelope["extraction"];

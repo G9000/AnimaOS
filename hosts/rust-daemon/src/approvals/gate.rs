@@ -197,6 +197,24 @@ pub(crate) struct ApprovalGate {
 }
 
 impl ApprovalGate {
+    pub(crate) fn bound_run(&self) -> &RunLink {
+        &self.run
+    }
+
+    /// Recheck only a newly explicit Exec deny. An outer AllowOnce has already
+    /// been consumed; Ask must not prompt again for each nested native call.
+    pub(crate) async fn rpc_outer_denied(&self, agent: &AgentState) -> bool {
+        let exec_probe = ToolCall {
+            id: String::new(),
+            name: "bash".into(),
+            args: Default::default(),
+        };
+        self.coordinator
+            .approval_verdict(agent, &self.run.session_id, &exec_probe)
+            .await
+            == Verdict::Deny
+    }
+
     pub(crate) fn new(
         coordinator: AgentRunCoordinator,
         run: RunLink,

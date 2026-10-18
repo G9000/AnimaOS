@@ -1,6 +1,104 @@
 use super::*;
 
 #[tokio::test]
+async fn fp05_origin_runtime_http_review_binds_exact_displayed_output_pair() {
+    use crate::control_plane_store::ControlPlaneStoreConfig;
+    use sha2::{Digest, Sha256};
+    let path = std::env::temp_dir().join(format!(
+        "anima-origin-review-http-{}.json",
+        uuid::Uuid::new_v4()
+    ));
+    let mut daemon = DaemonState::new();
+    daemon.set_control_plane_store(Some(ControlPlaneStoreConfig::Json(path.clone())));
+    let owner = daemon
+        .create_agent(test_config("origin-review-http"))
+        .unwrap()
+        .state
+        .id;
+    let result = "Owner-visible exact aggregate";
+    let digest = format!("{:x}", Sha256::digest(result.as_bytes()));
+    let final_output = serde_json::json!({"generation":1,"sha256":digest,
+        "outputs":[{"runId":"callback","replyMessageId":"reply","outputSha256":digest,
+            "preview":result,"previewTruncated":false}]});
+    let provenance = serde_json::json!({"launchRunId":"launch","childRunIds":["child"],"completionRunIds":["callback"],
+        "disposition":"completed","reason":"Exact HTTP review fixture"});
+    let job: crate::jobs::AgentJobRecord = serde_json::from_value(serde_json::json!({
+        "id":"job_http_origin","agentId":owner,"title":"Review","prompt":"Bounded work",
+        "requestKey":"origin-review","status":"completed","revision":2,"attempt":1,
+        "createdAtMs":1,"updatedAtMs":4,"startedAtMs":2,"finishedAtMs":4,"result":result,
+        "error":null,"maxAttempts":3,"requiresApproval":false,"approvedAtMs":null,"goalId":null,
+        "finalOutput":final_output,"delegationEvidence":provenance,"attempts":[{"attempt":1,"status":"completed",
+            "startedAtMs":2,"finishedAtMs":4,"result":result,"error":null,"resultTruncated":false,
+            "review":null,"finalOutput":final_output,"delegationEvidence":provenance}]
+    }))
+    .unwrap();
+    job.validate().unwrap();
+    daemon.jobs.insert(job.id.clone(), job.clone());
+    daemon.control_plane_persist_request().save().await.unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    let state = Arc::new(RwLock::new(daemon));
+    let app = router(state.clone(), DaemonConfig::default());
+    let uri = format!("/api/agents/{owner}/jobs/{}/review", job.id);
+    for (variant, expected) in [
+        ("partial_generation", StatusCode::BAD_REQUEST),
+        ("partial_digest", StatusCode::BAD_REQUEST),
+        ("missing", StatusCode::CONFLICT),
+        ("stale", StatusCode::CONFLICT),
+        ("exact", StatusCode::OK),
+    ] {
+        let mut body =
+            serde_json::json!({"revision":2,"decision":"accepted","note":"Exact owner decision"});
+        if variant != "missing" && variant != "partial_digest" {
+            body["finalOutputGeneration"] =
+                serde_json::json!(if variant == "stale" { 2 } else { 1 });
+        }
+        if variant != "missing" && variant != "partial_generation" {
+            body["finalOutputSha256"] = serde_json::json!(digest);
+        }
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(&uri)
+                    .header("host", "127.0.0.1:8080")
+                    .header("origin", "http://localhost:4200")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected, "{variant}");
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        if variant != "exact" {
+            assert_eq!(state.read().await.jobs[&job.id], job, "{variant}");
+            assert_eq!(std::fs::read(&path).unwrap(), bytes, "{variant}");
+        }
+    }
+    let saved = state.read().await.jobs[&job.id].clone();
+    assert_eq!(
+        saved.attempts[0]
+            .review
+            .as_ref()
+            .unwrap()
+            .final_output_generation,
+        Some(1)
+    );
+    assert_eq!(
+        saved.attempts[0]
+            .review
+            .as_ref()
+            .unwrap()
+            .final_output_sha256
+            .as_deref(),
+        Some(digest.as_str())
+    );
+    saved.validate().unwrap();
+    std::fs::remove_file(path).unwrap();
+}
+
+#[tokio::test]
 async fn goal_routes_authorize_before_body_and_lookup() {
     let app = router(
         Arc::new(RwLock::new(DaemonState::new())),

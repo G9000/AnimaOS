@@ -80,7 +80,7 @@ fn xlsx_record(temp: &Temp, id: &str) -> AttachmentRecord {
 }
 
 fn document_content(rows: &[AttachmentRecord]) -> Content {
-    use anima_core::document_content::*;
+    use anima_service_adapters::document_content::*;
     let mut content =
         crate::agent_runs::attachments::attachment_content("original owner bytes", rows, None);
     let snapshots = rows
@@ -136,24 +136,24 @@ fn document_content(rows: &[AttachmentRecord]) -> Content {
                 ),
                 xlsx_coverage: (row.mime
                     == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-                    .then_some(anima_core::document_content::XlsxCoverage {
+                    .then_some(anima_service_adapters::document_content::XlsxCoverage {
                         sheet_count: 2,
                         observed_cell_count: 5,
                         included_cell_count: 1,
                         sheets: vec![
-                            anima_core::document_content::XlsxSheetCoverage {
+                            anima_service_adapters::document_content::XlsxSheetCoverage {
                                 index: 1,
                                 name: "Ledger".into(),
                                 visibility:
-                                    anima_core::document_content::XlsxSheetVisibility::Visible,
+                                    anima_service_adapters::document_content::XlsxSheetVisibility::Visible,
                                 observed_cell_count: 4,
                                 included_cell_count: 1,
                             },
-                            anima_core::document_content::XlsxSheetCoverage {
+                            anima_service_adapters::document_content::XlsxSheetCoverage {
                                 index: 2,
                                 name: "Private notes".into(),
                                 visibility:
-                                    anima_core::document_content::XlsxSheetVisibility::Hidden,
+                                    anima_service_adapters::document_content::XlsxSheetVisibility::Hidden,
                                 observed_cell_count: 1,
                                 included_cell_count: 0,
                             },
@@ -208,7 +208,7 @@ async fn document_snapshots_hydrate_newest_four_only_and_preserve_saved_history(
         for key in [
             ATTACHMENT_RECORDS_KEY,
             ATTACHMENT_INPUT_TEXT_KEY,
-            anima_core::document_content::DOCUMENT_EXTRACTS_METADATA_KEY,
+            anima_service_adapters::document_content::DOCUMENT_EXTRACTS_METADATA_KEY,
         ] {
             assert!(!message
                 .content
@@ -261,23 +261,25 @@ async fn m66_xlsx_snapshot_projects_covered_cells_as_untrusted_context() {
         .contains("locator=xlsx#sheet=1;row=1;column=1"));
     assert!(user.content.text.contains("derived m66-xlsx-context"));
     assert!(!user.content.metadata.as_ref().is_some_and(|metadata| {
-        metadata.contains_key(anima_core::document_content::DOCUMENT_EXTRACTS_METADATA_KEY)
+        metadata
+            .contains_key(anima_service_adapters::document_content::DOCUMENT_EXTRACTS_METADATA_KEY)
     }));
-    let snapshot =
-        anima_core::document_content::parse_document_snapshots(&input.messages[0].content)
-            .unwrap()
-            .remove(0);
+    let snapshot = anima_service_adapters::document_content::parse_document_snapshots(
+        &input.messages[0].content,
+    )
+    .unwrap()
+    .remove(0);
     assert!(snapshot
         .extraction
         .omissions
-        .contains(&anima_core::document_content::DocumentOmission::StoredCellsOnly));
+        .contains(&anima_service_adapters::document_content::DocumentOmission::StoredCellsOnly));
     let coverage = snapshot.extraction.xlsx_coverage.unwrap();
     assert_eq!(coverage.sheet_count, 2);
     assert_eq!(coverage.observed_cell_count, 5);
     assert_eq!(coverage.included_cell_count, 1);
     assert_eq!(
         coverage.sheets[1].visibility,
-        anima_core::document_content::XlsxSheetVisibility::Hidden
+        anima_service_adapters::document_content::XlsxSheetVisibility::Hidden
     );
 }
 
@@ -296,12 +298,12 @@ async fn document_snapshots_foreign_role_bad_metadata_and_changed_source_fail_cl
             }
             "malformed" => {
                 input.messages[0].content.metadata.as_mut().unwrap().insert(
-                    anima_core::document_content::DOCUMENT_EXTRACTS_METADATA_KEY.into(),
+                    anima_service_adapters::document_content::DOCUMENT_EXTRACTS_METADATA_KEY.into(),
                     DataValue::String("forged".into()),
                 );
             }
             "hash" => {
-                use anima_core::document_content::*;
+                use anima_service_adapters::document_content::*;
                 let mut snapshots = parse_document_snapshots(&input.messages[0].content).unwrap();
                 snapshots[0].source_sha256 = "0".repeat(64);
                 input.messages[0].content.metadata.as_mut().unwrap().insert(
@@ -425,7 +427,7 @@ async fn document_snapshot_reloaded_binding_reaches_generate_and_stream_without_
 
 #[tokio::test]
 async fn mixed_history_hydration_has_four_reads_and_rejects_pdf_source_format_or_hash_mismatch() {
-    use anima_core::document_content::*;
+    use anima_service_adapters::document_content::*;
     let temp = Temp::new();
     let rows = (0..6)
         .map(|i| {
@@ -868,12 +870,14 @@ async fn attachment_model_caps_newest_four_and_does_not_read_dropped_context() {
         input.messages[0].content.attachments.as_ref().unwrap()[0].data,
         rows[0].path
     );
-    let budget = anima_core::TokenEstimator::raw_message_tokens(input.messages.last().unwrap());
+    let budget = anima_service_adapters::ServiceTokenEstimator::raw_message_tokens(
+        input.messages.last().unwrap(),
+    );
     let selected = anima_core::select_context(
         &input.messages,
         None,
         budget,
-        &anima_core::TokenEstimator::default(),
+        &anima_service_adapters::ServiceTokenEstimator::default(),
     );
     assert_eq!(selected.messages.len(), 1);
     input.messages = selected.messages;

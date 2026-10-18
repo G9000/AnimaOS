@@ -10,7 +10,7 @@ pub use docx::extract_docx;
 pub use pdf::extract_pdf;
 pub use xlsx::extract_xlsx;
 
-use anima_core::document_content::{DocumentFormat, ExtractedDocumentText};
+use anima_service_adapters::document_content::{DocumentFormat, ExtractedDocumentText};
 
 pub fn extract_document(format: DocumentFormat, bytes: &[u8]) -> ExtractedDocumentText {
     match format {

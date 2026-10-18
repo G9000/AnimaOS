@@ -304,7 +304,7 @@ async fn host_revalidates_provider_text_and_returns_only_static_failure() {
     for text in [
         " ".to_string(),
         "private\0body".to_string(),
-        "x".repeat(anima_core::audio_content::MAX_TRANSCRIPT_BYTES + 1),
+        "x".repeat(anima_service_adapters::audio_content::MAX_TRANSCRIPT_BYTES + 1),
     ] {
         let (_temp, state, agent, _) = fixture().await;
         let mut port = FakePort::new(1);
@@ -488,7 +488,7 @@ fn ordinary_audio_content_is_a_file_reference_with_no_document_snapshot() {
         .metadata
         .as_ref()
         .unwrap()
-        .contains_key(anima_core::document_content::DOCUMENT_EXTRACTS_METADATA_KEY));
+        .contains_key(anima_service_adapters::document_content::DOCUMENT_EXTRACTS_METADATA_KEY));
 }
 
 #[tokio::test]
@@ -863,7 +863,7 @@ async fn m56_review_regression_fresh_wav_uploads_preserve_closed_validation_stat
         ("long.wav", too_long, StatusCode::UNPROCESSABLE_ENTITY),
         (
             "large.wav",
-            vec![0; anima_core::audio_content::MAX_AUDIO_INPUT_BYTES + 1],
+            vec![0; anima_service_adapters::audio_content::MAX_AUDIO_INPUT_BYTES + 1],
             StatusCode::PAYLOAD_TOO_LARGE,
         ),
         ("invalid.txt", vec![0], StatusCode::BAD_REQUEST),

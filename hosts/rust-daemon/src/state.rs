@@ -1454,9 +1454,14 @@ mod tests {
                 error: Some(JOB_STOPPED_ERROR.into()),
                 result_truncated: false,
                 review: None,
+                final_output: None,
+                delegation_evidence: None,
             }],
             goal_id: None,
             stop_requested_at_ms: Some(20),
+            pending_delegations: None,
+            final_output: None,
+            delegation_evidence: None,
         });
         assert_eq!(
             snapshot.version,
@@ -1602,6 +1607,9 @@ pub(crate) struct DaemonState {
     pub(crate) community_reviews: HashMap<String, crate::community_bundles::ReviewReceipt>,
     /// Shared ephemeral browser service; neither scopes nor workers restore.
     pub(crate) browser_service: Option<crate::browser::BrowserService>,
+    /// One ephemeral shared local interpreter service; no kernels restore.
+    pub(crate) tool_rpc_service: Arc<crate::tool_rpc::ToolRpcService>,
+    pub(crate) checkpoint_root: Option<std::path::PathBuf>,
     pub(crate) browser_setup: Option<crate::browser::config::VerifiedBrowserSetup>,
     /// Ephemeral acknowledged browser grant epochs. Scopes are never restored.
     pub(crate) browser_permission_epochs: HashMap<String, u64>,
@@ -2188,6 +2196,8 @@ impl DaemonState {
             community_generation: 0,
             community_reviews: HashMap::new(),
             browser_service: None,
+            tool_rpc_service: crate::tool_rpc::ToolRpcService::disabled(),
+            checkpoint_root: None,
             browser_setup: None,
             browser_permission_epochs: HashMap::new(),
             mcp_publication: crate::mcp::McpRegistry::default().published(),
@@ -2511,6 +2521,7 @@ impl DaemonState {
         mut snapshot: ControlPlaneSnapshot,
     ) -> Result<(usize, usize), String> {
         self.validate_control_plane_snapshot(&snapshot)?;
+        let origin_pins = crate::runs::origin_pins(&snapshot);
         crate::connectors::discord::validate_snapshot(&snapshot)?;
         crate::connectors::drive::validate_snapshot(&snapshot)?;
         let mcp_owners: HashSet<_> = self
@@ -2545,6 +2556,7 @@ impl DaemonState {
             };
         // Ledger session ids follow the room mapping; always idempotent.
         let mapped_runs = crate::sessions::migration::map_ledger_session_ids(&mut snapshot.runs);
+        crate::connectors::gcalendar::restore_followup_origins(&mut snapshot.runs);
         self.workspace = snapshot.workspace.clone();
         self.community_bundles = snapshot.community_bundles.clone();
         self.community_generation = snapshot.community_generation;
@@ -2689,10 +2701,11 @@ impl DaemonState {
         }
         self.tool_grants_applied = snapshot.tool_grants_applied.into_iter().collect();
         self.pending_history_deletions = snapshot.pending_history_deletions;
-        self.runs = crate::runs::RunLedger::restored(
+        self.runs = crate::runs::RunLedger::restored_with_pins(
             snapshot.runs,
             &self.live_agent_ids(),
             anima_core::primitives::now_millis(),
+            &origin_pins,
         );
         self.learning = crate::learning::LearningRegistry::restored(
             crate::learning::LearningSnapshot {
@@ -2827,7 +2840,9 @@ impl DaemonState {
             .filter(|job| {
                 matches!(
                     job.status,
-                    crate::jobs::AgentJobStatus::Queued | crate::jobs::AgentJobStatus::Running
+                    crate::jobs::AgentJobStatus::Queued
+                        | crate::jobs::AgentJobStatus::Running
+                        | crate::jobs::AgentJobStatus::PendingDelegations
                 )
             })
             .count()
@@ -2844,7 +2859,20 @@ impl DaemonState {
             }
         }
         crate::runs::RunLedger::validate(&snapshot.runs)?;
+        crate::runs::validate_origin_snapshot(snapshot)?;
         crate::sessions::SessionRegistry::validate(&snapshot.sessions)?;
+        crate::runs::validate_helper_snapshot_links(
+            &snapshot.runs,
+            &persisted_agents,
+            &snapshot.sessions,
+        )?;
+        if snapshot
+            .sessions
+            .iter()
+            .any(|record| record.main_chat && !mcp_owners.contains(&record.agent_id))
+        {
+            return Err("main chat owner is missing or is a helper".into());
+        }
         crate::approvals::ApprovalRegistry::validate(
             &snapshot.approvals,
             &snapshot.approval_policies,

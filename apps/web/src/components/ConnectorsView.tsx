@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   createDaemonClient,
   type MailProvider,
@@ -9,13 +17,31 @@ import { primaryBtnCls } from './ui-bits';
 import { GoogleDriveCard } from './GoogleDriveCard';
 import { McpConnectionsPanel } from './mcp/McpConnectionsPanel';
 import { CommunityBundlesPanel } from './community-bundles/CommunityBundlesPanel';
+import { useConnectorLifetime } from '../hooks/useConnectorLifetime';
 
 const client = createDaemonClient({ baseUrl: '' }).connectors;
 const button =
   'rounded-lg border border-line px-3 py-2 text-xs text-ink-2 hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-50';
 
-// Each service is keyed by owner. A generation also invalidates reads begun before a mutation.
-function useService<T>(load: (explicit?: boolean) => Promise<T>) {
+const ConnectorContext = createContext({
+  owner: '',
+  online: true,
+  epoch: 0,
+  disabled: false,
+});
+
+// Reads and submitted writes belong to one owner/connection lifetime.
+function useService<T>(
+  load: (explicit: boolean, current: () => boolean) => Promise<T>,
+) {
+  const context = useContext(ConnectorContext);
+  const lifetime = useConnectorLifetime(
+    context.owner,
+    context.online,
+    context.epoch,
+  );
+  const allowed = useRef(!context.disabled);
+  allowed.current = !context.disabled;
   const loader = useRef(load);
   loader.current = load;
   const alive = useRef(false),
@@ -26,24 +52,38 @@ function useService<T>(load: (explicit?: boolean) => Promise<T>) {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   async function refresh(clearError = true, explicit = false) {
-    if (locked.current) return;
+    if (!lifetime.isCurrent(lifetime.token) || locked.current) return;
     const current = ++generation.current;
+    const valid = () =>
+      alive.current &&
+      current === generation.current &&
+      lifetime.isCurrent(lifetime.token);
     setLoading(true);
     try {
-      const next = await loader.current(explicit);
-      if (alive.current && current === generation.current) {
+      const next = await loader.current(explicit, valid);
+      if (valid()) {
         setData(next);
         if (clearError) setError(null);
       }
     } catch {
-      if (alive.current && current === generation.current)
-        setError('Could not refresh this connection. Try again.');
+      if (valid()) setError('Could not refresh this connection. Try again.');
     } finally {
-      if (alive.current && current === generation.current) setLoading(false);
+      if (valid()) setLoading(false);
     }
   }
-  useEffect(() => {
+  useLayoutEffect(() => {
     alive.current = true;
+    generation.current++;
+    locked.current = false;
+    setData(null);
+    setError(null);
+    setBusy(false);
+    setLoading(context.online);
+    if (!context.online)
+      return () => {
+        alive.current = false;
+        generation.current++;
+      };
     void refresh();
     const timer = window.setInterval(() => {
       if (document.visibilityState !== 'hidden') void refresh();
@@ -53,23 +93,35 @@ function useService<T>(load: (explicit?: boolean) => Promise<T>) {
       generation.current++;
       window.clearInterval(timer);
     };
-  }, []);
+    // Refresh captures this exact connection lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lifetime.token]);
   async function run<R>(
     action: () => Promise<R>,
     onSuccess?: (result: R) => void,
   ) {
-    if (locked.current || !alive.current) return false;
+    if (
+      !lifetime.isCurrent(lifetime.token) ||
+      !allowed.current ||
+      locked.current ||
+      !alive.current
+    )
+      return false;
     locked.current = true;
-    generation.current++;
+    const submittedGeneration = ++generation.current;
+    const current = () =>
+      alive.current &&
+      submittedGeneration === generation.current &&
+      lifetime.isCurrent(lifetime.token);
     setBusy(true);
     setError(null);
     let success = false;
     try {
       const result = await action();
       success = true;
-      if (alive.current) onSuccess?.(result);
+      if (current()) onSuccess?.(result);
     } catch (cause) {
-      if (alive.current)
+      if (current())
         setError(
           cause instanceof Error &&
             cause.message ===
@@ -78,15 +130,22 @@ function useService<T>(load: (explicit?: boolean) => Promise<T>) {
             : 'This action could not be completed. Refresh the connection before trying again.',
         );
     } finally {
-      locked.current = false;
-      if (alive.current) {
+      if (current()) {
+        locked.current = false;
         await refresh(false);
-        if (alive.current) setBusy(false);
+        if (lifetime.isCurrent(lifetime.token)) setBusy(false);
       }
     }
-    return success && alive.current;
+    return success && lifetime.isCurrent(lifetime.token) && alive.current;
   }
-  return { data, error, busy, loading, refresh, run };
+  return {
+    data,
+    error,
+    busy: busy || !context.online || context.disabled,
+    loading,
+    refresh,
+    run,
+  };
 }
 
 function authorizationUrl(value: string, provider: 'google' | 'outlook') {
@@ -217,13 +276,15 @@ function MailCard({
   agentId: string;
   provider: MailProvider;
 }) {
+  const context = useContext(ConnectorContext);
   const name = provider === 'gmail' ? 'Gmail' : 'Outlook';
   const [consent, setConsent] = useState<string | null>(null);
   const [to, setTo] = useState(''),
     [subject, setSubject] = useState(''),
     [body, setBody] = useState('');
-  const resource = useService(async (explicit = false) => {
+  const resource = useService(async (explicit, current) => {
     const status = await client.mailStatus(agentId, provider);
+    if (!current()) throw new Error('Obsolete connection');
     const id = status.connector?.id;
     const [messages, drafts] = await Promise.allSettled([
       id && status.connector?.status === 'active'
@@ -243,6 +304,9 @@ function MailCard({
   useEffect(() => {
     if (connection?.status === 'active') setConsent(null);
   }, [connection?.status]);
+  useLayoutEffect(() => {
+    setConsent(null);
+  }, [context.online, context.epoch, agentId]);
   const status = !resource.data
     ? resource.error
       ? 'Status unavailable'
@@ -502,6 +566,7 @@ function OAuthAppCard({
   provider: OAuthAppProvider;
   onChanged: () => void;
 }) {
+  const context = useContext(ConnectorContext);
   const name = provider === 'google' ? 'Google' : 'Microsoft';
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
@@ -510,6 +575,10 @@ function OAuthAppCard({
   const resource = useService(() => client.oauthAppStatus(provider));
   const status = resource.data;
   const environmentManaged = status?.source === 'environment';
+  useLayoutEffect(() => {
+    setClientSecret('');
+    setValidationError(null);
+  }, [context.owner, context.online, context.epoch]);
 
   useEffect(() => {
     if (provider === 'microsoft' && status?.tenant) setTenant(status.tenant);
@@ -669,9 +738,11 @@ function OAuthAppCard({
 }
 
 function CalendarCard({ agentId }: { agentId: string }) {
+  const context = useContext(ConnectorContext);
   const [consent, setConsent] = useState<string | null>(null);
-  const resource = useService(async () => {
+  const resource = useService(async (_explicit, current) => {
     const status = await client.calendarStatus(agentId);
+    if (!current()) throw new Error('Obsolete connection');
     const [writes] = await Promise.allSettled([
       status.connector
         ? client.calendarWrites(agentId, status.connector.id)
@@ -700,6 +771,9 @@ function CalendarCard({ agentId }: { agentId: string }) {
   useEffect(() => {
     if (connection?.status === 'active') setConsent(null);
   }, [connection?.status]);
+  useLayoutEffect(() => {
+    setConsent(null);
+  }, [context.online, context.epoch, agentId]);
   return (
     <Card
       title="Google Calendar"
@@ -819,6 +893,8 @@ export function ConnectorsView({
   telegram,
   discord,
   disabled = false,
+  online = true,
+  epoch = 0,
   onMcpGrantsChanged,
   onMcpBusyChanged,
   onMcpPermissionsUncertain,
@@ -829,23 +905,29 @@ export function ConnectorsView({
   telegram: ReactNode;
   discord?: ReactNode;
   disabled?: boolean;
+  online?: boolean;
+  epoch?: number;
   onMcpGrantsChanged?: (toolNames: string[]) => void | Promise<void>;
   onMcpBusyChanged?: (busy: boolean) => void;
   onMcpPermissionsUncertain?: () => void;
   mcpPermissionsUncertain?: boolean;
   mcpPermissionsBusy?: boolean;
 }) {
-  const currentOwner = useRef(agentId);
-  currentOwner.current = agentId;
+  const lifetime = useConnectorLifetime(agentId, online, epoch);
   const [ownerBusy, setOwnerBusy] = useState(false);
+  const busyClaims = useRef(0);
   const [mcpRefreshRequired, setMcpRefreshRequired] = useState(false);
-  useEffect(() => {
+  useLayoutEffect(() => {
+    busyClaims.current = 0;
     setOwnerBusy(false);
     setMcpRefreshRequired(false);
-  }, [agentId]);
+  }, [lifetime.token]);
   const reportOwnerBusy = (busy: boolean) => {
-    if (currentOwner.current === agentId) setOwnerBusy(busy);
-    onMcpBusyChanged?.(busy);
+    if (!lifetime.matches(lifetime.token)) return;
+    busyClaims.current = Math.max(0, busyClaims.current + (busy ? 1 : -1));
+    const active = busyClaims.current > 0;
+    if (lifetime.isCurrent(lifetime.token)) setOwnerBusy(active);
+    onMcpBusyChanged?.(active);
   };
   const [oauthGeneration, setOauthGeneration] = useState({
     google: 0,
@@ -858,106 +940,126 @@ export function ConnectorsView({
     }));
 
   return (
-    <section
-      aria-label="Connectors"
-      className="h-full min-w-0 overflow-y-auto p-4 pb-8 sm:p-6 lg:p-8"
+    <ConnectorContext.Provider
+      value={{ owner: agentId, online, epoch, disabled }}
     >
-      <div className="mx-auto max-w-6xl space-y-6">
-        <header>
-          <h1 className="text-xl font-semibold text-ink">Connectors</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-ink-3">
-            Bring your conversations, calendar, and inbox into your workspace.
-            Connections belong to your main agent.
-          </p>
-        </header>
-        <section
-          aria-labelledby="oauth-app-setup-heading"
-          className="space-y-4 rounded-2xl border border-line bg-panel/60 p-4 sm:p-6"
-        >
-          <div>
-            <h2
-              id="oauth-app-setup-heading"
-              className="text-base font-semibold text-ink"
-            >
-              OAuth app setup
-            </h2>
-            <p className="mt-1 text-xs leading-relaxed text-ink-3">
-              Add the daemon credentials used to start account connections.
+      <section
+        aria-label="Connectors"
+        className="h-full min-w-0 overflow-y-auto p-4 pb-8 sm:p-6 lg:p-8"
+      >
+        <div className="mx-auto max-w-6xl space-y-6">
+          <header>
+            <h1 className="text-xl font-semibold text-ink">Connectors</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-ink-3">
+              Bring your conversations, calendar, and inbox into your workspace.
+              Connections belong to your main agent.
             </p>
-          </div>
-          <div className="grid min-w-0 items-start gap-4 lg:grid-cols-2">
-            <OAuthAppCard
-              provider="google"
-              onChanged={() => oauthChanged('google')}
-            />
-            <OAuthAppCard
-              provider="microsoft"
-              onChanged={() => oauthChanged('microsoft')}
-            />
-          </div>
-        </section>
-        <McpConnectionsPanel
-          key={agentId}
-          agentId={agentId}
-          disabled={disabled || ownerBusy || mcpRefreshRequired}
-          permissionsUncertain={mcpPermissionsUncertain}
-          permissionsBusy={mcpPermissionsBusy || ownerBusy}
-          onGrantsChanged={async (names) => {
-            await onMcpGrantsChanged?.(names);
-            if (currentOwner.current === agentId) setMcpRefreshRequired(false);
-          }}
-          onBusyChanged={reportOwnerBusy}
-          onPermissionsUncertain={onMcpPermissionsUncertain}
-        />
-        {mcpRefreshRequired && (
-          <p className="text-xs text-ink-3">
-            A bundle changed its saved components. Use Refresh status in
-            External tools before editing those connections; your entered fields
-            are kept.
-          </p>
-        )}
-        <CommunityBundlesPanel
-          key={agentId}
-          agentId={agentId}
-          disabled={disabled || ownerBusy}
-          permissionsUncertain={mcpPermissionsUncertain}
-          permissionsBusy={mcpPermissionsBusy || ownerBusy}
-          onGrantsChanged={async (names) => {
-            await onMcpGrantsChanged?.(names);
-            if (currentOwner.current === agentId) setMcpRefreshRequired(true);
-          }}
-          onBusyChanged={reportOwnerBusy}
-          onPermissionsUncertain={onMcpPermissionsUncertain}
-        />
-        <div className="grid min-w-0 items-start gap-4 xl:grid-cols-2">
-          <div className="min-w-0 rounded-2xl border border-line bg-panel/60 p-4 sm:p-6">
-            {telegram}
-          </div>
-          {discord && (
-            <div className="min-w-0 rounded-2xl border border-line bg-panel/60 p-4 sm:p-6">
-              {discord}
-            </div>
+          </header>
+          {!online && (
+            <p role="status" className="text-xs text-ink-3">
+              Offline — reconnect to review current connection status.
+            </p>
           )}
-          <CalendarCard
-            key={`${agentId}:calendar:${oauthGeneration.google}`}
+          <section
+            aria-labelledby="oauth-app-setup-heading"
+            className="space-y-4 rounded-2xl border border-line bg-panel/60 p-4 sm:p-6"
+          >
+            <div>
+              <h2
+                id="oauth-app-setup-heading"
+                className="text-base font-semibold text-ink"
+              >
+                OAuth app setup
+              </h2>
+              <p className="mt-1 text-xs leading-relaxed text-ink-3">
+                Add the daemon credentials used to start account connections.
+              </p>
+            </div>
+            <div className="grid min-w-0 items-start gap-4 lg:grid-cols-2">
+              <OAuthAppCard
+                key={`${agentId}:google`}
+                provider="google"
+                onChanged={() => oauthChanged('google')}
+              />
+              <OAuthAppCard
+                key={`${agentId}:microsoft`}
+                provider="microsoft"
+                onChanged={() => oauthChanged('microsoft')}
+              />
+            </div>
+          </section>
+          <McpConnectionsPanel
+            key={`${agentId}:mcp`}
             agentId={agentId}
+            online={online}
+            epoch={epoch}
+            disabled={disabled || ownerBusy || mcpRefreshRequired}
+            permissionsUncertain={mcpPermissionsUncertain}
+            permissionsBusy={mcpPermissionsBusy || ownerBusy}
+            onGrantsChanged={async (names) => {
+              await onMcpGrantsChanged?.(names);
+              if (lifetime.isCurrent(lifetime.token))
+                setMcpRefreshRequired(false);
+            }}
+            onBusyChanged={reportOwnerBusy}
+            onPermissionsUncertain={onMcpPermissionsUncertain}
           />
-          <GoogleDriveCard
-            key={`${agentId}:drive:${oauthGeneration.google}`}
+          {mcpRefreshRequired && (
+            <p className="text-xs text-ink-3">
+              A bundle changed its saved components. Use Refresh status in
+              External tools before editing those connections; your entered
+              fields are kept.
+            </p>
+          )}
+          <CommunityBundlesPanel
+            key={`${agentId}:bundles`}
             agentId={agentId}
+            online={online}
+            epoch={epoch}
+            disabled={disabled || ownerBusy}
+            permissionsUncertain={mcpPermissionsUncertain}
+            permissionsBusy={mcpPermissionsBusy || ownerBusy}
+            onGrantsChanged={async (names) => {
+              await onMcpGrantsChanged?.(names);
+              if (lifetime.isCurrent(lifetime.token))
+                setMcpRefreshRequired(true);
+            }}
+            onBusyChanged={reportOwnerBusy}
+            onPermissionsUncertain={onMcpPermissionsUncertain}
           />
-          <MailCard
-            key={`${agentId}:gmail:${oauthGeneration.google}`}
-            agentId={agentId}
-            provider="gmail"
-          />
-          <MailCard
-            key={`${agentId}:outlook:${oauthGeneration.microsoft}`}
-            agentId={agentId}
-            provider="outlook"
-          />
+          <div className="grid min-w-0 items-start gap-4 xl:grid-cols-2">
+            <div className="min-w-0 rounded-2xl border border-line bg-panel/60 p-4 sm:p-6">
+              {telegram}
+            </div>
+            {discord && (
+              <div className="min-w-0 rounded-2xl border border-line bg-panel/60 p-4 sm:p-6">
+                {discord}
+              </div>
+            )}
+            <CalendarCard
+              key={`${agentId}:calendar:${oauthGeneration.google}`}
+              agentId={agentId}
+            />
+            <GoogleDriveCard
+              key={`${agentId}:drive:${oauthGeneration.google}`}
+              agentId={agentId}
+              online={online}
+              epoch={epoch}
+              disabled={disabled}
+            />
+            <MailCard
+              key={`${agentId}:gmail:${oauthGeneration.google}`}
+              agentId={agentId}
+              provider="gmail"
+            />
+            <MailCard
+              key={`${agentId}:outlook:${oauthGeneration.microsoft}`}
+              agentId={agentId}
+              provider="outlook"
+            />
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+    </ConnectorContext.Provider>
   );
 }

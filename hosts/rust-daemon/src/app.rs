@@ -240,6 +240,24 @@ pub async fn app_with_configured_persistence(config: DaemonConfig) -> io::Result
 pub async fn serve(listener: TcpListener, config: DaemonConfig) -> io::Result<()> {
     // Only the real daemon reads explicit operator configuration. Embeddings
     // and deterministic constructors remain independent of ambient config.
+    let tool_rpc_config =
+        crate::tool_rpc::ToolRpcConfig::parse(std::env::var_os("ANIMAOS_RS_TOOL_RPC_PYTHON_PATH"))
+            .map_err(io::Error::other)?;
+    let checkpoint_root =
+        std::env::var_os("ANIMAOS_RS_CHECKPOINT_ROOT").map(std::path::PathBuf::from);
+    if checkpoint_root
+        .as_ref()
+        .is_some_and(|path| !path.is_absolute())
+    {
+        return Err(io::Error::other(
+            "Checkpoint root must be an absolute private path outside the workspace",
+        ));
+    }
+    if checkpoint_root.is_some() && !cfg!(windows) {
+        return Err(io::Error::other(
+            "Native file checkpoints require the supported Windows profile",
+        ));
+    }
     let browser_setup = match std::env::var_os(crate::browser::config::BROWSER_CONFIG_ENV) {
         Some(path) => Some(
             tokio::task::spawn_blocking(move || {
@@ -265,6 +283,8 @@ pub async fn serve(listener: TcpListener, config: DaemonConfig) -> io::Result<()
         let mut guard = state.write().await;
         guard.chatgpt_auth = chatgpt_auth;
         guard.browser_setup = browser_setup;
+        guard.tool_rpc_service = crate::tool_rpc::ToolRpcService::new(tool_rpc_config);
+        guard.checkpoint_root = checkpoint_root;
         // AI titles for new chats (spec §12.3): only the real daemon turns
         // them on, so test and embedding states never see an unscripted
         // model call.

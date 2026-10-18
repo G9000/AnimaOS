@@ -41,6 +41,15 @@ impl ConnectorManager {
                 .approved_chat
                 .as_ref()
                 .map(|chat| chat.id.clone());
+            // The owner's private chat joins their main chat, like a message
+            // typed in the console; its reply still goes back to Telegram.
+            // Groups keep their own conversation.
+            let new_update_room = previous_connector
+                .approved_chat
+                .as_ref()
+                .filter(|chat| chat.kind == crate::connectors::TelegramChatKind::Private)
+                .and_then(|_| main_chat_room(&state, &previous_connector.agent_id))
+                .unwrap_or_else(|| previous_connector.room_id.clone());
             let now = now_ms();
 
             if let Some(approved_chat_id) = approved_chat_id {
@@ -50,11 +59,17 @@ impl ConnectorManager {
                         continue;
                     }
                     let key = (connector_id.clone(), update.update_id);
+                    // A redelivered update keeps the room it was first given.
+                    let room_id = state
+                        .inbound
+                        .get(&key)
+                        .map(|existing| existing.room_id.clone())
+                        .unwrap_or_else(|| new_update_room.clone());
                     let candidate = TelegramInboundRecord {
                         connector_id: connector_id.clone(),
                         update_id: update.update_id,
                         agent_id: previous_connector.agent_id.clone(),
-                        room_id: previous_connector.room_id.clone(),
+                        room_id,
                         normalized_text: update.text.clone(),
                         sender: update.sender.clone(),
                         chat: update.chat.clone(),
@@ -254,4 +269,19 @@ impl ConnectorManager {
             .insert(connector_id, ConnectorRuntimeStatus::Ready);
         Ok(updated)
     }
+}
+
+/// The room of the agent's designated main chat, when it has a usable one.
+/// Without one (the console has not resolved it yet), Telegram keeps its own
+/// conversation.
+fn main_chat_room(state: &DaemonState, agent_id: &str) -> Option<String> {
+    let mut designated = state
+        .sessions
+        .records()
+        .filter(|record| record.agent_id == agent_id && record.main_chat);
+    let record = designated.next()?;
+    if designated.next().is_some() || record.archived || !record.has_main_chat_identity() {
+        return None;
+    }
+    Some(record.room_id().to_owned())
 }

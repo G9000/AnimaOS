@@ -198,14 +198,16 @@ pub(crate) fn validate_snapshot(
         {
             return Err(invalid());
         }
-        let saved_runtime = anima_core::community_bundles::RuntimeCompatibility {
+        let saved_runtime = anima_service_adapters::community_bundles::RuntimeCompatibility {
             host: bundle.manifest.compatibility.host.clone(),
             version: bundle.manifest.compatibility.min_version.clone(),
             capabilities: bundle.manifest.compatibility.required_capabilities.clone(),
         };
-        let valid =
-            anima_core::community_bundles::validate_manifest(&bundle.manifest, &saved_runtime)
-                .map_err(|_| invalid())?;
+        let valid = anima_service_adapters::community_bundles::validate_manifest(
+            &bundle.manifest,
+            &saved_runtime,
+        )
+        .map_err(|_| invalid())?;
         if valid.manifest_digest != bundle.manifest_digest {
             return Err(invalid());
         }
@@ -217,14 +219,17 @@ pub(crate) fn validate_snapshot(
             };
             if !keys.insert(key)
                 || !bundle.manifest.components.iter().any(|part| match part {
-                    anima_core::community_bundles::ManifestComponent::Skill { key: k, .. } => {
-                        k == key && kind == "skill"
-                    }
-                    anima_core::community_bundles::ManifestComponent::McpHttp {
-                        key: k, ..
+                    anima_service_adapters::community_bundles::ManifestComponent::Skill {
+                        key: k,
+                        ..
+                    } => k == key && kind == "skill",
+                    anima_service_adapters::community_bundles::ManifestComponent::McpHttp {
+                        key: k,
+                        ..
                     } => k == key && kind == "mcpHttp",
-                    anima_core::community_bundles::ManifestComponent::McpStdio {
-                        key: k, ..
+                    anima_service_adapters::community_bundles::ManifestComponent::McpStdio {
+                        key: k,
+                        ..
                     } => k == key && kind == "mcpStdio",
                 })
             {
@@ -271,11 +276,10 @@ pub(crate) fn validate_snapshot(
                 .components
                 .iter()
                 .find_map(|component| match component {
-                    anima_core::community_bundles::ManifestComponent::Skill { key, skill_file }
-                        if key == &part.key =>
-                    {
-                        Some(skill_file)
-                    }
+                    anima_service_adapters::community_bundles::ManifestComponent::Skill {
+                        key,
+                        skill_file,
+                    } if key == &part.key => Some(skill_file),
                     _ => None,
                 })
                 .ok_or_else(invalid)?;
@@ -357,9 +361,11 @@ pub(crate) fn validate_snapshot(
 
 pub(crate) fn restore_records(state: &mut DaemonState) {
     for bundle in &mut state.community_bundles {
-        let compatible =
-            anima_core::community_bundles::validate_manifest(&bundle.manifest, &service::runtime())
-                .is_ok();
+        let compatible = anima_service_adapters::community_bundles::validate_manifest(
+            &bundle.manifest,
+            &service::runtime(),
+        )
+        .is_ok();
         let owned = bundle.mcp().all(|part| {
             state
                 .mcp_registry

@@ -38,6 +38,41 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe('useDriveIntegrations', () => {
+  it('fp02 offline and epoch fence Drive reads and settled actions without refetch or consent publication', async () => {
+    let finish!: (value: DriveConnectResult) => void;
+    const { result, rerender } = renderHook(
+      ({ online, epoch }) => useDriveIntegrations('agent-a', online, epoch),
+      { initialProps: { online: false, epoch: 1 } },
+    );
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(daemon.driveStatus).not.toHaveBeenCalled();
+    rerender({ online: true, epoch: 2 });
+    await waitFor(() => expect(result.current.available).toBe(true));
+    vi.mocked(daemon.connectDrive).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    let action!: Promise<boolean>;
+    act(() => {
+      action = result.current.connect({ selectedFileIds: ['File_1'] });
+    });
+    rerender({ online: false, epoch: 2 });
+    await act(async () => {
+      finish({
+        connector: driveFixture({ status: 'pairing' }),
+        consentUrl: 'https://accounts.google.com/o/oauth2/v2/auth?state=old',
+      });
+      expect(await action).toBe(false);
+    });
+    expect(result.current.consentUrl).toBeNull();
+    expect(result.current.status).toBeNull();
+    expect(daemon.driveStatus).toHaveBeenCalledTimes(1);
+    expect(daemon.connectDrive).toHaveBeenCalledTimes(1);
+  });
+
   it('discards prior agent reads/actions and clears pending consent URLs on agent switch', async () => {
     let finish!: (value: DriveConnectResult) => void;
     const { result, rerender } = renderHook(

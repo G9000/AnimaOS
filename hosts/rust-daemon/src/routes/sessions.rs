@@ -9,8 +9,9 @@ use axum::response::{IntoResponse, Response};
 use tracing::warn;
 
 use super::contracts::{
-    DeleteResponse, ErrorBody, SessionCreateRequest, SessionEnvelope, SessionMessagesEnvelope,
-    SessionResponse, SessionUpdateRequest, SessionsEnvelope,
+    DeleteResponse, ErrorBody, MainChatRequest, SessionCreateRequest, SessionEnvelope,
+    SessionMessageResponse, SessionMessageSearchEnvelope, SessionMessageSearchHitResponse,
+    SessionMessagesEnvelope, SessionResponse, SessionUpdateRequest, SessionsEnvelope,
 };
 use super::http::{json_response, read_limited_body, request_query};
 use super::jobs::{authorize, body, no_store};
@@ -19,7 +20,8 @@ use crate::agent_runs::HELPER_MUST_RUN_THROUGH_COMPANION;
 use crate::history::HistoryDeletion;
 use crate::live::{LiveEvent, LiveEventBody};
 use crate::sessions::compaction::manual_compaction_input;
-use crate::sessions::context::uncovered_pruned_through;
+use crate::sessions::context::{conversation_context_usage, uncovered_pruned_through};
+use crate::sessions::history_read::{self, HistoryReadError, MessageSearchRequest, WindowRequest};
 use crate::sessions::views::{
     self, MessagePageError, MessagePageRequest, SessionCursor, SessionListQuery,
     DEFAULT_MESSAGE_PAGE, DEFAULT_SESSION_PAGE, MAX_MESSAGE_PAGE, MAX_SEARCH_QUERY_CHARS,
@@ -32,6 +34,7 @@ use crate::sessions::{
 
 const TOO_MANY_NEW_CHATS: &str = "Too many new chats; try again in a minute";
 const SESSION_RUN_IN_PROGRESS: &str = "A run in this session is still in progress";
+const MAIN_CHAT_UNAVAILABLE: &str = "The main chat is unavailable; restore its history or explicitly reset the companion to recover";
 
 type QueryParams = HashMap<String, String>;
 
@@ -102,16 +105,113 @@ fn list_query(uri: &Uri) -> Result<SessionListQuery, ApiError> {
     })
 }
 
-fn message_query(uri: &Uri) -> Result<MessagePageRequest, ApiError> {
+enum SessionMessageQuery {
+    Page(MessagePageRequest),
+    Anchor(WindowRequest),
+}
+
+fn message_query(uri: &Uri, session_id: &str) -> Result<SessionMessageQuery, ApiError> {
     let params = params(uri)?;
-    Ok(MessagePageRequest {
+    if let Some(anchor) = params.get("anchor") {
+        if params.contains_key("before") || flag(&params, "includeHidden", false)? {
+            return Err(ApiError::bad_request_static(
+                "anchor cannot be combined with before or includeHidden=true",
+            ));
+        }
+        if anchor.trim().is_empty()
+            || anchor.len() > 256
+            || anchor.chars().any(char::is_control)
+            || crate::memory_text::has_hidden_text(anchor)
+        {
+            return Err(ApiError::bad_request_static("anchor is invalid"));
+        }
+        let count = limit(&params, 20, 20)?;
+        let before_count = (count - 1) / 2;
+        return Ok(SessionMessageQuery::Anchor(WindowRequest {
+            session_id: session_id.into(),
+            anchor_message_id: anchor.clone(),
+            before_count,
+            after_count: count - before_count - 1,
+        }));
+    }
+    Ok(SessionMessageQuery::Page(MessagePageRequest {
         before: params
             .get("before")
             .filter(|value| !value.is_empty())
             .cloned(),
         limit: limit(&params, DEFAULT_MESSAGE_PAGE, MAX_MESSAGE_PAGE)?,
         include_hidden: flag(&params, "includeHidden", false)?,
+    }))
+}
+
+fn history_error(error: HistoryReadError) -> Response {
+    rejected(match error {
+        HistoryReadError::InvalidRequest => {
+            ApiError::bad_request_static("history lookup arguments are invalid")
+        }
+        HistoryReadError::Unavailable => {
+            ApiError::service_unavailable("history store is unavailable")
+        }
+        HistoryReadError::ScopeLimit => ApiError::service_unavailable(
+            "history scope exceeds 500 sessions or 5000 hot messages; narrow the requested scope",
+        ),
     })
+}
+
+#[utoipa::path(get, path = "/api/agents/{agent_id}/message-search", tag = "sessions",
+    params(("agent_id" = String, Path), ("q" = String, Query, description = "Message prefix search, 1-200 characters"), ("limit" = Option<usize>, Query, description = "1-20, default 20")),
+    responses(
+        (status = 200, description = "Newest individual matching messages from allowed conversations", body = SessionMessageSearchEnvelope),
+        (status = 400, description = "Invalid query", body = ErrorBody),
+        (status = 403, description = "Local owner required", body = ErrorBody),
+        (status = 404, description = "Agent not found", body = ErrorBody),
+        (status = 503, description = "History store or bounded scope unavailable", body = ErrorBody)
+    ))]
+pub(super) async fn search_session_messages(
+    State(state): State<AppState>,
+    Path(agent_id): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, true) {
+        return response;
+    }
+    let query = match params(request.uri()).and_then(|params| {
+        let query = params
+            .get("q")
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| ApiError::bad_request_static("q must contain 1-200 characters"))?
+            .to_string();
+        Ok(MessageSearchRequest {
+            query,
+            limit: limit(&params, 20, 20)?,
+        })
+    }) {
+        Ok(query) => query,
+        Err(error) => return rejected(error),
+    };
+    match history_read::search_messages(&state.daemon, &agent_id, query).await {
+        Ok(Some(page)) => no_store(json_response(
+            StatusCode::OK,
+            &SessionMessageSearchEnvelope {
+                results: page
+                    .results
+                    .into_iter()
+                    .map(|hit| SessionMessageSearchHitResponse {
+                        session_id: hit.session_id,
+                        title: hit.title,
+                        message_id: hit.message.id,
+                        role: crate::history::role_name(hit.message.role).into(),
+                        created_at_ms: hit.message.created_at_ms,
+                        snippet: hit.snippet,
+                    })
+                    .collect(),
+                has_more: page.has_more,
+            },
+        )),
+        Ok(None) => rejected(ApiError::not_found()),
+        Err(error) => history_error(error),
+    }
 }
 
 #[utoipa::path(get, path = "/api/agents/{agent_id}/sessions", tag = "sessions",
@@ -174,6 +274,21 @@ pub(super) async fn get_session(
             let mut session = SessionResponse::from(&view);
             session.usage =
                 Some(super::usage::session_totals(&state, &agent_id, &session_id).await);
+            {
+                let guard = state.daemon.read().await;
+                session.context_usage = guard
+                    .agents
+                    .get(&agent_id)
+                    .zip(guard.sessions.get(&agent_id, &session_id))
+                    .map(|(runtime, record)| {
+                        conversation_context_usage(
+                            runtime.config(),
+                            record,
+                            &guard.model_visible_history(&agent_id, record.room_id()),
+                        )
+                        .into()
+                    });
+            }
             no_store(json_response(StatusCode::OK, &SessionEnvelope { session }))
         }
         None => rejected(ApiError::not_found()),
@@ -185,7 +300,8 @@ pub(super) async fn get_session(
         ("agent_id" = String, Path),
         ("session_id" = String, Path, description = "Percent-encoded session id"),
         ("before" = Option<String>, Query, description = "Only messages older than this message id"),
-        ("limit" = Option<usize>, Query, description = "1-200, default 50"),
+        ("anchor" = Option<String>, Query, description = "Exact visible owned message for a bounded surrounding window; excludes before/includeHidden=true"),
+        ("limit" = Option<usize>, Query, description = "1-200, default 50; anchor mode 1-20, default 20"),
         ("includeHidden" = Option<bool>, Query, description = "Include silent check-in turns (default false)")
     ),
     responses(
@@ -206,9 +322,42 @@ pub(super) async fn list_session_messages(
     if !is_valid_session_id(&session_id) {
         return rejected(ApiError::not_found());
     }
-    let query = match message_query(request.uri()) {
+    let query = match message_query(request.uri(), &session_id) {
         Ok(query) => query,
         Err(error) => return rejected(error),
+    };
+    let query = match query {
+        SessionMessageQuery::Page(query) => query,
+        SessionMessageQuery::Anchor(query) => {
+            return match history_read::select_conversation_window(&state.daemon, &agent_id, query)
+                .await
+            {
+                Ok(Some(window)) => {
+                    let next_before = window
+                        .has_earlier
+                        .then(|| window.messages.first().map(|message| message.id.clone()))
+                        .flatten();
+                    let page = SessionMessagesEnvelope {
+                        messages: window
+                            .messages
+                            .into_iter()
+                            .map(|message| {
+                                SessionMessageResponse::from(&views::PageMessage {
+                                    message,
+                                    hidden: false,
+                                })
+                            })
+                            .collect(),
+                        next_before,
+                        anchor_message_id: Some(window.anchor_message_id),
+                        has_newer: Some(window.has_later),
+                    };
+                    no_store(json_response(StatusCode::OK, &page))
+                }
+                Ok(None) => rejected(ApiError::not_found()),
+                Err(error) => history_error(error),
+            }
+        }
     };
     match views::session_messages(&state.daemon, &agent_id, &session_id, &query).await {
         Ok(page) => no_store(json_response(
@@ -332,6 +481,157 @@ pub(super) async fn create_session(
     session_response(&state, &agent_id, &session_id, StatusCode::CREATED).await
 }
 
+fn history_deletion_pending(state: &crate::state::DaemonState, record: &SessionRecord) -> bool {
+    state.pending_history_deletions.iter().any(|deletion| {
+        deletion.agent_id == record.agent_id
+            && deletion
+                .session_id
+                .as_deref()
+                .is_none_or(|id| id == record.id)
+    })
+}
+
+#[utoipa::path(post, path = "/api/agents/{agent_id}/main-chat", tag = "sessions",
+    params(("agent_id" = String, Path)), request_body = MainChatRequest,
+    responses(
+        (status = 200, description = "The existing or adopted main chat", body = SessionEnvelope),
+        (status = 201, description = "A newly created main chat", body = SessionEnvelope),
+        (status = 400, description = "Only an empty object or body is accepted", body = ErrorBody),
+        (status = 403, description = "Local owner required", body = ErrorBody),
+        (status = 404, description = "Agent not found", body = ErrorBody),
+        (status = 409, description = "The agent is a helper or the designated main chat needs recovery", body = ErrorBody),
+        (status = 429, description = "More than 60 new sessions this minute", body = ErrorBody),
+        (status = 503, description = "The control plane could not be saved", body = ErrorBody)
+    ))]
+pub(super) async fn main_chat(
+    State(state): State<AppState>,
+    Path(agent_id): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, false) {
+        return response;
+    }
+    let bytes = match read_limited_body(request, state.config.max_request_bytes).await {
+        Ok(bytes) => bytes,
+        Err(response) => return no_store(response),
+    };
+    if !bytes.iter().all(u8::is_ascii_whitespace) {
+        if bytes
+            .iter()
+            .find(|byte| !byte.is_ascii_whitespace())
+            .copied()
+            != Some(b'{')
+        {
+            return rejected(ApiError::bad_request_static(
+                "main chat request must be an empty object",
+            ));
+        }
+        if let Err(error) = parse_json_body::<MainChatRequest>(bytes) {
+            return rejected(error);
+        }
+    }
+    let transaction = state.agent_runs.control_plane_transaction().await;
+    let (session_id, previous, created, persist) = {
+        let mut guard = state.daemon.write().await;
+        match guard.agents.get(&agent_id) {
+            None => return rejected(ApiError::not_found()),
+            Some(runtime) if crate::agent_runs::is_helper_config(runtime.config()) => {
+                return rejected(ApiError::conflict(HELPER_MUST_RUN_THROUGH_COMPANION));
+            }
+            Some(_) => {}
+        }
+        let existing = {
+            let mut designated = guard
+                .sessions
+                .records()
+                .filter(|record| record.agent_id == agent_id && record.main_chat);
+            let existing = designated.next().cloned();
+            if designated.next().is_some() {
+                return rejected(ApiError::conflict(MAIN_CHAT_UNAVAILABLE));
+            }
+            existing
+        };
+        if let Some(record) = existing {
+            if !record.has_main_chat_identity()
+                || record.archived
+                || history_deletion_pending(&guard, &record)
+            {
+                return rejected(ApiError::conflict(MAIN_CHAT_UNAVAILABLE));
+            }
+            (record.id, None, false, None)
+        } else if let Some(previous) = guard
+            .sessions
+            .main_chat_candidate(&agent_id, |record| history_deletion_pending(&guard, record))
+            .cloned()
+        {
+            let mut record = previous.clone();
+            record.main_chat = true;
+            let id = record.id.clone();
+            guard.sessions.insert(record);
+            (
+                id,
+                Some(previous),
+                false,
+                Some(guard.control_plane_persist_request()),
+            )
+        } else {
+            let now_ms = now_millis();
+            if !guard.session_limiter.try_acquire(&agent_id, now_ms) {
+                return rejected(ApiError {
+                    kind: crate::routes::ApiErrorKind::General,
+                    status: StatusCode::TOO_MANY_REQUESTS,
+                    message: TOO_MANY_NEW_CHATS.into(),
+                });
+            }
+            let mut record = SessionRecord::new(
+                &agent_id,
+                &new_chat_session_id(),
+                SessionKind::Chat,
+                SessionOrigin::Web,
+                DEFAULT_CHAT_TITLE.to_string(),
+                TitleSource::FirstMessage,
+                now_ms,
+            );
+            record.main_chat = true;
+            let id = record.id.clone();
+            guard.sessions.insert(record);
+            (id, None, true, Some(guard.control_plane_persist_request()))
+        }
+    };
+    if let Some(persist) = persist {
+        if let Err(error) = persist.save().await {
+            let mut guard = state.daemon.write().await;
+            if let Some(previous) = previous {
+                guard.sessions.insert(previous);
+            } else {
+                guard.sessions.remove(&agent_id, &session_id);
+            }
+            return rejected(ApiError::service_unavailable(error.to_string()));
+        }
+        state.daemon.read().await.publish_session_event(
+            &agent_id,
+            &session_id,
+            if created {
+                LiveEventBody::SessionCreated
+            } else {
+                LiveEventBody::SessionUpdated
+            },
+        );
+    }
+    drop(transaction);
+    session_response(
+        &state,
+        &agent_id,
+        &session_id,
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+    )
+    .await
+}
+
 #[utoipa::path(patch, path = "/api/agents/{agent_id}/sessions/{session_id}", tag = "sessions",
     params(("agent_id" = String, Path), ("session_id" = String, Path, description = "Percent-encoded session id")),
     request_body = SessionUpdateRequest,
@@ -390,6 +690,9 @@ pub(super) async fn update_session(
         };
         if title.is_some() && !record.capabilities(schedule_exists).rename {
             return rejected(ApiError::conflict("This session cannot be renamed"));
+        }
+        if input.archived.is_some() && !record.capabilities(schedule_exists).archive {
+            return rejected(ApiError::conflict("This session cannot be archived"));
         }
         let previous = record.clone();
         if let Some(title) = title {

@@ -17,6 +17,7 @@ import { ChatGptConnection } from '../ChatGptConnection';
 import { ChatGptModelSelect } from '../ChatGptModelSelect';
 import { ResumeCard } from './ResumeCard';
 import { VoiceCheck } from './VoiceCheck';
+import { HaloOrb } from '../halo/HaloOrb';
 import './companion-onboarding.css';
 
 export interface CompanionSetupProps {
@@ -1078,6 +1079,7 @@ export function CompanionSetup({
         </form>
       </section>
       <div className="onboarding__scene" aria-hidden="true">
+        <HaloOrb energy={0.45} className="onboarding__orb" />
         {step === 'you' && (
           <div className="onboarding__preview">
             <span className="onboarding__kicker">Preview</span>

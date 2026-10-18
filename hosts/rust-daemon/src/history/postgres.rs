@@ -8,8 +8,9 @@ use sqlx::{PgPool, Row};
 
 use super::{
     message_ordinal, role_name, search_tokens, searchable_text, to_i64, validate_after_query,
-    validate_filtered_query, ApprovalPageQuery, FilteredSessionSearchQuery, HistoryError,
-    HistoryMessage, HistoryStore, MessageAfterQuery, MessagePageQuery, UsagePageQuery,
+    validate_filtered_message_query, validate_filtered_query, ApprovalPageQuery,
+    FilteredMessageSearchQuery, FilteredSessionSearchQuery, HistoryError, HistoryMessage,
+    HistoryStore, MessageAfterQuery, MessagePageQuery, UsagePageQuery,
 };
 use crate::approvals::ApprovalRequest;
 use crate::attachments::AttachmentRecord;
@@ -558,6 +559,35 @@ impl HistoryStore for PostgresHistoryStore {
         .bind(prefix_tsquery(&tokens))
         .bind(agent_ids.to_vec())
         .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(decode_row).collect()
+    }
+
+    async fn search_messages_filtered(
+        &self,
+        query: &FilteredMessageSearchQuery,
+    ) -> Result<Vec<HistoryMessage>, HistoryError> {
+        validate_filtered_message_query(query)?;
+        let tokens = search_tokens(&query.query);
+        if tokens.is_empty() || query.session_ids.is_empty() || query.limit == 0 {
+            return Ok(Vec::new());
+        }
+        let rows = sqlx::query(
+            "SELECT agent_id, session_id, hidden, record FROM history_messages
+             WHERE search @@ to_tsquery('simple', $1) AND agent_id = $2 AND session_id = ANY($3)
+               AND NOT (id = ANY($4)) AND NOT hidden AND role <> 'system'
+               AND ($5::bigint IS NULL OR created_at_ms >= $5)
+               AND ($6::bigint IS NULL OR created_at_ms < $6)
+             ORDER BY created_at_ms DESC, ordinal DESC, id COLLATE \"C\" DESC LIMIT $7",
+        )
+        .bind(prefix_tsquery(&tokens))
+        .bind(&query.agent_id)
+        .bind(&query.session_ids)
+        .bind(&query.excluded_message_ids)
+        .bind(query.after_ms.map(to_i64).transpose()?)
+        .bind(query.before_ms.map(to_i64).transpose()?)
+        .bind(query.limit as i64)
         .fetch_all(&self.pool)
         .await?;
         rows.iter().map(decode_row).collect()

@@ -5,7 +5,9 @@ use super::{
     transport::{error, BrowserErrorCode},
 };
 use crate::tools::workspace_bytes::WorkspaceBytes;
-use anima_core::browser::{BrowserArtifact, BrowserArtifactKind, BrowserError, BrowserScope};
+use anima_service_adapters::browser::{
+    BrowserArtifact, BrowserArtifactKind, BrowserError, BrowserScope,
+};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{

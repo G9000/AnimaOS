@@ -11,6 +11,7 @@ import {
   type CreateDiscordConnectorInput,
 } from '../lib/daemon-api';
 import { safeDiscordError } from '../lib/discord';
+import { useConnectorLifetime } from './useConnectorLifetime';
 
 export const DISCORD_STATUS_POLL_MS = 10_000;
 interface StatusRead {
@@ -20,7 +21,13 @@ interface StatusRead {
 }
 
 /** Separate native Discord state; stale responses cannot cross owner selections. */
-export function useDiscordIntegrations(agentId: string | null, active = false) {
+export function useDiscordIntegrations(
+  agentId: string | null,
+  active = false,
+  online = true,
+  epoch = 0,
+) {
+  const scope = useConnectorLifetime(agentId, online, epoch);
   const lifetime = useRef(0);
   const mutation = useRef(0);
   const activeAgent = useRef(agentId);
@@ -43,16 +50,21 @@ export function useDiscordIntegrations(agentId: string | null, active = false) {
     setBusy(null);
     setError(null);
     setAvailable(false);
-    setLoading(Boolean(agentId));
+    setLoading(Boolean(agentId) && online);
     return () => {
       lifetime.current++;
       mutation.current++;
       activeAgent.current = null;
     };
-  }, [agentId]);
+  }, [agentId, online, epoch]);
   const readStatus = useCallback(
     async (preserveError = false): Promise<void> => {
-      if (!agentId || activeAgent.current !== agentId || inFlight.current)
+      if (
+        !scope.isCurrent(scope.token) ||
+        !agentId ||
+        activeAgent.current !== agentId ||
+        inFlight.current
+      )
         return;
       const generation = lifetime.current;
       // Share current reads. Mutations invalidate older reads; wait for one
@@ -62,6 +74,7 @@ export function useDiscordIntegrations(agentId: string | null, active = false) {
         await previous.promise;
         if (
           generation !== lifetime.current ||
+          !scope.isCurrent(scope.token) ||
           activeAgent.current !== agentId ||
           inFlight.current
         )
@@ -79,13 +92,21 @@ export function useDiscordIntegrations(agentId: string | null, active = false) {
       claim.promise = (async () => {
         try {
           const listed = await daemon.discordConnectors(agentId);
-          if (generation !== lifetime.current || revision !== mutation.current)
+          if (
+            !scope.isCurrent(scope.token) ||
+            generation !== lifetime.current ||
+            revision !== mutation.current
+          )
             return;
           setConnectors(listed);
           setAvailable(true);
           if (!preserveError) setError(null);
         } catch (caught) {
-          if (generation !== lifetime.current || revision !== mutation.current)
+          if (
+            !scope.isCurrent(scope.token) ||
+            generation !== lifetime.current ||
+            revision !== mutation.current
+          )
             return;
           setAvailable(false);
           setError((current) =>
@@ -93,32 +114,38 @@ export function useDiscordIntegrations(agentId: string | null, active = false) {
           );
         } finally {
           if (statusRead.current === claim) statusRead.current = null;
-          if (generation === lifetime.current) setLoading(false);
+          if (generation === lifetime.current && scope.isCurrent(scope.token))
+            setLoading(false);
         }
       })();
       await claim.promise;
     },
-    [agentId],
+    [agentId, scope.token, scope.isCurrent],
   );
   useEffect(() => {
     void readStatus();
   }, [readStatus]);
   useEffect(() => {
-    if (!active || !agentId) return;
+    if (!online || !active || !agentId) return;
     void readStatus(true);
     const timer = setInterval(() => {
       if (!inFlight.current && statusRead.current === null)
         void readStatus(true);
     }, DISCORD_STATUS_POLL_MS);
     return () => clearInterval(timer);
-  }, [active, agentId, readStatus]);
+  }, [active, agentId, online, readStatus]);
   const action = useCallback(
     async (
       kind: string,
       run: () => Promise<DiscordConnector | void>,
       removedId?: string,
     ) => {
-      if (!agentId || activeAgent.current !== agentId || inFlight.current)
+      if (
+        !scope.isCurrent(scope.token) ||
+        !agentId ||
+        activeAgent.current !== agentId ||
+        inFlight.current
+      )
         return false;
       const generation = lifetime.current;
       const revision = ++mutation.current;
@@ -128,7 +155,11 @@ export function useDiscordIntegrations(agentId: string | null, active = false) {
       setAvailable(false);
       try {
         const connector = await run();
-        if (generation !== lifetime.current || revision !== mutation.current)
+        if (
+          !scope.isCurrent(scope.token) ||
+          generation !== lifetime.current ||
+          revision !== mutation.current
+        )
           return false;
         setConnectors((current) =>
           connector
@@ -137,11 +168,19 @@ export function useDiscordIntegrations(agentId: string | null, active = false) {
         );
         return true;
       } catch (caught) {
-        if (generation === lifetime.current && revision === mutation.current)
+        if (
+          scope.isCurrent(scope.token) &&
+          generation === lifetime.current &&
+          revision === mutation.current
+        )
           setError(safeDiscordError(caught));
         return false;
       } finally {
-        if (generation === lifetime.current && revision === mutation.current) {
+        if (
+          scope.isCurrent(scope.token) &&
+          generation === lifetime.current &&
+          revision === mutation.current
+        ) {
           inFlight.current = false;
           setBusy(null);
           // Failed requests may still commit lifecycle changes. Keep their
@@ -150,12 +189,13 @@ export function useDiscordIntegrations(agentId: string | null, active = false) {
         }
       }
     },
-    [agentId, readStatus],
+    [agentId, readStatus, scope.token, scope.isCurrent],
   );
   return {
-    connectors: owner === agentId ? connectors : [],
+    connectors:
+      owner === agentId && scope.isCurrent(scope.token) ? connectors : [],
     loading,
-    available: owner === agentId && available,
+    available: owner === agentId && scope.isCurrent(scope.token) && available,
     busy,
     error,
     refresh: () => readStatus(),

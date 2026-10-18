@@ -218,6 +218,10 @@ pub(crate) struct RunRecord {
     pub(crate) source: RunSource,
     #[serde(default)]
     pub(crate) source_ref: Option<String>,
+    /// Trusted host origin, independent of transport and message metadata.
+    /// Missing only in legacy records, whose adapter classifies it on restore.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) system_followup: Option<bool>,
     pub(crate) status: RunStatus,
     #[serde(default)]
     pub(crate) idempotency_key: Option<String>,
@@ -247,9 +251,15 @@ pub(crate) struct RunRecord {
     pub(crate) provider: Option<String>,
     #[serde(default)]
     pub(crate) parent_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) async_helper: Option<super::AsyncHelper>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) helper_completion: Option<super::HelperCompletion>,
     /// The committed final reply of a completed run (spec §4.4 item 3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) reply_message_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reply_sha256: Option<String>,
     /// Steers accepted into this run that are in no committed transcript or
     /// run of their own yet, oldest first: each leaves in the save that puts
     /// it in one, and a restart offers the rest again (audit I3).
@@ -268,6 +278,10 @@ pub(crate) struct RunRecord {
     /// Set once the history store holds this terminal record (spec §4.1).
     #[serde(default)]
     pub(crate) mirrored: bool,
+    /// In-process proof that this terminal outcome was durably saved and
+    /// published. Restore closes callback rights instead of restoring proof.
+    #[serde(skip)]
+    pub(crate) terminal_published: bool,
 }
 
 /// What the coordinator knows when a run starts.
@@ -293,6 +307,7 @@ impl RunRecord {
             session_id: start.session_id,
             source: start.source,
             source_ref: start.source_ref,
+            system_followup: Some(false),
             status: RunStatus::Running,
             idempotency_key: start.idempotency_key,
             input: RunInput {
@@ -312,11 +327,15 @@ impl RunRecord {
             model: start.model,
             provider: start.provider,
             parent_run_id: start.parent_run_id,
+            async_helper: None,
+            helper_completion: None,
             reply_message_id: None,
+            reply_sha256: None,
             pending_steers: Vec::new(),
             read_steer_keys: Vec::new(),
             steered_keys: Vec::new(),
             mirrored: false,
+            terminal_published: false,
         }
     }
 
@@ -330,6 +349,8 @@ impl RunRecord {
 
     /// A queued run starts executing now, with the model it runs on.
     pub(crate) fn start(&mut self, model: String, provider: Option<String>, now_ms: u64) {
+        self.reply_sha256 = None;
+        self.terminal_published = false;
         self.status = RunStatus::Running;
         self.started_at_ms = Some(now_ms.max(self.created_at_ms));
         self.model = model;
@@ -341,10 +362,32 @@ impl RunRecord {
     /// commit) replaces an earlier one, so the history store's copy, if any,
     /// is written again.
     pub(crate) fn finish(&mut self, status: RunStatus, error: Option<RunError>, now_ms: u64) {
+        self.reply_sha256 = None;
+        self.terminal_published = false;
         self.status = status;
         self.error = error;
         self.finished_at_ms = Some(now_ms.max(self.created_at_ms));
         self.mirrored = false;
+        if let Some(helper) = &mut self.async_helper {
+            if matches!(
+                helper.completion,
+                super::HelperCompletionState::AwaitingResult { .. }
+            ) && status == RunStatus::Completed
+                && self.reply_message_id.is_some()
+            {
+                helper.completion = super::HelperCompletionState::AwaitingParent {
+                    reserved_run_id: helper
+                        .completion
+                        .run_id()
+                        .expect("reserved callback identity")
+                        .into(),
+                };
+            } else if status != RunStatus::Completed {
+                helper.completion.require_review(
+                    "Helper did not commit a successful result; no completion was scheduled",
+                );
+            }
+        }
     }
 
     /// Notes a tool the run is starting: first-use order, no duplicates, and at
@@ -447,6 +490,10 @@ impl RunRecord {
     /// A run of this record's session for each steer it still holds, never
     /// started: the owner can send it again (audit I3).
     fn steers_to_send_again(&mut self) -> Vec<Self> {
+        if self.async_helper.is_some() {
+            super::async_helper::archive_steers(self);
+            return Vec::new();
+        }
         if self.pending_steers.is_empty() {
             return Vec::new();
         }
@@ -511,6 +558,13 @@ pub(crate) struct RunLedger {
 }
 
 impl RunLedger {
+    pub(super) fn records_for_helpers(&self) -> Vec<RunRecord> {
+        self.records
+            .values()
+            .filter(|record| record.async_helper.is_some())
+            .cloned()
+            .collect()
+    }
     pub(crate) fn insert(&mut self, record: RunRecord) {
         self.records.insert(record.id.clone(), record);
     }
@@ -634,6 +688,38 @@ impl RunLedger {
             .values()
             .filter(|record| !record.status.is_terminal())
             .collect()
+    }
+
+    /// A queued assignment is busy before its execution obtains a slot.
+    pub(crate) fn has_active_assignment(&self, agent_id: &str) -> bool {
+        self.records
+            .values()
+            .any(|record| record.agent_id == agent_id && !record.status.is_terminal())
+    }
+
+    pub(crate) fn async_launch(&self, owner: &str, launch_key: &str) -> Option<&RunRecord> {
+        self.records.values().find(|record| {
+            record.async_helper.as_ref().is_some_and(|helper| {
+                helper.owner_agent_id == owner && helper.launch_key == launch_key
+            })
+        })
+    }
+
+    pub(crate) fn async_helpers_for_owner(&self, owner: &str) -> Vec<&RunRecord> {
+        let mut records: Vec<_> = self
+            .records
+            .values()
+            .filter(|record| {
+                record
+                    .async_helper
+                    .as_ref()
+                    .is_some_and(|helper| helper.owner_agent_id == owner)
+            })
+            .collect();
+        records.sort_by(|left, right| {
+            (right.created_at_ms, &right.id).cmp(&(left.created_at_ms, &left.id))
+        });
+        records
     }
 
     /// `(agentId, sessionId)` of every run that is queued, running, or awaiting approval.
@@ -805,10 +891,20 @@ impl RunLedger {
     /// last 24 hours up to 50; a terminal run leaves only once the history
     /// store holds it (spec §4.1).
     pub(crate) fn prune(&mut self, now_ms: u64) {
+        self.prune_with_pins(now_ms, &HashSet::new());
+    }
+
+    pub(crate) fn prune_with_pins(&mut self, now_ms: u64, source_pins: &HashSet<String>) {
         let cutoff = now_ms.saturating_sub(TERMINAL_RUN_RETENTION_MS);
+        let mut pinned = super::async_helper::pinned(self.records.values());
+        pinned.extend(source_pins.iter().cloned());
         let expired: Vec<String> = {
             let mut terminal: HashMap<&str, Vec<(u64, &str, bool)>> = HashMap::new();
-            for record in self.records.values().filter(|record| record.is_prunable()) {
+            for record in self
+                .records
+                .values()
+                .filter(|record| record.is_prunable() && !pinned.contains(&record.id))
+            {
                 terminal.entry(record.agent_id.as_str()).or_default().push((
                     record.finished_at_ms.unwrap_or(record.created_at_ms),
                     record.id.as_str(),
@@ -910,8 +1006,15 @@ impl RunLedger {
                     record.id
                 ));
             }
+            if record.reply_sha256.as_ref().is_some_and(|digest| {
+                record.status != RunStatus::Completed
+                    || record.reply_message_id.is_none()
+                    || !super::delegation_origin::valid_digest(digest)
+            }) {
+                return Err("Invalid committed reply digest evidence".into());
+            }
         }
-        Ok(())
+        super::async_helper::validate(records)
     }
 
     /// The ledger after a restart: runs of missing agents are dropped, queued
@@ -923,8 +1026,20 @@ impl RunLedger {
         live_agents: &HashSet<String>,
         now_ms: u64,
     ) -> Self {
+        Self::restored_with_pins(records, live_agents, now_ms, &HashSet::new())
+    }
+
+    pub(crate) fn restored_with_pins(
+        records: Vec<RunRecord>,
+        live_agents: &HashSet<String>,
+        now_ms: u64,
+        pins: &HashSet<String>,
+    ) -> Self {
         let mut ledger = Self::default();
         for mut record in records {
+            // Struct snapshots can be restored without a serde round trip.
+            // Publication is proof about this process, never restored authority.
+            record.terminal_published = false;
             if !live_agents.contains(&record.agent_id) {
                 continue;
             }
@@ -933,9 +1048,19 @@ impl RunLedger {
                 ledger.insert(steer);
             }
             record.recover_after_restart(now_ms);
+            if let Some(helper) = &mut record.async_helper {
+                if helper.completion.is_unresolved() {
+                    // History still holds the previous disposition. Preserve
+                    // the changed review evidence until it has been mirrored.
+                    record.mirrored = false;
+                }
+                helper.completion.require_review(
+                    "Daemon restarted before helper completion settled; no work was replayed",
+                );
+            }
             ledger.insert(record);
         }
-        ledger.prune(now_ms);
+        ledger.prune_with_pins(now_ms, pins);
         ledger
     }
 }
@@ -1840,6 +1965,25 @@ mod tests {
                 .input,
             Some(input)
         );
+    }
+
+    #[test]
+    fn system_followup_origin_round_trips_and_legacy_runs_default_to_owner_origin() {
+        let mut run = record("agent-a", 10);
+        let json = serde_json::to_value(&run).unwrap();
+        assert_eq!(json["systemFollowup"], serde_json::json!(false));
+        let mut legacy_json = json;
+        legacy_json
+            .as_object_mut()
+            .unwrap()
+            .remove("systemFollowup");
+        let legacy: RunRecord = serde_json::from_value(legacy_json).unwrap();
+        assert_eq!(legacy.system_followup, None);
+        run.system_followup = Some(true);
+        let restored: RunRecord =
+            serde_json::from_value(serde_json::to_value(&run).unwrap()).unwrap();
+        assert_eq!(restored.system_followup, Some(true));
+        assert_eq!(restored.source_ref, run.source_ref);
     }
     #[test]
     fn restart_pending_steer_keeps_ordered_ids_and_raw_skill() {

@@ -1631,7 +1631,10 @@ async fn m45_restore_is_disconnected_and_interrupted_cleanup_is_unavailable_with
         .await
         .unwrap();
     let snapshot = f.saved().await;
-    assert_eq!(snapshot.version, 19);
+    assert_eq!(
+        snapshot.version,
+        crate::control_plane_store::CONTROL_PLANE_STORE_VERSION
+    );
     let mut restored = DaemonState::new();
     restored
         .restore_control_plane_snapshot(snapshot.clone())

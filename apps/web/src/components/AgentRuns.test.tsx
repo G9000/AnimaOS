@@ -68,6 +68,123 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+function delegatedOutput(generation = 1) {
+  return {
+    generation,
+    sha256: String(generation).repeat(64),
+    outputs: [
+      {
+        runId: 'callback',
+        replyMessageId: 'reply',
+        outputSha256: 'a'.repeat(64),
+        preview: '<script>delegated evidence</script>',
+        previewTruncated: true,
+      },
+    ],
+  };
+}
+
+function delegatedJob(generation = 1): AgentJob {
+  const finalOutput = delegatedOutput(generation);
+  return {
+    ...job,
+    status: 'completed',
+    result: `Aggregate ${generation}`,
+    error: null,
+    finishedAtMs: 2,
+    finalOutput,
+    attempts: [
+      {
+        attempt: 1,
+        status: 'completed',
+        startedAtMs: 1,
+        finishedAtMs: 2,
+        result: `Aggregate ${generation}`,
+        error: null,
+        resultTruncated: false,
+        review: null,
+        finalOutput,
+      },
+    ],
+  };
+}
+
+it('keeps delegated work unfinished without completed review controls', async () => {
+  vi.spyOn(daemon, 'agentJobs').mockResolvedValue([
+    {
+      ...job,
+      error: null,
+      status: 'pending_delegations',
+      pendingDelegations: {
+        launchRunId: 'launch-original',
+        childRunIds: ['child-one'],
+        completionRunIds: ['callback-one'],
+      },
+    },
+  ]);
+  render(<AgentRunsView agentId="a" />);
+  expect(await screen.findByText('Waiting for helpers')).toBeVisible();
+  expect(
+    screen.queryByRole('button', { name: 'Accept result' }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('button', { name: 'Retry run' }),
+  ).not.toBeInTheDocument();
+});
+
+it('binds existing result review controls to the exact output generation and digest', async () => {
+  const completed = delegatedJob();
+  vi.spyOn(daemon, 'agentJobs').mockResolvedValue([completed]);
+  const review = vi
+    .spyOn(daemon, 'reviewAgentJob')
+    .mockResolvedValue(completed);
+  render(<AgentRunsView agentId="a" />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Accept result' }));
+  await waitFor(() =>
+    expect(review).toHaveBeenCalledWith('a', 'one', {
+      revision: 4,
+      decision: 'accepted',
+      note: '',
+      finalOutputGeneration: 1,
+      finalOutputSha256: '1'.repeat(64),
+    }),
+  );
+});
+
+it('starts new review feedback when the same attempt publishes another generation', async () => {
+  const list = vi
+    .spyOn(daemon, 'agentJobs')
+    .mockResolvedValue([delegatedJob()]);
+  render(<AgentRunsView agentId="a" />);
+  fireEvent.change(await screen.findByLabelText('Review feedback'), {
+    target: { value: 'Feedback for generation one' },
+  });
+  list.mockResolvedValue([{ ...delegatedJob(2), revision: 5 }]);
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh runs' }));
+  await screen.findByText('Aggregate 2');
+  expect(screen.getByLabelText('Review feedback')).toHaveValue('');
+});
+
+it('does not credit an earlier delegated review as acceptance of current output', async () => {
+  const current = delegatedJob(2);
+  current.attempts[0].review = {
+    decision: 'accepted',
+    note: 'Old output only',
+    reviewedAtMs: 2,
+    finalOutputGeneration: 1,
+    finalOutputSha256: '1'.repeat(64),
+  };
+  vi.spyOn(daemon, 'agentJobs').mockResolvedValue([current]);
+  render(<AgentRunsView agentId="a" />);
+  expect(
+    await screen.findByRole('button', { name: 'Accept result' }),
+  ).toBeVisible();
+  expect(screen.queryByText('Result accepted')).not.toBeInTheDocument();
+  expect(
+    screen.getByText('Review applies to an earlier output.'),
+  ).toBeVisible();
+});
+
 it('retains an uncertain submission key and preserves edits made while submitting', async () => {
   vi.spyOn(daemon, 'agentJobs').mockResolvedValue([]);
   let finish!: (value: AgentJob) => void;

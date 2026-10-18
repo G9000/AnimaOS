@@ -38,6 +38,107 @@ struct ContextAwareModelAdapter;
 struct AsyncBoundaryModelAdapter;
 
 struct StaticProvider;
+
+struct RefreshingTaskProvider {
+    refresh: bool,
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+    value: Arc<Mutex<String>>,
+}
+
+#[async_trait]
+impl Provider for RefreshingTaskProvider {
+    fn name(&self) -> &str {
+        if self.refresh {
+            "active_tasks"
+        } else {
+            "frozen_memory"
+        }
+    }
+    fn description(&self) -> &str {
+        "Recording context snapshot"
+    }
+    fn refresh_each_model_request(&self) -> bool {
+        self.refresh
+    }
+    async fn get(&self, _: &AgentRuntime, _: &Message) -> Result<ProviderResult, String> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(ProviderResult {
+            text: self.value.lock().unwrap().clone(),
+            metadata: None,
+        })
+    }
+}
+
+struct TaskContextRecordingModel {
+    requests: Arc<Mutex<Vec<String>>>,
+}
+#[async_trait]
+impl ModelAdapter for TaskContextRecordingModel {
+    fn provider(&self) -> &str {
+        "task-context-recording"
+    }
+    async fn generate(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+    ) -> Result<ModelGenerateResponse, String> {
+        self.requests.lock().unwrap().push(request.system.clone());
+        ToolCallingModelAdapter.generate(config, request).await
+    }
+}
+
+#[test]
+fn fp03_refreshing_task_context_updates_after_tool_while_memory_remains_frozen() {
+    use std::sync::atomic::AtomicUsize;
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let dynamic_calls = Arc::new(AtomicUsize::new(0));
+    let frozen_calls = Arc::new(AtomicUsize::new(0));
+    let value = Arc::new(Mutex::new("before-save".to_string()));
+    let mut runtime = AgentRuntime::new(
+        tool_config(),
+        Arc::new(TaskContextRecordingModel {
+            requests: requests.clone(),
+        }),
+    );
+    runtime.register_provider(Arc::new(RefreshingTaskProvider {
+        refresh: false,
+        calls: frozen_calls.clone(),
+        value: value.clone(),
+    }));
+    runtime.register_provider(Arc::new(RefreshingTaskProvider {
+        refresh: true,
+        calls: dynamic_calls.clone(),
+        value: value.clone(),
+    }));
+    runtime.init();
+    let result = block_on(runtime.run_with_tools(
+        Content {
+            text: "update tasks".into(),
+            ..Default::default()
+        },
+        |_, _, _| {
+            *value.lock().unwrap() = "after-save".into();
+            async {
+                TaskResult::success(
+                    Content {
+                        text: "saved".into(),
+                        ..Default::default()
+                    },
+                    0,
+                )
+            }
+        },
+    ));
+    assert_eq!(result.status, TaskStatus::Success);
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 2, "refresh adds no model calls");
+    assert!(requests[0].contains("[active_tasks]: before-save"));
+    assert!(requests[1].contains("[active_tasks]: after-save"));
+    assert!(!requests[1].contains("[active_tasks]: before-save"));
+    assert!(requests[1].contains("[frozen_memory]: before-save"));
+    assert_eq!(dynamic_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(frozen_calls.load(Ordering::SeqCst), 1);
+}
 struct AsyncProvider;
 struct RecordingEvaluator {
     calls: Arc<Mutex<Vec<String>>>,

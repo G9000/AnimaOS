@@ -38,6 +38,80 @@ impl Drop for AgentDeletionGuard {
 }
 
 impl AgentRunCoordinator {
+    /// Called under the management caller's transaction. Child suppression and
+    /// continuation stop share one durable save; no signal precedes that save.
+    pub(super) async fn stop_helper_owned(
+        &self,
+        owner: &str,
+        original: RunRecord,
+        transaction: tokio::sync::OwnedMutexGuard<()>,
+    ) -> Result<String, String> {
+        let planned = {
+            let mut guard = self.state.write().await;
+            // A historical, pruned helper has no unresolved callback rights.
+            if guard.runs.get(&original.id).is_none() {
+                let mut answer = super::async_helpers::handle(&original);
+                answer["stopAccepted"] = serde_json::json!(true);
+                answer["historical"] = serde_json::json!(true);
+                return Ok(answer.to_string());
+            }
+            let plan = guard
+                .request_helper_stop(owner, &original.id, now_millis())
+                .ok_or_else(|| "Helper run unavailable".to_string())?;
+            let persist = (!plan.undo.is_empty()).then(|| guard.control_plane_persist_request());
+            (plan, persist)
+        };
+        let (plan, persist) = planned;
+        if let Some(persist) = persist {
+            if let Err(error) = persist.save().await {
+                self.state.write().await.revert_run_stop(plan.undo);
+                return Err(format!("Could not persist helper stop: {error}"));
+            }
+        }
+        let answer = {
+            let guard = self.state.read().await;
+            for approval in &plan.approvals {
+                guard.publish_approval(approval);
+                self.approval_waiters.wake(approval);
+            }
+            for id in &plan.signal {
+                if let Some(control) = guard.live.runs().control(id) {
+                    control.cancel.cancel();
+                }
+            }
+            for record in &plan.cancelled {
+                guard.live.runs().remove(&record.id);
+                let parent = guard.live_parent_agent(&record.agent_id, &record.session_id);
+                guard
+                    .live
+                    .publish(run_status_event(record), parent.as_deref());
+            }
+            let parent = guard.live_parent_agent(&plan.run.agent_id, &plan.run.session_id);
+            guard
+                .live
+                .publish(run_status_event(&plan.run), parent.as_deref());
+            let mut answer = super::async_helpers::handle(&plan.run);
+            answer["stopAccepted"] = serde_json::json!(true);
+            answer["continuationStatus"] = plan
+                .run
+                .async_helper
+                .as_ref()
+                .and_then(|helper| helper.completion.run_id())
+                .and_then(|id| guard.runs.get(id))
+                .map(|record| serde_json::json!(record.status.as_str()))
+                .unwrap_or(serde_json::Value::Null);
+            answer.to_string()
+        };
+        drop(transaction);
+        self.pump_helper_completions(&plan.run.id).await;
+        if let Some(browser) = &self.browser {
+            for id in &plan.signal {
+                browser.retire_run(id).await;
+            }
+        }
+        Ok(answer)
+    }
+
     pub(crate) fn begin_agent_deletion(&self, agent_id: &str) -> AgentDeletionGuard {
         *self
             .deleting_agents
@@ -146,6 +220,7 @@ impl AgentRunCoordinator {
             }
         }
         drop(transaction);
+        self.pump_helper_completions(run_id).await;
         if let Some(browser) = &self.browser {
             for id in &plan.signal {
                 browser.retire_run(id).await;

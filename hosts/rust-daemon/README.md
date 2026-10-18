@@ -92,6 +92,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/runs/{run_id}/browser-scope`                                         |
 | `GET`    | `/api/agents/{agent_id}/schedules`                                                           |
 | `GET`    | `/api/agents/{agent_id}/schedules/{schedule_id}/history`                                     |
+| `GET`    | `/api/agents/{agent_id}/message-search`                                                      |
 | `GET`    | `/api/agents/{agent_id}/sessions`                                                            |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}`                                               |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/export`                                        |
@@ -187,6 +188,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/jobs/{job_id}/review`                                                |
 | `POST`   | `/api/agents/{agent_id}/learning-reviews/{review_id}/cancel`                                 |
 | `POST`   | `/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}/skill-draft`    |
+| `POST`   | `/api/agents/{agent_id}/main-chat`                                                           |
 | `POST`   | `/api/agents/{agent_id}/mcp-connections`                                                     |
 | `POST`   | `/api/agents/{agent_id}/mcp-connections/{connection_id}/connect`                             |
 | `POST`   | `/api/agents/{agent_id}/mcp-connections/{connection_id}/disconnect`                          |
@@ -469,6 +471,35 @@ The registered OpenAPI inventory now contains 197 operations, including the thre
 
 Every session route requires local-owner authorization, and reads answer `Cache-Control: no-store`.
 
+Single-session GET also returns `contextUsage: { estimatedTokens, budgetTokens,
+replyReserveTokens }`. This estimates selected model-visible conversation history
+plus the saved summary, using native selection and session calibration. Its budget
+is the context budget minus the reply reserve. System/provider context, tool
+schemas, files, and draft input are excluded; it is not total model-prompt usage.
+Empty history estimates zero. A summary larger than the usable budget retains its
+true estimate. List/create/update responses omit this field.
+
+`GET /api/agents/{agent_id}/message-search?q=...&limit=20` returns
+`{ results, hasMore }`; each result has `sessionId`, `title`, `messageId`, `role`,
+`createdAtMs`, and `snippet`. Queries contain 1–200 characters, use the existing
+word-prefix matching, and return at most 20 newest individual messages, including
+several from one conversation. Archived conversations and the current main chat
+are included; helper/delegated sessions, hidden check-ins, system messages,
+pending deletions, and other agents are excluded before the store limit. Punctuation
+alone returns no matches. Scope above 500 sessions/5000 hot IDs, unavailable stores,
+and a five-second lookup deadline return `503`; custom stores must implement the
+filtered lookup explicitly. `hasMore` can also indicate that bounded cold results
+were exhausted; narrow the query rather than walking transcript pages.
+
+The messages route also accepts `?anchor=<messageId>` for one exact owned visible
+message and its surrounding transcript, at most 20 messages (nine before and ten
+after by default). It returns the normal full transcript message DTOs plus
+`anchorMessageId` and `hasNewer`; `nextBefore` covers only the older side. This
+window does not imply continuity to the newest messages. `anchor` cannot be combined
+with `before` or `includeHidden=true`; its optional `limit` is 1–20. Missing, hidden,
+deleted, or foreign anchors return `404`; required store failures return `503`.
+Resolution uses one exact read and bounded neighbor reads, without page walking.
+
 | Method   | Path                                                    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | -------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET`    | `/api/agents/{agent_id}/sessions`                       | Sessions, newest activity first. Optional `?kind=`, `?archived=`, `?q=`, `?cursor=`, `?limit=` (1–200, default 50), and `?includeHelpers=` (default `true`). Returns `{ sessions, nextCursor }`.                                                                                                                                                                                                                                                                                                                           |
@@ -643,6 +674,22 @@ The Usage and Logs routes above and `GET /api/status` below are the owner's view
 Every automation route requires local-owner authorization (the list too, since M6), and answers `Cache-Control: no-store` with errors as `{ code, error }`. An automation is a prompt the daemon sends its agent on a trigger: `interval { intervalMs }` (whole seconds), `daily { hour, minute, timeZone }`, `cron { expression, timeZone }` (five fields — minute, hour, day of month, month, day of week — with `*`, numbers, `JAN`–`DEC`, `SUN`–`SAT`, ranges, steps, and lists, or `@hourly`, `@daily`, `@midnight`, `@weekly`, `@monthly`, `@yearly`, `@annually`; `L`, `W`, `#`, and `?` are refused; when both day fields are restricted either may match), or `once { atMs }`, which turns itself off once it fires. Cron and daily times are wall-clock times in their IANA `timeZone`: a time a daylight-saving jump skips does not fire that day, and a repeated time fires once. `activeHours { start, end, days, timeZone }` (`HH:MM`, days 0 for Sunday to 6) keeps fires inside a window; a window whose `end` is before its `start` runs overnight from the day it starts; an interval waits for the window to open; a one-time automation takes no active hours. Each automation has a `name` (1–80 characters on one line, from the prompt when omitted), `createdBy` (`owner`, or `agent` with the session, run, and tool call that made it), `preset` (`heartbeat` or null), `counters { runs, failures, consecutiveFailures }`, and `running`. Every saved change, claim, and outcome is announced as `automation.updated` (`scheduleId`, `deleted`) on the agent's event stream. Each occurrence's outcome (`silent`, `spoke`, `failed`, or `stopped`) is kept as a fire record, saved with the outcome and mirrored to the history store's `schedule_runs` table; fire records go with their agent, not with their automation.
 
 **Limits.** An agent has at most 20 automations (a legacy browser import is exempt). Prompts may not contain invisible Unicode tag or direction-override characters, and names may not contain any invisible format character or line break. A companion with `create_automation` (a write-class tool, allowed by default) can schedule its own future runs; each one shows in its chat with Undo and on the Automations page, must be at least 5 minutes apart over its next 10 fires, and counts toward the 20. Set the companion's write policy to `ask` to approve each one. Silent check-in pairs (`CHECKIN_OK` replies) leave the control plane's hot tail once they are mirrored and older than 24 hours, wherever they sit in their session; the history store keeps them.
+
+The explicitly configured native tools `update_automation`, `resume_automation`
+and `delete_automation` manage only that agent's records. Updates patch the
+supplied fields; `clearActiveHours: true` removes the active-hours window.
+Agent timing changes and resumes retain the five-minute cadence requirement.
+These mutations recheck the live caller and its current grant inside the save
+transaction; stopping a caller or revoking its tool before admission refuses
+the change. Owner routes retain their existing behavior.
+
+`trigger_automation` is a separately granted delegate-class tool. It admits one
+manual occurrence through the same scheduler and returns before that run
+executes; the reply does not establish successful completion. The due time and
+enabled switch remain unchanged. Only an active direct Web/API/Telegram/Discord
+caller can trigger it; scheduled, delegated and helper runs cannot recursively
+trigger work. Deleting an automation does not promise to cancel already claimed
+work or undo its effects. Use the run's normal stop and outcome controls for it.
 
 | Method   | Path                                                     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | -------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -1072,3 +1119,94 @@ permission, but that can also disconnect Gmail and Calendar. Drive tokens remain
 separate from those integrations. A restart invalidates unfinished consent; start
 a fresh attempt. Live account consent, access and refresh lifetime require separate
 acceptance. The selected Rust port retains [source attribution](src/connectors/drive/HERMES-NOTICE).
+
+## Autonomous runtime
+
+The runtime owns task progress, execution, approvals, budgets, cancellation and
+recovery. Service data and workflows stay behind separately configured MCP/API
+adapters. Start the configured host with `bun dev --host rust`; none of the
+settings below automatically grants tools or connects a service.
+
+### Progress and completion review
+
+Grant `todo_list` explicitly for durable ID-aware tasks. Omit `todos` to read
+the saved list and observed revision. A full replacement must preserve complete
+objects; `merge: true` changes only supplied fields by exact task ID. Stale
+revisions save nothing. Active tasks and their ancestors are included as advisory
+context after compression.
+
+Set the selected agent's `settings.additional.completionReview` to boolean
+`true` for one advisory corrective pass before finishing when task or settled
+verification evidence is missing. Changed files need a later read-back; code
+changes also need a recognized successful verification command. This setting
+grants no tool, runs no check automatically and does not prove task correctness.
+Stop and the ordinary run budget remain authoritative.
+
+### Bounded background helpers
+
+Explicit grants for `spawn_helper_async`, `list_helper_runs`, `steer_helper`
+and `stop_helper` enable bounded background assignments. A launch returns a
+saved run handle; inspect the settled result before claiming completion. Four
+starts/helpers are shared with synchronous delegation. Assignments have at most
+eight tool turns, two minutes of execution and eight accepted steer operations.
+Chat completion can continue its original conversation after settlement; other
+callers can collect results manually, and ordinary Jobs can await origin-bound
+results. Continuations recheck current authority and require their own approvals.
+Stop does not undo completed effects. Restart closes uncertain work for review
+instead of replaying it automatically.
+
+### Explicit local Python execution
+
+On Windows, set `ANIMAOS_RS_TOOL_RPC_PYTHON_PATH` to an existing absolute
+trusted Python 3.10+ executable before host startup. Grant an ordinary agent both
+`execute_code` and `bash`, plus any native tools its program needs. There is no
+PATH discovery, interpreter installation or automatic setup. Programs can import
+their captured native tool intersection from `anima_tools`; every native call
+retains its own validation, approval and durable receipt.
+
+Each execution starts fresh. Four physical cells are shared by the host, with
+one per exact agent/session scope, bounded output and a five-minute maximum
+deadline. Helpers, recursive execution, browser/MCP calls and background-process
+tools are excluded from the bridge. Timeout and caller loss retain cleanup
+ownership until process-tree and transport retirement are proven. This is
+approved arbitrary local execution with the user's OS access, not a sandbox.
+
+### Selected native-file recovery
+
+On Windows, set `ANIMAOS_RS_CHECKPOINT_ROOT` to an absolute private directory
+outside the selected workspace before startup. A fresh directory receives
+private access controls; its existing parent must already be private to the
+owner and trusted system administrators. Existing insecure directories are
+refused; the daemon does not repair their permissions. With this
+opt-in, `write_file`, `edit_file` and `multi_edit` save an exact preimage
+before changing one ordinary workspace file and acknowledge its postimage and
+original native receipt. Existing parent directories are required. Tool replies
+include `filesystemCheckpointId`. Disabled mode keeps existing tool behavior.
+
+Grant `checkpoint_list` and `checkpoint_restore` separately. Listing takes no
+arguments; restore accepts only `{"checkpoint_id":"returned id"}`. Normal
+read/write policy and approvals apply. Recovery requires a direct ordinary run
+of the original owner; helpers, delegated runs and parent-linked continuations
+cannot recover. IDs grant no scope authority. Current grants, Stop, configuration
+and the physical workspace binding are rechecked before effects. Protected
+instruction writes also retain the exact owner-approved preimage.
+
+Restore verifies retained bytes, requires the current file to match its
+acknowledged postimage, saves a safety checkpoint and restores prior bytes or
+absence. Concurrent edits and protected instruction restoration are refused. An
+admitted restore attempt is single use, including a refused attempt. One
+checkpoint covers one native action, not a turn, directory tree, shell command
+or service transaction. An older checkpoint can conflict after a later write.
+
+The profile preserves ordinary content/absence and the basic read-only bit;
+timestamps, ACL history, alternate streams and other platforms are outside its
+contract. Limits are 10 MiB per file, 64 MiB capture content, 500 MiB physical
+store and 20 capture records per namespace. A safety slot is reserved before
+mutation, permitting at most 19 mutations before that reserve is exhausted;
+safety captures also consume records. New writes refuse when full. No automatic
+pruning, aging or forced overwrite is performed.
+
+Missing/corrupt evidence or an interrupted checkpoint transaction reports
+`Filesystem checkpoint RecoveryRequired`. Unknown effects stop further native
+effects in that run and require explicit review. Restoring daemon state does
+not replay effects or mark unfinished tasks complete.

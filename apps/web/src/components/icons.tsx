@@ -94,6 +94,14 @@ export const HeartIcon = (p: IconProps) =>
     p,
     <path d="M20.8 5.6a5 5 0 0 0-7.1 0L12 7.3l-1.7-1.7a5 5 0 0 0-7.1 7.1L12 21l8.8-8.3a5 5 0 0 0 0-7.1z" />,
   );
+export const InboxIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <path d="M22 12h-6l-2 3h-4l-2-3H2" />
+      <path d="M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z" />
+    </>,
+  );
 export const ChartIcon = (p: IconProps) =>
   base(p, <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />);
 export const MicIcon = (p: IconProps) =>

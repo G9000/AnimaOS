@@ -1,5 +1,5 @@
 //! Native Telegram bridge. Credentials never enter portable DTOs or metadata.
-use anima_core::connectors::{
+use anima_service_adapters::connectors::{
     ConnectorErrorKind, ConnectorFailure, ConnectorReceiveRequest, ConnectorSendRequest,
     ConnectorTransport as AsyncConnectorTransport,
 };

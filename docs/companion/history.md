@@ -1,5 +1,19 @@
 # Conversation history as evidence
 
+The owner console also provides **Messages** results in Ctrl K. Unlike the
+agent's conversation-discovery tool below, console search can return several
+individual matches in one conversation, including the current main chat and
+archived conversations. It uses the selected companion's own eligible history,
+with the same hidden/system/helper/deletion exclusions. The newest 20 matches
+are shown at most, with a more-results indication rather than an unbounded scan.
+Failures and scope limits are reported explicitly.
+
+Selecting a result opens its exact message with at most 19 surrounding messages.
+The historical window stays separate from the latest live tail; **Return to
+latest messages** restores normal viewing. This owner read uses the ordinary
+transcript projection and does not grant the agent additional tools or memory
+permissions. The existing agent-tool excerpts and limits below remain separate.
+
 Anima can discover its own earlier conversations and read a small window around
 one matching message. In agent Settings, **Allow reading conversation context**
 adds the optional `read_conversation_window` tool. It is off by default; changing
@@ -14,9 +28,15 @@ nonnegative JavaScript-safe integer epoch milliseconds. The matching message
 must be at or after `after_ms` and before `before_ms`; when both are provided,
 `after_ms` must be earlier. These are message timestamps, not session-start dates.
 
-Search excludes the current conversation, helper/delegated sources, hidden
-messages and pending deletions. Kind and time filters apply before selecting the
-newest match in each session. Search returns structured JSON with `sessionId`,
+Search includes the current conversation when the daemon has designated it as
+the companion's persistent main chat. Other current conversations remain
+excluded, along with helper/delegated sources, hidden messages and pending
+deletions. This allows the main chat to retrieve original older turns after
+rolling compaction. Kind and time filters apply before selecting the
+newest match in each session. For the current main chat, an eligible matching
+original outside the retained context takes precedence over recent turns, so a
+question or earlier retrieval result does not mask its source. Recent matches
+remain the fallback when no such original matches. Search returns structured JSON with `sessionId`,
 `matchMessageId`, `matchedAtMs`, `role`, and a bounded snippet. Without time
 bounds, a title-only match can have a null anchor and `anchorUnavailable: true`.
 A title alone cannot satisfy message-time bounds. `hasMore` and `shortened`

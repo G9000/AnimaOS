@@ -10,7 +10,7 @@
 
 ## Reuse decision/provenance
 
-Follow the canonical [reuse-first policy](../../companion/parity-roadmap.md#reuse-first-implementation-policy) in every worker brief and combined review. Inspected upstream: `NousResearch/hermes-agent`, pinned `1fd18277267152893a8a24792b79213e7ca3f899`, `agent/background_review.py`, MIT. Reuse its bounded admission/cancellation/request-completion design through a narrow attributed Rust port. Direct Python runtime integration would require a second runtime and its agent fork can write memory/skills; both conflict with M38's one-generation advice-only boundary. Existing Rust model streaming, owner routes and durable snapshot components provide the lower-cost integration. Preserve the host notice and record actual local adaptations; UI uses existing Anima components rather than importing an incompatible desktop stack.
+Follow the canonical reuse-first policy in every worker brief and combined review. Inspected upstream: `NousResearch/hermes-agent`, pinned `1fd18277267152893a8a24792b79213e7ca3f899`, `agent/background_review.py`, MIT. Reuse its bounded admission/cancellation/request-completion design through a narrow attributed Rust port. Direct Python runtime integration would require a second runtime and its agent fork can write memory/skills; both conflict with M38's one-generation advice-only boundary. Existing Rust model streaming, owner routes and durable snapshot components provide the lower-cost integration. Preserve the host notice and record actual local adaptations; UI uses existing Anima components rather than importing an incompatible desktop stack.
 
 ## Proposed small contract
 
@@ -101,7 +101,7 @@ Frozen review fields (camelCase): `id,agentId,sourceRunId,sessionId,trigger,poli
 - Required native gate: `bun x nx run rust-daemon:test --skipNxCache`; sequential daemon lint and supported formatting checks.
 - Root selects exact existing SDK/web Nx test/type/build targets; no new target directory or parallel Cargo process.
 - Use mocks/local temporary stores first; existing isolated synthetic chat-model testing is authorized; root binds its exact case and call budget before execution. Ordinary accounts/profiles and external actions remain separately scoped.
-- Read the [locked parity roadmap](../../companion/parity-roadmap.md) and these root rulings before implementation; if source moved, revise this detailed plan before RED.
+- Read the locked parity roadmap and these root rulings before implementation; if source moved, revise this detailed plan before RED.
 - Exact next implementation resume: this plan, on a new `g9000/companion-learning-m38` branch from verified merged main; ledger `.superpowers/sdd/2026-10-13-companion-learning-m38/progress.md`.
 
 ## Architecture and file map

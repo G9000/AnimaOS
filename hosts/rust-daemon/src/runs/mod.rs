@@ -1,8 +1,24 @@
 //! Coordinator runs: the durable run ledger (spec §4.1, §4.8).
 
 mod action_receipt;
+mod async_helper;
+#[cfg(test)]
+mod async_helper_contract_tests;
+mod delegation_origin;
+#[cfg(test)]
+mod delegation_origin_tests;
 mod ledger;
 pub(crate) use action_receipt::{validate_receipts, ActionDurability, ActionReceipt, ActionStatus};
+pub(crate) use async_helper::{
+    validate_snapshot_links as validate_helper_snapshot_links, AsyncHelper, AsyncHelperBounds,
+    HelperCompletion, HelperCompletionState,
+};
+pub(crate) use delegation_origin::sha256 as committed_output_sha256;
+pub(crate) use delegation_origin::{
+    ensure_origin_evidence_capacity, origin_pins, validate_origin_snapshot, DelegationDisposition,
+    DelegationEvidence, DelegationFinalOutput, DelegationOrigin, DelegationOutput,
+    DelegationOutputBinding, PendingDelegations,
+};
 
 #[allow(unused_imports)] // Later M1 tasks consume the remaining names.
 pub(crate) use ledger::{

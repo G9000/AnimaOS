@@ -67,7 +67,12 @@ describe('single companion experience', () => {
       />,
     );
     expect(screen.getByText('My conversation')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'New chat' })).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Anima, switch agent' }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Main chat' }),
+    ).not.toBeInTheDocument();
     for (const name of ['Team', 'Operations', 'Overview']) {
       expect(
         screen.queryByRole('button', { name, exact: true }),
@@ -113,7 +118,6 @@ describe('single companion experience', () => {
     render(
       <Shell connection="offline" conversation={<div>My conversation</div>} />,
     );
-    expect(screen.getByText('Offline')).toBeVisible();
-    expect(screen.getByText('Cannot reach your companion')).toBeVisible();
+    expect(screen.getByRole('status')).toHaveTextContent('Offline');
   });
 });

@@ -124,6 +124,19 @@ pub(crate) struct FilteredSessionSearchQuery {
     pub(crate) limit: usize,
 }
 
+/// Individual visible non-system matches. All predicates, including hot-copy
+/// exclusions, apply before the bounded message limit; no session grouping.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FilteredMessageSearchQuery {
+    pub(crate) agent_id: String,
+    pub(crate) session_ids: Vec<String>,
+    pub(crate) excluded_message_ids: Vec<String>,
+    pub(crate) query: String,
+    pub(crate) after_ms: Option<u64>,
+    pub(crate) before_ms: Option<u64>,
+    pub(crate) limit: usize,
+}
+
 pub(crate) const MAX_HISTORY_WINDOW_PAGE: usize = 20;
 pub(crate) const MAX_FILTERED_HISTORY_SESSIONS: usize = 500;
 pub(crate) const MAX_FILTERED_HISTORY_EXCLUSIONS: usize = 5000;
@@ -186,6 +199,21 @@ fn validate_filtered_query(query: &FilteredSessionSearchQuery) -> Result<(), His
         ));
     }
     Ok(())
+}
+
+fn validate_filtered_message_query(query: &FilteredMessageSearchQuery) -> Result<(), HistoryError> {
+    if query.limit > 21 {
+        return Err(HistoryError::new("filtered message search exceeds 21 rows"));
+    }
+    validate_filtered_query(&FilteredSessionSearchQuery {
+        agent_id: query.agent_id.clone(),
+        session_ids: query.session_ids.clone(),
+        excluded_message_ids: query.excluded_message_ids.clone(),
+        query: query.query.clone(),
+        after_ms: query.after_ms,
+        before_ms: query.before_ms,
+        limit: query.limit,
+    })
 }
 
 /// One page of decided approvals, newest first by `(createdAtMs, id)`.
@@ -408,6 +436,18 @@ pub(crate) trait HistoryStore: Send + Sync {
     ) -> Result<Vec<HistoryMessage>, HistoryError> {
         Err(HistoryError::new(
             "filtered history search is unsupported by this store",
+        ))
+    }
+
+    /// Exact allowed scope, hidden/system and hot-copy exclusions precede
+    /// LIMIT. Custom stores must implement this port explicitly, never fall
+    /// back to a global or grouped search followed by filtering.
+    async fn search_messages_filtered(
+        &self,
+        _query: &FilteredMessageSearchQuery,
+    ) -> Result<Vec<HistoryMessage>, HistoryError> {
+        Err(HistoryError::new(
+            "filtered message search is unsupported by this store",
         ))
     }
 

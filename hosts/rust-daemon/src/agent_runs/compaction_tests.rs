@@ -28,6 +28,158 @@ use crate::state::{DaemonState, RunBuild};
 /// A 26-token summary: with it, the newer hot turn (22) no longer fits.
 const LONG_SUMMARY: &str = "They planned a trip to Lisbon in May and asked for two hotel options.";
 
+#[tokio::test]
+async fn fp03_review_startup_active_context_cannot_authorize_blind_id_aware_replacement() {
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![anima_core::ToolCall {
+            id: "blind-task-replacement".into(),
+            name: "todo_list".into(),
+            args: [("todos".into(), DataValue::Array(vec![]))].into(),
+        }]),
+        Step::Text(vec!["The saved task list must be read before replacement."]),
+    ]);
+    let (coordinator, agent_id) = session(model.clone(), 8192.0, false).await;
+    let private = tempfile::tempdir().unwrap();
+    let task_path = private
+        .path()
+        .join(".animaos-swarm")
+        .join("agent-tasks")
+        .join(format!(
+            "{}.json",
+            agent_id
+                .bytes()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        ));
+    std::fs::create_dir_all(task_path.parent().unwrap()).unwrap();
+    let tasks: Vec<_> = (0..10).map(|i| serde_json::json!({"id":format!("t{i}"),"content":"x".repeat(3900),"activeForm":"Working","status":"pending"})).collect();
+    let bytes = serde_json::to_vec_pretty(&tasks).unwrap();
+    std::fs::write(&task_path, &bytes).unwrap();
+    {
+        let mut state = coordinator.state.write().await;
+        state.workspace = Some(crate::control_plane_store::WorkspaceConfig {
+            root_path: private.path().to_path_buf(),
+            company_name: "Startup task scope".into(),
+            mission: "Preserve saved tasks".into(),
+            values: vec![],
+        });
+        let mut config = state.agents[&agent_id].config().clone();
+        config.tools = Some(
+            state
+                .tool_registry
+                .resolve_descriptors(["todo_list"])
+                .unwrap(),
+        );
+        state.restore_agent_config(&agent_id, config);
+        state.approvals.set_policy(
+            &agent_id,
+            crate::approvals::ApprovalPolicy::default().with(
+                crate::approvals::RiskClass::Write,
+                crate::approvals::PolicyAction::Allow,
+            ),
+        );
+    }
+    coordinator
+        .run(chat_request(
+            &agent_id,
+            "chat:long",
+            "Continue my saved work",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read(task_path).unwrap(),
+        bytes,
+        "startup/context is not a complete-list observation"
+    );
+    assert_eq!(model.requests().len(), 2);
+    assert!(model.requests()[1]
+        .messages
+        .iter()
+        .any(|m| m.role == MessageRole::Tool
+            && m.content
+                .text
+                .contains("No complete task revision observed")));
+}
+
+#[tokio::test]
+async fn fp03_structured_tasks_survive_compaction_as_exact_active_lineage() {
+    let model = ScriptedModel::with_secondary(
+        vec![Step::Text(vec!["Continuing the active task"])],
+        vec![Step::Text(vec!["The earlier conversation was summarized."])],
+    );
+    let (coordinator, agent_id) = long_session(model.clone(), true).await;
+    let private = tempfile::tempdir().unwrap();
+    let task_path = private
+        .path()
+        .join(".animaos-swarm")
+        .join("agent-tasks")
+        .join(format!(
+            "{}.json",
+            agent_id
+                .bytes()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        ));
+    std::fs::create_dir_all(task_path.parent().unwrap()).unwrap();
+    let bytes = serde_json::to_vec_pretty(&serde_json::json!([
+        {"id":"grandparent","content":"Completed grandparent exact","activeForm":"Finishing grandparent","status":"completed"},
+        {"id":"parent","parent":"grandparent","content":"Completed parent exact","activeForm":"Finishing parent","status":"completed"},
+        {"id":"active","parent":"parent","content":"Active grandchild exact","activeForm":"Working on the active grandchild","status":"in_progress"},
+        {"id":"done-leaf","content":"Unrelated finished task omitted","activeForm":"Finishing unrelated work","status":"completed"},
+        {"id":"cancelled-leaf","content":"Unrelated cancelled task omitted","activeForm":"Cancelling unrelated work","status":"cancelled"}
+    ])).unwrap();
+    std::fs::write(&task_path, &bytes).unwrap();
+    {
+        let mut state = coordinator.state.write().await;
+        state.workspace = Some(crate::control_plane_store::WorkspaceConfig {
+            root_path: private.path().to_path_buf(),
+            company_name: "Task context fixture".into(),
+            mission: "Preserve task state".into(),
+            values: vec![],
+        });
+        let mut config = state.agents[&agent_id].config().clone();
+        config.tools = Some(
+            state
+                .tool_registry
+                .resolve_descriptors(["todo_list"])
+                .unwrap(),
+        );
+        state.restore_agent_config(&agent_id, config);
+    }
+    coordinator
+        .run(chat_request(&agent_id, "chat:long", "book one"))
+        .await
+        .unwrap();
+    assert_eq!(
+        model.secondary_requests().len(),
+        1,
+        "only the existing compaction call"
+    );
+    assert_eq!(
+        model.requests().len(),
+        1,
+        "the task reminder adds no model call"
+    );
+    let system = &model.requests()[0].system;
+    for text in [
+        "Completed grandparent exact",
+        "Completed parent exact",
+        "Active grandchild exact",
+        "\"id\":\"active\"",
+        "\"status\":\"completed\"",
+    ] {
+        assert!(system.contains(text), "missing {text}: {system}");
+    }
+    assert!(!system.contains("Unrelated finished task omitted"));
+    assert!(!system.contains("Unrelated cancelled task omitted"));
+    assert_eq!(
+        std::fs::read(task_path).unwrap(),
+        bytes,
+        "context does not migrate or rewrite canonical tasks"
+    );
+}
+
 /// A hot message of `chat:long`, newer than every pruned one below.
 fn message(agent_id: &str, id: &str, role: MessageRole, text: &str) -> Message {
     Message {
@@ -1210,7 +1362,7 @@ async fn agent_files_compaction_keeps_admitted_workspace_tools_and_attachment_ad
 async fn document_compaction_case(automatic: bool, source: &str) {
     use crate::agent_files::{AcceptedAgentFiles, Availability};
     use crate::attachments::{files::save_upload, AttachmentKind, AttachmentRecord};
-    use anima_core::document_content::*;
+    use anima_service_adapters::document_content::*;
     let model = ScriptedModel::with_secondary(vec![], vec![Step::Text(vec!["document summary"])]);
     let (coordinator, agent_id) = long_session(model.clone(), true).await;
     let root = crate::skills::test_support::temp_workspace("document-compaction-m54");

@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use anima_core::document_content::{
+use anima_service_adapters::document_content::{
     fit_document_snapshots, DocumentBlock, DocumentExtractionStatus as Status, DocumentFormat,
     DocumentLocator, DocumentOmission as Omission, DocumentSnapshot, ExtractedDocumentText,
     PdfCoverage, MAX_DOCUMENT_RENDERED_BYTES, MAX_PDF_PAGES,

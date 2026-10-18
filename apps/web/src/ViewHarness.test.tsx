@@ -130,16 +130,15 @@ const providers: DaemonProvider[] = [
 
 const nativeSetTimeout = window.setTimeout.bind(window);
 
+/** Waits for the shell: home opens the main chat on its own. */
 async function openChat() {
-  fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
+  await screen.findByRole('button', { name: /, switch agent$/ });
 }
 
 /** Opens the thread switcher, where the sessions list lives. */
 async function openSessions(user: ReturnType<typeof userEvent.setup>) {
-  if (screen.queryByRole('dialog', { name: 'Sessions' })) return;
-  await user.click(
-    await screen.findByRole('button', { name: 'Open sessions' }),
-  );
+  if (screen.queryByRole('dialog', { name: 'History' })) return;
+  await user.click(await screen.findByRole('button', { name: 'History' }));
 }
 
 /** Opens a settings page the way the owner does: through the command menu. */
@@ -174,7 +173,7 @@ interface SessionRoutes {
 
 let routes: SessionRoutes;
 
-/** In-memory session routes: created chats are listed as `chat:new-<n>`. */
+/** Durable main-chat resolution stays separate from explicit session creation. */
 function mockSessionRoutes(): SessionRoutes {
   const state: SessionRoutes = { sessions: [] };
   let created = 0;
@@ -192,6 +191,25 @@ function mockSessionRoutes(): SessionRoutes {
   vi.spyOn(daemon, 'createSession').mockImplementation(async (agentId) => {
     created += 1;
     const session = sessionFixture(`chat:new-${created}`, { agentId });
+    state.sessions.unshift(session);
+    return session;
+  });
+  vi.spyOn(daemon, 'ensureMainSession').mockImplementation(async (agentId) => {
+    const existing = state.sessions.find(
+      (session) => session.agentId === agentId && session.mainChat === true,
+    );
+    if (existing) return existing;
+    created += 1;
+    const session = sessionFixture(`chat:new-${created}`, {
+      agentId,
+      title: 'Main chat',
+      mainChat: true,
+      capabilities: {
+        ...sessionFixture('main').capabilities,
+        archive: false,
+        delete: false,
+      },
+    });
     state.sessions.unshift(session);
     return session;
   });
@@ -344,7 +362,7 @@ it('M46 sends one explicit browser selection from an existing chat without carry
   );
 });
 
-it('M46 captures browser selection across asynchronous first-session creation', async () => {
+it('M46 sends browser selection from the resolved main session without creating another chat', async () => {
   const user = userEvent.setup();
   mockBrowserPolicy();
   vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
@@ -374,7 +392,8 @@ it('M46 captures browser selection across asynchronous first-session creation', 
       expect.any(String),
     ),
   );
-  expect(daemon.createSession).toHaveBeenCalledTimes(1);
+  expect(daemon.ensureMainSession).toHaveBeenCalledExactlyOnceWith('alpha');
+  expect(daemon.createSession).not.toHaveBeenCalled();
 });
 
 it('M46 keeps active browser scope Stop CAS and artifacts when a newer ordinary message is queued', async () => {
@@ -487,7 +506,7 @@ it('M46 keeps active browser scope Stop CAS and artifacts when a newer ordinary 
   ).toBeVisible();
 });
 
-it('M46 delayed Home creation sends captured policy A without clearing policy B in another chat', async () => {
+it('M46 main resolution does not clear a browser selection in an opened historical chat', async () => {
   const user = userEvent.setup();
   const policyA = mockBrowserPolicy();
   const policyB = {
@@ -513,11 +532,11 @@ it('M46 delayed Home creation sends captured policy A without clearing policy B 
     }),
   );
   const creating = deferred<void>();
-  const createSession = vi.mocked(daemon.createSession);
-  const createListed = createSession.getMockImplementation()!;
-  createSession.mockImplementationOnce(async (agentId) => {
+  const ensureMain = vi.mocked(daemon.ensureMainSession);
+  const resolveMain = ensureMain.getMockImplementation()!;
+  ensureMain.mockImplementationOnce(async (agentId) => {
     await creating.promise;
-    return createListed(agentId);
+    return resolveMain(agentId);
   });
   const startRun = vi
     .mocked(daemon.startRun)
@@ -526,10 +545,8 @@ it('M46 delayed Home creation sends captured policy A without clearing policy B 
     );
   render(<ViewHarness />);
   const homeInput = await screen.findByPlaceholderText('Message Alpha…');
-  await user.selectOptions(await openBrowserPolicyPicker(), policyA.id);
-  await user.type(homeInput, 'Original Home browser task');
-  await user.click(screen.getByRole('button', { name: 'Send' }));
-  await waitFor(() => expect(createSession).toHaveBeenCalledTimes(1));
+  expect(homeInput).toBeDisabled();
+  await waitFor(() => expect(ensureMain).toHaveBeenCalledTimes(1));
   expect(startRun).not.toHaveBeenCalled();
 
   await openSessions(user);
@@ -544,17 +561,7 @@ it('M46 delayed Home creation sends captured policy A without clearing policy B 
   expect(otherPicker).toHaveValue(policyB.id);
   await act(async () => creating.resolve());
 
-  await waitFor(() =>
-    expect(startRun).toHaveBeenCalledWith(
-      'alpha',
-      'chat:new-1',
-      expect.objectContaining({
-        text: 'Original Home browser task',
-        browserSelection: { policyId: policyA.id, selectedInputIds: [] },
-      }),
-      expect.any(String),
-    ),
-  );
+  expect(startRun).not.toHaveBeenCalled();
   expect(window.location.hash).toBe('#/s/existing-chat');
   expect(screen.getByLabelText('Browser policy for next message')).toHaveValue(
     policyB.id,
@@ -572,9 +579,10 @@ it('M46 delayed Home creation sends captured policy A without clearing policy B 
       expect.any(String),
     ),
   );
+  expect(daemon.createSession).not.toHaveBeenCalled();
 });
 
-it('M46 failed Home creation consumes browser selection before recovery and resend', async () => {
+it('M46 failed main resolution waits for retry before accepting a browser-selected message', async () => {
   const user = userEvent.setup();
   const policy = mockBrowserPolicy();
   vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
@@ -582,9 +590,11 @@ it('M46 failed Home creation consumes browser selection before recovery and rese
     agents: [snapshot('alpha', 'Alpha', 1)],
   });
   mockProviders();
-  const createSession = vi
-    .mocked(daemon.createSession)
-    .mockRejectedValueOnce(new Error('Temporary session creation failure'));
+  const ensureMain = vi.mocked(daemon.ensureMainSession);
+  const resolveMain = ensureMain.getMockImplementation()!;
+  ensureMain
+    .mockRejectedValueOnce(new Error('Temporary main resolution failure'))
+    .mockImplementation(resolveMain);
   const startRun = vi
     .mocked(daemon.startRun)
     .mockImplementation(async (agentId, sessionId, input) =>
@@ -592,26 +602,35 @@ it('M46 failed Home creation consumes browser selection before recovery and rese
     );
   render(<ViewHarness />);
   const input = await screen.findByPlaceholderText('Message Alpha…');
-  await user.selectOptions(await openBrowserPolicyPicker(), policy.id);
-  await user.type(input, 'Recover this first message');
-  await user.click(screen.getByRole('button', { name: 'Send' }));
-  const restore = await screen.findByRole('button', {
-    name: 'Restore message',
-  });
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Temporary main resolution failure',
+  );
+  expect(input).toBeDisabled();
   expect(startRun).not.toHaveBeenCalled();
-  await user.click(restore);
-  expect(input).toHaveValue('Recover this first message');
+  await user.click(screen.getByRole('button', { name: 'Retry main chat' }));
+  await waitFor(() =>
+    expect(screen.getByPlaceholderText('Message Alpha…')).toBeEnabled(),
+  );
+  await user.selectOptions(await openBrowserPolicyPicker(), policy.id);
+  await user.type(
+    screen.getByPlaceholderText('Message Alpha…'),
+    'Recover this first message',
+  );
   await user.click(screen.getByRole('button', { name: 'Send' }));
 
   await waitFor(() => expect(startRun).toHaveBeenCalledTimes(1));
-  expect(createSession).toHaveBeenCalledTimes(2);
+  expect(ensureMain).toHaveBeenCalledTimes(2);
+  expect(daemon.createSession).not.toHaveBeenCalled();
   const [agentId, sessionId, sentInput] = startRun.mock.calls[0];
   expect([agentId, sessionId, sentInput.text]).toEqual([
     'alpha',
     'chat:new-1',
     'Recover this first message',
   ]);
-  expect(sentInput).not.toHaveProperty('browserSelection');
+  expect(sentInput.browserSelection).toEqual({
+    policyId: policy.id,
+    selectedInputIds: [],
+  });
 });
 
 /** What the runs route answers for a message whose run already finished. */
@@ -670,10 +689,10 @@ it('keeps the companion draft and failed send while opening Work', async () => {
   const run = deferred<Awaited<ReturnType<typeof daemon.startRun>>>();
   vi.mocked(daemon.startRun).mockReturnValue(run.promise);
   render(<ViewHarness />);
-  await user.type(
-    await screen.findByPlaceholderText('Message Alpha…'),
-    'Alpha request',
-  );
+  const input = await screen.findByPlaceholderText('Message Alpha…');
+  // The main chat resolves first; typing before that goes nowhere.
+  await waitFor(() => expect(input).toBeEnabled());
+  await user.type(input, 'Alpha request');
   await user.click(screen.getByRole('button', { name: 'Send' }));
   await goToPage(user, 'Work');
   await act(async () => {
@@ -720,10 +739,10 @@ it('retains a completed reply after opening Work and keeps settings on the compa
   const run = deferred<Awaited<ReturnType<typeof daemon.startRun>>>();
   vi.mocked(daemon.startRun).mockReturnValue(run.promise);
   render(<ViewHarness />);
-  await user.type(
-    await screen.findByPlaceholderText('Message Alpha…'),
-    'Alpha request',
-  );
+  const input = await screen.findByPlaceholderText('Message Alpha…');
+  // The main chat resolves first; typing before that goes nowhere.
+  await waitFor(() => expect(input).toBeEnabled());
+  await user.type(input, 'Alpha request');
   await user.click(screen.getByRole('button', { name: 'Send' }));
   await goToPage(user, 'Work');
   current = withMessage(alpha, 'Alpha finished', 'chat:new-1');
@@ -733,7 +752,9 @@ it('retains a completed reply after opening Work and keeps settings on the compa
   expect(await screen.findByText('Alpha finished')).not.toBeVisible();
   await user.click(screen.getByRole('button', { name: 'Settings' }));
   expect(
-    within(screen.getByRole('region', { name: 'Settings' })).getByDisplayValue('Alpha'),
+    within(screen.getByRole('region', { name: 'Settings' })).getByDisplayValue(
+      'Alpha',
+    ),
   ).toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Open companion chat' }));
   expect(screen.getByText('Alpha finished')).toBeVisible();
@@ -871,6 +892,277 @@ afterEach(() => {
   sessionStorage.clear();
   window.history.replaceState(null, '', '/');
   vi.restoreAllMocks();
+});
+
+describe('persistent main conversation', () => {
+  function mainFixture() {
+    const main = sessionFixture('chat:primary', {
+      agentId: 'agent-main',
+      title: 'Our ongoing conversation',
+      mainChat: true,
+      capabilities: {
+        ...sessionFixture('chat:primary').capabilities,
+        archive: false,
+        delete: false,
+      },
+    });
+    routes.sessions.push(main);
+    vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+    vi.spyOn(daemon, 'listAgents').mockResolvedValue({
+      agents: [snapshot('agent-main', 'Nova', 1)],
+    });
+    mockProviders();
+    vi.spyOn(daemon, 'ensureMainSession').mockResolvedValue(main);
+    return main;
+  }
+
+  it('opens an exact old message through Ctrl K and restores latest without losing the draft', async () => {
+    const user = userEvent.setup();
+    mainFixture();
+    routes.sessions.push(
+      sessionFixture('chat:archive', {
+        agentId: 'agent-main',
+        title: 'Earlier decisions',
+        archived: true,
+      }),
+    );
+    const search = vi.spyOn(daemon, 'searchSessionMessages').mockResolvedValue({
+      results: [
+        {
+          sessionId: 'chat:archive',
+          title: 'Earlier decisions',
+          messageId: 'old-1',
+          role: 'user',
+          createdAtMs: 1,
+          snippet: 'cobalt original decision',
+        },
+        {
+          sessionId: 'chat:archive',
+          title: 'Earlier decisions',
+          messageId: 'old-2',
+          role: 'assistant',
+          createdAtMs: 2,
+          snippet: 'cobalt follow-up',
+        },
+      ],
+      hasMore: false,
+    });
+    vi.mocked(daemon.sessionMessages).mockImplementation(
+      async (_agent, sessionId, options = {}) =>
+        options.anchor
+          ? {
+              messages: [
+                {
+                  id: 'old-1',
+                  role: 'user',
+                  text: 'Exact old decision from the saved transcript.',
+                  attachments: [],
+                  metadata: {},
+                  createdAtMs: 1,
+                },
+              ],
+              nextBefore: 'older-cursor',
+              anchorMessageId: 'old-1',
+              hasNewer: true,
+            }
+          : {
+              messages:
+                sessionId === 'chat:archive'
+                  ? [
+                      {
+                        id: 'latest-1',
+                        role: 'assistant',
+                        text: 'Latest saved reply.',
+                        attachments: [],
+                        metadata: {},
+                        createdAtMs: 1000,
+                      },
+                    ]
+                  : [],
+              nextBefore: null,
+            },
+    );
+    render(<ViewHarness />);
+    await waitFor(() =>
+      expect(window.location.hash).toBe('#/s/chat%3Aprimary'),
+    );
+    await user.keyboard('{Control>}k{/Control}');
+    await user.type(
+      screen.getByRole('combobox', { name: 'Search commands' }),
+      'cobalt',
+    );
+    await user.click(await screen.findByText('cobalt original decision'));
+    await waitFor(() =>
+      expect(window.location.hash).toBe('#/s/chat%3Aarchive?messageId=old-1'),
+    );
+    const oldText = await screen.findByText(
+      'Exact old decision from the saved transcript.',
+    );
+    expect(oldText.closest('.studio-message-anchor')).toHaveAttribute(
+      'data-search-match',
+      'true',
+    );
+    expect(screen.queryByText('Latest saved reply.')).not.toBeInTheDocument();
+    expect(search).toHaveBeenCalledWith('agent-main', {
+      q: 'cobalt',
+      limit: 20,
+      signal: expect.any(AbortSignal),
+    });
+    expect(
+      vi
+        .mocked(daemon.sessionMessages)
+        .mock.calls.filter((call) => call[2]?.anchor),
+    ).toHaveLength(1);
+    const field = screen.getByPlaceholderText('Message Nova…');
+    await user.type(field, 'Keep this thought');
+    await user.keyboard('{Control>}k{/Control}');
+    await user.type(
+      screen.getByRole('combobox', { name: 'Search commands' }),
+      'cobalt',
+    );
+    await user.click(await screen.findByText('cobalt original decision'));
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(daemon.sessionMessages)
+          .mock.calls.filter((call) => call[2]?.anchor),
+      ).toHaveLength(2),
+    );
+    expect(
+      await screen.findByText('Exact old decision from the saved transcript.'),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole('button', { name: 'Return to latest messages' }),
+    );
+    await waitFor(() =>
+      expect(window.location.hash).toBe('#/s/chat%3Aarchive'),
+    );
+    expect(await screen.findByText('Latest saved reply.')).toBeVisible();
+    expect(screen.getByPlaceholderText('Message Nova…')).toHaveValue(
+      'Keep this thought',
+    );
+    expect(
+      screen.queryByText('Exact old decision from the saved transcript.'),
+    ).not.toBeInTheDocument();
+    expect(daemon.createSession).not.toHaveBeenCalled();
+  });
+
+  it('resumes the saved main identity from home and after reload without creating a chat', async () => {
+    mainFixture();
+    const first = render(<ViewHarness />);
+    await waitFor(() =>
+      expect(window.location.hash).toBe('#/s/chat%3Aprimary'),
+    );
+    expect(
+      // The main chat has no title row: the top bar names it.
+      await screen.findByRole('region', { name: 'Our ongoing conversation' }),
+    ).toBeVisible();
+    first.unmount();
+    window.history.replaceState(null, '', '/#/');
+    render(<ViewHarness />);
+    await waitFor(() =>
+      expect(window.location.hash).toBe('#/s/chat%3Aprimary'),
+    );
+    expect(daemon.createSession).not.toHaveBeenCalled();
+    expect(routes.sessions).toHaveLength(1);
+  });
+
+  it('keeps a historical deep link and returns to the same main chat', async () => {
+    mainFixture();
+    routes.sessions.push(
+      sessionFixture('chat:old', { title: 'Previous conversation' }),
+    );
+    window.history.replaceState(null, '', '/#/s/chat%3Aold');
+    render(<ViewHarness />);
+    expect(
+      await screen.findByRole('heading', { name: 'Previous conversation' }),
+    ).toBeVisible();
+    expect(window.location.hash).toBe('#/s/chat%3Aold');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Main chat', exact: true }),
+    );
+    await waitFor(() =>
+      expect(window.location.hash).toBe('#/s/chat%3Aprimary'),
+    );
+    expect(routes.sessions).toHaveLength(2);
+    expect(daemon.createSession).not.toHaveBeenCalled();
+  });
+
+  it('preserves both a saved primary draft and a legacy home draft when home resolves', async () => {
+    mainFixture();
+    sessionStorage.setItem(
+      'animaos.draft.agent-main/home',
+      'Legacy home thought',
+    );
+    sessionStorage.setItem(
+      'animaos.draft.agent-main/session:chat:primary',
+      'Existing primary thought',
+    );
+    const first = render(<ViewHarness />);
+    await waitFor(() =>
+      expect(window.location.hash).toBe('#/s/chat%3Aprimary'),
+    );
+    const expected = 'Existing primary thought\n\nLegacy home thought';
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText('Message Nova…')).toHaveValue(
+        expected,
+      ),
+    );
+    first.unmount();
+    render(<ViewHarness />);
+    expect(await screen.findByPlaceholderText('Message Nova…')).toHaveValue(
+      expected,
+    );
+    expect(daemon.createSession).not.toHaveBeenCalled();
+  });
+
+  it('blocks a failed main resolution until explicit retry without creating a fallback session', async () => {
+    const main = mainFixture();
+    vi.mocked(daemon.ensureMainSession)
+      .mockRejectedValueOnce(new Error('main store unavailable'))
+      .mockResolvedValue(main);
+    render(<ViewHarness />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'main store unavailable',
+    );
+    expect(screen.getByPlaceholderText('Message Nova…')).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry main chat' }));
+    await waitFor(() =>
+      expect(window.location.hash).toBe('#/s/chat%3Aprimary'),
+    );
+    expect(daemon.createSession).not.toHaveBeenCalled();
+  });
+
+  it('ignores the previous companion main resolution after Reset promotes another companion', async () => {
+    const user = userEvent.setup();
+    const first = snapshot('agent-first', 'First', 1);
+    const next = snapshot('agent-next', 'Next', 2);
+    vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+    vi.spyOn(daemon, 'listAgents').mockResolvedValue({ agents: [first, next] });
+    vi.spyOn(daemon, 'deleteAgent').mockResolvedValue({ deleted: true });
+    mockProviders();
+    const oldMain = deferred<Session>();
+    vi.mocked(daemon.ensureMainSession).mockReturnValueOnce(oldMain.promise);
+    render(<ViewHarness />);
+    expect(await screen.findByPlaceholderText('Message First…')).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await user.click(screen.getByRole('button', { name: 'Reset' }));
+    await screen.findByRole('heading', { name: 'Say something to Next' });
+    await waitFor(() => expect(window.location.hash).toBe('#/s/chat%3Anew-1'));
+    await act(async () =>
+      oldMain.resolve(
+        sessionFixture('chat:old-main', {
+          agentId: first.state.id,
+          mainChat: true,
+        }),
+      ),
+    );
+    expect(window.location.hash).toBe('#/s/chat%3Anew-1');
+    expect(screen.getByPlaceholderText('Message Next…')).toBeEnabled();
+    expect(daemon.ensureMainSession).toHaveBeenCalledWith('agent-next');
+    expect(daemon.createSession).not.toHaveBeenCalled();
+    expect(daemon.startRun).not.toHaveBeenCalled();
+  });
 });
 
 describe('ViewHarness workspace controller', () => {
@@ -1035,6 +1327,8 @@ describe('ViewHarness workspace controller', () => {
     render(<ViewHarness />);
 
     const composer = await screen.findByPlaceholderText('Message Nova…');
+    // The main chat resolves first; typing before that goes nowhere.
+    await waitFor(() => expect(composer).toBeEnabled());
     await user.type(composer, 'Half-written thought');
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     expect(window.location.hash).toBe('#/profile');
@@ -1044,7 +1338,9 @@ describe('ViewHarness workspace controller', () => {
       within(settings).getByRole('button', { name: 'Profile' }),
     ).toHaveAttribute('aria-current', 'page');
 
-    await user.click(screen.getByRole('button', { name: 'Open companion chat' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Open companion chat' }),
+    );
     expect(
       screen.queryByRole('region', { name: 'Settings' }),
     ).not.toBeInTheDocument();
@@ -1136,17 +1432,18 @@ describe('ViewHarness workspace controller', () => {
         expect.any(String),
       ),
     );
-    expect(daemon.createSession).toHaveBeenCalledWith('agent-a');
+    expect(daemon.ensureMainSession).toHaveBeenCalledWith('agent-a');
+    expect(daemon.createSession).not.toHaveBeenCalled();
 
-    expect(screen.getByRole('heading', { name: 'Alpha', level: 1 })).toBeVisible();
+    expect(
+      screen.getByRole('heading', { name: 'Alpha', level: 1 }),
+    ).toBeVisible();
     expect(
       screen.queryByRole('button', { name: 'Message Beta' }),
     ).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Settings' }));
-    expect(
-      screen.getByRole('region', { name: 'Settings' }),
-    ).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Settings' })).toBeVisible();
     expect(screen.getByDisplayValue('Alpha')).toBeVisible();
   });
 
@@ -1206,16 +1503,23 @@ describe('ViewHarness workspace controller', () => {
       await screen.findByRole('heading', { name: 'Say something to Next' }),
     ).toBeVisible();
     expect(removeItem).toHaveBeenCalledWith('animaos.checkins.agent-first');
+    const nextMain = routes.sessions.find(
+      (session) =>
+        session.agentId === 'agent-next' && session.mainChat === true,
+    );
+    expect(nextMain).toBeDefined();
+    expect(daemon.ensureMainSession).toHaveBeenCalledWith('agent-next');
     await user.type(screen.getByPlaceholderText('Message Next…'), 'Continue');
     await user.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() =>
       expect(startRun).toHaveBeenCalledWith(
         'agent-next',
-        'chat:new-1',
+        nextMain!.id,
         { text: 'Continue', mode: 'queue' },
         expect.any(String),
       ),
     );
+    expect(daemon.createSession).not.toHaveBeenCalled();
     expect(await screen.findByText('Next is responsive')).toBeVisible();
   });
 
@@ -1305,7 +1609,9 @@ describe('ViewHarness workspace controller', () => {
     await waitFor(() =>
       expect(screen.getByRole('radio', { name: /^Operate/ })).toBeChecked(),
     );
-    await user.click(screen.getByRole('button', { name: 'Open companion chat' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Open companion chat' }),
+    );
     expect(screen.getByText('Existing conversation')).toBeVisible();
     expect(
       screen.getByRole('heading', { name: 'Nova Prime', level: 1 }),
@@ -1483,7 +1789,9 @@ describe('ViewHarness workspace controller', () => {
         screen.getByRole('heading', { name: 'Nova Prime', level: 1 }),
       ).toBeInTheDocument(),
     );
-    await user.click(screen.getByRole('button', { name: 'Open companion chat' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Open companion chat' }),
+    );
     await act(async () => {
       run.reject(new Error('Connection lost'));
     });
@@ -1556,9 +1864,7 @@ describe('ViewHarness workspace controller', () => {
     expect(close).toHaveAccessibleDescription(/until the change finishes/i);
     expect(screen.getByRole('button', { name: 'Model' })).toBeDisabled();
     await user.click(close);
-    expect(
-      screen.getByRole('region', { name: 'Settings' }),
-    ).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Settings' })).toBeVisible();
 
     await act(async () => {
       deletion.reject(new Error('DELETE denied'));
@@ -1616,7 +1922,9 @@ describe('ViewHarness workspace controller', () => {
     render(<ViewHarness />);
 
     await screen.findByText('Existing conversation');
-    expect(screen.getByRole('heading', { name: 'Nova', level: 1 })).toBeVisible();
+    expect(
+      screen.getByRole('heading', { name: 'Nova', level: 1 }),
+    ).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     const name = screen.getByDisplayValue('Nova');
     await user.clear(name);
@@ -1634,9 +1942,7 @@ describe('ViewHarness workspace controller', () => {
     expect(close).toBeDisabled();
     expect(close).toHaveAccessibleDescription(/until the change finishes/i);
     await user.click(close);
-    expect(
-      screen.getByRole('region', { name: 'Settings' }),
-    ).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Settings' })).toBeVisible();
 
     await act(async () => {
       update.reject(new Error('PATCH denied'));
@@ -1652,9 +1958,7 @@ describe('ViewHarness workspace controller', () => {
     expect(
       screen.getByRole('heading', { name: 'Nova', level: 1, hidden: true }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole('region', { name: 'Settings' }),
-    ).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Settings' })).toBeVisible();
     expect(close).toBeEnabled();
     await user.click(close);
     expect(
@@ -1756,9 +2060,7 @@ describe('ViewHarness workspace controller', () => {
       stalePoll.resolve({ agents: [nova] });
       await stalePoll.promise;
     });
-    expect(
-      screen.getByRole('heading', { name: 'Meet anima.' }),
-    ).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Meet anima.' })).toBeVisible();
     expect(
       screen.queryByRole('heading', { name: 'Say something to Nova' }),
     ).not.toBeInTheDocument();
@@ -1778,8 +2080,9 @@ describe('ViewHarness workspace controller', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(screen.getByRole('heading', { name: 'Nova', level: 1 })).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
+    expect(
+      screen.getByRole('heading', { name: 'Nova', level: 1 }),
+    ).toBeVisible();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5_000);
@@ -2393,7 +2696,10 @@ it('keeps each conversation draft across a reload', async () => {
   expect(await screen.findByPlaceholderText('Message Nova…')).toHaveValue(
     'Half-written thought',
   );
-  await user.click(screen.getByRole('button', { name: 'New chat' }));
+  // The way back appears once the side thread is known from the session list.
+  await user.click(
+    await screen.findByRole('button', { name: 'Main chat', exact: true }),
+  );
   expect(screen.getByPlaceholderText('Message Nova…')).toHaveValue('');
 });
 
@@ -2442,7 +2748,9 @@ it('keeps drafts in memory when session storage refuses them', async () => {
   await waitFor(() =>
     expect(screen.getByPlaceholderText('Message Nova…')).toHaveValue(''),
   );
-  await user.click(screen.getByRole('button', { name: 'New chat' }));
+  await user.click(
+    screen.getByRole('button', { name: 'Main chat', exact: true }),
+  );
   expect(screen.getByPlaceholderText('Message Nova…')).toHaveValue(
     'Keep this thought',
   );
@@ -2478,40 +2786,37 @@ it('offers a message still retrying when the page reloads before it is answered 
   expect(keys[1]).toBe(keys[0]);
 });
 
-it('creates one session for the first send and moves text typed meanwhile into it', async () => {
+it('keeps a follow-up draft in the same main session while the first send is accepted', async () => {
   const user = userEvent.setup();
   vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
   vi.spyOn(daemon, 'listAgents').mockResolvedValue({
     agents: [snapshot('agent-main', 'Nova', 1)],
   });
   mockProviders();
-  const creating = deferred<void>();
-  const createSession = vi.mocked(daemon.createSession);
-  const createListed = createSession.getMockImplementation()!;
-  createSession.mockImplementationOnce(async (agentId) => {
-    await creating.promise;
-    return createListed(agentId);
-  });
+  const accepting = deferred<void>();
   const startRun = vi
     .mocked(daemon.startRun)
     .mockImplementation(async (id, sessionId, input) => {
       // The daemon titles a new chat from its first message.
       setSessionFields(sessionId, { title: input.text });
+      await accepting.promise;
       return acceptedRun(id, sessionId, input.text);
     });
   render(<ViewHarness />);
   await openChat();
   const input = await screen.findByPlaceholderText('Message Nova…');
+  await waitFor(() => expect(input).toBeEnabled());
   await user.type(input, 'First question');
   await user.click(screen.getByRole('button', { name: 'Send' }));
-  await user.type(input, 'A follow-up{Enter}');
+  await user.type(input, 'A follow-up');
 
-  await act(async () => creating.resolve());
+  await act(async () => accepting.resolve());
   await waitFor(() => expect(window.location.hash).toBe('#/s/chat%3Anew-1'));
   expect(screen.getByPlaceholderText('Message Nova…')).toHaveValue(
     'A follow-up',
   );
-  expect(createSession).toHaveBeenCalledTimes(1);
+  expect(daemon.ensureMainSession).toHaveBeenCalledOnce();
+  expect(daemon.createSession).not.toHaveBeenCalled();
   expect(startRun).toHaveBeenCalledTimes(1);
   expect(startRun).toHaveBeenCalledWith(
     'agent-main',
@@ -2519,14 +2824,26 @@ it('creates one session for the first send and moves text typed meanwhile into i
     { text: 'First question', mode: 'queue' },
     expect.any(String),
   );
+  // The main chat is where you are, so History lists only other chats.
   await openSessions(user);
-  await screen.findByRole('button', { name: 'First question' });
-  await user.keyboard('{Escape}');
-  await user.click(screen.getByRole('button', { name: 'New chat' }));
-  expect(screen.getByPlaceholderText('Message Nova…')).toHaveValue('');
+  expect(
+    screen.queryByRole('button', { name: 'First question' }),
+  ).not.toBeInTheDocument();
+  await user.click(
+    within(screen.getByRole('dialog', { name: 'History' })).getByRole(
+      'button',
+      { name: 'Main chat', exact: true },
+    ),
+  );
+  await waitFor(() =>
+    expect(screen.getByPlaceholderText('Message Nova…')).toHaveValue(
+      'A follow-up',
+    ),
+  );
+  expect(window.location.hash).toBe('#/s/chat%3Anew-1');
 });
 
-it('stays in a session opened while the first send was creating its chat', async () => {
+it('stays in a historical session opened while the main identity is resolving', async () => {
   const user = userEvent.setup();
   const current = withMessage(
     snapshot('agent-main', 'Nova', 1),
@@ -2545,26 +2862,35 @@ it('stays in a session opened while the first send was creating its chat', async
   );
   messagesFromSnapshot(() => current);
   const creating = deferred<void>();
-  const createSession = vi.mocked(daemon.createSession);
-  const createListed = createSession.getMockImplementation()!;
-  createSession.mockImplementationOnce(async (agentId) => {
+  const ensureMain = vi.mocked(daemon.ensureMainSession);
+  const resolveMain = ensureMain.getMockImplementation()!;
+  ensureMain.mockImplementationOnce(async (agentId) => {
     await creating.promise;
-    return createListed(agentId);
+    return resolveMain(agentId);
   });
   const startRun = vi.mocked(daemon.startRun);
   render(<ViewHarness />);
   await openChat();
-  await user.type(
-    await screen.findByPlaceholderText('Message Nova…'),
-    'Plan the launch',
-  );
-  await user.click(screen.getByRole('button', { name: 'Send' }));
+  expect(await screen.findByPlaceholderText('Message Nova…')).toBeDisabled();
   await openSessions(user);
   await user.click(
     await screen.findByRole('button', { name: 'Weekend plans' }),
   );
 
   await act(async () => creating.resolve());
+  expect(startRun).not.toHaveBeenCalled();
+  expect(window.location.hash).toBe('#/s/room-7');
+  expect(screen.getByText('Earlier answer')).toBeVisible();
+  expect(daemon.createSession).not.toHaveBeenCalled();
+  await user.click(
+    screen.getByRole('button', { name: 'Main chat', exact: true }),
+  );
+  await waitFor(() => expect(window.location.hash).toBe('#/s/chat%3Anew-1'));
+  await user.type(
+    screen.getByPlaceholderText('Message Nova…'),
+    'Plan the launch',
+  );
+  await user.click(screen.getByRole('button', { name: 'Send' }));
   await waitFor(() =>
     expect(startRun).toHaveBeenCalledWith(
       'agent-main',
@@ -2573,11 +2899,9 @@ it('stays in a session opened while the first send was creating its chat', async
       expect.any(String),
     ),
   );
-  expect(window.location.hash).toBe('#/s/room-7');
-  expect(screen.getByText('Earlier answer')).toBeVisible();
 });
 
-it('opens the new session on the conversation so a reload finds it', async () => {
+it('canonicalizes home to the main session before sending so a reload finds it', async () => {
   const user = userEvent.setup();
   vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
   vi.spyOn(daemon, 'listAgents').mockResolvedValue({
@@ -2588,11 +2912,14 @@ it('opens the new session on the conversation so a reload finds it', async () =>
   window.history.replaceState(null, '', '/#/');
   render(<ViewHarness />);
 
+  await waitFor(() => expect(window.location.hash).toBe('#/s/chat%3Anew-1'));
+  expect(daemon.startRun).not.toHaveBeenCalled();
   await user.type(await screen.findByPlaceholderText('Message Nova…'), 'Hello');
   await user.click(screen.getByRole('button', { name: 'Send' }));
 
   // A reload of the page must find the session, not a new chat.
   await waitFor(() => expect(window.location.hash).toBe('#/s/chat%3Anew-1'));
+  expect(daemon.createSession).not.toHaveBeenCalled();
 });
 
 it('shows the companion’s automations at #/automations', async () => {
@@ -2696,7 +3023,7 @@ it('#/logs and #/health show their pages', async () => {
   expect(daemon.status).toHaveBeenCalled();
 });
 
-it('keeps a page open when the first send creates its session, then returns to that session', async () => {
+it('keeps a page open while main resolution finishes and returns to that same session', async () => {
   const user = userEvent.setup();
   let current = snapshot('agent-main', 'Nova', 1);
   vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
@@ -2706,11 +3033,11 @@ it('keeps a page open when the first send creates its session, then returns to t
   mockProviders();
   messagesFromSnapshot(() => current);
   const creating = deferred<void>();
-  const createSession = vi.mocked(daemon.createSession);
-  const createListed = createSession.getMockImplementation()!;
-  createSession.mockImplementationOnce(async (agentId) => {
+  const ensureMain = vi.mocked(daemon.ensureMainSession);
+  const resolveMain = ensureMain.getMockImplementation()!;
+  ensureMain.mockImplementationOnce(async (agentId) => {
     await creating.promise;
-    return createListed(agentId);
+    return resolveMain(agentId);
   });
   const startRun = vi
     .mocked(daemon.startRun)
@@ -2724,14 +3051,23 @@ it('keeps a page open when the first send creates its session, then returns to t
     });
   render(<ViewHarness />);
   await openChat();
-  await user.type(
-    await screen.findByPlaceholderText('Message Nova…'),
-    'Plan the launch',
-  );
-  await user.click(screen.getByRole('button', { name: 'Send' }));
+  expect(await screen.findByPlaceholderText('Message Nova…')).toBeDisabled();
   await goToPage(user, 'Work');
 
   await act(async () => creating.resolve());
+  expect(startRun).not.toHaveBeenCalled();
+  expect(window.location.hash).toBe('#/work');
+  expect(
+    screen.getByRole('button', { name: 'Work', exact: true }),
+  ).toHaveAttribute('aria-current', 'page');
+
+  await user.click(screen.getByRole('button', { name: 'Open companion chat' }));
+  await waitFor(() => expect(window.location.hash).toBe('#/s/chat%3Anew-1'));
+  await user.type(
+    screen.getByPlaceholderText('Message Nova…'),
+    'Plan the launch',
+  );
+  await user.click(screen.getByRole('button', { name: 'Send' }));
   await waitFor(() =>
     expect(startRun).toHaveBeenCalledWith(
       'agent-main',
@@ -2740,14 +3076,8 @@ it('keeps a page open when the first send creates its session, then returns to t
       expect.any(String),
     ),
   );
-  expect(window.location.hash).toBe('#/work');
-  expect(
-    screen.getByRole('button', { name: 'Work', exact: true }),
-  ).toHaveAttribute('aria-current', 'page');
-
-  await user.click(screen.getByRole('button', { name: 'Open companion chat' }));
-  expect(window.location.hash).toBe('#/s/chat%3Anew-1');
   expect(await screen.findByText('Launch plan ready')).toBeVisible();
+  expect(daemon.createSession).not.toHaveBeenCalled();
 });
 
 it('asks for a daemon update instead of failing sends when sessions are missing', async () => {
@@ -2767,7 +3097,9 @@ it('asks for a daemon update instead of failing sends when sessions are missing'
   expect(input).toBeDisabled();
   fireEvent.change(input, { target: { value: 'Hello' } });
   fireEvent.keyDown(input, { key: 'Enter' });
-  expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+  // Nothing can be sent: Send is either not offered or disabled.
+  const send = screen.queryByRole('button', { name: 'Send' });
+  if (send) expect(send).toBeDisabled();
   expect(daemon.createSession).not.toHaveBeenCalled();
   expect(startRun).not.toHaveBeenCalled();
 });
@@ -2807,7 +3139,7 @@ it('keeps an opened page when the open session finishes deleting behind it', asy
 
   expect(window.location.hash).toBe('#/work');
   await user.click(screen.getByRole('button', { name: 'Open companion chat' }));
-  expect(window.location.hash).toBe('#/');
+  await waitFor(() => expect(window.location.hash).toBe('#/s/chat%3Anew-1'));
   expect(
     await screen.findByRole('heading', { name: 'Say something to Nova' }),
   ).toBeVisible();
@@ -3818,7 +4150,7 @@ it('resends a restored message with its key and gives a new message a new key', 
   expect(newKey).not.toBe(firstKey);
 });
 
-it('returns to a new chat when the open session is deleted from the sidebar', async () => {
+it('returns to the durable main chat when a historical session is deleted from the sidebar', async () => {
   const user = userEvent.setup();
   vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
   vi.spyOn(daemon, 'listAgents').mockResolvedValue({
@@ -3847,7 +4179,8 @@ it('returns to a new chat when the open session is deleted from the sidebar', as
   expect(
     await screen.findByRole('heading', { name: 'Say something to Nova' }),
   ).toBeVisible();
-  expect(window.location.hash).toBe('#/');
+  await waitFor(() => expect(window.location.hash).toBe('#/s/chat%3Anew-1'));
+  expect(daemon.createSession).not.toHaveBeenCalled();
 });
 
 /** Past the harness's settle for live refreshes (150 ms). */
@@ -3967,7 +4300,7 @@ it('streams a reply into the open session with its tool steps, then shows the co
   );
 });
 
-it('shows a pending approval inline and on the Approvals badge, once, and decides it', async () => {
+it('shows a pending approval inline and in the inbox, once, and decides it', async () => {
   const user = userEvent.setup();
   const { stream } = await openLiveSession();
   const run = { ...runningRun(), status: 'awaiting_approval' as const };
@@ -3987,7 +4320,7 @@ it('shows a pending approval inline and on the Approvals badge, once, and decide
   });
   expect(screen.getByText('Waiting for your approval…')).toBeVisible();
   expect(
-    screen.getByRole('button', { name: 'Approvals, 1 waiting' }),
+    screen.getByRole('button', { name: 'Inbox, 1 need you' }),
   ).toBeVisible();
   // A reconnect's snapshot shows it again, still once.
   act(() =>
@@ -4019,8 +4352,8 @@ it('shows a pending approval inline and on the Approvals badge, once, and decide
     ).not.toBeInTheDocument(),
   );
   expect(
-    screen.queryByRole('button', { name: /Approvals, \d+ waiting/ }),
-  ).not.toBeInTheDocument();
+    screen.getByRole('button', { name: 'Inbox, nothing waiting' }),
+  ).toBeVisible();
 });
 
 it('streams a reply without rendering unchanged history again', async () => {
@@ -4231,7 +4564,11 @@ it('runs slash commands instead of sending them', async () => {
 
   await user.clear(input);
   await user.type(input, '/new{Enter}');
-  await waitFor(() => expect(window.location.hash).toBe('#/'));
+  await waitFor(() => expect(window.location.hash).toBe('#/s/chat%3Anew-1'));
+  expect(daemon.ensureMainSession).toHaveBeenCalledExactlyOnceWith(
+    'agent-main',
+  );
+  expect(daemon.createSession).not.toHaveBeenCalled();
   expect(daemon.startRun).not.toHaveBeenCalled();
 });
 
@@ -4980,8 +5317,26 @@ it('reports Telegram delivery when the stream says the reply’s run completed',
   const events = scriptedAgentEvents();
   const input = await openTelegramSession();
   await waitFor(() => expect(events.streams).toHaveLength(1));
-  act(() => events.streams[0].push(snapshotEvent([])));
   await user.type(input, 'On my way');
+  const ready = await vi.mocked(daemon.listConnectors).mock.results[0].value;
+  const refresh = deferred<typeof ready>();
+  vi.mocked(daemon.listConnectors).mockReturnValueOnce(refresh.promise);
+  act(() => events.streams[0].push(snapshotEvent([])));
+  await waitFor(() => expect(daemon.listConnectors).toHaveBeenCalledTimes(2));
+  expect(input).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('button', { name: 'Send' }),
+  ).not.toBeInTheDocument();
+  await act(async () => {
+    refresh.resolve(ready);
+    await refresh.promise;
+  });
+  expect(await screen.findByPlaceholderText('Reply on Telegram…')).toHaveValue(
+    'On my way',
+  );
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled(),
+  );
   await user.click(screen.getByRole('button', { name: 'Send' }));
   await waitFor(() => expect(daemon.startRun).toHaveBeenCalledTimes(1));
   const { run } = await vi.mocked(daemon.startRun).mock.results[0].value;

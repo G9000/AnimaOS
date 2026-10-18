@@ -844,12 +844,6 @@ remote provider call. The prior M35 live case remains evidence at its recorded
 revision, not a repeated live test of M36. See the
 [M36 plan](../superpowers/plans/2026-10-13-companion-memory-m36.md).
 
-The complete scoped follow-up work is now locked in the
-[capability parity roadmap](parity-roadmap.md). Its twelve work items distinguish
-implementation, synthetic-local acceptance, account acceptance and host
-acceptance. The first M38 plan covers budgeted task-learning advice; reviewed
-adoption and fresh-task reuse are a separate step. Planning completion does not
-change the evidence above or establish full Hermes parity.
 
 ## M38: one bounded task review and quiet recovery
 
@@ -939,7 +933,7 @@ The actual browser peer recorded **one initialize / one initialized / one tools/
 
 Live uncertain 503 outcomes fail closed. Immediate restart validates the complete prior/observed snapshot actually persisted: new components remain disabled/pending without launch, grant, adoption or replay, while prior explicit approvals/grants may survive and final removal may already be absent. Remaining durable cleanup intentions stay unavailable; recovery of those intentions remains a limit. This is no unconditional restart-unavailable, rollback or atomic external-filesystem claim.
 
-Scoped package implementation and local acceptance are complete. Exact source, PR and verified merge settlement is recorded in the M45 ledger. Authentication, selected real servers, non-Windows stdio and broader quality/full Hermes parity remain open, including M40's introduction-quality miss. See the [bundle guide](community-bundles.md), [M45 plan](../superpowers/plans/2026-10-14-companion-community-packages-m45.md) and [parity roadmap](parity-roadmap.md).
+Scoped package implementation and local acceptance are complete. Exact source, PR and verified merge settlement is recorded in the M45 ledger. Authentication, selected real servers, non-Windows stdio and broader quality/full Hermes parity remain open, including M40's introduction-quality miss. See the [bundle guide](community-bundles.md), [M45 plan](../superpowers/plans/2026-10-14-companion-community-packages-m45.md).
 
 ## M46 scoped Windows browser: controlled acceptance passed (2026-10-14)
 

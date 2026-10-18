@@ -6,8 +6,8 @@ use anima_core::primitives::now_millis;
 use anima_core::{
     select_context, AgentConfig, AgentRuntime, AgentRuntimeSnapshot, AgentState, AgentStatus,
     Content, ContextSummary, Message, MessageRole, Provider, RenderedAgentFiles, RuntimeRunBase,
-    TokenEstimator,
 };
+use anima_service_adapters::ServiceTokenEstimator as TokenEstimator;
 
 use super::DaemonState;
 use crate::runs::{RunChangeSet, RunError, RunOutcome, RunSource, RunStatus, AGENT_DELETED};
@@ -60,6 +60,8 @@ impl DaemonState {
                 .map(|workspace| workspace.root_path.clone()),
             self.calendar_manager.clone(),
         )
+        .with_tool_rpc_service(self.tool_rpc_service.clone())
+        .with_checkpoint_root(self.checkpoint_root.clone())
         .with_mail(self.mail_manager.clone())
         .with_drive(
             self.drive_manager
@@ -248,12 +250,11 @@ impl DaemonState {
             .expect("agent existence was checked above");
         change_set.undo = Some(runtime.apply_run_delta(&change_set.delta));
         // Spec §3.2: activity follows the commit, and the owner's own turn is read.
-        // Controller ruling (M2 pre-flight audit): a calendar write's own
-        // confirmation follow-up is `api`-sourced like an owner call, but it
-        // is not the owner's own turn.
+        // Host-originated follow-ups can use API transport without becoming
+        // the owner's own turn. The ledger origin is host-controlled.
         let owner_authored = self.runs.get(&change_set.run_id).is_some_and(|record| {
             matches!(record.source, RunSource::Api | RunSource::Web)
-                && !crate::sessions::is_calendar_write_followup(record.source_ref.as_deref())
+                && !record.system_followup.unwrap_or(false)
         }) || change_set
             .delta
             .messages
@@ -277,8 +278,20 @@ impl DaemonState {
                 &change_set.delta.messages,
             ));
             record.finish(outcome.status, outcome.error(), now_ms);
+            if outcome.status == crate::runs::RunStatus::Completed {
+                record.reply_sha256 = outcome.reply_message_id.as_ref().and_then(|reply| {
+                    change_set
+                        .delta
+                        .messages
+                        .iter()
+                        .find(|message| &message.id == reply)
+                        .map(|message| crate::runs::committed_output_sha256(&message.content.text))
+                });
+            }
         }
-        self.runs.prune(now_ms);
+        self.runs.settle_helper_origin(&change_set.run_id);
+        let pins = crate::runs::origin_pins(&self.control_plane_snapshot());
+        self.runs.prune_with_pins(now_ms, &pins);
         true
     }
 
@@ -327,6 +340,7 @@ impl DaemonState {
         if let Some(undo) = change_set.session_undo.clone() {
             self.sessions.revert_commit(undo);
         }
+        self.runs.settle_helper_origin(&change_set.run_id);
         self.runs
             .offer_steers_of_failed_run(&change_set.run_id, now_millis())
     }

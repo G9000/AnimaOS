@@ -1,68 +1,178 @@
-/* Scenic shell: the conversation sits on the garden scene, everything else is
- * a square, solid surface on top of it. Loaded after the studio sheets. */
+/* Scenic shell: the conversation sits over anima's orb; everything else is a
+ * square, solid surface on top of it. Loaded after the studio sheets. */
+
+/* ── Halo: anima's orb behind everything ──
+ * A dark field with the presence orb in the middle. One layer is in front at
+ * a time: while chatting the orb stays calm behind a reading lane; while the
+ * owner talks it comes forward with their words and the chat blurs back. */
 
 .scenic-shell .studio-main {
-  background: #0b0d10;
-  overflow: hidden;
+  background: #050608;
 }
 
-.scenic-backdrop {
+.halo-backdrop {
   position: absolute;
   inset: 0;
   z-index: 0;
+  overflow: hidden;
   pointer-events: none;
-  background:
-    linear-gradient(
-      to bottom,
-      rgb(5 8 10 / 0.35) 0%,
-      rgb(5 8 10 / 0) 18%,
-      rgb(5 8 10 / 0.05) 40%,
-      rgb(5 8 10 / 0.72) 74%,
-      rgb(5 8 10 / 0.92) 100%
-    ),
-    url('./assets/onboarding-garden.jpg') center / cover no-repeat;
+  background: radial-gradient(
+    ellipse 70% 80% at 50% 50%,
+    #101820 0%,
+    #050608 70%
+  );
 }
 
-/* Reading veil: once a conversation has messages, the scene steps back
- * behind a soft, slightly blurred band under the message column, so text
- * reads the same over sky, cloud, or foliage. The edges stay painted, and
- * the welcome keeps the whole scene. */
-.scenic-backdrop::before {
-  --veil-half: 440px;
-  --veil-feather: 180px;
-  --veil-band: linear-gradient(
-    to right,
-    transparent calc(50% - var(--veil-half) - var(--veil-feather)),
-    #000 calc(50% - var(--veil-half)),
-    #000 calc(50% + var(--veil-half)),
-    transparent calc(50% + var(--veil-half) + var(--veil-feather))
+.halo-glow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(110vmin, 1100px);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--halo-accent) 22%, transparent) 0%,
+    transparent 62%
   );
+  transition: background 600ms ease;
+}
+
+.halo-orb {
+  position: relative;
+}
+
+.halo-orb canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.halo-orb[data-fallback] {
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    #f4f3ef 0 6%,
+    color-mix(in srgb, var(--halo-accent) 80%, transparent) 18%,
+    color-mix(in srgb, var(--halo-accent) 30%, transparent) 42%,
+    transparent 68%
+  );
+}
+
+/* Talking: the orb comes forward with the owner's words. */
+.halo-backdrop-orb {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(72vmin, 640px);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  opacity: 0.6;
+  transition:
+    opacity 500ms ease,
+    scale 600ms ease;
+}
+
+/* The reading lane: a soft dark band under the message column, so text
+ * reads the same over the bright core and the dark edges. */
+.halo-backdrop::after {
   content: '';
   position: absolute;
   inset: 0;
   opacity: 0;
-  background: rgb(7 10 12 / 0.74);
-  backdrop-filter: blur(10px) saturate(0.85);
-  -webkit-mask-image: var(--veil-band);
-  mask-image: var(--veil-band);
+  background: linear-gradient(
+    to right,
+    transparent calc(50% - 600px),
+    rgb(7 9 12 / 0.55) calc(50% - 400px),
+    rgb(7 9 12 / 0.55) calc(50% + 400px),
+    transparent calc(50% + 600px)
+  );
   transition: opacity 500ms ease;
 }
 
-.scenic-shell:has(.studio-messages) .scenic-backdrop {
-  box-shadow: inset 0 0 0 100vmax rgb(5 8 10 / 0.18);
-}
-
-.scenic-shell:has(.studio-messages) .scenic-backdrop::before {
+.scenic-shell:has(.studio-messages) .halo-backdrop::after {
   opacity: 1;
 }
 
-/* Phones have no room for painted edges: the veil covers the width. */
-@media (max-width: 767px) {
-  .scenic-backdrop::before {
-    background: rgb(7 10 12 / 0.66);
-    -webkit-mask-image: none;
-    mask-image: none;
+.halo-backdrop[data-mode='thinking'] .halo-backdrop-orb,
+.halo-backdrop[data-mode='speaking'] .halo-backdrop-orb,
+.halo-backdrop[data-mode='attention'] .halo-backdrop-orb {
+  opacity: 0.85;
+}
+
+.halo-backdrop[data-mode='listening'] .halo-backdrop-orb {
+  opacity: 1;
+  scale: 1.04;
+}
+
+.halo-backdrop[data-mode='listening']::after {
+  opacity: 0;
+}
+
+.halo-words {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(880px, calc(100% - 48px));
+  margin: 0;
+  padding: 28px 32px;
+  translate: -50% -50%;
+  z-index: 2;
+  pointer-events: none;
+  text-align: center;
+  font-size: clamp(24px, 3.2vw, 38px);
+  font-weight: 500;
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+  color: #fff;
+  text-shadow: 0 2px 24px rgb(0 0 0 / 0.9);
+  background: radial-gradient(
+    ellipse at center,
+    rgb(5 6 8 / 0.62) 0%,
+    transparent 70%
+  );
+  animation: halo-words-in 220ms ease-out;
+}
+
+@keyframes halo-words-in {
+  from {
+    opacity: 0;
   }
+}
+
+.scenic-shell[data-presence='listening'] .studio-message-scroller,
+.scenic-shell[data-presence='listening'] .studio-conversation-tools,
+.scenic-shell[data-presence='listening'] .session-view-header {
+  filter: blur(6px);
+  opacity: 0.5;
+  transition:
+    filter 300ms ease,
+    opacity 300ms ease;
+}
+
+/* The words are on the orb; the composer keeps its status for screen
+ * readers only. */
+.scenic-shell[data-presence='listening']
+  .studio-dictation-control.is-compact
+  [role='status'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.scenic-shell .studio-composer {
+  position: relative;
+  z-index: 3;
+}
+
+/* Text over the orb keeps a soft shadow so no bright pixel cuts a letter. */
+.scenic-shell .chat-turn .scenic-agent-text,
+.scenic-shell .scenic-user-bubble,
+.scenic-shell .scenic-welcome {
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.6);
 }
 
 /* Messages fade out under the top bar instead of being cut by it. */
@@ -71,17 +181,22 @@
   mask-image: linear-gradient(to bottom, transparent 0, #000 28px);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .scenic-backdrop::before {
-    transition: none;
-  }
+/* Settings sit over a dimmed orb. */
+.scenic-shell:has(.settings-window) .halo-backdrop-orb {
+  opacity: 0.35;
 }
 
-.scenic-shell:has(.settings-window) .scenic-backdrop::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: rgb(5 8 10 / 0.6);
+@media (prefers-reduced-motion: reduce) {
+  .halo-backdrop-orb,
+  .halo-backdrop::after,
+  .halo-glow,
+  .scenic-shell[data-presence='listening'] .studio-message-scroller {
+    transition: none;
+  }
+
+  .halo-words {
+    animation: none;
+  }
 }
 
 .scenic-shell .studio-topbar.scenic-topbar {
@@ -494,29 +609,13 @@ button.scenic-thread[aria-expanded='true'] {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
   gap: 14px;
   min-height: 100%;
   max-width: 760px;
   margin: 0 auto;
-  padding: 0 24px 28px;
+  padding: 0 24px 64px;
   text-align: center;
-}
-
-.scenic-welcome-orb {
-  width: 56px;
-  height: 56px;
-  border-radius: 4px;
-  background:
-    radial-gradient(circle at 50% 50%, #f4f3ef 0 9%, transparent 22%),
-    radial-gradient(
-      circle at 50% 50%,
-      rgb(var(--color-accent-rgb) / 0.95) 0 24%,
-      rgb(var(--color-accent-rgb) / 0.35) 46%,
-      transparent 68%
-    ),
-    #0b0b0a;
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.16);
 }
 
 .scenic-shell .scenic-welcome .studio-hero-title {
@@ -1380,11 +1479,6 @@ button.scenic-thread[aria-expanded='true'] {
   font-size: 13px;
 }
 
-.scenic-reply-avatar {
-  display: inline-flex;
-  flex: none;
-}
-
 .chat-agent-name {
   font-weight: 500;
   color: rgb(255 255 255 / 0.92);
@@ -1398,7 +1492,7 @@ button.scenic-thread[aria-expanded='true'] {
 
 .scenic-shell .chat-turn .scenic-agent-text {
   max-width: 68ch;
-  padding: 0 0 0 30px;
+  padding: 0;
   font-size: 15px;
   line-height: 1.7;
   color: rgb(255 255 255 / 0.9);
@@ -1419,7 +1513,7 @@ button.scenic-thread[aria-expanded='true'] {
 }
 
 /* Consecutive replies (or a reply after its own tool work) read as one
- * turn: the name and orb show once. */
+ * turn: the name shows once. */
 .studio-message-anchor:has(.chat-turn.is-agent, .tool-block)
   + .studio-message-anchor
   > .chat-turn.is-agent
@@ -1560,6 +1654,12 @@ button.scenic-thread[aria-expanded='true'] {
   margin: 0;
 }
 
+/* The bar shows focus (focus-glow); a second ring on the text inside it
+ * reads as a box within the box. */
+.scenic-shell .composer-bar textarea:focus-visible {
+  outline: none;
+}
+
 .scenic-shell .composer-bar textarea::placeholder {
   color: rgb(255 255 255 / 0.45);
 }
@@ -1600,9 +1700,26 @@ button.scenic-thread[aria-expanded='true'] {
   height: 38px;
   border: 0;
   border-radius: 2px;
-  background: #f4f3ef;
-  color: #121212;
+  background: var(--color-accent);
+  color: #fff;
   box-shadow: none;
+}
+
+/* The agent's orb, live, at the start of the composer. */
+.composer-orb {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+}
+
+.composer-orb .composer-orb-canvas {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  overflow: hidden;
 }
 
 .scenic-shell .composer-bar .composer-send:disabled {
@@ -1862,4 +1979,916 @@ button.scenic-thread[aria-expanded='true'] {
   .scenic-shell .session-usage-line {
     display: none;
   }
+}
+
+/* An owner message that arrived from a chat app, shown in the main chat. */
+.chat-source {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6fb3e8;
+}
+
+/* ── Main chat ── */
+
+.scenic-shell .scenic-thread.is-back {
+  gap: 4px;
+}
+
+.scenic-side-thread {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: min(320px, 36vw);
+  font-size: 13px;
+  color: rgb(255 255 255 / 0.7);
+}
+
+/* Who you are talking with: avatar, name, and what it is doing. */
+.agent-switch {
+  position: relative;
+  min-width: 0;
+}
+
+.agent-switch-trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: min(420px, 60vw);
+  padding: 4px 10px 4px 4px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  color: #fff;
+  text-align: left;
+}
+
+.agent-switch-trigger:hover,
+.agent-switch-trigger[aria-expanded='true'] {
+  border-color: rgb(255 255 255 / 0.14);
+  background: rgb(22 28 33 / 0.55);
+  backdrop-filter: blur(20px);
+}
+
+.agent-switch .agent-avatar {
+  border-radius: 50%;
+}
+
+.agent-switch-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.agent-switch-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: rgb(255 255 255 / 0.6);
+}
+
+.agent-switch-name .scenic-wordmark {
+  overflow: hidden;
+  font-size: 16px;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.scenic-shell .agent-switch .companion-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.3;
+  color: rgb(255 255 255 / 0.6);
+  text-shadow: 0 1px 10px rgb(0 0 0 / 0.6);
+  white-space: nowrap;
+}
+
+.scenic-shell .companion-status i {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #5bd69a;
+}
+
+.scenic-shell .companion-status.is-busy i {
+  background: var(--color-accent);
+  animation: agent-status-pulse 1.6s ease-in-out infinite;
+}
+
+.scenic-shell .companion-status.is-offline i {
+  background: var(--color-danger);
+  animation: none;
+}
+
+@keyframes agent-status-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scenic-shell .companion-status.is-busy i {
+    animation: none;
+  }
+}
+
+.agent-switch-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  width: 280px;
+  padding: 6px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 2px;
+  background: rgb(14 18 21 / 0.96);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(24px);
+}
+
+.agent-switch-heading {
+  margin: 0;
+  padding: 8px 10px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgb(255 255 255 / 0.45);
+}
+
+.agent-switch-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border-radius: 2px;
+  color: rgb(255 255 255 / 0.9);
+  font-size: 13px;
+  text-align: left;
+}
+
+.agent-switch-item:hover,
+.agent-switch-item:focus-visible {
+  background: rgb(255 255 255 / 0.07);
+}
+
+.agent-switch-item[aria-checked='true'] {
+  background: rgb(var(--color-accent-rgb) / 0.12);
+}
+
+.agent-switch-item .agent-switch-text {
+  flex: 1;
+}
+
+.agent-switch-item-name {
+  overflow: hidden;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.agent-switch-item-status {
+  overflow: hidden;
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.5);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.agent-switch-check {
+  flex: none;
+  color: var(--color-accent);
+}
+
+.agent-switch-item.is-action {
+  min-height: 38px;
+  color: rgb(255 255 255 / 0.7);
+}
+
+.agent-switch-rule {
+  height: 1px;
+  margin: 6px 4px;
+  background: rgb(255 255 255 / 0.08);
+}
+
+@media (max-width: 767px) {
+  .scenic-shell .agent-switch .companion-status {
+    display: flex;
+  }
+
+  .agent-switch-name .scenic-wordmark {
+    font-size: 15px;
+  }
+}
+
+.session-drawer-title {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  color: #fff;
+}
+
+.session-drawer-note {
+  margin: 0;
+  padding: 4px 16px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgb(255 255 255 / 0.5);
+}
+
+/* Day dividers in the long-running main chat. */
+.chat-day {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0 14px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgb(255 255 255 / 0.45);
+}
+
+.chat-day::before,
+.chat-day::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgb(255 255 255 / 0.08);
+}
+
+/* Older turns left the model's view: one quiet line, not an alarm. */
+.scenic-shell .context-trimmed {
+  justify-content: flex-start;
+  padding: 9px 12px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 4px;
+  background: rgb(12 16 21 / 0.7);
+  backdrop-filter: blur(16px);
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.65);
+}
+
+.scenic-shell .context-trimmed-text {
+  flex: 1;
+}
+
+/* ── Needs you inbox ── */
+
+.needs-you-anchor {
+  position: relative;
+}
+
+.scenic-shell .studio-tool-button.needs-you-button.has-items {
+  border-color: rgb(242 180 75 / 0.55);
+  background: rgb(242 180 75 / 0.14);
+  color: #ffe3b0;
+  font-weight: 500;
+}
+
+.needs-you-button.has-items i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f2b44b;
+}
+
+.needs-you-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(640px, calc(100vh - 120px));
+  overflow-y: auto;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 4px;
+  background: rgb(12 16 21 / 0.97);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.55);
+  backdrop-filter: blur(24px);
+  color: #fff;
+}
+
+.needs-you-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.08);
+  background: rgb(12 16 21);
+}
+
+.needs-you-tabs {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+}
+
+.needs-you-tabs button {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 2px;
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.55);
+}
+
+.needs-you-tabs button[aria-selected='true'] {
+  background: rgb(255 255 255 / 0.08);
+  color: #fff;
+  font-weight: 500;
+}
+
+.needs-you-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.needs-you-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.06);
+}
+
+.needs-you-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.45);
+}
+
+.needs-you-kind {
+  padding: 2px 6px;
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #f2b44b;
+  background: rgb(242 180 75 / 0.12);
+}
+
+.needs-you-item[data-kind='fix'] .needs-you-kind {
+  color: #f59a9a;
+  background: rgb(240 106 106 / 0.12);
+}
+
+.needs-you-item[data-kind='review'] .needs-you-kind {
+  color: #f7a8d6;
+  background: rgb(var(--color-accent-rgb) / 0.14);
+}
+
+.needs-you-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #fff;
+}
+
+.needs-you-detail {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgb(255 255 255 / 0.6);
+}
+
+.needs-you-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.needs-you-actions button {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 3px;
+  background: rgb(255 255 255 / 0.04);
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.85);
+}
+
+.needs-you-actions button:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.1);
+}
+
+.needs-you-actions .needs-you-primary {
+  border-color: #fff;
+  background: #fff;
+  font-weight: 500;
+  color: #0b0d10;
+}
+
+.needs-you-actions .needs-you-primary:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.88);
+}
+
+.needs-you-actions button:disabled {
+  opacity: 0.5;
+}
+
+.needs-you-done {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.06);
+}
+
+.needs-you-done-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.needs-you-done-text strong {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgb(255 255 255 / 0.9);
+}
+
+.needs-you-done-text span {
+  overflow: hidden;
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: rgb(255 255 255 / 0.5);
+}
+
+.needs-you-done time {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.4);
+}
+
+.needs-you-failed {
+  font-weight: 400;
+  color: #f59a9a;
+}
+
+.needs-you-empty,
+.needs-you-error {
+  margin: 0;
+  padding: 20px 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgb(255 255 255 / 0.6);
+}
+
+.needs-you-item .needs-you-error {
+  padding: 0;
+  color: #f59a9a;
+}
+
+.needs-you-error {
+  color: #f59a9a;
+}
+
+.needs-you-foot {
+  margin: 0;
+  padding: 10px 16px;
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.4);
+}
+
+/* ── Plan card (propose_plan approvals) ── */
+
+.plan-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgb(242 180 75 / 0.35);
+  border-radius: 6px;
+  background: rgb(12 16 21 / 0.94);
+  backdrop-filter: blur(24px);
+  color: #fff;
+}
+
+.plan-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.08);
+  font-size: 14px;
+}
+
+.plan-card-head strong {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.plan-card-head > span {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.45);
+}
+
+.plan-card-steps {
+  margin: 0;
+  padding: 6px 0;
+  list-style: none;
+}
+
+.plan-card-steps li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 16px;
+  font-size: 13px;
+}
+
+.plan-card-number {
+  width: 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.35);
+}
+
+.plan-card-action {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: rgb(255 255 255 / 0.9);
+}
+
+.plan-card-asks {
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: rgb(242 180 75 / 0.12);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #f2b44b;
+}
+
+.plan-card-estimate {
+  margin: 0;
+  padding: 8px 16px;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  background: rgb(255 255 255 / 0.02);
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.65);
+}
+
+.plan-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+}
+
+.plan-card-actions button {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 3px;
+  background: rgb(255 255 255 / 0.04);
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.85);
+}
+
+.plan-card-actions .plan-card-primary {
+  border-color: #fff;
+  background: #fff;
+  font-weight: 500;
+  color: #0b0d10;
+}
+
+.plan-card-actions .plan-card-quiet {
+  margin-left: auto;
+  border-color: transparent;
+  background: none;
+  color: rgb(255 255 255 / 0.55);
+}
+
+.plan-card-actions button:disabled {
+  opacity: 0.5;
+}
+
+.plan-card-change {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 16px 0;
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.7);
+}
+
+.plan-card-change textarea {
+  padding: 8px 10px;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.04);
+  font-size: 13px;
+  color: #fff;
+}
+
+.plan-card-change .plan-card-actions {
+  padding: 4px 0 12px;
+}
+
+.plan-card-sent,
+.plan-card-error {
+  margin: 0;
+  padding: 12px 16px;
+  font-size: 13px;
+  color: rgb(255 255 255 / 0.75);
+}
+
+.plan-card-error {
+  padding-top: 0;
+  color: #f59a9a;
+}
+
+/* ── Weekly report ── */
+
+.weekly-report-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(5 7 10 / 0.78);
+}
+
+.weekly-report {
+  display: flex;
+  flex-direction: column;
+  width: min(1040px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 2px;
+  background: #0e1215;
+  color: #fff;
+  outline: none;
+}
+
+.weekly-report-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  padding: 24px 32px 18px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.08);
+}
+
+.weekly-report-head > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.weekly-report-kicker {
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+.weekly-report-head h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.weekly-report-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 28px;
+  padding: 24px 32px;
+}
+
+.weekly-report-main,
+.weekly-report-side {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+
+.weekly-report h3 {
+  margin: 0 0 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(255 255 255 / 0.45);
+}
+
+.weekly-report-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.weekly-report-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.02);
+}
+
+.weekly-report-tile strong {
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.weekly-report-tile span {
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.7);
+}
+
+.weekly-report-tile small {
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.45);
+}
+
+.weekly-report-tile[data-warn] strong {
+  color: #f2b44b;
+}
+
+.weekly-report-list,
+.weekly-report-issues,
+.weekly-report-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.weekly-report-list li {
+  display: flex;
+  justify-content: space-between;
+  color: rgb(255 255 255 / 0.85);
+}
+
+.weekly-report-count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.5);
+}
+
+.weekly-report-issues li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgb(242 180 75 / 0.25);
+  border-radius: 2px;
+  background: rgb(242 180 75 / 0.05);
+}
+
+.weekly-report-issues li span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: rgb(255 255 255 / 0.85);
+}
+
+.weekly-report-facts li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 2px;
+  font-size: 12px;
+}
+
+.weekly-report-facts li > span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: rgb(255 255 255 / 0.85);
+}
+
+.weekly-report-facts button,
+.weekly-report-forgotten {
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.5);
+}
+
+.weekly-report-facts button:hover {
+  color: #fff;
+}
+
+.weekly-report-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  height: 110px;
+}
+
+.weekly-report-bar {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+}
+
+.weekly-report-bar i {
+  width: 100%;
+  background: rgb(var(--color-accent-rgb) / 0.4);
+}
+
+.weekly-report-bar i[data-peak] {
+  background: var(--color-accent);
+}
+
+.weekly-report-bar span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: rgb(255 255 255 / 0.4);
+}
+
+.weekly-report-quiet,
+.weekly-report-empty,
+.weekly-report-error {
+  margin: 0;
+  font-size: 13px;
+  color: rgb(255 255 255 / 0.55);
+}
+
+.weekly-report-empty,
+.weekly-report > .weekly-report-error {
+  padding: 32px;
+}
+
+.weekly-report-error {
+  color: #f59a9a;
+}
+
+.weekly-report-foot {
+  margin: 0;
+  padding: 12px 32px;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.45);
+}
+
+@media (max-width: 860px) {
+  .weekly-report-body {
+    grid-template-columns: 1fr;
+  }
+
+  .weekly-report-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.needs-you-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.needs-you-foot span {
+  flex: 1;
+}
+
+.needs-you-foot button {
+  flex: none;
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.75);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }

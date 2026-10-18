@@ -1,7 +1,7 @@
 //! Trusted, immutable built-ins. Metadata describes transport, never grants authority.
 use std::sync::Arc;
 
-use anima_core::connectors::{
+use anima_service_adapters::connectors::{
     ConnectorDescriptor, ConnectorOperation, ConnectorRegistry as MetadataRegistry,
     ConnectorTransportKind,
 };

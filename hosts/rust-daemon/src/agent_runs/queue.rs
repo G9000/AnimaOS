@@ -64,7 +64,10 @@ fn accepted_at_ms(content: &Content) -> Option<u64> {
 
 /// A steer as its run's inbox carries it: the text with its key and when it
 /// was accepted, which the runtime keeps on the message it records.
-fn steer_content(steer: &RunSteer, records: &[crate::attachments::AttachmentRecord]) -> Content {
+pub(super) fn steer_content(
+    steer: &RunSteer,
+    records: &[crate::attachments::AttachmentRecord],
+) -> Content {
     let mut metadata = BTreeMap::from([
         (
             CLIENT_REQUEST_ID_METADATA_KEY.into(),
@@ -145,7 +148,7 @@ impl AcceptanceClock {
     }
 
     /// The next acceptance time: later than every earlier one.
-    fn next(&self) -> u64 {
+    pub(super) fn next(&self) -> u64 {
         let wall_ms = self.wall_ms();
         let mut next = wall_ms;
         let _ = self
@@ -843,6 +846,23 @@ impl AgentRunCoordinator {
     /// (audit M9). Nothing unsaved is announced (spec §6).
     pub(super) async fn hand_on_steers(&self, left: SteerLeftovers) {
         let transaction = self.control_plane_transaction().await;
+        {
+            let mut guard = self.state.write().await;
+            if let Some(record) = guard
+                .runs
+                .get_mut(&left.run_id)
+                .filter(|record| record.async_helper.is_some())
+            {
+                record.note_steers_read(left.taken.iter());
+                record.archive_helper_steers_except(&left.taken);
+                let persist = guard.control_plane_persist_request();
+                drop(guard);
+                if let Err(error) = persist.save().await {
+                    warn!(run_id = %left.run_id, %error, "could not save helper steer archival; terminal commit retains it");
+                }
+                return;
+            }
+        }
         let (records, parent, hub, persist) = {
             let mut guard = self.state.write().await;
             // Read under the transaction: a stop whose save was still in
@@ -1157,6 +1177,36 @@ impl AgentRunCoordinator {
 
     /// Adds an accepted run to its session's queue by acceptance time, so a
     /// steer that becomes a queued message later keeps its place.
+    pub(super) fn enqueue_internal(&self, record: &RunRecord, start: QueuedRunStart) {
+        self.enqueue(record, start);
+    }
+
+    /// An internal typed helper start preserves its accepted identity and
+    /// private room while sharing ordinary room/slot/global admission.
+    pub(super) fn helper_start(&self, request: AgentRunRequest) -> QueuedRunStart {
+        let coordinator = self.clone();
+        let room_id = request.room.resolve(&request.agent_id);
+        QueuedRunStart {
+            reserved_ticket: None,
+            room_id: Some(room_id),
+            start: Box::new(move |run_id, _| {
+                Box::pin(async move {
+                    coordinator
+                        .run_accepted(request, run_id)
+                        .await
+                        .map(|_| ())
+                        .map_err(|error| {
+                            if super::shutdown::is_shutting_down(&error) {
+                                QueuedStartError::ShuttingDown
+                            } else {
+                                QueuedStartError::Failed(error.message().to_string())
+                            }
+                        })
+                })
+            }),
+        }
+    }
+
     fn enqueue(&self, record: &RunRecord, start: QueuedRunStart) {
         let key = (record.agent_id.clone(), record.session_id.clone());
         let next = QueuedStart {
@@ -1381,6 +1431,7 @@ impl AgentRunCoordinator {
                 .expect("the run is queued, checked above");
             record.finish(status, Some(error), now_millis());
             let record = record.clone();
+            guard.runs.settle_helper_origin(run_id);
             // It will never run: its control goes with the queued state.
             guard.live.runs().remove(&record.id);
             let parent = guard.live_parent_agent(&record.agent_id, &record.session_id);
@@ -1398,5 +1449,6 @@ impl AgentRunCoordinator {
         }
         drop(transaction);
         hub.publish(run_status_event(&record), parent.as_deref());
+        self.pump_helper_completions(run_id).await;
     }
 }

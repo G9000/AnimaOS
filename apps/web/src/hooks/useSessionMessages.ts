@@ -73,10 +73,21 @@ export function useSessionMessages(
   sessionId: string | null,
   refreshKey = 0,
   pollMs = SESSION_MESSAGES_POLL_MS,
+  options: { anchorMessageId?: string | null; jumpRequestKey?: number } = {},
 ) {
+  const anchorMessageId = options.anchorMessageId ?? null;
+  const jumpRequestKey = options.jumpRequestKey ?? 0;
+  const anchorReadKey = JSON.stringify([
+    agentId,
+    sessionId,
+    anchorMessageId,
+    jumpRequestKey,
+  ]);
+  const [settledAnchorKey, setSettledAnchorKey] = useState<string | null>(null);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
   const [nextBefore, setNextBefore] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [loadingAnchor, setLoadingAnchor] = useState(false);
   const [missing, setMissing] = useState(false);
   // A newest-page error clears with the next good poll; an older-page error
   // stays until older messages load or the session changes, so a failed
@@ -112,15 +123,19 @@ export function useSessionMessages(
     setMessages([]);
     setNextBefore(null);
     setLoadingOlder(false);
+    setLoadingAnchor(anchorMessageId !== null);
     setMissing(false);
     setNewestError(null);
     setOlderError(null);
     setAppliedRead(0);
-  }, [agentId, sessionId]);
+  }, [agentId, sessionId, anchorMessageId, jumpRequestKey]);
 
   /** Newest-page reads begun so far, by any caller (a poll, a refresh key,
    *  an event): a read numbered above this began after now. */
-  const readsStarted = useCallback(() => refreshGeneration.current, []);
+  const readsStarted = useCallback(
+    () => (anchorMessageId ? 0 : refreshGeneration.current),
+    [anchorMessageId],
+  );
 
   /** Reads the newest page; true once that page is what the view shows,
    *  false when the read failed or a newer read or another session
@@ -129,29 +144,49 @@ export function useSessionMessages(
     if (!agentId || !sessionId) return false;
     const sessionEpoch = generation.current;
     const request = ++refreshGeneration.current;
+    if (anchorMessageId) setLoadingAnchor(true);
     try {
-      const page = await daemon.sessionMessages(agentId, sessionId, {
-        limit: SESSION_MESSAGE_PAGE,
-      });
+      const page = await daemon.sessionMessages(
+        agentId,
+        sessionId,
+        anchorMessageId
+          ? { anchor: anchorMessageId }
+          : { limit: SESSION_MESSAGE_PAGE },
+      );
       if (
         sessionEpoch !== generation.current ||
         request !== refreshGeneration.current
       )
         return false;
+      if (
+        anchorMessageId &&
+        (page.anchorMessageId !== anchorMessageId ||
+          !page.messages.some((message) => message.id === anchorMessageId))
+      )
+        throw new Error(
+          'The daemon could not load this exact message. Update the daemon or return to latest.',
+        );
       const previous = messagesRef.current;
-      const merged = mergeNewest(previous, page.messages);
+      const merged = anchorMessageId
+        ? page.messages
+        : mergeNewest(previous, page.messages);
       messagesRef.current = merged;
       setMessages(merged);
       // Once older history has been loaded, a normal poll must not move
       // `nextBefore` (that would discard the client's paging progress). A
       // gapped poll is the exception (ruling 2): it must reopen `hasOlder`.
-      if (!loadedOlder.current || opensGap(previous, page.messages)) {
+      if (
+        anchorMessageId ||
+        !loadedOlder.current ||
+        opensGap(previous, page.messages)
+      ) {
         setNextBefore(page.nextBefore);
       }
       missingRef.current = false;
       setMissing(false);
       setNewestError(null);
-      setAppliedRead(request);
+      // An old window cannot confirm that a pending newest message is absent.
+      setAppliedRead(anchorMessageId ? 0 : request);
       return true;
     } catch (caught) {
       if (
@@ -159,15 +194,27 @@ export function useSessionMessages(
         request !== refreshGeneration.current
       )
         return false;
-      if (httpStatus(caught) === 404) {
+      if (anchorMessageId && httpStatus(caught) === 404) {
+        setNewestError(
+          'This message is no longer available. Return to latest to continue.',
+        );
+      } else if (httpStatus(caught) === 404) {
         missingRef.current = true;
         setMissing(true);
       } else {
         setNewestError(errorText(caught));
       }
       return false;
+    } finally {
+      if (
+        sessionEpoch === generation.current &&
+        request === refreshGeneration.current
+      ) {
+        setLoadingAnchor(false);
+        if (anchorMessageId) setSettledAnchorKey(anchorReadKey);
+      }
     }
-  }, [agentId, sessionId]);
+  }, [agentId, sessionId, anchorMessageId, anchorReadKey]);
 
   const loadOlder = useCallback(async () => {
     if (!agentId || !sessionId || !nextBefore || loadingOlderRef.current)
@@ -210,12 +257,13 @@ export function useSessionMessages(
     }
   }, [agentId, sessionId, nextBefore]);
 
+  const activeRefreshKey = anchorMessageId ? jumpRequestKey : refreshKey;
   useEffect(() => {
     if (!agentId || !sessionId) return;
     let active = true;
     let timer: number | undefined;
     const schedule = () => {
-      if (!active || missingRef.current) return;
+      if (!active || missingRef.current || anchorMessageId) return;
       timer = window.setTimeout(() => {
         timer = undefined;
         void refresh().finally(schedule);
@@ -226,12 +274,16 @@ export function useSessionMessages(
       active = false;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [agentId, sessionId, refresh, refreshKey, pollMs]);
+  }, [agentId, sessionId, refresh, activeRefreshKey, pollMs, anchorMessageId]);
 
   return {
     messages,
     hasOlder: nextBefore !== null,
     loadingOlder,
+    // Parent/child layout effects must not consume a new jump against old DOM.
+    loadingAnchor:
+      anchorMessageId !== null &&
+      (loadingAnchor || settledAnchorKey !== anchorReadKey),
     loadOlder,
     missing,
     error: newestError ?? olderError,

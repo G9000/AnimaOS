@@ -86,6 +86,99 @@ async function loaded() {
 }
 
 describe('owner external tools', () => {
+  it('fp02 navigation releases a same-lifetime status-reconciliation busy claim without publishing late rows', async () => {
+    const mock = api();
+    const reconciliation = deferred<void>();
+    const changed = vi.fn().mockReturnValue(reconciliation.promise);
+    const busy = vi.fn();
+    const view = render(
+      <McpConnectionsPanel
+        agentId="main"
+        api={mock}
+        online
+        epoch={1}
+        onGrantsChanged={changed}
+        onBusyChanged={busy}
+      />,
+    );
+    await loaded();
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: 'Refresh status' }));
+    expect(busy).toHaveBeenLastCalledWith(true);
+    view.unmount();
+    await act(async () => {
+      reconciliation.resolve(undefined);
+    });
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(busy).toHaveBeenLastCalledWith(false);
+  });
+
+  it('fp02 fences obsolete connection lists and mutation callbacks across offline and epoch changes', async () => {
+    const first = deferred<McpConnection[]>();
+    const mock = api();
+    vi.mocked(mock.list).mockReturnValueOnce(first.promise);
+    const busy = vi.fn();
+    const view = render(
+      <McpConnectionsPanel
+        agentId="main"
+        api={mock}
+        online
+        epoch={1}
+        onBusyChanged={busy}
+      />,
+    );
+    view.rerender(
+      <McpConnectionsPanel
+        agentId="main"
+        api={mock}
+        online={false}
+        epoch={1}
+        onBusyChanged={busy}
+      />,
+    );
+    await act(async () => {
+      first.resolve([ready()]);
+    });
+    expect(
+      screen.queryByText('Connected — reviewed tools ready'),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }));
+    expect(mock.list).toHaveBeenCalledTimes(1);
+    vi.mocked(mock.list).mockResolvedValue([connection()]);
+    view.rerender(
+      <McpConnectionsPanel
+        agentId="main"
+        api={mock}
+        online
+        epoch={2}
+        onBusyChanged={busy}
+      />,
+    );
+    await loaded();
+    const pending = deferred<McpConnection>();
+    vi.mocked(mock.update).mockReturnValue(pending.promise);
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: 'Enable connection' }));
+    expect(mock.update).toHaveBeenCalledTimes(1);
+    view.rerender(
+      <McpConnectionsPanel
+        agentId="main"
+        api={mock}
+        online={false}
+        epoch={2}
+        onBusyChanged={busy}
+      />,
+    );
+    busy.mockClear();
+    await act(async () => {
+      pending.resolve(connection({ enabled: true, version: 2 }));
+    });
+    expect(busy).not.toHaveBeenCalled();
+    expect(mock.update).toHaveBeenCalledTimes(1);
+  });
+
   it('M65 offers an explicit password action only for saved HTTPS HTTP connections', async () => {
     const mock = api([
       connection({ endpoint: 'https://example.test/mcp' }),

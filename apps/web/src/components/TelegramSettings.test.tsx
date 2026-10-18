@@ -22,6 +22,28 @@ const connector: TelegramConnector = {
 };
 
 describe('TelegramSettings', () => {
+  it('fp02 Telegram clears unsubmitted secrets and blocks offline actions', async () => {
+    const user = userEvent.setup();
+    const p = {
+      connector: null,
+      busy: null,
+      error: null,
+      connect: vi.fn(),
+      replace: vi.fn(),
+      approve: vi.fn(),
+      restart: vi.fn(),
+      disconnect: vi.fn(),
+    };
+    const view = render(<TelegramSettings {...p} online epoch={1} />);
+    await user.type(screen.getByLabelText('Bot token'), 'synthetic-secret');
+    view.rerender(<TelegramSettings {...p} online={false} epoch={1} />);
+    expect(screen.getByLabelText('Bot token')).toHaveValue('');
+    expect(
+      screen.getByRole('button', { name: 'Connect Telegram' }),
+    ).toBeDisabled();
+    expect(p.connect).not.toHaveBeenCalled();
+  });
+
   it('keeps the token password local, clears it after failure, and shows a safe error', async () => {
     const user = userEvent.setup();
     const connect = vi.fn(async () => false);

@@ -3,6 +3,8 @@ mod browser;
 #[cfg(test)]
 mod browser_tests;
 pub(crate) mod calendar;
+mod checkpoints;
+pub(crate) mod completion;
 mod conversations;
 mod drive;
 mod filesystem;
@@ -46,6 +48,7 @@ pub(crate) use process::{
     background_process_count, new_shared_process_manager_with_limit, SharedProcessManager,
     DEFAULT_MAX_BACKGROUND_PROCESSES,
 };
+pub(crate) use utility::PLAN_TOOL;
 pub(crate) use workspace::{
     canonical_workspace_root, normalized_relative_path, resolve_workspace_write_path,
     workspace_root_path, write_workspace_bytes,
@@ -89,6 +92,13 @@ pub(crate) struct ToolExecutionContext {
     tool_registry: ToolRegistry,
     pub(super) process_manager: SharedProcessManager,
     pub(super) workspace_root: Option<PathBuf>,
+    checkpoint_root: Option<PathBuf>,
+    action_approved: bool,
+    protected_write: Option<crate::agent_files::write_policy::ProtectedWrite>,
+    #[cfg(test)]
+    checkpoint_validation_hook: Option<Arc<std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>>>,
+    #[cfg(test)]
+    checkpoint_preimage_hook: Option<Arc<std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>>>,
     pub(super) document_extractor:
         Arc<dyn crate::attachments::documents::worker::DocumentExtractor>,
     pub(super) calendar: Option<CalendarManager>,
@@ -108,9 +118,40 @@ pub(crate) struct ToolExecutionContext {
     /// tool calls, which have no session or owner to ask.
     pub(super) approvals: Option<crate::approvals::ApprovalGate>,
     action_journal: Option<crate::agent_runs::action_receipts::RunActionJournal>,
+    rpc_fence: Option<crate::tool_rpc::RpcGrantFence>,
+    completion_review: Option<anima_core::CompletionReview>,
+    tool_rpc_service: Arc<crate::tool_rpc::ToolRpcService>,
 }
 
 impl ToolExecutionContext {
+    pub(crate) fn with_checkpoint_root(mut self, root: Option<PathBuf>) -> Self {
+        self.checkpoint_root = root;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_checkpoint_validation_hook(
+        mut self,
+        hook: impl FnOnce() + Send + 'static,
+    ) -> Self {
+        self.checkpoint_validation_hook =
+            Some(Arc::new(std::sync::Mutex::new(Some(Box::new(hook)))));
+        self
+    }
+
+    pub(crate) fn with_tool_rpc_service(
+        mut self,
+        service: Arc<crate::tool_rpc::ToolRpcService>,
+    ) -> Self {
+        self.tool_rpc_service = service;
+        self
+    }
+    /// Host registry schema only; captured model descriptors cannot expand the
+    /// native RPC tool surface or replace its argument contracts.
+    pub(crate) fn rpc_descriptor(&self, name: &str) -> Option<ToolDescriptor> {
+        self.tool_registry.descriptor(name)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         memory: SharedMemoryStore,
@@ -139,6 +180,13 @@ impl ToolExecutionContext {
             tool_registry,
             process_manager,
             workspace_root,
+            checkpoint_root: None,
+            action_approved: false,
+            protected_write: None,
+            #[cfg(test)]
+            checkpoint_preimage_hook: None,
+            #[cfg(test)]
+            checkpoint_validation_hook: None,
             document_extractor: Arc::new(crate::attachments::documents::worker::DocumentWorker),
             calendar,
             mail: None,
@@ -150,6 +198,9 @@ impl ToolExecutionContext {
             cancel: None,
             approvals: None,
             action_journal: None,
+            rpc_fence: None,
+            completion_review: None,
+            tool_rpc_service: crate::tool_rpc::ToolRpcService::disabled(),
         }
     }
 
@@ -158,6 +209,14 @@ impl ToolExecutionContext {
         extractor: Arc<dyn crate::attachments::documents::worker::DocumentExtractor>,
     ) -> Self {
         self.document_extractor = extractor;
+        self
+    }
+
+    pub(crate) fn with_completion_review(
+        mut self,
+        review: Option<anima_core::CompletionReview>,
+    ) -> Self {
+        self.completion_review = review;
         self
     }
 
@@ -242,6 +301,29 @@ impl ToolExecutionContext {
         self
     }
 
+    pub(crate) fn rpc_journal(
+        &self,
+    ) -> Option<&crate::agent_runs::action_receipts::RunActionJournal> {
+        self.action_journal.as_ref()
+    }
+
+    pub(crate) fn has_upstream_tool_origin(&self) -> bool {
+        self.delegated_parent.is_some()
+            || !self.peer_sources.is_empty()
+            || self.peer_route.as_ref().is_some_and(|route| {
+                // Ordinary native runs start a route containing only their
+                // own agent. Forwarded or foreign routes remain upstream.
+                self.run_link
+                    .as_ref()
+                    .is_none_or(|run| route.participants() != [run.agent_id.as_str()])
+            })
+    }
+
+    pub(crate) fn with_rpc_fence(mut self, fence: crate::tool_rpc::RpcGrantFence) -> Self {
+        self.rpc_fence = Some(fence);
+        self
+    }
+
     pub(crate) fn with_mcp(mut self, manager: Option<crate::mcp::McpManager>) -> Self {
         if let (Some(manager), Some(run)) = (&manager, &self.run_link) {
             self.tool_registry = self
@@ -259,9 +341,19 @@ impl ToolExecutionContext {
         tool_call: ToolCall,
     ) -> TaskResult<Content> {
         let name = tool_call.name.clone();
+        let completion = self.completion_review.clone().map(|review| {
+            let checkpoint = review.checkpoint();
+            (review, checkpoint, tool_call.clone())
+        });
         let result = self
             .execute_tool_inner(agent, user_message, tool_call)
             .await;
+        // execute_tool_inner acknowledges the action journal before returning.
+        // An actual effect with an uncertain outcome save is an error here and
+        // cannot be converted into successful completion evidence.
+        if let Some((review, checkpoint, call)) = completion {
+            completion::observe(&review, checkpoint, &call, &result);
+        }
         web_search::project_result(&name, result)
     }
 
@@ -278,6 +370,17 @@ impl ToolExecutionContext {
         let Some(handler) = self.tool_registry.lookup(&tool_call.name) else {
             return TaskResult::error(format!("Unknown tool: {}", tool_call.name), 0);
         };
+        if tool_call.name == "execute_code" {
+            let arguments =
+                crate::routes::data_value_to_json(&DataValue::Object(tool_call.args.clone()))
+                    .to_string();
+            if !crate::tool_rpc::reviewable_arguments(arguments.as_bytes()) {
+                return TaskResult::error(
+                    "Code arguments must be closed and fit the complete 16 KiB execution review",
+                    0,
+                );
+            }
+        }
         if is_browser_tool(&tool_call.name) {
             let (Some(service), Some(run), Some(_), Some(_), Some(_)) = (
                 &self.browser,
@@ -398,7 +501,15 @@ impl ToolExecutionContext {
                 journal
                     .revalidate()
                     .await
-                    .map_err(|error| TaskResult::error(error, 0))
+                    .map_err(|error| TaskResult::error(error, 0))?;
+                // RPC authority must be observed after the last awaited native
+                // ownership check, as well as after approval/receipt waits.
+                if self.rpc_fence.is_some() {
+                    #[cfg(test)]
+                    journal.arm_test_final_rpc_authority_read();
+                    self.live_checks(&agent, &tool_call).await?;
+                }
+                Ok::<(), TaskResult<Content>>(())
             }
             .await;
             if let Err(refused) = revalidated {
@@ -415,6 +526,17 @@ impl ToolExecutionContext {
             None
         };
         let started = std::time::Instant::now();
+        if let Some(observed) = self
+            .rpc_fence
+            .as_ref()
+            .and_then(|fence| fence.dispatch_started.as_ref())
+        {
+            // A host-only typed projection witness: handler entry is distinct
+            // from admission refusal and does not itself prove an effect.
+            observed.store(true, std::sync::atomic::Ordering::Release);
+        }
+        self.action_approved = approved;
+        self.protected_write = protected;
         let result = handler(self, agent, user_message, tool_call).await;
         if let Some(journal) = journal {
             let duration = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
@@ -440,6 +562,35 @@ impl ToolExecutionContext {
         agent: &AgentState,
         tool_call: &ToolCall,
     ) -> Result<(), TaskResult<Content>> {
+        if let Some(fence) = &self.rpc_fence {
+            let (Some(run), Some(journal), Some(gate), Some(cancel)) = (
+                &self.run_link,
+                &self.action_journal,
+                &self.approvals,
+                &self.cancel,
+            ) else {
+                return Err(TaskResult::error(
+                    "Tool RPC native context is unavailable",
+                    0,
+                ));
+            };
+            if run != &fence.run
+                || journal.bound_run() != run
+                || gate.bound_run() != run
+                || run.agent_id != agent.id
+                || self.has_upstream_tool_origin()
+                || crate::agent_runs::is_helper_config(&agent.config)
+            {
+                return Err(TaskResult::error("Tool RPC native scope changed", 0));
+            }
+            if cancel.is_cancelled() {
+                return Err(TaskResult::error(cancel.tool_result(), 0));
+            }
+            journal
+                .rpc_authority(run, &fence.outer_call, Some(&tool_call.name))
+                .await
+                .map_err(|error| TaskResult::error(error, 0))?;
+        }
         if is_browser_tool(&tool_call.name)
             && (self.delegated_parent.is_some()
                 || !self.peer_sources.is_empty()
@@ -527,7 +678,7 @@ pub(crate) fn ctx_workspace_root(context: &ToolExecutionContext) -> Option<&Path
 pub(crate) fn is_process_tool(name: &str) -> bool {
     matches!(
         name,
-        "bash" | "bg_start" | "bg_output" | "bg_stop" | "bg_list"
+        "execute_code" | "bash" | "bg_start" | "bg_output" | "bg_stop" | "bg_list"
     )
 }
 
@@ -536,9 +687,16 @@ impl ToolRegistry {
         let mut registry = Self {
             registrations: HashMap::new(),
         };
+        let mut code_parameters = object_parameters(vec![required_parameter("code", non_blank_string_parameter("Complete Python program; serialized arguments must fit the 16 KiB execution review")), optional_parameter("reset", boolean_parameter("Explicit state-reset request; one-shot execution is always fresh"))]);
+        code_parameters.insert("additionalProperties".into(), DataValue::Bool(false));
+        registry.register(tool_descriptor("execute_code", "Execute an explicitly configured local Python one-shot program with an exact native-tool grant intersection. Requires both execute_code and bash grants, current execution approval and durable per-call receipts. Missing interpreter is unavailable. Local mode is not a filesystem or network sandbox. Printed verification claims remain untrusted; cleanup uncertainty retains physical capacity.", code_parameters), execute_code);
         registry.register(tool_descriptor("list_workspace_agents", "Read the actual live workspace agent roster, including IDs, roles, and current status.", object_parameters(vec![])), team::list_workspace_agents);
         registry.register(tool_descriptor("delegate_to_agent", "Assign a bounded task to an existing specialist and wait for its recorded result. Use an agent ID from the roster. Delegation cannot grant tools or permissions you do not have.", object_parameters(vec![required_parameter("agent_id", non_blank_string_parameter("Existing specialist ID")), required_parameter("task", non_blank_string_parameter("Self-contained task, relevant context, and expected deliverable"))])), team::delegate_to_agent);
         registry.register(tool_descriptor("spawn_helper", "Run a bounded task with a helper and wait for its saved result. Reuses an idle helper or creates one, up to four busy helpers and four starts per companion run. Only the companion can spawn helpers; helpers inherit its current tool permissions except shell/background-process tools, and cannot contact or create other agents. Each helper has at most eight tool turns and a two-minute execution deadline; completed effects are not rolled back. Future companion runs receive a fresh start allowance and reuse idle slots.", object_parameters(vec![required_parameter("name", non_blank_string_parameter("Short helper label, at most 80 bytes")), required_parameter("task", non_blank_string_parameter("Self-contained task, relevant context, and expected deliverable, at most 32768 bytes"))])), team::spawn_helper);
+        registry.register(tool_descriptor("spawn_helper_async", "Accept a bounded helper assignment and return its saved Queued run handle before execution. Requires an explicit grant. Four helper agents and four starts are shared with synchronous spawn_helper; helpers retain the existing inherited tool subset and approvals. Completion defaults to the saved original Chat. Explicit origin completes the exact ordinary native job attempt after all required callbacks settle; workflow, schedule and connector origins are unsupported. Use manual elsewhere. Bounds are eight tool turns, two minutes, at most 4096 output tokens per response and eight lifetime steer operations.", object_parameters(vec![required_parameter("name", non_blank_string_parameter("Helper label, at most 80 bytes")), required_parameter("task", non_blank_string_parameter("Task, at most 32768 bytes")), optional_parameter("completion", string_enum_parameter("Completion destination", &["chat", "manual", "origin"]))])), team::async_helper_operation);
+        registry.register(tool_descriptor("list_helper_runs", "Inspect only this companion's async helper assignments and bounded committed results. An immutable run_id can retrieve one exact assignment. Acceptance and helper assertions are not independent validation.", object_parameters(vec![optional_parameter("run_id", non_blank_string_parameter("Exact immutable child run handle")), optional_parameter("limit", bounded_integer_parameter("Maximum assignments, default 10", 1, 20))])), team::async_helper_operation);
+        registry.register(tool_descriptor("steer_helper", "Save additional untrusted task input for one exact Running or AwaitingApproval helper with an open inbox. At most eight accepted steer operations over the assignment lifetime; exact retries are free. Acceptance does not mean the model read the input.", object_parameters(vec![required_parameter("run_id", non_blank_string_parameter("Exact immutable child run handle")), required_parameter("message", non_blank_string_parameter("Additional task input, at most 32768 bytes"))])), team::async_helper_operation);
+        registry.register(tool_descriptor("stop_helper", "Save a stop and suppress this helper assignment's completion, including after the child finished. Stops any admitted continuation before signalling. This does not undo completed effects or promise completed cleanup.", object_parameters(vec![required_parameter("run_id", non_blank_string_parameter("Exact immutable child run handle"))])), team::async_helper_operation);
         registry.register(
             tool_descriptor(
                 "memory_search",
@@ -733,6 +891,28 @@ impl ToolRegistry {
         );
         registry.register(
             tool_descriptor(
+                utility::PLAN_TOOL,
+                "Show the owner your plan before a job with several steps that changes things outside this chat (sending messages, booking, editing files, spending money). Call it first and wait: nothing in the plan starts until the owner approves. Mark steps that will ask again with asks_first. Skip it for questions and single small actions.",
+                object_parameters(vec![
+                    required_parameter("title", non_blank_string_parameter("What the plan is for, in a few words")),
+                    required_parameter(
+                        "steps",
+                        array_parameter(
+                            "The steps in order, at most 12",
+                            object_parameter(vec![
+                                required_parameter("action", non_blank_string_parameter("One step, in plain words")),
+                                optional_parameter("asks_first", boolean_parameter("The step asks the owner again before it acts")),
+                            ]),
+                            Some(1),
+                        ),
+                    ),
+                    optional_parameter("estimate", string_parameter("Rough time or cost, such as \"about 6 min\"")),
+                ]),
+            ),
+            utility::execute_propose_plan,
+        );
+        registry.register(
+            tool_descriptor(
                 "calculate",
                 "Evaluate a mathematical expression",
                 object_parameters(vec![required_parameter(
@@ -919,6 +1099,35 @@ impl ToolRegistry {
             automations::pause_automation,
         );
         registry.register(
+            tool_descriptor("update_automation", "Update selected fields of one of your own automations. Other fields remain unchanged. Timing changes must remain at least five minutes apart. This does not grant tools or run the automation.", object_parameters(vec![
+                required_parameter("id", non_blank_string_parameter("Your automation id from list_automations")),
+                optional_parameter("name", non_blank_string_parameter("New display name")),
+                optional_parameter("prompt", non_blank_string_parameter("New scheduled task prompt")),
+                optional_parameter("schedule", non_blank_string_parameter("Cron, every <n> minutes|hours|days, or at <RFC3339>")),
+                optional_parameter("timeZone", non_blank_string_parameter("IANA time zone for schedule or activeHours")),
+                optional_parameter("activeHours", object_parameter(vec![
+                    required_parameter("start", non_blank_string_parameter("HH:MM start")),
+                    required_parameter("end", non_blank_string_parameter("HH:MM end; earlier means overnight")),
+                    optional_parameter("days", array_parameter("Days 0 Sunday through 6 Saturday", bounded_integer_parameter("Weekday", 0, 6), Some(1))),
+                ])),
+                optional_parameter("clearActiveHours", boolean_parameter("Remove active hours; cannot be combined with activeHours")),
+                optional_parameter("target", string_enum_parameter("Current owner delivery target", &["thread", "telegram"])),
+                optional_parameter("enabled", boolean_parameter("Whether the automation is on")),
+            ])), automations::update_automation,
+        );
+        registry.register(
+            tool_descriptor("resume_automation", "Turn on one of your own automations. Recomputes the next due time without replaying missed occurrences; cadence limits apply.", object_parameters(vec![required_parameter("id", non_blank_string_parameter("Your automation id"))])),
+            automations::resume_automation,
+        );
+        registry.register(
+            tool_descriptor("delete_automation", "Remove one of your own automations. Do not claim already-started work was cancelled; it retains existing stop/outcome handling.", object_parameters(vec![required_parameter("id", non_blank_string_parameter("Your automation id"))])),
+            automations::delete_automation,
+        );
+        registry.register(
+            tool_descriptor("trigger_automation", "Admit one manual occurrence of your automation without changing its schedule or enabled state. Returns after durable admission, before the result. Only an active direct user run can call this; scheduled, helper and delegated runs cannot trigger more runs.", object_parameters(vec![required_parameter("id", non_blank_string_parameter("Your automation id"))])),
+            automations::trigger_automation,
+        );
+        registry.register(
             tool_descriptor(
                 "read_file",
                 "Read a workspace file with line numbers",
@@ -1019,6 +1228,14 @@ impl ToolRegistry {
             filesystem::execute_write_file,
         );
         registry.register(
+            tool_descriptor("checkpoint_list", "List this agent's selected native-file recovery checkpoints. Requires explicit host checkpoint configuration; opaque IDs do not grant restore authority.", object_parameters(vec![])),
+            checkpoints::list,
+        );
+        registry.register(
+            tool_descriptor("checkpoint_restore", "Restore exactly one admitted native file change from its checkpoint if its acknowledged postimage is still current. Requires explicit permission and host configuration; refuses changed files and protected instruction targets.", object_parameters(vec![required_parameter("checkpoint_id", non_blank_string_parameter("Opaque checkpoint ID returned by the native write or checkpoint_list"))])),
+            checkpoints::restore,
+        );
+        registry.register(
             tool_descriptor(
                 "edit_file",
                 "Replace one exact string occurrence in a workspace file",
@@ -1075,6 +1292,17 @@ impl ToolRegistry {
                     array_parameter(
                         "Complete todo list to persist",
                         object_parameter(vec![
+                            optional_parameter("id", non_blank_string_parameter("Stable task ID")),
+                            optional_parameter(
+                                "parent",
+                                DataValue::Object(BTreeMap::from([(
+                                    "anyOf".into(),
+                                    DataValue::Array(vec![
+                                        non_blank_string_parameter("Parent task ID"),
+                                        typed_parameter("null", "Clear the parent link"),
+                                    ]),
+                                )])),
+                            ),
                             required_parameter(
                                 "content",
                                 non_blank_string_parameter("Todo description"),
@@ -1083,7 +1311,7 @@ impl ToolRegistry {
                                 "status",
                                 string_enum_parameter(
                                     "Todo status",
-                                    &["pending", "in_progress", "completed"],
+                                    &["pending", "in_progress", "completed", "cancelled"],
                                 ),
                             ),
                             required_parameter(
@@ -1107,6 +1335,7 @@ impl ToolRegistry {
             ),
             todo::execute_todo_read,
         );
+        todo::register_structured_tool(&mut registry);
         registry.register(
             tool_descriptor(
                 "bash",
@@ -1414,6 +1643,16 @@ struct SchemaParameter {
     name: &'static str,
     schema: DataValue,
     required: bool,
+}
+
+fn execute_code(
+    context: ToolExecutionContext,
+    agent: AgentState,
+    input: Message,
+    call: ToolCall,
+) -> BoxFuture<'static, TaskResult<Content>> {
+    let service = context.tool_rpc_service.clone();
+    Box::pin(async move { service.execute(context, agent, input, call).await })
 }
 
 fn tool_descriptor(

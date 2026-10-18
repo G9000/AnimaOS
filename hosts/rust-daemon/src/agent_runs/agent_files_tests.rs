@@ -100,7 +100,8 @@ async fn files_replace_persona_keep_host_guidance_and_survive_tools_without_pers
 
 #[test]
 fn file_reserve_is_counted_once_and_empty_snapshot_preserves_legacy_selection() {
-    use anima_core::{AgentFileRenderBudget, AgentFileSection, Content, TokenEstimator};
+    use anima_core::{AgentFileRenderBudget, AgentFileSection, Content};
+    use anima_service_adapters::ServiceTokenEstimator as TokenEstimator;
     let mut state = DaemonState::new();
     let id = state
         .create_agent(lead_config("companion"))
@@ -300,7 +301,8 @@ async fn root_changes_retry_once_with_frozen_config_and_original_deadline() {
 #[tokio::test]
 async fn admission_reserves_retained_summary_before_long_soul() {
     use crate::sessions::SessionSummary;
-    use anima_core::{CancelSignal, Content, DataValue, TokenEstimator};
+    use anima_core::{CancelSignal, Content, DataValue};
+    use anima_service_adapters::ServiceTokenEstimator as TokenEstimator;
     let root = temp_workspace("agent-files-summary-budget");
     std::fs::write(root.join("SOUL.md"), "Speak clearly. ".repeat(1000)).unwrap();
     let mut config = lead_config("companion");

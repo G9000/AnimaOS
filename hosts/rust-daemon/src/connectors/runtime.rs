@@ -13,10 +13,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anima_core::connectors::{
+use anima_core::{Content, DataValue, MessageRole, TaskResult, TaskStatus};
+use anima_service_adapters::connectors::{
     ConnectorReceiveRequest, ConnectorSendRequest, ConnectorTransport as AsyncConnectorTransport,
 };
-use anima_core::{Content, DataValue, MessageRole, TaskResult, TaskStatus};
 use async_trait::async_trait;
 use tokio::sync::{oneshot, watch, Mutex};
 use tokio::task::JoinHandle;

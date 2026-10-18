@@ -17,7 +17,9 @@ use crate::agent_runs::AgentRunCoordinator;
 use crate::app::SharedDaemonState;
 use crate::connectors::registry::ConnectorRegistry;
 use crate::state::DaemonState;
-use anima_core::connectors::{ConnectorReceiveRequest, ConnectorSendRequest, ConnectorTransport};
+use anima_service_adapters::connectors::{
+    ConnectorReceiveRequest, ConnectorSendRequest, ConnectorTransport,
+};
 use client::{DiscordTransport, DiscordTransportError};
 use credentials::{DiscordBotToken, DiscordCredentialStore};
 pub(crate) use model::*;

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use anima_core::document_content::{
+use anima_service_adapters::document_content::{
     fit_document_snapshots, DocumentBlock, DocumentExtractionStatus as Status, DocumentFormat,
     DocumentLocator, DocumentOmission as Omission, DocumentSnapshot, ExtractedDocumentText,
     XlsxCoverage, XlsxSheetCoverage, XlsxSheetVisibility, MAX_DOCUMENT_RENDERED_BYTES,

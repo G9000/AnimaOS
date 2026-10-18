@@ -116,7 +116,7 @@ Restore never launches, grants, adopts or replays installation/cleanup. Remainin
 unavailable. Retained cleanup-intent recovery is an explicit remaining limit; there is no new reconciliation endpoint
 or automatic cleanup. CP19 migration preserves CP18 shapes with an independent `.pre-community-bundles.bak`.
 
-Contributors should reuse the [host-neutral validator](../../packages/core-rust/crates/anima-core/src/community_bundles.rs),
+Contributors should reuse the [host-neutral validator](../../packages/core-rust/crates/anima-service-adapters/src/community_bundles.rs),
 [owner coordinator](../../hosts/rust-daemon/src/community_bundles/service.rs), [typed SDK](../../packages/sdk/src/community-bundles.ts)
 and [existing SKILL.md parser/composer](../../hosts/rust-daemon/src/skills/file.rs).
 The compiled host's [OpenAPI schema](http://127.0.0.1:8080/openapi.json) describes owner envelopes;
@@ -124,6 +124,6 @@ The compiled host's [OpenAPI schema](http://127.0.0.1:8080/openapi.json) describ
 Bundles use those compiled libraries and the standard SKILL convention; they do not load native plugins.
 Preserve Anima branding and actual pinned source/notices. The example's [attribution](../../examples/community-bundles/synthetic-violet/ATTRIBUTION.md)
 states MIT metadata and the absent root license text; claims are not extra redistribution grants.
-No private Hermes profiles are copied. Archives, registries, executable installers, authentication/credentials,
+Private profiles from other agents are not copied. Archives, registries, executable installers, authentication/credentials,
 connector contributions and native plugin loading remain outside this slice. See the [M45 plan](../superpowers/plans/2026-10-14-companion-community-packages-m45.md)
-and [parity roadmap](parity-roadmap.md); this selected local composition does not establish full Hermes parity.
+for implementation details and acceptance limits.

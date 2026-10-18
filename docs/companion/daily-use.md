@@ -53,6 +53,77 @@ For durable local use, configure control-plane/history and memory persistence as
 specified in the [daemon startup examples](../../hosts/rust-daemon/README.md#starting-the-daemon). An ephemeral preview is not a persistent assistant. Keep the
 same workspace path and private credential vault across restart.
 
+## Keep one main conversation
+
+Home and **Main chat** open the companion's same saved web conversation on each
+visit. The first visit adopts its most recently active eligible web chat, or
+creates one if none exists. That identity is saved by the daemon, so other
+browsers and restarts return to it. Earlier chats and helper/task/connector
+threads keep their own histories and remain available through History and links.
+The compatibility command `/new` also returns to the main chat.
+
+Messages from your paired **private** Telegram chat join the main chat too, so
+one conversation holds what you say in the console and on Telegram. They are
+tagged "via Telegram", and anima's reply to them still goes back to Telegram;
+replies to messages typed in the console stay in the console. A Telegram group
+keeps its own conversation, and so do Discord channels. Until the console has
+resolved the main chat once, Telegram keeps using its own conversation; earlier
+Telegram turns stay in that conversation's history. An update the daemon had
+already received keeps the conversation it was first given.
+
+The main conversation can be renamed and exported. Ordinary archive and delete
+actions are unavailable for it; the existing explicit companion reset remains a
+separate destructive operation. If resolution fails, the composer waits and
+offers **Retry main chat** instead of creating another conversation. Console and
+daemon must both support this feature.
+
+Long conversations use the existing automatic rolling compaction, unless you
+explicitly disabled it. Durable memories retain selected facts; the original
+transcript remains searchable with the existing history tools and permissions,
+including older messages from the main conversation itself. The whole transcript
+is not sent to the model on every reply, and recall is not guaranteed. See
+[conversation history](history.md) for the retrieval limits.
+
+**What anima kept** expands the saved compaction summary above the transcript,
+even when its original boundary is outside the loaded messages. This is the
+model-written running summary, not a guarantee that every earlier detail or
+durable memory was retained. A failed later compaction leaves the prior summary
+available.
+
+**Estimated conversation context** shows the selected conversation history plus
+its summary against the conversation budget, with reply space reserved
+separately. It excludes system instructions, other provider context, tool schemas,
+files and the unsent draft. It is not an exact measurement of the complete model
+prompt. Old daemons, offline sessions and failed reads show context unavailable.
+
+Press **Ctrl K** (or **⌘ K**) and type words from a saved message. The **Messages**
+section returns individual matching messages, including several from the same
+conversation and archived history. Choose a result to open a bounded window
+around its exact message, with that message highlighted. **Return to latest
+messages** returns to the live tail without clearing your draft. A message link
+also survives reload. Search has bounded results; narrow the query when more
+matches exist. Helper/delegated, hidden, system and pending-deletion messages are
+excluded from this search.
+
+## Plans, the inbox and the weekly report
+
+Before a bigger job that changes things outside the chat, the companion calls
+`propose_plan` and waits. The plan shows in the chat as numbered steps, with the
+ones that will ask again marked **Asks first**. **Start plan** lets it begin;
+**Change it** sends your note back so it can revise the plan; **Not now** stops
+it. **Don’t ask for plans** adds an always-allow rule for plans, which you can
+remove in Permissions. A plan asks even when its approval class is allowed.
+
+The header's inbox button collects everything waiting on you: approvals and
+plans, Telegram chats asking to pair, a Telegram bot that needs attention, and
+learned skills waiting for a decision. Its **Done today** tab lists what the
+companion changed today from its action receipts; reads and searches are left
+out. Nothing there can be undone yet.
+
+**Weekly report** (from the inbox or Ctrl K) shows the last seven days from the
+companion's own records: runs finished and failed, what it changed, model spend
+by day, and the memories it saved, each of which you can forget.
+
 ## Review an interrupted automation
 
 An automation with a recorded interrupted run shows **Needs review**. Some actions

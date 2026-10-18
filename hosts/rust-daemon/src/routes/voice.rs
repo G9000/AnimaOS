@@ -10,7 +10,7 @@ use crate::{
     sessions::is_valid_session_id,
     voice::{check_scope, VoiceError},
 };
-use anima_core::audio_content::TranscriptionAvailability;
+use anima_service_adapters::audio_content::TranscriptionAvailability;
 use axum::{
     extract::{Path, Request, State},
     http::StatusCode,

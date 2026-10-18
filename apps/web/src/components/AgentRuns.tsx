@@ -6,6 +6,12 @@ import {
   type GoalView,
 } from '@animaOS-SWARM/sdk';
 import { daemon } from '../lib/daemon-api';
+import {
+  currentJobReview,
+  hasCurrentJobOutput,
+  jobReviewKey,
+  reviewMatchesAttempt,
+} from '../lib/job-output';
 
 type Draft = {
   title: string;
@@ -19,6 +25,7 @@ const labels: Record<AgentJob['status'] | AgentJobAttempt['status'], string> = {
   awaiting_approval: 'Awaiting approval',
   queued: 'Queued',
   running: 'Running',
+  pending_delegations: 'Waiting for helpers',
   completed: 'Completed',
   failed: 'Failed',
   needs_review: 'Needs review',
@@ -156,7 +163,10 @@ function AgentRuns({
         setLoadError('');
         if (
           result.some(
-            (job) => job.status === 'queued' || job.status === 'running',
+            (job) =>
+              job.status === 'queued' ||
+              job.status === 'running' ||
+              job.status === 'pending_delegations',
           )
         ) {
           if (--remaining > 0) timer = setTimeout(() => void load(), 5000);
@@ -486,7 +496,12 @@ function AgentRuns({
                           {attempt.error}
                         </p>
                       )}
-                      {attempt.review && (
+                      {attempt.review && !reviewMatchesAttempt(attempt) && (
+                        <p className="text-sm text-ink-3">
+                          Review applies to an earlier output.
+                        </p>
+                      )}
+                      {attempt.review && reviewMatchesAttempt(attempt) && (
                         <div className="space-y-1 text-sm">
                           <p className="font-semibold">
                             {attempt.review.decision === 'accepted'
@@ -500,76 +515,83 @@ function AgentRuns({
                       )}
                     </details>
                   ))}
-                  {job.status === 'completed' &&
-                    !job.attempts.find(
-                      (attempt) => attempt.attempt === job.attempt,
-                    )?.review && (
-                      <div className="space-y-3">
-                        <p className="text-sm text-ink-3">
-                          Execution completed. Review the saved output to accept
-                          it or request changes. This does not authorize
-                          external actions.
+                  {job.status === 'completed' && !currentJobReview(job) && (
+                    <div className="space-y-3">
+                      {!hasCurrentJobOutput(job) && (
+                        <p role="status" className="text-sm text-ink-3">
+                          The final output is unavailable for review. Refresh
+                          runs to load its current version.
                         </p>
-                        <label className="block space-y-2 text-sm">
-                          Review feedback
-                          <textarea
-                            className="field min-h-20"
-                            value={feedback[`${job.id}:${job.attempt}`] ?? ''}
-                            onChange={(event) =>
-                              setFeedback((current) => ({
-                                ...current,
-                                [`${job.id}:${job.attempt}`]:
-                                  event.target.value,
-                              }))
-                            }
-                          />
-                        </label>
-                        {new TextEncoder().encode(
-                          feedback[`${job.id}:${job.attempt}`] ?? '',
-                        ).length > 4000 && (
-                          <p className="text-sm text-danger">
-                            Feedback must be at most 4,000 bytes.
-                          </p>
+                      )}
+                      <p className="text-sm text-ink-3">
+                        Execution completed. Review the saved output to accept
+                        it or request changes. This does not authorize external
+                        actions.
+                      </p>
+                      <label className="block space-y-2 text-sm">
+                        Review feedback
+                        <textarea
+                          className="field min-h-20"
+                          value={feedback[jobReviewKey(job)] ?? ''}
+                          onChange={(event) =>
+                            setFeedback((current) => ({
+                              ...current,
+                              [jobReviewKey(job)]: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      {new TextEncoder().encode(
+                        feedback[jobReviewKey(job)] ?? '',
+                      ).length > 4000 && (
+                        <p className="text-sm text-danger">
+                          Feedback must be at most 4,000 bytes.
+                        </p>
+                      )}
+                      <div className="flex flex-wrap gap-4">
+                        {(['accepted', 'changes_requested'] as const).map(
+                          (decision) => (
+                            <button
+                              key={decision}
+                              type="button"
+                              className="text-sm underline disabled:opacity-50"
+                              disabled={
+                                busy ||
+                                !!loadError ||
+                                !hasCurrentJobOutput(job) ||
+                                new TextEncoder().encode(
+                                  feedback[jobReviewKey(job)] ?? '',
+                                ).length > 4000 ||
+                                (decision === 'changes_requested' &&
+                                  !(feedback[jobReviewKey(job)] ?? '').trim())
+                              }
+                              onClick={() =>
+                                void mutate(() =>
+                                  daemon.reviewAgentJob(agentId, job.id, {
+                                    revision: job.revision,
+                                    decision,
+                                    note: feedback[jobReviewKey(job)] ?? '',
+                                    ...(job.finalOutput
+                                      ? {
+                                          finalOutputGeneration:
+                                            job.finalOutput.generation,
+                                          finalOutputSha256:
+                                            job.finalOutput.sha256,
+                                        }
+                                      : {}),
+                                  }),
+                                )
+                              }
+                            >
+                              {decision === 'accepted'
+                                ? 'Accept result'
+                                : 'Request changes'}
+                            </button>
+                          ),
                         )}
-                        <div className="flex flex-wrap gap-4">
-                          {(['accepted', 'changes_requested'] as const).map(
-                            (decision) => (
-                              <button
-                                key={decision}
-                                type="button"
-                                className="text-sm underline disabled:opacity-50"
-                                disabled={
-                                  busy ||
-                                  !!loadError ||
-                                  new TextEncoder().encode(
-                                    feedback[`${job.id}:${job.attempt}`] ?? '',
-                                  ).length > 4000 ||
-                                  (decision === 'changes_requested' &&
-                                    !(
-                                      feedback[`${job.id}:${job.attempt}`] ?? ''
-                                    ).trim())
-                                }
-                                onClick={() =>
-                                  void mutate(() =>
-                                    daemon.reviewAgentJob(agentId, job.id, {
-                                      revision: job.revision,
-                                      decision,
-                                      note:
-                                        feedback[`${job.id}:${job.attempt}`] ??
-                                        '',
-                                    }),
-                                  )
-                                }
-                              >
-                                {decision === 'accepted'
-                                  ? 'Accept result'
-                                  : 'Request changes'}
-                              </button>
-                            ),
-                          )}
-                        </div>
                       </div>
-                    )}
+                    </div>
+                  )}
                   {job.status === 'awaiting_approval' && (
                     <div className="space-y-2">
                       <p className="text-sm text-ink-3">
@@ -620,9 +642,8 @@ function AgentRuns({
                   {(job.status === 'failed' ||
                     job.status === 'needs_review' ||
                     (job.status === 'completed' &&
-                      job.attempts.find(
-                        (attempt) => attempt.attempt === job.attempt,
-                      )?.review?.decision === 'changes_requested')) &&
+                      currentJobReview(job)?.decision ===
+                        'changes_requested')) &&
                     (job.attempt >= job.maxAttempts ? (
                       <p className="text-sm text-ink-3">
                         Attempt limit reached.

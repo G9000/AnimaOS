@@ -42,7 +42,21 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 203, "complete registered operation count");
+    assert_eq!(actual.len(), 205, "complete registered operation count");
+    let message_search_additions = [("GET", "/api/agents/{agent_id}/message-search")];
+    for (method, path) in message_search_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "individual message search must be registered"
+        );
+    }
+    let main_chat_additions = [("POST", "/api/agents/{agent_id}/main-chat")];
+    for (method, path) in main_chat_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "main chat resolution must be registered"
+        );
+    }
     let report_additions = [("GET", "/api/workspace/file/download")];
     for (method, path) in report_additions {
         assert!(
@@ -91,8 +105,10 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             .iter()
             .filter(|(method, path)| {
                 !speech_additions.contains(&(method.as_str(), path.as_str()))
+                    && !message_search_additions.contains(&(method.as_str(), path.as_str()))
                     && !credential_additions.contains(&(method.as_str(), path.as_str()))
                     && !report_additions.contains(&(method.as_str(), path.as_str()))
+                    && !main_chat_additions.contains(&(method.as_str(), path.as_str()))
             })
             .count(),
         197,
@@ -122,9 +138,11 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             .iter()
             .filter(
                 |(method, path)| !additions.contains(&(method.as_str(), path.as_str()))
+                    && !message_search_additions.contains(&(method.as_str(), path.as_str()))
                     && !speech_additions.contains(&(method.as_str(), path.as_str()))
                     && !credential_additions.contains(&(method.as_str(), path.as_str()))
                     && !report_additions.contains(&(method.as_str(), path.as_str()))
+                    && !main_chat_additions.contains(&(method.as_str(), path.as_str()))
             )
             .count(),
         192,
@@ -153,6 +171,7 @@ fn owner_console_path(path: &str) -> bool {
         || (path.starts_with("/api/agents/")
             && [
                 "/sessions",
+                "/message-search",
                 "/events",
                 "/runs",
                 "/approvals",

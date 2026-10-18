@@ -3,8 +3,9 @@ use crate::{
     app::SharedDaemonState,
     history::{HistoryMessage, HistoryStore, SharedHistory},
 };
-use anima_core::{
-    CancelSignal, MessageRole, SpeechAudio, SpeechAvailability, SpeechError, SpeechPort, SpeechText,
+use anima_core::{CancelSignal, MessageRole};
+use anima_service_adapters::{
+    SpeechAudio, SpeechAvailability, SpeechError, SpeechPort, SpeechText,
 };
 use axum::body::Bytes;
 use std::{

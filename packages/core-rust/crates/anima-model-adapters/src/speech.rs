@@ -5,9 +5,9 @@
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
-use anima_core::{
-    CancelSignal, SpeechAudio, SpeechAvailability, SpeechError, SpeechPort, SpeechText,
-    MAX_SPEECH_PCM_BYTES,
+use anima_core::CancelSignal;
+use anima_service_adapters::{
+    SpeechAudio, SpeechAvailability, SpeechError, SpeechPort, SpeechText, MAX_SPEECH_PCM_BYTES,
 };
 use async_trait::async_trait;
 use bytes::Bytes;

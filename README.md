@@ -1,50 +1,53 @@
 # animaOS-SWARM
 
-**anima** is a personal AI that you own. It runs on your computer or your own server, answers you in its web console, Telegram or Discord, brings in helper agents for bigger jobs, asks before it acts, and gets better at your work over time.
+**anima** is a personal AI that you own. It runs on your computer or your own server, and you talk to it in one ongoing chat, in the web console or on Telegram. It brings in helper agents for bigger jobs, shows you its plan and asks before it acts, and gets better at your work over time.
 
 This repository is the whole stack: a Rust agent runtime, the daemon that hosts it, the TypeScript SDK, and the web console.
 
-![anima listening in immersive mode](docs/images/immersive-listening.webp)
+![The main chat](docs/images/main-chat.webp)
 
 ## What anima does
 
-- **One companion, everywhere.** Chat in the web console, or message it on Telegram or Discord. It's one conversation with one memory, and each message shows where it came from.
-- **Talk or type.** You can dictate, have replies read aloud, and send recorded audio for transcription. Immersive mode is a near-empty screen built around anima's orb. Say "Hey anima" or hold Space to talk, and hear the answer or read it.
-- **Helpers for big jobs.** anima can delegate to a small team of helper agents, such as a researcher, a coder and a reviewer. It supervises them and reports back with a result you can review, like a patch with its tests.
-- **Asks before it acts.** Anything that runs commands, sends messages or changes files goes through approvals you control. Each one can be allowed once, for this chat, or always, or denied.
-- **Learns from your work.** It keeps memory of what matters, reviews finished tasks, and drafts reusable skills. Nothing is kept until you approve it.
-- **Runs where you want.** It runs on your machine by default, or as a single-owner service on a Linux VPS with Docker, HTTPS and authentication.
-- **Works with your stack.** It supports many model providers, Google Drive, Calendar and mail connections, reviewed MCP tools, community bundles, documents, web search and scoped browser work.
+- **One main chat.** Each agent has one ongoing conversation with one memory, so "that thing from yesterday" means something. Your private Telegram chat joins it, and every message shows where it came from. Telegram groups and Discord channels get their own threads.
+- **More than one agent.** Make agents for different parts of your life and switch between them from the name in the header. The header always shows who you're talking with and what it's doing.
+- **Talk or type.** Dictate, have replies read aloud, or send recorded audio for transcription. Voice and text land in the same chat.
+- **Shows you the plan first.** Before a bigger job that changes things, anima lays out its steps and waits. Start it, send back changes, or tell it to stop asking.
+- **Asks before it acts.** Anything that runs commands, sends messages or changes files can go through approvals you control: once, for this chat, always, or denied.
+- **One place for what needs you.** Approvals, plans, Telegram pairing requests, broken connections and skills to review all wait in one inbox, next to a list of everything it changed today.
+- **Helpers for big jobs.** anima can delegate to helper agents, such as a researcher, a coder and a reviewer, supervise them, and bring back one result you can review.
+- **Learns from your work.** It keeps memory of what matters and drafts reusable skills from tasks that went well. Nothing becomes a skill until you approve it.
+- **A weekly report.** What it finished, what it changed, what it cost, what failed, and what it kept about you, from its own records.
+- **Runs where you want.** On your machine by default, or as a single-owner service on a Linux VPS with Docker, HTTPS and sign-in.
+- **Works with your stack.** Many model providers, Google Drive, Calendar and mail, reviewed MCP tools, community bundles, documents, web search and scoped browser work.
 
 ## A look at it
 
 | | |
 | --- | --- |
-| ![Chat](docs/images/chat.webp) | ![Speaking](docs/images/immersive-speaking.webp) |
-| **Chat.** Replies sit under anima's name, your messages sit on the right, and each one shows its source, such as Telegram. | **Speaking.** In immersive mode the reply plays as captions on the orb, sentence by sentence. |
-| ![Needs your OK](docs/images/immersive-needs-ok.webp) | ![Helpers](docs/images/immersive-helpers.webp) |
-| **Needs your OK.** Before anything leaves your machine, anima asks. Answer by voice or press a key. | **Helpers.** Each helper is its own small orb, with what it's doing right now. |
-| ![Swarm done](docs/images/immersive-swarm-done.webp) | ![Agent exchange](docs/images/chat-agent-exchange.webp) |
-| **Results you review.** The helpers' patch arrives with its files and tests. Nothing is applied until you say so. | **Agent exchange.** Watch the helpers talk a problem through, and step in when you want. |
-| ![Learned a skill](docs/images/immersive-learned-skill.webp) | ![Looking back](docs/images/immersive-looking-back.webp) |
-| **Learning.** When a task goes well, anima offers to keep how it did it as a skill. | **Looking back.** Scroll up in immersive mode to see the same thread you see in chat. |
-
-Chat and voice share the same conversation. Everything said by voice lands in the chat thread, and every decision has a button, a spoken answer and a key.
+| ![Switch agent](docs/images/switch-agent.webp) | ![Telegram group thread](docs/images/telegram-thread.webp) |
+| **Your agents.** The header shows who you're talking with and what it's doing. Switch agents from its name. | **Chat apps.** Your private Telegram chat is part of the main chat. A group gets its own thread, and replies go back to the group. |
+| ![Plan before acting](docs/images/plan.webp) | ![Needs you](docs/images/needs-you.webp) |
+| **Plans.** For bigger jobs anima shows its steps first, marks the ones that will ask again, and waits for you. | **Needs you.** Everything waiting on you in one place, answered in a click. |
+| ![Needs your OK](docs/images/needs-ok.webp) | ![Listening](docs/images/voice-listening.webp) |
+| **Approvals.** Before anything leaves your machine, anima asks. Answer with a button or by voice. | **Voice.** Hold Space and talk; your words appear over the orb, and the chat stays underneath. |
+| ![Helpers](docs/images/helpers.webp) | ![Learned a skill](docs/images/learned-skill.webp) |
+| **Helpers.** Bigger jobs go to a small team, shown right in the chat with what each one is doing. | **Learning.** When a task goes well, anima offers to keep how it did it as a skill. |
 
 ## Status
 
 | Area | Today |
 | --- | --- |
-| Web console: chat, onboarding, Settings (profile, model, permissions, skills, memory, tools, connections, automations, runtime) | Built |
+| Web console: main chat per agent, agent switcher, history, onboarding, Settings | Built |
 | Rust daemon with persistence, restart recovery and streaming | Built |
-| Telegram and Discord, embedded in the daemon | Built |
+| Telegram and Discord, embedded in the daemon; private Telegram chats join the main chat | Built |
 | Memory, task reviews, owner-approved skills, approvals, automations | Built |
+| Plans before bigger jobs (`propose_plan`), the Needs-you inbox, "Done today", the weekly report | Built |
 | Helper agents (delegation) | Built |
 | Voice: browser dictation, read aloud, recorded-audio transcription and selected-reply speech (the last two are server opt-ins) | Built |
 | Reviewed MCP tools, community bundles, documents, web search, scoped browser work | Built, with the scope limits described in [docs/companion](docs/companion) |
 | One-owner VPS deployment | Built; some acceptance checks are still manual ([guide](deploy/vps/README.md)) |
-| Immersive mode: orb, wake word, hotkey, hands-free flow | Coming next |
-| Dark "Halo" background for the chat, and the swarm exchange views | Coming next |
+| Undo for actions the agent took | Coming next: "Done today" lists every change, but nothing can be rolled back from it yet |
+| Wake word and hands-free voice | Coming next |
 
 ## Quick start
 
@@ -82,12 +85,11 @@ More detail: [Rust daemon architecture](docs/rust-daemon-architecture.md), [swar
 ## Design
 
 The interface is designed in [pen.dev](https://pen.dev) before it is built. [`design/design.pen`](design/design.pen) holds every screen:
-- onboarding
-- chat
-- swarm
-- Settings
-- in-chat components
-- immersive mode (the "Halo" direction) and the chat ⇄ voice parity sheet
+- the end-to-end journey and onboarding
+- the main chat, its states (working, offline, errors, plans, receipts) and the agent switcher
+- the Needs-you inbox and the weekly report
+- chat moments, helpers, and every Settings page
+- the components sheet, mascot explorations and the landing page
 
 The orb is a shader, [`design/shaders/presence.glsl`](design/shaders/presence.glsl).
 
@@ -154,3 +156,6 @@ Rust (Axum, SQLite), Bun, TypeScript, React, Vite, Tailwind, Nx, Vitest, Playwri
 ## License
 
 MIT
+
+For task progress, background helpers, local Python and selected-file recovery,
+see the [Rust autonomous runtime guide](hosts/rust-daemon/README.md#autonomous-runtime).

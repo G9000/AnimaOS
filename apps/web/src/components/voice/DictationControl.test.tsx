@@ -97,3 +97,30 @@ it('cancels a pending request and clears interim on disabled boundary', async ()
   ).toBeDisabled();
   expect(screen.queryByRole('status')).not.toBeInTheDocument();
 });
+
+it('shows what the composer microphone hears on the orb, and clears it after', async () => {
+  const { getPresenceSnapshotForTest } = await import('../../lib/presence');
+  const view = render(
+    <DictationControl
+      compact
+      onTranscript={vi.fn()}
+      conversationKey="session"
+    />,
+  );
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Dictate message' }),
+  );
+  const recognition = Recognition.instance;
+  act(() => recognition.onstart?.());
+  act(() =>
+    recognition.onresult?.({
+      resultIndex: 0,
+      results: [{ isFinal: false, 0: { transcript: 'what should I' } }],
+    }),
+  );
+  expect(getPresenceSnapshotForTest().listening).toEqual({
+    words: 'what should I',
+  });
+  view.unmount();
+  expect(getPresenceSnapshotForTest().listening).toBeNull();
+});

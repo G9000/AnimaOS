@@ -6,7 +6,7 @@
 
 When an owner explicitly selects a valid `.xlsx` attachment in a message, extract a bounded, ordered text representation of workbook sheet names and cell values into the existing untrusted-document context. Attach stable sheet/cell locators and honest coverage/omission status. Keep the original upload and download unchanged. Do not edit workbooks, run formulas/macros, resolve external links, or fetch remote data.
 
-XLSX is accepted as an upload type but not understood in selected-message context today: `hosts/rust-daemon/src/attachments/validation.rs` validates the OOXML ZIP envelope and `xl/workbook.xml`; `hosts/rust-daemon/src/attachments/documents/mod.rs::document_format` recognizes only DOCX/PDF. The worker and shared document contract also enumerate only DOCX/PDF. `docs/companion/documents.md` and PAR-08 in `docs/companion/parity-roadmap.md` identify other Office formats as unsupported.
+XLSX is accepted as an upload type but not understood in selected-message context today: `hosts/rust-daemon/src/attachments/validation.rs` validates the OOXML ZIP envelope and `xl/workbook.xml`; `hosts/rust-daemon/src/attachments/documents/mod.rs::document_format` recognizes only DOCX/PDF. The worker and shared document contract also enumerate only DOCX/PDF. `docs/companion/documents.md` identifies other Office formats as unsupported.
 
 ## Reuse/provenance decision
 

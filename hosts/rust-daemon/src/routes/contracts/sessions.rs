@@ -98,6 +98,26 @@ pub(crate) struct SessionMatchResponse {
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct SessionContextUsageResponse {
+    /// Selected conversation history plus summary; excludes other prompt parts.
+    pub(crate) estimated_tokens: u64,
+    /// Usable history budget after the reply reserve.
+    pub(crate) budget_tokens: u64,
+    pub(crate) reply_reserve_tokens: u64,
+}
+
+impl From<crate::sessions::context::ContextUsage> for SessionContextUsageResponse {
+    fn from(value: crate::sessions::context::ContextUsage) -> Self {
+        Self {
+            estimated_tokens: value.estimated_tokens,
+            budget_tokens: value.budget_tokens,
+            reply_reserve_tokens: value.reply_reserve_tokens,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct SessionResponse {
     pub(crate) id: String,
     pub(crate) agent_id: String,
@@ -111,6 +131,7 @@ pub(crate) struct SessionResponse {
     pub(crate) last_activity_at_ms: u64,
     pub(crate) last_read_at_ms: Option<u64>,
     pub(crate) archived: bool,
+    pub(crate) main_chat: bool,
     pub(crate) parent_session_id: Option<String>,
     pub(crate) parent_run_id: Option<String>,
     pub(crate) parent_agent_id: Option<String>,
@@ -132,6 +153,9 @@ pub(crate) struct SessionResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<UsageTotalsResponse>)]
     pub(crate) usage: Option<Option<UsageTotalsResponse>>,
+    /// Only single-session GET includes this live conversation estimate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) context_usage: Option<SessionContextUsageResponse>,
 }
 
 impl From<&SessionView> for SessionResponse {
@@ -149,6 +173,7 @@ impl From<&SessionView> for SessionResponse {
             last_activity_at_ms: record.last_activity_at_ms,
             last_read_at_ms: record.last_read_at_ms,
             archived: record.archived,
+            main_chat: record.main_chat,
             parent_session_id: record.parent_session_id.clone(),
             parent_run_id: record.parent_run_id.clone(),
             parent_agent_id: record.parent_agent_id.clone(),
@@ -184,6 +209,7 @@ impl From<&SessionView> for SessionResponse {
                 snippet: found.snippet.clone(),
             }),
             usage: None,
+            context_usage: None,
         }
     }
 }
@@ -284,12 +310,13 @@ fn extraction_response(
     }
     let selected =
         selected.filter(|row| row.kind == crate::attachments::AttachmentKind::Document)?;
-    let snapshot = anima_core::document_content::parse_document_snapshots(&message.content)
-        .ok()?
-        .into_iter()
-        .find(|snapshot| snapshot.attachment_id == selected.id)?;
+    let snapshot =
+        anima_service_adapters::document_content::parse_document_snapshots(&message.content)
+            .ok()?
+            .into_iter()
+            .find(|snapshot| snapshot.attachment_id == selected.id)?;
     let extraction = snapshot.extraction;
-    use anima_core::document_content::DocumentFormat;
+    use anima_service_adapters::document_content::DocumentFormat;
     let extension = selected.name.rsplit_once('.').map(|(_, ext)| ext);
     let expected_format = match selected.mime.as_str() {
         crate::attachments::documents::DOCX_MIME
@@ -353,8 +380,8 @@ fn extraction_response(
                     .filter(|sheet| {
                         matches!(
                             sheet.visibility,
-                            anima_core::document_content::XlsxSheetVisibility::Hidden
-                                | anima_core::document_content::XlsxSheetVisibility::VeryHidden
+                            anima_service_adapters::document_content::XlsxSheetVisibility::Hidden
+                                | anima_service_adapters::document_content::XlsxSheetVisibility::VeryHidden
                         )
                     })
                     .count() as u32
@@ -456,6 +483,10 @@ impl From<&PageMessage> for SessionMessageResponse {
 pub(crate) struct SessionMessagesEnvelope {
     pub(crate) messages: Vec<SessionMessageResponse>,
     pub(crate) next_before: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) anchor_message_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) has_newer: Option<bool>,
 }
 
 impl From<&MessagePage> for SessionMessagesEnvelope {
@@ -467,8 +498,28 @@ impl From<&MessagePage> for SessionMessagesEnvelope {
                 .map(SessionMessageResponse::from)
                 .collect(),
             next_before: page.next_before.clone(),
+            anchor_message_id: None,
+            has_newer: None,
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionMessageSearchHitResponse {
+    pub(crate) session_id: String,
+    pub(crate) title: String,
+    pub(crate) message_id: String,
+    pub(crate) role: String,
+    pub(crate) created_at_ms: u64,
+    pub(crate) snippet: String,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionMessageSearchEnvelope {
+    pub(crate) results: Vec<SessionMessageSearchHitResponse>,
+    pub(crate) has_more: bool,
 }
 
 /// `POST /api/agents/{id}/sessions`; an empty body means `{}`.
@@ -478,6 +529,11 @@ pub(crate) struct SessionCreateRequest {
     #[serde(default)]
     pub(crate) title: Option<String>,
 }
+
+/// `POST /api/agents/{id}/main-chat`; an empty body means `{}`.
+#[derive(Clone, Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MainChatRequest {}
 
 /// `PATCH /api/agents/{id}/sessions/{sid}`; at least one field.
 #[derive(Clone, Debug, Deserialize, ToSchema)]

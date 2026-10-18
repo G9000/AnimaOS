@@ -1,5 +1,5 @@
 use super::*;
-use anima_core::document_content::{
+use anima_service_adapters::document_content::{
     DocumentExtractionStatus, DocumentOmission, PdfCoverage, XlsxCoverage, XlsxSheetCoverage,
     XlsxSheetVisibility,
 };

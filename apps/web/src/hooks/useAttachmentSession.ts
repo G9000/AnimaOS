@@ -2,15 +2,17 @@ import { useRef } from 'react';
 import type { Session } from '@animaOS-SWARM/sdk';
 import { daemon } from '../lib/daemon-api';
 
-/** Both uploads and a new chat's first send use this single session creation. */
+/** Uploads and first send share the caller's session resolution. */
 export function useAttachmentSession({
   chatKey,
   agentId,
   session,
+  createSession = daemon.createSession,
 }: {
   chatKey: string | null;
   agentId: string | null;
   session: Session | null;
+  createSession?: (agentId: string) => Promise<Session>;
 }) {
   const pending = useRef(new Map<string, Promise<Session>>());
   const ensureSession = (): Promise<Session> => {
@@ -20,7 +22,7 @@ export function useAttachmentSession({
     const key = `${agentId}\u0000${chatKey}`;
     const existing = pending.current.get(key);
     if (existing) return existing;
-    const request = daemon.createSession(agentId);
+    const request = createSession(agentId);
     pending.current.set(key, request);
     void request.catch(() => {
       if (pending.current.get(key) === request) pending.current.delete(key);

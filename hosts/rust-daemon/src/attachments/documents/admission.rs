@@ -4,14 +4,13 @@ use std::{
     sync::Arc,
 };
 
-use anima_core::{
-    document_content::{
-        document_snapshots_metadata, fit_document_snapshots, validate_document_extraction,
-        DocumentExtractionStatus as Status, DocumentFormat, DocumentOmission, DocumentSnapshot,
-        ExtractedDocumentText, DOCUMENT_EXTRACTS_METADATA_KEY, MAX_DOCUMENT_RENDERED_BYTES,
-    },
-    AgentConfig, CancelSignal, Content, TokenEstimator,
+use anima_core::{AgentConfig, CancelSignal, Content};
+use anima_service_adapters::document_content::{
+    document_snapshots_metadata, fit_document_snapshots, validate_document_extraction,
+    DocumentExtractionStatus as Status, DocumentFormat, DocumentOmission, DocumentSnapshot,
+    ExtractedDocumentText, DOCUMENT_EXTRACTS_METADATA_KEY, MAX_DOCUMENT_RENDERED_BYTES,
 };
+use anima_service_adapters::ServiceTokenEstimator as TokenEstimator;
 
 use super::{
     document_format,

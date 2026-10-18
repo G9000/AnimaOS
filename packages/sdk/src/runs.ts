@@ -41,6 +41,32 @@ export interface ActionReceipt {
   durability: 'persistent' | 'memory';
 }
 
+/** Durable completion disposition. Acceptance and queueing do not prove execution. */
+export type HelperCompletionDisposition =
+  | { state: 'manual' }
+  | { state: 'awaiting_result'; reservedRunId: string }
+  | { state: 'awaiting_parent'; reservedRunId: string }
+  | { state: 'queued'; runId: string }
+  | { state: 'settled'; runId: string }
+  | { state: 'review_required'; reason: string; runId?: string }
+  | { state: 'suppressed'; reason: string; runId?: string };
+
+/** Response-only helper lineage; private launch identities and steer content are omitted. */
+export interface AsyncHelperSummary {
+  ownerAgentId: string;
+  ownerSessionId: string;
+  parentRunId: string;
+  completion: HelperCompletionDisposition;
+  pendingSteerCount: number;
+  archiveUnconsumedCount: number;
+}
+
+/** Typed host provenance for evidence returned to the original companion chat. */
+export interface HelperCompletionOrigin {
+  helperRunId: string;
+  launchParentRunId: string;
+}
+
 /** A ledger run (spec §4.1). */
 export interface Run {
   id: string;
@@ -68,6 +94,10 @@ export interface Run {
   replyMessageId: string | null;
   /** Native action witnesses, absent on runs saved before receipt support. */
   actionReceipts?: ActionReceipt[];
+  /** Absent for legacy runs and ordinary owner turns. */
+  asyncHelper?: AsyncHelperSummary;
+  /** Generated helper evidence, never a newly authored owner request. */
+  helperCompletion?: HelperCompletionOrigin;
 }
 
 /** `queue` waits behind the session's earlier messages; `steer` joins its

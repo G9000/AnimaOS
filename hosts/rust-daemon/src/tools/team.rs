@@ -209,3 +209,70 @@ pub(super) fn spawn_helper(
         }
     })
 }
+
+pub(super) fn async_helper_operation(
+    context: ToolExecutionContext,
+    agent: AgentState,
+    _message: Message,
+    call: ToolCall,
+) -> BoxFuture<'static, TaskResult<Content>> {
+    Box::pin(async move {
+        if !context.can_delegate {
+            return TaskResult::error("Only the companion's ordinary run can manage helpers", 0);
+        }
+        let (Some(coordinator), Some(parent)) = (context.team, context.run_link) else {
+            return TaskResult::error(
+                "Helper operations require an authentic active companion run",
+                0,
+            );
+        };
+        let result = if call.name == "spawn_helper_async" {
+            let arg = |key: &str| match call.args.get(key) {
+                Some(DataValue::String(value)) => Some(value.clone()),
+                _ => None,
+            };
+            let (Some(name), Some(task)) = (arg("name"), arg("task")) else {
+                return TaskResult::error("name and task are required", 0);
+            };
+            let completion = match call.args.get("completion") {
+                None => "chat".to_string(),
+                Some(DataValue::String(value))
+                    if matches!(value.as_str(), "chat" | "manual" | "origin") =>
+                {
+                    value.clone()
+                }
+                _ => {
+                    return TaskResult::error(
+                        "completion must be chat, manual or supported job origin",
+                        0,
+                    )
+                }
+            };
+            coordinator
+                .accept_async_helper(
+                    agent.id,
+                    parent,
+                    call.id,
+                    name,
+                    task,
+                    completion,
+                    context.helper_starts,
+                )
+                .await
+        } else {
+            coordinator
+                .manage_async_helper(agent.id, parent, call)
+                .await
+        };
+        match result {
+            Ok(text) => TaskResult::success(
+                Content {
+                    text,
+                    ..Content::default()
+                },
+                0,
+            ),
+            Err(error) => TaskResult::error(error, 0),
+        }
+    })
+}

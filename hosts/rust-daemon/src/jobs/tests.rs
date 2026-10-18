@@ -242,7 +242,7 @@ async fn a_chat_run_in_another_room_does_not_hold_back_the_agents_job() {
     let _ = std::fs::remove_file(path);
 }
 
-fn setup() -> (JobService, String, std::path::PathBuf) {
+pub(super) fn setup() -> (JobService, String, std::path::PathBuf) {
     let path = std::env::temp_dir().join(format!("anima-jobs-{}.json", uuid::Uuid::new_v4()));
     let mut state = DaemonState::new();
     state.set_control_plane_store(Some(ControlPlaneStoreConfig::Json(path.clone())));

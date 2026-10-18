@@ -43,6 +43,158 @@ afterEach(() => {
 });
 
 describe('useSessionMessages', () => {
+  it('loads one exact old window, isolates it from live refreshes and returns to latest', async () => {
+    const polls = capturePolls();
+    const pages = vi
+      .spyOn(daemon, 'sessionMessages')
+      .mockImplementation(async (_agent, _session, options = {}) =>
+        options.anchor
+          ? {
+              messages: [message('old-before', 1), message('deep-old', 2)],
+              nextBefore: 'old-cursor',
+              anchorMessageId: options.anchor,
+              hasNewer: true,
+            }
+          : {
+              messages: [message('latest', 1000)],
+              nextBefore: 'latest-cursor',
+            },
+      );
+    const { result, rerender } = renderHook(
+      ({ anchor, refreshKey, jumpRequestKey }) =>
+        useSessionMessages(
+          'agent-main',
+          'chat:1',
+          refreshKey,
+          SESSION_MESSAGES_POLL_MS,
+          { anchorMessageId: anchor, jumpRequestKey },
+        ),
+      {
+        initialProps: {
+          anchor: 'deep-old' as string | null,
+          refreshKey: 0,
+          jumpRequestKey: 0,
+        },
+      },
+    );
+    await waitFor(() =>
+      expect(result.current.messages.map((item) => item.id)).toEqual([
+        'old-before',
+        'deep-old',
+      ]),
+    );
+    expect(pages).toHaveBeenCalledExactlyOnceWith('agent-main', 'chat:1', {
+      anchor: 'deep-old',
+    });
+    expect(polls).toHaveLength(0);
+    rerender({ anchor: 'deep-old', refreshKey: 1, jumpRequestKey: 0 });
+    expect(result.current.messages.map((item) => item.id)).toEqual([
+      'old-before',
+      'deep-old',
+    ]);
+    expect(pages).toHaveBeenCalledOnce();
+    rerender({ anchor: 'deep-old', refreshKey: 1, jumpRequestKey: 1 });
+    await waitFor(() => expect(pages).toHaveBeenCalledTimes(2));
+    rerender({ anchor: null, refreshKey: 1, jumpRequestKey: 1 });
+    await waitFor(() =>
+      expect(result.current.messages.map((item) => item.id)).toEqual([
+        'latest',
+      ]),
+    );
+    expect(pages).toHaveBeenLastCalledWith('agent-main', 'chat:1', {
+      limit: 50,
+    });
+  });
+
+  it('marks a repeated anchor pending on its first render before parent effects', async () => {
+    let resolve!: (page: SessionMessagePage) => void;
+    const pending = new Promise<SessionMessagePage>((done) => {
+      resolve = done;
+    });
+    const page = {
+      messages: [message('old', 1)],
+      nextBefore: null,
+      anchorMessageId: 'old',
+    };
+    vi.spyOn(daemon, 'sessionMessages')
+      .mockResolvedValueOnce(page)
+      .mockReturnValueOnce(pending);
+    const renders: { key: number; loading: boolean }[] = [];
+    const { result, rerender } = renderHook(
+      ({ key }) => {
+        const state = useSessionMessages(
+          'agent-main',
+          'chat:1',
+          0,
+          SESSION_MESSAGES_POLL_MS,
+          { anchorMessageId: 'old', jumpRequestKey: key },
+        );
+        renders.push({ key, loading: state.loadingAnchor });
+        return state;
+      },
+      { initialProps: { key: 0 } },
+    );
+    await waitFor(() => expect(result.current.loadingAnchor).toBe(false));
+    rerender({ key: 1 });
+    expect(renders.find((render) => render.key === 1)?.loading).toBe(true);
+    expect(result.current.readsStarted()).toBe(0);
+    await act(async () => resolve(page));
+    await waitFor(() => expect(result.current.loadingAnchor).toBe(false));
+  });
+
+  it('keeps a missing anchor distinct from a deleted session and exposes its error', async () => {
+    vi.spyOn(daemon, 'sessionMessages').mockRejectedValue({
+      status: 404,
+      message: 'message unavailable',
+    });
+    const { result } = renderHook(() =>
+      useSessionMessages('agent-main', 'chat:1', 0, SESSION_MESSAGES_POLL_MS, {
+        anchorMessageId: 'gone',
+      }),
+    );
+    await waitFor(() =>
+      expect(result.current.error).toMatch(/message|anchor/i),
+    );
+    expect(result.current.missing).toBe(false);
+    expect(result.current.loadingAnchor).toBe(false);
+  });
+
+  it('discards an old anchor read after an agent or anchor switch', async () => {
+    let resolve!: (page: SessionMessagePage) => void;
+    const old = new Promise<SessionMessagePage>((done) => {
+      resolve = done;
+    });
+    vi.spyOn(daemon, 'sessionMessages').mockImplementation(
+      async (agent, _session, options = {}) =>
+        agent === 'old-agent'
+          ? old
+          : {
+              messages: [message('new-anchor', 10)],
+              nextBefore: null,
+              anchorMessageId: options.anchor,
+            },
+    );
+    const { result, rerender } = renderHook(
+      ({ agent, anchor }) =>
+        useSessionMessages(agent, 'chat:1', 0, SESSION_MESSAGES_POLL_MS, {
+          anchorMessageId: anchor,
+        }),
+      { initialProps: { agent: 'old-agent', anchor: 'old-anchor' } },
+    );
+    rerender({ agent: 'new-agent', anchor: 'new-anchor' });
+    await waitFor(() =>
+      expect(result.current.messages[0]?.id).toBe('new-anchor'),
+    );
+    await act(async () =>
+      resolve({
+        messages: [message('old-anchor', 1)],
+        nextBefore: null,
+        anchorMessageId: 'old-anchor',
+      }),
+    );
+    expect(result.current.messages[0]?.id).toBe('new-anchor');
+  });
+
   it('loads the newest page, then older pages without duplicates', async () => {
     const pages = vi
       .spyOn(daemon, 'sessionMessages')

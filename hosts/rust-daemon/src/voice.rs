@@ -11,12 +11,10 @@ use crate::{
     },
     sessions::{SessionKind, SessionOrigin},
 };
-use anima_core::{
-    audio_content::{
-        validate_transcript_text, AudioValidationError, TranscriptionAvailability,
-        TranscriptionError, TranscriptionPort, WavAudio,
-    },
-    CancelSignal,
+use anima_core::CancelSignal;
+use anima_service_adapters::audio_content::{
+    validate_transcript_text, AudioValidationError, TranscriptionAvailability, TranscriptionError,
+    TranscriptionPort, WavAudio,
 };
 use std::{
     collections::HashMap,

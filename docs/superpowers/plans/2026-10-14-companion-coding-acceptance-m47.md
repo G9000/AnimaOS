@@ -13,7 +13,7 @@ M46 gates are not evidence for an M47 implementation.
 
 ## 1. Scope and success claims
 
-- PAR-06 remains partial in `docs/companion/parity-roadmap.md`; deterministic cases do not close the failed actual-provider case.
+- Deterministic cases do not close the failed actual-provider case.
 - Deliver an isolated coding fixture, independent oracle, native acceptance cases,
   and concise evidence. A narrow Windows shell Job/IO/caller-drop fix is mandatory
   before live coding; other runtime changes still require a demonstrated gap.

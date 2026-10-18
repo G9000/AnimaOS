@@ -1,6 +1,6 @@
 use super::*;
 use crate::browser::transport::BrowserDocumentWitness;
-use anima_core::browser::BrowserOperation;
+use anima_service_adapters::browser::BrowserOperation;
 use serde::Deserialize;
 use serde_json::{json, Value};
 

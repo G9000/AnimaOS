@@ -7,6 +7,7 @@ pub(crate) enum AgentJobStatus {
     AwaitingApproval,
     Queued,
     Running,
+    PendingDelegations,
     Completed,
     Failed,
     NeedsReview,
@@ -46,6 +47,12 @@ pub(crate) struct AgentJobRecord {
     /// Saved before a running attempt is signalled to stop (spec §4.6).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) stop_requested_at_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) pending_delegations: Option<crate::runs::PendingDelegations>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) final_output: Option<crate::runs::DelegationFinalOutput>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) delegation_evidence: Option<crate::runs::DelegationEvidence>,
 }
 
 fn default_max_attempts() -> u32 {
@@ -65,6 +72,10 @@ pub(crate) struct JobOutputReview {
     pub(crate) decision: JobReviewDecision,
     pub(crate) note: String,
     pub(crate) reviewed_at_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) final_output_generation: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) final_output_sha256: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -78,6 +89,10 @@ pub(crate) struct AgentJobAttempt {
     pub(crate) error: Option<String>,
     pub(crate) result_truncated: bool,
     pub(crate) review: Option<JobOutputReview>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) final_output: Option<crate::runs::DelegationFinalOutput>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) delegation_evidence: Option<crate::runs::DelegationEvidence>,
 }
 
 impl AgentJobRecord {
@@ -98,12 +113,43 @@ impl AgentJobRecord {
                     // Legacy outputs did not retain truncation metadata. Conservatively mark a full preview.
                     result_truncated: self.result.as_ref().is_some_and(|r| r.len() >= 65533),
                     review: None,
+                    final_output: self.final_output.clone(),
+                    delegation_evidence: self.delegation_evidence.clone(),
                 });
             }
         }
     }
 
     pub(crate) fn validate(&self) -> Result<(), String> {
+        if (self.status == AgentJobStatus::PendingDelegations) != self.pending_delegations.is_some()
+            || self.pending_delegations.as_ref().is_some_and(|pending| {
+                pending.validate().is_err()
+                    || self.finished_at_ms.is_some()
+                    || self.result.is_some()
+                    || self.error.is_some()
+                    || self.final_output.is_some()
+                    || self.delegation_evidence.is_some()
+                    || self
+                        .attempts
+                        .iter()
+                        .any(|attempt| attempt.attempt == self.attempt)
+            })
+            || self.final_output.as_ref().is_some_and(|output| {
+                self.status != AgentJobStatus::Completed
+                    || output.validate(self.result.as_deref()).is_err()
+                    || self
+                        .attempts
+                        .last()
+                        .is_none_or(|attempt| attempt.attempt != self.attempt)
+            })
+        {
+            return Err("Invalid pending/final delegation job state".into());
+        }
+        validate_evidence(self.status, self.delegation_evidence.as_ref())?;
+        validate_output_pair(
+            self.final_output.as_ref(),
+            self.delegation_evidence.as_ref(),
+        )?;
         if !(1..=3).contains(&self.max_attempts)
             || self.attempt > self.max_attempts
             || self.attempts.len() > self.max_attempts as usize
@@ -115,6 +161,7 @@ impl AgentJobRecord {
                     self.status,
                     AgentJobStatus::Queued
                         | AgentJobStatus::Running
+                        | AgentJobStatus::PendingDelegations
                         | AgentJobStatus::Completed
                         | AgentJobStatus::Failed
                         | AgentJobStatus::NeedsReview
@@ -127,6 +174,11 @@ impl AgentJobRecord {
         }
         let mut previous = 0;
         for attempt in &self.attempts {
+            validate_evidence(attempt.status, attempt.delegation_evidence.as_ref())?;
+            validate_output_pair(
+                attempt.final_output.as_ref(),
+                attempt.delegation_evidence.as_ref(),
+            )?;
             if attempt.attempt <= previous
                 || attempt.attempt > self.attempt
                 || !matches!(
@@ -142,7 +194,14 @@ impl AgentJobRecord {
                 || attempt.result.as_ref().is_some_and(|r| r.len() > 65536)
                 || attempt.error.as_ref().is_some_and(|r| r.len() > 65536)
                 || (attempt.result_truncated && attempt.result.is_none())
-                || (self.status == AgentJobStatus::Running && attempt.attempt == self.attempt)
+                || (matches!(
+                    self.status,
+                    AgentJobStatus::Running | AgentJobStatus::PendingDelegations
+                ) && attempt.attempt == self.attempt)
+                || attempt.final_output.as_ref().is_some_and(|output| {
+                    attempt.status != AgentJobStatus::Completed
+                        || output.validate(attempt.result.as_deref()).is_err()
+                })
             {
                 return Err("Invalid job attempt history".into());
             }
@@ -155,6 +214,21 @@ impl AgentJobRecord {
                     || review.reviewed_at_ms > self.updated_at_ms
                 {
                     return Err("Invalid job output review".into());
+                }
+                match &attempt.final_output {
+                    Some(output)
+                        if review.final_output_generation != Some(output.generation)
+                            || review.final_output_sha256.as_deref()
+                                != Some(output.sha256.as_str()) =>
+                    {
+                        return Err("Async output review does not bind exact final evidence".into());
+                    }
+                    None if review.final_output_generation.is_some()
+                        || review.final_output_sha256.is_some() =>
+                    {
+                        return Err("Legacy review cannot invent async output evidence".into());
+                    }
+                    _ => {}
                 }
             }
             if attempt.attempt == self.attempt
@@ -170,7 +244,9 @@ impl AgentJobRecord {
                     || Some(attempt.started_at_ms) != self.started_at_ms
                     || Some(attempt.finished_at_ms) != self.finished_at_ms
                     || attempt.result != self.result
-                    || attempt.error != self.error)
+                    || attempt.error != self.error
+                    || attempt.final_output != self.final_output
+                    || attempt.delegation_evidence != self.delegation_evidence)
             {
                 return Err("Latest attempt disagrees with saved output".into());
             }
@@ -210,7 +286,7 @@ impl AgentJobRecord {
             {
                 Err("Invalid queued job".into())
             }
-            AgentJobStatus::Running
+            AgentJobStatus::Running | AgentJobStatus::PendingDelegations
                 if self.attempt == 0
                     || self.started_at_ms.is_none()
                     || self.finished_at_ms.is_some() =>
@@ -231,4 +307,41 @@ impl AgentJobRecord {
             _ => Ok(()),
         }
     }
+}
+
+fn validate_evidence(
+    status: AgentJobStatus,
+    evidence: Option<&crate::runs::DelegationEvidence>,
+) -> Result<(), String> {
+    let Some(evidence) = evidence else {
+        return Ok(());
+    };
+    evidence.validate()?;
+    let expected = match evidence.disposition {
+        crate::runs::DelegationDisposition::Completed => status == AgentJobStatus::Completed,
+        crate::runs::DelegationDisposition::ReviewRequired => status == AgentJobStatus::NeedsReview,
+        crate::runs::DelegationDisposition::Suppressed => matches!(
+            status,
+            AgentJobStatus::NeedsReview | AgentJobStatus::Stopped | AgentJobStatus::Cancelled
+        ),
+    };
+    if !expected {
+        return Err("Delegation evidence disagrees with job disposition".into());
+    }
+    Ok(())
+}
+
+fn validate_output_pair(
+    output: Option<&crate::runs::DelegationFinalOutput>,
+    evidence: Option<&crate::runs::DelegationEvidence>,
+) -> Result<(), String> {
+    let completed = evidence.is_some_and(|evidence| {
+        evidence.disposition == crate::runs::DelegationDisposition::Completed
+    });
+    if output.is_some() != completed {
+        return Err(
+            "Completed delegation evidence and exact final output must be saved together".into(),
+        );
+    }
+    Ok(())
 }

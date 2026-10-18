@@ -465,17 +465,7 @@ impl AgentRuntime {
         self.mark_running();
         let input = self.tag_for_run(input, None, Vec::new());
         let user_message = self.record_message_in_room(room_id.clone(), MessageRole::User, input);
-        let context_parts = match self.build_provider_context(&user_message).await {
-            Ok(context_parts) => context_parts,
-            Err(error) => {
-                let duration_ms = now_millis().saturating_sub(start);
-                self.mark_failed(error, duration_ms);
-                return self
-                    .last_task
-                    .clone()
-                    .unwrap_or_else(|| TaskResult::error("provider context failed", duration_ms));
-            }
-        };
+        let mut provider_snapshots = std::collections::BTreeMap::new();
         let mut conversation = history;
         conversation.push(user_message.clone());
         let mut iterations = 0;
@@ -518,6 +508,19 @@ impl AgentRuntime {
                     .max_retries = Some(0);
                 config
             });
+            let context_parts = match self
+                .build_provider_context(&user_message, &mut provider_snapshots)
+                .await
+            {
+                Ok(parts) => parts,
+                Err(error) => {
+                    let duration_ms = now_millis().saturating_sub(start);
+                    self.mark_failed(error, duration_ms);
+                    return self.last_task.clone().unwrap_or_else(|| {
+                        TaskResult::error("provider context failed", duration_ms)
+                    });
+                }
+            };
             let mut system = self.build_system_prompt(&context_parts);
             if budget_wrapup {
                 system.push_str("\n\n");
@@ -644,20 +647,22 @@ impl AgentRuntime {
                             exact_failures.reset();
                             successful_results.reset();
                             successful_cycle.reset_history();
-                            let evaluation =
-                                match self.run_evaluators(&user_message, &response.content).await {
-                                    Ok(decision) => decision,
-                                    Err(error) => {
-                                        return self.fail_step(
-                                            &room_id,
-                                            &step_id,
-                                            &response.content.text,
-                                            INCOMPLETE_METADATA_KEY,
-                                            error,
-                                            start,
-                                        );
-                                    }
-                                };
+                            let evaluation = match self
+                                .run_evaluators(&user_message, &response.content, !budget_wrapup)
+                                .await
+                            {
+                                Ok(decision) => decision,
+                                Err(error) => {
+                                    return self.fail_step(
+                                        &room_id,
+                                        &step_id,
+                                        &response.content.text,
+                                        INCOMPLETE_METADATA_KEY,
+                                        error,
+                                        start,
+                                    );
+                                }
+                            };
 
                             match evaluation {
                                 EvaluatorDecision::Accept => {
@@ -1429,14 +1434,21 @@ impl AgentRuntime {
         parts.join("\n\n")
     }
 
-    async fn build_provider_context(&self, message: &Message) -> Result<Vec<String>, String> {
+    async fn build_provider_context(
+        &self,
+        message: &Message,
+        snapshots: &mut std::collections::BTreeMap<usize, String>,
+    ) -> Result<Vec<String>, String> {
         let mut context_parts = Vec::new();
-        let mut providers = self.providers.iter().collect::<Vec<_>>();
-        providers.sort_by(|left, right| right.priority().cmp(&left.priority()));
+        let mut providers = self.providers.iter().enumerate().collect::<Vec<_>>();
+        providers.sort_by(|(_, left), (_, right)| right.priority().cmp(&left.priority()));
 
-        for provider in providers {
-            let result = provider.get(self, message).await?;
-            context_parts.push(format!("[{}]: {}", provider.name(), result.text));
+        for (index, provider) in providers {
+            if provider.refresh_each_model_request() || !snapshots.contains_key(&index) {
+                let result = provider.get(self, message).await?;
+                snapshots.insert(index, format!("[{}]: {}", provider.name(), result.text));
+            }
+            context_parts.push(snapshots[&index].clone());
         }
         Ok(context_parts)
     }
@@ -1445,11 +1457,15 @@ impl AgentRuntime {
         &self,
         message: &Message,
         response: &Content,
+        tools_available: bool,
     ) -> Result<EvaluatorDecision, String> {
         let mut evaluators = self.evaluators.iter().collect::<Vec<_>>();
         evaluators.sort_by(|left, right| right.priority().cmp(&left.priority()));
 
         for evaluator in evaluators {
+            if !tools_available && evaluator.requires_tool_budget() {
+                continue;
+            }
             if evaluator.validate(self, message).await? {
                 let result = evaluator.evaluate(self, message, response).await?;
                 match result.decision {

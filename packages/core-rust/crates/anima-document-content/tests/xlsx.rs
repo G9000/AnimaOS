@@ -1,11 +1,11 @@
 use std::io::Write;
 
-use anima_core::document_content::{
+use anima_document_content::extract_document;
+use anima_service_adapters::document_content::{
     DocumentExtractionStatus as Status, DocumentFormat, DocumentLocator,
     DocumentOmission as Omission, ExtractedDocumentText, XlsxCoverage, XlsxSheetCoverage,
     XlsxSheetVisibility as Visibility,
 };
-use anima_document_content::extract_document;
 use rawzip::{CompressionMethod, ZipArchive, ZipArchiveWriter};
 
 const NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
@@ -409,13 +409,13 @@ fn m66_cell_count_boundary_and_context_budget_preserve_honest_counts() {
     assert_eq!(coverage.included_cell_count as usize, value.blocks.len());
     assert!(coverage.included_cell_count > 0 && coverage.included_cell_count < 2000);
     assert!(value.omissions.contains(&Omission::TextLimit));
-    let snapshot = anima_core::document_content::DocumentSnapshot {
+    let snapshot = anima_service_adapters::document_content::DocumentSnapshot {
         attachment_id: "a".repeat(128),
         source_sha256: "a".repeat(64),
         extraction: value,
     };
     assert!(
-        anima_core::document_content::render_document_snapshots(&[snapshot])
+        anima_service_adapters::document_content::render_document_snapshots(&[snapshot])
             .unwrap()
             .len()
             <= 16 * 1024

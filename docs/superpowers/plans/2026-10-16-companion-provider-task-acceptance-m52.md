@@ -108,7 +108,6 @@ new harness framework, worker bridge, runtime, browser or workspace project.
 | `docs/superpowers/plans/2026-10-15-companion-subscription-models-m49.md` | Frozen catalog routes, states, deliberate model selection        |
 | `docs/superpowers/plans/2026-10-15-companion-catalog-budget-m51.md`      | Bounded catalog budget only; actual metadata is a separate gate  |
 | `docs/companion/harness-acceptance.md`                                   | Revision-specific evidence and quality limits                    |
-| `docs/companion/parity-roadmap.md`                                       | PAR-06 remains useful-task/delegation acceptance                 |
 | `packages/core-rust/acceptance/coding-m47/`                              | Oracle/manifest/control conventions; do not modify M47 inputs    |
 | `hosts/rust-daemon/src/agent_runs/coding_tests.rs`                       | Real handlers, scripted gates, receipts and protected witnesses  |
 | `hosts/rust-daemon/src/agent_runs/test_support.rs`                       | Existing ScriptedModel, Gate, session/admission/approval helpers |

@@ -9,6 +9,7 @@ It does not own the runnable HTTP daemon. The current Rust host remains at [`hos
 | Crate | What it does |
 |---|---|
 | [`anima-core`](crates/anima-core) | Agent execution loop, trait interfaces, and runtime primitives. No HTTP or database implementation details. |
+| [`anima-service-adapters`](crates/anima-service-adapters) | Reusable browser, connector, bundle, speech/audio and document contracts and validation, including derived-content context costs. Depends on core; core does not depend on it. |
 | [`anima-memory`](crates/anima-memory) | BM25-backed memory storage and retrieval helpers. |
 | [`anima-swarm`](crates/anima-swarm) | Multi-agent coordination strategies built on top of `anima-core`. |
 
@@ -17,9 +18,7 @@ It does not own the runnable HTTP daemon. The current Rust host remains at [`hos
 From the repo root:
 
 ```bash
-cargo build -p anima-core
-cargo build -p anima-memory
-cargo build -p anima-swarm
+bun x nx run core-rust:build
 ```
 
 ## Test
@@ -27,9 +26,7 @@ cargo build -p anima-swarm
 From the repo root:
 
 ```bash
-cargo test -p anima-core
-cargo test -p anima-memory
-cargo test -p anima-swarm
+bun x nx run core-rust:test
 ```
 
 ## Architecture

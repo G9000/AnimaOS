@@ -2,10 +2,10 @@
 //! Jobs constrain resources/lifetime; they are not a filesystem/network sandbox.
 use std::io::{self, Read, Write};
 
-use anima_core::document_content::{
+use anima_core::CancelSignal;
+use anima_service_adapters::document_content::{
     validate_document_extraction, DocumentFormat, ExtractedDocumentText,
 };
-use anima_core::CancelSignal;
 use async_trait::async_trait;
 use tokio::time::Instant;
 
@@ -641,7 +641,7 @@ mod physical {
                     assert_eq!(result, Err(WorkerFailure::TimedOut), "{mode}");
                     assert_eq!(
                         available(format, "valid", Vec::new()).await.unwrap().status,
-                        anima_core::document_content::DocumentExtractionStatus::NoText
+                        anima_service_adapters::document_content::DocumentExtractionStatus::NoText
                     );
                 }
                 for dropped in [false, true] {

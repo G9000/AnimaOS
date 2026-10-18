@@ -1,6 +1,6 @@
 # Task reviews and learning advice
 
-M38 adds a bounded advice stage. It does not automatically save facts, edit skills or change instructions. M39 adds owner-reviewed procedural adoption and later reuse under [PAR-02](parity-roadmap.md#par-02-close-the-learning-loop-through-reviewed-adoption).
+M38 adds a bounded advice stage. It does not automatically save facts, edit skills or change instructions. M39 adds owner-reviewed procedural adoption and later reuse through the existing skill approval flow.
 
 After an eligible completed task, use **Review this task** next to its accepted reply. Open the companion's settings to inspect **Task reviews**. You can refresh status, read the evidence, cancel a pending review, acknowledge advice or dismiss it. Generated advice is unverified. Acknowledgement records your decision; it does not create a Fact, approve a skill or execute its suggestion.
 
@@ -18,9 +18,9 @@ The owner policy response reports whether the physical reviewer is still active.
 
 Owner routes are documented in the daemon OpenAPI contract: learning-policy GET/PATCH, completed-run learning-review POST, review list/detail GET, cancellation POST and versioned proposal decision PATCH. The SDK exposes these through `client.learning`. Requests may choose only the source run or owner decision; evidence, provider, policy version and limits stay server-owned.
 
-The implementation follows the [reuse-first policy](parity-roadmap.md#reuse-first-implementation-policy): a narrow attributed port of the upstream request-exit/cancellation pattern, integrated with Anima's existing streaming model adapter and durable owner boundaries. Full Python agent forks with automatic memory/skill writes would violate this stage's contract. See the host learning notice for pinned source and MIT attribution.
+The implementation uses a narrow attributed port of the upstream request-exit/cancellation pattern, integrated with Anima's existing streaming model adapter and durable owner boundaries. Full Python agent forks with automatic memory/skill writes would violate this stage's contract. See the host learning notice for pinned source and MIT attribution.
 
-Verification and real acceptance are recorded in [harness acceptance](harness-acceptance.md). Advice alone does not establish a lifelong learning loop, general insight quality, real-account readiness or full Hermes parity.
+Verification and real acceptance are recorded in [harness acceptance](harness-acceptance.md). Advice alone does not establish a lifelong learning loop, general insight quality, real-account readiness.
 
 ## Reviewed procedural adoption
 
@@ -48,4 +48,4 @@ Missing, deleted, foreign, hidden or ineligible selected sources are unavailable
 
 Owner contracts are GET/PATCH `/api/agents/{agent_id}/memory-views`, GET its `/candidates?query=...` and PATCH its `/sources/{memory_id}`. SDK methods live on `client.memories`. Selection requires `expectedVersion`, ordered `userProfile` and `agentNotes` arrays of `{id,sourceHash}`. Correction requires `expectedVersion`, `expectedContent`, `expectedSourceHash` and `content`. All routes require owner access and use no-store responses. Version16 backs up version15 independently as `.pre-memory-views.bak`; older daemons refuse this format.
 
-This M40 slice follows pinned Hermes full-entry guarding and profile/notes behavior through Anima's existing canonical store. Standard Markdown synchronization, automatic profile inference and unattended curation are outside this wave. Exact local gates and the two fresh corrected-preference/restart trials are recorded in [harness acceptance](harness-acceptance.md) and the [M40 plan](../superpowers/plans/2026-10-13-companion-profile-memory-m40.md).
+This M40 slice uses exact-entry guards and Anima's existing canonical store for profile facts and agent notes. Standard Markdown synchronization, automatic profile inference and unattended curation are outside this wave. Exact local gates and the two fresh corrected-preference/restart trials are recorded in [harness acceptance](harness-acceptance.md) and the [M40 plan](../superpowers/plans/2026-10-13-companion-profile-memory-m40.md).

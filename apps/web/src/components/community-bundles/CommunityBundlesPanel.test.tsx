@@ -92,6 +92,42 @@ async function inspect(
 }
 
 describe('owner community bundles', () => {
+  it('fp02 epoch invalidates bundle review but preserves the manifest draft', async () => {
+    const mock = api();
+    const user = userEvent.setup();
+    const view = render(
+      <CommunityBundlesPanel agentId="main" api={mock} online epoch={1} />,
+    );
+    await loaded();
+    await enter(user);
+    await user.click(screen.getByRole('button', { name: 'Review bundle' }));
+    await waitFor(() => expect(mock.review).toHaveBeenCalledTimes(1));
+    const manifest = screen.getByRole('textbox', { name: 'Bundle manifest' });
+    const draft = (manifest as HTMLTextAreaElement).value;
+    view.rerender(
+      <CommunityBundlesPanel
+        agentId="main"
+        api={mock}
+        online={false}
+        epoch={1}
+      />,
+    );
+    expect(manifest).toHaveValue(draft);
+    expect(
+      screen.queryByRole('button', { name: 'Install reviewed bundle' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Refresh bundle status' }),
+    );
+    expect(mock.list).toHaveBeenCalledTimes(1);
+    view.rerender(
+      <CommunityBundlesPanel agentId="main" api={mock} online epoch={2} />,
+    );
+    await loaded();
+    expect(manifest).toHaveValue(draft);
+    expect(mock.install).not.toHaveBeenCalled();
+  });
+
   it('loads saved metadata only and leaves empty review and installation inactive', async () => {
     const mock = api();
     render(<CommunityBundlesPanel agentId="main" api={mock} />);

@@ -1084,6 +1084,79 @@ async fn calendar_state_round_trips_through_the_control_plane_snapshot() {
     assert_eq!(target.calendar_writes.len(), 1);
 }
 
+#[test]
+fn calendar_followup_titles_preserve_summary_and_empty_fallback() {
+    assert_eq!(
+        super::followup_context(Some("Team sync")).title,
+        "Calendar · Team sync"
+    );
+    assert_eq!(super::followup_context(None).title, "Calendar update");
+    assert_eq!(super::followup_context(Some("  ")).title, "Calendar update");
+}
+
+#[tokio::test]
+async fn legacy_calendar_followup_origin_is_restored_without_changing_source_refs() {
+    let fixture = fixture(Some(GoogleOAuthConfig::for_tests())).await;
+    let mut snapshot = fixture.state.read().await.control_plane_snapshot();
+    let now = now_ms();
+    for (reference, origin) in [
+        ("calendar-write:legacy", None),
+        ("ordinary-api", None),
+        ("calendar-write:ordinary-api", Some(false)),
+        ("calendar-write:trusted", Some(true)),
+    ] {
+        let mut run = crate::runs::RunRecord::running(
+            crate::runs::RunStart {
+                agent_id: fixture.agent_id.clone(),
+                session_id: format!("direct:{reference}"),
+                source: crate::runs::RunSource::Api,
+                source_ref: Some(reference.into()),
+                idempotency_key: None,
+                text: "Stored input".into(),
+                model: "test".into(),
+                provider: None,
+                parent_run_id: None,
+            },
+            now,
+        );
+        run.system_followup = origin;
+        snapshot.runs.push(run);
+    }
+    let mut json = serde_json::to_value(&snapshot).unwrap();
+    for run in json["runs"].as_array_mut().unwrap() {
+        if matches!(
+            run["sourceRef"].as_str(),
+            Some("calendar-write:legacy" | "ordinary-api")
+        ) {
+            run.as_object_mut().unwrap().remove("systemFollowup");
+        }
+    }
+    let mut restored = DaemonState::new();
+    restored
+        .restore_control_plane_snapshot(serde_json::from_value(json).unwrap())
+        .unwrap();
+    let restored = restored.control_plane_snapshot();
+    assert_eq!(restored.runs.len(), 4);
+    for run in &restored.runs {
+        assert_eq!(
+            run.system_followup,
+            Some(matches!(
+                run.source_ref.as_deref(),
+                Some("calendar-write:legacy" | "calendar-write:trusted")
+            ))
+        );
+    }
+    // Saving and restoring the upgraded snapshot must retain explicit false,
+    // even when the ordinary run's reference resembles a legacy follow-up.
+    let mut second = DaemonState::new();
+    second
+        .restore_control_plane_snapshot(
+            serde_json::from_str(&serde_json::to_string(&restored).unwrap()).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(second.control_plane_snapshot().runs, restored.runs);
+}
+
 #[tokio::test]
 async fn list_events_tool_reports_connection_guidance_when_unconnected() {
     let fixture = fixture(Some(GoogleOAuthConfig::for_tests())).await;

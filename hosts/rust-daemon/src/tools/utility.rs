@@ -22,6 +22,29 @@ pub(super) fn execute_get_current_time(
     })
 }
 
+/// The plan-first tool. The approval gate always asks the owner before it
+/// runs, so reaching here means the plan was approved.
+pub(crate) const PLAN_TOOL: &str = "propose_plan";
+pub(crate) const PLAN_APPROVED: &str = "The owner approved this plan. Carry it out in order, and keep asking before any step marked asks_first.";
+
+pub(super) fn execute_propose_plan(
+    _context: ToolExecutionContext,
+    _agent: AgentState,
+    _user_message: Message,
+    _tool_call: ToolCall,
+) -> BoxFuture<'static, TaskResult<Content>> {
+    Box::pin(async move {
+        TaskResult::success(
+            Content {
+                text: PLAN_APPROVED.into(),
+                attachments: None,
+                metadata: None,
+            },
+            0,
+        )
+    })
+}
+
 pub(super) fn execute_calculate(
     _context: ToolExecutionContext,
     _agent: AgentState,

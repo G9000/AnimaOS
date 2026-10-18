@@ -28,8 +28,8 @@ const initialAgent: AgentDetail = {
   token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
   messages: [
     {
-      id: 'assistant-message',
-      role: 'Assistant',
+      id: 'owner-message',
+      role: 'User',
       content: { text: 'Initial response' },
       created_at_ms: 1_725_000_000_000,
     },

@@ -206,18 +206,18 @@ impl Scheduler {
                     let target_min = i64::from(*hour) * 60 + i64::from(*minute);
                     let fired_today = self.state[idx].last_fired_day == Some(day);
                     let reached = local_minutes_of_day(local_ms) as i64 >= target_min;
-                    let (fire_day, now_within_day_ms) = if !fired_today && reached {
+                    let fire_day = if !fired_today && reached {
                         // Due right now.
                         return Some(0);
                     } else if !fired_today {
                         // Later today.
-                        (day, local_ms.rem_euclid(DAY_MS))
+                        day
                     } else {
                         // Tomorrow.
-                        (day + 1, local_ms.rem_euclid(DAY_MS))
+                        day + 1
                     };
                     let fire_local_ms = fire_day * DAY_MS + target_min * MINUTE_MS;
-                    (fire_local_ms - now_within_day_ms).max(0) as u64
+                    (fire_local_ms - local_ms).max(0) as u64
                 }
             };
             best = Some(match best {
@@ -468,6 +468,50 @@ mod tests {
             s.next_due_in_ms(10 * HOUR_MS),
             Some(86_400_000 - 30 * 60_000)
         );
+    }
+
+    #[test]
+    fn fp01_daily_delay_uses_elapsed_time_on_modern_days_and_fixed_offsets() {
+        for offset in [-840, -300, 0, 480, 840] {
+            let utc_at_local = |hour: u64, minute: u64| {
+                (20_000 * DAY_MS + hour as i64 * HOUR_MS as i64 + minute as i64 * MINUTE_MS
+                    - i64::from(offset) * MINUTE_MS) as u64
+            };
+            let mut scheduler = Scheduler::new(vec![daily_job("daily", 9, 30, offset)]).unwrap();
+            assert_eq!(
+                scheduler.next_due_in_ms(utc_at_local(8, 0)),
+                Some(90 * 60_000),
+                "before due, offset {offset}"
+            );
+            assert_eq!(scheduler.next_due_in_ms(utc_at_local(10, 0)), Some(0));
+            assert_eq!(
+                due_names(&mut scheduler, utc_at_local(10, 0)),
+                vec!["daily"]
+            );
+            assert_eq!(
+                scheduler.next_due_in_ms(utc_at_local(10, 0)),
+                Some(23 * HOUR_MS + 30 * 60_000),
+                "after firing, offset {offset}"
+            );
+        }
+    }
+
+    #[test]
+    fn fp01_daily_delay_crosses_local_midnight_on_modern_days() {
+        for offset in [-840, 0, 840] {
+            let utc_midnight = (20_000 * DAY_MS - i64::from(offset) * MINUTE_MS) as u64;
+            let mut scheduler = Scheduler::new(vec![daily_job("midnight", 0, 0, offset)]).unwrap();
+            assert_eq!(due_names(&mut scheduler, utc_midnight), vec!["midnight"]);
+            assert_eq!(
+                scheduler.next_due_in_ms(utc_midnight + 23 * HOUR_MS + 59 * 60_000),
+                Some(60_000),
+                "one minute before next midnight, offset {offset}"
+            );
+            assert_eq!(
+                scheduler.next_due_in_ms(utc_midnight + DAY_MS as u64),
+                Some(0)
+            );
+        }
     }
 
     #[test]

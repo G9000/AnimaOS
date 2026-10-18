@@ -10,7 +10,8 @@ import {
   type ReactNode,
 } from 'react';
 import { ConversationTools } from './ConversationTools';
-import { AgentAvatar } from './AgentAvatar';
+import { HaloOrb } from './halo/HaloOrb';
+import { usePresenceSignals } from '../lib/presence';
 import { CopyMessage } from './CopyMessage';
 import { SaveToMemory } from './memory/SaveToMemory';
 import type { SaveOutcome, SavedState } from '../hooks/useSaveToMemory';
@@ -82,6 +83,18 @@ function messageFlag(message: ChatMessage): string | null {
   return null;
 }
 
+/** Where an owner message came from, when not this console: the owner's
+ *  private Telegram chat shares the main chat. */
+const SOURCE_LABELS: Record<string, string> = {
+  telegram: 'Telegram',
+  discord: 'Discord',
+};
+function messageSource(message: ChatMessage): string | null {
+  if (message.role !== 'User') return null;
+  const source = message.content.metadata?.source;
+  return typeof source === 'string' ? (SOURCE_LABELS[source] ?? null) : null;
+}
+
 /** Memoized on its message: a committed message renders once, however
  *  often the transcript around it changes (a streamed reply's deltas). */
 const Bubble = memo(function Bubble({
@@ -95,7 +108,8 @@ const Bubble = memo(function Bubble({
   message: ChatMessage;
   /** Shown beside assistant replies so every reply is attributed. */
   agentName?: string;
-  /** Offers Save to memory on a user or assistant message with text. */
+  /** Offers Save to memory on the owner's own messages: the agent decides
+   *  what of its replies is worth keeping, and the owner can say so. */
   onSave?: (message: ChatMessage) => Promise<SaveOutcome>;
   savedLookup?: (messageId: string) => SavedState | null;
   agentId: string;
@@ -115,9 +129,6 @@ const Bubble = memo(function Bubble({
     >
       {!isUser && (
         <div className="chat-agent-head">
-          <span className="scenic-reply-avatar" aria-hidden>
-            <AgentAvatar id={agentId} name={agentName} size={22} />
-          </span>
           {agentName && <span className="chat-agent-name">{agentName}</span>}
           <span className="chat-time">{time}</span>
           {flag && <span className="message-flag">{flag}</span>}
@@ -140,6 +151,9 @@ const Bubble = memo(function Bubble({
           />
         )}
       </div>
+      {messageSource(message) && (
+        <span className="chat-source">via {messageSource(message)}</span>
+      )}
       <div className="chat-actions studio-message-meta">
         {isUser && <span className="chat-time">{time}</span>}
         {isUser && flag && <span className="message-flag">{flag}</span>}
@@ -151,7 +165,9 @@ const Bubble = memo(function Bubble({
             controller={readAloud}
           />
         )}
-        {onSave && message.content.text.trim() !== '' && (
+        {onSave &&
+          message.role === 'User' &&
+          message.content.text.trim() !== '' && (
           <SaveToMemory
             message={message}
             save={onSave}
@@ -207,11 +223,6 @@ function EmptyState({
 }) {
   return (
     <div className="studio-welcome scenic-welcome animate-rise-in">
-      <span
-        className="scenic-welcome-orb agent-orb"
-        aria-hidden
-        data-motion="agent-orb"
-      />
       <h2
         aria-label={`Say something to ${agentName}`}
         className="studio-hero-title"
@@ -288,6 +299,43 @@ function anchorsFor(transcript: readonly TranscriptItem[]): string[][] {
     const owned = candidateAnchorIds(item).filter((id) => !claimed.has(id));
     for (const id of owned) claimed.add(id);
     return owned;
+  });
+}
+
+/** When a transcript item happened, for day dividers; live items have none. */
+function itemTime(item: TranscriptItem): number | null {
+  return item.kind === 'message' ||
+    item.kind === 'delegated' ||
+    item.kind === 'revised'
+    ? item.message.created_at_ms
+    : null;
+}
+
+function dayLabel(ms: number, now = new Date()): string {
+  const day = new Date(ms);
+  const startOf = (d: Date) =>
+    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diff = Math.round((startOf(now) - startOf(day)) / 86_400_000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return day.toLocaleDateString([], {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    ...(day.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }),
+  });
+}
+
+/** The main chat runs for days: a divider marks where each new day starts. */
+function dayDividers(transcript: readonly TranscriptItem[]): (string | null)[] {
+  let previous: string | null = null;
+  return transcript.map((item) => {
+    const ms = itemTime(item);
+    if (ms === null) return null;
+    const day = new Date(ms).toDateString();
+    const changed = previous !== null && day !== previous;
+    previous = day;
+    return changed ? dayLabel(ms) : null;
   });
 }
 
@@ -413,6 +461,10 @@ export const MessageList = memo(function MessageList({
   actions,
   readAloud,
   knownAttachments = EMPTY_RUN_ATTACHMENTS,
+  highlightMessageId = null,
+  jumpRequestKey = 0,
+  jumpReady = true,
+  onJumpToLatest,
 }: {
   agent: AgentDetail;
   sending: boolean;
@@ -430,9 +482,17 @@ export const MessageList = memo(function MessageList({
   actions?: TranscriptActions;
   readAloud?: ReadAloudController;
   knownAttachments?: KnownRunAttachments;
+  /** A bounded history result; waits for its transcript anchor to mount. */
+  highlightMessageId?: string | null;
+  jumpRequestKey?: number;
+  /** The requested historical window has finished loading successfully. */
+  jumpReady?: boolean;
+  onJumpToLatest?: () => void;
 }) {
   const [awayFromBottom, setAwayFromBottom] = useState(false);
   const [highlight, setHighlight] = useState<string | null>(null);
+  const highlightedMessageId =
+    highlight ?? (jumpReady ? highlightMessageId : null);
   const atBottom = useRef(true);
   const messageElements = useRef(new Map<string, HTMLDivElement>());
   const firstMessageId = agent.messages[0]?.id;
@@ -440,22 +500,83 @@ export const MessageList = memo(function MessageList({
     firstId: firstMessageId,
     height: 0,
   });
+  const externalJump = useRef<{
+    messageId: string | null;
+    requestKey: number;
+    agentId: string;
+    done: boolean;
+  }>({
+    messageId: null,
+    requestKey: 0,
+    agentId: agent.id,
+    done: false,
+  });
   const transcript = useMemo(
     () => items ?? buildTranscript({ messages: agent.messages }),
     [items, agent.messages],
   );
   const anchorsByItem = useMemo(() => anchorsFor(transcript), [transcript]);
+  const days = useMemo(() => dayDividers(transcript), [transcript]);
   const jumpToMessage = useCallback((id: string) => {
     atBottom.current = false;
     setAwayFromBottom(true);
     messageElements.current.get(id)?.scrollIntoView?.({ block: 'center' });
   }, []);
   const jumpToLatest = () => {
+    if (highlightMessageId && onJumpToLatest) {
+      onJumpToLatest();
+      return;
+    }
     const element = scrollerRef.current;
     if (element) element.scrollTop = element.scrollHeight;
     atBottom.current = true;
     setAwayFromBottom(false);
   };
+  useLayoutEffect(() => {
+    const previous = externalJump.current;
+    const changed =
+      previous.messageId !== highlightMessageId ||
+      previous.requestKey !== jumpRequestKey ||
+      previous.agentId !== agent.id;
+    if (changed) {
+      externalJump.current = {
+        messageId: highlightMessageId,
+        requestKey: jumpRequestKey,
+        agentId: agent.id,
+        done: false,
+      };
+      setHighlight(null);
+      if (!highlightMessageId && previous.messageId) {
+        atBottom.current = true;
+        setAwayFromBottom(false);
+        const scroller = scrollerRef.current;
+        if (scroller) scroller.scrollTop = scroller.scrollHeight;
+      }
+    }
+    if (!highlightMessageId) return;
+    // Disable bottom-follow even while the requested window is loading.
+    atBottom.current = false;
+    setAwayFromBottom(true);
+    if (!jumpReady || externalJump.current.done) return;
+    const element = messageElements.current.get(highlightMessageId);
+    if (!element) return;
+    externalJump.current.done = true;
+    element.scrollIntoView?.({ block: 'center' });
+    // The ordinary prepend-preservation effect below must not offset the
+    // position we just chose when the anchor window replaced the page.
+    anchor.current = {
+      firstId: firstMessageId,
+      height: scrollerRef.current?.scrollHeight ?? 0,
+    };
+  }, [
+    highlightMessageId,
+    jumpRequestKey,
+    jumpReady,
+    agent.id,
+    transcript,
+    firstMessageId,
+    scrollerRef,
+  ]);
   useLayoutEffect(() => {
     if (atBottom.current) {
       const element = scrollerRef.current;
@@ -497,7 +618,12 @@ export const MessageList = memo(function MessageList({
               element.scrollHeight - element.scrollTop - element.clientHeight <
               80;
             setAwayFromBottom(!atBottom.current);
-            if (element.scrollTop < 40 && hasOlder && !loadingOlder) {
+            if (
+              element.scrollTop < 40 &&
+              hasOlder &&
+              !loadingOlder &&
+              !highlightMessageId
+            ) {
               onLoadOlder?.();
             }
           }}
@@ -542,11 +668,17 @@ export const MessageList = memo(function MessageList({
                       }
                     }}
                     data-search-match={
-                      (highlight !== null && ids.includes(highlight)) ||
+                      (highlightedMessageId !== null &&
+                        ids.includes(highlightedMessageId)) ||
                       undefined
                     }
                     className="studio-message-anchor"
                   >
+                    {days[index] && (
+                      <div className="chat-day" role="separator">
+                        <span>{days[index]}</span>
+                      </div>
+                    )}
                     <TranscriptEntry
                       item={item}
                       agentName={agent.name}
@@ -677,6 +809,14 @@ export function Composer({
     (draft.trim().length > 0 || hasAttachments);
   const canPick = !disabled && !sending && !offline;
   const steerable = runActive && onSteer !== undefined;
+  // One button: the mic until there is something to send, then Send. While
+  // dictation listens the mic stays, so its words never stop it.
+  const listening = usePresenceSignals().listening !== null;
+  const showSend =
+    !listening &&
+    (draft.trim().length > 0 ||
+      (attachments?.items.length ?? 0) > 0 ||
+      savedAttachmentCount > 0);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -811,20 +951,14 @@ export function Composer({
         )}
         <AttachmentDropZone disabled={!canPick} onAdd={attachments?.onAdd}>
           <div className="studio-composer-box composer-bar glass-strong focus-glow flex items-end gap-1 p-1.5 transition-all duration-200">
-            {hasTray && (
-              <button
-                ref={moreButton}
-                type="button"
-                className="composer-icon composer-more"
-                aria-label="More input options"
-                aria-expanded={moreOpen}
-                aria-controls={trayId}
-                title="Attach files, record audio, and more"
-                onClick={() => setMoreOpen((open) => !open)}
-              >
-                <PlusIcon size={16} />
-              </button>
-            )}
+            {/* The agent's orb lives in the composer: it brightens while you
+                write and while the agent works. */}
+            <span className="composer-orb" aria-hidden>
+              <HaloOrb
+                energy={runActive || sending ? 0.8 : draft.trim() ? 0.6 : 0.35}
+                className="composer-orb-canvas"
+              />
+            </span>
             <textarea
               data-workspace-composer
               ref={taRef}
@@ -881,12 +1015,20 @@ export function Composer({
               placeholder={`${inputLabel}…`}
               className="max-h-48 flex-1 resize-none bg-transparent px-2 py-[7px] text-[15px] leading-6 text-ink placeholder-ink-3 outline-none"
             />
-            <DictationControl
-              compact
-              disabled={!canPick || voiceDisabled}
-              conversationKey={conversationKey}
-              onTranscript={appendDictation}
-            />
+            {hasTray && (
+              <button
+                ref={moreButton}
+                type="button"
+                className="composer-icon composer-more"
+                aria-label="More input options"
+                aria-expanded={moreOpen}
+                aria-controls={trayId}
+                title="Attach files, record audio, and more"
+                onClick={() => setMoreOpen((open) => !open)}
+              >
+                <PlusIcon size={16} />
+              </button>
+            )}
             {runActive && onStop ? (
               <button
                 type="button"
@@ -896,6 +1038,13 @@ export function Composer({
               >
                 <StopIcon size={14} />
               </button>
+            ) : !showSend ? (
+              <DictationControl
+                compact
+                disabled={!canPick || voiceDisabled}
+                conversationKey={conversationKey}
+                onTranscript={appendDictation}
+              />
             ) : (
               <button
                 type="button"

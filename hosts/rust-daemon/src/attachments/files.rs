@@ -259,7 +259,7 @@ mod tests {
         let saved = save_upload(&temp.0, "2026-10-16", "notes.txt", b"small").unwrap();
         let mut row = record(&temp.0, saved, b"small");
         row.kind = AttachmentKind::Audio;
-        row.size = anima_core::audio_content::MAX_AUDIO_INPUT_BYTES as u64;
+        row.size = anima_service_adapters::audio_content::MAX_AUDIO_INPUT_BYTES as u64;
         assert_eq!(
             attachment_read_limit(&row).unwrap() + 1,
             4 * 1024 * 1024 + 1

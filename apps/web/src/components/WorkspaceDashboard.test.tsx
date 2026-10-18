@@ -56,6 +56,17 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it('FP03 keeps cancelled tasks out of open work and completed outputs', async () => {
+  vi.spyOn(daemon, 'agentTasks').mockResolvedValue({ revision: 'cancelled', tasks: [
+    { id: 'retired', content: 'Retired experiment', activeForm: 'Experimenting', status: 'cancelled' },
+  ] });
+  vi.spyOn(daemon, 'listSchedules').mockResolvedValue({ schedules: [] });
+  render(<WorkspaceDashboard agents={agents} online {...callbacks()} />);
+  expect(await screen.findByText('No open tasks. Ask your manager to plan the next piece of work.')).toBeVisible();
+  expect(screen.queryByText('Retired experiment')).not.toBeInTheDocument();
+  expect(screen.queryByText('Completed task · completion time unavailable')).not.toBeInTheDocument();
+});
+
 it('combines live work and schedules and routes actions to their owner', async () => {
   const tasks = vi.spyOn(daemon, 'agentTasks').mockResolvedValue({
     revision: '1',

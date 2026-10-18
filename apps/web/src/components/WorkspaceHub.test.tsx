@@ -24,6 +24,16 @@ const agents: AgentDetail[] = ['Alpha', 'Beta'].map((name) => ({
 }));
 afterEach(() => vi.restoreAllMocks());
 
+it('FP03 labels a cancelled task honestly in the workspace task list', async () => {
+  vi.spyOn(daemon, 'agentTasks').mockResolvedValue({ revision: 'cancelled', tasks: [
+    { id: 'retired', content: 'Retired experiment', activeForm: 'Experimenting', status: 'cancelled' },
+  ] });
+  render(<WorkspaceHub agents={[agents[0]]} online initialSection="Tasks" />);
+  expect(await screen.findByText('Retired experiment')).toBeVisible();
+  expect(screen.getByText('Cancelled')).toBeVisible();
+  expect(screen.queryByText('Completed')).not.toBeInTheDocument();
+});
+
 it('keeps Runs inside Work and scopes queueing to the selected agent', async () => {
   const list = vi.spyOn(daemon, 'agentJobs').mockResolvedValue([]);
   const tasks = vi.spyOn(daemon, 'agentTasks');

@@ -97,6 +97,7 @@ dependencies = [
  "anima-memory",
  "anima-model-adapters",
  "anima-schedule",
+ "anima-service-adapters",
  "anima-swarm",
  "async-trait",
  "atomicwrites",
@@ -144,7 +145,7 @@ dependencies = [
 name = "anima-document-content"
 version = "0.1.0"
 dependencies = [
- "anima-core",
+ "anima-service-adapters",
  "flate2",
  "pdf-extract",
  "quick-xml",
@@ -175,6 +176,7 @@ name = "anima-model-adapters"
 version = "0.1.0"
 dependencies = [
  "anima-core",
+ "anima-service-adapters",
  "async-trait",
  "axum",
  "bytes",
@@ -193,6 +195,19 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "anima-service-adapters"
+version = "0.1.0"
+dependencies = [
+ "anima-core",
+ "async-trait",
+ "futures",
+ "serde",
+ "serde_jcs",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

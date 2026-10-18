@@ -49,7 +49,7 @@ candidate dependencies, OS CPU-limit proposal and any differing interfaces.
 ## Source findings and chosen first slice
 
 - `docs/superpowers/handover/2026-09-28-companion-console.md`, current **Start here**, says M53 is the active four-file web notice change. M47/M52 actual cases and releases remain immutable/consumed; M52 strict quality remains partial. M54 cannot replay them or borrow their provider authorization.
-- `docs/companion/parity-roadmap.md`, **PAR-08**, requires selected-only context, isolated bounded parsing, retained originals, derived provenance and honest encrypted/corrupt/OCR limits. Text/image live acceptance and the later formats remain separate evidence.
+- Document context requires selected-only context, isolated bounded parsing, retained originals, derived provenance and honest encrypted/corrupt/OCR limits. Text/image live acceptance and the later formats remain separate evidence.
 - hosts/rust-daemon/src/attachments/{mod,validation,files,metadata}.rs already retain agent/session/root/SHA-256 identity, validate envelopes and cap stored documents at 25 MiB. `read_attachment_bytes` rechecks root, exact size/hash and classification. Upload validation is not document parsing.
 - `hosts/rust-daemon/src/agent_runs/attachments.rs` resolves only selected IDs for the same agent/session, caps selection at ten, and currently says documents cannot be read automatically. Selected text is a saved-file reference requiring `read_file`; it is not automatically inline text.
 - `hosts/rust-daemon/src/attachments/model.rs` hydrates only verified user images in the run's bound session. It acts after context selection; appending document text there without reserving its cost would bypass context budgeting.

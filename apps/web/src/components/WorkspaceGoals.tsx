@@ -7,6 +7,7 @@ import {
   type GoalStatus,
 } from '@animaOS-SWARM/sdk';
 import { daemon } from '../lib/daemon-api';
+import { currentJobReview, reviewMatchesAttempt } from '../lib/job-output';
 const fresh = (): GoalInput => ({
   title: '',
   objective: '',
@@ -157,14 +158,12 @@ export function WorkspaceGoals({
       (job) =>
         job.status === 'cancelled' ||
         (job.status === 'completed' &&
-          job.attempts.find((attempt) => attempt.attempt === job.attempt)
-            ?.review?.decision === 'accepted'),
+          currentJobReview(job)?.decision === 'accepted'),
     ) &&
     outputs.some(
       (job) =>
         job.status === 'completed' &&
-        job.attempts.find((attempt) => attempt.attempt === job.attempt)?.review
-          ?.decision === 'accepted',
+        currentJobReview(job)?.decision === 'accepted',
     );
   return (
     <div className="space-y-6">
@@ -362,8 +361,10 @@ export function WorkspaceGoals({
                 <details key={attempt.attempt} className="space-y-2">
                   <summary className="cursor-pointer text-sm">
                     Saved attempt {attempt.attempt} ·{' '}
-                    {attempt.review?.decision.replace(/_/g, ' ') ??
-                      attempt.status.replace(/_/g, ' ')}
+                    {attempt.review && !reviewMatchesAttempt(attempt)
+                      ? 'Review applies to an earlier output'
+                      : (attempt.review?.decision.replace(/_/g, ' ') ??
+                        attempt.status.replace(/_/g, ' '))}
                   </summary>
                   {attempt.result !== null && (
                     <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words font-sans text-sm">

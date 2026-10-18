@@ -9,7 +9,7 @@ use super::{
         BrowserTransportFactory, PlaywrightTransportFactory,
     },
 };
-use anima_core::browser::{BrowserError, BrowserScope};
+use anima_service_adapters::browser::{BrowserError, BrowserScope};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{

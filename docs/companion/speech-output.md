@@ -84,8 +84,6 @@ HTTP peers. The independent WAV oracle contains 6,000 frames at 24 kHz: 250 ms a
 content, browser/device compatibility, live API availability, billing or voice
 quality. No real provider or speaker is activated by those tests.
 
-The narrow Hermes adaptation retains its pinned MIT
+The narrow upstream adaptation retains its pinned MIT
 [notice](../../packages/core-rust/crates/anima-model-adapters/HERMES-NOTICE).
-Product controls retain Anima naming. See [voice input](voice.md),
-[harness evidence](harness-acceptance.md) and the
-[parity roadmap](parity-roadmap.md) for remaining acceptance work.
+See [voice input](voice.md) and [harness evidence](harness-acceptance.md) for selected acceptance and remaining limits.

@@ -7,7 +7,7 @@ use crate::{
     sessions::is_valid_session_id,
     speech::{check_scope, ServiceError},
 };
-use anima_core::{
+use anima_service_adapters::{
     SpeechAvailability, SpeechText, MAX_SPEECH_DURATION_MS, MAX_SPEECH_INPUT_BYTES,
     MAX_SPEECH_INPUT_CHARS, MAX_SPEECH_WAV_BYTES,
 };

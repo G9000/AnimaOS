@@ -707,6 +707,22 @@ describe('daemon integration requests', () => {
 });
 
 describe('daemon session requests', () => {
+  it('resolves main chat through the shared SDK transport without creating a new chat', async () => {
+    const main = { id: 'main-id', mainChat: true };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ session: main }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect(await daemon.ensureMainSession('agent /?')).toEqual(main);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/agents/agent%20%2F%3F/main-chat',
+    );
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({});
+  });
+
   it('reads and changes sessions through the SDK routes', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

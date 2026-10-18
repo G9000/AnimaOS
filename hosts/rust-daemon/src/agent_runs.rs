@@ -23,6 +23,7 @@ use crate::state::DaemonState;
 
 pub(crate) mod action_receipts;
 mod approvals;
+mod async_helpers;
 pub(crate) mod attachments;
 mod automations;
 mod compact;
@@ -96,6 +97,10 @@ fn is_coordination_tool(name: &str) -> bool {
         "list_workspace_agents"
             | "delegate_to_agent"
             | "spawn_helper"
+            | "spawn_helper_async"
+            | "list_helper_runs"
+            | "steer_helper"
+            | "stop_helper"
             | "send_message"
             | "broadcast_message"
     )
@@ -116,7 +121,7 @@ fn helper_config(parent: &AgentState, name: String) -> AgentConfig {
         // and process tools and `propose_skill` (spec §8.3: helpers cannot
         // propose skills; they keep `load_skill`). The automation tools never reach a helper either
         // (spec §9.3: they would schedule runs of the helper).
-        tools: Some(parent.config.tools.iter().flatten().filter(|tool| !is_coordination_tool(&tool.name) && !crate::tools::is_process_tool(&tool.name) && !crate::tools::is_browser_tool(&tool.name) && !tool.name.starts_with("mcp_") && tool.name != "search_conversations" && tool.name != "read_conversation_window" && tool.name != "propose_skill" && !crate::tools::is_automation_tool(&tool.name)).cloned().collect()),
+        tools: Some(parent.config.tools.iter().flatten().filter(|tool| !is_coordination_tool(&tool.name) && !crate::tools::is_process_tool(&tool.name) && !crate::tools::is_browser_tool(&tool.name) && !tool.name.starts_with("mcp_") && tool.name != "search_conversations" && tool.name != "read_conversation_window" && tool.name != "propose_skill" && tool.name != crate::tools::PLAN_TOOL && tool.name != "checkpoint_list" && tool.name != "checkpoint_restore" && !crate::tools::is_automation_tool(&tool.name)).cloned().collect()),
         settings: Some(AgentSettings {
             temperature: parent_settings.temperature,
             max_tokens: Some(parent_settings.max_tokens.unwrap_or(4096).min(4096)),
@@ -308,6 +313,7 @@ pub(crate) enum RunRoom {
     Generated,
     Stable(String),
     Delegated { parent_id: String },
+    DelegatedIn { parent_id: String, room_id: String },
     Peer { route: AgentCommunicationRoute },
 }
 
@@ -316,7 +322,7 @@ impl RunRoom {
     /// fresh id before the run starts so it can be locked and recorded first.
     pub(crate) fn resolve(&self, agent_id: &str) -> String {
         match self {
-            Self::Stable(room_id) => room_id.clone(),
+            Self::Stable(room_id) | Self::DelegatedIn { room_id, .. } => room_id.clone(),
             Self::Peer { route } => {
                 let participants = route.participants();
                 format!("peer:{}:{}", participants[participants.len() - 2], agent_id)
@@ -343,6 +349,13 @@ pub(crate) struct AgentRunRequest {
     pub(crate) parent: Option<crate::runs::RunLink>,
 }
 
+/// Host-selected context for a daemon-originated follow-up. It is supplied
+/// separately from message metadata, which can contain user-controlled data.
+#[derive(Clone, Debug)]
+pub(crate) struct SystemFollowup {
+    pub(crate) title: String,
+}
+
 #[derive(Clone)]
 pub(crate) struct AgentRunCoordinator {
     state: SharedDaemonState,
@@ -363,6 +376,7 @@ pub(crate) struct AgentRunCoordinator {
     learning: crate::learning::LearningService,
     mcp: Option<crate::mcp::McpManager>,
     browser: Option<crate::browser::BrowserService>,
+    scheduler_trigger: Arc<StdMutex<Option<crate::schedules::SchedulerTrigger>>>,
     document_extractor: Arc<dyn crate::attachments::documents::worker::DocumentExtractor>,
     #[cfg(test)]
     web_search: Option<Arc<crate::tools::web_search::SearchExecutor>>,
@@ -566,6 +580,9 @@ impl AgentRunCoordinator {
                     // never call `admit()` here, because its `slot_capacity` takes
                     // `state.read()` and would deadlock.
                     let available = helpers.iter().find_map(|helper| {
+                        if guard.runs.has_active_assignment(&helper.state.id) {
+                            return None;
+                        }
                         let slot = coordinator.try_slot_lease(&helper.state.id, HELPER_MAX_RUNS)?;
                         Some((helper.clone(), slot))
                     });
@@ -644,6 +661,7 @@ impl AgentRunCoordinator {
             learning,
             mcp: None,
             browser: None,
+            scheduler_trigger: Arc::new(StdMutex::new(None)),
             document_extractor: Arc::new(crate::attachments::documents::worker::DocumentWorker),
             #[cfg(test)]
             web_search: None,
@@ -808,6 +826,33 @@ impl AgentRunCoordinator {
             .await
     }
 
+    pub(crate) async fn run_system_followup(
+        &self,
+        request: AgentRunRequest,
+        followup: SystemFollowup,
+    ) -> Result<AgentRunEnvelope, ApiError> {
+        let coordinator = self.clone();
+        tokio::spawn(async move {
+            coordinator.prevalidate(&request).await?;
+            let ticket = coordinator
+                .acquire_ticket(&request, PermitMode::TryNow, None, None)
+                .await?;
+            coordinator
+                .run_locked_inner(
+                    request,
+                    ticket,
+                    |_, _| Ok(()),
+                    None,
+                    None,
+                    None,
+                    Some(followup),
+                )
+                .await
+        })
+        .await
+        .map_err(run_worker_stopped)?
+    }
+
     /// The legacy run route (spec §4.9): `run`, holding `waiting` (a unit of
     /// the agent's waiting budget) while the run waits for its room and an
     /// agent slot, until it has its global permit.
@@ -909,7 +954,7 @@ impl AgentRunCoordinator {
     {
         // The run executes in the ticket's room; a stable request room must name it.
         debug_assert!(
-            !matches!(&request.room, RunRoom::Stable(room) if room.as_str() != ticket.room_id()),
+            !matches!(&request.room, RunRoom::Stable(room) | RunRoom::DelegatedIn { room_id: room, .. } if room.as_str() != ticket.room_id()),
             "a ticketed run must use the room its ticket locked"
         );
         let coordinator = self.clone();
@@ -957,6 +1002,7 @@ impl AgentRunCoordinator {
                     None,
                     Some(run_id),
                     Some(prepared),
+                    None,
                 )
                 .await
         })
@@ -1303,7 +1349,7 @@ impl AgentRunCoordinator {
     where
         F: FnOnce(&mut DaemonState, &RunOutcome) -> Result<(), ApiError> + Send,
     {
-        self.run_locked_inner(request, ticket, commit, rollback, accepted, None)
+        self.run_locked_inner(request, ticket, commit, rollback, accepted, None, None)
             .await
     }
     async fn run_locked_inner<F>(
@@ -1314,6 +1360,7 @@ impl AgentRunCoordinator {
         mut rollback: Option<AgentRunRollback>,
         accepted: Option<String>,
         browser_selection: Option<crate::browser::PreparedBrowserSelection>,
+        system_followup: Option<SystemFollowup>,
     ) -> Result<AgentRunEnvelope, ApiError>
     where
         F: FnOnce(&mut DaemonState, &RunOutcome) -> Result<(), ApiError> + Send,
@@ -1387,7 +1434,28 @@ impl AgentRunCoordinator {
             // An accepted run starts only from its queued record, checked
             // before anything below touches session state (audit M6).
             let session_id = crate::sessions::session_id_for_room(&room_id);
+            if matches!(&room, RunRoom::DelegatedIn { .. }) {
+                self::async_helpers::validate_accepted_helper(
+                    &guard,
+                    accepted.as_deref(),
+                    &agent_id,
+                    &room_id,
+                    parent.as_ref(),
+                )?;
+            }
             if let Some(accepted_id) = accepted.as_deref() {
+                if guard
+                    .runs
+                    .get(accepted_id)
+                    .is_some_and(|record| record.helper_completion.is_some())
+                {
+                    self::async_helpers::validate_accepted_completion(
+                        &guard,
+                        accepted_id,
+                        &agent_id,
+                        &room_id,
+                    )?;
+                }
                 let waiting = guard.runs.get(accepted_id).is_some_and(|record| {
                     record.status == RunStatus::Queued
                         && record.agent_id == agent_id
@@ -1398,7 +1466,7 @@ impl AgentRunCoordinator {
                 }
             }
             let Some(crate::state::RunBuild {
-                runtime,
+                mut runtime,
                 tools: tool_context,
                 base,
                 context,
@@ -1407,6 +1475,61 @@ impl AgentRunCoordinator {
             else {
                 return Err(ApiError::not_found());
             };
+            if let Some(accepted_id) = accepted.as_deref() {
+                if let Some(origin) = guard
+                    .runs
+                    .get(accepted_id)
+                    .and_then(|record| record.helper_completion.as_ref())
+                {
+                    let child = guard
+                        .runs
+                        .get(&origin.helper_run_id)
+                        .expect("validated completion source");
+                    let bounds = child
+                        .async_helper
+                        .as_ref()
+                        .and_then(|helper| helper.effective_bounds.as_ref())
+                        .ok_or_else(|| {
+                            ApiError::conflict("Saved helper execution bounds are missing")
+                        })?
+                        .intersect(&crate::runs::AsyncHelperBounds::for_config(
+                            runtime.config(),
+                        ));
+                    let mut config = runtime.config().clone();
+                    bounds.apply(&mut config);
+                    runtime.replace_config(config);
+                }
+                if let Some(helper) = guard
+                    .runs
+                    .get(accepted_id)
+                    .and_then(|record| record.async_helper.as_ref())
+                {
+                    let parent_config = guard
+                        .agents
+                        .get(&helper.owner_agent_id)
+                        .ok_or_else(ApiError::not_found)?
+                        .config();
+                    let original = helper.effective_bounds.as_ref().ok_or_else(|| {
+                        ApiError::conflict("Saved helper execution bounds are missing")
+                    })?;
+                    let bounds = original
+                        .intersect(&crate::runs::AsyncHelperBounds::for_config(parent_config))
+                        .intersect(&crate::runs::AsyncHelperBounds::for_config(
+                            runtime.config(),
+                        ));
+                    let mut config = runtime.config().clone();
+                    bounds.apply(&mut config);
+                    runtime.replace_config(config);
+                    guard
+                        .runs
+                        .get_mut(accepted_id)
+                        .expect("accepted helper exists")
+                        .async_helper
+                        .as_mut()
+                        .expect("typed helper exists")
+                        .effective_bounds = Some(bounds);
+                }
+            }
             // Spec §3: every room is a session; a new record is saved with the
             // run start below, so no extra save is added.
             let now_ms = anima_core::primitives::now_millis();
@@ -1414,19 +1537,13 @@ impl AgentRunCoordinator {
                 agent_id: &agent_id,
                 room_id: &room_id,
                 source,
-                source_ref: source_ref.as_deref(),
-                calendar_summary: content
-                    .metadata
+                system_followup_title: system_followup
                     .as_ref()
-                    .and_then(|metadata| {
-                        metadata.get(crate::sessions::CALENDAR_SUMMARY_METADATA_KEY)
-                    })
-                    .and_then(|value| match value {
-                        DataValue::String(value) => Some(value.as_str()),
-                        _ => None,
-                    }),
+                    .map(|followup| followup.title.as_str()),
                 delegated_parent: match &room {
-                    RunRoom::Delegated { parent_id } => Some(parent_id.as_str()),
+                    RunRoom::Delegated { parent_id } | RunRoom::DelegatedIn { parent_id, .. } => {
+                        Some(parent_id.as_str())
+                    }
                     _ => None,
                 },
                 peer_sender: match &room {
@@ -1482,6 +1599,9 @@ impl AgentRunCoordinator {
                     now_ms,
                 ),
             };
+            if system_followup.is_some() {
+                record.system_followup = Some(true);
+            }
             if inherited_stop.is_some() && record.stop.is_none() {
                 record.stop = inherited_stop;
             }
@@ -1632,19 +1752,21 @@ impl AgentRunCoordinator {
             .map(|browser| BrowserRunRetirement(browser.clone(), run_id.clone()));
         // A helper's deadline starts before its compaction, which counts
         // toward it (Task 12 fix round 1).
-        let helper_deadline = config_helper_parent(runtime.config()).is_some().then(|| {
-            let timeout_ms = runtime
-                .config()
-                .settings
-                .as_ref()
-                .and_then(|settings| settings.timeout_ms)
-                .unwrap_or(MAX_HELPER_RUN_MS)
-                .min(MAX_HELPER_RUN_MS);
-            (
-                timeout_ms,
-                tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms),
-            )
-        });
+        let is_helper_completion = started.helper_completion.is_some();
+        let helper_deadline =
+            (config_helper_parent(runtime.config()).is_some() || is_helper_completion).then(|| {
+                let timeout_ms = runtime
+                    .config()
+                    .settings
+                    .as_ref()
+                    .and_then(|settings| settings.timeout_ms)
+                    .unwrap_or(MAX_HELPER_RUN_MS)
+                    .min(MAX_HELPER_RUN_MS);
+                (
+                    timeout_ms,
+                    tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms),
+                )
+            });
         let frozen_config = runtime.config().clone();
         crate::attachments::documents::admission::admit(
             &self.state,
@@ -1712,7 +1834,9 @@ impl AgentRunCoordinator {
         // applies to later runs (spec §4.4 items 1–2).
         let original_config = runtime.config().clone();
         let delegated_parent = match &room {
-            RunRoom::Delegated { parent_id } => Some(parent_id.clone()),
+            RunRoom::Delegated { parent_id } | RunRoom::DelegatedIn { parent_id, .. } => {
+                Some(parent_id.clone())
+            }
             _ => None,
         };
         let peer_route = match &room {
@@ -1725,11 +1849,26 @@ impl AgentRunCoordinator {
             }
             _ => vec![],
         };
-        let can_delegate = delegated_parent.is_none()
+        let can_delegate = !is_helper_completion
+            && delegated_parent.is_none()
             && peer_sources.is_empty()
             && is_workspace_manager(&runtime.state());
         let mut tools = original_config.tools.clone().unwrap_or_default();
-        tools.retain(|tool| !matches!(tool.name.as_str(), "delegate_to_agent" | "spawn_helper"));
+        tools.retain(|tool| {
+            !matches!(tool.name.as_str(), "delegate_to_agent" | "spawn_helper")
+                && (can_delegate
+                    || !matches!(
+                        tool.name.as_str(),
+                        "spawn_helper_async" | "list_helper_runs" | "steer_helper" | "stop_helper"
+                    ))
+        });
+        if is_helper_completion {
+            tools.retain(|tool| {
+                !is_coordination_tool(&tool.name)
+                    && !crate::tools::is_automation_tool(&tool.name)
+                    && tool.name != "bg_start"
+            });
+        }
         if delegated_parent.is_some() {
             tools
                 .retain(|tool| !matches!(tool.name.as_str(), "send_message" | "broadcast_message"));
@@ -1746,7 +1885,7 @@ impl AgentRunCoordinator {
         // grants survive restart and reconnect without widening authority.
         tools.retain(|tool| !tool.name.starts_with("mcp_") || ready_mcp.contains(tool));
         let registry = crate::tools::ToolRegistry::new();
-        if delegated_parent.is_none() {
+        if delegated_parent.is_none() && !is_helper_completion {
             for name in ["list_workspace_agents", "send_message", "broadcast_message"] {
                 if !tools.iter().any(|tool| tool.name == name) {
                     tools.push(registry.descriptor(name).expect("registered peer tool"));
@@ -1766,6 +1905,15 @@ impl AgentRunCoordinator {
             tools: Some(tools),
             ..Default::default()
         });
+        // A fresh review belongs to this ordinary run, never a helper's result
+        // or a previous turn. It grants no tools and shares the existing budget.
+        let completion_review = (crate::tools::completion::enabled(&original_config)
+            && delegated_parent.is_none()
+            && !is_helper_config(&original_config))
+        .then(anima_core::CompletionReview::default);
+        if let Some(review) = &completion_review {
+            runtime.register_evaluator(Arc::new(review.clone()));
+        }
         // Spec §8.3: the skills index and a `/skill` message's instructions.
         self.apply_skills(&mut runtime, &content).await;
         runtime.set_run_id(run_id.clone());
@@ -1773,16 +1921,21 @@ impl AgentRunCoordinator {
         runtime.set_run_control(live_run.control());
         // `todo_write` may only replace the task list this run started from
         // (spec §4.4 item 8); another room's update surfaces as a conflict.
-        let todo_baseline = if runtime.config().allows_tool("todo_write") {
-            crate::tools::todo::read_agent_todos(
-                crate::tools::ctx_workspace_root(&tool_context),
-                &agent_id,
-            )
-            .ok()
-            .map(|todos| todos.revision)
-        } else {
-            None
-        };
+        let todo_baseline = crate::tools::todo::startup_revision(
+            crate::tools::ctx_workspace_root(&tool_context),
+            &agent_id,
+            runtime.config(),
+        );
+        // Refreshed task context is advisory data. It never advances the CAS
+        // baseline, and only an existing source grant enables the provider.
+        if runtime.config().allows_tool("todo_list") {
+            runtime.register_provider(Arc::new(
+                crate::tools::todo::context::CanonicalTaskProvider {
+                    root: tool_context.workspace_root.clone(),
+                    owner_id: tool_context.todo_owner_id(&runtime.state()).to_string(),
+                },
+            ));
+        }
         let action_journal = action_receipts::RunActionJournal::new(
             &self.state,
             self.control_plane_transactions(),
@@ -1800,6 +1953,7 @@ impl AgentRunCoordinator {
             None
         };
         let tool_context = tool_context
+            .with_completion_review(completion_review)
             .with_document_extractor(Arc::clone(&self.document_extractor))
             .with_action_journal(action_journal.clone())
             .with_team(self.clone(), can_delegate)
@@ -2064,6 +2218,15 @@ impl AgentRunCoordinator {
             }
             live_run.publish(live_run.session_event(LiveEventBody::SessionUpdated));
             live_run.publish_record(finished);
+            // A terminal status merged in memory can still be rolled back or
+            // abandoned before its source save. Completion admission requires
+            // this separate proof, set only after durable save and publication.
+            // Live controls outlive the normal settlement pump and are also
+            // removed on abort, so their presence/absence is not such proof.
+            if let Some(record) = self.state.write().await.runs.get_mut(&run_id) {
+                record.terminal_published =
+                    record.status.is_terminal() && record.status == finished.status;
+            }
             if finished.status == RunStatus::Completed {
                 self.title_after_first_reply(
                     &agent_id,
@@ -2078,6 +2241,10 @@ impl AgentRunCoordinator {
         // Disarmed only once the terminal event is out, so a panic before it
         // still ends the run's events.
         in_flight.disarm();
+
+        // Both launching-parent and child settlement use the same durable,
+        // event-driven admission seam. It never waits for model capacity.
+        self.pump_helper_completions(&run_id).await;
 
         // A silent check-in stores no task-result memory; otherwise silent
         // check-ins crowd real memories out of the recent-memory context (spec §9.2).
@@ -2183,7 +2350,8 @@ fn validate_run_request(
 ) -> Result<(), ApiError> {
     if let Some(target) = agent_config(state, agent_id) {
         if let Some(parent_id) = config_helper_parent(target) {
-            if !matches!(room, RunRoom::Delegated { parent_id: source } if source == parent_id) {
+            if !matches!(room, RunRoom::Delegated { parent_id: source } | RunRoom::DelegatedIn { parent_id: source, .. } if source == parent_id)
+            {
                 return Err(ApiError::bad_request_static(
                     HELPER_MUST_RUN_THROUGH_COMPANION,
                 ));
@@ -2232,21 +2400,26 @@ fn validate_run_request(
             }
         }
     }
-    if let RunRoom::Delegated { parent_id } = room {
+    if let RunRoom::Delegated { parent_id } | RunRoom::DelegatedIn { parent_id, .. } = room {
         let parent = agent_config(state, parent_id).ok_or_else(ApiError::not_found)?;
         let target = agent_config(state, agent_id).ok_or_else(ApiError::not_found)?;
         if !is_manager_config(parent)
             || is_manager_config(target)
             || parent_id == agent_id
-            || target.tools.iter().flatten().any(|tool| {
-                tool.name != "list_workspace_agents"
-                    && tool.name != "delegate_to_agent"
-                    && tool.name != "spawn_helper"
-                    && !parent.allows_tool(&tool.name)
-            })
+            || target
+                .tools
+                .iter()
+                .flatten()
+                .any(|tool| !is_coordination_tool(&tool.name) && !parent.allows_tool(&tool.name))
         {
             return Err(ApiError::bad_request_static(
                 "Delegation cannot escalate permissions or target a manager",
+            ));
+        }
+        if matches!(room, RunRoom::DelegatedIn { .. }) && !parent.allows_tool("spawn_helper_async")
+        {
+            return Err(ApiError::bad_request_static(
+                "The companion no longer permits asynchronous helper work",
             ));
         }
     }
@@ -2361,7 +2534,11 @@ impl Drop for InFlightRunGuard {
                 let Some(record) = guard.runs.get_mut(&run_id) else {
                     return;
                 };
-                if !record.status.is_terminal() {
+                if !record.status.is_terminal() || record.status == RunStatus::Completed {
+                    // Completed in memory is not proof of a durable source
+                    // commit. Only terminal publication (checked above) is.
+                    // A commit hook can panic after merging the run delta.
+                    record.reply_message_id = None;
                     record.finish(
                         RunStatus::Failed,
                         Some(RunError::new(
@@ -2371,6 +2548,7 @@ impl Drop for InFlightRunGuard {
                         anima_core::primitives::now_millis(),
                     );
                 }
+                guard.runs.settle_helper_origin(&run_id);
                 // Controller ruling m2: settled in memory; the next save carries it.
                 let now_ms = anima_core::primitives::now_millis();
                 for approval in guard.stop_orphaned_approvals(&run_id, now_ms) {
@@ -2451,13 +2629,19 @@ mod approval_stop_tests;
 #[cfg(test)]
 mod approval_tests;
 #[cfg(test)]
+mod async_helper_tests;
+#[cfg(test)]
 mod attachment_tests;
 #[cfg(test)]
 mod automation_tests;
+#[cfg(all(test, windows))]
+mod checkpoint_admission_tests;
 #[cfg(test)]
 mod coding_tests;
 #[cfg(test)]
 mod compaction_tests;
+#[cfg(test)]
+mod completion_tests;
 #[cfg(test)]
 mod context_tests;
 #[cfg(test)]
@@ -2493,3 +2677,6 @@ mod agent_files_tests;
 mod web_search_tests;
 #[cfg(test)]
 mod workspace_document_tests;
+
+#[cfg(all(test, windows))]
+mod autonomous_acceptance_tests;

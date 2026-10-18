@@ -414,9 +414,19 @@ fn registry_rejects_duplicate_registration() {
 fn registry_defines_every_registered_tool_schema() {
     let registry = ToolRegistry::new();
     let expectations = [
+        ("execute_code", &["code"][..], &["reset"][..]),
         ("list_workspace_agents", &[][..], &[][..]),
         ("delegate_to_agent", &["agent_id", "task"][..], &[][..]),
         ("spawn_helper", &["name", "task"][..], &[][..]),
+        ("todo_list", &[][..], &["todos", "merge"][..]),
+        (
+            "spawn_helper_async",
+            &["name", "task"][..],
+            &["completion"][..],
+        ),
+        ("list_helper_runs", &[][..], &["run_id", "limit"][..]),
+        ("steer_helper", &["run_id", "message"][..], &[][..]),
+        ("stop_helper", &["run_id"][..], &[][..]),
         ("memory_search", &["query"][..], &["limit"][..]),
         ("memory_add", &["content"][..], &["type", "importance"][..]),
         (
@@ -459,6 +469,23 @@ fn registry_defines_every_registered_tool_schema() {
         ),
         ("list_automations", &[][..], &[][..]),
         ("pause_automation", &["id"][..], &[][..]),
+        (
+            "update_automation",
+            &["id"][..],
+            &[
+                "name",
+                "prompt",
+                "schedule",
+                "timeZone",
+                "activeHours",
+                "clearActiveHours",
+                "target",
+                "enabled",
+            ][..],
+        ),
+        ("resume_automation", &["id"][..], &[][..]),
+        ("delete_automation", &["id"][..], &[][..]),
+        ("trigger_automation", &["id"][..], &[][..]),
         ("read_file", &["file_path"][..], &["offset", "limit"][..]),
         ("read_document", &["file_path"][..], &[][..]),
         ("list_dir", &["path"][..], &[][..]),
@@ -519,7 +546,10 @@ fn registry_defines_every_registered_tool_schema() {
         ),
         ("drive_search", &[][..], &["query"][..]),
         ("drive_read", &["file_id"][..], &[][..]),
+        ("propose_plan", &["title", "steps"][..], &["estimate"][..]),
         ("browser_navigate", &["routeId"][..], &[][..]),
+        ("checkpoint_list", &[][..], &[][..]),
+        ("checkpoint_restore", &["checkpoint_id"][..], &[][..]),
         ("browser_observe", &["screenshot"][..], &[][..]),
         (
             "browser_act",
@@ -608,12 +638,14 @@ fn registry_encodes_parameter_constraints() {
         "multi_edit",
         "edits",
         &["old_string", "new_string"],
+        &[],
     );
     assert_array_items(
         &registry,
         "todo_write",
         "todos",
         &["content", "status", "activeForm"],
+        &["id", "parent"],
     );
 
     let todo_write = registry
@@ -628,7 +660,7 @@ fn registry_encodes_parameter_constraints() {
                 .and_then(|schema| schema.get("enum"))
                 .expect("todo status enum")
         ),
-        vec!["pending", "in_progress", "completed"]
+        vec!["pending", "in_progress", "completed", "cancelled"]
     );
 }
 
@@ -877,7 +909,13 @@ fn assert_string_enum(registry: &ToolRegistry, tool: &str, property: &str, expec
     );
 }
 
-fn assert_array_items(registry: &ToolRegistry, tool: &str, property: &str, required: &[&str]) {
+fn assert_array_items(
+    registry: &ToolRegistry,
+    tool: &str,
+    property: &str,
+    required: &[&str],
+    optional: &[&str],
+) {
     let descriptor = registry.descriptor(tool).expect("registered descriptor");
     let properties = array_item_properties(&descriptor, property);
     let item_schema = descriptor
@@ -890,7 +928,13 @@ fn assert_array_items(registry: &ToolRegistry, tool: &str, property: &str, requi
         .and_then(data_object)
         .expect("array item schema");
 
-    assert_eq!(properties.len(), required.len());
+    assert_eq!(properties.len(), required.len() + optional.len());
+    for name in required.iter().chain(optional) {
+        assert!(
+            properties.contains_key(*name),
+            "missing item property {name}"
+        );
+    }
     assert_eq!(
         schema_strings(item_schema.get("required").expect("item required fields")),
         required
@@ -1991,16 +2035,25 @@ fn todo_write_and_read_persist_structured_todos() {
     let workspace = create_temp_workspace("todo-list");
     let todos = vec![
         TodoItem {
+            parent_specified: false,
+            id: None,
+            parent: None,
             content: "Inspect the daemon registry".into(),
             status: "completed".into(),
             active_form: "Inspecting the daemon registry".into(),
         },
         TodoItem {
+            parent_specified: false,
+            id: None,
+            parent: None,
             content: "Port todo tools".into(),
             status: "in_progress".into(),
             active_form: "Porting todo tools".into(),
         },
         TodoItem {
+            parent_specified: false,
+            id: None,
+            parent: None,
             content: "Run validation".into(),
             status: "pending".into(),
             active_form: "Running validation".into(),
@@ -2031,11 +2084,17 @@ fn todo_write_warns_when_multiple_items_are_in_progress() {
     let workspace = create_temp_workspace("todo-warning");
     let todos = vec![
         TodoItem {
+            parent_specified: false,
+            id: None,
+            parent: None,
             content: "One".into(),
             status: "in_progress".into(),
             active_form: "Doing one".into(),
         },
         TodoItem {
+            parent_specified: false,
+            id: None,
+            parent: None,
             content: "Two".into(),
             status: "in_progress".into(),
             active_form: "Doing two".into(),
@@ -2061,6 +2120,9 @@ fn todo_write_rejects_symlinked_animaos_swarm_directory_pointing_outside() {
     std::os::unix::fs::symlink(&outside, workspace.join(".animaos-swarm")).expect("create symlink");
 
     let todos = vec![TodoItem {
+        parent_specified: false,
+        id: None,
+        parent: None,
         content: "Leak".into(),
         status: "pending".into(),
         active_form: "Leaking".into(),
@@ -2093,6 +2155,9 @@ fn todo_write_rejects_symlinked_todos_json_pointing_outside() {
     std::os::unix::fs::symlink(&outside, todo_dir.join("todos.json")).expect("create symlink");
 
     let todos = vec![TodoItem {
+        parent_specified: false,
+        id: None,
+        parent: None,
         content: "Leak".into(),
         status: "pending".into(),
         active_form: "Leaking".into(),

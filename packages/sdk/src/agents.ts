@@ -50,8 +50,12 @@ export interface AgentRunOptions {
 }
 
 export interface AgentTask {
+  /** Explicit stable identity, absent on legacy task lists. */
+  id?: string;
+  /** Parent task identity; explicit null clears the relationship. */
+  parent?: string | null;
   content: string;
-  status: 'pending' | 'in_progress' | 'completed';
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
   activeForm: string;
 }
 
@@ -64,6 +68,28 @@ export interface AgentJobReviewInput {
   revision: number;
   decision: 'accepted' | 'changes_requested';
   note?: string;
+  /** Required together when reviewing a delegated final output. */
+  finalOutputGeneration?: number;
+  finalOutputSha256?: string;
+}
+
+export interface PendingDelegations {
+  launchRunId: string;
+  childRunIds: string[];
+  completionRunIds: string[];
+}
+
+export interface DelegatedFinalOutput {
+  generation: number;
+  /** SHA256 of the exact saved aggregate text being reviewed. */
+  sha256: string;
+  outputs: {
+    runId: string;
+    replyMessageId: string;
+    outputSha256: string;
+    preview: string;
+    previewTruncated: boolean;
+  }[];
 }
 
 export interface AgentJobAttempt {
@@ -74,10 +100,13 @@ export interface AgentJobAttempt {
   result: string | null;
   error: string | null;
   resultTruncated: boolean;
+  finalOutput?: DelegatedFinalOutput;
   review: {
     decision: 'accepted' | 'changes_requested';
     note: string;
     reviewedAtMs: number;
+    finalOutputGeneration?: number;
+    finalOutputSha256?: string;
   } | null;
 }
 
@@ -92,6 +121,7 @@ export interface AgentJob {
     | 'awaiting_approval'
     | 'queued'
     | 'running'
+    | 'pending_delegations'
     | 'completed'
     | 'failed'
     | 'needs_review'
@@ -108,6 +138,8 @@ export interface AgentJob {
   finishedAtMs: number | null;
   result: string | null;
   error: string | null;
+  pendingDelegations?: PendingDelegations;
+  finalOutput?: DelegatedFinalOutput;
   /** Set when the owner stopped the running attempt (spec §4.6). */
   stopRequestedAtMs?: number;
 }

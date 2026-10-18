@@ -1,7 +1,9 @@
 //! Pure protocol/factory/file proofs plus an explicit root-only real Node Job witness.
 //! The ignored helper is not browser compatibility or page/egress acceptance.
 use super::*;
-use anima_core::browser::{BrowserArtifactKind, BrowserLimits, BrowserMethod, BrowserRoute};
+use anima_service_adapters::browser::{
+    BrowserArtifactKind, BrowserLimits, BrowserMethod, BrowserRoute,
+};
 use std::path::{Path, PathBuf};
 
 fn scope() -> BrowserScope {
@@ -275,7 +277,7 @@ fn m46_transport_expected_witness_never_uses_newer_cached_document() {
         ..old.clone()
     };
     let click = BrowserOperation::Click {
-        node: anima_core::browser::BrowserNodeRef {
+        node: anima_service_adapters::browser::BrowserNodeRef {
             token: "node_1".into(),
         },
     };

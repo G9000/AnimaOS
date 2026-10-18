@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useConnectorLifetime } from '../../hooks/useConnectorLifetime';
 import {
   communityBundlesOwnerApi,
   type BundleReview,
@@ -71,6 +72,8 @@ function failure(caught: unknown): string {
 export function CommunityBundlesPanel({
   agentId,
   disabled = false,
+  online = true,
+  epoch: connectionEpoch = 0,
   permissionsUncertain = false,
   permissionsBusy = false,
   onGrantsChanged,
@@ -80,6 +83,8 @@ export function CommunityBundlesPanel({
 }: {
   agentId: string;
   disabled?: boolean;
+  online?: boolean;
+  epoch?: number;
   permissionsUncertain?: boolean;
   permissionsBusy?: boolean;
   onGrantsChanged?: (names: string[]) => void | Promise<void>;
@@ -87,6 +92,7 @@ export function CommunityBundlesPanel({
   onPermissionsUncertain?: () => void;
   api?: CommunityBundlesOwnerApi;
 }) {
+  const lifetime = useConnectorLifetime(agentId, online, connectionEpoch);
   const [summaries, setSummaries] = useState<BundleSummary[]>([]);
   const [details, setDetails] = useState<Record<string, BundleView>>({});
   const [manifestText, setManifestText] = useState('');
@@ -108,13 +114,22 @@ export function CommunityBundlesPanel({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const generation = useRef(0);
+  const previousLifetime = useRef(lifetime.token);
+  if (previousLifetime.current !== lifetime.token) {
+    previousLifetime.current = lifetime.token;
+    generation.current++;
+  }
   const readGeneration = useRef(0);
   const locked = useRef(false);
   const currentOwner = useRef(agentId);
   currentOwner.current = agentId;
 
   function current(epoch: number, owner: string) {
-    return generation.current === epoch && currentOwner.current === owner;
+    return (
+      lifetime.isCurrent(lifetime.token) &&
+      generation.current === epoch &&
+      currentOwner.current === owner
+    );
   }
 
   function invalidateReview() {
@@ -124,7 +139,12 @@ export function CommunityBundlesPanel({
   }
 
   async function refresh(signal?: AbortSignal, explicit = false) {
-    if (locked.current || (explicit && permissionsBusy)) return;
+    if (
+      !lifetime.isCurrent(lifetime.token) ||
+      locked.current ||
+      (explicit && permissionsBusy)
+    )
+      return;
     const epoch = generation.current;
     const read = ++readGeneration.current;
     const owner = agentId;
@@ -142,7 +162,7 @@ export function CommunityBundlesPanel({
         try {
           await onGrantsChanged?.(names);
         } finally {
-          onBusyChanged?.(false);
+          if (lifetime.matches(lifetime.token)) onBusyChanged?.(false);
         }
         if (!current(epoch, owner) || read !== readGeneration.current) return;
       }
@@ -176,23 +196,27 @@ export function CommunityBundlesPanel({
     }
   }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    setManifestText('');
+    setProgramBindings({});
+  }, [agentId, api]);
+
+  useLayoutEffect(() => {
     generation.current += 1;
     locked.current = false;
     setSummaries([]);
     setDetails({});
-    setManifestText('');
-    setProgramBindings({});
     setTrustedLocalCode(false);
     setTarget(null);
     setReview(null);
     setBusy(false);
     setInspecting(null);
-    setNeedsRefresh(false);
+    setLoading(online);
+    setNeedsRefresh(!online);
     setError(null);
     setNotice(null);
     const controller = new AbortController();
-    void refresh(controller.signal);
+    if (online) void refresh(controller.signal);
     return () => {
       controller.abort();
       generation.current += 1;
@@ -200,7 +224,7 @@ export function CommunityBundlesPanel({
     };
     // Every read, review and mutation is fenced by the selected owner.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentId, api]);
+  }, [agentId, api, lifetime.token]);
 
   useEffect(() => {
     if (!review) return;
@@ -230,6 +254,7 @@ export function CommunityBundlesPanel({
     affectsPermissions: boolean,
   ) {
     if (
+      !lifetime.isCurrent(lifetime.token) ||
       disabled ||
       loading ||
       inspecting !== null ||
@@ -264,12 +289,18 @@ export function CommunityBundlesPanel({
         setBusy(false);
       }
       // Parent fencing survives unmount, navigation and unknown removal results.
-      onBusyChanged?.(false);
+      if (lifetime.matches(lifetime.token)) onBusyChanged?.(false);
     }
   }
 
   async function inspect(id: string) {
-    if (locked.current || loading || permissionsBusy) return;
+    if (
+      !lifetime.isCurrent(lifetime.token) ||
+      locked.current ||
+      loading ||
+      permissionsBusy
+    )
+      return;
     const epoch = generation.current;
     const owner = agentId;
     const read = ++readGeneration.current;
@@ -331,6 +362,7 @@ export function CommunityBundlesPanel({
         row.reviewedComponentStateDigest === target.componentStateDigest,
     );
   const blocked =
+    !online ||
     disabled ||
     loading ||
     inspecting !== null ||
@@ -372,7 +404,9 @@ export function CommunityBundlesPanel({
         </div>
         <button
           className={button}
-          disabled={busy || loading || inspecting !== null || permissionsBusy}
+          disabled={
+            !online || busy || loading || inspecting !== null || permissionsBusy
+          }
           onClick={() => void refresh(undefined, true)}
         >
           Refresh bundle status

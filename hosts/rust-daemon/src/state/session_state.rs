@@ -12,9 +12,8 @@ use crate::sessions::migration::{
     derive_sessions_for_legacy_rooms, LegacyAgent, LegacySessionContext, ToolGrantSet,
 };
 use crate::sessions::{
-    connector_id_of_room, derived_title, is_calendar_write_followup, job_id_of_room, kind_for_room,
-    labelled_title, schedule_id_of_room, session_id_for_room, session_title, SessionKind,
-    SessionRecord, TitleContext, TitleSource,
+    connector_id_of_room, job_id_of_room, kind_for_room, schedule_id_of_room, session_id_for_room,
+    session_title, SessionKind, SessionRecord, TitleContext, TitleSource,
 };
 
 /// What `ensure_run_session` needs to know about a starting run.
@@ -22,13 +21,8 @@ pub(crate) struct RunSessionRequest<'a> {
     pub(crate) agent_id: &'a str,
     pub(crate) room_id: &'a str,
     pub(crate) source: RunSource,
-    /// Ledger source reference (spec §4.1); `calendar-write:<id>` marks the
-    /// calendar connector's own confirmation follow-up (Controller ruling,
-    /// M2 pre-flight audit), not an owner-authored `api` call.
-    pub(crate) source_ref: Option<&'a str>,
-    /// The calendar write's own summary, carried structurally in the run's
-    /// content metadata so the title need not parse the confirmation prose.
-    pub(crate) calendar_summary: Option<&'a str>,
+    /// Preformatted by the trusted host adapter, independently of user content.
+    pub(crate) system_followup_title: Option<&'a str>,
     /// The delegating agent of a `RunRoom::Delegated` run.
     pub(crate) delegated_parent: Option<&'a str>,
     /// The sending agent of a `RunRoom::Peer` run.
@@ -170,18 +164,8 @@ impl DaemonState {
                 }),
             peer_sender_name: peer_sender_name.as_deref(),
         };
-        let (title, title_source) = if is_calendar_write_followup(request.source_ref) {
-            // Controller ruling (M2 pre-flight audit): a system follow-up,
-            // titled from the write's own summary, not the owner's first
-            // message.
-            (
-                labelled_title(
-                    "Calendar",
-                    request.calendar_summary.and_then(derived_title),
-                    "Calendar update",
-                ),
-                TitleSource::System,
-            )
+        let (title, title_source) = if let Some(title) = request.system_followup_title {
+            (title.to_string(), TitleSource::System)
         } else {
             session_title(kind, origin, &title_context)
         };

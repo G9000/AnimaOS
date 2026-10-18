@@ -12,6 +12,9 @@ use crate::live::events::preview;
 use crate::runs::{ActionDurability, ActionReceipt, ActionStatus, RunLink, RunStatus};
 use crate::state::DaemonState;
 
+#[cfg(test)]
+use std::sync::atomic::AtomicBool;
+
 pub(crate) const RECEIPT_NOT_SAVED: &str = "Native action evidence could not be saved; effects may have occurred. Further actions were stopped.";
 const ACTION_ADMISSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
@@ -24,6 +27,17 @@ pub(crate) struct RunActionJournal {
     deadline: Option<tokio::time::Instant>,
     failure: Arc<StdMutex<Option<String>>>,
     pending: Arc<PendingSaves>,
+    #[cfg(test)]
+    rpc_authority_read_gate: Arc<StdMutex<Option<Arc<TestRpcAuthorityReadGate>>>>,
+}
+
+/// Test scheduling only: no call arguments, outputs or transport material.
+#[cfg(test)]
+pub(crate) struct TestRpcAuthorityReadGate {
+    pub(crate) entered: tokio::sync::Semaphore,
+    pub(crate) release: tokio::sync::Semaphore,
+    pub(crate) blocked: tokio::sync::Semaphore,
+    armed: AtomicBool,
 }
 
 #[derive(Default)]
@@ -47,6 +61,10 @@ impl Drop for SaveWork {
 }
 
 impl RunActionJournal {
+    pub(crate) fn rpc_deadline(&self) -> Option<tokio::time::Instant> {
+        self.deadline
+    }
+
     pub(crate) fn new(
         state: &SharedDaemonState,
         transactions: Arc<Mutex<()>>,
@@ -62,6 +80,63 @@ impl RunActionJournal {
             deadline,
             failure: Arc::new(StdMutex::new(None)),
             pending: Arc::new(PendingSaves::default()),
+            #[cfg(test)]
+            rpc_authority_read_gate: Arc::new(StdMutex::new(None)),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn install_test_rpc_authority_read_gate(&self) -> Arc<TestRpcAuthorityReadGate> {
+        let gate = Arc::new(TestRpcAuthorityReadGate {
+            entered: tokio::sync::Semaphore::new(0),
+            release: tokio::sync::Semaphore::new(0),
+            blocked: tokio::sync::Semaphore::new(0),
+            armed: AtomicBool::new(false),
+        });
+        *self.rpc_authority_read_gate.lock().unwrap() = Some(gate.clone());
+        gate
+    }
+
+    #[cfg(test)]
+    pub(crate) fn arm_test_final_rpc_authority_read(&self) {
+        if let Some(gate) = self.rpc_authority_read_gate.lock().unwrap().as_ref() {
+            gate.armed.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[cfg(test)]
+    async fn test_rpc_authority_read<'a>(
+        &self,
+        state: &'a RwLock<DaemonState>,
+    ) -> tokio::sync::RwLockReadGuard<'a, DaemonState> {
+        use std::future::Future;
+        let gate = self
+            .rpc_authority_read_gate
+            .lock()
+            .unwrap()
+            .clone()
+            .filter(|gate| gate.armed.swap(false, Ordering::SeqCst));
+        if let Some(gate) = gate {
+            gate.entered.add_permits(1);
+            gate.release
+                .acquire()
+                .await
+                .expect("test release gate")
+                .forget();
+            let read = state.read();
+            tokio::pin!(read);
+            let mut noted = false;
+            std::future::poll_fn(|context| {
+                let result = read.as_mut().poll(context);
+                if result.is_pending() && !noted {
+                    noted = true;
+                    gate.blocked.add_permits(1);
+                }
+                result
+            })
+            .await
+        } else {
+            state.read().await
         }
     }
 
@@ -85,6 +160,149 @@ impl RunActionJournal {
 
     pub(crate) fn owns_caller(&self, agent_id: &str, input_agent_id: &str) -> bool {
         self.run.agent_id == agent_id && self.run.agent_id == input_agent_id
+    }
+
+    pub(crate) fn bound_run(&self) -> &RunLink {
+        &self.run
+    }
+
+    /// Final, non-waiting authority snapshot after checkpoint publication.
+    /// The short guard is released before the caller performs any file effect.
+    pub(crate) fn checkpoint_revalidate_now(
+        &self,
+        workspace: &std::path::Path,
+        store: &std::path::Path,
+        call: &ToolCall,
+        approved: bool,
+        recovery: bool,
+    ) -> Result<(), String> {
+        self.check_liveness()?;
+        let state = self
+            .state
+            .upgrade()
+            .ok_or("Native action owner is unavailable")?;
+        let guard = state
+            .try_read()
+            .map_err(|_| "Checkpoint authority is busy; no file effect was admitted")?;
+        self.check_owner(&guard, true)?;
+        if guard
+            .workspace
+            .as_ref()
+            .map(|value| value.root_path.as_path())
+            != Some(workspace)
+            || guard.checkpoint_root.as_deref() != Some(store)
+        {
+            return Err("Checkpoint workspace or host configuration changed".into());
+        }
+        let record = guard.runs.get(&self.run.run_id).unwrap();
+        if !record.action_receipts.iter().any(|receipt| {
+            receipt.tool_call_id == call.id
+                && receipt.name == call.name
+                && receipt.status == ActionStatus::Started
+        }) {
+            return Err("Checkpoint native action intent is unavailable".into());
+        }
+        let current = guard
+            .get_agent(&self.run.agent_id)
+            .ok_or("Checkpoint owner is unavailable")?
+            .state;
+        if !current.config.allows_tool(&call.name) {
+            return Err("Checkpoint tool permission was revoked".into());
+        }
+        if recovery
+            && (record.parent_run_id.is_some()
+                || record.source == crate::runs::RunSource::Delegation
+                || super::is_helper_config(&current.config))
+        {
+            return Err("Checkpoint recovery requires a direct ordinary run".into());
+        }
+        if let Some(parent) = super::config_helper_parent(&current.config) {
+            if !guard
+                .get_agent(parent)
+                .is_some_and(|agent| agent.state.config.allows_tool(&call.name))
+            {
+                return Err("Checkpoint parent tool permission was revoked".into());
+            }
+        }
+        if let Some(parent) = record
+            .parent_run_id
+            .as_deref()
+            .and_then(|id| guard.runs.get(id))
+            .filter(|_| {
+                super::is_helper_config(&current.config)
+                    || record.source == crate::runs::RunSource::Delegation
+            })
+        {
+            if parent.stop.is_some() || !parent.status.is_in_flight() {
+                return Err("Checkpoint parent run is no longer active".into());
+            }
+        }
+        match guard.approval_verdict(&current, &self.run.session_id, call) {
+            crate::approvals::Verdict::Allow => Ok(()),
+            crate::approvals::Verdict::Ask if approved => Ok(()),
+            _ => Err("Checkpoint action is no longer approved".into()),
+        }
+    }
+
+    /// One authoritative snapshot for the stricter RPC grant intersection.
+    /// No model input supplies the run, wrapper call or captured grant set.
+    pub(crate) async fn rpc_authority(
+        &self,
+        run: &RunLink,
+        outer: &ToolCall,
+        inner: Option<&str>,
+    ) -> Result<(usize, std::collections::BTreeSet<String>), String> {
+        if run != &self.run || outer.name != "execute_code" {
+            return Err("Tool RPC scope does not match its native action journal".into());
+        }
+        self.revalidate().await?;
+        let state = self
+            .state
+            .upgrade()
+            .ok_or("Native action owner is unavailable")?;
+        #[cfg(test)]
+        let guard = self.test_rpc_authority_read(&state).await;
+        #[cfg(not(test))]
+        let guard = state.read().await;
+        self.check_owner(&guard, true)?;
+        let record = guard.runs.get(&self.run.run_id).unwrap();
+        if record.parent_run_id.is_some() || record.source == crate::runs::RunSource::Delegation {
+            return Err("Tool RPC requires a direct ordinary run".into());
+        }
+        if !record.action_receipts.iter().any(|receipt| {
+            receipt.tool_call_id == outer.id
+                && receipt.name == outer.name
+                && receipt.status == ActionStatus::Started
+        }) {
+            return Err("Tool RPC outer native action intent is missing".into());
+        }
+        let runtime = guard.agents.get(&self.run.agent_id).unwrap();
+        if super::is_helper_config(runtime.config()) {
+            return Err("Tool RPC is unavailable to helpers".into());
+        }
+        if !runtime.config().allows_tool("execute_code")
+            || !runtime.config().allows_tool("bash")
+            || inner.is_some_and(|name| !runtime.config().allows_tool(name))
+            || guard
+                .approvals
+                .policy(&self.run.agent_id)
+                .action(crate::approvals::RiskClass::Exec)
+                == Some(crate::approvals::PolicyAction::Deny)
+        {
+            return Err("Tool RPC current grants or execution policy refuse this action".into());
+        }
+        let granted = runtime
+            .config()
+            .tools
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|descriptor| descriptor.name.clone())
+            .collect();
+        Ok((
+            crate::live::MAX_LIVE_TOOL_CARDS.saturating_sub(record.action_receipts.len()),
+            granted,
+        ))
     }
 
     pub(crate) async fn settle(&self) {
@@ -129,7 +347,7 @@ impl RunActionJournal {
         RECEIPT_NOT_SAVED.into()
     }
 
-    pub(crate) async fn revalidate(&self) -> Result<(), String> {
+    fn check_liveness(&self) -> Result<(), String> {
         if let Some(error) = self.failure() {
             return Err(error);
         }
@@ -142,6 +360,11 @@ impl RunActionJournal {
         {
             return Err("Execution deadline reached before running the tool".into());
         }
+        Ok(())
+    }
+
+    pub(crate) async fn revalidate(&self) -> Result<(), String> {
+        self.check_liveness()?;
         let state = self
             .state
             .upgrade()
@@ -151,6 +374,12 @@ impl RunActionJournal {
     }
 
     fn check_owner(&self, state: &DaemonState, starting: bool) -> Result<(), String> {
+        if starting {
+            // State locks may have waited since the previous check. Recheck
+            // synchronous liveness under the acquired guard before admission;
+            // outcome acknowledgement still settles after cancellation.
+            self.check_liveness()?;
+        }
         if !state.agents.contains_key(&self.run.agent_id)
             || !state
                 .sessions

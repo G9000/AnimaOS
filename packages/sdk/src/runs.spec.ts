@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import type { Run, StartRunInput } from './runs.js';
 
 import {
   createDaemonClient,
@@ -28,6 +29,18 @@ const run = {
 };
 
 describe('runs client', () => {
+  it('preserves optional async summaries and completion origins through owner reads', async () => {
+    const asyncHelper = { ownerAgentId: 'owner', ownerSessionId: 'chat:owner', parentRunId: 'launch', completion: { state: 'awaiting_parent', reservedRunId: 'completion' }, pendingSteerCount: 1, archiveUnconsumedCount: 2 };
+    const helperCompletion = { helperRunId: 'child', launchParentRunId: 'launch' };
+    const { runs } = transport((url) => Response.json(url.includes('?') ? { runs: [{ ...run, asyncHelper }, { ...run, id: 'completion', helperCompletion }] } : { run }));
+    const listed = await runs.listForSession('owner', 'chat:owner', { limit: 2 });
+    expect(listed).toEqual([{ ...run, asyncHelper }, { ...run, id: 'completion', helperCompletion }]);
+    expect(await runs.get('owner', 'legacy')).not.toHaveProperty('asyncHelper');
+    expect(await runs.get('owner', 'legacy')).not.toHaveProperty('helperCompletion');
+    expectTypeOf<Extract<keyof StartRunInput, 'asyncHelper' | 'helperCompletion' | 'parentRunId' | 'ownerAgentId'>>().toEqualTypeOf<never>();
+    // Legacy payloads remain assignable after new response-only fields are added.
+    expectTypeOf<Pick<Run, 'id' | 'source'>>().toEqualTypeOf<{ id: string; source: Run['source'] }>();
+  });
   it('retains ordered attachment IDs unchanged in accepted run input', async () => {
     const { runs, requests } = transport(() =>
       Response.json({ run }, { status: 202 }),

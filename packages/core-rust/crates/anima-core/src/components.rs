@@ -13,6 +13,11 @@ pub trait Provider: Send + Sync {
     fn priority(&self) -> u8 {
         0
     }
+    /// Opt-in context that must be reread before each model request. Ordinary
+    /// providers retain their once-per-run snapshot semantics.
+    fn refresh_each_model_request(&self) -> bool {
+        false
+    }
     async fn get(
         &self,
         runtime: &AgentRuntime,
@@ -33,6 +38,11 @@ pub trait Evaluator: Send + Sync {
     /// Higher values run earlier. Ties preserve registration order.
     fn priority(&self) -> u8 {
         0
+    }
+    /// A corrective tool pass cannot run during the sole tool-free budget
+    /// wrap-up. Ordinary response validators still run there by default.
+    fn requires_tool_budget(&self) -> bool {
+        false
     }
     async fn validate(&self, runtime: &AgentRuntime, message: &Message) -> Result<bool, String>;
     async fn evaluate(

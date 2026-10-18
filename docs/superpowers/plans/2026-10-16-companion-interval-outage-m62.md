@@ -4,7 +4,7 @@ Status: locally accepted test-only milestone; publication and merge settlement a
 
 ## Gap and smallest useful case
 
-PAR-10 in `docs/companion/parity-roadmap.md` says recurrence/outage evidence is incomplete: controlled clocks must define missed-occurrence behavior and avoid catch-up storms; long outage, before/after durable claim, interrupted shutdown/restart, cancellation/disable and uncertain effects remain listed.
+Recurrence/outage evidence is incomplete: controlled clocks must define missed-occurrence behavior and avoid catch-up storms; long outage, before/after durable claim, interrupted shutdown/restart, cancellation/disable and uncertain effects remain listed.
 
 Prove one synthetic workspace-target interval case crossing the JSON control-plane boundary after a long outage. The durable snapshot contains an enabled interval with no prior `last_fired` and a due time in the past relative to the first controlled tick. A new `SchedulerService` is constructed from that snapshot. One explicit `tick_at(N)` must collapse the overdue backlog into exactly one execution at N, durably advance next due to N+I, and never replay missed occurrences. Repeated observation at N must not execute again. A fresh restore must remain quiet until another explicit test tick; exactly one later tick at N+I demonstrates ordinary recurrence resumes without catch-up.
 

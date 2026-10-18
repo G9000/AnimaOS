@@ -12,8 +12,8 @@ use super::{hidden_message_ids, SessionKind, SessionRecord};
 use crate::app::SharedDaemonState;
 use crate::history::{
     display_text, role_name, search_snippet, search_tokens, searchable_text, snippet_text,
-    text_matches, FilteredSessionSearchQuery, HistoryMessage, HistoryStore, MessageAfterQuery,
-    MessageOrder, MessagePageQuery,
+    text_matches, FilteredMessageSearchQuery, FilteredSessionSearchQuery, HistoryMessage,
+    HistoryStore, MessageAfterQuery, MessageOrder, MessagePageQuery,
 };
 use crate::state::DaemonState;
 
@@ -36,6 +36,33 @@ pub(crate) struct WindowRequest {
     pub(crate) anchor_message_id: String,
     pub(crate) before_count: usize,
     pub(crate) after_count: usize,
+}
+#[derive(Clone, Debug)]
+pub(crate) struct ConversationWindow {
+    pub(crate) session_id: String,
+    pub(crate) anchor_message_id: String,
+    pub(crate) messages: Vec<Message>,
+    pub(crate) has_earlier: bool,
+    pub(crate) has_later: bool,
+    pub(crate) omitted: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct MessageSearchRequest {
+    pub(crate) query: String,
+    pub(crate) limit: usize,
+}
+#[derive(Clone, Debug)]
+pub(crate) struct MessageSearchHit {
+    pub(crate) session_id: String,
+    pub(crate) title: String,
+    pub(crate) message: Message,
+    pub(crate) snippet: String,
+}
+#[derive(Clone, Debug)]
+pub(crate) struct MessageSearchPage {
+    pub(crate) results: Vec<MessageSearchHit>,
+    pub(crate) has_more: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum HistoryReadError {
@@ -151,7 +178,7 @@ async fn discover_inner(
             .records()
             .filter(|record| {
                 allowed(&guard, agent, record)
-                    && Some(record.id.as_str()) != current
+                    && (Some(record.id.as_str()) != current || record.main_chat)
                     && request.kind.is_none_or(|kind| kind == record.kind)
             })
             .map(|record| (record.id.clone(), record.clone()))
@@ -229,6 +256,13 @@ async fn discover_inner(
         }
         insert_latest(&mut found, &record.id, row.message);
     }
+    // A permanent current conversation's recent question or earlier tool
+    // output can repeat the search words. Keep its matching stored source
+    // outside the hot tail as the anchor; ordinary sessions still select
+    // their newest match across both sources.
+    let current_main_has_cold_match = current
+        .and_then(|id| records.get(id))
+        .is_some_and(|record| record.main_chat && found.contains_key(&record.id));
     for message in hot.iter().filter(|message| matches(message)) {
         if message.agent_id != agent || !valid_id(&message.id) {
             continue;
@@ -237,7 +271,9 @@ async fn discover_inner(
             .values()
             .find(|record| record.room_id() == message.room_id)
         {
-            insert_latest(&mut found, &record.id, message.clone());
+            if !(current_main_has_cold_match && Some(record.id.as_str()) == current) {
+                insert_latest(&mut found, &record.id, message.clone());
+            }
         }
     }
     let guard = state.read().await;
@@ -316,11 +352,220 @@ fn insert_latest(found: &mut HashMap<String, Message>, session: &str, message: M
     }
 }
 
+/// Bounded owner search over individual messages, including multiple hits in
+/// the same conversation. No transcript pages or unscoped fallback are read.
+pub(crate) async fn search_messages(
+    state: &SharedDaemonState,
+    agent: &str,
+    request: MessageSearchRequest,
+) -> Result<Option<MessageSearchPage>, HistoryReadError> {
+    if request.query.trim().is_empty()
+        || request.query.len() > 800
+        || request.query.chars().count() > 200
+        || request.query.chars().any(char::is_control)
+        || crate::memory_text::has_hidden_text(&request.query)
+        || !(1..=20).contains(&request.limit)
+    {
+        return Err(HistoryReadError::InvalidRequest);
+    }
+    tokio::time::timeout(DEADLINE, search_messages_inner(state, agent, request))
+        .await
+        .map_err(|_| HistoryReadError::Unavailable)?
+}
+
+async fn search_messages_inner(
+    state: &SharedDaemonState,
+    agent: &str,
+    request: MessageSearchRequest,
+) -> Result<Option<MessageSearchPage>, HistoryReadError> {
+    let (records, hot, hidden, store) = {
+        let guard = state.read().await;
+        let Some(runtime) = guard.agents.get(agent) else {
+            return Ok(None);
+        };
+        let records: BTreeMap<_, _> = guard
+            .sessions
+            .records()
+            .filter(|record| allowed(&guard, agent, record))
+            .take(501)
+            .map(|record| (record.id.clone(), record.clone()))
+            .collect();
+        if records.len() > 500 {
+            return Err(HistoryReadError::ScopeLimit);
+        }
+        let rooms: HashSet<_> = records.values().map(SessionRecord::room_id).collect();
+        let hot: Vec<_> = runtime
+            .messages()
+            .iter()
+            .filter(|message| rooms.contains(message.room_id.as_str()))
+            .take(5001)
+            .collect();
+        if hot.len() > 5000 {
+            return Err(HistoryReadError::ScopeLimit);
+        }
+        let hot: Vec<_> = hot.into_iter().cloned().collect();
+        let hidden: HashSet<_> = rooms
+            .iter()
+            .flat_map(|room| {
+                hidden_message_ids(hot.iter().filter(|message| message.room_id == *room))
+            })
+            .collect();
+        (records, hot, hidden, guard.history.store())
+    };
+    let mut excluded_message_ids: Vec<_> = hot
+        .iter()
+        .filter(|message| message.agent_id == agent && valid_id(&message.id))
+        .map(|message| message.id.clone())
+        .collect();
+    excluded_message_ids.sort();
+    excluded_message_ids.dedup();
+    if excluded_message_ids.len() > 5000 {
+        return Err(HistoryReadError::ScopeLimit);
+    }
+    let tokens = search_tokens(&request.query);
+    if tokens.is_empty() {
+        return Ok(Some(MessageSearchPage {
+            results: Vec::new(),
+            has_more: false,
+        }));
+    }
+    let query = FilteredMessageSearchQuery {
+        agent_id: agent.into(),
+        session_ids: records.keys().cloned().collect(),
+        excluded_message_ids,
+        query: request.query,
+        after_ms: None,
+        before_ms: None,
+        limit: request.limit + 1,
+    };
+    let cold = if records.is_empty() {
+        Vec::new()
+    } else {
+        store
+            .search_messages_filtered(&query)
+            .await
+            .map_err(|_| HistoryReadError::Unavailable)?
+    };
+    if cold.len() > query.limit {
+        return Err(HistoryReadError::Unavailable);
+    }
+    let cold_full = cold.len() == query.limit;
+    let mut found = HashMap::<String, (String, Message)>::new();
+    for row in cold {
+        let Some(record) = records.get(&row.session_id) else {
+            return Err(HistoryReadError::Unavailable);
+        };
+        if !row_allowed(&row, agent, record, &hidden)
+            || query.excluded_message_ids.contains(&row.message.id)
+            || !text_matches(searchable_text(&row.message), &tokens)
+            || found.contains_key(&row.message.id)
+        {
+            return Err(HistoryReadError::Unavailable);
+        }
+        found.insert(row.message.id.clone(), (record.id.clone(), row.message));
+    }
+    // Re-read live hot copies after I/O: they also override a cold copy that
+    // entered the hot tail while the store read was in flight.
+    let guard = state.read().await;
+    let Some(runtime) = guard.agents.get(agent) else {
+        return Ok(None);
+    };
+    let live_records: BTreeMap<_, _> = records
+        .values()
+        .filter_map(|record| {
+            guard
+                .sessions
+                .get(agent, &record.id)
+                .filter(|live| live.room_id() == record.room_id() && allowed(&guard, agent, live))
+                .map(|live| (live.id.clone(), live))
+        })
+        .collect();
+    let rooms: HashMap<_, _> = live_records
+        .values()
+        .map(|record| (record.room_id(), record.id.as_str()))
+        .collect();
+    let live_hot: Vec<_> = runtime
+        .messages()
+        .iter()
+        .filter(|message| rooms.contains_key(message.room_id.as_str()))
+        .take(5001)
+        .collect();
+    if live_hot.len() > 5000 {
+        return Err(HistoryReadError::ScopeLimit);
+    }
+    let live_hidden: HashSet<_> = rooms
+        .keys()
+        .flat_map(|room| {
+            hidden_message_ids(
+                live_hot
+                    .iter()
+                    .copied()
+                    .filter(|message| message.room_id == *room),
+            )
+        })
+        .collect();
+    for message in live_hot {
+        if let Some(session_id) = rooms.get(message.room_id.as_str()) {
+            found.insert(
+                message.id.clone(),
+                ((*session_id).to_string(), message.clone()),
+            );
+        }
+    }
+    let mut results: Vec<_> = found
+        .into_values()
+        .filter_map(|(session_id, message)| {
+            let record = live_records.get(&session_id)?;
+            (message.agent_id == agent
+                && message.room_id == record.room_id()
+                && message.role != MessageRole::System
+                && valid_id(&message.id)
+                && !live_hidden.contains(&message.id)
+                && text_matches(searchable_text(&message), &tokens))
+            .then(|| MessageSearchHit {
+                session_id,
+                title: clip(&record.title, 240),
+                snippet: search_snippet(snippet_text(&message), &tokens),
+                message,
+            })
+        })
+        .collect();
+    results.sort_by(|a, b| MessageOrder::of(&b.message).cmp(&MessageOrder::of(&a.message)));
+    let has_more = cold_full || results.len() > request.limit;
+    results.truncate(request.limit);
+    Ok(Some(MessageSearchPage { results, has_more }))
+}
+
 pub(crate) async fn read_conversation_window(
     state: &SharedDaemonState,
     agent: &str,
     request: WindowRequest,
 ) -> Result<Value, HistoryReadError> {
+    let Some(window) = select_conversation_window(state, agent, request.clone()).await? else {
+        return Ok(missing(&request.session_id, &request.anchor_message_id));
+    };
+    // Agent evidence keeps its existing clipped text, metadata and byte caps.
+    // The owner transcript instead projects the native messages directly.
+    let messages: Vec<_> = window.messages.iter().map(shape_message).collect();
+    let mut output = json!({"guidance":GUIDANCE,"status":"found","sessionId":window.session_id,
+        "anchorMessageId":window.anchor_message_id,"messages":messages,"hasEarlier":window.has_earlier,"hasLater":window.has_later,
+        "shortened":window.omitted,
+        "sourceCoverage":if window.omitted{"bounded_with_omissions"}else{"hot_and_store"},
+        "pairingIncomplete":false});
+    bound_window(&mut output);
+    output["pairingIncomplete"] = json!(
+        output["pairingIncomplete"] == true
+            || window.omitted
+            || pairing_incomplete(output["messages"].as_array().expect("message array"))
+    );
+    Ok(output)
+}
+
+pub(crate) async fn select_conversation_window(
+    state: &SharedDaemonState,
+    agent: &str,
+    request: WindowRequest,
+) -> Result<Option<ConversationWindow>, HistoryReadError> {
     if !valid_id(&request.session_id)
         || !valid_id(&request.anchor_message_id)
         || request.before_count > 19
@@ -338,7 +583,7 @@ async fn window_inner(
     state: &SharedDaemonState,
     agent: &str,
     request: WindowRequest,
-) -> Result<Value, HistoryReadError> {
+) -> Result<Option<ConversationWindow>, HistoryReadError> {
     let (record, hot, hidden, store): (
         SessionRecord,
         Vec<Message>,
@@ -351,7 +596,7 @@ async fn window_inner(
             .get(agent, &request.session_id)
             .filter(|record| allowed(&guard, agent, record))
         else {
-            return Ok(missing(&request.session_id, &request.anchor_message_id));
+            return Ok(None);
         };
         let hot: Vec<_> = guard.agents[agent]
             .messages()
@@ -373,7 +618,7 @@ async fn window_inner(
         {
             message.clone()
         }
-        Some(_) => return Ok(missing(&request.session_id, &request.anchor_message_id)),
+        Some(_) => return Ok(None),
         None => match store
             .get_message(agent, &request.session_id, &request.anchor_message_id)
             .await
@@ -390,11 +635,11 @@ async fn window_inner(
                     return Err(HistoryReadError::Unavailable);
                 }
                 if !row_allowed(&row, agent, &record, &hidden) {
-                    return Ok(missing(&request.session_id, &request.anchor_message_id));
+                    return Ok(None);
                 }
                 row.message
             }
-            None => return Ok(missing(&request.session_id, &request.anchor_message_id)),
+            None => return Ok(None),
         },
     };
     let order = MessageOrder::of(&anchor);
@@ -463,7 +708,7 @@ async fn window_inner(
         .get(agent, &record.id)
         .is_some_and(|live| live.room_id() == record.room_id() && allowed(&guard, agent, live))
     {
-        return Ok(missing(&request.session_id, &request.anchor_message_id));
+        return Ok(None);
     }
     let live_hidden = hidden_message_ids(
         guard.agents[agent]
@@ -473,7 +718,7 @@ async fn window_inner(
     );
     drop(guard);
     if live_hidden.contains(&anchor.id) {
-        return Ok(missing(&request.session_id, &request.anchor_message_id));
+        return Ok(None);
     }
     merged.retain(|id, _| !live_hidden.contains(id));
     merged.insert(anchor.id.clone(), anchor.clone());
@@ -494,25 +739,19 @@ async fn window_inner(
     older.truncate(request.before_count);
     older.reverse();
     newer.truncate(request.after_count);
-    let messages: Vec<_> = older
+    let messages = older
         .into_iter()
         .chain(std::iter::once(anchor))
         .chain(newer)
-        .map(|message| shape_message(&message))
         .collect();
-    let mut output = json!({"guidance":GUIDANCE,"status":"found","sessionId":record.id,
-        "anchorMessageId":request.anchor_message_id,"messages":messages,"hasEarlier":has_earlier,"hasLater":has_later,
-        "shortened":omitted_before||omitted_after,
-        "sourceCoverage":if omitted_before||omitted_after{"bounded_with_omissions"}else{"hot_and_store"},
-        "pairingIncomplete":false});
-    bound_window(&mut output);
-    output["pairingIncomplete"] = json!(
-        output["pairingIncomplete"] == true
-            || omitted_before
-            || omitted_after
-            || pairing_incomplete(output["messages"].as_array().expect("message array"))
-    );
-    Ok(output)
+    Ok(Some(ConversationWindow {
+        session_id: record.id,
+        anchor_message_id: request.anchor_message_id,
+        messages,
+        has_earlier,
+        has_later,
+        omitted: omitted_before || omitted_after,
+    }))
 }
 
 fn shape_message(message: &Message) -> Value {

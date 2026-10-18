@@ -59,4 +59,4 @@ test-output
 
 .env
 .env.local
-/target
+target/

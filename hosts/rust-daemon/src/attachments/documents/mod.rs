@@ -14,13 +14,13 @@ pub(crate) const MAX_DOCX_INPUT_BYTES: u64 = MAX_DOCUMENT_INPUT_BYTES;
 
 #[allow(dead_code)]
 pub(crate) fn is_docx(record: &super::AttachmentRecord) -> bool {
-    document_format(record) == Some(anima_core::document_content::DocumentFormat::Docx)
+    document_format(record) == Some(anima_service_adapters::document_content::DocumentFormat::Docx)
 }
 
 pub(crate) fn document_format(
     record: &super::AttachmentRecord,
-) -> Option<anima_core::document_content::DocumentFormat> {
-    use anima_core::document_content::DocumentFormat;
+) -> Option<anima_service_adapters::document_content::DocumentFormat> {
+    use anima_service_adapters::document_content::DocumentFormat;
     if record.kind != super::AttachmentKind::Document {
         return None;
     }

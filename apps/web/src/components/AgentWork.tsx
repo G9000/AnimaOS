@@ -363,6 +363,14 @@ export function AgentTasksView({
                   tasks: [
                     ...previous.tasks,
                     {
+                      ...(previous.tasks.some(
+                        (task) => task.id !== undefined,
+                      ) ||
+                      previous.snapshot?.tasks.some(
+                        (task) => task.id !== undefined,
+                      )
+                        ? { id: crypto.randomUUID() }
+                        : {}),
                       content: previous.content.trim(),
                       activeForm: previous.content.trim(),
                       status: 'pending',
@@ -448,6 +456,11 @@ export function AgentTasksView({
                   <option value="pending">Pending</option>
                   <option value="in_progress">In progress</option>
                   <option value="completed">Completed</option>
+                  {task.status === 'cancelled' && (
+                    <option value="cancelled" disabled>
+                      Cancelled
+                    </option>
+                  )}
                 </select>
                 <button
                   type="button"

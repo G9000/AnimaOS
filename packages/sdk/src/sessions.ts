@@ -55,6 +55,34 @@ export interface SessionCompactionError {
   atMs: number;
 }
 
+/** Estimated selected conversation history and summary, excluding other prompt parts. */
+export interface SessionContextUsage {
+  estimatedTokens: number;
+  /** Usable conversation budget after reserving the reply. */
+  budgetTokens: number;
+  replyReserveTokens: number;
+}
+
+export interface SessionMessageSearchHit {
+  sessionId: string;
+  title: string;
+  messageId: string;
+  role: 'user' | 'assistant' | 'tool';
+  createdAtMs: number;
+  snippet: string;
+}
+
+export interface SessionMessageSearchPage {
+  results: SessionMessageSearchHit[];
+  hasMore: boolean;
+}
+
+export interface SessionMessageSearchOptions {
+  q: string;
+  limit?: number;
+  signal?: AbortSignal;
+}
+
 /** Why a search result matched; `messageId` is null for a title match. */
 export interface SessionMatch {
   messageId: string | null;
@@ -75,6 +103,8 @@ export interface Session {
   lastActivityAtMs: number;
   lastReadAtMs: number | null;
   archived: boolean;
+  /** The daemon-designated primary web chat; absent on older records. */
+  mainChat?: boolean;
   parentSessionId: string | null;
   parentRunId: string | null;
   parentAgentId: string | null;
@@ -90,6 +120,8 @@ export interface Session {
   match?: SessionMatch;
   /** The session's usage totals; present only on a single-session read. */
   usage?: UsageTotals | null;
+  /** Only on a single-session read; absent on older daemons. */
+  contextUsage?: SessionContextUsage;
 }
 
 export interface SessionPage {
@@ -220,10 +252,15 @@ export interface SessionMessagePage {
    * quietly claiming there is nothing more.
    */
   nextBefore: string | null;
+  /** Present only for an exact bounded historical window. */
+  anchorMessageId?: string;
+  hasNewer?: boolean;
 }
 
 export interface SessionMessageOptions {
   before?: string;
+  /** Mutually exclusive with before and includeHidden=true. */
+  anchor?: string;
   limit?: number;
   includeHidden?: boolean;
   signal?: AbortSignal;
@@ -236,11 +273,11 @@ export interface SessionUpdateInput {
 }
 
 /**
- * Thrown only by `SessionsClient.list`. The daemon answers an unknown route
+ * Thrown by `SessionsClient.list` and `main`. The daemon answers an unknown route
  * with the same JSON 404 as a real not-found, so a 404 from `GET
  * /api/agents/{id}/sessions` alone cannot tell "the daemon predates the
  * sessions routes" apart from "the agent does not exist" (Controller ruling
- * 2, M2 pre-flight audit; spec §13.4). `list` resolves the ambiguity by
+ * 2, M2 pre-flight audit; spec §13.4). Both operations resolve the ambiguity by
  * probing `GET /api/agents/{id}`: if the agent exists, the sessions route is
  * the thing missing, so it raises this instead of the plain `DaemonHttpError`.
  * `code` is a stable string a caller can check without importing this class.
@@ -248,9 +285,12 @@ export interface SessionUpdateInput {
 export class DaemonTooOldError extends Error {
   readonly code = 'daemon_too_old' as const;
 
-  constructor(readonly agentId: string) {
+  constructor(
+    readonly agentId: string,
+    operation = 'sessions',
+  ) {
     super(
-      `The daemon does not support sessions for agent "${agentId}" yet; update the daemon.`,
+      `The daemon does not support ${operation} for agent "${agentId}" yet; update the daemon.`,
     );
     this.name = 'DaemonTooOldError';
   }
@@ -258,6 +298,41 @@ export class DaemonTooOldError extends Error {
 
 export class SessionsClient {
   constructor(private readonly client: DaemonClient) {}
+
+  async searchMessages(
+    agentId: string,
+    options: SessionMessageSearchOptions,
+  ): Promise<SessionMessageSearchPage> {
+    const search = new URLSearchParams({ q: options.q });
+    if (options.limit !== undefined) search.set('limit', String(options.limit));
+    return this.client.requestJson<SessionMessageSearchPage>(
+      withQuery(
+        `/api/agents/${encodeURIComponent(agentId)}/message-search`,
+        search,
+      ),
+      { signal: options.signal },
+    );
+  }
+
+  /** Atomically resolves the agent's durable main web conversation. */
+  async main(agentId: string): Promise<Session> {
+    try {
+      const response = await this.client.requestJson<{ session: Session }>(
+        `/api/agents/${encodeURIComponent(agentId)}/main-chat`,
+        { method: 'POST', body: {} },
+      );
+      return response.session;
+    } catch (error) {
+      if (
+        error instanceof DaemonHttpError &&
+        error.status === 404 &&
+        (await this.agentExists(agentId))
+      ) {
+        throw new DaemonTooOldError(agentId, 'main chat');
+      }
+      throw error;
+    }
+  }
 
   async list(
     agentId: string,
@@ -316,6 +391,7 @@ export class SessionsClient {
   ): Promise<SessionMessagePage> {
     const search = new URLSearchParams();
     if (options.before) search.set('before', options.before);
+    if (options.anchor) search.set('anchor', options.anchor);
     if (options.limit !== undefined) search.set('limit', String(options.limit));
     if (options.includeHidden !== undefined)
       search.set('includeHidden', String(options.includeHidden));

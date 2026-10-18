@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { AgentJob } from '@animaOS-SWARM/sdk';
 import { daemon } from '../lib/daemon-api';
 import { AgentRunsView } from './AgentRuns';
+import { currentJobReview } from '../lib/job-output';
 
 type Agent = { id: string; name: string };
 type Selection =
@@ -18,8 +19,7 @@ const filters = [
 ] as const;
 type Filter = (typeof filters)[number];
 function review(job: AgentJob) {
-  return job.attempts.find((attempt) => attempt.attempt === job.attempt)
-    ?.review;
+  return currentJobReview(job);
 }
 function matches(job: AgentJob, filter: Filter) {
   switch (filter) {
@@ -28,7 +28,11 @@ function matches(job: AgentJob, filter: Filter) {
     case 'Approval':
       return job.status === 'awaiting_approval';
     case 'Active':
-      return job.status === 'queued' || job.status === 'running';
+      return (
+        job.status === 'queued' ||
+        job.status === 'running' ||
+        job.status === 'pending_delegations'
+      );
     case 'Review':
       return (
         job.status === 'needs_review' ||
@@ -56,6 +60,7 @@ function status(job: AgentJob) {
     awaiting_approval: 'Awaiting approval',
     queued: 'Queued',
     running: 'Running',
+    pending_delegations: 'Waiting for helpers',
     failed: 'Failed',
     needs_review: 'Outcome uncertain',
     cancelled: 'Cancelled',

@@ -247,6 +247,113 @@ impl AutomationPatch {
     }
 }
 
+/// The exact lifecycle tool whose host-derived run authority is being used.
+#[derive(Clone, Copy)]
+pub(crate) enum AutomationRunTool {
+    Create,
+    Pause,
+    Update,
+    Resume,
+    Delete,
+    Trigger,
+}
+
+impl AutomationRunTool {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Create => "create_automation",
+            Self::Pause => "pause_automation",
+            Self::Update => "update_automation",
+            Self::Resume => "resume_automation",
+            Self::Delete => "delete_automation",
+            Self::Trigger => "trigger_automation",
+        }
+    }
+}
+
+/// Carries execution context into the transaction; never read from tool args.
+#[derive(Clone)]
+pub(crate) struct AutomationRunAuthority {
+    link: crate::runs::RunLink,
+    tool: AutomationRunTool,
+    call: anima_core::ToolCall,
+    approved: bool,
+    cancel: Option<anima_core::CancelSignal>,
+}
+
+impl AutomationRunAuthority {
+    pub(crate) fn new(
+        link: crate::runs::RunLink,
+        tool: AutomationRunTool,
+        call: anima_core::ToolCall,
+        approved: bool,
+        cancel: Option<anima_core::CancelSignal>,
+    ) -> Self {
+        Self {
+            link,
+            tool,
+            call,
+            approved,
+            cancel,
+        }
+    }
+
+    /// Called under the actual mutation's transaction and state write lock.
+    pub(crate) fn validate(
+        &self,
+        state: &crate::state::DaemonState,
+        agent_id: &str,
+    ) -> Result<(), ScheduleError> {
+        let live_source = state.runs.get(&self.link.run_id).is_some_and(|run| {
+            self.link.agent_id == agent_id
+                && run.id == self.link.run_id
+                && run.agent_id == agent_id
+                && run.session_id == self.link.session_id
+                && run.status == crate::runs::RunStatus::Running
+                && run.stop.is_none()
+        });
+        let granted = state.get_agent(agent_id).is_some_and(|agent| {
+            !crate::agent_runs::is_helper_config(&agent.state.config)
+                && agent
+                    .state
+                    .config
+                    .tools
+                    .iter()
+                    .flatten()
+                    .any(|tool| tool.name == self.tool.name())
+        });
+        let approved = state.get_agent(agent_id).is_some_and(|agent| {
+            matches!(
+                state.approval_verdict(&agent.state, &self.link.session_id, &self.call),
+                crate::approvals::Verdict::Allow
+            ) || (self.approved
+                && matches!(
+                    state.approval_verdict(&agent.state, &self.link.session_id, &self.call),
+                    crate::approvals::Verdict::Ask
+                ))
+        });
+        if live_source
+            && granted
+            && approved
+            && self.call.name == self.tool.name()
+            && !self
+                .cancel
+                .as_ref()
+                .is_some_and(|cancel| cancel.is_cancelled())
+        {
+            Ok(())
+        } else {
+            Err(ScheduleError::Rejected(
+                "The automation source run is no longer authorized".into(),
+            ))
+        }
+    }
+
+    pub(crate) fn link(&self) -> &crate::runs::RunLink {
+        &self.link
+    }
+}
+
 /// The heartbeat preset (spec §9.2) in the owner's `time_zone`; the caller
 /// may replace any field before creating it.
 pub(crate) fn heartbeat_input(
@@ -528,6 +635,25 @@ impl AutomationService {
         input: AutomationInput,
         now_ms: u64,
     ) -> Result<(ScheduledPromptRecord, bool), ScheduleError> {
+        self.create_with_source(input, now_ms, None).await
+    }
+
+    pub(crate) async fn create_from_run(
+        &self,
+        input: AutomationInput,
+        now_ms: u64,
+        authority: AutomationRunAuthority,
+    ) -> Result<(ScheduledPromptRecord, bool), ScheduleError> {
+        self.create_with_source(input, now_ms, Some(authority))
+            .await
+    }
+
+    async fn create_with_source(
+        &self,
+        input: AutomationInput,
+        now_ms: u64,
+        authority: Option<AutomationRunAuthority>,
+    ) -> Result<(ScheduledPromptRecord, bool), ScheduleError> {
         checked_prompt(&input.prompt)?;
         let name = match &input.name {
             Some(name) => checked_name(name)?,
@@ -574,7 +700,7 @@ impl AutomationService {
             preset: input.preset,
             counters: AutomationCounters::default(),
         };
-        self.locked(move |service| async move { service.insert(record, now_ms).await })
+        self.locked(move |service| async move { service.insert(record, now_ms, authority).await })
             .await
     }
 
@@ -582,9 +708,13 @@ impl AutomationService {
         &self,
         mut record: ScheduledPromptRecord,
         now_ms: u64,
+        authority: Option<AutomationRunAuthority>,
     ) -> Result<(ScheduledPromptRecord, bool), ScheduleError> {
         let persist = {
             let mut state = self.state.write().await;
+            if let Some(authority) = &authority {
+                authority.validate(&state, &record.agent_id)?;
+            }
             if state.get_agent(&record.agent_id).is_none() {
                 return Err(ScheduleError::AgentNotFound);
             }
@@ -639,6 +769,45 @@ impl AutomationService {
         patch: AutomationPatch,
         now_ms: u64,
     ) -> Result<ScheduledPromptRecord, ScheduleError> {
+        self.update_with_source(agent_id, schedule_id, patch, now_ms, false, None)
+            .await
+    }
+
+    /// Agent-created timing changes retain the same cadence bound as creation.
+    #[cfg(test)]
+    pub(crate) async fn update_from_agent(
+        &self,
+        agent_id: &str,
+        schedule_id: &str,
+        patch: AutomationPatch,
+        now_ms: u64,
+    ) -> Result<ScheduledPromptRecord, ScheduleError> {
+        self.update_with_source(agent_id, schedule_id, patch, now_ms, true, None)
+            .await
+    }
+
+    /// Agent tool mutations recheck their live source after obtaining the lock.
+    pub(crate) async fn update_from_run(
+        &self,
+        agent_id: &str,
+        schedule_id: &str,
+        patch: AutomationPatch,
+        now_ms: u64,
+        authority: AutomationRunAuthority,
+    ) -> Result<ScheduledPromptRecord, ScheduleError> {
+        self.update_with_source(agent_id, schedule_id, patch, now_ms, true, Some(authority))
+            .await
+    }
+
+    async fn update_with_source(
+        &self,
+        agent_id: &str,
+        schedule_id: &str,
+        patch: AutomationPatch,
+        now_ms: u64,
+        from_agent: bool,
+        authority: Option<AutomationRunAuthority>,
+    ) -> Result<ScheduledPromptRecord, ScheduleError> {
         if patch.is_empty() {
             return Err(ScheduleError::Invalid(NOTHING_TO_UPDATE));
         }
@@ -653,6 +822,9 @@ impl AutomationService {
         self.locked(move |service| async move {
             let (updated, previous, persist) = {
                 let mut state = service.state.write().await;
+                if let Some(authority) = &authority {
+                    authority.validate(&state, &agent_id)?;
+                }
                 let previous = state
                     .schedules
                     .get(&schedule_id)
@@ -685,12 +857,17 @@ impl AutomationService {
                 // Also catches a new one-time trigger on an automation that
                 // keeps its old active hours.
                 updated.active_hours = checked_hours(updated.active_hours, &updated.trigger)?;
+                if from_agent && retimed {
+                    check_agent_gap(&updated.trigger, updated.active_hours.as_ref(), now_ms)?;
+                }
                 if retimed {
                     updated.next_due_at_ms =
                         next_due(&updated.trigger, updated.active_hours.as_ref(), now_ms)?;
                 }
                 validate_target(&state, &agent_id, &updated.target, updated.enabled)?;
-                updated.updated_at_ms = now_ms.max(updated.created_at_ms);
+                updated.updated_at_ms = now_ms
+                    .max(updated.created_at_ms)
+                    .max(previous.updated_at_ms);
                 state.schedules.insert(schedule_id.clone(), updated.clone());
                 (updated, previous, state.control_plane_persist_request())
             };
@@ -709,6 +886,54 @@ impl AutomationService {
                 false,
             );
             Ok(updated)
+        })
+        .await
+    }
+
+    pub(crate) async fn pause_from_run(
+        &self,
+        agent_id: &str,
+        schedule_id: &str,
+        now_ms: u64,
+        authority: AutomationRunAuthority,
+    ) -> Result<(ScheduledPromptRecord, bool), ScheduleError> {
+        let (agent_id, schedule_id) = (agent_id.to_owned(), schedule_id.to_owned());
+        self.locked(move |service| async move {
+            let (previous, updated, persist) = {
+                let mut state = service.state.write().await;
+                authority.validate(&state, &agent_id)?;
+                let previous = state
+                    .schedules
+                    .get(&schedule_id)
+                    .filter(|record| record.agent_id == agent_id)
+                    .cloned()
+                    .ok_or(ScheduleError::NotFound)?;
+                if !previous.enabled {
+                    return Ok((previous, false));
+                }
+                let mut updated = previous.clone();
+                updated.enabled = false;
+                updated.updated_at_ms = now_ms
+                    .max(updated.created_at_ms)
+                    .max(previous.updated_at_ms);
+                state.schedules.insert(schedule_id.clone(), updated.clone());
+                (previous, updated, state.control_plane_persist_request())
+            };
+            if persist.save().await.is_err() {
+                service
+                    .state
+                    .write()
+                    .await
+                    .schedules
+                    .insert(schedule_id, previous);
+                return Err(ScheduleError::Persistence);
+            }
+            service.state.read().await.publish_automation_updated(
+                &updated.agent_id,
+                &updated.id,
+                false,
+            );
+            Ok((updated, true))
         })
         .await
     }
@@ -745,10 +970,32 @@ impl AutomationService {
         agent_id: &str,
         schedule_id: &str,
     ) -> Result<(), ScheduleError> {
+        self.delete_with_source(agent_id, schedule_id, None).await
+    }
+
+    pub(crate) async fn delete_from_run(
+        &self,
+        agent_id: &str,
+        schedule_id: &str,
+        authority: AutomationRunAuthority,
+    ) -> Result<(), ScheduleError> {
+        self.delete_with_source(agent_id, schedule_id, Some(authority))
+            .await
+    }
+
+    async fn delete_with_source(
+        &self,
+        agent_id: &str,
+        schedule_id: &str,
+        authority: Option<AutomationRunAuthority>,
+    ) -> Result<(), ScheduleError> {
         let (agent_id, schedule_id) = (agent_id.to_string(), schedule_id.to_string());
         self.locked(move |service| async move {
             let (removed, persist) = {
                 let mut state = service.state.write().await;
+                if let Some(authority) = &authority {
+                    authority.validate(&state, &agent_id)?;
+                }
                 if !state
                     .schedules
                     .get(&schedule_id)
@@ -1299,6 +1546,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fp01_clock_rollback_edit_preserves_evidence_and_fresh_restore() {
+        fp01_check_completed_edit(false).await;
+    }
+
+    #[tokio::test]
+    async fn fp01_clock_rollback_pause_preserves_evidence_and_fresh_restore() {
+        fp01_check_completed_edit(true).await;
+    }
+
+    async fn fp01_check_completed_edit(pause: bool) {
+        use crate::schedules::{ScheduleLastFired, ScheduleSafeOutcome};
+
+        let (service, state, agent) = service();
+        let (record, _) = service.create(every(&agent, 60), NOW).await.unwrap();
+        let completed = {
+            let mut state = state.write().await;
+            let record = state.schedules.get_mut(&record.id).unwrap();
+            record.last_fired = Some(ScheduleLastFired {
+                fired_at_ms: NOW + MINUTE,
+                run_idempotency_key: format!("schedule:{}:{}", record.id, NOW + MINUTE),
+                manual: false,
+            });
+            record.last_safe_outcome = Some(ScheduleSafeOutcome {
+                status: ScheduleOutcomeStatus::Silent,
+                occurred_at_ms: NOW + MINUTE,
+                error_code: None,
+            });
+            record.counters.record(&ScheduleOutcomeStatus::Silent);
+            record.updated_at_ms = NOW + 2 * MINUTE;
+            record.clone()
+        };
+        DaemonState::new()
+            .restore_control_plane_snapshot(state.read().await.control_plane_snapshot())
+            .expect("the completed fixture is valid before the clock correction");
+
+        let earlier_now = NOW + MINUTE / 2;
+        let updated = if pause {
+            let (paused, changed) = service
+                .pause(&agent, &record.id, earlier_now)
+                .await
+                .unwrap();
+            assert!(changed);
+            assert!(!paused.enabled);
+            paused
+        } else {
+            service
+                .update(
+                    &agent,
+                    &record.id,
+                    AutomationPatch {
+                        prompt: Some("Updated check-in".into()),
+                        ..AutomationPatch::default()
+                    },
+                    earlier_now,
+                )
+                .await
+                .unwrap()
+        };
+        assert_eq!(updated.last_fired, completed.last_fired);
+        assert_eq!(updated.last_safe_outcome, completed.last_safe_outcome);
+        assert_eq!(updated.counters, completed.counters);
+        assert_eq!(updated.next_due_at_ms, completed.next_due_at_ms);
+        let bytes = serde_json::to_vec(&state.read().await.control_plane_snapshot()).unwrap();
+        let mut restored = DaemonState::new();
+        restored
+            .restore_control_plane_snapshot(serde_json::from_slice(&bytes).unwrap())
+            .expect("clock rollback followed by an owner edit must retain a restorable snapshot");
+        assert_eq!(restored.schedules[&record.id], updated);
+        assert_eq!(updated.updated_at_ms, completed.updated_at_ms);
+    }
+
+    #[tokio::test]
     async fn pause_is_idempotent_and_delete_announces() {
         let (service, state, agent) = service();
         let (record, _) = service.create(every(&agent, 60), NOW).await.unwrap();
@@ -1483,5 +1802,168 @@ mod tests {
             Err(ScheduleError::Rejected(ACTIVE_HOURS_NOT_FOR_ONCE.into()))
         );
         assert_eq!(state.read().await.schedules[&record.id], record);
+    }
+
+    struct Fp04SnapshotFile(std::path::PathBuf);
+
+    impl Drop for Fp04SnapshotFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    async fn fp04_reload_automation_service(
+        store: &crate::control_plane_store::ControlPlaneStoreConfig,
+    ) -> (AutomationService, SharedDaemonState) {
+        let snapshot = crate::control_plane_store::load_control_plane_snapshot(store)
+            .await
+            .unwrap()
+            .expect("the lifecycle operation must save its JSON snapshot");
+        let mut daemon = DaemonState::new();
+        daemon.set_control_plane_store(Some(store.clone()));
+        daemon
+            .restore_control_plane_snapshot(snapshot)
+            .expect("saved lifecycle changes must pass strict fresh restore");
+        let state = Arc::new(RwLock::new(daemon));
+        (
+            AutomationService::new(Arc::clone(&state), Arc::new(Mutex::new(()))),
+            state,
+        )
+    }
+
+    #[tokio::test]
+    async fn fp04_agent_update_resume_and_delete_survive_json_reloads() {
+        use crate::control_plane_store::ControlPlaneStoreConfig;
+
+        let file = Fp04SnapshotFile(std::env::temp_dir().join(format!(
+            "anima-fp04-lifecycle-{}.json",
+            uuid::Uuid::new_v4()
+        )));
+        let store = ControlPlaneStoreConfig::Json(file.0.clone());
+        let (service, state, owner) = service();
+        state
+            .write()
+            .await
+            .set_control_plane_store(Some(store.clone()));
+        let foreign = state
+            .write()
+            .await
+            .create_agent(companion_config("other companion"))
+            .unwrap()
+            .state
+            .id;
+        let (original, _) = service.create(every(&owner, 60), NOW).await.unwrap();
+        let (unrelated, _) = service.create(every(&owner, 30), NOW).await.unwrap();
+        let (foreign_record, _) = service.create(every(&foreign, 45), NOW).await.unwrap();
+
+        let updated = service
+            .update_from_agent(
+                &owner,
+                &original.id,
+                AutomationPatch {
+                    name: Some("Reviewed check-in".into()),
+                    prompt: Some("Review the current task list".into()),
+                    trigger: Some(ScheduleTrigger::Interval {
+                        interval_ms: 15 * MINUTE,
+                    }),
+                    enabled: Some(false),
+                    ..AutomationPatch::default()
+                },
+                NOW + MINUTE,
+            )
+            .await
+            .unwrap();
+        assert!(!updated.enabled);
+        assert_eq!(updated.name, "Reviewed check-in");
+        assert_eq!(updated.prompt, "Review the current task list");
+        assert_eq!(updated.next_due_at_ms, NOW + 16 * MINUTE);
+        let (service, state) = fp04_reload_automation_service(&store).await;
+        assert_eq!(state.read().await.schedules[&original.id], updated);
+
+        let before_refusal = std::fs::read(&file.0).unwrap();
+        assert_eq!(
+            service
+                .update_from_agent(
+                    &foreign,
+                    &original.id,
+                    AutomationPatch {
+                        enabled: Some(true),
+                        ..AutomationPatch::default()
+                    },
+                    NOW + 2 * MINUTE,
+                )
+                .await,
+            Err(ScheduleError::NotFound)
+        );
+        assert_eq!(
+            service.delete(&foreign, &original.id).await,
+            Err(ScheduleError::NotFound)
+        );
+        assert_eq!(std::fs::read(&file.0).unwrap(), before_refusal);
+        assert_eq!(state.read().await.schedules[&original.id], updated);
+
+        let resumed = service
+            .update_from_agent(
+                &owner,
+                &original.id,
+                AutomationPatch {
+                    enabled: Some(true),
+                    ..AutomationPatch::default()
+                },
+                NOW + 2 * MINUTE,
+            )
+            .await
+            .unwrap();
+        assert!(resumed.enabled);
+        assert_eq!(resumed.next_due_at_ms, NOW + 17 * MINUTE);
+        assert_eq!(resumed.prompt, updated.prompt);
+        let (service, state) = fp04_reload_automation_service(&store).await;
+        assert_eq!(state.read().await.schedules[&original.id], resumed);
+        service.delete(&owner, &original.id).await.unwrap();
+
+        let (_, state) = fp04_reload_automation_service(&store).await;
+        let state = state.read().await;
+        assert!(!state.schedules.contains_key(&original.id));
+        assert_eq!(state.schedules.len(), 2);
+        assert_eq!(state.schedules[&unrelated.id], unrelated);
+        assert_eq!(state.schedules[&foreign_record.id], foreign_record);
+    }
+
+    #[tokio::test]
+    async fn fp04_agent_cannot_resume_an_owner_fast_schedule_after_json_reload() {
+        use crate::control_plane_store::ControlPlaneStoreConfig;
+
+        let file = Fp04SnapshotFile(
+            std::env::temp_dir().join(format!("anima-fp04-cadence-{}.json", uuid::Uuid::new_v4())),
+        );
+        let store = ControlPlaneStoreConfig::Json(file.0.clone());
+        let (service, state, owner) = service();
+        state
+            .write()
+            .await
+            .set_control_plane_store(Some(store.clone()));
+        let mut input = every(&owner, 1);
+        input.enabled = false;
+        let (original, _) = service.create(input, NOW).await.unwrap();
+        let before = std::fs::read(&file.0).unwrap();
+        let (service, state) = fp04_reload_automation_service(&store).await;
+        assert_eq!(
+            service
+                .update_from_agent(
+                    &owner,
+                    &original.id,
+                    AutomationPatch {
+                        enabled: Some(true),
+                        ..AutomationPatch::default()
+                    },
+                    NOW + MINUTE,
+                )
+                .await,
+            Err(ScheduleError::Invalid(AGENT_AUTOMATION_TOO_FREQUENT))
+        );
+        assert_eq!(std::fs::read(&file.0).unwrap(), before);
+        assert_eq!(state.read().await.schedules[&original.id], original);
+        let (_, state) = fp04_reload_automation_service(&store).await;
+        assert_eq!(state.read().await.schedules[&original.id], original);
     }
 }

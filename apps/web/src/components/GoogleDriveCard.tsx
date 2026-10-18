@@ -11,14 +11,32 @@ const STATUS = {
   disconnected: 'Disconnected locally',
 };
 
-export function GoogleDriveCard({ agentId }: { agentId: string }) {
-  const integration = useDriveIntegrations(agentId);
+export function GoogleDriveCard({
+  agentId,
+  online = true,
+  epoch = 0,
+  disabled: parentDisabled = false,
+}: {
+  agentId: string;
+  online?: boolean;
+  epoch?: number;
+  disabled?: boolean;
+}) {
+  const integration = useDriveIntegrations(
+    agentId,
+    online,
+    epoch,
+    parentDisabled,
+  );
   const [selection, setSelection] = useState('');
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   useLayoutEffect(() => {
     setSelection('');
     setConfirmDisconnect(false);
   }, [agentId]);
+  useLayoutEffect(() => {
+    setConfirmDisconnect(false);
+  }, [online, epoch]);
   const connector = integration.status?.connector ?? null;
   useLayoutEffect(() => {
     setConfirmDisconnect(false);
@@ -27,7 +45,11 @@ export function GoogleDriveCard({ agentId }: { agentId: string }) {
   const fixedSelection =
     connector !== null && connector.status !== 'disconnected';
   const disabled =
-    integration.busy || integration.loading || !integration.available;
+    parentDisabled ||
+    !online ||
+    integration.busy ||
+    integration.loading ||
+    !integration.available;
   const configured = integration.status?.configured === true;
   return (
     <section
@@ -223,7 +245,7 @@ export function GoogleDriveCard({ agentId }: { agentId: string }) {
         <button
           type="button"
           className={button}
-          disabled={integration.busy || integration.loading}
+          disabled={!online || integration.busy || integration.loading}
           onClick={() => void integration.refresh()}
         >
           {integration.loading ? 'Loading Drive…' : 'Refresh Drive status'}

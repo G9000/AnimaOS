@@ -2,12 +2,10 @@
 //! tool data. They never upload or manufacture attachment/history authority.
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use anima_core::{
-    document_content::{
-        fit_document_snapshots, validate_document_extraction, DocumentFormat, DocumentSnapshot,
-        ExtractedDocumentText, MAX_DOCUMENT_RENDERED_BYTES,
-    },
-    AgentState, CancelSignal, Content, DataValue, Message, TaskResult, ToolCall,
+use anima_core::{AgentState, CancelSignal, Content, DataValue, Message, TaskResult, ToolCall};
+use anima_service_adapters::document_content::{
+    fit_document_snapshots, validate_document_extraction, DocumentFormat, DocumentSnapshot,
+    ExtractedDocumentText, MAX_DOCUMENT_RENDERED_BYTES,
 };
 use futures::future::BoxFuture;
 use serde::Serialize;

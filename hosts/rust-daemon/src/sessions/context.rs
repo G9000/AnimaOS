@@ -4,9 +4,10 @@
 use std::borrow::Borrow;
 
 use anima_core::{
-    AgentConfig, AgentRuntime, DataValue, Message, MessageRole, Provider, ProviderResult,
-    REVISED_METADATA_KEY,
+    select_context, AgentConfig, AgentRuntime, ContextSummary, DataValue, Message, MessageRole,
+    Provider, ProviderResult, REVISED_METADATA_KEY,
 };
+use anima_service_adapters::ServiceTokenEstimator as TokenEstimator;
 use async_trait::async_trait;
 
 use super::{hidden_message_ids, SessionContextTrimmed, SessionPrunedThrough, SessionRecord};
@@ -81,6 +82,44 @@ impl ContextBudget {
         self.budget_tokens
             .saturating_sub(self.reply_reserve_tokens)
             .saturating_sub(current_message_tokens)
+    }
+}
+
+/// Conversation history and its saved summary only. It excludes system and
+/// provider context, tools, files, draft input, and the separately reserved reply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ContextUsage {
+    pub(crate) estimated_tokens: u64,
+    pub(crate) budget_tokens: u64,
+    pub(crate) reply_reserve_tokens: u64,
+}
+
+pub(crate) fn conversation_context_usage(
+    config: &AgentConfig,
+    record: &SessionRecord,
+    model_visible_history: &[Message],
+) -> ContextUsage {
+    let budget = ContextBudget::for_config(config);
+    let estimator = TokenEstimator::new(
+        record
+            .context_calibration_permille
+            .map_or(1.0, |value| f64::from(value) / 1000.0),
+    );
+    let summary = record.summary.as_ref().map(|summary| ContextSummary {
+        text: summary.text.clone(),
+        through_message_id: summary.through_message_id.clone(),
+    });
+    let budget_tokens = budget.history_tokens(0);
+    let selection = select_context(
+        model_visible_history,
+        summary.as_ref(),
+        budget_tokens,
+        &estimator,
+    );
+    ContextUsage {
+        estimated_tokens: selection.estimated_tokens,
+        budget_tokens,
+        reply_reserve_tokens: budget.reply_reserve_tokens,
     }
 }
 

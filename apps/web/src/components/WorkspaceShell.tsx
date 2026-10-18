@@ -1,10 +1,21 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { Session } from '@animaOS-SWARM/sdk';
+import type {
+  Session,
+  SessionMessageSearchHit,
+  SessionMessageSearchPage,
+} from '@animaOS-SWARM/sdk';
 import type { DaemonConnection } from '../hooks/useDaemonBootstrap';
 import type { DaemonWorkspaceState } from '../lib/daemon-api';
 import type { HashPage, HashRoute, Navigate } from '../lib/hash-route';
 import type { AgentDetail } from '../lib/types';
 import { AgentPresence } from './AgentPresence';
+import { AgentSwitcher } from './AgentSwitcher';
+import { HaloBackdrop } from './halo/HaloBackdrop';
+import {
+  presenceMode,
+  usePresenceSignals,
+  type PresenceMode,
+} from '../lib/presence';
 import { WorkspaceHub } from './WorkspaceHub';
 import { WorkspaceFiles } from './WorkspaceFiles';
 import { WorkspaceCapabilities } from './WorkspaceCapabilities';
@@ -20,14 +31,13 @@ import {
   ClockIcon,
   GearIcon,
   HeartIcon,
+  InboxIcon,
   LogIcon,
-  PlusIcon,
   PulseIcon,
   ShieldIcon,
   SparkIcon,
   XIcon,
 } from './icons';
-import { ghostBtnCls } from './ui-bits';
 
 /** Pages this release renders; the other hash pages open the conversation
  *  until their milestones build them. */
@@ -285,7 +295,7 @@ function SessionDrawer({
       className="session-drawer"
       role="dialog"
       aria-modal="true"
-      aria-label="Sessions"
+      aria-label="History"
     >
       <div
         ref={panel}
@@ -293,19 +303,27 @@ function SessionDrawer({
         className="session-drawer-panel studio-sidebar"
       >
         <div className="session-drawer-head">
-          <button type="button" className={ghostBtnCls} onClick={onNewChat}>
-            <PlusIcon size={14} />
-            New chat
+          <strong className="session-drawer-title">Other conversations</strong>
+          <button
+            type="button"
+            className="studio-tool-button"
+            onClick={onNewChat}
+          >
+            Main chat
           </button>
           <button
             type="button"
             className="studio-tool-button"
-            aria-label="Close sessions"
+            aria-label="Close history"
             onClick={onClose}
           >
             <XIcon size={14} />
           </button>
         </div>
+        <p className="session-drawer-note">
+          Your main chat is where you talk to anima. These are side threads it
+          started, group chats, and conversations from before it.
+        </p>
         {children}
       </div>
       <div className="session-drawer-backdrop" aria-hidden onClick={onClose} />
@@ -325,6 +343,29 @@ function routeSession(
         (!route.agentId || session.agentId === route.agentId),
     ) ?? null
   );
+}
+
+/** What the agent is doing, in the header under its name. */
+export function agentStatusText({
+  online,
+  presence,
+  workingHelpers,
+}: {
+  online: boolean;
+  presence: PresenceMode;
+  workingHelpers: number;
+}): string {
+  if (!online) return 'Offline';
+  if (presence === 'listening') return 'Listening';
+  if (presence === 'speaking') return 'Speaking';
+  if (presence === 'attention') return 'Waiting for your OK';
+  const helpers =
+    workingHelpers > 0
+      ? `${workingHelpers} ${workingHelpers === 1 ? 'helper' : 'helpers'} working`
+      : null;
+  if (presence === 'thinking')
+    return helpers ? `Working · ${helpers}` : 'Working on your request';
+  return helpers ?? 'Ready';
 }
 
 export function WorkspaceShell({
@@ -355,6 +396,11 @@ export function WorkspaceShell({
   onChangeWorkspaceAvatar = ignoreWorkspaceAvatarChange,
   onPickPrompt,
   onNewChat,
+  onSelectAgent,
+  searchMessages,
+  onOpenMessage,
+  inbox = null,
+  onOpenReport,
 }: {
   mainAgent: AgentDetail;
   agents: readonly AgentDetail[];
@@ -397,8 +443,28 @@ export function WorkspaceShell({
   onChangeWorkspaceAvatar?: (file: File) => Promise<void>;
   onPickPrompt?: (prompt: string) => void;
   onNewChat?: () => void;
+  searchMessages?: (
+    query: string,
+    signal: AbortSignal,
+  ) => Promise<SessionMessageSearchPage>;
+  onOpenMessage?: (hit: SessionMessageSearchHit) => void;
+  /** Switches the conversation to another companion. */
+  onSelectAgent?: (agentId: string) => void;
+  /** The "Needs you" inbox: how many things wait, and its panel. */
+  inbox?: {
+    count: number;
+    render: (close: () => void) => ReactNode;
+  } | null;
+  /** Opens the weekly report. */
+  onOpenReport?: () => void;
 }) {
   const page = availablePage(route);
+  const presenceSignals = usePresenceSignals();
+  const presence = presenceMode({
+    signals: presenceSignals,
+    running: connection === 'online' && mainAgent.status === 'Running',
+    waiting: pendingApprovals > 0,
+  });
   const [visitedConversation, setVisitedConversation] = useState<HashRoute>(
     route.kind === 'session' ? route : { kind: 'home' },
   );
@@ -421,12 +487,24 @@ export function WorkspaceShell({
     workspaceState?.configured === true &&
     workspaceState.workspace?.hasAvatar === true;
   const workingHelpers = agents.filter(
-    (agent) => agent.id !== mainAgent.id && agent.status === 'Running',
+    (agent) => agent.workspaceRole === 'helper' && agent.status === 'Running',
   ).length;
   const newChat = onNewChat ?? (() => navigate({ kind: 'home' }));
   const openConversation = () => navigate(lastConversation);
   const currentSession = routeSession(lastConversation, sessions);
-  const threadTitle = currentSession?.title || 'New chat';
+  // One main chat (OpenClaw-style): everything else is a side thread you
+  // visit and leave.
+  const sideThread =
+    lastConversation.kind === 'session' &&
+    currentSession !== null &&
+    currentSession.mainChat !== true
+      ? currentSession
+      : null;
+  const statusText = agentStatusText({
+    online: connection === 'online',
+    presence,
+    workingHelpers,
+  });
 
   useEffect(() => {
     if (route.kind === 'session' || route.kind === 'home')
@@ -453,8 +531,8 @@ export function WorkspaceShell({
   const commands: StudioCommand[] = [
     {
       id: 'new-chat',
-      title: 'New chat',
-      description: 'Start a fresh conversation',
+      title: 'Main chat',
+      description: 'Resume your ongoing conversation',
       group: 'Navigate',
       run: newChat,
     },
@@ -468,6 +546,17 @@ export function WorkspaceShell({
       group: 'Navigate',
       run: () => navigate({ kind: 'page', page: 'approvals' }),
     },
+    ...(onOpenReport
+      ? [
+          {
+            id: 'weekly-report',
+            title: 'Weekly report',
+            description: 'What it did this week, what it cost, what went wrong',
+            group: 'Navigate',
+            run: onOpenReport,
+          },
+        ]
+      : []),
     ...DESTINATIONS.map((item) => ({
       id: item.page,
       title: `Go to ${item.label}`,
@@ -514,79 +603,62 @@ export function WorkspaceShell({
     <>
       <div
         className="studio-shell companion-shell scenic-shell relative z-[1] flex min-h-0 flex-1 flex-col"
+        data-presence={page === null ? presence : 'calm'}
         inert={commandsOpen || drawerShown || undefined}
         aria-hidden={commandsOpen || drawerShown || undefined}
       >
         <div className="studio-frame relative flex min-h-0 flex-1">
           <main className="studio-main workspace-mobile-safe relative min-h-0 min-w-0 flex-1">
-            <div className="scenic-backdrop" aria-hidden />
+            <HaloBackdrop
+              mode={page === null ? presence : 'calm'}
+              words={presenceSignals.listening?.words}
+            />
             <div className="studio-topbar scenic-topbar">
               <div className="scenic-identity">
-                <h1 className="scenic-wordmark" title={mainAgent.name}>
-                  {mainAgent.name}
-                </h1>
-                <span className="scenic-divider" aria-hidden>
-                  /
-                </span>
-                {sidebar !== null ? (
-                  <button
-                    ref={sessionsButtonRef}
-                    type="button"
-                    className="scenic-thread"
-                    aria-label="Open sessions"
-                    aria-expanded={drawerOpen}
-                    aria-haspopup="dialog"
-                    onClick={() => setDrawerOpen(true)}
-                  >
-                    {currentSession &&
-                      currentSession.kind !== 'chat' &&
-                      (currentSession.kind === 'telegram' ||
-                        currentSession.kind === 'discord') && (
+                <AgentSwitcher
+                  agent={mainAgent}
+                  agents={agents}
+                  online={connection === 'online'}
+                  status={statusText}
+                  busy={presence !== 'calm'}
+                  onSelect={onSelectAgent}
+                  onOpenSettings={() =>
+                    navigate({ kind: 'page', page: 'profile' })
+                  }
+                />
+                {sideThread && (
+                  <>
+                    <button
+                      type="button"
+                      className="scenic-thread is-back"
+                      onClick={newChat}
+                    >
+                      <ChevronIcon size={13} className="rotate-90" />
+                      <span className="scenic-thread-title">Main chat</span>
+                    </button>
+                    <span
+                      className="scenic-side-thread"
+                      title={sideThread.title}
+                    >
+                      {(sideThread.kind === 'telegram' ||
+                        sideThread.kind === 'discord') && (
                         <span className="session-kind-badge">
-                          {currentSession.kind === 'telegram'
+                          {sideThread.kind === 'telegram'
                             ? 'Telegram'
                             : 'Discord'}
                         </span>
                       )}
-                    <span className="scenic-thread-title">{threadTitle}</span>
-                    <ChevronIcon size={13} />
-                  </button>
-                ) : (
-                  <span className="scenic-thread">
-                    <span className="scenic-thread-title">{threadTitle}</span>
-                  </span>
+                      <span className="scenic-thread-title">
+                        {sideThread.title}
+                      </span>
+                    </span>
+                  </>
                 )}
               </div>
-              <div className="companion-status" role="status">
-                <span
-                  className={`studio-connection ${connection === 'online' ? 'is-online' : 'is-offline'}`}
-                >
-                  <i aria-hidden />
-                  {connection === 'online' ? 'Connected' : 'Offline'}
-                </span>
-                <p>
-                  {connection === 'offline'
-                    ? 'Cannot reach your companion'
-                    : mainAgent.status === 'Running'
-                      ? 'Working on your request'
-                      : 'Ready when you are'}
-                </p>
-                <span
-                  className={
-                    connection === 'online' && workingHelpers === 0
-                      ? 'scenic-quiet'
-                      : undefined
-                  }
-                >
-                  {connection === 'offline'
-                    ? 'Check the server connection.'
-                    : workingHelpers > 0
-                      ? `${workingHelpers} ${workingHelpers === 1 ? 'helper is' : 'helpers are'} working`
-                      : 'Your conversations stay with you.'}
-                </span>
-              </div>
               <div className="studio-topbar-actions">
-                {pendingApprovals > 0 && (
+                {inbox ? (
+                  <InboxButton inbox={inbox} />
+                ) : pendingApprovals > 0 && (
                   <button
                     type="button"
                     className="studio-tool-button scenic-waiting"
@@ -599,14 +671,22 @@ export function WorkspaceShell({
                     {pendingApprovals} waiting
                   </button>
                 )}
-                <button
-                  type="button"
-                  className="studio-tool-button"
-                  onClick={newChat}
-                >
-                  <PlusIcon size={14} />
-                  <span className="sr-only">New chat</span>
-                </button>
+                {sidebar !== null && (
+                  <button
+                    ref={sessionsButtonRef}
+                    type="button"
+                    className="studio-tool-button"
+                    aria-label="History"
+                    aria-expanded={drawerOpen}
+                    aria-haspopup="dialog"
+                    onClick={() => setDrawerOpen(true)}
+                  >
+                    <ClockIcon size={14} />
+                    <span className="scenic-hide-narrow" aria-hidden>
+                      History
+                    </span>
+                  </button>
+                )}
                 <button
                   type="button"
                   className="studio-command-trigger"
@@ -743,8 +823,77 @@ export function WorkspaceShell({
         </SessionDrawer>
       )}
       {commandsOpen && (
-        <CommandMenu commands={commands} close={() => setCommandsOpen(false)} />
+        <CommandMenu
+          commands={commands}
+          close={() => setCommandsOpen(false)}
+          searchMessages={searchMessages}
+          onOpenMessage={onOpenMessage}
+        />
       )}
     </>
   );
 }
+
+/** The inbox's header button: amber with a count when something waits on
+ *  the owner, a quiet icon otherwise. Its panel opens under it. */
+function InboxButton({
+  inbox,
+}: {
+  inbox: { count: number; render: (close: () => void) => ReactNode };
+}) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setOpen(false);
+      button.current?.focus();
+    };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [open]);
+  const close = () => {
+    setOpen(false);
+    button.current?.focus();
+  };
+  const waiting = inbox.count > 0;
+  return (
+    <div ref={root} className="needs-you-anchor">
+      <button
+        ref={button}
+        type="button"
+        className={`studio-tool-button needs-you-button${waiting ? ' has-items' : ''}`}
+        aria-label={
+          waiting ? `Inbox, ${inbox.count} need you` : 'Inbox, nothing waiting'
+        }
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {waiting ? (
+          <>
+            <i aria-hidden />
+            {inbox.count} need you
+          </>
+        ) : (
+          <InboxIcon size={15} />
+        )}
+      </button>
+      {open && (
+        <div className="needs-you-popover" role="dialog" aria-label="Inbox">
+          {inbox.render(close)}
+        </div>
+      )}
+    </div>
+  );
+}
+

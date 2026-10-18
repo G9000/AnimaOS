@@ -1,4 +1,6 @@
+import { useEffect } from 'react';
 import { useBrowserDictation } from '../../hooks/useBrowserDictation';
+import { setPresenceListening } from '../../lib/presence';
 import { revealInvisible } from '../../lib/skills';
 import { MicIcon } from '../icons';
 
@@ -19,8 +21,19 @@ export function DictationControl({
     conversationKey,
     disabled,
   });
-  if (!dictation.supported) return null;
   const active = dictation.state !== 'idle';
+  // The composer's microphone drives the orb: it shows the words as heard.
+  useEffect(() => {
+    if (!compact) return;
+    setPresenceListening(active ? dictation.interim : null);
+  }, [compact, active, dictation.interim]);
+  useEffect(
+    () => () => {
+      if (compact) setPresenceListening(null);
+    },
+    [compact],
+  );
+  if (!dictation.supported) return null;
   const label =
     dictation.state === 'starting'
       ? 'Cancel dictation'

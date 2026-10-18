@@ -13,8 +13,8 @@ use crate::browser::{
     BrowserDocumentView, BrowserScopeState, SaveBrowserScope,
 };
 use crate::runs::ActionStatus;
-use anima_core::browser::*;
 use anima_core::TaskStatus;
+use anima_service_adapters::browser::*;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -1355,7 +1355,9 @@ impl ControlledFixture {
     }
 }
 
-fn evidence(result: TaskResult<Content>) -> (Value, anima_core::browser::BrowserObservation) {
+fn evidence(
+    result: TaskResult<Content>,
+) -> (Value, anima_service_adapters::browser::BrowserObservation) {
     assert_eq!(result.status, TaskStatus::Success, "{:?}", result.error);
     let text = result.data.unwrap().text;
     let (header, body) = text.split_once("\nUntrusted page evidence: ").unwrap();

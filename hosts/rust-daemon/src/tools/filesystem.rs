@@ -189,6 +189,17 @@ pub(super) fn execute_write_file(
             _ => return TaskResult::error("write_file content must be a string", 0),
         };
 
+        match context.checkpoint_mutate(&tool_call, &file_path, |_| Ok(content.as_bytes().to_vec()))
+        {
+            Ok(Some(receipt)) => {
+                return super::checkpoints::mutation_success(
+                    format!("Wrote {} chars to {}", content.chars().count(), file_path),
+                    Some(receipt),
+                )
+            }
+            Err(error) => return TaskResult::error(error, 0),
+            Ok(None) => {}
+        }
         match write_workspace_file(ctx_workspace_root(&context), &file_path, &content) {
             Ok(text) => TaskResult::success(
                 Content {
@@ -225,6 +236,18 @@ pub(super) fn execute_edit_file(
             _ => return TaskResult::error("edit_file new_string must be a string", 0),
         };
 
+        match context.checkpoint_mutate(&tool_call, &file_path, |bytes| {
+            edit::prepare_edit_bytes(bytes, &old_string, &new_string, &file_path)
+        }) {
+            Ok(Some(receipt)) => {
+                return super::checkpoints::mutation_success(
+                    format!("Edited {}", file_path),
+                    Some(receipt),
+                )
+            }
+            Err(error) => return TaskResult::error(error, 0),
+            Ok(None) => {}
+        }
         match edit_workspace_file(
             ctx_workspace_root(&context),
             &file_path,
@@ -299,6 +322,18 @@ pub(super) fn execute_multi_edit(
             _ => return TaskResult::error("multi_edit edits must be a non-empty array", 0),
         };
 
+        match context.checkpoint_mutate(&tool_call, &file_path, |bytes| {
+            edit::prepare_multi_edit_bytes(bytes, &edits, &file_path)
+        }) {
+            Ok(Some(receipt)) => {
+                return super::checkpoints::mutation_success(
+                    format!("Applied {} edit(s) to {}", edits.len(), file_path),
+                    Some(receipt),
+                )
+            }
+            Err(error) => return TaskResult::error(error, 0),
+            Ok(None) => {}
+        }
         match multi_edit_workspace_file(ctx_workspace_root(&context), &file_path, &edits) {
             Ok(text) => TaskResult::success(
                 Content {

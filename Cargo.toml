@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "packages/core-rust/crates/anima-core",
+    "packages/core-rust/crates/anima-service-adapters",
     "packages/core-rust/crates/anima-document-content",
     "packages/core-rust/crates/anima-harness",
     "packages/core-rust/crates/anima-model-adapters",

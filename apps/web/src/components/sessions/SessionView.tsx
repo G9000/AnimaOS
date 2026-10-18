@@ -14,7 +14,8 @@ import {
 } from '@animaOS-SWARM/sdk';
 
 import { useSaveToMemory } from '../../hooks/useSaveToMemory';
-import { useSessionUsage } from '../../hooks/useSessionUsage';
+import { setPresenceSpeaking } from '../../lib/presence';
+import { useSessionDetails } from '../../hooks/useSessionUsage';
 import { describeTrigger } from '../../lib/automations';
 import type { LiveRun } from '../../lib/session-events';
 import { SESSION_KIND_LABELS } from '../../lib/session-groups';
@@ -37,6 +38,7 @@ import { BrowserTaskControls } from './BrowserTaskControls';
 import type { NativeVoiceScope } from '../voice/NativeTranscription';
 import { NativeSpeech } from '../voice/NativeSpeech';
 import { SessionSkillDrafts } from '../learning/SessionSkillDrafts';
+import { ContextNote, SessionContinuity } from './SessionContinuity';
 
 export interface SessionComposerState {
   draft: string;
@@ -117,6 +119,16 @@ export interface SessionViewProps {
     enabled: boolean;
     onReview?: () => void;
   };
+  /** Root-owned bounded history window for a saved message search result. */
+  historyAnchor?: {
+    messageId: string;
+    loading: boolean;
+    error: string | null;
+    onReturnToLatest(): void;
+  };
+  jumpRequestKey?: number;
+  /** Activity outside a historical window that refreshes its context estimate. */
+  contextRefreshKey?: number | string;
 }
 
 export type SessionFooter =
@@ -304,6 +316,9 @@ export function SessionView({
   notice = null,
   browserTask,
   skillDrafts,
+  historyAnchor,
+  jumpRequestKey,
+  contextRefreshKey,
 }: SessionViewProps) {
   // The session record names its agent, so a helper's session saves to that
   // helper even when the agents list does not hold it (then `agent` is the
@@ -322,6 +337,11 @@ export function SessionView({
       composer.offline ||
       composer.voiceDisabled === true,
   );
+  const speaking = readAloud.speakingMessageId !== null;
+  useEffect(() => {
+    setPresenceSpeaking(speaking);
+  }, [speaking]);
+  useEffect(() => () => setPresenceSpeaking(false), []);
   const saveTarget = useMemo(
     () =>
       saveAgentId && sessionId
@@ -334,7 +354,11 @@ export function SessionView({
   const finishedRuns = runs.filter((item) =>
     isTerminalRunStatus(item.run.status),
   ).length;
-  const usage = useSessionUsage(saveTarget, finishedRuns);
+  const sessionDetails = useSessionDetails(
+    saveTarget,
+    `${agent.provider}:${agent.model}:${finishedRuns}:${messages.length}:${session?.summary?.createdAtMs ?? ''}:${session?.contextTrimmed?.atMs ?? ''}:${contextRefreshKey ?? ''}`,
+    !composer.offline && !missing,
+  );
   const transcriptActions = useMemo<TranscriptActions>(
     () => ({ ...actions, onSaveToMemory: save, savedToMemory: savedState }),
     [actions, save, savedState],
@@ -363,7 +387,7 @@ export function SessionView({
       >
         <p className="text-sm text-ink-2">This session was deleted.</p>
         <button type="button" className={ghostBtnCls} onClick={onNewChat}>
-          Start a new chat
+          Return to main chat
         </button>
       </section>
     );
@@ -434,7 +458,9 @@ export function SessionView({
       className="flex h-full min-h-0 flex-col"
       aria-label={session?.title ?? 'New chat'}
     >
-      {session ? (
+      {/* The main chat's header is the top bar; rename, export and usage
+       *  stay one / command away. */}
+      {session && session.mainChat !== true ? (
         <SessionHeader
           session={session}
           onRename={onRename}
@@ -442,10 +468,33 @@ export function SessionView({
           onExport={onExport}
           automation={automation}
           onEditAutomation={onEditAutomation}
-          usageLine={sessionUsageLine(usage)}
+          usageLine={sessionUsageLine(sessionDetails.usage)}
         />
       ) : null}
+      {session && (
+        <SessionContinuity
+          key={`${session.agentId}\u0000${session.id}`}
+          session={session}
+        />
+      )}
       {notice}
+      {historyAnchor && (
+        <div className="session-history-anchor">
+          <p role={historyAnchor.error ? 'alert' : 'status'}>
+            {historyAnchor.loading
+              ? 'Loading saved message…'
+              : (historyAnchor.error ??
+                'Viewing a saved message in its conversation.')}
+          </p>
+          <button
+            type="button"
+            className={ghostBtnCls}
+            onClick={historyAnchor.onReturnToLatest}
+          >
+            Return to latest messages
+          </button>
+        </div>
+      )}
       {/* Mounted empty and filled when an error arrives, so it is
        *  announced (S3b-E). */}
       <div role="status">
@@ -471,6 +520,12 @@ export function SessionView({
         }
         readAloud={readAloud}
         knownAttachments={knownAttachments}
+        highlightMessageId={historyAnchor?.messageId}
+        jumpRequestKey={jumpRequestKey}
+        jumpReady={
+          !historyAnchor || (!historyAnchor.loading && !historyAnchor.error)
+        }
+        onJumpToLatest={historyAnchor?.onReturnToLatest}
       />
       {session?.kind === 'chat' && skillDrafts && (
         <SessionSkillDrafts
@@ -488,6 +543,18 @@ export function SessionView({
       )}
       {footer.kind !== 'composer' && (
         <div className="session-tools">{sessionTools}</div>
+      )}
+      {footer.kind === 'composer' && session && (
+        <ContextNote
+          agentName={agent.name}
+          usage={
+            composer.offline
+              ? undefined
+              : sessionDetails.settled
+                ? sessionDetails.contextUsage
+                : session.contextUsage
+          }
+        />
       )}
       {footer.kind === 'composer' ? (
         <Composer

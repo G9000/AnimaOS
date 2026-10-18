@@ -1,10 +1,8 @@
 use super::*;
-use anima_core::{
-    document_content::{
-        DocumentBlock, DocumentExtractionStatus as Status, DocumentLocator, DocumentOmission,
-        XlsxCoverage, XlsxSheetCoverage, XlsxSheetVisibility,
-    },
-    AgentStatus, MessageRole, TaskStatus,
+use anima_core::{AgentStatus, MessageRole, TaskStatus};
+use anima_service_adapters::document_content::{
+    DocumentBlock, DocumentExtractionStatus as Status, DocumentLocator, DocumentOmission,
+    XlsxCoverage, XlsxSheetCoverage, XlsxSheetVisibility,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};

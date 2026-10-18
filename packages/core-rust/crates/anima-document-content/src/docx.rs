@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::io::Read;
 
-use anima_core::document_content::{
+use anima_service_adapters::document_content::{
     DocumentBlock, DocumentExtractionStatus as Status, DocumentFormat, DocumentLocator,
     DocumentOmission as Omission, ExtractedDocumentText, DOCUMENT_CONTENT_VERSION,
     MAX_DOCUMENT_PARAGRAPHS, MAX_DOCUMENT_RENDERED_BYTES,

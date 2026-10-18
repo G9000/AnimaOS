@@ -12,6 +12,7 @@ import {
   type Session,
   type UploadedAttachment,
   type BrowserSelection,
+  type SessionMessageSearchHit,
 } from '@animaOS-SWARM/sdk';
 
 import { AlertIcon } from './components/icons';
@@ -31,9 +32,11 @@ import { useConversationLifecycle } from './hooks/useConversationLifecycle';
 import { useDaemonCompatibility } from './hooks/useDaemonCompatibility';
 import { useAgentIntegrations } from './hooks/useAgentIntegrations';
 import { useDiscordIntegrations } from './hooks/useDiscordIntegrations';
+import { useConnectorLifetime } from './hooks/useConnectorLifetime';
 import { useCompanionSessions } from './hooks/useCompanionSessions';
 import { useDaemonBootstrap } from './hooks/useDaemonBootstrap';
 import { useLiveSession } from './hooks/useLiveSession';
+import { useMainChat } from './hooks/useMainChat';
 import { useSessionCommands } from './hooks/useSessionCommands';
 import { useSessionPending } from './hooks/useSessionPending';
 import { useSessionSends } from './hooks/useSessionSends';
@@ -61,8 +64,16 @@ import {
   type AgentUpdateInput,
   type DaemonSnapshot,
 } from './lib/daemon-api';
-import { selectMainAgent } from './lib/agent-access';
-import { pendingApprovalCount } from './lib/approvals';
+import {
+  readActiveAgent,
+  saveActiveAgent,
+  selectActiveAgent,
+} from './lib/active-agent';
+import { decideApproval, pendingApprovalCount } from './lib/approvals';
+import { pendingApprovals } from './lib/session-events';
+import { useNeedsYou } from './hooks/useNeedsYou';
+import { NeedsYouPanel } from './components/inbox/NeedsYouPanel';
+import { WeeklyReport } from './components/report/WeeklyReport';
 import { checkinScheduleId } from './lib/automations';
 import { useHashRoute, type HashRoute } from './lib/hash-route';
 import { exportFileName, sessionKey } from './lib/session-groups';
@@ -253,8 +264,14 @@ export function ViewHarness() {
     () => agentSnapshots.map((snapshot) => toAgentDetail(snapshot)),
     [agentSnapshots],
   );
-  const mainAgent = selectMainAgent(agents);
-  // Helpers are implementation details, never a second top-level persona.
+  // The owner can talk with several companions and switch between them;
+  // helpers are implementation details, never a top-level persona.
+  const [preferredAgentId, setPreferredAgentId] = useState(readActiveAgent);
+  const mainAgent = selectActiveAgent(agents, preferredAgentId);
+  const selectAgent = useCallback((id: string) => {
+    saveActiveAgent(id);
+    setPreferredAgentId(id);
+  }, []);
   const agent = mainAgent;
   const agentId = agent?.id ?? null;
   const availableAgentIdsRef = useRef(new Set<string>());
@@ -284,6 +301,35 @@ export function ViewHarness() {
   listedSessionsRef.current = sessions.sessions;
   const routeSessionId =
     conversationRoute.kind === 'session' ? conversationRoute.sessionId : null;
+  const routeMessageId =
+    conversationRoute.kind === 'session'
+      ? (conversationRoute.messageId ?? null)
+      : null;
+  const [jumpRequestKey, setJumpRequestKey] = useState(0);
+  const searchMessages = useCallback(
+    (query: string, signal: AbortSignal) => {
+      if (!agentId || connection !== 'online')
+        return Promise.reject(new Error('Reconnect to search saved messages.'));
+      return daemon.searchSessionMessages(agentId, {
+        q: query,
+        limit: 20,
+        signal,
+      });
+    },
+    [agentId, connection],
+  );
+  const openMessage = (hit: SessionMessageSearchHit) => {
+    setJumpRequestKey((value) => value + 1);
+    navigate({
+      kind: 'session',
+      sessionId: hit.sessionId,
+      messageId: hit.messageId,
+    });
+  };
+  const returnToLatest = () => {
+    if (conversationRoute.kind === 'session')
+      navigate({ ...conversationRoute, messageId: undefined });
+  };
   // Another agent's session (a helper's) names its agent in the route.
   const routeAgentId =
     conversationRoute.kind === 'session'
@@ -364,6 +410,7 @@ export function ViewHarness() {
     routeSessionId,
     messagesRefresh,
     streamOpen ? SESSION_MESSAGES_LIVE_POLL_MS : SESSION_MESSAGES_POLL_MS,
+    { anchorMessageId: routeMessageId, jumpRequestKey },
   );
   const chatMessages = useMemo(
     () => history.messages.map(toChatMessage),
@@ -591,7 +638,63 @@ export function ViewHarness() {
   const [mcpBusy, setMcpBusy] = useState(false);
   const mcpBusyRef = useRef(false);
   const mcpPermissionsUnknownRef = useRef(false);
+  const connectorLifetime = useConnectorLifetime(
+    agentId,
+    connection === 'online',
+    live.state.epoch,
+  );
+  useLayoutEffect(() => {
+    mcpBusyRef.current = false;
+    setMcpBusy(false);
+  }, [connectorLifetime.token]);
   const [resetting, setResetting] = useState(false);
+  const mainChat = useMainChat({
+    agentId: resetting ? null : agentId,
+    online: connection === 'online' && loaded,
+  });
+  const waitingForMain =
+    conversationRoute.kind === 'home' && mainChat.session === null;
+  const upsertMainSession = sessions.upsert;
+  useEffect(() => {
+    const session = mainChat.session;
+    if (
+      !session ||
+      session.agentId !== agentId ||
+      resetting ||
+      lastConversationRef.current.kind !== 'home'
+    )
+      return;
+    const homeKey = chatKey(session.agentId, HOME_CONVERSATION);
+    const target = chatKey(session.agentId, sessionConversation(session.id));
+    // Preserve a saved home draft and an existing main-chat draft on adoption.
+    setChats((current) => {
+      const home = chatState(current, homeKey);
+      if (!home.draft && home.failedDrafts.length === 0) return current;
+      const existing = chatState(current, target);
+      return {
+        ...current,
+        [homeKey]: { ...home, draft: '', failedDrafts: [] },
+        [target]: {
+          ...existing,
+          draft: [existing.draft, home.draft].filter(Boolean).join('\n\n'),
+          failedDrafts: [...existing.failedDrafts, ...home.failedDrafts],
+        },
+      };
+    });
+    setKnownSession(session);
+    upsertMainSession(session);
+    const resolved: HashRoute = { kind: 'session', sessionId: session.id };
+    if (availablePage(routeRef.current) !== null)
+      lastConversationRef.current = resolved;
+    else navigate(resolved, { replace: true });
+  }, [
+    agentId,
+    mainChat.session,
+    resetting,
+    conversationRoute.kind,
+    navigate,
+    upsertMainSession,
+  ]);
   const [legacyMigrationError, setLegacyMigrationError] = useState<
     string | null
   >(null);
@@ -604,13 +707,32 @@ export function ViewHarness() {
   const currentAgentIdRef = useRef<string | null>(null);
   const previousSelectedMainIdRef = useRef<string | null>(null);
 
-  const integrations = useAgentIntegrations(agentId);
+  const integrations = useAgentIntegrations(
+    agentId,
+    connection === 'online',
+    live.state.epoch,
+  );
   const discordIntegrations = useDiscordIntegrations(
     agentId,
     (route.kind === 'page' && route.page === 'connectors') ||
       activeSession?.kind === 'discord',
+    connection === 'online',
+    live.state.epoch,
   );
   const telegramConnector = integrations.connectors[0] ?? null;
+  const [reportOpen, setReportOpen] = useState(false);
+  const approvalsWaiting = useMemo(
+    () => pendingApprovals(live.state.approvals),
+    [live.state.approvals],
+  );
+  const needsYou = useNeedsYou({
+    agentId,
+    online: connection === 'online',
+    approvals: approvalsWaiting,
+    telegram: integrations.connectors,
+    sessions: sessions.sessions,
+    refreshKey: `${live.state.skillsVersion}:${live.state.epoch}`,
+  });
   const activeConnector =
     activeSession?.kind === 'telegram'
       ? (integrations.connectors.find(
@@ -784,6 +906,7 @@ export function ViewHarness() {
       const adopted = adoptAgentSnapshot(operation, updatedAgent);
       if (adopted) {
         setSettingsSaveError(null);
+        setSessionRereads((value) => value + 1);
       }
       return adopted;
     } catch (caught) {
@@ -913,6 +1036,7 @@ export function ViewHarness() {
     chatKey: activeChatKey,
     agentId,
     session: activeSession,
+    createSession: mainChat.ensureSession,
   });
   const attachments = useAttachments({
     chatKey: activeChatKey,
@@ -925,6 +1049,7 @@ export function ViewHarness() {
       connection === 'online' &&
       !resetting &&
       !sessionLoading &&
+      !waitingForMain &&
       !daemonTooOld &&
       activeSession?.kind !== 'discord' &&
       (activeSession?.capabilities.send ?? true) &&
@@ -932,7 +1057,7 @@ export function ViewHarness() {
   });
   const savedAttachmentIds = attachments.readyAttachmentIds;
 
-  /** A new chat uses the same session creation as its attachment uploads. */
+  /** Sending and attachment uploads share the durable main-chat identity. */
   const startChat = async (
     targetId: string,
     text: string,
@@ -1004,7 +1129,12 @@ export function ViewHarness() {
     );
   };
 
-  const newChat = () => navigate({ kind: 'home' });
+  const newChat = () =>
+    navigate(
+      mainChat.session
+        ? { kind: 'session', sessionId: mainChat.session.id }
+        : { kind: 'home' },
+    );
   const renameSession = async (session: Session, title: string) => {
     try {
       await daemon.updateSession(session.agentId, session.id, { title });
@@ -1186,7 +1316,10 @@ export function ViewHarness() {
 
   const sidebar = (
     <SessionSidebar
-      sessions={sessions.sessions}
+      // The main chat is where you are; History lists everything else.
+      sessions={sessions.sessions.filter(
+        (session) => session.mainChat !== true,
+      )}
       activeKey={activeSession ? sessionKey(activeSession) : null}
       query={sessionQuery}
       onQueryChange={setSessionQuery}
@@ -1235,6 +1368,18 @@ export function ViewHarness() {
           ),
       }}
       session={viewedSession}
+      historyAnchor={
+        routeMessageId
+          ? {
+              messageId: routeMessageId,
+              loading: history.loadingAnchor,
+              error: history.error,
+              onReturnToLatest: returnToLatest,
+            }
+          : undefined
+      }
+      jumpRequestKey={jumpRequestKey}
+      contextRefreshKey={`${messagesRefresh}:${sessionRereads}:${activeSession?.lastActivityAtMs}:${activeSession?.messageCount}`}
       skillDrafts={{
         version: live.state.skillsVersion,
         epoch: live.state.epoch,
@@ -1243,8 +1388,8 @@ export function ViewHarness() {
       }}
       messages={routeSessionId ? chatMessages : []}
       knownAttachments={sends.knownRunAttachments}
-      pending={openPending}
-      runs={live.runs}
+      pending={routeMessageId ? undefined : openPending}
+      runs={routeMessageId ? undefined : live.runs}
       actions={transcriptActions}
       automation={checkinAutomation}
       onEditAutomation={(automation) => {
@@ -1286,7 +1431,7 @@ export function ViewHarness() {
         setDraft,
         sending,
         // Usable while the companion works: messages queue (spec §15.3).
-        disabled: resetting || sessionLoading || daemonTooOld,
+        disabled: resetting || sessionLoading || waitingForMain || daemonTooOld,
         offline: connection === 'offline',
         onSend: commands.send,
         error: workspaceError,
@@ -1360,6 +1505,18 @@ export function ViewHarness() {
       }}
       notice={
         <>
+          {waitingForMain && mainChat.error ? (
+            <div role="alert" className="px-4 pt-3 text-xs text-danger">
+              <p>Main chat could not be loaded: {mainChat.error}</p>
+              <button
+                type="button"
+                className="mt-2 underline"
+                onClick={mainChat.retry}
+              >
+                Retry main chat
+              </button>
+            </div>
+          ) : null}
           {legacyMigrationError ? (
             <p role="status" className="px-4 pt-3 text-xs text-ink-3">
               {legacyMigrationError}
@@ -1407,7 +1564,7 @@ export function ViewHarness() {
               Session details could not be loaded: {sessionReadError}. Retrying…
             </p>
           ) : null}
-          {routeSessionId && history.error ? (
+          {routeSessionId && !routeMessageId && history.error ? (
             <p role="alert" className="px-4 pt-3 text-xs text-danger">
               Messages could not be loaded: {history.error}
             </p>
@@ -1427,6 +1584,38 @@ export function ViewHarness() {
           route={route}
           navigate={navigate}
           onNewChat={newChat}
+          searchMessages={
+            agentId && connection === 'online' ? searchMessages : undefined
+          }
+          onOpenMessage={openMessage}
+          onSelectAgent={selectAgent}
+          onOpenReport={agent ? () => setReportOpen(true) : undefined}
+          inbox={
+            agent
+              ? {
+                  count: needsYou.items.length,
+                  render: (close) => (
+                    <NeedsYouPanel
+                      items={needsYou.items}
+                      agentName={agent.name}
+                      decideApproval={decideApproval}
+                      approvePairing={integrations.approvePairing}
+                      openSession={(targetAgentId, sessionId) =>
+                        commands.openTarget({
+                          agentId: targetAgentId,
+                          sessionId,
+                        })
+                      }
+                      openPage={(page) => navigate({ kind: 'page', page })}
+                      done={needsYou.done}
+                      onShowDone={() => void needsYou.loadDone()}
+                      onClose={close}
+                      onOpenReport={() => setReportOpen(true)}
+                    />
+                  ),
+                }
+              : null
+          }
           locked={settingsBusy}
           profile={settingsPage(['profile'])}
           model={settingsPage(['model'])}
@@ -1446,6 +1635,8 @@ export function ViewHarness() {
           connectors={
             <ConnectorsView
               agentId={agent.id}
+              online={connection === 'online'}
+              epoch={live.state.epoch}
               disabled={
                 savingSettings ||
                 resetting ||
@@ -1456,6 +1647,7 @@ export function ViewHarness() {
               mcpPermissionsBusy={mcpBusy}
               onMcpBusyChanged={(busy) => {
                 if (
+                  !connectorLifetime.isCurrent(connectorLifetime.token) ||
                   currentAgentIdRef.current !== agent.id ||
                   agentLifecycleGenerationRef.current !==
                     onboardingLifecycleGeneration
@@ -1466,6 +1658,7 @@ export function ViewHarness() {
               }}
               onMcpGrantsChanged={async () => {
                 if (
+                  !connectorLifetime.isCurrent(connectorLifetime.token) ||
                   currentAgentIdRef.current !== agent.id ||
                   agentLifecycleGenerationRef.current !==
                     onboardingLifecycleGeneration
@@ -1476,7 +1669,10 @@ export function ViewHarness() {
                 try {
                   canonical = (await daemon.getAgent(agent.id)).agent;
                 } catch (caught) {
-                  if (isCurrentAgentOperation(operation)) {
+                  if (
+                    connectorLifetime.isCurrent(connectorLifetime.token) &&
+                    isCurrentAgentOperation(operation)
+                  ) {
                     mcpPermissionsUnknownRef.current = true;
                     setSettingsSaveError(
                       'External tool permissions need a fresh read. Refresh status in Connections before saving changes.',
@@ -1484,7 +1680,11 @@ export function ViewHarness() {
                   }
                   throw caught;
                 }
-                if (!isCurrentAgentOperation(operation)) return;
+                if (
+                  !connectorLifetime.isCurrent(connectorLifetime.token) ||
+                  !isCurrentAgentOperation(operation)
+                )
+                  return;
                 if (canonical.state.id !== agent.id) {
                   mcpPermissionsUnknownRef.current = true;
                   setSettingsSaveError(
@@ -1500,6 +1700,7 @@ export function ViewHarness() {
               }}
               onMcpPermissionsUncertain={() => {
                 if (
+                  !connectorLifetime.isCurrent(connectorLifetime.token) ||
                   currentAgentIdRef.current !== agent.id ||
                   agentLifecycleGenerationRef.current !==
                     onboardingLifecycleGeneration
@@ -1512,6 +1713,13 @@ export function ViewHarness() {
               }}
               telegram={
                 <TelegramSettings
+                  online={connection === 'online'}
+                  epoch={live.state.epoch}
+                  disabled={
+                    savingSettings ||
+                    resetting ||
+                    agent.workspaceRole === 'helper'
+                  }
                   connector={telegramConnector}
                   busy={integrations.connectorBusy}
                   error={integrations.connectorError}
@@ -1526,6 +1734,13 @@ export function ViewHarness() {
               discord={
                 <DiscordSettings
                   agentId={agent.id}
+                  online={connection === 'online'}
+                  epoch={live.state.epoch}
+                  disabled={
+                    savingSettings ||
+                    resetting ||
+                    agent.workspaceRole === 'helper'
+                  }
                   {...discordIntegrations}
                   openConversation={(connector) =>
                     commands.openTarget({
@@ -1628,6 +1843,17 @@ export function ViewHarness() {
           conversationRoute={conversationRoute}
         />
       </div>
+      {reportOpen && agent && (
+        <WeeklyReport
+          agentId={agent.id}
+          agentName={agent.name}
+          sessions={sessions.sessions}
+          openSession={(sessionId) =>
+            commands.openTarget({ agentId: agent.id, sessionId })
+          }
+          onClose={() => setReportOpen(false)}
+        />
+      )}
     </>
   );
 }

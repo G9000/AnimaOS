@@ -13,6 +13,7 @@ use super::{
 /// arrive in M5 and M6.
 const READ_TOOLS: &[&str] = &[
     "read_file",
+    "checkpoint_list",
     "read_document",
     "list_dir",
     "glob",
@@ -25,6 +26,7 @@ const READ_TOOLS: &[&str] = &[
     "bg_list",
     "bg_output",
     "list_workspace_agents",
+    "list_helper_runs",
     "calendar_list_events",
     "mail_list_messages",
     "drive_search",
@@ -39,22 +41,29 @@ const READ_TOOLS: &[&str] = &[
 /// Connectors.
 const WRITE_TOOLS: &[&str] = &[
     "write_file",
+    "checkpoint_restore",
     "edit_file",
     "multi_edit",
     "todo_write",
+    "todo_list",
     "memory_add",
     "memory_update",
     "memory_remove",
     "memory_consolidate",
     "propose_skill",
+    crate::tools::PLAN_TOOL,
     "create_automation",
     "pause_automation",
+    "update_automation",
+    "resume_automation",
+    "delete_automation",
     "mail_create_draft",
     "calendar_create_event",
     "calendar_update_event",
     "calendar_delete_event",
 ];
 const EXEC_TOOLS: &[&str] = &[
+    "execute_code",
     "bash",
     "bg_start",
     "bg_stop",
@@ -71,8 +80,12 @@ fn m83_anonymous_search_uses_ordinary_network_approval_class() {
     assert_eq!(matcher_kinds("web_search"), &[MatcherKind::Any]);
 }
 const DELEGATE_TOOLS: &[&str] = &[
+    "trigger_automation",
     "delegate_to_agent",
     "spawn_helper",
+    "spawn_helper_async",
+    "steer_helper",
+    "stop_helper",
     "send_message",
     "broadcast_message",
 ];
@@ -498,6 +511,15 @@ pub(crate) fn evaluate(
         || allowances.iter().any(|allowance| {
             allowance.tool == call.name && matcher_matches(&allowance.matcher, call)
         });
+    // A plan exists to be seen: it asks even where its class is allowed,
+    // unless the owner chose "Always allow" for plans.
+    if call.name == crate::tools::PLAN_TOOL {
+        return if covered {
+            Verdict::Allow
+        } else {
+            Verdict::Ask
+        };
+    }
     if covered || action == PolicyAction::Allow {
         Verdict::Allow
     } else {
@@ -565,6 +587,7 @@ mod tests {
                     "bg_list",
                     "bg_output",
                     "list_workspace_agents",
+                    "list_helper_runs",
                     "calendar_list_events",
                     "mail_list_messages",
                     "drive_search",
@@ -582,6 +605,7 @@ mod tests {
                     "edit_file",
                     "multi_edit",
                     "todo_write",
+                    "todo_list",
                     "memory_add",
                     "memory_update",
                     "propose_skill",
@@ -600,6 +624,9 @@ mod tests {
                 &[
                     "delegate_to_agent",
                     "spawn_helper",
+                    "spawn_helper_async",
+                    "steer_helper",
+                    "stop_helper",
                     "send_message",
                     "broadcast_message",
                 ][..],
@@ -764,6 +791,27 @@ mod tests {
             evaluate(&ask_all, &[&other_tool], &[], &remember),
             Verdict::Ask,
             "a rule covers only its own tool"
+        );
+    }
+
+    #[test]
+    fn a_plan_always_asks_unless_the_owner_always_allows_plans() {
+        let plan = call("propose_plan", &[("title", "Lisbon trip")]);
+        let default = ApprovalPolicy::default();
+        assert_eq!(risk_class("propose_plan"), RiskClass::Write);
+        assert_eq!(
+            default.action(RiskClass::Write),
+            Some(PolicyAction::Allow),
+            "writes are allowed by default, plans still ask"
+        );
+        assert_eq!(evaluate(&default, &[], &[], &plan), Verdict::Ask);
+        let always = rule("propose_plan", ApprovalMatcher::any());
+        assert_eq!(evaluate(&default, &[&always], &[], &plan), Verdict::Allow);
+        let deny_writes = default.with(RiskClass::Write, PolicyAction::Deny);
+        assert_eq!(
+            evaluate(&deny_writes, &[&always], &[], &plan),
+            Verdict::Deny,
+            "a class deny still wins"
         );
     }
 

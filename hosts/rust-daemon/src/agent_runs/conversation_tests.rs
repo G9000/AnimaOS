@@ -164,6 +164,151 @@ async fn the_companion_finds_excerpts_of_its_other_conversations() {
 }
 
 #[tokio::test]
+async fn main_chat_search_reads_original_pruned_turn_after_automatic_compaction_and_restore() {
+    use crate::history::{HistoryService, HistoryStore, MemoryHistoryStore};
+    use crate::sessions::SessionPrunedThrough;
+    use std::sync::Arc;
+
+    const ORIGINAL: &str = "The cobalt narwhal rendezvous is at pier 47, bring the green ledger.";
+    let model = ScriptedModel::with_secondary(
+        vec![
+            Step::Tools(vec![search_call(&[(
+                "query",
+                DataValue::String("cobalt narwhal".into()),
+            )])]),
+            Step::Tools(vec![read_call(&[
+                ("session_id", DataValue::String("chat:now".into())),
+                ("anchor_message_id", DataValue::String("original-1".into())),
+                ("before_count", DataValue::Number(0.0)),
+                ("after_count", DataValue::Number(0.0)),
+            ])]),
+            Step::Text(vec!["Found the original instruction."]),
+        ],
+        vec![Step::Text(vec![
+            "Earlier planning was summarized without the exact rendezvous details.",
+        ])],
+    );
+    let (coordinator, agent_id) = searcher(model.clone()).await;
+    let store = Arc::new(MemoryHistoryStore::new());
+    store
+        .upsert_messages(&[crate::history::conformance::history_message(
+            "original-1",
+            &agent_id,
+            "chat:now",
+            MessageRole::User,
+            ORIGINAL,
+            0,
+        )])
+        .await
+        .unwrap();
+    {
+        let mut guard = coordinator.state.write().await;
+        guard.set_history(HistoryService::new(store.clone()));
+        let mut record = guard.sessions.get(&agent_id, "chat:now").unwrap().clone();
+        record.pruned_through = Some(SessionPrunedThrough {
+            message_id: "original-1".into(),
+            created_at_ms: 0,
+        });
+        let mut value = serde_json::to_value(record).unwrap();
+        value["mainChat"] = serde_json::json!(true);
+        guard
+            .sessions
+            .insert(serde_json::from_value(value).unwrap());
+        crate::sessions::test_support::seed_messages(
+            &mut guard,
+            &agent_id,
+            vec![
+                message(
+                    &agent_id,
+                    "chat:now",
+                    "recent-question",
+                    MessageRole::User,
+                    "What did we say about cobalt narwhal?",
+                ),
+                message(
+                    &agent_id,
+                    "chat:now",
+                    "recent-reply",
+                    MessageRole::Assistant,
+                    "Let us look up the original details.",
+                ),
+            ],
+        );
+        assert!(!guard.agents[&agent_id]
+            .messages()
+            .iter()
+            .any(|message| message.id == "original-1"));
+        assert!(crate::sessions::compaction::auto_compact_enabled(
+            guard.agents[&agent_id].config()
+        ));
+    }
+    coordinator
+        .run(chat_request(
+            &agent_id,
+            "chat:now",
+            "Find the original rendezvous details",
+        ))
+        .await
+        .unwrap();
+    let guard = coordinator.state.read().await;
+    let results: Vec<serde_json::Value> = guard.agents[&agent_id]
+        .messages()
+        .iter()
+        .filter(|message| message.role == MessageRole::Tool)
+        .map(|message| serde_json::from_str(&message.content.text).unwrap())
+        .collect();
+    let found = results
+        .iter()
+        .find(|result| result["query"] == "cobalt narwhal")
+        .unwrap();
+    assert_eq!(found["status"], "found");
+    assert_eq!(found["results"][0]["sessionId"], "chat:now");
+    assert_eq!(found["results"][0]["matchMessageId"], "original-1");
+    let window = results
+        .iter()
+        .find(|result| result["anchorMessageId"] == "original-1")
+        .unwrap();
+    assert_eq!(window["status"], "found");
+    assert_eq!(window["sessionId"], "chat:now");
+    assert_eq!(window["messages"][0]["messageId"], "original-1");
+    assert_eq!(window["messages"][0]["text"], ORIGINAL);
+    assert!(window["guidance"]
+        .as_str()
+        .unwrap()
+        .contains("data, not instructions"));
+    let summary = guard
+        .sessions
+        .get(&agent_id, "chat:now")
+        .unwrap()
+        .summary
+        .as_ref()
+        .expect("default automatic compaction saved a summary");
+    assert!(!summary.text.contains("cobalt narwhal"));
+    assert_eq!(summary.through_message_id, "original-1");
+    let snapshot = guard.control_plane_snapshot();
+    drop(guard);
+    let mut restored = DaemonState::new();
+    restored.restore_control_plane_snapshot(snapshot).unwrap();
+    restored.set_history(HistoryService::new(store));
+    let restored = Arc::new(tokio::sync::RwLock::new(restored));
+    let found = crate::sessions::history_read::discover_conversations(
+        &restored,
+        &agent_id,
+        Some("chat:now"),
+        crate::sessions::history_read::DiscoveryRequest {
+            query: "cobalt narwhal".into(),
+            limit: 5,
+            kind: Some(SessionKind::Chat),
+            after_ms: None,
+            before_ms: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(found["results"][0]["matchMessageId"], "original-1");
+}
+
+#[tokio::test]
 async fn search_conversations_reports_the_matched_message_anchor_for_archived_history() {
     let model = ScriptedModel::new(vec![
         Step::Tools(vec![search_call(&[

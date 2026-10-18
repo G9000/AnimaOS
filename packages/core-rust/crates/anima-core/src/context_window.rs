@@ -4,7 +4,6 @@
 
 use std::borrow::Borrow;
 
-use crate::document_content::document_rendered_bytes;
 use crate::primitives::{AttachmentType, Content, Message, MessageRole};
 use crate::runtime_serde::data_value_json;
 
@@ -17,6 +16,14 @@ pub const MIN_CALIBRATION: f64 = 0.5;
 pub const MAX_CALIBRATION: f64 = 2.0;
 /// Images sent as images per window; older ones become text (spec §5.2).
 pub const MAX_CONTEXT_IMAGES: usize = 4;
+
+/// Host-supplied costs for the content actually sent through its model adapter.
+/// Implementations can account for derived content without teaching the engine
+/// about service metadata, document formats, or provider-specific rendering.
+pub trait ContextTokenEstimator {
+    fn message_tokens(&self, message: &Message) -> u64;
+    fn text_tokens(&self, text: &str) -> u64;
+}
 
 /// Where each turn of `messages` starts, oldest first; `messages` are one
 /// room's messages in transcript order. A turn starts at a user message and
@@ -63,7 +70,6 @@ impl TokenEstimator {
     /// The uncalibrated estimate of one message.
     pub fn raw_message_tokens(message: &Message) -> u64 {
         Self::ordinary_content_tokens(&message.content)
-            .saturating_add(document_rendered_bytes(&message.content) as u64)
     }
 
     fn ordinary_content_tokens(content: &Content) -> u64 {
@@ -80,12 +86,9 @@ impl TokenEstimator {
         self.content_tokens(&message.content)
     }
 
-    /// Documents reserve their exact rendered UTF-8 bytes, never discounted by calibration.
+    /// Estimates ordinary text, framing and tool-call arguments.
     pub fn content_tokens(&self, content: &Content) -> u64 {
-        let ordinary = self.scale(Self::ordinary_content_tokens(content));
-        let documents =
-            (document_rendered_bytes(content) as f64 * self.calibration.max(1.0)).ceil() as u64;
-        ordinary.saturating_add(documents)
+        self.scale(Self::ordinary_content_tokens(content))
     }
 
     /// The estimate of `text` sent as one message (a summary or an input).
@@ -97,6 +100,16 @@ impl TokenEstimator {
 
     fn scale(&self, tokens: u64) -> u64 {
         (tokens as f64 * self.calibration).ceil() as u64
+    }
+}
+
+impl ContextTokenEstimator for TokenEstimator {
+    fn message_tokens(&self, message: &Message) -> u64 {
+        TokenEstimator::message_tokens(self, message)
+    }
+
+    fn text_tokens(&self, text: &str) -> u64 {
+        TokenEstimator::text_tokens(self, text)
     }
 }
 
@@ -148,7 +161,7 @@ pub fn select_context(
     history: &[Message],
     summary: Option<&ContextSummary>,
     budget_tokens: u64,
-    estimator: &TokenEstimator,
+    estimator: &dyn ContextTokenEstimator,
 ) -> ContextSelection {
     let covered = summary
         .and_then(|summary| {
@@ -324,6 +337,32 @@ mod tests {
         let everything = select_context(&history, None, 1_000, &TokenEstimator::default());
         assert_eq!(everything.messages.len(), 6);
         assert!(everything.dropped.is_empty());
+    }
+
+    #[test]
+    fn selection_uses_adapter_costs_for_whole_turns_and_summary() {
+        struct AdapterEstimator;
+        impl ContextTokenEstimator for AdapterEstimator {
+            fn message_tokens(&self, _message: &Message) -> u64 {
+                50
+            }
+
+            fn text_tokens(&self, _text: &str) -> u64 {
+                10
+            }
+        }
+        let history: Vec<Message> = (1..=3).flat_map(turn).collect();
+        let summary = ContextSummary {
+            text: "summary".into(),
+            through_message_id: "a1".into(),
+        };
+        let selected = select_context(&history, Some(&summary), 110, &AdapterEstimator);
+        assert_eq!(ids(&selected.messages), ["u3", "a3"]);
+        assert_eq!(ids(&selected.dropped), ["u2", "a2"]);
+        assert_eq!(selected.estimated_tokens, 110);
+        assert!(select_context(&history, None, 99, &AdapterEstimator)
+            .messages
+            .is_empty());
     }
 
     /// Task 3 review carry-forward: the first run of a new session has no

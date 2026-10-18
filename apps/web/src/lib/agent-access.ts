@@ -42,6 +42,7 @@ const COLLABORATE_TOOLS = [
   'multi_edit',
   'todo_write',
   'propose_skill',
+  'propose_plan',
   'create_automation',
   'pause_automation',
 ] as const;

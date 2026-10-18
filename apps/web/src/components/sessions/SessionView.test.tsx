@@ -83,6 +83,277 @@ afterEach(() => {
 });
 
 describe('SessionView', () => {
+  it('refreshes the context estimate while historical messages and visible runs stay fixed', async () => {
+    const initialContext = {
+      estimatedTokens: 800,
+      budgetTokens: 1000,
+      replyReserveTokens: 200,
+    };
+    const getSession = vi
+      .mocked(daemon.getSession)
+      .mockResolvedValueOnce(
+        sessionFixture('chat:plans', { contextUsage: initialContext }),
+      )
+      .mockResolvedValueOnce(
+        sessionFixture('chat:plans', {
+          contextUsage: { ...initialContext, estimatedTokens: 900 },
+        }),
+      );
+    const historyRead = vi
+      .spyOn(daemon, 'sessionMessages')
+      .mockResolvedValue({ messages: [], nextBefore: null });
+    const fixedMessages = [
+      {
+        id: 'saved-message',
+        role: 'User' as const,
+        content: { text: 'A fixed historical message' },
+        created_at_ms: 1,
+      },
+    ];
+    const view = renderView({
+      session: sessionFixture('chat:plans'),
+      messages: fixedMessages,
+      runs: [],
+      historyAnchor: {
+        messageId: 'saved-message',
+        loading: false,
+        error: null,
+        onReturnToLatest: vi.fn(),
+      },
+      contextRefreshKey: 'activity:1',
+    });
+    await waitFor(() =>
+      expect(screen.getByRole('progressbar')).toHaveAttribute('value', '800'),
+    );
+    expect(getSession).toHaveBeenCalledTimes(1);
+    view.rerender({ contextRefreshKey: 'activity:2' });
+    await waitFor(() =>
+      expect(screen.getByRole('progressbar')).toHaveAttribute('value', '900'),
+    );
+    expect(getSession).toHaveBeenCalledTimes(2);
+    expect(historyRead).not.toHaveBeenCalled();
+    expect(screen.getByText('A fixed historical message')).toBeVisible();
+  });
+
+  it('waits for a successful history window before jumping to a message already in the transcript', () => {
+    const scrollIntoView = vi.fn();
+    const previous = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      const historyAnchor = {
+        messageId: 'saved-message',
+        loading: true,
+        error: null,
+        onReturnToLatest: vi.fn(),
+      };
+      const view = renderView({
+        session: sessionFixture('chat:plans'),
+        messages: [
+          {
+            id: 'saved-message',
+            role: 'User',
+            content: { text: 'An already loaded match' },
+            created_at_ms: 1,
+          },
+        ],
+        historyAnchor,
+      });
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      view.rerender({
+        historyAnchor: {
+          ...historyAnchor,
+          loading: false,
+          error: 'Read unavailable',
+        },
+      });
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      view.rerender({ historyAnchor: { ...historyAnchor, loading: false } });
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    } finally {
+      Element.prototype.scrollIntoView = previous;
+    }
+  });
+
+  it('shows bounded-history loading, failure and an explicit return to latest', async () => {
+    const onReturnToLatest = vi.fn();
+    const historyAnchor = {
+      messageId: 'saved-message',
+      loading: true,
+      error: null,
+      onReturnToLatest,
+    };
+    const view = renderView({
+      session: sessionFixture('chat:plans'),
+      historyAnchor,
+    });
+    expect(screen.getByText('Loading saved message…')).toBeVisible();
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Return to latest messages' }),
+    );
+    expect(onReturnToLatest).toHaveBeenCalledOnce();
+    view.rerender({
+      historyAnchor: {
+        ...historyAnchor,
+        loading: false,
+        error: 'This saved message is no longer available.',
+      },
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'This saved message is no longer available.',
+    );
+    expect(
+      screen.queryByText('Loading saved message…'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('says the chat is getting long only near the budget, with a truthful over-budget reading', () => {
+    const usage = (estimatedTokens: number) => ({
+      estimatedTokens,
+      budgetTokens: 1000,
+      replyReserveTokens: 200,
+    });
+    const view = renderView({
+      session: sessionFixture('chat:plans', { contextUsage: usage(500) }),
+    });
+    // Half full is not news.
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+
+    view.rerender({
+      session: sessionFixture('chat:plans', { contextUsage: usage(820) }),
+    });
+    const meter = screen.getByRole('progressbar', {
+      name: 'Estimated conversation context',
+    });
+    expect(meter).toHaveAttribute('max', '1000');
+    expect(meter).toHaveAttribute('value', '820');
+    expect(screen.getByText(/getting long · 82% of Nova’s working memory/)).toBeVisible();
+    for (const excluded of ['instructions', 'tool schemas', 'files', 'draft', 'reply'])
+      expect(meter).toHaveAttribute('title', expect.stringContaining(excluded));
+
+    view.rerender({
+      session: sessionFixture('chat:plans', { contextUsage: usage(1500) }),
+    });
+    expect(meter).toHaveAttribute('value', '1000');
+    expect(screen.getByText(/150% of Nova’s working memory/)).toBeVisible();
+  });
+
+  it('says nothing about context for old or invalid readings', () => {
+    const view = renderView({ session: sessionFixture('old-daemon') });
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(screen.queryByText(/working memory/)).not.toBeInTheDocument();
+    for (const contextUsage of [
+      { estimatedTokens: 0, budgetTokens: 0, replyReserveTokens: 0 },
+      { estimatedTokens: -1, budgetTokens: 1000, replyReserveTokens: 200 },
+      {
+        estimatedTokens: Number.NaN,
+        budgetTokens: 1000,
+        replyReserveTokens: 200,
+      },
+      { estimatedTokens: 900, budgetTokens: 1000, replyReserveTokens: -1 },
+    ]) {
+      view.rerender({ session: sessionFixture('invalid', { contextUsage }) });
+      expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    }
+  });
+
+  it('leaves the main chat’s header to the top bar', () => {
+    renderView({
+      session: sessionFixture('chat:main', { mainChat: true }),
+    });
+    expect(
+      screen.queryByRole('button', { name: 'Rename' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Export' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps the saved summary reachable once when its boundary is outside the loaded history', async () => {
+    const summary = {
+      text: 'Keep **Saturday free**. [Unsafe](javascript:alert(1))',
+      throughMessageId: 'unloaded-message',
+      createdAtMs: 1_725_000_000_000,
+      sourceMessageCount: 12,
+    };
+    renderView({
+      session: sessionFixture('chat:plans', {
+        summary,
+        contextTrimmed: {
+          droppedThroughMessageId: 'unloaded-message',
+          atMs: 1,
+        },
+      }),
+      messages: [
+        {
+          id: 'latest-message',
+          role: 'Assistant',
+          content: { text: 'A newer reply' },
+          created_at_ms: 2,
+        },
+      ],
+    });
+
+    const disclosure = screen.getByText('What anima kept');
+    expect(screen.getAllByText('What anima kept')).toHaveLength(1);
+    expect(screen.getByText('Saturday free')).not.toBeVisible();
+    await userEvent.click(disclosure);
+    expect(screen.getByText('Saturday free')).toBeVisible();
+    expect(screen.getByText('Saturday free').tagName).toBe('STRONG');
+    expect(screen.getByText(/12 messages/)).toBeVisible();
+    expect(screen.getByText('Unsafe')).not.toHaveAttribute(
+      'href',
+      expect.stringMatching(/^javascript:/),
+    );
+  });
+
+  it('updates an open saved summary and retains it after a later compaction error', async () => {
+    const first = sessionFixture('chat:plans', {
+      summary: {
+        text: 'The first saved summary.',
+        throughMessageId: 'old-1',
+        createdAtMs: 1,
+        sourceMessageCount: 2,
+      },
+    });
+    const view = renderView({ session: first });
+    await userEvent.click(screen.getByText('What anima kept'));
+    view.rerender({
+      session: {
+        ...first,
+        summary: {
+          ...first.summary!,
+          text: 'The updated saved summary.',
+          sourceMessageCount: 4,
+        },
+        compactionError: { message: 'model unavailable', atMs: 2 },
+      },
+    });
+    expect(screen.getByText('The updated saved summary.')).toBeVisible();
+    expect(
+      screen.queryByText('The first saved summary.'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/could not be summarized: model unavailable/),
+    ).toBeVisible();
+    expect(screen.getAllByText('What anima kept')).toHaveLength(1);
+  });
+
+  it('omits an absent summary and collapses the disclosure when the session changes', async () => {
+    const view = renderView({ session: sessionFixture('chat:first') });
+    expect(screen.queryByText('What anima kept')).not.toBeInTheDocument();
+    const summary = {
+      text: 'Saved context.',
+      throughMessageId: 'old-1',
+      createdAtMs: 1,
+      sourceMessageCount: 2,
+    };
+    view.rerender({ session: sessionFixture('chat:first', { summary }) });
+    await userEvent.click(screen.getByText('What anima kept'));
+    expect(screen.getByText('Saved context.')).toBeVisible();
+    view.rerender({ session: sessionFixture('chat:second', { summary }) });
+    expect(screen.getByText('Saved context.')).not.toBeVisible();
+  });
+
   it('offers native speech for a saved assistant reply without starting playback', () => {
     const ensureSession = vi.fn().mockResolvedValue('room-7');
     const audio = vi.fn();
@@ -187,7 +458,7 @@ describe('SessionView', () => {
       messages: [
         {
           id: 'm1',
-          role: 'Assistant',
+          role: 'User',
           content: { text: 'Found the answer' },
           created_at_ms: 1,
         },
@@ -222,7 +493,7 @@ describe('SessionView', () => {
       messages: [
         {
           id: 'm1',
-          role: 'Assistant',
+          role: 'User',
           content: { text: 'Found it' },
           created_at_ms: 1,
         },
@@ -498,7 +769,9 @@ describe('SessionView', () => {
     });
 
     expect(
-      screen.getByText('Earlier messages are outside the companion’s view'),
+      screen.getByText(
+        'Older messages are outside anima’s working memory · they stay here in the chat',
+      ),
     ).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Compact' }));
     expect(onCompact).toHaveBeenCalled();
@@ -549,14 +822,14 @@ describe('SessionView', () => {
     expect(screen.getByText('Nova is thinking')).toBeVisible();
   });
 
-  it('offers a new chat when the session was deleted elsewhere', async () => {
+  it('offers the main chat when the session was deleted elsewhere', async () => {
     const props = renderView({
       session: sessionFixture('chat:gone'),
       missing: true,
     });
     expect(screen.getByText('This session was deleted.')).toBeVisible();
     await userEvent.click(
-      screen.getByRole('button', { name: 'Start a new chat' }),
+      screen.getByRole('button', { name: 'Return to main chat' }),
     );
     expect(props.onNewChat).toHaveBeenCalled();
   });

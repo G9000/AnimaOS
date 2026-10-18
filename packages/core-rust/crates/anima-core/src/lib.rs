@@ -4,29 +4,14 @@ pub use agent_files::{
     AgentFileRenderBudget, AgentFileSection, RenderedAgentFiles, RuntimePromptIdentity,
 };
 pub mod agent;
-pub mod audio_content;
-pub use audio_content::{
-    validate_transcript_text, AudioValidationError, TranscriptionAvailability, TranscriptionError,
-    TranscriptionPort, WavAudio, WavInfo, MAX_AUDIO_DURATION_MS, MAX_AUDIO_INPUT_BYTES,
-    MAX_TRANSCRIPT_BYTES,
-};
-pub mod browser;
-pub use browser::{
-    decode_observation, decode_operation, decode_scope, operation_digest, scope_digest,
-    validate_observation, validate_operation, validate_scope, BrowserArtifact, BrowserArtifactKind,
-    BrowserClose, BrowserControl, BrowserEffect, BrowserError, BrowserErrorCode, BrowserLimits,
-    BrowserMethod, BrowserNode, BrowserNodeRef, BrowserObservation, BrowserOperation, BrowserPort,
-    BrowserRoute, BrowserScope, BrowserSession,
-};
 pub mod communication;
-pub mod community_bundles;
 pub use communication::{AgentCommunicationRoute, MAX_AGENT_COMMUNICATION_HOPS};
 pub mod capability;
+pub mod completion;
 pub mod components;
-pub mod connectors;
+pub use completion::{CompletionObservation, CompletionReview};
 pub mod context_window;
 pub mod definition;
-pub mod document_content;
 pub mod engine;
 pub mod events;
 pub mod evidence;
@@ -37,6 +22,7 @@ pub use external_tools::{
     validate_external_arguments, validate_external_output, ExternalToolDescriptor,
     ExternalToolError, ExternalToolResult,
 };
+pub mod filesystem_checkpoints;
 pub mod memory;
 pub mod model;
 pub mod persistence;
@@ -44,7 +30,8 @@ pub mod policy;
 pub mod primitives;
 pub mod runtime;
 mod runtime_serde;
-pub mod speech;
+pub mod structured_tasks;
+pub mod tool_rpc;
 
 pub use agent::{
     tool_not_configured_error, AgentConfig, AgentConfigUpdate, AgentSettings, AgentState,
@@ -69,8 +56,8 @@ pub use capability::{
 pub use components::{Evaluator, EvaluatorDecision, EvaluatorResult, Provider, ProviderResult};
 pub use context_window::{
     calibration_factor, select_context, turn_starts, ContextSelection, ContextSummary,
-    TokenEstimator, CHARS_PER_TOKEN, MAX_CALIBRATION, MAX_CONTEXT_IMAGES, MESSAGE_OVERHEAD_TOKENS,
-    MIN_CALIBRATION,
+    ContextTokenEstimator, TokenEstimator, CHARS_PER_TOKEN, MAX_CALIBRATION, MAX_CONTEXT_IMAGES,
+    MESSAGE_OVERHEAD_TOKENS, MIN_CALIBRATION,
 };
 pub use definition::{
     AgentDefinition, AgentDefinitionDraft, CapabilityOverride, DefinitionPublisher,
@@ -149,8 +136,4 @@ pub use runtime::{
     MAX_RETAINED_EVENTS, MODEL_STREAM_WITHOUT_FINAL, REVISED_METADATA_KEY, RUN_ID_METADATA_KEY,
     RUN_STOPPED_ERROR, STEER_METADATA_KEY, STEP_ID_METADATA_KEY, STOPPED_METADATA_KEY,
     TOOL_DURATION_METADATA_KEY, TOOL_STATUS_METADATA_KEY,
-};
-pub use speech::{
-    SpeechAudio, SpeechAvailability, SpeechError, SpeechPort, SpeechText, MAX_SPEECH_DURATION_MS,
-    MAX_SPEECH_INPUT_BYTES, MAX_SPEECH_INPUT_CHARS, MAX_SPEECH_PCM_BYTES, MAX_SPEECH_WAV_BYTES,
 };

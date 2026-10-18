@@ -37,6 +37,27 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+it('keeps pending delegation in the active queue without a completed label', async () => {
+  vi.mocked(daemon.agentJobs).mockResolvedValue([
+    {
+      ...job('a', 'pending_delegations'),
+      pendingDelegations: {
+        launchRunId: 'launch',
+        childRunIds: ['child'],
+        completionRunIds: ['callback'],
+      },
+    },
+  ]);
+  render(<WorkspaceOperations agents={[agents[0]]} online onChat={vi.fn()} />);
+  const queue = screen.getByRole('region', { name: 'Assignment queue' });
+  await within(queue).findByRole('button', { name: /a assignment/ });
+  fireEvent.click(screen.getByRole('button', { name: /^Active/ }));
+  expect(
+    within(queue).getByRole('button', { name: /a assignment/ }),
+  ).toBeVisible();
+  expect(within(queue).getByText('Waiting for helpers')).toBeVisible();
+});
+
 it('loads all agents, filters the queue and opens the selected assignment', async () => {
   render(<WorkspaceOperations agents={agents} online onChat={vi.fn()} />);
   const queue = screen.getByRole('region', { name: 'Assignment queue' });
