@@ -190,6 +190,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "anima-process"
+version = "0.1.0"
+dependencies = [
+ "nix",
+ "process-wrap",
+ "serde",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "anima-schedule"
 version = "0.1.0"
 dependencies = [

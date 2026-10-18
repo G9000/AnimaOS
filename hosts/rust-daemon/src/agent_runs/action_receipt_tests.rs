@@ -28,6 +28,7 @@ struct ActionFixture {
     coordinator: AgentRunCoordinator,
     run: RunLink,
     journal: RunActionJournal,
+    cancel: anima_core::CancelSignal,
     agent: anima_core::AgentState,
     context: crate::tools::ToolExecutionContext,
 }
@@ -62,7 +63,7 @@ impl ActionFixture {
             cancel.clone(),
             None,
         );
-        let context = gated_context(&coordinator, &run, cancel)
+        let context = gated_context(&coordinator, &run, cancel.clone())
             .await
             .with_action_journal(journal.clone());
         let agent = coordinator
@@ -86,6 +87,7 @@ impl ActionFixture {
             coordinator,
             run,
             journal,
+            cancel,
             agent,
             context,
         }
@@ -346,6 +348,311 @@ async fn interrupted_owner_run_keeps_native_write_witness_without_chat_commit() 
         evidence.second_restored_owner_run,
         evidence.restored_owner_run
     );
+}
+
+#[tokio::test]
+async fn superseded_native_intent_rebases_before_dispatch() {
+    let fixture = ActionFixture::new("superseded-native-intent", true).await;
+    let gate = fixture.journal.install_test_before_save_gate();
+    let calling = fixture.call(write_call());
+    tokio::time::timeout(Duration::from_secs(5), gate.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    assert!(!fixture.root.join(FILE_PATH).exists());
+    let newer = {
+        let mut state = fixture.coordinator.state.write().await;
+        state.runs.get_mut(&fixture.run.run_id).unwrap().model = "newer-owner-snapshot".into();
+        state.control_plane_persist_request()
+    };
+    newer.save().await.unwrap();
+    gate.release.add_permits(1);
+    let result = calling.await.unwrap();
+    assert_eq!(result.status, anima_core::TaskStatus::Success, "{result:?}");
+    assert_persistent_success(&fixture.public_run().await);
+    let saved = fixture.saved_run().await;
+    assert_persistent_success(&saved);
+    assert_eq!(saved["model"], "newer-owner-snapshot");
+}
+
+#[tokio::test]
+async fn superseded_native_outcome_rebases_without_repeating_effect() {
+    let fixture = ActionFixture::new("superseded-native-outcome", true).await;
+    let intent = fixture.journal.install_test_before_save_gate();
+    let calling = fixture.call(write_call());
+    tokio::time::timeout(Duration::from_secs(5), intent.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    let outcome = fixture.journal.install_test_before_save_gate();
+    intent.release.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(5), outcome.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    assert_eq!(
+        std::fs::read_to_string(fixture.root.join(FILE_PATH)).unwrap(),
+        CONTENT
+    );
+    assert_eq!(
+        fixture.public_run().await["actionReceipts"][0]["status"],
+        "started"
+    );
+    // A later owner edit would be overwritten if the handler ran again.
+    std::fs::write(
+        fixture.root.join(FILE_PATH),
+        "owner edit after native effect",
+    )
+    .unwrap();
+    let newer = {
+        let mut state = fixture.coordinator.state.write().await;
+        state.runs.get_mut(&fixture.run.run_id).unwrap().model = "newer-owner-snapshot".into();
+        state.control_plane_persist_request()
+    };
+    newer.save().await.unwrap();
+    outcome.release.add_permits(1);
+    let result = calling.await.unwrap();
+    assert_eq!(result.status, anima_core::TaskStatus::Success, "{result:?}");
+    assert_eq!(
+        std::fs::read_to_string(fixture.root.join(FILE_PATH)).unwrap(),
+        "owner edit after native effect"
+    );
+    assert_persistent_success(&fixture.public_run().await);
+    let saved = fixture.saved_run().await;
+    assert_persistent_success(&saved);
+    assert_eq!(saved["model"], "newer-owner-snapshot");
+    assert_eq!(saved["actionReceipts"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn superseded_native_intent_honors_cancellation() {
+    let fixture = ActionFixture::new("superseded-native-cancel-intent", true).await;
+    let gate = fixture.journal.install_test_before_save_gate();
+    let calling = fixture.call(write_call());
+    tokio::time::timeout(Duration::from_secs(5), gate.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    fixture.cancel.cancel();
+    let newer = fixture
+        .coordinator
+        .state
+        .write()
+        .await
+        .control_plane_persist_request();
+    newer.save().await.unwrap();
+    gate.release.add_permits(1);
+    assert!(calling.await.unwrap().error.is_some());
+    assert!(!fixture.root.join(FILE_PATH).exists());
+    assert!(fixture.public_run().await["actionReceipts"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(fixture.saved_run().await.get("actionReceipts").is_none());
+    assert!(fixture.journal.failure().is_none());
+}
+
+#[tokio::test]
+async fn superseded_native_outcome_settles_after_stop_without_clearing_stop() {
+    let fixture = ActionFixture::new("superseded-native-stop-outcome", true).await;
+    let intent = fixture.journal.install_test_before_save_gate();
+    let calling = fixture.call(write_call());
+    tokio::time::timeout(Duration::from_secs(5), intent.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    let outcome = fixture.journal.install_test_before_save_gate();
+    intent.release.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(5), outcome.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    fixture.cancel.cancel();
+    // Simulate a newer authoritative Stop while the old snapshot waits.
+    let stop_at = anima_core::primitives::now_millis();
+    let newer = {
+        let mut state = fixture.coordinator.state.write().await;
+        state.runs.get_mut(&fixture.run.run_id).unwrap().stop = Some(crate::runs::RunStopRequest {
+            requested_at_ms: stop_at,
+        });
+        state.control_plane_persist_request()
+    };
+    newer.save().await.unwrap();
+    outcome.release.add_permits(1);
+    let result = calling.await.unwrap();
+    assert_eq!(result.status, anima_core::TaskStatus::Success, "{result:?}");
+    let saved = fixture.saved_run().await;
+    assert_persistent_success(&saved);
+    assert_eq!(saved["stop"]["requestedAtMs"], stop_at);
+    assert_eq!(fixture.public_run().await["stop"]["requestedAtMs"], stop_at);
+    assert!(fixture.journal.failure().is_none());
+}
+
+#[tokio::test]
+async fn superseded_native_intent_never_resurrects_a_removed_run() {
+    let fixture = ActionFixture::new("superseded-native-deleted-run", true).await;
+    let gate = fixture.journal.install_test_before_save_gate();
+    let calling = fixture.call(write_call());
+    tokio::time::timeout(Duration::from_secs(5), gate.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    let newer = {
+        let mut state = fixture.coordinator.state.write().await;
+        state.runs.remove(&fixture.run.run_id).unwrap();
+        state.control_plane_persist_request()
+    };
+    newer.save().await.unwrap();
+    gate.release.add_permits(1);
+    assert!(calling.await.unwrap().error.is_some());
+    assert!(!fixture.root.join(FILE_PATH).exists());
+    assert!(fixture
+        .coordinator
+        .state
+        .read()
+        .await
+        .runs
+        .get(&fixture.run.run_id)
+        .is_none());
+    let saved = load_control_plane_snapshot(&fixture.store)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(saved.runs.iter().all(|run| run.id != fixture.run.run_id));
+}
+
+#[tokio::test]
+async fn superseded_native_outcome_never_resurrects_a_removed_run() {
+    let fixture = ActionFixture::new("superseded-native-deleted-outcome", true).await;
+    let intent = fixture.journal.install_test_before_save_gate();
+    let calling = fixture.call(write_call());
+    tokio::time::timeout(Duration::from_secs(5), intent.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    let outcome = fixture.journal.install_test_before_save_gate();
+    intent.release.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(5), outcome.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    assert_eq!(
+        std::fs::read_to_string(fixture.root.join(FILE_PATH)).unwrap(),
+        CONTENT
+    );
+    std::fs::write(
+        fixture.root.join(FILE_PATH),
+        "owner edit after native effect",
+    )
+    .unwrap();
+    let newer = {
+        let mut state = fixture.coordinator.state.write().await;
+        state.runs.remove(&fixture.run.run_id).unwrap();
+        state.control_plane_persist_request()
+    };
+    newer.save().await.unwrap();
+    outcome.release.add_permits(1);
+    assert!(calling.await.unwrap().error.is_some());
+    assert_eq!(
+        std::fs::read_to_string(fixture.root.join(FILE_PATH)).unwrap(),
+        "owner edit after native effect"
+    );
+    assert!(fixture
+        .coordinator
+        .state
+        .read()
+        .await
+        .runs
+        .get(&fixture.run.run_id)
+        .is_none());
+    let saved = load_control_plane_snapshot(&fixture.store)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(saved.runs.iter().all(|run| run.id != fixture.run.run_id));
+}
+
+#[tokio::test]
+async fn superseded_native_intent_has_bounded_snapshot_attempts() {
+    let fixture = ActionFixture::new("superseded-native-bound", true).await;
+    let mut gate = fixture.journal.install_test_before_save_gate();
+    let calling = fixture.call(write_call());
+    for attempt in 0..8 {
+        tokio::time::timeout(Duration::from_secs(5), gate.entered.acquire())
+            .await
+            .unwrap()
+            .unwrap()
+            .forget();
+        let next = (attempt < 7).then(|| fixture.journal.install_test_before_save_gate());
+        let newer = fixture
+            .coordinator
+            .state
+            .write()
+            .await
+            .control_plane_persist_request();
+        newer.save().await.unwrap();
+        gate.release.add_permits(1);
+        if let Some(next) = next {
+            gate = next;
+        }
+    }
+    let result = tokio::time::timeout(Duration::from_secs(5), calling)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.error.as_deref(), Some(RECEIPT_NOT_SAVED));
+    assert!(fixture.journal.failure().is_some());
+    assert!(!fixture.root.join(FILE_PATH).exists());
+    assert!(fixture.saved_run().await.get("actionReceipts").is_none());
+}
+
+#[tokio::test]
+async fn parallel_native_actions_keep_every_durable_outcome() {
+    crate::init_tracing();
+    let fixture = ActionFixture::new("parallel-receipt-outcomes", true).await;
+    let calls: Vec<_> = (0..24)
+        .map(|index| {
+            let mut call = write_call();
+            call.id = format!("parallel-{index}");
+            call.args.insert(
+                "file_path".into(),
+                DataValue::String(format!("parallel/{index}.txt")),
+            );
+            fixture.call(call)
+        })
+        .collect();
+    let mut errors = Vec::new();
+    for call in calls {
+        let result = call.await.unwrap();
+        if result.status != anima_core::TaskStatus::Success {
+            errors.push(result.error);
+        }
+    }
+    fixture.journal.settle().await;
+    assert!(errors.is_empty(), "parallel actions failed: {errors:?}");
+    let public = fixture.public_run().await;
+    let saved = fixture.saved_run().await;
+    assert_eq!(public["actionReceipts"], saved["actionReceipts"]);
+    let receipts = saved["actionReceipts"].as_array().unwrap();
+    assert_eq!(receipts.len(), 24);
+    assert!(receipts
+        .iter()
+        .all(|receipt| receipt["status"] == "succeeded"));
+    for index in 0..24 {
+        assert_eq!(
+            std::fs::read_to_string(fixture.root.join(format!("parallel/{index}.txt"))).unwrap(),
+            CONTENT
+        );
+    }
 }
 
 #[tokio::test]

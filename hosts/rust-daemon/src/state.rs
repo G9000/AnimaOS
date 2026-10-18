@@ -1726,6 +1726,25 @@ struct AcknowledgedRunActions {
     tools_started: Vec<String>,
 }
 
+/// Rejected before storage was attempted, so an unpublished candidate may be
+/// rebuilt from authoritative state. No I/O failure has this classification.
+#[derive(Debug)]
+struct SupersededControlPlaneSave;
+
+impl std::fmt::Display for SupersededControlPlaneSave {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("action receipt snapshot was superseded")
+    }
+}
+
+impl std::error::Error for SupersededControlPlaneSave {}
+
+pub(crate) fn is_superseded_control_plane_save(error: &std::io::Error) -> bool {
+    error
+        .get_ref()
+        .is_some_and(|inner| inner.is::<SupersededControlPlaneSave>())
+}
+
 #[cfg(test)]
 #[derive(Clone)]
 pub(crate) struct TestControlPlaneSaveGate {
@@ -1827,9 +1846,7 @@ impl ControlPlanePersistRequest {
         let mut acknowledged = self.order.acknowledged.lock().await;
         if self.revision <= acknowledged.revision {
             if require_current {
-                return Err(std::io::Error::other(
-                    "action receipt snapshot was superseded",
-                ));
+                return Err(std::io::Error::other(SupersededControlPlaneSave));
             }
             return Ok(());
         }

@@ -73,7 +73,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": ".",
-        "command": "cargo build --manifest-path Cargo.toml --target-dir target/core-rust/build -p anima-core -p anima-service-adapters -p anima-model-adapters -p anima-memory -p anima-schedule -p anima-swarm -p anima-harness -p anima-document-content"
+        "command": "cargo build --manifest-path Cargo.toml --target-dir target/core-rust/build -p anima-core -p anima-service-adapters -p anima-model-adapters -p anima-memory -p anima-schedule -p anima-swarm -p anima-harness -p anima-document-content -p anima-process"
       },
       "inputs": [
         "default",
@@ -86,7 +86,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": ".",
-        "command": "cargo test --manifest-path Cargo.toml --target-dir target/core-rust/test -p anima-core -p anima-service-adapters -p anima-model-adapters -p anima-memory -p anima-schedule -p anima-swarm -p anima-harness -p anima-document-content"
+        "command": "cargo test --manifest-path Cargo.toml --target-dir target/core-rust/test -p anima-core -p anima-service-adapters -p anima-model-adapters -p anima-memory -p anima-schedule -p anima-swarm -p anima-harness -p anima-document-content -p anima-process"
       },
       "inputs": [
         "default",
@@ -153,7 +153,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": ".",
-        "command": "cargo fmt --manifest-path Cargo.toml --package anima-core --package anima-service-adapters --package anima-model-adapters --package anima-memory --package anima-schedule --package anima-swarm --package anima-harness --package anima-document-content --check"
+        "command": "cargo fmt --manifest-path Cargo.toml --package anima-core --package anima-service-adapters --package anima-model-adapters --package anima-memory --package anima-schedule --package anima-swarm --package anima-harness --package anima-document-content --package anima-process --check"
       },
       "inputs": [
         "default",
