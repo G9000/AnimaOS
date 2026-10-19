@@ -17,6 +17,7 @@ mod filesystem_checkpoints;
 mod foreign_sessions;
 mod history;
 mod jobs;
+mod keychain;
 mod learning;
 mod live;
 mod logs;

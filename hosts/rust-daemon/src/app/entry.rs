@@ -73,6 +73,8 @@ pub fn config_from_env() -> io::Result<DaemonConfig> {
 /// Initialises tracing, binds the configured address, logs the startup line
 /// and serves until shutdown.
 pub async fn run_from_env(options: ServeOptions) -> io::Result<()> {
+    crate::keychain::validate_namespace_env()
+        .map_err(|message| io::Error::new(io::ErrorKind::InvalidInput, message))?;
     crate::init_tracing();
 
     let bind_addr = bind_addr_from_env();

@@ -154,7 +154,8 @@ trait VaultBackend: Send + Sync {
 struct OsBackend;
 impl OsBackend {
     fn entry(account: &str) -> Result<keyring::Entry, McpCredentialError> {
-        keyring::Entry::new(SERVICE, account).map_err(|_| McpCredentialError::Unavailable)
+        keyring::Entry::new(&crate::keychain::service_name(SERVICE), account)
+            .map_err(|_| McpCredentialError::Unavailable)
     }
 }
 impl VaultBackend for OsBackend {

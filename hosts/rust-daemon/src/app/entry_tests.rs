@@ -117,3 +117,19 @@ async fn shutdown_notify_stops_server() {
         .expect("the server task does not panic");
     assert!(outcome.is_ok());
 }
+
+#[tokio::test]
+async fn an_invalid_keychain_namespace_fails_startup_before_binding() {
+    // An invalid value is ignored by `service_name`, so no other test is
+    // affected by this process-wide variable.
+    std::env::set_var("ANIMAOS_RS_KEYCHAIN_NAMESPACE", "Not Valid");
+    let result = run_from_env(ServeOptions::default()).await;
+    std::env::remove_var("ANIMAOS_RS_KEYCHAIN_NAMESPACE");
+
+    let error = result.expect_err("an invalid namespace must stop startup");
+    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    assert_eq!(
+        error.to_string(),
+        "ANIMAOS_RS_KEYCHAIN_NAMESPACE must be 1-32 of a-z, 0-9, -"
+    );
+}
