@@ -32,6 +32,20 @@ pub(crate) fn provider_env_keys() -> BTreeMap<String, String> {
         .collect()
 }
 
+/// Every `(provider id, environment variable)` pair that can supply a provider's
+/// API key, in the order the daemon reads them (the first one set wins).
+pub fn provider_env_key_names() -> Vec<(&'static str, &'static str)> {
+    provider_definitions()
+        .iter()
+        .flat_map(|definition| {
+            definition
+                .api_key_envs
+                .iter()
+                .map(|name| (definition.id, *name))
+        })
+        .collect()
+}
+
 fn provider_config_from_env() -> ProviderAdapterConfig {
     ProviderAdapterConfig {
         key_source: None,

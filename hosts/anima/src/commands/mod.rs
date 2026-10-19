@@ -9,6 +9,7 @@ pub mod lifecycle;
 pub mod logs;
 pub mod open;
 pub mod run;
+pub mod setup;
 pub mod status;
 
 /// The per-user folder (created if it is missing) and the config in it.

@@ -109,13 +109,3 @@ fn anima_run_serves_health_with_temp_home() {
         "store {store} should live under the temp home"
     );
 }
-
-#[test]
-fn unimplemented_commands_exit_with_status_two() {
-    let output = Command::new(env!("CARGO_BIN_EXE_anima"))
-        .arg("setup")
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("not yet available"));
-}

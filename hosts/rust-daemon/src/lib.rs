@@ -47,6 +47,7 @@ pub mod postgres;
 
 pub use attachments::documents::worker::document_worker_entry;
 pub use logs::init_tracing;
+pub use runtime_model::provider_env_key_names;
 
 pub use app::entry::{bind_addr_from_env, config_from_env, run_from_env, ServeOptions};
 pub use app::{

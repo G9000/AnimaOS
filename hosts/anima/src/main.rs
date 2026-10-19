@@ -51,10 +51,8 @@ fn main() -> ExitCode {
         Some(Command::Logs { follow }) => report_code(commands::logs::logs(follow)),
         Some(Command::Config { action }) => report_code(commands::config_cmd::config(action)),
         Some(Command::Autostart { on_off }) => report_code(commands::autostart::autostart(on_off)),
-        // Setup lands with its own task.
-        Some(Command::Setup { .. }) => {
-            eprintln!("not yet available");
-            ExitCode::from(2)
+        Some(Command::Setup { yes, workspace }) => {
+            report_code(commands::setup::setup(yes, workspace))
         }
     }
 }
