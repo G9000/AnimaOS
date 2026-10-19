@@ -1,9 +1,12 @@
 //! A per-user LaunchAgent, `~/Library/LaunchAgents/dev.animaos.anima.plist`.
 
 use std::io;
+use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use super::Autostart;
+use crate::config::Config;
 use crate::paths::AnimaPaths;
 
 /// The LaunchAgent label, and the name of its plist.
@@ -21,20 +24,34 @@ pub struct Launched {
 /// Runs `launchctl` with the arguments. A test swaps in a recorder.
 pub type Launchctl = Box<dyn Fn(&[&str]) -> io::Result<Launched>>;
 
+/// Whether a supervisor answers on the control port. A test swaps in its own.
+pub type SupervisorLive = Box<dyn Fn() -> bool>;
+
+/// How long the control port gets to accept a connection.
+const PROBE_TIMEOUT: Duration = Duration::from_millis(300);
+
 pub struct MacAutostart {
     agents_dir: PathBuf,
     logs: PathBuf,
     uid: Option<u32>,
     launchctl: Launchctl,
+    supervisor_live: SupervisorLive,
 }
 
 impl MacAutostart {
-    pub fn new(agents_dir: PathBuf, logs: PathBuf, uid: Option<u32>, launchctl: Launchctl) -> Self {
+    pub fn new(
+        agents_dir: PathBuf,
+        logs: PathBuf,
+        uid: Option<u32>,
+        launchctl: Launchctl,
+        supervisor_live: SupervisorLive,
+    ) -> Self {
         Self {
             agents_dir,
             logs,
             uid,
             launchctl,
+            supervisor_live,
         }
     }
 
@@ -53,11 +70,15 @@ impl MacAutostart {
         } else {
             Box::new(run_launchctl)
         };
+        let control_port = Config::load(&paths.config_file)
+            .unwrap_or_default()
+            .control_port;
         Self::new(
             home.join("Library").join("LaunchAgents"),
             paths.logs.clone(),
             user_id(home).ok(),
             launchctl,
+            Box::new(move || answers(control_port)),
         )
     }
 
@@ -100,19 +121,35 @@ impl Autostart for MacAutostart {
         )))
     }
 
+    /// Removes the plist, so the agent is not loaded at the next login. A
+    /// running supervisor may be this very agent: booting it out would kill
+    /// it (and its server) without waiting for work, so the agent is only
+    /// booted out when no supervisor answers.
     fn disable(&self) -> io::Result<()> {
-        let uid = self.uid()?;
-        // Fails when the agent is not loaded, which is the state we want.
-        self.launchctl(&["bootout", &format!("gui/{uid}/{LABEL}")])?;
         match std::fs::remove_file(self.plist_path()) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
-            _ => Ok(()),
+            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+            _ => {}
         }
+        if (self.supervisor_live)() {
+            return Ok(());
+        }
+        if let Some(uid) = self.uid {
+            // Fails when the agent is not loaded, which is the state we want;
+            // either way the plist is gone, so it won't load at login.
+            let _ = self.launchctl(&["bootout", &format!("gui/{uid}/{LABEL}")]);
+        }
+        Ok(())
     }
 
     fn is_enabled(&self) -> io::Result<bool> {
         self.plist_path().try_exists()
     }
+}
+
+/// Whether something accepts connections on the control port.
+fn answers(control_port: u16) -> bool {
+    let address = SocketAddr::from(([127, 0, 0, 1], control_port));
+    TcpStream::connect_timeout(&address, PROBE_TIMEOUT).is_ok()
 }
 
 /// `launchctl` exits 37 (EALREADY) when the service is loaded already.
@@ -248,13 +285,24 @@ mod tests {
         calls: Calls,
     }
 
+    /// No supervisor answers.
     fn fixture(answer: impl Fn(&[&str]) -> Launched + 'static) -> Fixture {
+        fixture_with(answer, false)
+    }
+
+    fn fixture_with(answer: impl Fn(&[&str]) -> Launched + 'static, live: bool) -> Fixture {
         let dir = tempfile::tempdir().unwrap();
         // The agents folder does not exist yet: `enable` creates it.
         let agents = dir.path().join("Library").join("LaunchAgents");
         let logs = dir.path().join(".animaos-swarm").join("logs");
         let (runner, calls) = fake(answer);
-        let agent = MacAutostart::new(agents.clone(), logs.clone(), Some(501), runner);
+        let agent = MacAutostart::new(
+            agents.clone(),
+            logs.clone(),
+            Some(501),
+            runner,
+            Box::new(move || live),
+        );
         Fixture {
             _dir: dir,
             agents,
@@ -368,7 +416,7 @@ mod tests {
     }
 
     #[test]
-    fn disable_boots_the_agent_out_and_removes_the_plist() {
+    fn disable_with_no_supervisor_boots_the_agent_out_and_removes_the_plist() {
         let fx = fixture(ok);
         fx.agent.enable(Path::new("/opt/anima/anima")).unwrap();
         fx.calls.borrow_mut().clear();
@@ -384,6 +432,49 @@ mod tests {
     }
 
     #[test]
+    fn disable_while_a_supervisor_runs_only_removes_the_plist() {
+        // The running supervisor may be the agent itself: a bootout would
+        // kill it without waiting for its work.
+        let fx = fixture_with(ok, true);
+        fx.agent.enable(Path::new("/opt/anima/anima")).unwrap();
+        fx.calls.borrow_mut().clear();
+
+        fx.agent.disable().unwrap();
+
+        assert!(!fx.agent.is_enabled().unwrap());
+        assert!(!fx.agents.join("dev.animaos.anima.plist").exists());
+        assert!(fx.calls.borrow().is_empty(), "{:?}", fx.calls.borrow());
+    }
+
+    #[test]
+    fn disable_removes_the_plist_even_when_launchctl_cannot_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let agents = dir.path().join("a");
+        let failing: Launchctl = Box::new(|_| Err(io::Error::other("no launchctl")));
+        let agent = MacAutostart::new(
+            agents.clone(),
+            dir.path().join("l"),
+            Some(501),
+            failing,
+            Box::new(|| false),
+        );
+        std::fs::create_dir_all(&agents).unwrap();
+        std::fs::write(agents.join("dev.animaos.anima.plist"), "x").unwrap();
+
+        agent.disable().unwrap();
+        assert!(!agent.is_enabled().unwrap());
+    }
+
+    #[test]
+    fn the_probe_sees_a_listening_control_port() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        assert!(answers(port));
+        drop(listener);
+        assert!(!answers(port));
+    }
+
+    #[test]
     fn disable_succeeds_when_nothing_was_enabled() {
         // launchctl: "Could not find service"; and there is no file either.
         let fx = fixture(|_| done(false, 113, "Boot-out failed: 3: No such process"));
@@ -392,13 +483,22 @@ mod tests {
     }
 
     #[test]
-    fn without_a_user_id_enable_and_disable_say_so() {
+    fn without_a_user_id_enable_fails_and_disable_removes_the_plist() {
         let dir = tempfile::tempdir().unwrap();
         let (runner, calls) = fake(ok);
-        let agent = MacAutostart::new(dir.path().join("a"), dir.path().join("l"), None, runner);
+        let agent = MacAutostart::new(
+            dir.path().join("a"),
+            dir.path().join("l"),
+            None,
+            runner,
+            Box::new(|| false),
+        );
         assert!(agent.enable(Path::new("/x")).is_err());
-        assert!(agent.disable().is_err());
-        assert!(calls.borrow().is_empty());
         assert!(!dir.path().join("a").exists());
+        std::fs::create_dir_all(dir.path().join("a")).unwrap();
+        std::fs::write(dir.path().join("a").join("dev.animaos.anima.plist"), "x").unwrap();
+        agent.disable().unwrap();
+        assert!(!agent.is_enabled().unwrap());
+        assert!(calls.borrow().is_empty());
     }
 }
