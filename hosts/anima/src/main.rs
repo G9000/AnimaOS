@@ -1,5 +1,6 @@
 //! Packaged Anima entry point.
 
+mod autostart;
 mod cli;
 mod client;
 mod commands;
@@ -46,8 +47,9 @@ fn main() -> ExitCode {
         Some(Command::Update { now }) => report_action(Action::Update, now),
         Some(Command::Logs { follow }) => report_code(commands::logs::logs(follow)),
         Some(Command::Config { action }) => report_code(commands::config_cmd::config(action)),
-        // Setup and autostart land with their own tasks.
-        Some(Command::Setup { .. } | Command::Autostart { .. }) => {
+        Some(Command::Autostart { on_off }) => report_code(commands::autostart::autostart(on_off)),
+        // Setup lands with its own task.
+        Some(Command::Setup { .. }) => {
             eprintln!("not yet available");
             ExitCode::from(2)
         }

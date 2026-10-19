@@ -115,7 +115,7 @@ fn wait_until_running(
 /// (macOS), else as a detached process of this executable.
 fn launch_supervisor(paths: &AnimaPaths) -> io::Result<Option<Child>> {
     if let Some(home) = paths.root.parent() {
-        if kickstart_launch_agent(home)? {
+        if kickstart_launch_agent(paths, home)? {
             return Ok(None);
         }
     }
@@ -150,17 +150,12 @@ fn detach(command: &mut Command) {
 /// Starts the installed LaunchAgent. `false` when there is none, or when
 /// launchd would not start it (then the supervisor is spawned directly).
 #[cfg(target_os = "macos")]
-fn kickstart_launch_agent(home: &Path) -> io::Result<bool> {
-    use std::os::unix::fs::MetadataExt;
-    const LABEL: &str = "dev.animaos.anima";
-    let plist = home
-        .join("Library")
-        .join("LaunchAgents")
-        .join(format!("{LABEL}.plist"));
-    if !plist.exists() {
+fn kickstart_launch_agent(paths: &AnimaPaths, home: &Path) -> io::Result<bool> {
+    use crate::autostart::macos::{user_id, LABEL};
+    if !crate::autostart::platform(paths).is_enabled()? {
         return Ok(false);
     }
-    let uid = std::fs::metadata(home)?.uid();
+    let uid = user_id(home)?;
     let started = Command::new("launchctl")
         .args(["kickstart", &format!("gui/{uid}/{LABEL}")])
         .stdin(Stdio::null())
@@ -172,7 +167,7 @@ fn kickstart_launch_agent(home: &Path) -> io::Result<bool> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn kickstart_launch_agent(_home: &Path) -> io::Result<bool> {
+fn kickstart_launch_agent(_paths: &AnimaPaths, _home: &Path) -> io::Result<bool> {
     Ok(false)
 }
 

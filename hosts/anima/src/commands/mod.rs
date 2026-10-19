@@ -3,6 +3,7 @@ use std::io;
 use crate::config::Config;
 use crate::paths::AnimaPaths;
 
+pub mod autostart;
 pub mod config_cmd;
 pub mod lifecycle;
 pub mod logs;

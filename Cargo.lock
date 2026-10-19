@@ -82,6 +82,7 @@ dependencies = [
  "directories",
  "getrandom 0.3.4",
  "open",
+ "plist",
  "process-wrap",
  "reqwest",
  "rust-embed",
@@ -92,6 +93,7 @@ dependencies = [
  "tokio",
  "toml",
  "tower",
+ "winreg 0.56.0",
 ]
 
 [[package]]
@@ -187,7 +189,7 @@ dependencies = [
  "anima-service-adapters",
  "flate2",
  "pdf-extract",
- "quick-xml",
+ "quick-xml 0.41.0",
  "rawzip",
 ]
 
@@ -3026,6 +3028,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
+name = "plist"
+version = "1.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2896bade328c13f7042a297ea5ac5b0951f6cf989dea5f32c2fd98da398195cb"
+dependencies = [
+ "base64 0.23.1",
+ "indexmap",
+ "quick-xml 0.42.0",
+ "serde",
+ "time",
+]
+
+[[package]]
 name = "polling"
 version = "3.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3084,7 +3099,7 @@ dependencies = [
  "shared_library",
  "shell-words",
  "winapi",
- "winreg",
+ "winreg 0.10.1",
 ]
 
 [[package]]
@@ -3163,6 +3178,15 @@ name = "quick-xml"
 version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.42.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41b1177fdf999d2321d3fb46ff47159d9c1fb9ad66a4879f8c50a0b504615e9b"
 dependencies = [
  "memchr",
 ]
@@ -5315,7 +5339,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "338e30461b3a2b67d70eb30a6d89f8e0c93a833e07d2ae89085cd070c4a00ac0"
 dependencies = [
  "proc-macro2",
- "quick-xml",
+ "quick-xml 0.41.0",
  "quote",
 ]
 
@@ -5874,6 +5898,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "80d0f4e272c85def139476380b12f9ac60926689dd2e01d4923222f40580869d"
 dependencies = [
  "winapi",
+]
+
+[[package]]
+name = "winreg"
+version = "0.56.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
+dependencies = [
+ "cfg-if",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
