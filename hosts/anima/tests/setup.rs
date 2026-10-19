@@ -271,6 +271,15 @@ fn setup_imports_provider_key() {
         assert!(!text(stream).contains("sk-test-123"), "{}", text(stream));
     }
     assert!(text(&output.stdout).contains("OPENAI_API_KEY"));
+    let note = "Imported. Note: memory embeddings, speech-to-text and coding-agent key \
+                passthrough still read the environment variable; set it in your login \
+                environment if you use them.";
+    assert_eq!(
+        text(&output.stdout).matches(note).count(),
+        1,
+        "{}",
+        text(&output.stdout)
+    );
 
     let listed = home.server_get("/api/provider-keys");
     let openai = listed["providers"]
@@ -298,6 +307,12 @@ fn setup_reimporting_a_stored_key_is_not_an_error() {
     expect_success(&home.setup_with(&[], &env));
     let again = home.setup_with(&[], &env);
     expect_success(&again);
+    // Nothing new was imported, so no note.
+    assert!(
+        !text(&again.stdout).contains("Imported. Note:"),
+        "{}",
+        text(&again.stdout)
+    );
     let stderr = text(&again.stderr);
     assert!(!stderr.contains("sk-test-456"), "{stderr}");
     let listed = home.server_get("/api/provider-keys");

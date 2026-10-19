@@ -33,6 +33,9 @@ const IMPORT_LABEL: &str = "Imported from shell";
 const IMPORT_TIMEOUT: Duration = Duration::from_secs(10);
 /// The exit code for an answer setup can't use.
 const BAD_ANSWER: u8 = 2;
+/// Said once after keys were imported: these parts of the server still read
+/// the shell's environment, not the key store.
+const IMPORT_NOTE: &str = "Imported. Note: memory embeddings, speech-to-text and coding-agent key passthrough still read the environment variable; set it in your login environment if you use them.";
 
 /// A provider key found in the shell's environment. No `Debug`: it holds a key.
 struct Found {
@@ -162,9 +165,14 @@ fn choose_defaults(
     Ok(Choices {
         workspace: prepare_workspace(&wanted.to_string_lossy(), home, paths)?,
         port: current.port,
-        autostart: current.autostart,
+        autostart: suggested_autostart(current),
         imports: found,
     })
+}
+
+/// Yes the first time (no workspace chosen yet); afterwards, what it is now.
+fn suggested_autostart(current: &Config) -> bool {
+    current.workspace.is_none() || current.autostart
 }
 
 fn ask(
@@ -206,7 +214,7 @@ fn ask(
 
     let autostart = Confirm::with_theme(&theme)
         .with_prompt("Start Anima when you log in?")
-        .default(current.autostart)
+        .default(suggested_autostart(current))
         .interact()?;
 
     let mut imports = Vec::new();
@@ -311,6 +319,7 @@ fn import_keys(cfg: &Config, admin_token: &str, imports: &[Found]) {
             return;
         }
     };
+    let mut imported = false;
     for found in imports {
         let sent = client
             .post(format!("{base}/api/provider-keys/{}", found.provider))
@@ -320,6 +329,7 @@ fn import_keys(cfg: &Config, admin_token: &str, imports: &[Found]) {
         match sent {
             Ok(response) if response.status() == StatusCode::CREATED => {
                 println!("Imported {} into Anima", found.variable);
+                imported = true;
             }
             // The store has this very key already (an earlier setup, or the
             // environment of a server started from this shell).
@@ -339,6 +349,9 @@ fn import_keys(cfg: &Config, admin_token: &str, imports: &[Found]) {
                 error.without_url()
             ),
         }
+    }
+    if imported {
+        println!("{IMPORT_NOTE}");
     }
 }
 
@@ -364,6 +377,8 @@ mod tests {
         assert_eq!(choices.workspace, home.join("anima-workspace"));
         assert!(choices.workspace.is_dir());
         assert_eq!(choices.port, 8787);
+        // Start at login is suggested the first time, though it is off until then.
+        assert!(!Config::default().autostart);
         assert!(choices.autostart);
     }
 

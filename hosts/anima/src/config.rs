@@ -36,7 +36,8 @@ impl Default for Config {
             workspace: None,
             port: 8787,
             control_port: 8788,
-            autostart: true,
+            // Nothing is installed until setup (or `anima autostart on`) does it.
+            autostart: false,
             updates: UpdatesConfig::default(),
         }
     }
@@ -168,7 +169,7 @@ mod tests {
         let cfg = Config::load(&dir.path().join("nope.toml")).unwrap();
         assert_eq!(cfg.port, 8787);
         assert_eq!(cfg.control_port, 8788);
-        assert!(cfg.autostart);
+        assert!(!cfg.autostart);
         assert!(cfg.updates.check);
         assert_eq!(cfg.workspace, None);
     }
