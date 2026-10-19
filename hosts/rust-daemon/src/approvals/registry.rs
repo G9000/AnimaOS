@@ -126,6 +126,17 @@ pub(crate) struct ApprovalRequest {
     /// for a command that is hard to undo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) reason: Option<String>,
+    /// What makes the command hard to undo, as the floor put it, e.g. `runs
+    /// hidden (encoded) commands`. Absent on older records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reason_detail: Option<String>,
+}
+
+/// Why a request asked when its class alone would not have.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ApprovalReason {
+    /// The floor found the command hard to undo, for this reason.
+    DangerousCommand(&'static str),
 }
 
 /// What a new request is about.
@@ -136,7 +147,7 @@ pub(crate) struct PendingApprovalStart<'a> {
     pub(crate) run_id: &'a str,
     pub(crate) call: &'a ToolCall,
     pub(crate) timeout_ms: u64,
-    pub(crate) reason: Option<&'static str>,
+    pub(crate) reason: Option<ApprovalReason>,
 }
 
 /// `call`'s arguments as JSON text, cut to `MAX_APPROVAL_ARGUMENTS_BYTES` on
@@ -172,7 +183,12 @@ impl ApprovalRequest {
             status: ApprovalStatus::Pending,
             revision: 1,
             resolution: None,
-            reason: start.reason.map(str::to_string),
+            reason: start.reason.map(|reason| match reason {
+                ApprovalReason::DangerousCommand(_) => "dangerous_command".to_string(),
+            }),
+            reason_detail: start.reason.map(|reason| match reason {
+                ApprovalReason::DangerousCommand(why) => why.to_string(),
+            }),
         }
     }
 

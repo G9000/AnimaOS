@@ -63,7 +63,11 @@ fn optional_bool(call: &ToolCall, key: &str) -> Result<Option<bool>, String> {
     }
 }
 
-fn patch(call: &ToolCall, record: &ScheduledPromptRecord) -> Result<AutomationPatch, String> {
+fn patch(
+    call: &ToolCall,
+    record: &ScheduledPromptRecord,
+    owner_zone: chrono_tz::Tz,
+) -> Result<AutomationPatch, String> {
     let zone = optional_text(call, "timeZone")?;
     if zone.is_some()
         && !call.args.contains_key("schedule")
@@ -78,7 +82,7 @@ fn patch(call: &ToolCall, record: &ScheduledPromptRecord) -> Result<AutomationPa
         _ => record
             .active_hours
             .as_ref()
-            .map_or("UTC", |hours| hours.time_zone.as_str()),
+            .map_or(owner_zone.name(), |hours| hours.time_zone.as_str()),
     };
     let zone = zone.unwrap_or(existing_zone);
     let clear_hours = optional_bool(call, "clearActiveHours")?.unwrap_or(false);
@@ -130,7 +134,7 @@ pub(crate) fn update_automation(
             )?;
             let service = coordinator.automations();
             let record = service.get(&agent.id, id).await.map_err(refusal)?;
-            let mut patch = patch(&call, &record)?;
+            let mut patch = patch(&call, &record, context.owner_time_zone.effective())?;
             if let Some(target) = optional_text(&call, "target")? {
                 patch.target = Some(match target {
                     "thread" => ScheduleTarget::Workspace,
@@ -149,7 +153,7 @@ pub(crate) fn update_automation(
                 "Updated the automation \"{}\" ({}), {}. {}",
                 display_name(&saved),
                 saved.id,
-                describe(&saved),
+                describe(&saved, display_zone(&saved, context.owner_time_zone.effective())),
                 if saved.enabled { "On." } else { "Paused." }
             ))
         }
@@ -190,7 +194,7 @@ pub(crate) fn resume_automation(
                 "Resumed the automation \"{}\" ({}), {}.",
                 display_name(&saved),
                 saved.id,
-                describe(&saved)
+                describe(&saved, display_zone(&saved, context.owner_time_zone.effective()))
             ))
         }
         .await;

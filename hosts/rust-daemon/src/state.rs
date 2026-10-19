@@ -617,6 +617,32 @@ mod tests {
     }
 
     #[test]
+    fn the_owner_time_zone_round_trips_and_an_unknown_one_is_dropped() {
+        let source = DaemonState::new();
+        source
+            .owner_time_zone
+            .set(Some(chrono_tz::Tz::America__New_York));
+        let payload = serde_json::to_value(source.control_plane_snapshot()).unwrap();
+        assert_eq!(payload["ownerTimeZone"], "America/New_York");
+
+        let mut restored = DaemonState::new();
+        restored
+            .restore_control_plane_snapshot(serde_json::from_value(payload.clone()).unwrap())
+            .expect("a snapshot with an owner zone restores");
+        assert_eq!(
+            restored.owner_time_zone.get(),
+            Some(chrono_tz::Tz::America__New_York)
+        );
+
+        let mut unknown = payload;
+        unknown["ownerTimeZone"] = "Mars/Olympus_Mons".into();
+        restored
+            .restore_control_plane_snapshot(serde_json::from_value(unknown).unwrap())
+            .expect("a restore never fails on the owner zone");
+        assert_eq!(restored.owner_time_zone.get(), None);
+    }
+
+    #[test]
     fn invalid_saved_overrides_are_dropped_with_a_warning_not_fatal() {
         let mut snapshot = DaemonState::new().control_plane_snapshot();
         snapshot.pricing_overrides = vec![
@@ -1656,6 +1682,9 @@ pub(crate) struct DaemonState {
     pub(crate) schedule_fires: crate::schedules::FireLog,
     /// The owner's price overrides (spec §11.1); saved in the control plane.
     pub(crate) pricing_overrides: Vec<crate::usage::PricingOverride>,
+    /// The owner's time zone as their web console last reported it; saved in
+    /// the control plane so Telegram and scheduled runs use it too.
+    pub(crate) owner_time_zone: crate::clock::OwnerTimeZone,
     pub(crate) history: crate::history::SharedHistory,
     /// Session creations per agent per minute (spec §14); not persisted.
     pub(crate) session_limiter: crate::sessions::SessionCreateLimiter,
@@ -2261,6 +2290,7 @@ impl DaemonState {
             skills: crate::skills::SkillRegistry::default(),
             schedule_fires: crate::schedules::FireLog::default(),
             pricing_overrides: Vec::new(),
+            owner_time_zone: crate::clock::OwnerTimeZone::default(),
             history: crate::history::HistoryService::ephemeral(),
             session_limiter: crate::sessions::SessionCreateLimiter::default(),
             tool_grants_applied: std::collections::BTreeSet::new(),
@@ -2526,6 +2556,7 @@ impl DaemonState {
         snapshot.skill_drafts = skills.drafts;
         snapshot.schedule_fires = self.schedule_fires.snapshot();
         snapshot.pricing_overrides = self.pricing_overrides.clone();
+        snapshot.owner_time_zone = self.owner_time_zone.get().map(|zone| zone.name().to_string());
         let learning = self.learning.snapshot();
         snapshot.learning_reviews = learning.reviews;
         snapshot.learning_policies = learning.policies;
@@ -2793,6 +2824,13 @@ impl DaemonState {
                     Vec::new()
                 }
             };
+        // Likewise an unknown saved zone: the host's zone stands in.
+        let owner_zone = snapshot.owner_time_zone.as_deref().and_then(|name| {
+            crate::schedules::timing::parse_time_zone(name)
+                .inspect_err(|problem| warn!(problem, "dropped the saved owner time zone"))
+                .ok()
+        });
+        self.owner_time_zone.set(owner_zone);
 
         if relabelled_messages > 0 || relabelled_runs > 0 || mapped_runs > 0 {
             info!(
@@ -3535,6 +3573,7 @@ impl DaemonState {
             Arc::clone(&self.memory),
             Arc::clone(&self.memory_embeddings),
             Arc::clone(&self.memory_view_selections),
+            self.owner_time_zone.clone(),
         ));
         runtime.set_evaluators(default_evaluators(
             Arc::clone(&self.memory),
@@ -3598,6 +3637,7 @@ impl DaemonState {
             Arc::clone(&self.memory),
             Arc::clone(&self.memory_embeddings),
             Arc::clone(&self.memory_view_selections),
+            self.owner_time_zone.clone(),
         ));
         runtime.set_evaluators(default_evaluators(
             Arc::clone(&self.memory),

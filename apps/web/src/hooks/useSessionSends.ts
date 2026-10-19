@@ -19,6 +19,7 @@ import {
   validAttachmentId,
   MAX_DRAFT_ATTACHMENTS,
 } from '../lib/attachments';
+import { localTimeZone } from '../lib/automations';
 
 export interface SendAttachments {
   attachmentIds: string[];
@@ -408,6 +409,7 @@ export class SendQueue {
           ...(send.browserSelection
             ? { browserSelection: send.browserSelection }
             : {}),
+          timeZone: localTimeZone(),
         },
         send.key,
       );

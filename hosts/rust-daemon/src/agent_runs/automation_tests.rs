@@ -68,11 +68,12 @@ async fn create_automation_records_its_creator_and_answers_its_next_runs() {
         reply.starts_with("Created the automation \"Stretch\" (schedule-"),
         "{reply}"
     );
-    assert_eq!(
-        reply.matches("Z,").count() + 1,
-        3,
-        "three next runs: {reply}"
-    );
+    // The runs read on the owner's clock, so count them, not UTC markers.
+    let runs = reply
+        .split_once("Next runs: ")
+        .and_then(|(_, rest)| rest.split_once(" ("))
+        .map_or(0, |(runs, _)| runs.split(", ").count());
+    assert_eq!(runs, 3, "three next runs: {reply}");
     let guard = coordinator.state.read().await;
     let record = guard.schedules.values().next().expect("one automation");
     assert_eq!(

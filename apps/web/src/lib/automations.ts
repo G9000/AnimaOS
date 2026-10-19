@@ -32,6 +32,34 @@ export function localTimeZone(): string {
   }
 }
 
+/** The zone an automation's times read in: its schedule's or active hours',
+ *  else this browser's. */
+export function automationTimeZone(
+  automation: Pick<Automation, 'trigger' | 'activeHours'>,
+): string {
+  const { trigger } = automation;
+  if (trigger.type === 'daily' || trigger.type === 'cron')
+    return trigger.timeZone;
+  return automation.activeHours?.timeZone ?? localTimeZone();
+}
+
+/** `ms` on `timeZone`'s clock with the zone named ("Oct 19, 07:00 PM EDT"),
+ *  so a time set from elsewhere is never read as local. */
+export function formatWhenIn(ms: number, timeZone: string): string {
+  try {
+    return new Date(ms).toLocaleString([], {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone,
+      timeZoneName: 'short',
+    });
+  } catch {
+    return formatWhen(ms);
+  }
+}
+
 function pad(value: number): string {
   return String(value).padStart(2, '0');
 }
@@ -57,7 +85,7 @@ export function describeTrigger(trigger: AutomationTrigger): string {
     case 'cron':
       return `cron ${trigger.expression} (${trigger.timeZone})`;
     case 'once':
-      return `once, ${formatWhen(trigger.atMs)}`;
+      return `once, ${formatWhenIn(trigger.atMs, localTimeZone())}`;
   }
 }
 

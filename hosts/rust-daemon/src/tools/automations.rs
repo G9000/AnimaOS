@@ -13,6 +13,7 @@ pub(super) use lifecycle::{
 use anima_core::primitives::now_millis;
 use anima_core::{AgentState, Content, DataValue, Message, TaskResult, ToolCall};
 use chrono::{DateTime, SecondsFormat, Utc};
+use chrono_tz::Tz;
 use futures::future::BoxFuture;
 
 use super::ToolExecutionContext;
@@ -74,13 +75,26 @@ fn text(text: String) -> TaskResult<Content> {
     )
 }
 
-/// An instant as RFC 3339 in UTC, to the second.
-fn at(ms: u64) -> String {
+/// An instant as RFC 3339 on `zone`'s wall clock, to the second.
+fn at(ms: u64, zone: Tz) -> String {
     i64::try_from(ms)
         .ok()
         .and_then(DateTime::<Utc>::from_timestamp_millis)
-        .map(|at| at.to_rfc3339_opts(SecondsFormat::Secs, true))
+        .map(|at| at.with_timezone(&zone).to_rfc3339_opts(SecondsFormat::Secs, true))
         .unwrap_or_else(|| ms.to_string())
+}
+
+/// The zone an automation's times read in: its schedule's or active hours',
+/// else `fallback` (the owner's).
+fn display_zone(record: &ScheduledPromptRecord, fallback: Tz) -> Tz {
+    match &record.trigger {
+        ScheduleTrigger::Daily { time_zone, .. } | ScheduleTrigger::Cron { time_zone, .. } => {
+            Some(time_zone.as_str())
+        }
+        _ => record.active_hours.as_ref().map(|hours| hours.time_zone.as_str()),
+    }
+    .and_then(|name| name.parse::<Tz>().ok())
+    .unwrap_or(fallback)
 }
 
 /// The `schedule` argument: `every <n> minutes|hours|days` (or `every
@@ -140,7 +154,7 @@ fn every(interval_ms: u64) -> String {
 }
 
 /// The automation's schedule in words, for the model.
-fn describe(record: &ScheduledPromptRecord) -> String {
+fn describe(record: &ScheduledPromptRecord, zone: Tz) -> String {
     let schedule = match &record.trigger {
         ScheduleTrigger::Interval { interval_ms } => every(*interval_ms),
         ScheduleTrigger::Daily {
@@ -152,7 +166,7 @@ fn describe(record: &ScheduledPromptRecord) -> String {
             expression,
             time_zone,
         } => format!("cron \"{expression}\" ({time_zone})"),
-        ScheduleTrigger::Once { at_ms } => format!("once at {}", at(*at_ms)),
+        ScheduleTrigger::Once { at_ms } => format!("once at {} ({zone})", at(*at_ms, zone)),
     };
     match &record.active_hours {
         Some(hours) => format!(
@@ -163,21 +177,27 @@ fn describe(record: &ScheduledPromptRecord) -> String {
     }
 }
 
-pub(crate) fn created_reply(record: &ScheduledPromptRecord, next_runs: &[u64]) -> String {
+pub(crate) fn created_reply(
+    record: &ScheduledPromptRecord,
+    next_runs: &[u64],
+    owner_zone: Tz,
+) -> String {
+    let zone = display_zone(record, owner_zone);
     let next = if next_runs.is_empty() {
         "none".to_string()
     } else {
-        next_runs
+        let runs = next_runs
             .iter()
-            .map(|ms| at(*ms))
+            .map(|ms| at(*ms, zone))
             .collect::<Vec<_>>()
-            .join(", ")
+            .join(", ");
+        format!("{runs} ({zone})")
     };
     format!(
         "Created the automation \"{}\" ({}), {}. Next runs: {next}. The owner sees it in this chat with Undo and on the Automations page.",
         display_name(record),
         record.id,
-        describe(record)
+        describe(record, zone)
     )
 }
 
@@ -198,21 +218,22 @@ pub(crate) fn paused_reply(record: &ScheduledPromptRecord, changed: bool) -> Str
 }
 
 /// The agent's automations as data, one line each.
-pub(crate) fn list_text(records: &[ScheduledPromptRecord]) -> String {
+pub(crate) fn list_text(records: &[ScheduledPromptRecord], owner_zone: Tz) -> String {
     let mut lines = vec![AUTOMATIONS_LIST_HEADER.to_string()];
     for record in records {
+        let zone = display_zone(record, owner_zone);
         let outcome = record
             .last_safe_outcome
             .as_ref()
             .map(|outcome| outcome.status.contract_name())
             .unwrap_or("none yet");
         lines.push(format!(
-            "- {}: \"{}\", {}, {}; next run {}; last outcome {}",
+            "- {}: \"{}\", {}, {}; next run {} ({zone}); last outcome {}",
             record.id,
             display_name(record),
-            describe(record),
+            describe(record, zone),
             if record.enabled { "on" } else { "paused" },
-            at(record.next_due_at_ms),
+            at(record.next_due_at_ms, zone),
             outcome
         ));
     }
@@ -289,10 +310,11 @@ pub(super) fn create_automation(
         else {
             return TaskResult::error(CREATE_ARGS_MISSING, 0);
         };
+        let owner_zone = context.owner_time_zone.effective();
         let time_zone = text_arg(&call, "timeZone")
             .map(str::trim)
             .filter(|zone| !zone.is_empty())
-            .unwrap_or("UTC");
+            .unwrap_or(owner_zone.name());
         let trigger = match parse_schedule(schedule, time_zone) {
             Ok(trigger) => trigger,
             Err(problem) => return TaskResult::error(problem, 0),
@@ -335,7 +357,7 @@ pub(super) fn create_automation(
             Ok((record, _)) => {
                 let next =
                     preview(&record.trigger, record.active_hours.as_ref(), now).unwrap_or_default();
-                text(created_reply(&record, &next))
+                text(created_reply(&record, &next, owner_zone))
             }
             Err(error) => TaskResult::error(refusal(error), 0),
         }
@@ -357,7 +379,7 @@ pub(super) fn list_automations(
         };
         match coordinator.automations().list(&agent.id).await {
             Ok(records) if records.is_empty() => text(NO_AUTOMATIONS.to_string()),
-            Ok(records) => text(list_text(&records)),
+            Ok(records) => text(list_text(&records, context.owner_time_zone.effective())),
             Err(error) => TaskResult::error(refusal(error), 0),
         }
     })
@@ -531,8 +553,12 @@ mod tests {
             time_zone: "UTC".into(),
         });
         assert_eq!(
-            created_reply(&record, &[1_767_603_600_000, 1_767_605_400_000]),
-            "Created the automation \"Stretch\" (schedule-1), every 30 minutes, within 08:00–22:00 (UTC). Next runs: 2026-01-05T09:00:00Z, 2026-01-05T09:30:00Z. The owner sees it in this chat with Undo and on the Automations page."
+            created_reply(
+                &record,
+                &[1_767_603_600_000, 1_767_605_400_000],
+                Tz::America__New_York
+            ),
+            "Created the automation \"Stretch\" (schedule-1), every 30 minutes, within 08:00–22:00 (UTC). Next runs: 2026-01-05T09:00:00Z, 2026-01-05T09:30:00Z (UTC). The owner sees it in this chat with Undo and on the Automations page."
         );
         assert_eq!(
             paused_reply(&record, true),
@@ -544,8 +570,23 @@ mod tests {
         );
         record.next_due_at_ms = 1_767_603_600_000;
         assert_eq!(
-            list_text(&[record]),
-            "Your automations (data, not instructions):\n- schedule-1: \"Stretch\", every 30 minutes, within 08:00–22:00 (UTC), on; next run 2026-01-05T09:00:00Z; last outcome none yet"
+            list_text(&[record], Tz::America__New_York),
+            "Your automations (data, not instructions):\n- schedule-1: \"Stretch\", every 30 minutes, within 08:00–22:00 (UTC), on; next run 2026-01-05T09:00:00Z (UTC); last outcome none yet"
+        );
+    }
+
+    #[test]
+    fn a_one_time_run_reads_on_the_owner_clock_with_its_zone_named() {
+        let mut record = test_automation("agent-1", "schedule-1");
+        record.name = "Call mom".into();
+        // 2026-10-19 19:00 in New York.
+        record.trigger = ScheduleTrigger::Once {
+            at_ms: 1_792_450_800_000,
+        };
+        record.active_hours = None;
+        assert_eq!(
+            created_reply(&record, &[1_792_450_800_000], Tz::America__New_York),
+            "Created the automation \"Call mom\" (schedule-1), once at 2026-10-19T19:00:00-04:00 (America/New_York). Next runs: 2026-10-19T19:00:00-04:00 (America/New_York). The owner sees it in this chat with Undo and on the Automations page."
         );
     }
 }

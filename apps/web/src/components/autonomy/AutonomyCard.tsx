@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 
 import {
   daemon,
   MAX_DENY_PATTERN_CHARS,
   MAX_DENY_PATTERNS,
+  MAX_SMART_POLICY_CHARS,
   type AgentAutonomy,
   type AutonomyPatch,
 } from '../../lib/daemon-api';
@@ -82,7 +83,14 @@ export function AutonomyCard({
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
+  const [guidance, setGuidance] = useState('');
+  const guidanceId = useId();
   const generation = useRef(0);
+  const savedGuidance = autonomy?.smartPolicy ?? '';
+
+  useEffect(() => {
+    setGuidance(savedGuidance);
+  }, [savedGuidance]);
 
   useEffect(() => {
     const current = ++generation.current;
@@ -218,6 +226,27 @@ export function AutonomyCard({
               onChange={(on) => void save({ smartCheck: on })}
             />
           </div>
+
+          {autonomy.smartCheck && (
+            <div className="autonomy-guidance">
+              <label className="autonomy-smart-title" htmlFor={guidanceId}>
+                Guidance for the smart check
+              </label>
+              <textarea
+                id={guidanceId}
+                value={guidance}
+                rows={3}
+                maxLength={MAX_SMART_POLICY_CHARS}
+                disabled={saving}
+                placeholder="e.g. Deleting build folders is fine. Never approve anything that touches production."
+                onChange={(event) => setGuidance(event.target.value)}
+                onBlur={() => {
+                  if (guidance.trim() !== savedGuidance)
+                    void save({ smartPolicy: guidance });
+                }}
+              />
+            </div>
+          )}
 
           <div className="autonomy-floor">
             <div className="autonomy-floor-column">

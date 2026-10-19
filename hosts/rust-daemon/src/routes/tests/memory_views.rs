@@ -515,6 +515,7 @@ async fn m40_selection_publication_waits_for_save_and_settles_after_the_http_cal
                 guard.memory_handle(),
                 guard.memory_embeddings_handle(),
                 published.clone(),
+                Default::default(),
             );
             (published, providers)
         };
@@ -689,6 +690,7 @@ async fn m40_poisoned_publication_refuses_owner_reads_and_selection_and_omits_co
             guard.memory_handle(),
             guard.memory_embeddings_handle(),
             published.clone(),
+            Default::default(),
         );
         (published, providers)
     };
@@ -755,6 +757,7 @@ async fn m40_deleted_selection_rows_do_not_consume_live_capacity_and_failed_save
             guard.memory_handle(),
             guard.memory_embeddings_handle(),
             published.clone(),
+            Default::default(),
         );
         (published, providers)
     };

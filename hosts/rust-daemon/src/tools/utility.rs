@@ -1,11 +1,11 @@
 use anima_core::{AgentState, Content, DataValue, Message, TaskResult, ToolCall};
-use chrono::{SecondsFormat, Utc};
+use chrono::Utc;
 use futures::future::BoxFuture;
 
 use super::ToolExecutionContext;
 
 pub(super) fn execute_get_current_time(
-    _context: ToolExecutionContext,
+    context: ToolExecutionContext,
     _agent: AgentState,
     _user_message: Message,
     _tool_call: ToolCall,
@@ -13,7 +13,7 @@ pub(super) fn execute_get_current_time(
     Box::pin(async move {
         TaskResult::success(
             Content {
-                text: current_time_iso_utc(),
+                text: crate::clock::local_time_text(Utc::now(), context.owner_time_zone.effective()),
                 attachments: None,
                 metadata: None,
             },
@@ -69,10 +69,6 @@ pub(super) fn execute_calculate(
             Err(error) => TaskResult::error(error, 0),
         }
     })
-}
-
-pub(super) fn current_time_iso_utc() -> String {
-    Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
 pub(super) fn evaluate_expression(expression: &str) -> Result<String, String> {

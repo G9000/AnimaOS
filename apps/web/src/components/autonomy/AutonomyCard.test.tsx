@@ -8,6 +8,7 @@ import { AutonomyCard, denyPatternProblem } from './AutonomyCard';
 const FREE: AgentAutonomy = {
   mode: 'free',
   smartCheck: false,
+  smartPolicy: '',
   denyPatterns: ['rm -rf build/*'],
   policy: { write: 'allow', exec: 'allow', network: 'allow', delegate: 'allow' },
 };
@@ -87,6 +88,30 @@ describe('AutonomyCard', () => {
     await user.click(smart);
     expect(save).toHaveBeenCalledWith('agent-1', { smartCheck: true });
     await waitFor(() => expect(smart).toHaveAttribute('aria-checked', 'true'));
+  });
+
+  it('gives the smart check written guidance while it is on', async () => {
+    const user = userEvent.setup();
+    const save = mockDaemon({ ...FREE, smartCheck: true });
+    render(<AutonomyCard agentId="agent-1" />);
+    const guidance = await screen.findByRole('textbox', {
+      name: 'Guidance for the smart check',
+    });
+    expect(guidance).toHaveAttribute('maxlength', '1000');
+    await user.type(guidance, 'Deleting dist is fine');
+    await user.tab();
+    expect(save).toHaveBeenCalledWith('agent-1', {
+      smartPolicy: 'Deleting dist is fine',
+    });
+  });
+
+  it('hides the guidance while the smart check is off', async () => {
+    mockDaemon();
+    render(<AutonomyCard agentId="agent-1" />);
+    await screen.findByRole('switch', { name: 'Smart check' });
+    expect(
+      screen.queryByRole('textbox', { name: 'Guidance for the smart check' }),
+    ).toBeNull();
   });
 
   it('adds and removes blocked commands, refusing empty, long and repeated ones', async () => {

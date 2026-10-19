@@ -87,6 +87,10 @@ pub(crate) struct ApprovalResponse {
     /// undo; absent otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) reason: Option<String>,
+    /// What makes the command hard to undo, e.g. `runs hidden (encoded)
+    /// commands`; absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) reason_detail: Option<String>,
 }
 
 impl From<&ApprovalRequest> for ApprovalResponse {
@@ -111,6 +115,7 @@ impl From<&ApprovalRequest> for ApprovalResponse {
             status: approval.status.as_str().into(),
             revision: approval.revision,
             reason: approval.reason.clone(),
+            reason_detail: approval.reason_detail.clone(),
             resolution: approval
                 .resolution
                 .as_ref()

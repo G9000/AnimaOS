@@ -5,6 +5,7 @@
 //! transaction, so exactly one of them wins.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
 use std::time::Duration;
 
@@ -15,7 +16,7 @@ use tokio::sync::oneshot;
 
 use super::{
     risk_class, ApprovalRequest, ApprovalStatus, RiskClass, Verdict, APPROVAL_LOST,
-    APPROVAL_TIMEOUT_MS, DENIED_BY_OWNER, DENIED_BY_POLICY, HELPER_NEEDS_APPROVAL,
+    APPROVAL_TIMEOUT_MS, DENIED_BY_OWNER, DENIED_BY_POLICY, HELPER_NEEDS_APPROVAL, REFUSAL_BREAKER,
     TELEGRAM_APPROVAL_TIMEOUT_MS,
 };
 use crate::agent_runs::{is_helper_config, AgentRunCoordinator};
@@ -194,6 +195,45 @@ pub(crate) struct ApprovalGate {
     run: RunLink,
     source: RunSource,
     cancel: CancelSignal,
+    /// Refusals in a row in this run; an action that runs resets it.
+    refusals: RefusalStreak,
+}
+
+/// Refused actions in a row, shared by every clone of one run's gate.
+#[derive(Clone, Default)]
+struct RefusalStreak(Arc<AtomicU32>);
+
+impl RefusalStreak {
+    /// Moves the count for one decision and, from `REFUSAL_BREAKER` refusals
+    /// in a row on, adds the breaker note to the refusal.
+    fn apply(&self, outcome: GateOutcome, streak: Streak) -> GateOutcome {
+        match streak {
+            Streak::Resets => {
+                self.0.store(0, Ordering::SeqCst);
+                outcome
+            }
+            Streak::Neutral => outcome,
+            Streak::Counts => {
+                let count = self.0.fetch_add(1, Ordering::SeqCst) + 1;
+                match outcome {
+                    GateOutcome::Refuse(refused) if count >= REFUSAL_BREAKER => {
+                        GateOutcome::Refuse(with_breaker_note(refused, count))
+                    }
+                    other => other,
+                }
+            }
+        }
+    }
+}
+
+/// How one gate decision moves the run's refusal streak.
+enum Streak {
+    /// Blocked, denied by policy, by the smart check, or by the owner.
+    Counts,
+    /// The action runs.
+    Resets,
+    /// Helper limits, cancellation, lost or expired approvals.
+    Neutral,
 }
 
 impl ApprovalGate {
@@ -226,36 +266,51 @@ impl ApprovalGate {
             run,
             source,
             cancel,
+            refusals: RefusalStreak::default(),
         }
     }
 
+    /// Judges `call`, then appends the breaker note once the run has had
+    /// `REFUSAL_BREAKER` refusals in a row.
     pub(crate) async fn check(&self, agent: &AgentState, call: &ToolCall) -> GateOutcome {
+        let (outcome, streak) = self.check_inner(agent, call).await;
+        self.refusals.apply(outcome, streak)
+    }
+
+    async fn check_inner(&self, agent: &AgentState, call: &ToolCall) -> (GateOutcome, Streak) {
         // Read-class tools never ask (spec §7.2), so they never wait for the
         // state lock either: a read tool runs while the lock is held (M3).
         if risk_class(&call.name) == RiskClass::Read {
-            return GateOutcome::Proceed;
+            return (GateOutcome::Proceed, Streak::Resets);
         }
-        use crate::approvals::autonomy::{command_of, Floor, SmartVerdict};
+        use crate::approvals::autonomy::{command_of, fits_smart_check, Floor, SmartVerdict};
         let floor = self.coordinator.approval_floor(agent, call).await;
         if let Floor::Blocked(reason) = &floor {
-            return GateOutcome::Refuse(TaskResult::error(
-                format!(
-                    "Blocked: this command {reason}, so it never runs, in any mode. Don't retry it or work around it; tell the owner what you wanted to do."
-                ),
-                0,
-            ));
+            return (
+                GateOutcome::Refuse(TaskResult::error(
+                    format!(
+                        "Blocked: this command {reason}, so it never runs, in any mode. Don't retry it or work around it; tell the owner what you wanted to do."
+                    ),
+                    0,
+                )),
+                Streak::Counts,
+            );
         }
         match self
             .coordinator
             .approval_verdict(agent, &self.run.session_id, call)
             .await
         {
-            Verdict::Allow => GateOutcome::Proceed,
-            Verdict::Deny => GateOutcome::Refuse(TaskResult::error(DENIED_BY_POLICY, 0)),
+            Verdict::Allow => (GateOutcome::Proceed, Streak::Resets),
+            Verdict::Deny => (
+                GateOutcome::Refuse(TaskResult::error(DENIED_BY_POLICY, 0)),
+                Streak::Counts,
+            ),
             // Helpers never wait (spec §7.3).
-            Verdict::Ask if is_helper_config(&agent.config) => {
-                GateOutcome::Refuse(TaskResult::error(HELPER_NEEDS_APPROVAL, 0))
-            }
+            Verdict::Ask if is_helper_config(&agent.config) => (
+                GateOutcome::Refuse(TaskResult::error(HELPER_NEEDS_APPROVAL, 0)),
+                Streak::Neutral,
+            ),
             Verdict::Ask => {
                 let floor_only = matches!(floor, Floor::Dangerous(_))
                     && self
@@ -263,27 +318,32 @@ impl ApprovalGate {
                         .approval_policy_verdict(agent, &self.run.session_id, call)
                         .await
                         == Verdict::Allow;
-                if let (true, Floor::Dangerous(why), Some(command)) =
-                    (floor_only, &floor, command_of(call))
-                {
+                if let (true, Floor::Dangerous(why), Some(command)) = (
+                    floor_only,
+                    &floor,
+                    command_of(call).filter(|command| fits_smart_check(command)),
+                ) {
                     match self
                         .coordinator
                         .smart_check(agent, &self.run.session_id, command, why)
                         .await
                     {
-                        SmartVerdict::Approve => return GateOutcome::Proceed,
+                        SmartVerdict::Approve => return (GateOutcome::Proceed, Streak::Resets),
                         SmartVerdict::Deny => {
-                            return GateOutcome::Refuse(TaskResult::error(
-                                format!(
-                                    "Denied by the owner's smart check: this command {why} and did not look like a safe step. Ask the owner if it is really needed."
-                                ),
-                                0,
-                            ))
+                            return (
+                                GateOutcome::Refuse(TaskResult::error(
+                                    format!(
+                                        "Denied by the owner's smart check: this command {why} and did not look like a safe step. Ask the owner if it is really needed."
+                                    ),
+                                    0,
+                                )),
+                                Streak::Counts,
+                            )
                         }
                         SmartVerdict::Escalate => {}
                     }
                 }
-                self.ask(agent, call).await
+                self.ask_counted(agent, call).await
             }
         }
     }
@@ -341,18 +401,34 @@ impl ApprovalGate {
         original: &ToolCall,
         redacted: &ToolCall,
     ) -> GateOutcome {
+        let (outcome, streak) = self.check_exact_inner(agent, original, redacted).await;
+        self.refusals.apply(outcome, streak)
+    }
+
+    async fn check_exact_inner(
+        &self,
+        agent: &AgentState,
+        original: &ToolCall,
+        redacted: &ToolCall,
+    ) -> (GateOutcome, Streak) {
         if self
             .coordinator
             .approval_verdict(agent, &self.run.session_id, original)
             .await
             == Verdict::Deny
         {
-            return GateOutcome::Refuse(TaskResult::error(DENIED_BY_POLICY, 0));
+            return (
+                GateOutcome::Refuse(TaskResult::error(DENIED_BY_POLICY, 0)),
+                Streak::Counts,
+            );
         }
         if is_helper_config(&agent.config) {
-            return GateOutcome::Refuse(TaskResult::error(HELPER_NEEDS_APPROVAL, 0));
+            return (
+                GateOutcome::Refuse(TaskResult::error(HELPER_NEEDS_APPROVAL, 0)),
+                Streak::Neutral,
+            );
         }
-        let outcome = self.ask(agent, redacted).await;
+        let (outcome, streak) = self.ask_counted(agent, redacted).await;
         if matches!(outcome, GateOutcome::Approved)
             && self
                 .coordinator
@@ -360,12 +436,16 @@ impl ApprovalGate {
                 .await
                 == Verdict::Deny
         {
-            return GateOutcome::Refuse(TaskResult::error(DENIED_BY_POLICY, 0));
+            return (
+                GateOutcome::Refuse(TaskResult::error(DENIED_BY_POLICY, 0)),
+                Streak::Counts,
+            );
         }
-        outcome
+        (outcome, streak)
     }
 
-    async fn ask(&self, agent: &AgentState, call: &ToolCall) -> GateOutcome {
+    /// Asks the owner; an owner Deny counts toward the refusal streak.
+    async fn ask_counted(&self, agent: &AgentState, call: &ToolCall) -> (GateOutcome, Streak) {
         let timeout = self.coordinator.approval_timeout(self.source);
         // Taken before the request is made, so the wait ends when the
         // record's `expiresAtMs` says it does.
@@ -383,11 +463,21 @@ impl ApprovalGate {
             .await;
         let pending = match self.coordinator.open_approval(ask).await {
             Ok(pending) => pending,
-            Err(refused) => return GateOutcome::Refuse(refused),
+            Err(refused) => return (GateOutcome::Refuse(refused), Streak::Neutral),
         };
-        let outcome = match self.wait(pending, deadline).await {
-            Some(approval) => self.outcome(&approval),
-            None => GateOutcome::Refuse(TaskResult::error(APPROVAL_LOST, 0)),
+        let (outcome, streak) = match self.wait(pending, deadline).await {
+            Some(approval) => (
+                self.outcome(&approval),
+                match approval.status {
+                    ApprovalStatus::Denied => Streak::Counts,
+                    ApprovalStatus::Allowed if !self.cancel.is_cancelled() => Streak::Resets,
+                    _ => Streak::Neutral,
+                },
+            ),
+            None => (
+                GateOutcome::Refuse(TaskResult::error(APPROVAL_LOST, 0)),
+                Streak::Neutral,
+            ),
         };
         // The owner may have changed the agent during the wait: what runs is
         // what the agent allows now, not what it allowed when it asked.
@@ -399,12 +489,12 @@ impl ApprovalGate {
                     .await,
             )
         {
-            return GateOutcome::Refuse(TaskResult::error(
-                tool_not_configured_error(&call.name),
-                0,
-            ));
+            return (
+                GateOutcome::Refuse(TaskResult::error(tool_not_configured_error(&call.name), 0)),
+                Streak::Neutral,
+            );
         }
-        outcome
+        (outcome, streak)
     }
 
     /// The approval as it was settled, by whoever settled it first. Holds no
@@ -478,8 +568,43 @@ impl ApprovalGate {
     }
 }
 
+/// The refusal's text with the breaker note: after `count` refusals in a row
+/// the agent should stop and ask the owner.
+fn with_breaker_note(refused: TaskResult<Content>, count: u32) -> TaskResult<Content> {
+    let text = refused.error.clone().unwrap_or_default();
+    TaskResult::error(
+    format!(
+        "{text}\n\nThat is {count} refused actions in a row. Stop trying other ways to do this; tell the owner what you were trying to do and ask how to proceed."
+    ),
+    refused.duration_ms,
+)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_refusal_streak_counts_resets_and_ignores() {
+        let streak = RefusalStreak::default();
+        let refuse = || GateOutcome::Refuse(TaskResult::error("no", 0));
+        let note = |outcome: &GateOutcome| match outcome {
+            GateOutcome::Refuse(result) => result
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("refused actions in a row"),
+            _ => false,
+        };
+        assert!(!note(&streak.apply(refuse(), Streak::Counts)));
+        assert!(!note(&streak.apply(refuse(), Streak::Neutral)));
+        assert!(!note(&streak.apply(refuse(), Streak::Counts)));
+        assert!(note(&streak.apply(refuse(), Streak::Counts)));
+        assert!(matches!(
+            streak.apply(GateOutcome::Proceed, Streak::Resets),
+            GateOutcome::Proceed
+        ));
+        assert!(!note(&streak.apply(refuse(), Streak::Counts)));
+    }
+
     use std::collections::BTreeMap;
 
     use anima_core::ToolCall;

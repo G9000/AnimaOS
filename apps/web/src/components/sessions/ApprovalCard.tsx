@@ -184,7 +184,9 @@ function ToolApprovalCard({
       </header>
       {approval.reason === 'dangerous_command' && (
         <p className="approval-card-lead approval-card-reason">
-          Asked because this command is hard to undo.
+          {approval.reasonDetail
+            ? `Asked because this command ${approval.reasonDetail}.`
+            : 'Asked because this command is hard to undo.'}
         </p>
       )}
       <p className="approval-card-lead">

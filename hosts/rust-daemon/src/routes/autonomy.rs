@@ -12,7 +12,9 @@ use super::jobs::{authorize, body, no_store};
 use super::sessions::rejected;
 use super::{ApiError, AppState};
 use crate::agent_runs::is_helper_config;
-use crate::approvals::autonomy::{validate_deny_patterns, AgentAutonomy, AutonomyMode};
+use crate::approvals::autonomy::{
+    validate_deny_patterns, validate_smart_policy, AgentAutonomy, AutonomyMode,
+};
 use crate::approvals::HELPERS_USE_COMPANION_APPROVALS;
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -22,6 +24,8 @@ pub(super) struct AutonomyResponse {
     mode: AutonomyMode,
     smart_check: bool,
     deny_patterns: Vec<String>,
+    /// The owner's written guidance for the smart check; empty for none.
+    smart_policy: String,
     policy: ApprovalPolicyResponse,
 }
 
@@ -32,6 +36,8 @@ pub(super) struct AutonomyRequest {
     mode: Option<AutonomyMode>,
     smart_check: Option<bool>,
     deny_patterns: Option<Vec<String>>,
+    /// Up to 1000 characters; newlines and tabs allowed.
+    smart_policy: Option<String>,
 }
 
 fn response(record: &AgentAutonomy, policy: &crate::approvals::ApprovalPolicy) -> AutonomyResponse {
@@ -39,6 +45,7 @@ fn response(record: &AgentAutonomy, policy: &crate::approvals::ApprovalPolicy) -
         mode: record.mode,
         smart_check: record.smart_check,
         deny_patterns: record.deny_patterns.clone(),
+        smart_policy: record.smart_policy.clone(),
         policy: ApprovalPolicyResponse::from(policy),
     }
 }
@@ -76,7 +83,7 @@ pub(super) async fn get_autonomy(
     request_body = AutonomyRequest,
     responses(
         (status = 200, description = "Saved", body = AutonomyResponse),
-        (status = 400, description = "Custom mode or invalid blocked commands", body = ErrorBody),
+        (status = 400, description = "Custom mode, invalid blocked commands or smart-check guidance", body = ErrorBody),
         (status = 403, description = "Local owner required", body = ErrorBody),
         (status = 404, description = "Agent not found", body = ErrorBody),
         (status = 409, description = "A helper, which uses its companion's", body = ErrorBody),
@@ -104,6 +111,11 @@ pub(super) async fn put_autonomy(
         Some(Ok(patterns)) => Some(patterns),
         None => None,
     };
+    let smart_policy = match input.smart_policy.as_deref().map(validate_smart_policy) {
+        Some(Err(message)) => return rejected(ApiError::bad_request(message)),
+        Some(Ok(policy)) => Some(policy),
+        None => None,
+    };
     let operation = tokio::spawn(async move {
         let transaction = state.agent_runs.control_plane_transaction().await;
         let (previous_record, previous_policy, persist) = {
@@ -129,6 +141,9 @@ pub(super) async fn put_autonomy(
             }
             if let Some(patterns) = deny_patterns {
                 record.deny_patterns = patterns;
+            }
+            if let Some(policy) = smart_policy {
+                record.smart_policy = policy;
             }
             guard.autonomy.set(record);
             (

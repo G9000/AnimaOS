@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::detection::{analyze, dangerous, glob_matches, hardline, pipeline_risk, prepare};
 use super::{ApprovalPolicy, PolicyAction};
 
 pub(crate) const MAX_DENY_PATTERNS: usize = 50;
@@ -66,6 +67,9 @@ pub(crate) struct AgentAutonomy {
     /// The owner's own always-blocked command globs (`*`, `?`).
     #[serde(default)]
     pub(crate) deny_patterns: Vec<String>,
+    /// The owner's written guidance for the smart check; empty for none.
+    #[serde(default)]
+    pub(crate) smart_policy: String,
 }
 
 impl AgentAutonomy {
@@ -143,6 +147,26 @@ impl AutonomyRegistry {
     }
 }
 
+pub(crate) const MAX_SMART_POLICY_CHARS: usize = 1_000;
+
+/// Trims the owner's smart-check guidance and refuses text that is too long
+/// or holds control characters other than newlines and tabs.
+pub(crate) fn validate_smart_policy(text: &str) -> Result<String, String> {
+    let text = text.trim();
+    if text.chars().count() > MAX_SMART_POLICY_CHARS {
+        return Err(format!(
+            "Smart check guidance is limited to {MAX_SMART_POLICY_CHARS} characters"
+        ));
+    }
+    if text
+        .chars()
+        .any(|c| c.is_control() && c != '\n' && c != '\t')
+    {
+        return Err("Smart check guidance can't contain control characters".to_string());
+    }
+    Ok(text.to_string())
+}
+
 pub(crate) fn validate_deny_patterns(patterns: &[String]) -> Result<Vec<String>, String> {
     if patterns.len() > MAX_DENY_PATTERNS {
         return Err(format!("At most {MAX_DENY_PATTERNS} blocked commands"));
@@ -192,8 +216,17 @@ impl SmartVerdict {
 }
 
 /// A command cut for the smart check's prompt.
+/// The most of a command the smart check is shown.
+pub(crate) const SMART_CHECK_MAX_CHARS: usize = 4_000;
+
+/// Whether the smart check would see `command` whole; a longer one always
+/// goes to the owner.
+pub(crate) fn fits_smart_check(command: &str) -> bool {
+    command.chars().count() <= SMART_CHECK_MAX_CHARS
+}
+
 pub(crate) fn bounded_command(command: &str) -> String {
-    command.chars().take(4_000).collect()
+    command.chars().take(SMART_CHECK_MAX_CHARS).collect()
 }
 
 // --- The floor ---------------------------------------------------------------
@@ -221,355 +254,62 @@ pub(crate) enum Floor {
     Ordinary,
 }
 
-/// Judges `command` for `autonomy`'s owner.
+/// Judges `command` for `autonomy`'s owner. The first hit wins: the owner's
+/// blocked patterns, fork bombs, hardline commands, `sudo -S` fed from a
+/// pipe, pipeline risks, elevated commands, hard-to-undo commands, parts that
+/// could not be read reliably, hidden characters, and commands too long to
+/// check.
 pub(crate) fn floor(command: &str, autonomy: &AgentAutonomy) -> Floor {
-    let normalized = normalize(command);
+    let prepared = prepare(command);
+    let flat = prepared
+        .text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let as_written = command
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     for pattern in &autonomy.deny_patterns {
-        if glob_matches(&pattern.to_lowercase(), &normalized) {
+        let pattern = pattern.to_lowercase();
+        if glob_matches(&pattern, &flat) || glob_matches(&pattern, &as_written) {
             return Floor::Blocked(format!("matches your blocked command \"{pattern}\""));
         }
     }
-    for segment in segments(&normalized) {
-        if let Some(reason) = hardline(&segment) {
+    if flat.contains(":(){") || flat.contains(":() {") {
+        return Floor::Blocked("is a fork bomb".to_string());
+    }
+    let analysis = analyze(&prepared.text);
+    for segment in &analysis.segments {
+        if let Some(reason) = hardline(segment) {
             return Floor::Blocked(reason.to_string());
         }
     }
-    if normalized.contains("| sudo -s") || normalized.contains("|sudo -s") {
+    if flat.contains("| sudo -s") || flat.contains("|sudo -s") {
         return Floor::Blocked("pipes a password into sudo".to_string());
     }
-    if piped_into_shell(&normalized) {
-        return Floor::Dangerous("runs a downloaded script");
+    if let Some(reason) = pipeline_risk(&analysis, &flat) {
+        return Floor::Dangerous(reason);
     }
-    if elevated(&normalized) {
+    if analysis.segments.iter().any(|segment| segment.elevated) {
         return Floor::Dangerous("runs as the administrator");
     }
-    for segment in segments(&normalized) {
-        if let Some(reason) = dangerous(&segment) {
+    for segment in &analysis.segments {
+        if let Some(reason) = dangerous(segment) {
             return Floor::Dangerous(reason);
         }
     }
+    if let Some(reason) = analysis.uncertain {
+        return Floor::Dangerous(reason);
+    }
+    if prepared.hidden {
+        return Floor::Dangerous("hides characters in the command");
+    }
+    if prepared.too_long {
+        return Floor::Dangerous("is too long to check");
+    }
     Floor::Ordinary
-}
-
-/// Lowercase, single-spaced, with `$HOME`/`${HOME}` spelled `~`.
-fn normalize(command: &str) -> String {
-    command
-        .to_lowercase()
-        .replace("${home}", "~")
-        .replace("$home", "~")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Whether any simple command starts with `sudo`, `doas` or `su`.
-fn elevated(command: &str) -> bool {
-    command.split([';', '|', '&', '\n']).any(|segment| {
-        matches!(
-            segment.split_whitespace().next(),
-            Some("sudo" | "doas" | "su")
-        )
-    })
-}
-
-/// Each simple command of a line: split on `;`, `&&`, `||`, `|` and `&`, with
-/// leading `sudo`, `env X=…`, `nohup`, `time`, `exec` and `command` removed.
-fn segments(command: &str) -> Vec<String> {
-    command
-        .split([';', '|', '&', '\n'])
-        .map(|segment| {
-            let mut words: Vec<&str> = segment.split_whitespace().collect();
-            loop {
-                match words.first() {
-                    Some(&("sudo" | "nohup" | "time" | "exec" | "command" | "doas")) => {
-                        words.remove(0);
-                        while words.first().is_some_and(|word| word.starts_with('-')) {
-                            words.remove(0);
-                        }
-                    }
-                    Some(&"env") => {
-                        words.remove(0);
-                        while words
-                            .first()
-                            .is_some_and(|word| word.contains('=') || word.starts_with('-'))
-                        {
-                            words.remove(0);
-                        }
-                    }
-                    Some(word) if word.contains('=') && !word.starts_with('-') => {
-                        words.remove(0);
-                    }
-                    _ => break,
-                }
-            }
-            words.join(" ")
-        })
-        .filter(|segment| !segment.is_empty())
-        .collect()
-}
-
-const PROTECTED_ROOTS: &[&str] = &[
-    "/",
-    "/*",
-    "~",
-    "~/",
-    "~/*",
-    "/home",
-    "/users",
-    "/root",
-    "/etc",
-    "/usr",
-    "/bin",
-    "/sbin",
-    "/lib",
-    "/var",
-    "/system",
-    "/library",
-    "/applications",
-    "/opt",
-    "/boot",
-    "/private",
-];
-
-/// Commands nothing allows, in any mode.
-fn hardline(segment: &str) -> Option<&'static str> {
-    let words: Vec<&str> = segment.split(' ').collect();
-    let program = words
-        .first()
-        .map(|word| word.rsplit('/').next().unwrap_or(word))?;
-    match program {
-        "rm" => {
-            let recursive = words.iter().any(|word| {
-                *word == "--recursive"
-                    || (word.starts_with('-') && !word.starts_with("--") && word.contains('r'))
-            });
-            let targets = words.iter().skip(1).filter(|word| !word.starts_with('-'));
-            let mut targets =
-                targets.map(|word| word.trim_matches(['"', '\'']).trim_end_matches('/'));
-            if recursive
-                && targets.any(|target| {
-                    let target = if target.is_empty() { "/" } else { target };
-                    PROTECTED_ROOTS.contains(&target)
-                })
-            {
-                return Some("recursively deletes the system or your home folder");
-            }
-            None
-        }
-        name if name.starts_with("mkfs") => Some("formats a disk"),
-        "dd" if words.iter().any(|word| word.starts_with("of=/dev/")) => {
-            Some("writes over a disk device")
-        }
-        "shutdown" | "reboot" | "halt" | "poweroff" => Some("shuts down or restarts the computer"),
-        "init" | "telinit" if words.get(1).is_some_and(|arg| *arg == "0" || *arg == "6") => {
-            Some("shuts down or restarts the computer")
-        }
-        "systemctl"
-            if words
-                .iter()
-                .any(|word| matches!(*word, "poweroff" | "reboot" | "halt" | "kexec")) =>
-        {
-            Some("shuts down or restarts the computer")
-        }
-        "kill" if words.iter().skip(1).any(|word| *word == "-1") && words.len() <= 3 => {
-            Some("kills every process you own")
-        }
-        "diskutil"
-            if words
-                .iter()
-                .any(|word| matches!(*word, "erasedisk" | "erasevolume" | "secureerase")) =>
-        {
-            Some("erases a disk")
-        }
-        _ if segment.contains(":(){") || segment.contains(":() {") => Some("is a fork bomb"),
-        _ if segment.contains("> /dev/sd")
-            || segment.contains(">/dev/sd")
-            || segment.contains("> /dev/disk")
-            || segment.contains(">/dev/disk")
-            || segment.contains("> /dev/nvme") =>
-        {
-            Some("writes over a disk device")
-        }
-        _ => None,
-    }
-}
-
-/// `curl … | sh`-style: a download fed straight to a shell.
-fn piped_into_shell(command: &str) -> bool {
-    let fetches = command.contains("curl ") || command.contains("wget ");
-    fetches
-        && command.split('|').skip(1).any(|segment| {
-            let program = segment.split_whitespace().next().unwrap_or("");
-            let program = program.rsplit('/').next().unwrap_or(program);
-            matches!(
-                program,
-                "sh" | "bash"
-                    | "zsh"
-                    | "fish"
-                    | "sudo"
-                    | "python"
-                    | "python3"
-                    | "node"
-                    | "perl"
-                    | "ruby"
-            )
-        })
-}
-
-/// Commands that are hard to undo; they ask unless a rule covers them.
-fn dangerous(segment: &str) -> Option<&'static str> {
-    let words: Vec<&str> = segment.split(' ').collect();
-    let program = words
-        .first()
-        .map(|word| word.rsplit('/').next().unwrap_or(word))?;
-    let has = |flag: &str| words.iter().any(|word| *word == flag);
-    let short_flag = |letter: char| {
-        words
-            .iter()
-            .any(|word| word.starts_with('-') && !word.starts_with("--") && word.contains(letter))
-    };
-    match program {
-        "rm" if short_flag('r') || short_flag('f') || has("--recursive") || has("--force") => {
-            Some("deletes files for good")
-        }
-        "git" => {
-            let sub = words
-                .iter()
-                .skip(1)
-                .find(|word| !word.starts_with('-'))
-                .copied()
-                .unwrap_or("");
-            match sub {
-                "push"
-                    if has("--force")
-                        || has("-f")
-                        || has("--force-with-lease")
-                        || has("--delete")
-                        || has("--mirror") =>
-                {
-                    Some("rewrites or deletes history on a remote")
-                }
-                "reset" if has("--hard") => Some("throws away uncommitted work"),
-                "clean" if short_flag('f') => Some("deletes untracked files"),
-                "checkout" | "restore" if has(".") || has("--") && has(".") => {
-                    Some("throws away uncommitted work")
-                }
-                "branch" if has("-d") || has("--delete") => Some("deletes a branch"),
-                "filter-branch" | "filter-repo" => Some("rewrites history"),
-                _ => None,
-            }
-        }
-        // Flags are lowercased by `normalize`, so `-R` reads as `-r`.
-        "chmod" | "chown" | "chgrp" if short_flag('r') || has("--recursive") => {
-            Some("changes permissions of a whole tree")
-        }
-        "chmod" if words.iter().any(|word| *word == "777" || *word == "a+rwx") => {
-            Some("makes files writable by everyone")
-        }
-        "launchctl" | "systemctl"
-            if words.iter().any(|word| {
-                matches!(*word, "disable" | "unload" | "stop" | "mask" | "bootout")
-            }) =>
-        {
-            Some("stops a system service")
-        }
-        "kill" | "killall" | "pkill" if has("-9") || program != "kill" => {
-            Some("force-stops processes")
-        }
-        "docker" | "podman"
-            if words
-                .iter()
-                .any(|word| matches!(*word, "prune" | "rm" | "rmi"))
-                && (has("-f") || has("--force") || has("prune") || has("-a")) =>
-        {
-            Some("deletes containers, images or volumes")
-        }
-        "kubectl" if has("delete") => Some("deletes cluster resources"),
-        "terraform" | "tofu" if has("destroy") || has("-destroy") => {
-            Some("destroys infrastructure")
-        }
-        "npm" | "pnpm" | "yarn" | "cargo" | "twine" | "gem"
-            if has("publish") || has("unpublish") || has("yank") =>
-        {
-            Some("publishes or unpublishes a package")
-        }
-        "gh" if words.iter().any(|word| matches!(*word, "delete" | "merge")) => {
-            Some("deletes or merges on GitHub")
-        }
-        "crontab" if has("-r") => Some("deletes your scheduled jobs"),
-        "truncate" | "shred" | "srm" => Some("destroys file contents"),
-        _ => {
-            if writes_sensitive_file(segment) {
-                Some("changes a shell, SSH or credential file")
-            } else if segment.contains("drop table")
-                || segment.contains("drop database")
-                || segment.contains("truncate table")
-            {
-                Some("deletes database data")
-            } else {
-                None
-            }
-        }
-    }
-}
-
-/// Redirects or copies into a file that controls logins or the shell.
-fn writes_sensitive_file(segment: &str) -> bool {
-    const SENSITIVE: &[&str] = &[
-        "~/.ssh/",
-        "~/.bashrc",
-        "~/.zshrc",
-        "~/.profile",
-        "~/.bash_profile",
-        "~/.zprofile",
-        "~/.netrc",
-        "~/.aws/credentials",
-        "~/.git-credentials",
-        "~/.gnupg/",
-        "/etc/",
-        "/private/etc/",
-    ];
-    let writes = segment.contains('>')
-        || segment.starts_with("tee ")
-        || segment.starts_with("cp ")
-        || segment.starts_with("mv ")
-        || segment.starts_with("sed -i")
-        || segment.starts_with("ln ");
-    writes && SENSITIVE.iter().any(|path| segment.contains(path))
-}
-
-/// Shell-style glob over the whole normalized command: `*` any run, `?` one
-/// character.
-fn glob_matches(pattern: &str, text: &str) -> bool {
-    let pattern: Vec<char> = pattern
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .collect();
-    let text: Vec<char> = text.chars().collect();
-    let (mut p, mut t) = (0, 0);
-    let (mut star, mut mark) = (None, 0);
-    while t < text.len() {
-        if p < pattern.len() && (pattern[p] == '?' || pattern[p] == text[t]) {
-            p += 1;
-            t += 1;
-        } else if p < pattern.len() && pattern[p] == '*' {
-            star = Some(p);
-            mark = t;
-            p += 1;
-        } else if let Some(position) = star {
-            p = position + 1;
-            mark += 1;
-            t = mark;
-        } else {
-            return false;
-        }
-    }
-    while p < pattern.len() && pattern[p] == '*' {
-        p += 1;
-    }
-    p == pattern.len()
 }
 
 #[cfg(test)]
@@ -666,6 +406,44 @@ mod tests {
             SmartVerdict::Escalate
         );
         assert_eq!(SmartVerdict::parse(""), SmartVerdict::Escalate);
+    }
+
+    #[test]
+    fn owner_patterns_match_the_absolute_home_path() {
+        let Ok(home) = std::env::var("HOME") else {
+            return;
+        };
+        let owner = AgentAutonomy {
+            deny_patterns: vec![format!("cat {home}/secrets*")],
+            ..AgentAutonomy::default()
+        };
+        assert!(matches!(
+            floor(&format!("cat {home}/secrets.txt"), &owner),
+            Floor::Blocked(_)
+        ));
+    }
+
+    #[test]
+    fn the_smart_check_only_judges_commands_it_can_see_whole() {
+        assert!(fits_smart_check("rm -rf build"));
+        assert!(!fits_smart_check(&format!(
+            "{} && rm -rf ~/work",
+            "true ".repeat(1_000)
+        )));
+    }
+
+    #[test]
+    fn smart_policy_is_trimmed_and_bounded() {
+        assert_eq!(validate_smart_policy("  ok  "), Ok("ok".to_string()));
+        assert_eq!(
+            validate_smart_policy(&"x".repeat(1001)),
+            Err("Smart check guidance is limited to 1000 characters".to_string())
+        );
+        assert_eq!(
+            validate_smart_policy("a\u{7}"),
+            Err("Smart check guidance can't contain control characters".to_string())
+        );
+        assert_eq!(validate_smart_policy("a\nb\tc"), Ok("a\nb\tc".to_string()));
     }
 
     #[test]

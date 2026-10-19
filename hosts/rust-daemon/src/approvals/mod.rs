@@ -4,6 +4,8 @@
 //! (`gate`).
 
 pub(crate) mod autonomy;
+mod detection;
+mod shell_lex;
 pub(crate) mod gate;
 pub(crate) mod policy;
 pub(crate) mod registry;
@@ -18,7 +20,7 @@ pub(crate) use policy::{
     evaluate, matcher_kinds, risk_class, suggested_matcher, validate_matcher, Verdict,
 };
 pub(crate) use registry::{
-    AgentApprovalPolicy, ApprovalDecisionKind, ApprovalRegistry, ApprovalRequest,
+    AgentApprovalPolicy, ApprovalDecisionKind, ApprovalReason, ApprovalRegistry, ApprovalRequest,
     ApprovalResolution, ApprovalSnapshot, ApprovalStatus, PendingApprovalStart, ResolvedBy,
 };
 
@@ -53,6 +55,8 @@ pub(crate) const TOO_MANY_SESSION_ALLOWANCES: &str = "This session already has 5
 pub(crate) const APPROVAL_SESSION_GONE: &str = "This approval's session no longer exists";
 /// How long a call waits for the owner (spec §7.3, §16)...
 pub(crate) const APPROVAL_TIMEOUT_MS: u64 = 30 * 60 * 1000;
+/// Refused actions in a row after which the agent is told to stop and ask.
+pub(crate) const REFUSAL_BREAKER: u32 = 3;
 /// ...or, for a Telegram-started run, whose connector handles one message
 /// at a time.
 pub(crate) const TELEGRAM_APPROVAL_TIMEOUT_MS: u64 = 15 * 60 * 1000;

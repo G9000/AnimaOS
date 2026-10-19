@@ -25,11 +25,13 @@ sha2 = "0.10"
 axum = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = "0.10"
+iana-time-zone = "0.1"
 fastembed = { version = "5.13.4", default-features = false, features = ["hf-hub-rustls-tls", "ort-download-binaries-rustls-tls"] }
 futures = "0.3"
 keyring = "4.1.6"
 meval = "0.2"
 regex = "1"
+unicode-normalization = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "stream"] }
 rmcp = { version = "=3.5.1", default-features = false, features = ["client", "transport-streamable-http-client", "transport-async-rw"] }
 process-wrap = { version = "=10.0.1", default-features = false, features = ["std", "tokio1", "creation-flags", "job-object", "kill-on-drop", "process-group"] }

@@ -1,8 +1,13 @@
 import { useState } from 'react';
 import { DaemonHttpError, type Automation } from '@animaOS-SWARM/sdk';
 
-import { COMPANION_UNREACHABLE, formatWhen } from '../../lib/approvals';
-import { describeActiveHours, describeTrigger } from '../../lib/automations';
+import { COMPANION_UNREACHABLE } from '../../lib/approvals';
+import {
+  automationTimeZone,
+  describeActiveHours,
+  describeTrigger,
+  formatWhenIn,
+} from '../../lib/automations';
 import { revealInvisible } from '../../lib/skills';
 
 /** An automation the companion created (spec §9.3, §15.2), with Undo. Its
@@ -40,7 +45,7 @@ export function AutomationNoticeCard({
         ? ` · ${describeActiveHours(automation.activeHours)}`
         : '') +
       (automation.enabled
-        ? ` · next ${formatWhen(automation.nextDueAtMs)}`
+        ? ` · next ${formatWhenIn(automation.nextDueAtMs, automationTimeZone(automation))}`
         : ' · paused'),
   ).text;
   return (

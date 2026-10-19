@@ -52,6 +52,34 @@ pub(super) struct StartRunRequest {
     skill: Option<String>,
     #[serde(default)]
     mode: StartRunMode,
+    /// The sender's IANA time zone, as their browser reports it; it becomes
+    /// the owner's time zone for every run, Telegram and automations too.
+    #[serde(default)]
+    time_zone: Option<String>,
+}
+
+/// Makes `zone` the owner's time zone and saves it in the background, so a
+/// slow store never delays the run. A zone this build does not know is
+/// ignored: the message still runs, on the zone held before.
+async fn remember_owner_time_zone(state: &AppState, zone: Option<&str>) {
+    let Some(zone) =
+        zone.and_then(|name| crate::schedules::timing::parse_time_zone(name.trim()).ok())
+    else {
+        return;
+    };
+    let owner = state.daemon.read().await.owner_time_zone.clone();
+    if !owner.set(Some(zone)) {
+        return;
+    }
+    let state = state.clone();
+    tokio::spawn(async move {
+        let transaction = state.agent_runs.control_plane_transaction().await;
+        let persist = state.daemon.write().await.control_plane_persist_request();
+        if let Err(error) = persist.save().await {
+            tracing::warn!(%error, "the owner's time zone was not saved");
+        }
+        drop(transaction);
+    });
 }
 
 fn idempotency_key(headers: &HeaderMap) -> Result<String, ApiError> {
@@ -155,6 +183,7 @@ pub(super) async fn start_session_run(
     if let Err(error) = validate_input(&input) {
         return rejected(error);
     }
+    remember_owner_time_zone(&state, input.time_zone.as_deref()).await;
     if let Some(replayed) = state
         .agent_runs
         .replayed_run_with_attachments(

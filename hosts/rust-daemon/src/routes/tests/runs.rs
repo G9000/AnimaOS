@@ -337,6 +337,35 @@ async fn a_fully_escaped_32_kib_text_is_checked_by_its_length_not_the_body_limit
 }
 
 #[tokio::test]
+async fn the_senders_time_zone_becomes_the_owners_and_an_unknown_one_is_ignored() {
+    let (app, state, agent) = app_with_chat(ScriptedModel::new(vec![
+        Step::Text(vec!["Noted"]),
+        Step::Text(vec!["Noted again"]),
+    ]))
+    .await;
+    let owner = state.read().await.owner_time_zone.clone();
+    assert_eq!(owner.get(), None);
+
+    for (key, zone, expected) in [
+        ("zone-1", "America/New_York", Some(chrono_tz::Tz::America__New_York)),
+        ("zone-2", "Mars/Olympus_Mons", Some(chrono_tz::Tz::America__New_York)),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(start_request(
+                &agent,
+                "chat:plans",
+                Some(key),
+                json!({"text": "Remind me at 7 p.m.", "timeZone": zone}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED, "{zone}");
+        assert_eq!(owner.get(), expected, "{zone}");
+    }
+}
+
+#[tokio::test]
 async fn a_message_is_accepted_as_a_queued_run_that_then_completes() {
     let (app, state, agent) = app_with_chat(ScriptedModel::new(vec![Step::Text(vec![
         "Here ",

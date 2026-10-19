@@ -99,6 +99,7 @@ export function registerAttachmentJourneys({
     expect(calls[1][2]).toEqual({
       text: raw,
       mode: 'queue',
+      timeZone: expect.any(String),
       skill: 'notes',
       attachmentIds: ['att_1'],
     });
@@ -355,7 +356,12 @@ export function registerAttachmentJourneys({
       expect(daemon.startRun).toHaveBeenCalledWith(
         'agent-a',
         'chat:new-1',
-        { text: '', mode: 'queue', attachmentIds: ['att_ongoing'] },
+        {
+          text: '',
+          mode: 'queue',
+          attachmentIds: ['att_ongoing'],
+          timeZone: expect.any(String),
+        },
         expect.any(String),
       ),
     );
@@ -406,7 +412,12 @@ export function registerAttachmentJourneys({
       expect(daemon.startRun).toHaveBeenCalledWith(
         'agent-a',
         upload.mock.calls[0][1],
-        { text: '', mode: 'queue', attachmentIds: ['one.txt', 'two.txt'] },
+        {
+          text: '',
+          mode: 'queue',
+          attachmentIds: ['one.txt', 'two.txt'],
+          timeZone: expect.any(String),
+        },
         expect.any(String),
       ),
     );

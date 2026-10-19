@@ -7,10 +7,10 @@ use anima_core::{AgentState, Content, TaskResult, ToolCall, CANCELLED_TOOL_RESUL
 use super::DaemonState;
 use crate::agent_runs::{config_helper_parent, is_helper_config};
 use crate::approvals::{
-    evaluate, validate_matcher, ApprovalDecisionKind, ApprovalMatcher, ApprovalRequest,
-    ApprovalResolution, ApprovalRule, ApprovalStatus, PendingApprovalStart, ResolvedBy,
-    SessionAllowance, Verdict, APPROVAL_NOTE_TOO_LONG, APPROVAL_SESSION_GONE, APPROVAL_TIMED_OUT,
-    APPROVAL_UNAVAILABLE, MAX_APPROVAL_NOTE_CHARS, MAX_SESSION_ALLOWANCES,
+    evaluate, validate_matcher, ApprovalDecisionKind, ApprovalMatcher, ApprovalReason,
+    ApprovalRequest, ApprovalResolution, ApprovalRule, ApprovalStatus, PendingApprovalStart,
+    ResolvedBy, SessionAllowance, Verdict, APPROVAL_NOTE_TOO_LONG, APPROVAL_SESSION_GONE,
+    APPROVAL_TIMED_OUT, APPROVAL_UNAVAILABLE, MAX_APPROVAL_NOTE_CHARS, MAX_SESSION_ALLOWANCES,
     TOO_MANY_SESSION_ALLOWANCES,
 };
 use crate::live::{run_status_event, LiveEvent, LiveEventBody};
@@ -312,14 +312,12 @@ impl DaemonState {
                             config_helper_parent(runtime.config()).map(str::to_string)
                         })
                         .unwrap_or_else(|| ask.run.agent_id.clone());
-                    command_of(&ask.call)
-                        .filter(|command| {
-                            matches!(
-                                floor(command, &self.autonomy_of(&owner)),
-                                Floor::Dangerous(_)
-                            )
-                        })
-                        .map(|_| "dangerous_command")
+                    command_of(&ask.call).and_then(|command| {
+                        match floor(command, &self.autonomy_of(&owner)) {
+                            Floor::Dangerous(why) => Some(ApprovalReason::DangerousCommand(why)),
+                            _ => None,
+                        }
+                    })
                 },
             },
             now_ms,

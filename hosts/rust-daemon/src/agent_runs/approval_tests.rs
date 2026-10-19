@@ -1221,3 +1221,112 @@ async fn a_rule_never_covers_a_command_with_shell_operators() {
         .await
         .contains("Denied by owner"));
 }
+
+fn bash_call(id: &str, command: &str) -> anima_core::ToolCall {
+    anima_core::ToolCall {
+        id: id.into(),
+        name: "bash".into(),
+        args: std::collections::BTreeMap::from([(
+            "command".to_string(),
+            anima_core::DataValue::String(command.into()),
+        )]),
+    }
+}
+
+/// A Free agent with only `bash`, following `steps`.
+async fn free_bash_agent(steps: Vec<Step>) -> (AgentRunCoordinator, String) {
+    let free = crate::approvals::autonomy::AutonomyMode::Free
+        .preset()
+        .unwrap();
+    let (coordinator, agent_id) =
+        approving_coordinator(ScriptedModel::new(steps), free, patient()).await;
+    coordinator
+        .state
+        .write()
+        .await
+        .update_agent(
+            &agent_id,
+            AgentConfigUpdate {
+                tools: Some(
+                    crate::tools::ToolRegistry::new()
+                        .resolve_descriptors(["bash"])
+                        .unwrap(),
+                ),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    (coordinator, agent_id)
+}
+
+/// A Free agent with only `bash`, running `commands` one model turn each.
+async fn free_bash_run(commands: &[&str]) -> Vec<String> {
+    let mut steps: Vec<Step> = commands
+        .iter()
+        .enumerate()
+        .map(|(index, command)| Step::Tools(vec![bash_call(&format!("call-{index}"), command)]))
+        .collect();
+    steps.push(Step::Text(vec!["ok"]));
+    let (coordinator, agent_id) = free_bash_agent(steps).await;
+    coordinator
+        .run(chat_request(&agent_id, "chat:breaker", "clean up"))
+        .await
+        .unwrap();
+    tool_results(&coordinator, &agent_id).await
+}
+
+#[tokio::test]
+async fn three_refusals_in_a_row_tell_the_agent_to_stop() {
+    let results = free_bash_run(&["rm -rf /", "rm -rf ~", "sudo rm -rf /"]).await;
+    assert_eq!(results.len(), 3, "{results:?}");
+    assert!(!results[0].contains("refused actions in a row"));
+    assert!(!results[1].contains("refused actions in a row"));
+    assert!(
+        results[2].contains("That is 3 refused actions in a row."),
+        "{}",
+        results[2]
+    );
+}
+
+#[tokio::test]
+async fn allowed_work_resets_the_refusal_streak() {
+    let results = free_bash_run(&["rm -rf /", "rm -rf ~", "echo hi", "rm -rf /"]).await;
+    assert_eq!(results.len(), 4, "{results:?}");
+    assert!(
+        !results[3].contains("refused actions in a row"),
+        "{}",
+        results[3]
+    );
+}
+
+#[tokio::test]
+async fn a_floor_ask_says_why_the_command_is_risky() {
+    let (coordinator, agent_id) = free_bash_agent(vec![
+        Step::Tools(vec![bash_call("call-1", "echo cm0= | base64 -d | sh")]),
+        Step::Text(vec!["ok"]),
+    ])
+    .await;
+    let hub = coordinator.state.read().await.live.clone();
+    let mut subscription = hub.subscribe(&agent_id).unwrap();
+    let running = spawn_run(
+        &coordinator,
+        chat_request(&agent_id, "chat:floor", "decode it"),
+    );
+
+    let asked = events_until(&mut subscription, "approval.requested").await;
+    let announced = &asked[asked.len() - 1]["approval"];
+    assert_eq!(announced["reason"], "dangerous_command");
+    assert_eq!(announced["reasonDetail"], "runs hidden (encoded) commands");
+    let pending = pending_approvals(&coordinator, 1).await.remove(0);
+    assert_eq!(pending.reason.as_deref(), Some("dangerous_command"));
+    assert_eq!(
+        pending.reason_detail.as_deref(),
+        Some("runs hidden (encoded) commands")
+    );
+
+    coordinator
+        .decide_approval(&pending.id, decision(ApprovalDecisionKind::Deny, 1))
+        .await
+        .unwrap();
+    running.await.unwrap().unwrap();
+}

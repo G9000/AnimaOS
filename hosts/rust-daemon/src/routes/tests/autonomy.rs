@@ -174,6 +174,36 @@ async fn an_older_agent_reads_as_the_preset_its_policy_equals() {
 }
 
 #[tokio::test]
+async fn smart_policy_round_trips_and_is_validated() {
+    let mut daemon = DaemonState::new();
+    let id = daemon
+        .create_agent(crate::agent_runs::test_support::companion_config("Guided"))
+        .unwrap()
+        .state
+        .id;
+    let app = router(Arc::new(RwLock::new(daemon)), DaemonConfig::default());
+    let uri = format!("/api/agents/{id}/autonomy");
+    let (status, saved) = send(
+        &app,
+        "PUT",
+        &uri,
+        Some(json!({"smartPolicy": "Deleting dist is fine"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let (_, read) = send(&app, "GET", &uri, None).await;
+    assert_eq!(read["smartPolicy"], "Deleting dist is fine");
+    let (status, _) = send(
+        &app,
+        "PUT",
+        &uri,
+        Some(json!({"smartPolicy": "x".repeat(1001)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn autonomy_routes_require_the_owner() {
     let mut daemon = DaemonState::new();
     let id = daemon

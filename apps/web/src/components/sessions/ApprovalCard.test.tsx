@@ -260,4 +260,21 @@ describe('ApprovalCard reason', () => {
       screen.queryByText('Asked because this command is hard to undo.'),
     ).toBeNull();
   });
+
+  it('names the specific risk when the floor gave one', () => {
+    render(
+      <ApprovalCard
+        approval={approvalFixture('apr_1', {
+          reason: 'dangerous_command',
+          reasonDetail: 'runs hidden (encoded) commands',
+        })}
+      />,
+    );
+    expect(
+      screen.getByText('Asked because this command runs hidden (encoded) commands.'),
+    ).toBeVisible();
+    expect(
+      screen.queryByText('Asked because this command is hard to undo.'),
+    ).toBeNull();
+  });
 });

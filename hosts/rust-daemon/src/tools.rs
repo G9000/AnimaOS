@@ -121,6 +121,8 @@ pub(crate) struct ToolExecutionContext {
     rpc_fence: Option<crate::tool_rpc::RpcGrantFence>,
     completion_review: Option<anima_core::CompletionReview>,
     tool_rpc_service: Arc<crate::tool_rpc::ToolRpcService>,
+    /// The owner's time zone, for reading and scheduling wall-clock times.
+    pub(super) owner_time_zone: crate::clock::OwnerTimeZone,
 }
 
 impl ToolExecutionContext {
@@ -201,7 +203,13 @@ impl ToolExecutionContext {
             rpc_fence: None,
             completion_review: None,
             tool_rpc_service: crate::tool_rpc::ToolRpcService::disabled(),
+            owner_time_zone: crate::clock::OwnerTimeZone::default(),
         }
+    }
+
+    pub(crate) fn with_owner_time_zone(mut self, zone: crate::clock::OwnerTimeZone) -> Self {
+        self.owner_time_zone = zone;
+        self
     }
 
     pub(crate) fn with_document_extractor(
@@ -904,7 +912,7 @@ impl ToolRegistry {
         registry.register(
             tool_descriptor(
                 "get_current_time",
-                "Return the current UTC time in RFC 3339 format",
+                "Return the current local time: weekday, RFC 3339 time with offset, and IANA time zone",
                 object_parameters(Vec::new()),
             ),
             utility::execute_get_current_time,
@@ -1068,7 +1076,7 @@ impl ToolRegistry {
                     ),
                     optional_parameter(
                         "timeZone",
-                        string_parameter("IANA time zone for a cron schedule and active hours, such as Europe/London; UTC when absent"),
+                        string_parameter("IANA time zone for a cron schedule and active hours, such as Europe/London; the owner's time zone when absent"),
                     ),
                     optional_parameter(
                         "target",

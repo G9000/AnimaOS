@@ -9,7 +9,9 @@ import {
   automationNoticeFor,
   checkinScheduleId,
   describeActiveHours,
+  automationTimeZone,
   describeTrigger,
+  formatWhenIn,
 } from './automations';
 import type { ToolStep } from './transcript';
 
@@ -30,6 +32,32 @@ function step(overrides: Partial<ToolStep> = {}): ToolStep {
 }
 
 describe('automation labels', () => {
+  it('reads times on the automation’s zone and names it', () => {
+    const cron = {
+      trigger: {
+        type: 'cron',
+        expression: '0 19 * * *',
+        timeZone: 'America/New_York',
+      },
+      activeHours: null,
+    } as const;
+    expect(automationTimeZone(cron)).toBe('America/New_York');
+    expect(
+      automationTimeZone({
+        trigger: { type: 'interval', intervalMs: 1_800_000 },
+        activeHours: {
+          start: '08:00',
+          end: '22:00',
+          days: [1],
+          timeZone: 'Asia/Singapore',
+        },
+      }),
+    ).toBe('Asia/Singapore');
+    expect(
+      formatWhenIn(Date.UTC(2026, 9, 19, 23, 0), 'America/New_York'),
+    ).toMatch(/Oct 19, 07:00\sPM EDT/);
+  });
+
   it('describes triggers and active hours in words', () => {
     expect(describeTrigger({ type: 'interval', intervalMs: 1_800_000 })).toBe(
       'every 30 min',

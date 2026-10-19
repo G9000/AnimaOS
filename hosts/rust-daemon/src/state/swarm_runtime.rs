@@ -40,6 +40,7 @@ impl DaemonState {
         let mail = self.mail_manager.clone();
         let drive = self.drive_manager.clone();
         let db = self.db.clone();
+        let owner_time_zone = self.owner_time_zone.clone();
 
         Arc::new(move |context: CoordinatorAgentFactoryContext| {
             let memory = Arc::clone(&memory);
@@ -55,6 +56,7 @@ impl DaemonState {
             let drive = drive.as_ref().and_then(|manager| manager.upgrade());
             let event_stream = event_stream.clone();
             let db = db.clone();
+            let owner_time_zone = owner_time_zone.clone();
 
             Box::pin(async move {
                 let config = with_swarm_messaging_tools(context.config.clone(), &tool_registry);
@@ -73,6 +75,7 @@ impl DaemonState {
                     workspace_root,
                     calendar,
                 )
+                .with_owner_time_zone(owner_time_zone)
                 .with_mail(mail)
                 .with_drive(drive)
                 .with_todo_owner(swarm_task_owner_id(&context.swarm_id, &context.agent_id));
@@ -95,6 +98,7 @@ impl DaemonState {
                     Arc::clone(&memory_embeddings),
                     memory_store.clone(),
                     Arc::clone(&memory_views),
+                    tool_context.owner_time_zone.clone(),
                     inbox.clone(),
                     participants.clone(),
                     Arc::clone(&runtime_events),
@@ -164,6 +168,7 @@ impl DaemonState {
                                         Arc::clone(&memory_embeddings),
                                         memory_store,
                                         memory_views,
+                                        tool_context.owner_time_zone.clone(),
                                         inbox,
                                         participants.clone(),
                                         Arc::clone(&runtime_events),
@@ -339,6 +344,7 @@ fn build_swarm_runtime(
     memory_embeddings: SharedMemoryEmbeddings,
     memory_store: Option<crate::memory_store::MemoryStoreConfig>,
     memory_views: crate::memory_views::SharedMemoryViewSelections,
+    owner_time_zone: crate::clock::OwnerTimeZone,
     inbox: Arc<CoordinatorInboxFn>,
     participants: Arc<CoordinatorParticipantsFn>,
     event_listener: Arc<dyn Fn(EngineEvent) + Send + Sync>,
@@ -350,6 +356,7 @@ fn build_swarm_runtime(
         Arc::clone(&memory),
         Arc::clone(&memory_embeddings),
         memory_views,
+        owner_time_zone,
     );
     providers.push(Arc::new(SwarmInboxProvider { inbox }));
     providers.push(Arc::new(SwarmParticipantsProvider { participants }));

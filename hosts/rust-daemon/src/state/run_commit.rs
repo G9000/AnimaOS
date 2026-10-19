@@ -62,6 +62,7 @@ impl DaemonState {
         )
         .with_tool_rpc_service(self.tool_rpc_service.clone())
         .with_checkpoint_root(self.checkpoint_root.clone())
+        .with_owner_time_zone(self.owner_time_zone.clone())
         .with_mail(self.mail_manager.clone())
         .with_drive(
             self.drive_manager
@@ -204,6 +205,7 @@ impl DaemonState {
                 Arc::clone(&self.memory),
                 Arc::clone(&self.memory_embeddings),
                 Arc::clone(&self.memory_view_selections),
+                self.owner_time_zone.clone(),
             );
             providers
                 .push(Arc::new(SessionSummaryProvider { text: summary.text }) as Arc<dyn Provider>);

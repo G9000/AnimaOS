@@ -36,6 +36,26 @@ describe('AutomationNoticeCard', () => {
     ).toBeNull();
   });
 
+  it('names the zone of the next run, the schedule’s own when it has one', () => {
+    // 2026-10-19 19:00 in New York.
+    const evening = Date.UTC(2026, 9, 19, 23, 0);
+    render(
+      <AutomationNoticeCard
+        automation={automationFixture('schedule-2', {
+          name: 'Call mom',
+          trigger: {
+            type: 'cron',
+            expression: '0 19 * * *',
+            timeZone: 'America/New_York',
+          },
+          nextDueAtMs: evening,
+        })}
+      />,
+    );
+    const card = screen.getByRole('note', { name: 'Automation Call mom' });
+    expect(card).toHaveTextContent(/next Oct 19, 07:00\sPM EDT/);
+  });
+
   it('says the companion is unreachable when Undo fails any other way', async () => {
     const user = userEvent.setup();
     const onUndo = vi.fn().mockRejectedValue(new TypeError('fetch failed'));

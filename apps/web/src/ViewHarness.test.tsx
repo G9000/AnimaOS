@@ -1428,7 +1428,7 @@ describe('ViewHarness workspace controller', () => {
       expect(startRun).toHaveBeenCalledWith(
         'agent-a',
         'chat:new-1',
-        { text: 'Hello', mode: 'queue' },
+        { text: 'Hello', mode: 'queue', timeZone: expect.any(String) },
         expect.any(String),
       ),
     );
@@ -1515,7 +1515,7 @@ describe('ViewHarness workspace controller', () => {
       expect(startRun).toHaveBeenCalledWith(
         'agent-next',
         nextMain!.id,
-        { text: 'Continue', mode: 'queue' },
+        { text: 'Continue', mode: 'queue', timeZone: expect.any(String) },
         expect.any(String),
       ),
     );
@@ -2128,7 +2128,7 @@ describe('ViewHarness workspace controller', () => {
       expect(daemon.startRun).toHaveBeenCalledWith(
         'agent-a',
         'chat:new-1',
-        { text: 'Alpha work', mode: 'queue' },
+        { text: 'Alpha work', mode: 'queue', timeZone: expect.any(String) },
         expect.any(String),
       ),
     );
@@ -2336,7 +2336,7 @@ it('keeps the composer usable while the session has a reply in progress', async 
   expect(daemon.startRun).toHaveBeenCalledWith(
     'agent-main',
     'room-7',
-    { text: 'And one more', mode: 'queue' },
+    { text: 'And one more', mode: 'queue', timeZone: expect.any(String) },
     expect.any(String),
   );
 });
@@ -2372,7 +2372,12 @@ it('sends a /skill message from the composer with its skill', async () => {
   expect(daemon.startRun).toHaveBeenCalledWith(
     'agent-main',
     'room-7',
-    { text: '/notes plan the week', mode: 'queue', skill: 'notes' },
+    {
+      text: '/notes plan the week',
+      mode: 'queue',
+      skill: 'notes',
+      timeZone: expect.any(String),
+    },
     expect.any(String),
   );
 });
@@ -2475,7 +2480,7 @@ it('replies to a check-in through the runs route', async () => {
   expect(daemon.startRun).toHaveBeenCalledWith(
     'agent-main',
     'schedule:daily',
-    { text: 'Goals are on track', mode: 'queue' },
+    { text: 'Goals are on track', mode: 'queue', timeZone: expect.any(String) },
     expect.any(String),
   );
 });
@@ -2546,7 +2551,11 @@ it('opens an existing session from the sidebar, marks it read, and sends to it',
   expect(run).toHaveBeenCalledWith(
     'agent-main',
     'room-7',
-    { text: 'Does Saturday work?', mode: 'queue' },
+    {
+      text: 'Does Saturday work?',
+      mode: 'queue',
+      timeZone: expect.any(String),
+    },
     expect.any(String),
   );
   expect(daemon.createSession).not.toHaveBeenCalled();
@@ -2585,7 +2594,7 @@ it('keeps the composer disabled until the open session record loads', async () =
   expect(startRun).toHaveBeenCalledWith(
     'agent-main',
     'legacy-room:abc',
-    { text: 'Hello again', mode: 'queue' },
+    { text: 'Hello again', mode: 'queue', timeZone: expect.any(String) },
     expect.any(String),
   );
 });
@@ -2821,7 +2830,7 @@ it('keeps a follow-up draft in the same main session while the first send is acc
   expect(startRun).toHaveBeenCalledWith(
     'agent-main',
     'chat:new-1',
-    { text: 'First question', mode: 'queue' },
+    { text: 'First question', mode: 'queue', timeZone: expect.any(String) },
     expect.any(String),
   );
   // The main chat is where you are, so History lists only other chats.
@@ -2895,7 +2904,7 @@ it('stays in a historical session opened while the main identity is resolving', 
     expect(startRun).toHaveBeenCalledWith(
       'agent-main',
       'chat:new-1',
-      { text: 'Plan the launch', mode: 'queue' },
+      { text: 'Plan the launch', mode: 'queue', timeZone: expect.any(String) },
       expect.any(String),
     ),
   );
@@ -3072,7 +3081,7 @@ it('keeps a page open while main resolution finishes and returns to that same se
     expect(startRun).toHaveBeenCalledWith(
       'agent-main',
       'chat:new-1',
-      { text: 'Plan the launch', mode: 'queue' },
+      { text: 'Plan the launch', mode: 'queue', timeZone: expect.any(String) },
       expect.any(String),
     ),
   );
@@ -3454,7 +3463,7 @@ it('replies to a Telegram session through the runs route', async () => {
   expect(daemon.startRun).toHaveBeenCalledWith(
     'agent-main',
     'telegram:tg-1',
-    { text: 'On my way', mode: 'queue' },
+    { text: 'On my way', mode: 'queue', timeZone: expect.any(String) },
     expect.any(String),
   );
 });
@@ -4007,7 +4016,7 @@ it('opens a selected Discord conversation from Connectors and sends a native tex
   expect(daemon.startRun).toHaveBeenCalledWith(
     'agent-main',
     'discord:dc-1',
-    { text: 'Hello Discord', mode: 'queue' },
+    { text: 'Hello Discord', mode: 'queue', timeZone: expect.any(String) },
     expect.any(String),
   );
 });
@@ -4138,7 +4147,7 @@ it('resends a restored message with its key and gives a new message a new key', 
   expect(startRun.mock.calls[1]).toEqual([
     'agent-main',
     'telegram:tg-1',
-    { text: 'On my way', mode: 'queue' },
+    { text: 'On my way', mode: 'queue', timeZone: expect.any(String) },
     firstKey,
   ]);
 
@@ -4453,7 +4462,7 @@ it('steers a message into the running reply with Ctrl+Enter', async () => {
   expect(daemon.startRun).toHaveBeenCalledWith(
     'agent-main',
     'room-7',
-    { text: 'also check trains', mode: 'steer' },
+    { text: 'also check trains', mode: 'steer', timeZone: expect.any(String) },
     expect.any(String),
   );
   expect(
@@ -4524,7 +4533,7 @@ it('offers to send an interrupted message again, warning when tools had started'
   expect(daemon.startRun).toHaveBeenCalledWith(
     'agent-main',
     'room-7',
-    { text: 'Clean the logs', mode: 'queue' },
+    { text: 'Clean the logs', mode: 'queue', timeZone: expect.any(String) },
     expect.any(String),
   );
   // Used once, it cannot send the message a second time.
@@ -4931,7 +4940,11 @@ it('moves a steer to the recovery panel when its reply fails without it', async 
   await user.keyboard('{Enter}');
   await waitFor(() => expect(daemon.startRun).toHaveBeenCalledTimes(2));
   const [, , body, resendKey] = vi.mocked(daemon.startRun).mock.calls[1];
-  expect(body).toEqual({ text: 'also check trains', mode: 'queue' });
+  expect(body).toEqual({
+    text: 'also check trains',
+    mode: 'queue',
+    timeZone: expect.any(String),
+  });
   expect(resendKey).not.toBe(key);
 });
 
@@ -5187,6 +5200,7 @@ it('says why an accepted message failed and sends it again as a new message', as
   expect(startRun.mock.calls[1][2]).toEqual({
     text: 'Book the train',
     mode: 'queue',
+    timeZone: expect.any(String),
   });
   expect(startRun.mock.calls[1][3]).not.toBe(startRun.mock.calls[0][3]);
 });

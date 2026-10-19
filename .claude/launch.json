@@ -1,0 +1,20 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "e2e-daemon",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "set -a; . ./.env.local; set +a; E=/private/tmp/claude-501/-Users-julio-animaOS-SWARM/23772356-0ee1-4c2a-b9de-3a0c9f572226/scratchpad/e2e; ANIMAOS_RS_CONTROL_PLANE_FILE=$E/control-plane.json ANIMAOS_WORKSPACE_ROOT=$E/workspace CARGO_BUILD_JOBS=6 exec bun tools/workspace-dev/src/rust-daemon-dev.ts"
+      ],
+      "port": 8080
+    },
+    {
+      "name": "e2e-web",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["x", "nx", "run", "@animaOS-SWARM/web:serve"],
+      "port": 4200
+    }
+  ]
+}

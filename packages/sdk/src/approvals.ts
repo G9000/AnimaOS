@@ -81,6 +81,9 @@ export interface Approval {
   /** Why it asks when the policy alone would allow it: `dangerous_command`
    *  for a command that is hard to undo. Absent on older records. */
   reason?: string;
+  /** What makes the command hard to undo, e.g. `runs hidden (encoded)
+   *  commands`. Absent on older records. */
+  reasonDetail?: string;
 }
 
 export interface ApprovalRule {

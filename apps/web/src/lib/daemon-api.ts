@@ -361,6 +361,8 @@ export type AutonomyMode = 'free' | 'strict' | 'custom';
 /** The most deny patterns, and the longest one, the daemon keeps. */
 export const MAX_DENY_PATTERNS = 50;
 export const MAX_DENY_PATTERN_CHARS = 200;
+/** The longest smart-check guidance the daemon keeps. */
+export const MAX_SMART_POLICY_CHARS = 1000;
 
 export interface AgentAutonomy {
   mode: AutonomyMode;
@@ -368,6 +370,8 @@ export interface AgentAutonomy {
   smartCheck: boolean;
   /** The owner's always-blocked command globs (`*`, `?`). */
   denyPatterns: string[];
+  /** The owner's written guidance for the smart check; empty for none. */
+  smartPolicy: string;
   policy: ApprovalPolicy;
 }
 
@@ -375,6 +379,7 @@ export interface AutonomyPatch {
   mode?: Exclude<AutonomyMode, 'custom'>;
   smartCheck?: boolean;
   denyPatterns?: string[];
+  smartPolicy?: string;
 }
 
 export type ForeignSource = 'claude-code' | 'codex';

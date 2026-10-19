@@ -204,7 +204,12 @@ describe('useSessionSends', () => {
       expect(startRun).toHaveBeenCalledWith(
         'agent-main',
         'chat:1',
-        { text: 'text k1', mode: 'queue', skill: 'notes' },
+        {
+          text: 'text k1',
+          mode: 'queue',
+          skill: 'notes',
+          timeZone: expect.any(String),
+        },
         'k1',
       ),
     );

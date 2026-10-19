@@ -23,7 +23,7 @@ use super::{
     todo::{
         read_todo_list_from_root, todo_file_path_from_root, write_todo_list_from_root, TodoItem,
     },
-    utility::{current_time_iso_utc, evaluate_expression},
+    utility::evaluate_expression,
     web::{parse_exa_results, strip_html_text},
     workspace_root_path, ToolExecutionContext, ToolRegistry, DEFAULT_MAX_BACKGROUND_PROCESSES,
 };
@@ -33,7 +33,6 @@ use anima_core::{
     TaskStatus, ToolCall, ToolDescriptor,
 };
 use anima_memory::MemoryManager;
-use chrono::DateTime;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::fs;
@@ -1290,14 +1289,6 @@ fn calculate_evaluates_math_expressions() {
     let result = evaluate_expression("2 + 2 * 3").expect("math result");
 
     assert_eq!(result, "8");
-}
-
-#[test]
-fn current_time_returns_rfc3339() {
-    let timestamp = current_time_iso_utc();
-
-    assert!(DateTime::parse_from_rfc3339(&timestamp).is_ok());
-    assert!(timestamp.ends_with('Z'));
 }
 
 #[test]

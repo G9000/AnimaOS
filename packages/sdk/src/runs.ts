@@ -111,6 +111,9 @@ export interface StartRunInput {
   mode?: RunMode;
   /** Explicit owner opt-in for a new immediately eligible Chat run; replay never renews it. */
   browserSelection?: BrowserSelection;
+  /** The sender's IANA time zone; the daemon keeps it as the owner's, so
+   *  "7 p.m." means their evening in every channel. */
+  timeZone?: string;
 }
 
 export interface StartRunResult {

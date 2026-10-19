@@ -225,6 +225,9 @@ pub(crate) struct ControlPlaneSnapshot {
     /// The owner's price overrides (spec §11.1).
     #[serde(default)]
     pub(crate) pricing_overrides: Vec<crate::usage::PricingOverride>,
+    /// The owner's IANA time zone, as their web console last reported it.
+    #[serde(default)]
+    pub(crate) owner_time_zone: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -687,6 +690,7 @@ impl ControlPlaneSnapshot {
             skill_drafts: vec![],
             schedule_fires: vec![],
             pricing_overrides: vec![],
+            owner_time_zone: None,
             learning_reviews: vec![],
             learning_policies: vec![],
             memory_views: vec![],
