@@ -89,9 +89,11 @@ pub fn confirm(paths: &AnimaPaths) -> io::Result<()> {
     remove(&pending_path(paths))
 }
 
-/// Swaps `binary` in for `exe` with `swap` (the running executable:
-/// [`super::swap`]), then records the pending update. If it can't be recorded
-/// the old binary is put back, since nothing would check the new one.
+/// Records the pending update, then swaps `binary` in for `exe` with `swap`
+/// (the running executable: [`super::swap`]). Recorded first, so a process
+/// that dies during the swap still leaves the new binary checked (a record
+/// for a version that did not get installed is dropped by [`on_start`]). A
+/// failed swap leaves no record.
 pub fn install(
     paths: &AnimaPaths,
     exe: &Path,
@@ -100,15 +102,28 @@ pub fn install(
     to: &str,
     swap: impl FnOnce(&[u8]) -> Result<PathBuf, UpdateError>,
 ) -> Result<PendingUpdate, UpdateError> {
-    let old = swap(binary)?;
-    let pending = PendingUpdate {
+    let mut pending = PendingUpdate {
         from: from.to_string(),
         to: to.to_string(),
-        old,
+        old: super::install::old_path(exe),
     };
-    if let Err(error) = write_json(&pending_path(paths), &pending) {
-        let _ = super::rollback(exe, &pending.old);
-        return Err(error.into());
+    write_json(&pending_path(paths), &pending)?;
+    let old = match swap(binary) {
+        Ok(old) => old,
+        Err(error) => {
+            let _ = remove(&pending_path(paths));
+            return Err(error);
+        }
+    };
+    // `swap` kept the previous binary somewhere else (`exe` reached through
+    // a link): the record must say where, or nothing could be rolled back.
+    if old != pending.old {
+        pending.old = old;
+        if let Err(error) = write_json(&pending_path(paths), &pending) {
+            let _ = remove(&pending_path(paths));
+            let _ = super::rollback(exe, &pending.old);
+            return Err(error.into());
+        }
     }
     Ok(pending)
 }

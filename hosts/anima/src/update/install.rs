@@ -15,20 +15,29 @@ pub fn swap(new_binary: &[u8]) -> Result<PathBuf, UpdateError> {
     let replaced = self_replace::self_replace(&staged);
     let _ = fs::remove_file(&staged);
     replaced?;
-    ensure_executable(&exe)?;
+    warn_unless_executable(&exe, ensure_executable);
     Ok(old)
 }
 
 /// [`swap`] for a binary that is not the one running (tests, or a stopped install).
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn swap_at(new_binary: &[u8], target: &Path) -> Result<PathBuf, UpdateError> {
+    replace_at(new_binary, target, ensure_executable)
+}
+
+/// [`swap_at`], with how the exec bit is set.
+fn replace_at(
+    new_binary: &[u8],
+    target: &Path,
+    make_executable: impl FnOnce(&Path) -> io::Result<()>,
+) -> Result<PathBuf, UpdateError> {
     let old = keep_old(target)?;
     let staged = stage(new_binary, target)?;
     if let Err(error) = fs::rename(&staged, target) {
         let _ = fs::remove_file(&staged);
         return Err(error.into());
     }
-    ensure_executable(target)?;
+    warn_unless_executable(target, make_executable);
     Ok(old)
 }
 
@@ -45,16 +54,30 @@ pub fn rollback(current_exe: &Path, old: &Path) -> Result<(), UpdateError> {
     } else {
         fs::rename(old, current_exe)?;
     }
-    ensure_executable(current_exe)?;
+    warn_unless_executable(current_exe, ensure_executable);
     Ok(())
+}
+
+/// The binary at `path` is already in place (staged with the exec bit, and
+/// with the permissions of the one it replaced), so a failure to set the bit
+/// again is a warning: answering with an error would report a swap that did
+/// happen as one that did not.
+fn warn_unless_executable(path: &Path, make_executable: impl FnOnce(&Path) -> io::Result<()>) {
+    if let Err(error) = make_executable(path) {
+        eprintln!(
+            "anima: warning: {} is in place, but its exec bit could not be set: {error}",
+            path.display()
+        );
+    }
 }
 
 fn running_exe() -> io::Result<PathBuf> {
     std::env::current_exe()?.canonicalize()
 }
 
-/// `anima` → `anima.old`, `anima.exe` → `anima.exe.old`.
-fn old_path(exe: &Path) -> PathBuf {
+/// Where [`swap`] keeps the previous binary: `anima` → `anima.old`,
+/// `anima.exe` → `anima.exe.old`.
+pub(super) fn old_path(exe: &Path) -> PathBuf {
     let mut name = exe.file_name().unwrap_or_default().to_os_string();
     name.push(".old");
     exe.with_file_name(name)
@@ -106,4 +129,20 @@ fn ensure_executable(path: &Path) -> io::Result<()> {
 #[cfg(not(unix))]
 fn ensure_executable(_path: &Path) -> io::Result<()> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_exec_bit_failure_after_the_rename_is_still_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("anima");
+        fs::write(&exe, b"old").unwrap();
+        let old = replace_at(b"new", &exe, |_| Err(io::Error::other("read-only"))).unwrap();
+        assert_eq!(old, old_path(&exe));
+        assert_eq!(fs::read(&exe).unwrap(), b"new");
+        assert_eq!(fs::read(&old).unwrap(), b"old");
+    }
 }

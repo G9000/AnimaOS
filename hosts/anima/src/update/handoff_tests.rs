@@ -195,12 +195,55 @@ fn install_swaps_and_records_the_pending_update() {
 }
 
 #[test]
+fn install_records_the_pending_update_before_the_swap() {
+    let (_home, paths) = folder();
+    let exe = paths.root.join("anima");
+    fs::write(&exe, b"old binary").unwrap();
+    let recorded = RefCell::new(None);
+
+    install(&paths, &exe, b"new binary", "0.1.0", "0.2.0", |binary| {
+        *recorded.borrow_mut() = Some(read_json(&pending_file(&paths)));
+        swap_at(binary, &exe)
+    })
+    .unwrap();
+
+    // Already there when the swap began, with the `.old` it would keep.
+    assert_eq!(
+        recorded.into_inner(),
+        Some(json!({ "from": "0.1.0", "to": "0.2.0", "old": paths.root.join("anima.old") }))
+    );
+}
+
+#[test]
+fn install_that_cannot_record_does_not_swap() {
+    let (_home, paths) = folder();
+    let exe = paths.root.join("anima");
+    fs::write(&exe, b"old binary").unwrap();
+    // The run folder is a file, so nothing can be recorded in it.
+    fs::remove_dir_all(&paths.run).unwrap();
+    fs::write(&paths.run, b"not a folder").unwrap();
+    let swapped = RefCell::new(false);
+
+    let outcome = install(&paths, &exe, b"new binary", "0.1.0", "0.2.0", |_| {
+        *swapped.borrow_mut() = true;
+        Ok(paths.root.join("anima.old"))
+    });
+
+    assert!(outcome.is_err());
+    assert!(!swapped.into_inner());
+    assert_eq!(fs::read(&exe).unwrap(), b"old binary");
+}
+
+#[test]
 fn install_that_cannot_swap_changes_nothing() {
     let (_home, paths) = folder();
     let exe = paths.root.join("missing/anima");
     let outcome = install(&paths, &exe, b"new", "0.1.0", "0.2.0", |binary| {
+        // Recorded before the swap was tried…
+        assert!(pending_file(&paths).exists());
         swap_at(binary, &exe)
     });
     assert!(outcome.is_err());
+    // …and dropped once it failed.
     assert!(!pending_file(&paths).exists());
 }
