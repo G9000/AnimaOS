@@ -33,6 +33,9 @@ pub(super) fn manager_error(e: DiscordManagerError) -> Response {
             (StatusCode::BAD_REQUEST, "invalid_request")
         }
         DiscordManagerError::Conflict => (StatusCode::CONFLICT, "connector_conflict"),
+        DiscordManagerError::DuplicateChannel => {
+            (StatusCode::CONFLICT, "discord_channel_already_connected")
+        }
         DiscordManagerError::UnknownDelivery => {
             (StatusCode::CONFLICT, "discord_delivery_uncertain")
         }
@@ -411,6 +414,15 @@ mod tests {
     use super::*;
     use axum::body::{to_bytes, Body};
     use tower::ServiceExt;
+    #[tokio::test]
+    async fn duplicate_channel_has_a_specific_safe_conflict_code() {
+        let response = manager_error(DiscordManagerError::DuplicateChannel);
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        let bytes = to_bytes(response.into_body(), 8192).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["code"], "discord_channel_already_connected");
+    }
     #[tokio::test]
     async fn provider_errors_have_distinct_safe_codes_and_no_store() {
         for (provider, status, code) in [

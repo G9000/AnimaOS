@@ -25,6 +25,37 @@ function props() {
 }
 
 describe('DiscordSettings', () => {
+  it('opens the selected channel conversation when several channels share an agent', async () => {
+    const user = userEvent.setup();
+    const p = props();
+    const connectors = ['22', '55', '66'].map((id) =>
+      discordFixture({
+        id: `discord-${id}`,
+        roomId: `discord:discord-${id}`,
+        channel: {
+          id,
+          guildId: '33',
+          name: `channel-${id}`,
+          kind: 'guildText',
+        },
+      }),
+    );
+    render(<DiscordSettings {...p} connectors={connectors} />);
+    const open = screen.getAllByRole('button', { name: 'Open conversation' });
+    for (const [index, button] of open.entries()) {
+      await user.click(button);
+      expect(p.openConversation).toHaveBeenNthCalledWith(
+        index + 1,
+        connectors[index],
+      );
+    }
+    expect(
+      screen.getByText(
+        /Replies stay in the channel where each message arrives/,
+      ),
+    ).toBeVisible();
+    expect(screen.getByText('Add selected channel')).toBeVisible();
+  });
   it('fp02 Discord clears unsubmitted secrets but retains selected IDs on reconnect', async () => {
     const user = userEvent.setup();
     const p = props();

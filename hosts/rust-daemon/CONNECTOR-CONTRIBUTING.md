@@ -107,8 +107,17 @@ Selected Drive read/search is the next bounded milestone.
 
 ## Selected Discord channel
 
-The owner configures one guild text channel and a nonempty list of permitted
-user IDs. A bot's access to the channel does not establish its privacy; the owner
+The owner configures one guild text channel per connection and a nonempty list of
+permitted user IDs. One agent can have multiple connections, including the same
+bot in different channels. Each connection keeps its own conversation, intake
+cursor, credentials, and delivery journal. Replies go only to the originating
+connection's selected channel; they are never broadcast to the agent's other
+channels. Owner messages sent from a Discord conversation in the web console
+also go to that conversation's selected channel. A second non-deleted connection
+for the same agent and channel is rejected, including while the first is disabled.
+Native Gateway connections share identify pacing by verified bot ID, including
+after token replacement; different bots keep independent login budgets.
+A bot's access to the channel does not establish its privacy; the owner
 checks channel permissions and confirms the selection. New records are saved
 disabled. First activation establishes a latest-message baseline, so earlier
 history is not dispatched. Later enable/restart preserves the saved cursor.

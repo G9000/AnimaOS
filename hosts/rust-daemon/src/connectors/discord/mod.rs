@@ -50,6 +50,7 @@ pub(crate) enum DiscordManagerError {
     InvalidInput,
     UnsupportedInput,
     Conflict,
+    DuplicateChannel,
     InvalidToken,
     Transport,
     Provider(DiscordTransportError),
@@ -67,6 +68,7 @@ impl std::fmt::Display for DiscordManagerError {
             Self::InvalidInput => "invalid Discord request",
             Self::UnsupportedInput => "Discord message content exceeds the supported inbound bound",
             Self::Conflict => "Discord selection conflicts with existing state",
+            Self::DuplicateChannel => "Discord channel is already connected to this agent",
             Self::InvalidToken => "Discord rejected the bot credential",
             Self::Transport => "Discord transport unavailable",
             Self::Provider(error) => match error {
@@ -575,7 +577,7 @@ pub(crate) fn validate_snapshot(
         .map(|a| a.state.id.as_str())
         .collect();
     let mut ids = HashSet::new();
-    let mut owners = HashSet::new();
+    let mut selections = HashSet::new();
     for c in &snapshot.discord_connectors {
         if c.id.is_empty()
             || !ids.insert(c.id.as_str())
@@ -591,7 +593,8 @@ pub(crate) fn validate_snapshot(
             || (c.deleted_at_ms.is_some() && c.enabled)
             || (c.enabled && c.activated_at_ms.is_none())
             || (c.deleted_at_ms.is_none()
-                && (!agents.contains(c.agent_id.as_str()) || !owners.insert(c.agent_id.as_str())))
+                && (!agents.contains(c.agent_id.as_str())
+                    || !selections.insert((c.agent_id.as_str(), c.channel.id.as_str()))))
         {
             return Err("invalid native Discord connector snapshot".into());
         }

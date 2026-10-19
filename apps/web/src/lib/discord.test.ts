@@ -51,6 +51,21 @@ describe('Discord selected authority and delivery state', () => {
       'Discord request failed. Refresh status and check the connection setup.',
     );
   });
+  it('distinguishes duplicate channel setup from uncertain delivery without exposing backend text', () => {
+    for (const [code, expected] of [
+      ['discord_channel_already_connected', 'already connected to this agent'],
+      ['discord_delivery_uncertain', 'Review uncertain delivery'],
+      ['agent_busy', 'run in progress'],
+    ]) {
+      const message = safeDiscordError({
+        status: 409,
+        body: { code, error: 'provider-secret' },
+      });
+      expect(message).toContain(expected);
+      expect(message).not.toContain('provider-secret');
+      expect(message).not.toContain('Replacement tokens');
+    }
+  });
   it('keeps canonical u64 IDs as strings and rejects empty, duplicate or out-of-range selection', () => {
     expect(isDiscordSnowflake('18446744073709551615')).toBe(true);
     for (const invalid of [
