@@ -460,10 +460,54 @@ const PROTECTED_ROOTS: &[&str] = &[
     "/private",
 ];
 
+/// `anima` subcommands that start, stop, reconfigure or update the installed
+/// host. An agent running them would control its own host.
+const ANIMA_LIFECYCLE: &[&str] = &[
+    "stop",
+    "quit",
+    "restart",
+    "update",
+    "config",
+    "autostart",
+    "setup",
+    "start",
+    "supervise",
+];
+
+/// Whether the command runs an `anima` lifecycle subcommand or edits the
+/// `AnimaOS` autostart entry in the Windows registry. Judged on the words as
+/// written, so a Windows path (`C:\anima\anima.exe stop`) still names the
+/// program.
+fn controls_anima_host(raw_words: &[String]) -> bool {
+    let Some(first) = raw_words.first() else {
+        return false;
+    };
+    let word = first.trim_matches(['\'', '"']).to_ascii_lowercase();
+    let program = word.rsplit(['/', '\\']).next().unwrap_or(&word);
+    match program {
+        "anima" | "anima.exe" => raw_words
+            .iter()
+            .skip(1)
+            .find(|arg| !arg.starts_with('-'))
+            .is_some_and(|arg| {
+                let arg = arg.trim_matches(['\'', '"']).to_ascii_lowercase();
+                ANIMA_LIFECYCLE.contains(&arg.as_str())
+            }),
+        "reg" | "reg.exe" => {
+            let joined = raw_words.join(" ").to_ascii_lowercase();
+            joined.contains(r"currentversion\run") && joined.contains("animaos")
+        }
+        _ => false,
+    }
+}
+
 /// Commands nothing allows, in any mode.
 pub(crate) fn hardline(seg: &Segment) -> Option<&'static str> {
     if windows_delete(&seg.raw_words).is_some_and(|delete| delete.recursive && delete.protected) {
         return Some("recursively deletes the system or your home folder");
+    }
+    if controls_anima_host(&seg.raw_words) {
+        return Some("controls anima itself");
     }
     let segment = seg.text.as_str();
     let words: Vec<&str> = segment.split(' ').collect();
@@ -535,6 +579,12 @@ pub(crate) fn hardline(seg: &Segment) -> Option<&'static str> {
                 && words.iter().any(|word| word.contains("anima")) =>
         {
             Some("stops anima itself")
+        }
+        "launchctl"
+            if words.iter().any(|word| *word == "kickstart")
+                && words.iter().any(|word| word.contains("dev.animaos.anima")) =>
+        {
+            Some("controls anima itself")
         }
         _ if segment.contains(":(){") || segment.contains(":() {") => Some("is a fork bomb"),
         _ if segment.contains("> /dev/sd")
@@ -1167,6 +1217,22 @@ mod tests {
     }
 
     #[test]
+    fn anima_read_only_commands_are_not_host_control() {
+        for command in [
+            "anima status",
+            "anima logs",
+            "animate",
+            "anima",
+            "animate stop",
+        ] {
+            assert!(
+                !matches!(judge(command), Floor::Blocked(_)),
+                "{command:?} must not be host control"
+            );
+        }
+    }
+
+    #[test]
     fn pipeline_risks_ask() {
         for (command, reason) in [
             (
@@ -1290,6 +1356,42 @@ mod tests {
             (
                 "pkill -f anima-daemon",
                 Floor::Blocked("stops anima itself".to_string()),
+            ),
+            (
+                "anima stop",
+                Floor::Blocked("controls anima itself".to_string()),
+            ),
+            (
+                "anima update --now",
+                Floor::Blocked("controls anima itself".to_string()),
+            ),
+            (
+                "/usr/local/bin/anima quit",
+                Floor::Blocked("controls anima itself".to_string()),
+            ),
+            (
+                "anima.exe autostart off",
+                Floor::Blocked("controls anima itself".to_string()),
+            ),
+            (
+                r#""C:\Program Files\anima\anima.exe" stop"#,
+                Floor::Blocked("controls anima itself".to_string()),
+            ),
+            (
+                "FOO=1 sudo anima stop",
+                Floor::Blocked("controls anima itself".to_string()),
+            ),
+            (
+                "anima --verbose restart",
+                Floor::Blocked("controls anima itself".to_string()),
+            ),
+            (
+                "launchctl kickstart -k gui/501/dev.animaos.anima",
+                Floor::Blocked("controls anima itself".to_string()),
+            ),
+            (
+                r"reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v AnimaOS /d x",
+                Floor::Blocked("controls anima itself".to_string()),
             ),
             (
                 "\u{440}m -rf build",
