@@ -1,3 +1,4 @@
+import { AnimaAppCard } from '../components/AnimaAppCard';
 import { StatusCard } from '../components/system/StatusCard';
 import { useStatus } from '../hooks/useStatus';
 import { COMPANION_UNREACHABLE } from '../lib/approvals';
@@ -36,6 +37,7 @@ export function HealthPage({ online, epoch }: HealthPageProps) {
 
   return (
     <div className="system-page">
+      <AnimaAppCard />
       <div className="system-header">
         <h2>How the daemon is doing</h2>
         <button
