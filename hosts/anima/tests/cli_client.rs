@@ -340,6 +340,22 @@ fn config_set_workspace_rejects_home() {
 }
 
 #[test]
+fn config_set_workspace_rejects_a_file() {
+    let home = Home::new();
+    let before = home.config_text();
+    let file = home.dir.path().join("afile");
+    std::fs::write(&file, "x").unwrap();
+    let output = home.anima(&["config", "set", "workspace", file.to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        text(&output.stderr).contains("Workspace path is not a folder"),
+        "{}",
+        text(&output.stderr)
+    );
+    assert_eq!(home.config_text(), before);
+}
+
+#[test]
 fn config_set_workspace_accepts_a_folder() {
     let home = Home::new();
     let workspace = home.dir.path().join("anima-workspace");

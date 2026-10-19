@@ -404,6 +404,21 @@ fn missing_workspace_still_runs() {
 }
 
 #[test]
+fn file_workspace_is_reported_and_still_runs() {
+    let home = tempfile::tempdir().unwrap();
+    let file = home.path().join("afile");
+    std::fs::write(&file, "x").unwrap();
+    let config = format!("workspace = {:?}\n", file.to_string_lossy());
+    let supervisor = Supervisor::start_in(home, free_port(), &config);
+    let status = supervisor.wait_for_kind("running");
+    let problem = status["workspaceProblem"].as_str().unwrap_or_default();
+    assert!(
+        problem.starts_with("Workspace path is not a folder"),
+        "workspaceProblem: {problem:?}"
+    );
+}
+
+#[test]
 fn cancel_ends_the_server_drain() {
     let supervisor = Supervisor::start("");
     supervisor.wait_for_kind("running");

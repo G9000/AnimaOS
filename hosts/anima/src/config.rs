@@ -103,6 +103,8 @@ pub enum WorkspaceProblem {
     InsideDataRoot,
     /// The folder does not exist.
     Missing(PathBuf),
+    /// The path exists but is not a folder.
+    NotAFolder(PathBuf),
 }
 
 impl WorkspaceProblem {
@@ -111,6 +113,9 @@ impl WorkspaceProblem {
         match self {
             WorkspaceProblem::Missing(path) => {
                 format!("Workspace folder not found: {}", path.display())
+            }
+            WorkspaceProblem::NotAFolder(path) => {
+                format!("Workspace path is not a folder: {}", path.display())
             }
             WorkspaceProblem::IsHome => "The workspace can't be your home folder".to_string(),
             WorkspaceProblem::ContainsDataRoot => {
@@ -135,6 +140,9 @@ pub fn validate_workspace(
 ) -> Result<(), WorkspaceProblem> {
     if !ws.exists() {
         return Err(WorkspaceProblem::Missing(ws.to_path_buf()));
+    }
+    if !ws.is_dir() {
+        return Err(WorkspaceProblem::NotAFolder(ws.to_path_buf()));
     }
     let ws = resolve(ws);
     if ws == resolve(home) {
@@ -232,6 +240,12 @@ mod tests {
         assert_eq!(
             validate_workspace(&missing, &home, &paths),
             Err(WorkspaceProblem::Missing(missing.clone()))
+        );
+        let file = home.join("afile");
+        std::fs::write(&file, "x").unwrap();
+        assert_eq!(
+            validate_workspace(&file, &home, &paths),
+            Err(WorkspaceProblem::NotAFolder(file.clone()))
         );
         let ok = home.join("anima-workspace");
         std::fs::create_dir_all(&ok).unwrap();
