@@ -13,13 +13,19 @@ path = "src/main.rs"
 bundled-ui = ["dep:rust-embed"]
 
 [dependencies]
+anima-daemon = { path = "../rust-daemon" }
+axum = "0.8"
+clap = { version = "4", features = ["derive"] }
 directories = "6"
-rust-embed = { version = "8", optional = true }
+rust-embed = { version = "8", features = ["mime-guess"], optional = true }
 serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
 toml = "0.8"
 
 [dev-dependencies]
 tempfile = "=3.27.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }
 
 [lints]
 workspace = true

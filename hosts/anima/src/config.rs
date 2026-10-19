@@ -54,6 +54,7 @@ impl Config {
     }
 
     /// Atomic write (temp file in the same directory, then rename), mode 0600 on Unix.
+    #[allow(dead_code)] // used by `anima setup` / `anima config set` in a later task
     pub fn save(&self, path: &Path) -> io::Result<()> {
         let text = toml::to_string_pretty(self)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
@@ -94,6 +95,7 @@ impl Config {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)] // used by `anima setup` in a later task
 pub enum WorkspaceProblem {
     /// The workspace is the home folder itself.
     IsHome,
@@ -106,10 +108,12 @@ pub enum WorkspaceProblem {
 }
 
 /// Canonicalizes where the path exists, so symlinks and `..` can't dodge the rules.
+#[allow(dead_code)] // used by `validate_workspace`
 fn resolve(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+#[allow(dead_code)] // used by `anima setup` in a later task
 pub fn validate_workspace(
     ws: &Path,
     home: &Path,
