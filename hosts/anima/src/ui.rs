@@ -1,6 +1,18 @@
 //! The embedded web console, served as the daemon router's fallback.
 
+use axum::http::{header, HeaderMap, HeaderValue};
 use axum::Router;
+
+/// Forbids every page from framing the console, so no site can lay it under
+/// its own content and steer the owner's clicks.
+#[cfg_attr(not(feature = "bundled-ui"), allow(dead_code))]
+fn deny_framing(headers: &mut HeaderMap) {
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("frame-ancestors 'none'"),
+    );
+}
 
 /// How the console answers a request path that no daemon route claimed.
 #[derive(Debug, PartialEq, Eq)]
@@ -43,7 +55,7 @@ mod bundled {
     use axum::Router;
     use rust_embed::RustEmbed;
 
-    use super::{classify, Fallback};
+    use super::{classify, deny_framing, Fallback};
 
     #[derive(RustEmbed)]
     #[folder = "../../apps/web/dist"]
@@ -54,6 +66,12 @@ mod bundled {
     }
 
     async fn serve(uri: Uri) -> Response {
+        let mut response = respond(uri).await;
+        deny_framing(response.headers_mut());
+        response
+    }
+
+    async fn respond(uri: Uri) -> Response {
         let path = uri.path();
         if classify(path) == Fallback::NotFound {
             return StatusCode::NOT_FOUND.into_response();
@@ -115,6 +133,26 @@ mod bundled {
         }
 
         #[tokio::test]
+        async fn ui_responses_cannot_be_framed() {
+            let index = get("/").await;
+            let asset_path = Assets::iter()
+                .find(|path| path.starts_with("assets/"))
+                .expect("the console has assets");
+            let asset = get(&format!("/{asset_path}")).await;
+            assert_eq!(
+                asset.headers()[header::CACHE_CONTROL],
+                "public, max-age=31536000, immutable"
+            );
+            for response in [index, asset, get("/some/deep/path").await] {
+                assert_eq!(response.headers()[header::X_FRAME_OPTIONS], "DENY");
+                assert_eq!(
+                    response.headers()[header::CONTENT_SECURITY_POLICY],
+                    "frame-ancestors 'none'"
+                );
+            }
+        }
+
+        #[tokio::test]
         async fn ui_router_404s_api_paths() {
             for path in ["/api/nope", "/api", "/health/nope", "/health"] {
                 let response = get(path).await;
@@ -133,6 +171,17 @@ mod tests {
     #[test]
     fn ui_router_none_without_feature() {
         assert!(ui_router().is_none());
+    }
+
+    #[test]
+    fn framing_is_denied() {
+        let mut headers = HeaderMap::new();
+        deny_framing(&mut headers);
+        assert_eq!(headers[header::X_FRAME_OPTIONS], "DENY");
+        assert_eq!(
+            headers[header::CONTENT_SECURITY_POLICY],
+            "frame-ancestors 'none'"
+        );
     }
 
     #[test]
