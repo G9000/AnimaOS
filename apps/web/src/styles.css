@@ -16,9 +16,13 @@
 @source '../../packages/ui/src/**/*.{ts,tsx}';
 
 @theme {
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
-  --font-display: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  /* Geist and Geist Mono, bundled (main.tsx), as in design/design.pen. */
+  --font-sans: 'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, 'Cascadia Code', Consolas,
+    monospace;
+  --font-display: 'Geist Variable', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', sans-serif;
 
   /* Live Fixer dashboard / worker-site palette (ports 3000 and 3002). */
   /* prettier-ignore */

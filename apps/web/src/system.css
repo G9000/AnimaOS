@@ -188,7 +188,7 @@
   border-radius: 12px;
   padding: 8px;
   background: var(--color-abyss);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 .system-log-row {

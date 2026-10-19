@@ -17,6 +17,7 @@ import { HelperCard } from './HelperCard';
 import { PlanNoteCard } from './PlanCard';
 import { ToolStepCard } from './ToolStepCard';
 import { CodingSessionCard } from '../coding/CodingSessionCard';
+import { ChevronIcon } from '../icons';
 import {
   mergeAcpSnapshots,
   parseCodingSession,
@@ -118,14 +119,22 @@ function typedNote(typed: number): string | undefined {
   return `Typed ${typed} ${typed === 1 ? 'message' : 'messages'}`;
 }
 
+/** Who a turn of tool work belongs to: the turn's name line sits above
+ *  its first activity, as it does above a reply. */
+export interface TurnHead {
+  name: string;
+  time?: string;
+}
+
 /** Tool requests as cards (spec §15.2): open while the run works, then
- *  collapsed to "N tool requests · Ns". */
+ *  collapsed to one "Worked for Ns · N steps" row. */
 export function ToolBlock({
   steps,
   active,
   elapsedMs,
   actions,
   onStop,
+  head,
 }: {
   steps: readonly ToolStep[];
   active: boolean;
@@ -133,16 +142,20 @@ export function ToolBlock({
   actions?: TranscriptActions;
   /** Stops the run these steps belong to (a plan card's Stop). */
   onStop?: () => void;
+  head?: TurnHead;
 }) {
   const [open, setOpen] = useState(false);
   const count = steps.length;
   const total =
     elapsedMs ?? steps.reduce((sum, step) => sum + (step.durationMs ?? 0), 0);
-  const label = active
+  const stepCount = `${count} ${count === 1 ? 'step' : 'steps'}`;
+  const title = active ? 'Working' : `Worked for ${formatElapsed(total)}`;
+  const meta = active
     ? count === 0
-      ? `Working · ${formatElapsed(total)}`
-      : `Working · ${count} ${count === 1 ? 'step' : 'steps'} · ${formatElapsed(total)}`
-    : `${count} ${count === 1 ? 'tool request' : 'tool requests'} · ${formatElapsed(total)}`;
+      ? formatElapsed(total)
+      : `${stepCount} · ${formatElapsed(total)}`
+    : stepCount;
+  const label = `${title} · ${meta}`;
   const expanded = active || open;
   const keys = stepKeys(steps);
   const agentId = actions?.sessionAgentId;
@@ -165,6 +178,12 @@ export function ToolBlock({
   );
   return (
     <div className="tool-block" data-active={active || undefined}>
+      {head && (
+        <div className="chat-agent-head">
+          <span className="chat-agent-name">{head.name}</span>
+          {head.time && <span className="chat-time">{head.time}</span>}
+        </div>
+      )}
       {plans.map(({ plan, key }) => (
         <PlanNoteCard
           key={key}
@@ -173,39 +192,48 @@ export function ToolBlock({
           onStop={active ? onStop : undefined}
         />
       ))}
-      {active ? (
-        <p className="tool-block-label">{label}</p>
-      ) : (
-        <button
-          type="button"
-          className="tool-block-toggle"
-          aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
-        >
-          {label}
-        </button>
-      )}
-      {expanded && count > 0 && (
-        <ul className="tool-block-steps">
-          {steps.map((step, index) => (
-            <li key={keys[index]}>
-              {step.helper ? (
-                <HelperCard
-                  step={step}
-                  target={actions?.helperSession?.(step) ?? null}
-                  onOpen={actions?.onOpenSession}
-                />
-              ) : (
-                <ToolStepCard
-                  step={step}
-                  agentId={agentId}
-                  pinned={pinned.has(index)}
-                />
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+      <div className="tool-block-card" data-open={expanded || undefined}>
+        {active ? (
+          <p className="tool-block-label" aria-label={label}>
+            <span className="tool-block-live" aria-hidden />
+            <span className="tool-block-title">{title}</span>
+            <span className="tool-block-meta">{meta}</span>
+          </p>
+        ) : (
+          <button
+            type="button"
+            className="tool-block-toggle"
+            aria-expanded={open}
+            aria-label={label}
+            onClick={() => setOpen((value) => !value)}
+          >
+            <ChevronIcon size={14} className="tool-block-chevron" />
+            <span className="tool-block-title">{title}</span>
+            <span className="tool-block-meta">{meta}</span>
+          </button>
+        )}
+        {expanded && count > 0 && (
+          <ul className="tool-block-steps">
+            {steps.map((step, index) => (
+              <li key={keys[index]}>
+                {step.helper ? (
+                  <HelperCard
+                    step={step}
+                    target={actions?.helperSession?.(step) ?? null}
+                    onOpen={actions?.onOpenSession}
+                  />
+                ) : (
+                  <ToolStepCard
+                    step={step}
+                    agentId={agentId}
+                    pinned={pinned.has(index)}
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
       {snapshots.map(({ session, typed, index }) => (
         // A newer snapshot mounts afresh: a local Stop or Cancel no longer
         // stands in for what the daemon reported.
@@ -319,6 +347,7 @@ export function RunActivity({
           active={active}
           elapsedMs={active ? elapsed : undefined}
           actions={actions}
+          head={{ name: agentName }}
           onStop={
             active && actions?.onStopRun
               ? () => actions.onStopRun?.(run)

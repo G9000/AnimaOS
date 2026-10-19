@@ -81,7 +81,7 @@ describe('RunActivity', () => {
     ).toBeVisible();
     expect(screen.getByText('Add these')).toBeVisible();
     expect(screen.getByText('Adding now')).toBeVisible();
-    expect(screen.getByText(/^Working · 1 step · /)).toBeVisible();
+    expect(screen.getByLabelText(/^Working · 1 step · /)).toBeVisible();
     const card = screen.getByRole('button', { name: /calculate/ });
     expect(card).toHaveAttribute('aria-expanded', 'false');
     await user.click(card);
@@ -157,7 +157,7 @@ describe('RunActivity', () => {
     );
 
     const summary = screen.getByRole('button', {
-      name: '1 tool request · <1s',
+      name: 'Worked for <1s · 1 step',
     });
     expect(
       screen.getByText(
@@ -353,7 +353,7 @@ describe('ToolBlock', () => {
     );
 
     const toggle = screen.getByRole('button', {
-      name: '2 tool requests · <1s',
+      name: 'Worked for <1s · 2 steps',
     });
     expect(
       screen.queryByRole('button', { name: /calculate/ }),

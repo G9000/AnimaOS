@@ -122,6 +122,7 @@ const Bubble = memo(function Bubble({
   const isUser = message.role === 'User';
   const flag = messageFlag(message);
   const time = formatTime(message.created_at_ms);
+  const source = messageSource(message);
   // A reply is a turn under the companion's name; the owner's words sit in
   // a slim bubble on the right. Actions stay out of the way until wanted.
   return (
@@ -152,10 +153,8 @@ const Bubble = memo(function Bubble({
           />
         )}
       </div>
-      {messageSource(message) && (
-        <span className="chat-source">via {messageSource(message)}</span>
-      )}
       <div className="chat-actions studio-message-meta">
+        {source && <span className="chat-source">via {source}</span>}
         {isUser && <span className="chat-time">{time}</span>}
         {isUser && flag && <span className="message-flag">{flag}</span>}
         <CopyMessage text={message.content.text} />
@@ -349,9 +348,12 @@ const TranscriptEntry = memo(function TranscriptEntry({
   agentId,
   readAloud,
   knownAttachments,
+  turnTime,
 }: {
   item: TranscriptItem;
   agentName: string;
+  /** When the reply this tool work leads into was sent. */
+  turnTime?: number | null;
   actions?: TranscriptActions;
   agentId: string;
   readAloud?: ReadAloudController;
@@ -404,7 +406,17 @@ const TranscriptEntry = memo(function TranscriptEntry({
         <DelegatedTurn from={item.from} text={item.message.content.text} />
       );
     case 'tools':
-      return <ToolBlock steps={item.steps} active={false} actions={actions} />;
+      return (
+        <ToolBlock
+          steps={item.steps}
+          active={false}
+          actions={actions}
+          head={{
+            name: agentName,
+            time: turnTime == null ? undefined : formatTime(turnTime),
+          }}
+        />
+      );
     case 'run':
       return (
         <RunActivity
@@ -690,6 +702,11 @@ export const MessageList = memo(function MessageList({
                         agentId={agent.id}
                         readAloud={readAloud}
                         knownAttachments={knownAttachments}
+                        turnTime={
+                          item.kind === 'tools'
+                            ? itemTime(transcript[index + 1] ?? item)
+                            : undefined
+                        }
                       />
                     </div>
                   );
@@ -827,11 +844,26 @@ export function Composer({
     setActiveIndex(0);
   }, [draft]);
 
+  // Fit the field to its text. It measures again when its width changes:
+  // measured before layout, at no width, the empty field filled its
+  // 192px cap.
   useEffect(() => {
     const el = taRef.current;
     if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 192)}px`;
+    const fit = () => {
+      el.style.height = 'auto';
+      el.style.height = `${Math.min(el.scrollHeight, 192)}px`;
+    };
+    fit();
+    if (typeof ResizeObserver === 'undefined') return;
+    let width = el.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fit();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [draft]);
 
   /** Runs a command that needs nothing more; completes one that does, and

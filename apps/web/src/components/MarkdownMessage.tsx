@@ -284,7 +284,7 @@ const components: Components = {
     return fenced ? (
       <CodeBlock className={className} children={children} />
     ) : (
-      <code className="break-all rounded bg-panel-2 px-1 py-0.5 font-mono text-[0.9em]">
+      <code className="rounded bg-panel-2 px-1 py-0.5 font-mono text-[0.9em] [overflow-wrap:anywhere]">
         {children}
       </code>
     );

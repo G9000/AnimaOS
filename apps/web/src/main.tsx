@@ -1,5 +1,7 @@
 import { StrictMode } from 'react';
 import * as ReactDOM from 'react-dom/client';
+import '@fontsource-variable/geist';
+import '@fontsource-variable/geist-mono';
 import { App } from './app/app';
 import './styles.css';
 

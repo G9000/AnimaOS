@@ -57,7 +57,7 @@ const agent: AgentDetail = {
 
 async function openM83SearchCards() {
   for (const button of screen.queryAllByRole('button', {
-    name: /^\d+ tool requests?/,
+    name: /^Worked for .* · \d+ steps?$/,
   }))
     fireEvent.click(button);
   for (const button of screen.getAllByRole('button', { name: /^web_search/ }))
@@ -719,7 +719,7 @@ describe('MessageList', () => {
     // Tool messages are no longer grey pills (spec §15.1).
     expect(screen.queryByText(/^tool · /)).not.toBeInTheDocument();
     await user.click(
-      screen.getByRole('button', { name: '1 tool request · <1s' }),
+      screen.getByRole('button', { name: 'Worked for <1s · 1 step' }),
     );
     await user.click(screen.getByRole('button', { name: /^tool\b/ }));
     expect(screen.getByText('## tool marker').tagName).toBe('PRE');
@@ -817,7 +817,7 @@ describe('MessageList', () => {
         .getByText('Let me check.')
         .closest('.studio-message-anchor');
       const toolAnchor = screen
-        .getByRole('button', { name: /1 tool request/ })
+        .getByRole('button', { name: /· 1 step$/ })
         .closest('.studio-message-anchor');
       expect(bubbleAnchor).not.toBeNull();
       expect(bubbleAnchor).not.toBe(toolAnchor);

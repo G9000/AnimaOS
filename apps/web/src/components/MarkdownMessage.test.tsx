@@ -119,8 +119,10 @@ describe('MarkdownMessage', () => {
     const tableWrapper = screen.getByRole('table').parentElement;
     expect(tableWrapper).toHaveAttribute('data-markdown-overflow', 'table');
     expect(tableWrapper).toHaveClass('max-w-full', 'overflow-x-auto');
+    // Long values still wrap, but at a break opportunity first: break-all
+    // split ordinary words ("Sto/p") mid-word.
     expect(screen.getByText('a-very-long-inline-code-value')).toHaveClass(
-      'break-all',
+      '[overflow-wrap:anywhere]',
     );
   });
 
