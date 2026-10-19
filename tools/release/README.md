@@ -5,6 +5,11 @@ binary for macOS on Apple Silicon (`aarch64-apple-darwin`) and Windows x64
 (`x86_64-pc-windows-msvc`). Only `hosts/anima` ships; `anima-daemon` and the rest of
 the workspace are excluded.
 
+The Release workflow runs for any pushed tag that looks like a version: dist's
+trigger is the pattern `'**[0-9]+.[0-9]+.[0-9]+*'`, so `v0.2.0`, `0.2.0` and
+`anima/0.2.0` all start a release, not only `v*` tags. Use `v<version>` tags, and
+protect them (see the tag ruleset below).
+
 | Asset | What it is |
 | --- | --- |
 | `anima-aarch64-apple-darwin.tar.gz` | macOS binary, code-signed as `dev.animaos.anima` |
@@ -14,6 +19,7 @@ the workspace are excluded.
 | `sha256.sum` | All checksums in one file (dist always writes it) |
 | `anima-installer.sh` | `curl … \| sh` installer for macOS |
 | `anima-installer.ps1` | PowerShell installer for Windows |
+| `dist-manifest.json` | dist's description of the release (dist always uploads it) |
 
 The installers can't run commands after installing, so they end with
 `Run 'anima setup' to finish installing Anima.`
@@ -31,10 +37,18 @@ The installers can't run commands after installing, so they end with
 - dist signs the macOS binary with the `CODESIGN_*` secrets. The binary carries an
   Info.plist (`hosts/anima/build.rs`), so its signing identifier is
   `dev.animaos.anima` and not one derived from the file name.
-- After the release is published, `.github/workflows/sign-release.yml` runs
-  `tools/release/sign-assets.sh`. The script signs each archive with minisign and
-  uploads the `.minisig` files. Until those files are uploaded, `anima update` treats
-  the release as incomplete and doesn't offer it.
+- `.github/build-setup.yml` installs with `bun install --ignore-scripts`, so no
+  package's install script runs in a job that holds signing secrets, and it blanks
+  the `CODESIGN_*` secrets and `GH_TOKEN` for its own steps. Its actions are pinned
+  to commit SHAs.
+- After the release is published, `.github/workflows/sign-release.yml` signs the
+  archives. It takes them from this workflow run's own build artifacts
+  (`artifacts-build-local-*`), not from the GitHub Release, whose assets can be
+  replaced after upload. It signs them with `tools/release/sign-assets.sh`, checks
+  each signature against the committed `hosts/anima/release-key.pub` (the job fails
+  on a mismatch; while that file is still the placeholder the check is skipped and
+  the log says so), then uploads the `.minisig` files. Until those files are
+  uploaded, `anima update` treats the release as incomplete and doesn't offer it.
 
 To change the configuration, install the same dist version, edit
 `dist-workspace.toml`, regenerate and commit both files:
@@ -92,18 +106,34 @@ Keep the `.p12` and its password in your backups. Reuse this certificate for eve
 release. A new certificate changes the signature, and the keychain asks people to
 approve access again.
 
-### 3. Repository secrets
+### 3. Secrets
 
-In GitHub, open Settings → Secrets and variables → Actions and add these five secrets.
-Set all of them before the first tag.
+Set all of these before the first tag.
 
-| Secret | Value |
-| --- | --- |
-| `CODESIGN_CERTIFICATE` | the base64 text of `AnimaOS-Code-Signing.p12` |
-| `CODESIGN_CERTIFICATE_PASSWORD` | the `.p12` export password |
-| `CODESIGN_IDENTITY` | `AnimaOS Code Signing` (the certificate's name) |
-| `MINISIGN_SECRET_KEY` | the full contents of `anima-release.key` (both lines) |
-| `MINISIGN_PASSWORD` | the minisign key password |
+| Secret | Value | Where |
+| --- | --- | --- |
+| `CODESIGN_CERTIFICATE` | the base64 text of `AnimaOS-Code-Signing.p12` | repository |
+| `CODESIGN_CERTIFICATE_PASSWORD` | the `.p12` export password | repository |
+| `CODESIGN_IDENTITY` | `AnimaOS Code Signing` (the certificate's name) | repository |
+| `MINISIGN_SECRET_KEY` | the full contents of `anima-release.key` (both lines) | `release` environment |
+| `MINISIGN_PASSWORD` | the minisign key password | `release` environment |
+
+The `CODESIGN_*` secrets go under Settings → Secrets and variables → Actions →
+Repository secrets.
+
+The signing job runs in a GitHub Environment named `release`. Create it under
+Settings → Environments → New environment, add **Required reviewers** (yourself), and
+under **Deployment branches and tags** allow only tags matching `v*`. Add the two
+`MINISIGN_*` secrets there as environment secrets, not repository secrets. Then no
+release is signed until a reviewer approves the job, and no other workflow or branch
+can read the key.
+
+### 4. A tag ruleset
+
+Anyone who can push a version tag starts a release. Under Settings → Rules →
+Rulesets → New tag ruleset, target all tags (dist's trigger matches any version-like
+tag, not only `v*`), restrict creation, update and deletion to the maintainers who cut
+releases, and block force pushes.
 
 ## The signature convention
 
@@ -138,8 +168,10 @@ MINISIGN_PASSWORD=… tools/release/sign-assets.sh 0.2.0 anima-release.key \
 gh release upload v0.2.0 anima-*.minisig --clobber
 ```
 
-Check a signature with `minisign -V -p hosts/anima/release-key.pub -m <archive>`. It
-prints the trusted comment.
+Check a signature with
+`minisign -V -p hosts/anima/release-key.pub -m <archive> -x <archive>.minisig`. It
+prints the trusted comment. The signing job runs exactly this for every archive
+before it uploads the signatures.
 
 The round-trip test signs with a throwaway key through the script and checks the
 result with the updater's `verify`. It needs `minisign` on `PATH`, so it is ignored by
@@ -155,8 +187,9 @@ cargo test -p anima sign_script -- --include-ignored
    `0.2.0`. Then run `cargo check -p anima` to update `Cargo.lock`.
 2. Commit: `git commit -am "release: v0.2.0"`, then push the commit.
 3. Tag and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
-4. Watch the **Release** workflow in GitHub Actions. When the `custom-sign-release`
-   job has finished, the release has both `.minisig` files.
+4. Watch the **Release** workflow in GitHub Actions. The `custom-sign-release` job
+   waits for a reviewer of the `release` environment: approve it. When it has
+   finished, the release has both `.minisig` files.
 
 The updater only offers stable releases (no `-suffix`) that are newer than the running
 version and have their archive, `.sha256` and `.minisig` uploaded. A tag with a
