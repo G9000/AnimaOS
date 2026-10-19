@@ -12,6 +12,7 @@ members = [
     "packages/core-rust/crates/anima-schedule",
     "packages/core-rust/crates/anima-swarm",
     "hosts/rust-daemon",
+    "hosts/anima",
 ]
 resolver = "2"
 

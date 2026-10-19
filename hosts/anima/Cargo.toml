@@ -1,0 +1,25 @@
+[package]
+name = "anima"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "anima"
+path = "src/main.rs"
+
+[features]
+bundled-ui = ["dep:rust-embed"]
+
+[dependencies]
+directories = "6"
+rust-embed = { version = "8", optional = true }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "=3.27.0"
+
+[lints]
+workspace = true

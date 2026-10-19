@@ -1,0 +1,47 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "anima",
+  "root": "hosts/anima",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "cargo build -p anima"
+      },
+      "inputs": [
+        "default",
+        "{workspaceRoot}/Cargo.toml",
+        "{workspaceRoot}/Cargo.lock",
+        "{workspaceRoot}/packages/core-rust/crates/**/*"
+      ]
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "cargo test -p anima"
+      },
+      "inputs": [
+        "default",
+        "{workspaceRoot}/Cargo.toml",
+        "{workspaceRoot}/Cargo.lock",
+        "{workspaceRoot}/packages/core-rust/crates/**/*"
+      ]
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "cargo fmt --all --check"
+      },
+      "inputs": [
+        "default",
+        "{workspaceRoot}/Cargo.toml",
+        "{workspaceRoot}/Cargo.lock",
+        "{workspaceRoot}/packages/core-rust/crates/**/*"
+      ]
+    }
+  }
+}
