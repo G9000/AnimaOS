@@ -1,5 +1,7 @@
 # anima-daemon
 
+The installable `anima` program wraps this daemon; see [Packaged Anima](../../apps/contributor-docs/src/content/docs/packaged-anima.md).
+
 ## Connector contributions
 
 The Rust connector contract and Telegram pilot support reviewed, trusted source
