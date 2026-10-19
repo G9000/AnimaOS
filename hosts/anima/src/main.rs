@@ -5,6 +5,7 @@ mod commands;
 mod config;
 mod paths;
 mod server_env;
+mod supervisor;
 mod ui;
 
 use std::io;
@@ -32,6 +33,8 @@ fn main() -> ExitCode {
 
     match Cli::parse().command {
         Some(Command::Run) => report(commands::run::run()),
+        // There is no tray yet: with or without `--no-tray` it runs headless.
+        Some(Command::Supervise { .. }) => report(supervisor::supervise()),
         // `open` and the other commands land with the supervisor.
         _ => {
             eprintln!("not yet available");

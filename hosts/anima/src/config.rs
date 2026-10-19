@@ -95,7 +95,6 @@ impl Config {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // used by `anima setup` in a later task
 pub enum WorkspaceProblem {
     /// The workspace is the home folder itself.
     IsHome,
@@ -108,12 +107,10 @@ pub enum WorkspaceProblem {
 }
 
 /// Canonicalizes where the path exists, so symlinks and `..` can't dodge the rules.
-#[allow(dead_code)] // used by `validate_workspace`
 fn resolve(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-#[allow(dead_code)] // used by `anima setup` in a later task
 pub fn validate_workspace(
     ws: &Path,
     home: &Path,

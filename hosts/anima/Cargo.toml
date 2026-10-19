@@ -17,12 +17,17 @@ anima-daemon = { path = "../rust-daemon" }
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }
 directories = "6"
+getrandom = "0.3"
+process-wrap = { version = "=10.0.1", default-features = false, features = ["tokio1", "creation-flags", "job-object", "kill-on-drop", "process-group"] }
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
 rust-embed = { version = "8", features = ["mime-guess"], optional = true }
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "1", features = ["rt-multi-thread"] }
+serde_json = "1"
+tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 toml = "0.8"
 
 [dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
 tempfile = "=3.27.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tower = { version = "0.5", features = ["util"] }

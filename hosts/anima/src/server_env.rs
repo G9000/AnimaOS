@@ -5,12 +5,23 @@ use std::collections::BTreeMap;
 use crate::config::Config;
 use crate::paths::AnimaPaths;
 
+/// The port the server listens on: a usable `ANIMAOS_RS_PORT` in the process
+/// environment, else the config's.
+pub fn effective_port(cfg: &Config, process_env: &BTreeMap<String, String>) -> u16 {
+    process_env
+        .get("ANIMAOS_RS_PORT")
+        .and_then(|value| value.parse::<u16>().ok())
+        .filter(|port| *port != 0)
+        .unwrap_or(cfg.port)
+}
+
 /// Returns only the variables the process environment doesn't already set.
 pub fn server_env(
     cfg: &Config,
     paths: &AnimaPaths,
     process_env: &BTreeMap<String, String>,
 ) -> BTreeMap<String, String> {
+    let port = effective_port(cfg, process_env);
     let mut out = BTreeMap::new();
     let mut put = |key: &str, value: String| {
         if !process_env.contains_key(key) {
@@ -44,11 +55,11 @@ pub fn server_env(
     }
     put(
         "ANIMA_ALLOWED_UI_ORIGINS",
-        format!("http://127.0.0.1:{0},http://localhost:{0}", cfg.port),
+        format!("http://127.0.0.1:{0},http://localhost:{0}", port),
     );
     put(
         "ANIMA_PUBLIC_BASE_URL",
-        format!("http://127.0.0.1:{}", cfg.port),
+        format!("http://127.0.0.1:{}", port),
     );
     put("ANIMAOS_RS_KEYCHAIN_NAMESPACE", "installed".to_string());
     if let Ok(token) = std::fs::read_to_string(&paths.admin_token) {
@@ -129,5 +140,29 @@ mod tests {
         assert_eq!(env["ANIMA_LOCAL_ADMIN_TOKEN"], "secret-token");
         assert_eq!(env["ANIMAOS_RS_PORT"], "9100");
         assert_eq!(env["ANIMA_PUBLIC_BASE_URL"], "http://127.0.0.1:9100");
+    }
+
+    #[test]
+    fn origins_follow_the_effective_port() {
+        let (_home, paths) = setup();
+        let process = BTreeMap::from([("ANIMAOS_RS_PORT".to_string(), "9000".to_string())]);
+        let env = server_env(&Config::default(), &paths, &process);
+        assert_eq!(env["ANIMA_PUBLIC_BASE_URL"], "http://127.0.0.1:9000");
+        assert_eq!(
+            env["ANIMA_ALLOWED_UI_ORIGINS"],
+            "http://127.0.0.1:9000,http://localhost:9000"
+        );
+        assert_eq!(effective_port(&Config::default(), &process), 9000);
+
+        // An unusable override falls back to the config's port.
+        for bad in ["not-a-port", "0", "70000"] {
+            let process = BTreeMap::from([("ANIMAOS_RS_PORT".to_string(), bad.to_string())]);
+            let env = server_env(&Config::default(), &paths, &process);
+            assert_eq!(
+                env["ANIMA_PUBLIC_BASE_URL"], "http://127.0.0.1:8787",
+                "{bad}"
+            );
+            assert_eq!(effective_port(&Config::default(), &process), 8787, "{bad}");
+        }
     }
 }
