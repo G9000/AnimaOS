@@ -1297,6 +1297,29 @@ mod tests {
     }
 
     #[test]
+    fn anima_host_control_asks_the_owner_instead_of_being_refused() {
+        use crate::approvals::autonomy::{AgentAutonomy, AutonomyMode};
+        let free = AgentAutonomy {
+            mode: AutonomyMode::Free,
+            ..Default::default()
+        };
+        let free_policy = AutonomyMode::Free.preset().unwrap();
+        for command in ["anima stop", "an''ima update --now", "bash -c 'anima quit'"] {
+            assert_eq!(
+                evaluate_with_floor(
+                    &free_policy,
+                    &[],
+                    &[],
+                    &call("bash", &[("command", command)]),
+                    &free
+                ),
+                Verdict::Ask,
+                "{command:?} must ask the owner, not be denied"
+            );
+        }
+    }
+
+    #[test]
     fn the_floor_blocks_asks_and_lets_free_plans_through() {
         use crate::approvals::autonomy::{AgentAutonomy, AutonomyMode};
         let free = AgentAutonomy {
