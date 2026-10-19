@@ -63,6 +63,10 @@ impl Updater {
 }
 
 async fn find_release() -> Result<Option<ReleaseInfo>, UpdateError> {
+    // An unconfigured build says so on every platform.
+    if !update::release_key_configured() {
+        return Err(UpdateError::NotConfigured);
+    }
     let target = update::current_target().ok_or(UpdateError::Unsupported)?;
     let current = Version::parse(env!("CARGO_PKG_VERSION"))
         .map_err(|error| UpdateError::Io(std::io::Error::other(error)))?;

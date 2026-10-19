@@ -15,6 +15,8 @@ mod updates;
 pub use logs::LOG_FILE_NAME;
 pub use state::{Action, ServerState, SupervisorStatus};
 #[cfg(test)]
+mod lifecycle_tests;
+#[cfg(test)]
 mod state_tests;
 pub mod tokens;
 
@@ -216,7 +218,7 @@ impl Supervisor {
             ));
             Handoff {
                 pending,
-                deadline: Some(Instant::now() + handoff::HEALTH_TIMEOUT),
+                wait: HandoffWait::Until(Instant::now() + handoff::HEALTH_TIMEOUT),
                 reason: String::new(),
             }
         });
@@ -473,10 +475,18 @@ struct UpdateJob {
 /// The update that installed this version, until its server runs.
 struct Handoff {
     pending: handoff::PendingUpdate,
-    /// When the server must be running by; `None` once rolling back.
-    deadline: Option<Instant>,
+    wait: HandoffWait,
     /// Why it is being rolled back.
     reason: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HandoffWait {
+    /// The server must be running by then, or the update is rolled back.
+    Until(Instant),
+    /// The owner stopped the server (or quit): no deadline until it starts again.
+    Paused,
+    RollingBack,
 }
 
 /// What a phase's own work came to.
@@ -538,7 +548,10 @@ impl Lifecycle {
         while !matches!(phase, Phase::Exit) {
             let mut exit = self.child.as_ref().map(ServerChild::exit_watch);
             let mut work = self.work(phase);
-            let handoff_due = self.handoff.as_ref().and_then(|handoff| handoff.deadline);
+            let handoff_due = match self.handoff.as_ref().map(|handoff| handoff.wait) {
+                Some(HandoffWait::Until(at)) => Some(at),
+                _ => None,
+            };
             let handoff_timeout = async move {
                 match handoff_due {
                     Some(at) => tokio::time::sleep_until(at).await,
@@ -668,6 +681,22 @@ impl Lifecycle {
 
     /// Takes a requested action, answering with the status once it is under way.
     fn handle(&mut self, request: ActionRequest, phase: Phase) -> Option<Phase> {
+        // The owner's Cancel, Stop, Restart or Quit wins over an update that
+        // is still downloading: it is dropped, and the action is taken as if
+        // it had never begun.
+        if matches!(phase, Phase::Preparing { .. })
+            && matches!(
+                request.action,
+                Action::Cancel | Action::Stop | Action::Restart | Action::Quit
+            )
+        {
+            let resumed = self.drop_preparation();
+            if request.action == Action::Cancel {
+                let _ = request.reply.send(Ok(self.snapshot()));
+                return Some(resumed);
+            }
+            return Some(self.handle(request, resumed).unwrap_or(resumed));
+        }
         let ActionRequest {
             action,
             force,
@@ -684,6 +713,9 @@ impl Lifecycle {
                 return None;
             }
         };
+        if matches!(action, Action::Stop | Action::Quit) {
+            self.pause_handoff();
+        }
         let next_phase = match transition {
             // `update --now` while the update downloads: once it is ready,
             // don't wait for work.
@@ -848,6 +880,7 @@ impl Lifecycle {
     /// Ctrl-C or SIGTERM: quit without waiting for work; a second one kills.
     fn on_terminate(&mut self, phase: Phase) -> Phase {
         self.abandon_update();
+        self.pause_handoff();
         match phase {
             Phase::Stopping { killed, .. } => {
                 if !killed {
@@ -872,6 +905,13 @@ impl Lifecycle {
 
     /// Starts the server, with the config as it is now.
     fn start(&mut self) -> Phase {
+        // A server stopped by its owner during an update's health wait gets
+        // the full wait again.
+        if let Some(handoff) = self.handoff.as_mut() {
+            if handoff.wait == HandoffWait::Paused {
+                handoff.wait = HandoffWait::Until(Instant::now() + handoff::HEALTH_TIMEOUT);
+            }
+        }
         match Config::load(&self.paths.config_file) {
             Ok(cfg) => self.cfg = cfg,
             Err(error) => self.log.note(&format!(
@@ -1124,6 +1164,20 @@ impl Lifecycle {
         self.log
             .note(&format!("The update was not installed: {error}"));
         lock(&self.status).update.last_error = Some(error);
+        self.resume(resume)
+    }
+
+    /// The owner took another action while the update was downloading: the
+    /// update is dropped, and the server is as it was before.
+    fn drop_preparation(&mut self) -> Phase {
+        let resume = self.job.as_ref().map_or(Resume::Start, |job| job.resume);
+        self.abandon_update();
+        self.log.note("The update was cancelled");
+        self.resume(resume)
+    }
+
+    /// Goes back to where the lifecycle was before an update began.
+    fn resume(&mut self, resume: Resume) -> Phase {
         let alive = self.child.as_ref().is_some_and(ServerChild::is_alive);
         match resume {
             Resume::Running if alive => self.running(),
@@ -1153,6 +1207,21 @@ impl Lifecycle {
         self.prepared = None;
     }
 
+    /// The owner stopped the server (or quit) before this version's server
+    /// ran: no rollback behind their back. The pending update stays, and the
+    /// wait starts again with the next start (or the next supervisor).
+    fn pause_handoff(&mut self) {
+        if let Some(handoff) = self.handoff.as_mut() {
+            if matches!(handoff.wait, HandoffWait::Until(_)) {
+                handoff.wait = HandoffWait::Paused;
+                self.log.note(&format!(
+                    "Stopped before v{} was confirmed running; the update waits for the next start",
+                    handoff.pending.to
+                ));
+            }
+        }
+    }
+
     /// This version's server did not run in time after an update: kills it,
     /// then puts the previous binary back.
     fn on_handoff_timeout(&mut self, phase: Phase) -> Phase {
@@ -1166,7 +1235,7 @@ impl Lifecycle {
         let Some(handoff) = self.handoff.as_mut() else {
             return phase;
         };
-        handoff.deadline = None;
+        handoff.wait = HandoffWait::RollingBack;
         handoff.reason = reason;
         let (from, to) = (handoff.pending.from.clone(), handoff.pending.to.clone());
         self.log.note(&format!(
