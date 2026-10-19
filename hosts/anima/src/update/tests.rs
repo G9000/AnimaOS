@@ -50,6 +50,8 @@ fn newer_release_selected_for_target() {
         mac,
         ReleaseInfo {
             version: version("0.2.0"),
+            target: MAC.to_owned(),
+            archive_name: format!("anima-{MAC}.tar.gz"),
             archive_url: format!("{RELEASE_BASE}/anima-{MAC}.tar.gz"),
             sha256_url: format!("{RELEASE_BASE}/anima-{MAC}.tar.gz.sha256"),
             sig_url: format!("{RELEASE_BASE}/anima-{MAC}.tar.gz.minisig"),
@@ -145,13 +147,21 @@ fn test_key() -> TestKey {
     }
 }
 
+/// The trusted comment for v0.2.0 of the mac archive (the `local_release` below).
+const COMMENT: &str = "anima 0.2.0 aarch64-apple-darwin file:anima-aarch64-apple-darwin.tar.gz";
+
 impl TestKey {
+    /// Signed for v0.2.0 of the mac archive.
     fn sign(&self, bytes: &[u8]) -> String {
+        self.sign_as(bytes, COMMENT)
+    }
+
+    fn sign_as(&self, bytes: &[u8], trusted_comment: &str) -> String {
         minisign::sign(
             Some(&self.public_key),
             &self.secret,
             Cursor::new(bytes),
-            Some("test signature"),
+            Some(trusted_comment),
             None,
         )
         .unwrap()
@@ -173,13 +183,21 @@ fn verify_accepts_good_signature() {
     let key = test_key();
     let archive = b"pretend archive bytes".to_vec();
     let checksum = sha256_file(&archive, "anima-aarch64-apple-darwin.tar.gz");
-    verify(&archive, &checksum, &key.sign(&archive), &key.public).unwrap();
+    verify(
+        &archive,
+        &checksum,
+        &key.sign(&archive),
+        &key.public,
+        COMMENT,
+    )
+    .unwrap();
     // Upper-case hex is the same digest.
     verify(
         &archive,
         &checksum.to_uppercase(),
         &key.sign(&archive),
         &key.public,
+        COMMENT,
     )
     .unwrap();
 }
@@ -194,14 +212,14 @@ fn verify_rejects_tampered_archive() {
     let mut tampered = archive.clone();
     tampered[3] ^= 0x01;
     assert!(matches!(
-        verify(&tampered, &checksum, &signature, &key.public),
+        verify(&tampered, &checksum, &signature, &key.public, COMMENT),
         Err(UpdateError::Checksum)
     ));
 
     // A checksum that matches the tampered bytes still fails on the signature.
     let forged = sha256_file(&tampered, "anima.tar.gz");
     assert!(matches!(
-        verify(&tampered, &forged, &signature, &key.public),
+        verify(&tampered, &forged, &signature, &key.public, COMMENT),
         Err(UpdateError::Signature)
     ));
 }
@@ -213,9 +231,65 @@ fn verify_rejects_wrong_key() {
     let archive = b"pretend archive bytes".to_vec();
     let checksum = sha256_file(&archive, "anima.tar.gz");
     assert!(matches!(
-        verify(&archive, &checksum, &signer.sign(&archive), &other.public),
+        verify(
+            &archive,
+            &checksum,
+            &signer.sign(&archive),
+            &other.public,
+            COMMENT
+        ),
         Err(UpdateError::Signature)
     ));
+}
+
+#[test]
+fn release_trusted_comment_format() {
+    assert_eq!(
+        release_trusted_comment(&version("0.2.0"), MAC, "anima-aarch64-apple-darwin.tar.gz"),
+        COMMENT
+    );
+}
+
+/// A genuine signature only counts for the release its trusted comment names, so an
+/// older signed archive re-published under a newer tag (or another platform's, or
+/// another file) is refused.
+#[test]
+fn verify_binds_the_signature_to_the_release() {
+    let key = test_key();
+    let archive = b"pretend archive bytes".to_vec();
+    let checksum = sha256_file(&archive, "anima-aarch64-apple-darwin.tar.gz");
+    let signed = |comment: &str| {
+        verify(
+            &archive,
+            &checksum,
+            &key.sign_as(&archive, comment),
+            &key.public,
+            COMMENT,
+        )
+    };
+
+    signed(COMMENT).unwrap();
+    for other in [
+        // An older version re-tagged as 0.2.0.
+        "anima 0.1.0 aarch64-apple-darwin file:anima-aarch64-apple-darwin.tar.gz",
+        "anima v0.2.0 aarch64-apple-darwin file:anima-aarch64-apple-darwin.tar.gz",
+        // Another target.
+        "anima 0.2.0 x86_64-pc-windows-msvc file:anima-aarch64-apple-darwin.tar.gz",
+        // Another file.
+        "anima 0.2.0 aarch64-apple-darwin file:anima-x86_64-pc-windows-msvc.zip",
+        // The minisign default and near misses.
+        "timestamp:1760000000\tfile:anima-aarch64-apple-darwin.tar.gz",
+        "anima 0.2.0 aarch64-apple-darwin file:anima-aarch64-apple-darwin.tar.gz ",
+        "",
+    ] {
+        match signed(other) {
+            Err(UpdateError::ReleaseMismatch { expected, signed }) => {
+                assert_eq!(expected, COMMENT);
+                assert_eq!(signed, other);
+            }
+            outcome => panic!("comment {other:?} gave {outcome:?}"),
+        }
+    }
 }
 
 #[test]
@@ -226,7 +300,7 @@ fn verify_rejects_unusable_checksum_and_signature_files() {
     for checksum in ["", "   ", "abc123  anima.tar.gz", "zz  anima.tar.gz"] {
         assert!(
             matches!(
-                verify(&archive, checksum, &signature, &key.public),
+                verify(&archive, checksum, &signature, &key.public, COMMENT),
                 Err(UpdateError::Checksum)
             ),
             "checksum file {checksum:?}"
@@ -234,7 +308,7 @@ fn verify_rejects_unusable_checksum_and_signature_files() {
     }
     let checksum = sha256_file(&archive, "anima.tar.gz");
     assert!(matches!(
-        verify(&archive, &checksum, "", &key.public),
+        verify(&archive, &checksum, "", &key.public, COMMENT),
         Err(UpdateError::Signature)
     ));
     assert!(matches!(
@@ -242,7 +316,8 @@ fn verify_rejects_unusable_checksum_and_signature_files() {
             &archive,
             &checksum,
             "untrusted comment: x\nnot base64",
-            &key.public
+            &key.public,
+            COMMENT
         ),
         Err(UpdateError::Signature)
     ));
@@ -260,7 +335,13 @@ fn placeholder_key_disables_updates() {
     let archive = b"pretend archive bytes".to_vec();
     let checksum = sha256_file(&archive, "anima.tar.gz");
     assert!(matches!(
-        verify(&archive, &checksum, &key.sign(&archive), RELEASE_PUBLIC_KEY),
+        verify(
+            &archive,
+            &checksum,
+            &key.sign(&archive),
+            RELEASE_PUBLIC_KEY,
+            COMMENT
+        ),
         Err(UpdateError::NotConfigured)
     ));
     // And `check` stops before any request.
@@ -620,6 +701,8 @@ async fn check_at_reports_server_errors() {
 fn local_release(base: &str) -> ReleaseInfo {
     ReleaseInfo {
         version: version("0.2.0"),
+        target: MAC.to_owned(),
+        archive_name: format!("anima-{MAC}.tar.gz"),
         archive_url: format!("{base}/archive"),
         sha256_url: format!("{base}/archive.sha256"),
         sig_url: format!("{base}/archive.minisig"),
@@ -658,6 +741,29 @@ async fn download_verified_refuses_a_swapped_archive() {
     let outcome =
         download_verified(&http_client().unwrap(), &local_release(&base), &key.public).await;
     assert!(matches!(outcome, Err(UpdateError::Checksum)), "{outcome:?}");
+}
+
+#[tokio::test]
+async fn download_verified_refuses_a_signature_for_another_release() {
+    let key = test_key();
+    let archive = b"genuinely signed 0.1.0 archive".to_vec();
+    let base = serve(Served {
+        sha256: sha256_file(&archive, "anima-aarch64-apple-darwin.tar.gz"),
+        minisig: key.sign_as(
+            &archive,
+            "anima 0.1.0 aarch64-apple-darwin file:anima-aarch64-apple-darwin.tar.gz",
+        ),
+        archive,
+        ..Served::default()
+    })
+    .await;
+    // Offered as 0.2.0, so the 0.1.0 signature does not count.
+    let outcome =
+        download_verified(&http_client().unwrap(), &local_release(&base), &key.public).await;
+    assert!(
+        matches!(outcome, Err(UpdateError::ReleaseMismatch { .. })),
+        "{outcome:?}"
+    );
 }
 
 #[tokio::test]

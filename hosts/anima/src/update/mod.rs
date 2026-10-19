@@ -20,7 +20,9 @@ pub use release::{
     check, check_at, current_target, download, download_verified, http_client, select_release,
     ReleaseInfo, GITHUB_API, MAX_ARCHIVE_BYTES, REPO,
 };
-pub use verify::{extract_binary, release_key_configured, verify, RELEASE_PUBLIC_KEY};
+pub use verify::{
+    extract_binary, release_key_configured, release_trusted_comment, verify, RELEASE_PUBLIC_KEY,
+};
 
 #[derive(Debug)]
 pub enum UpdateError {
@@ -36,6 +38,13 @@ pub enum UpdateError {
     Checksum,
     /// The minisign signature is missing, malformed or not made by the release key.
     Signature,
+    /// A genuine signature, but for another release: its trusted comment is not the one
+    /// [`release_trusted_comment`] builds for the selected release (for example an
+    /// older signed build re-published under a newer tag).
+    ReleaseMismatch {
+        expected: String,
+        signed: String,
+    },
     /// The archive is unreadable, unsafe, or holds no `anima` binary.
     Archive(String),
     Io(io::Error),
@@ -51,6 +60,11 @@ impl fmt::Display for UpdateError {
             }
             Self::Checksum => f.write_str("The update download does not match its checksum"),
             Self::Signature => f.write_str("The update is not signed by the Anima release key"),
+            Self::ReleaseMismatch { expected, signed } => write!(
+                f,
+                "The update's signature is for a different release \
+                 (signed for \"{signed}\", expected \"{expected}\")"
+            ),
             Self::Archive(message) => write!(f, "The update archive is not usable: {message}"),
             Self::Io(error) => write!(f, "Could not install the update: {error}"),
         }

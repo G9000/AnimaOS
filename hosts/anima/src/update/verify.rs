@@ -3,6 +3,7 @@
 use std::io::{Cursor, Read};
 
 use minisign_verify::{PublicKey, Signature};
+use semver::Version;
 use sha2::{Digest, Sha256};
 
 use super::UpdateError;
@@ -19,13 +20,32 @@ pub fn release_key_configured() -> bool {
     PublicKey::decode(RELEASE_PUBLIC_KEY).is_ok()
 }
 
-/// Accept `archive` only if it matches `sha256_file` (cargo-dist's `<hex>  <name>`) and
-/// `minisig` is a signature over it by `public_key`. Both must pass.
+/// The trusted comment a release signature must carry, binding it to one release:
+///
+/// ```text
+/// anima {version} {target} file:{asset_name}
+/// ```
+///
+/// `version` has no leading `v`, e.g.
+/// `anima 0.2.0 aarch64-apple-darwin file:anima-aarch64-apple-darwin.tar.gz`. Sign with
+/// `minisign -S -t "<that comment>" -m <archive>`. The trusted comment is covered by the
+/// signature, so a genuinely signed older archive cannot be passed off as a newer
+/// release or as another platform's build.
+pub fn release_trusted_comment(version: &Version, target: &str, asset_name: &str) -> String {
+    format!("anima {version} {target} file:{asset_name}")
+}
+
+/// Accept `archive` only if all of these pass:
+/// 1. it matches `sha256_file` (cargo-dist's `<hex>  <name>`), else [`UpdateError::Checksum`];
+/// 2. `minisig` is a signature over it by `public_key`, else [`UpdateError::Signature`];
+/// 3. that signature's trusted comment is exactly `expected_trusted_comment` (build it
+///    with [`release_trusted_comment`]), else [`UpdateError::ReleaseMismatch`].
 pub fn verify(
     archive: &[u8],
     sha256_file: &str,
     minisig: &str,
     public_key: &str,
+    expected_trusted_comment: &str,
 ) -> Result<(), UpdateError> {
     let public_key = PublicKey::decode(public_key).map_err(|_| UpdateError::NotConfigured)?;
 
@@ -47,7 +67,16 @@ pub fn verify(
     // Only prehashed signatures, the minisign default; legacy ones are refused.
     public_key
         .verify(archive, &signature, false)
-        .map_err(|_| UpdateError::Signature)
+        .map_err(|_| UpdateError::Signature)?;
+    // Checked only once the signature (which covers the trusted comment) is genuine.
+    let signed = signature.trusted_comment();
+    if signed != expected_trusted_comment {
+        return Err(UpdateError::ReleaseMismatch {
+            expected: expected_trusted_comment.to_owned(),
+            signed: signed.to_owned(),
+        });
+    }
+    Ok(())
 }
 
 /// Take the `anima` (`anima.exe` on Windows) binary out of a release archive: a

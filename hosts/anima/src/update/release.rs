@@ -7,7 +7,7 @@ use reqwest::{redirect, Client, StatusCode};
 use semver::Version;
 use serde::Deserialize;
 
-use super::{verify, UpdateError};
+use super::{release_trusted_comment, verify, UpdateError};
 
 pub const GITHUB_API: &str = "https://api.github.com";
 pub const REPO: &str = "G9000/animaOS-SWARM";
@@ -22,6 +22,10 @@ const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReleaseInfo {
     pub version: Version,
+    /// The target this release was selected for.
+    pub target: String,
+    /// The archive's asset name, e.g. `anima-aarch64-apple-darwin.tar.gz`.
+    pub archive_name: String,
     pub archive_url: String,
     pub sha256_url: String,
     pub sig_url: String,
@@ -106,6 +110,8 @@ pub fn select_release(api_json: &str, current: &Version, target: &str) -> Option
         sha256_url: url_of(&format!("{archive}.sha256"))?,
         sig_url: url_of(&format!("{archive}.minisig"))?,
         version,
+        target: target.to_owned(),
+        archive_name: archive,
     })
 }
 
@@ -160,7 +166,9 @@ pub async fn download(client: &Client, url: &str, limit: u64) -> Result<Vec<u8>,
 
 /// Download `release`'s archive, checksum and signature, and return the archive only
 /// if [`verify`] accepts it against `public_key` (the release key in production:
-/// [`RELEASE_PUBLIC_KEY`](super::RELEASE_PUBLIC_KEY)).
+/// [`RELEASE_PUBLIC_KEY`](super::RELEASE_PUBLIC_KEY)) *and* the signature's trusted
+/// comment names this exact release: [`release_trusted_comment`] of its version,
+/// target and archive name.
 pub async fn download_verified(
     client: &Client,
     release: &ReleaseInfo,
@@ -174,6 +182,7 @@ pub async fn download_verified(
         &String::from_utf8_lossy(&sha256),
         &String::from_utf8_lossy(&minisig),
         public_key,
+        &release_trusted_comment(&release.version, &release.target, &release.archive_name),
     )?;
     Ok(archive)
 }
