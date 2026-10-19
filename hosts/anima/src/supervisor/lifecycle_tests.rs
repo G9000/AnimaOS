@@ -70,7 +70,7 @@ fn ask(
     lifecycle: &mut Lifecycle,
     phase: Phase,
     action: Action,
-) -> (Option<Phase>, Result<SupervisorStatus, Conflict>) {
+) -> (Option<Phase>, Result<SupervisorStatus, Refusal>) {
     let (reply, mut answer) = oneshot::channel();
     let next = lifecycle.handle(
         ActionRequest {
@@ -164,9 +164,9 @@ async fn start_while_preparing_still_conflicts() {
     assert!(next.is_none());
     assert_eq!(
         answer.unwrap_err(),
-        Conflict {
+        Refusal::Busy(Conflict {
             pending: Action::Update
-        }
+        })
     );
     assert!(lifecycle.job.is_some());
 }
@@ -240,6 +240,38 @@ async fn quit_during_the_health_wait_keeps_the_pending_update() {
     assert_eq!(wait(&lifecycle), HandoffWait::Paused);
     // The next supervisor of this version waits for health again.
     assert!(marker.exists());
+}
+
+#[tokio::test]
+async fn an_update_waits_for_the_last_one_to_finish() {
+    let home = tempfile::tempdir().unwrap();
+    let mut lifecycle = lifecycle(home.path());
+    let marker = awaiting_health(&mut lifecycle);
+    lifecycle.set_state(ServerState::Starting, None);
+    let starting = Phase::Starting {
+        deadline: Instant::now() + READY_TIMEOUT,
+    };
+
+    // While the new version's server is still coming up…
+    let (next, answer) = ask(&mut lifecycle, starting, Action::Update);
+    assert!(next.is_none(), "{next:?}");
+    assert_eq!(answer.unwrap_err(), Refusal::UnfinishedUpdate);
+
+    // …and while the owner has it stopped.
+    let (next, _) = ask(&mut lifecycle, starting, Action::Stop);
+    assert!(matches!(next, Some(Phase::Stopped)), "{next:?}");
+    assert_eq!(wait(&lifecycle), HandoffWait::Paused);
+    let (next, answer) = ask(&mut lifecycle, Phase::Stopped, Action::Update);
+    assert!(next.is_none(), "{next:?}");
+    assert_eq!(answer.unwrap_err(), Refusal::UnfinishedUpdate);
+    assert!(lifecycle.job.is_none());
+    assert!(marker.exists());
+
+    // Once it ran, updates are taken again.
+    lifecycle.running();
+    let (next, answer) = ask(&mut lifecycle, Phase::Running, Action::Update);
+    assert!(matches!(next, Some(Phase::Preparing { .. })), "{next:?}");
+    assert!(answer.is_ok());
 }
 
 #[tokio::test]

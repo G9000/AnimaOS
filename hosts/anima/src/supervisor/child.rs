@@ -28,14 +28,23 @@ pub struct ServerChild {
 }
 
 impl ServerChild {
-    /// Starts `exe run` with `env` added to this process's environment, its
-    /// output going to `log`. On Unix it leads its own process group; on
-    /// Windows it runs in a job object without a console window.
-    pub fn spawn(exe: &Path, env: &BTreeMap<String, String>, log: &ServerLog) -> io::Result<Self> {
+    /// Starts `exe run` in `cwd` with `env` added to this process's
+    /// environment, its output going to `log`. On Unix it leads its own
+    /// process group; on Windows it runs in a job object without a console
+    /// window.
+    pub fn spawn(
+        exe: &Path,
+        env: &BTreeMap<String, String>,
+        cwd: &Path,
+        log: &ServerLog,
+    ) -> io::Result<Self> {
         let mut command = tokio::process::Command::new(exe);
         command
             .arg("run")
             .envs(env)
+            // The supervisor's own marker (Windows): not the server's business.
+            .env_remove("ANIMA_DETACHED")
+            .current_dir(cwd)
             // Held open for the child's lifetime: when this process dies,
             // the server sees end of input and shuts itself down.
             .stdin(Stdio::piped())

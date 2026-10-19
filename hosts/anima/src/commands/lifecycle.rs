@@ -40,6 +40,9 @@ impl Started {
 
 pub fn start() -> io::Result<ExitCode> {
     let (paths, cfg) = super::load()?;
+    if let Some(code) = super::refuse_unless_set_up(&cfg) {
+        return Ok(code);
+    }
     match ensure_running(&paths, &cfg)? {
         Started::Already(status) => println!("Anima is already running · {}", status.server_url),
         Started::Now(status) => println!("Anima is running · {}", status.server_url),
@@ -86,6 +89,15 @@ fn wait_until_running(
                 ServerState::Crashed { message, .. } => {
                     return Err(io::Error::other(message.clone()))
                 }
+                // The supervisor would not start the server (an unsafe
+                // workspace), or it was stopped meanwhile.
+                ServerState::Stopped if status.pending.is_none() => {
+                    return Err(io::Error::other(
+                        status.workspace_problem.clone().unwrap_or_else(|| {
+                            "Anima was stopped before it finished starting".to_string()
+                        }),
+                    ))
+                }
                 _ => {}
             },
             Ok(None) => {}
@@ -125,6 +137,8 @@ fn launch_supervisor(paths: &AnimaPaths) -> io::Result<Option<Child>> {
     let mut command = Command::new(std::env::current_exe()?);
     command
         .args(["supervise", "--background"])
+        // Not the folder this command ran in: nothing inherits it.
+        .current_dir(&paths.data)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -144,7 +158,10 @@ fn detach(command: &mut Command) {
         use std::os::windows::process::CommandExt;
         const DETACHED_PROCESS: u32 = 0x0000_0008;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW);
+        command
+            .creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW)
+            // Already detached: `supervise` must not relaunch itself.
+            .env(super::open::DETACHED_ENV, "1");
     }
     #[cfg(not(any(unix, windows)))]
     let _ = command;

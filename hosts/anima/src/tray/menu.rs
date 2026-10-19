@@ -70,6 +70,10 @@ pub fn menu_model(status: &SupervisorStatus) -> Vec<MenuItemModel> {
             None => MenuItemModel::new("check", "Check for updates", true),
         },
     ];
+    // Why the last update or check did not go through.
+    if let Some(error) = &status.update.last_error {
+        items.push(MenuItemModel::new("update-error", error.clone(), false));
+    }
     // A gated action under way; a cancel being confirmed has nothing to cancel.
     if status
         .pending

@@ -68,13 +68,22 @@ impl Supervisor {
         Self::start_in(home, free_port(), extra_config)
     }
 
+    /// `extra_config` may set `workspace`; otherwise a `ws` folder in the
+    /// home is the workspace (the supervisor refuses to run without one).
     fn start_in(home: tempfile::TempDir, server_port: u16, extra_config: &str) -> Self {
         let control_port = free_port();
         let root = home.path().join(".animaos-swarm");
         std::fs::create_dir_all(&root).unwrap();
+        let workspace = if extra_config.contains("workspace =") {
+            String::new()
+        } else {
+            let workspace = home.path().join("ws");
+            std::fs::create_dir_all(&workspace).unwrap();
+            format!("workspace = {:?}\n", workspace.to_string_lossy())
+        };
         std::fs::write(
             root.join("config.toml"),
-            format!("port = {server_port}\ncontrol_port = {control_port}\nautostart = false\n{extra_config}\n[updates]\ncheck = false\n"),
+            format!("port = {server_port}\ncontrol_port = {control_port}\nautostart = false\n{workspace}{extra_config}\n[updates]\ncheck = false\n"),
         )
         .unwrap();
         Self {
@@ -416,6 +425,77 @@ fn file_workspace_is_reported_and_still_runs() {
         problem.starts_with("Workspace path is not a folder"),
         "workspaceProblem: {problem:?}"
     );
+}
+
+#[test]
+fn home_folder_workspace_is_refused_without_starting_the_server() {
+    let home = tempfile::tempdir().unwrap();
+    let config = format!("workspace = {:?}\n", home.path().to_string_lossy());
+    let supervisor = Supervisor::start_in(home, free_port(), &config);
+    let status = supervisor.wait_for_kind("stopped");
+    assert_eq!(
+        status["workspaceProblem"], "The workspace can't be your home folder",
+        "{status}"
+    );
+    assert_eq!(status["pending"], Value::Null);
+    assert!(refuses_connections(supervisor.server_port));
+    let log = std::fs::read_to_string(supervisor.root().join("logs").join("anima.log")).unwrap();
+    assert!(
+        log.contains("Not starting the server: The workspace can't be your home folder"),
+        "log:\n{log}"
+    );
+    assert!(!log.contains("Starting the server"), "log:\n{log}");
+
+    // Asking again does not start it either.
+    let (code, body) = supervisor.action("start", false);
+    assert_eq!(code, 202, "{body}");
+    supervisor.wait_for_kind("stopped");
+    assert!(refuses_connections(supervisor.server_port));
+}
+
+#[test]
+fn supervise_without_a_workspace_refuses() {
+    let home = tempfile::tempdir().unwrap();
+    let control_port = free_port();
+    let root = home.path().join(".animaos-swarm");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("config.toml"),
+        format!("control_port = {control_port}\n[updates]\ncheck = false\n"),
+    )
+    .unwrap();
+    // A supervisor that does not refuse would run until it is killed.
+    let mut child = KillOnDrop(
+        supervise_command(home.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            break status;
+        }
+        assert!(Instant::now() < deadline, "the supervisor did not refuse");
+        thread::sleep(Duration::from_millis(100));
+    };
+    let mut stderr = String::new();
+    child
+        .0
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    assert_eq!(status.code(), Some(2));
+    assert_eq!(
+        stderr.trim(),
+        "Anima isn't set up yet. Run `anima setup` first."
+    );
+    // It never took the control port, so nothing was left running.
+    assert!(refuses_connections(control_port));
+    assert!(!root.join("control-token").exists());
 }
 
 #[test]

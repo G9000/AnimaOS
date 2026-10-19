@@ -16,7 +16,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 
-use super::state::{Action, Conflict, SupervisorStatus};
+use super::state::{Action, Conflict, Refusal, SupervisorStatus, UNFINISHED_UPDATE};
 use super::tokens::ControlToken;
 use super::SharedStatus;
 
@@ -27,7 +27,7 @@ const ACTION_TIMEOUT: Duration = Duration::from_secs(10);
 pub struct ActionRequest {
     pub action: Action,
     pub force: bool,
-    pub reply: oneshot::Sender<Result<SupervisorStatus, Conflict>>,
+    pub reply: oneshot::Sender<Result<SupervisorStatus, Refusal>>,
 }
 
 #[derive(Clone)]
@@ -122,11 +122,12 @@ async fn action_route(
     }
     match tokio::time::timeout(ACTION_TIMEOUT, answer).await {
         Ok(Ok(Ok(status))) => (StatusCode::ACCEPTED, Json(status)).into_response(),
-        Ok(Ok(Err(Conflict { pending }))) => (
+        Ok(Ok(Err(Refusal::Busy(Conflict { pending })))) => (
             StatusCode::CONFLICT,
             Json(json!({ "error": "Another action is in progress", "pending": pending })),
         )
             .into_response(),
+        Ok(Ok(Err(Refusal::UnfinishedUpdate))) => error(StatusCode::CONFLICT, UNFINISHED_UPDATE),
         _ => error(
             StatusCode::SERVICE_UNAVAILABLE,
             "The supervisor did not take the action",

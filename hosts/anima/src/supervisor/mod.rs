@@ -25,7 +25,7 @@ use std::future::Future;
 use std::io;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::process::ExitStatus;
+use std::process::{ExitCode, ExitStatus};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -35,14 +35,14 @@ use tokio::sync::{mpsc, oneshot, watch, Notify};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
-use crate::config::{validate_workspace, Config};
+use crate::config::{validate_workspace, Config, WorkspaceProblem};
 use crate::paths::AnimaPaths;
 use crate::server_env::{effective_port, server_env};
 use crate::update::{self, handoff};
 use child::{ServerApi, ServerChild, ShutdownRequest};
 use control_api::ActionRequest;
 use logs::ServerLog;
-use state::{backoff_secs, next, Conflict, Transition, UpdateStatus};
+use state::{backoff_secs, next, Conflict, Refusal, Transition, UpdateStatus, UNFINISHED_UPDATE};
 use tokens::{AdminToken, ControlToken};
 use updates::{JobProgress, Prepared, Progress, Updater};
 
@@ -84,20 +84,36 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// Runs the supervisor until it is asked to quit, with the tray when `tray`
 /// is set. A supervisor already listening on the control port means there is
-/// nothing to do.
-pub fn supervise(tray: bool) -> io::Result<()> {
-    let Some(supervisor) = Supervisor::bind()? else {
+/// nothing to do. Before `anima setup` has chosen a workspace it refuses.
+///
+/// On Windows, `background` (the start-at-login entry) runs in a console of
+/// its own: the supervisor starts itself again without one, and this copy exits.
+pub fn supervise(tray: bool, background: bool) -> io::Result<ExitCode> {
+    let paths = AnimaPaths::discover()?;
+    paths.ensure()?;
+    let cfg = Config::load(&paths.config_file)?;
+    if let Some(code) = crate::commands::refuse_unless_set_up(&cfg) {
+        return Ok(code);
+    }
+    #[cfg(windows)]
+    if background && crate::commands::open::needs_detaching() {
+        return crate::commands::open::relaunch_detached();
+    }
+    #[cfg(not(windows))]
+    let _ = background;
+    let Some(supervisor) = Supervisor::bind(paths, cfg)? else {
         println!("Anima is already running");
-        return Ok(());
+        return Ok(ExitCode::SUCCESS);
     };
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
     if tray {
-        crate::tray::run(runtime, supervisor)
+        crate::tray::run(runtime, supervisor)?;
     } else {
-        runtime.block_on(supervisor.run())
+        runtime.block_on(supervisor.run())?;
     }
+    Ok(ExitCode::SUCCESS)
 }
 
 /// A supervisor that holds the control port, ready to run.
@@ -118,10 +134,7 @@ pub struct Supervisor {
 
 impl Supervisor {
     /// Takes the control port; `None` when another supervisor has it.
-    fn bind() -> io::Result<Option<Self>> {
-        let paths = AnimaPaths::discover()?;
-        paths.ensure()?;
-        let cfg = Config::load(&paths.config_file)?;
+    fn bind(paths: AnimaPaths, cfg: Config) -> io::Result<Option<Self>> {
         let Some(listener) = bind_control_port(&paths, cfg.control_port)? else {
             return Ok(None);
         };
@@ -284,6 +297,7 @@ impl Link {
     pub fn request(&self, action: Action) {
         let requests = self.requests.clone();
         let log = self.log.clone();
+        let status = Arc::clone(&self.status);
         self.runtime.spawn(async move {
             let (reply, answer) = oneshot::channel();
             let request = ActionRequest {
@@ -294,10 +308,16 @@ impl Link {
             if requests.send(request).await.is_err() {
                 return;
             }
-            if let Ok(Err(Conflict { pending })) = answer.await {
-                log.note(&format!(
+            match answer.await {
+                Ok(Err(Refusal::Busy(Conflict { pending }))) => log.note(&format!(
                     "The tray asked for {action:?}, but {pending:?} is in progress"
-                ));
+                )),
+                // The menu shows the update's last error.
+                Ok(Err(Refusal::UnfinishedUpdate)) => {
+                    log.note(UNFINISHED_UPDATE);
+                    lock(&status).update.last_error = Some(UNFINISHED_UPDATE.to_string());
+                }
+                _ => {}
             }
         });
     }
@@ -345,6 +365,25 @@ fn workspace_problem(cfg: &Config, paths: &AnimaPaths) -> Option<String> {
     let workspace = cfg.workspace.as_ref()?;
     let home = paths.root.parent()?;
     Some(validate_workspace(workspace, home, paths).err()?.message())
+}
+
+/// Why the server must not be started with this config: no workspace (the
+/// server would fall back to its working folder), or one that holds the home
+/// folder or Anima's own keys. A missing folder is not a reason: the server
+/// starts with it and reports the problem.
+fn unsafe_workspace(cfg: &Config, paths: &AnimaPaths) -> Option<String> {
+    let Some(workspace) = cfg.workspace.as_ref() else {
+        return Some(crate::commands::NOT_SET_UP.to_string());
+    };
+    let home = paths.root.parent()?;
+    match validate_workspace(workspace, home, paths) {
+        Err(
+            problem @ (WorkspaceProblem::IsHome
+            | WorkspaceProblem::ContainsDataRoot
+            | WorkspaceProblem::InsideDataRoot),
+        ) => Some(problem.message()),
+        _ => None,
+    }
 }
 
 /// Ctrl-C (and SIGTERM on Unix), each one sent as a `()`.
@@ -702,6 +741,16 @@ impl Lifecycle {
             force,
             reply,
         } = request;
+        // The installed update's server must run (or be rolled back) first:
+        // another one would replace the binary a rollback puts back.
+        if action == Action::Update
+            && self.handoff.as_ref().is_some_and(|handoff| {
+                matches!(handoff.wait, HandoffWait::Until(_) | HandoffWait::Paused)
+            })
+        {
+            let _ = reply.send(Err(Refusal::UnfinishedUpdate));
+            return None;
+        }
         let (state, pending) = {
             let status = lock(&self.status);
             (status.state.clone(), status.pending)
@@ -709,7 +758,7 @@ impl Lifecycle {
         let transition = match next(&state, pending, action, force) {
             Ok(transition) => transition,
             Err(conflict) => {
-                let _ = reply.send(Err(conflict));
+                let _ = reply.send(Err(conflict.into()));
                 return None;
             }
         };
@@ -936,8 +985,18 @@ impl Lifecycle {
         }
     }
 
-    /// Spawns the server once its port is free.
+    /// Spawns the server once its port is free, unless the workspace is
+    /// one it must not work in: then it stays stopped, saying why.
     fn spawn_child(&mut self) -> Phase {
+        if let Some(problem) = unsafe_workspace(&self.cfg, &self.paths) {
+            self.log
+                .note(&format!("Not starting the server: {problem}"));
+            // Not the new version's fault: no rollback while it waits.
+            self.pause_handoff();
+            lock(&self.status).workspace_problem = Some(problem);
+            self.set_state(ServerState::Stopped, None);
+            return Phase::Stopped;
+        }
         let process_env: BTreeMap<String, String> = std::env::vars().collect();
         let port = effective_port(&self.cfg, &process_env);
         let mut env = server_env(&self.cfg, &self.paths, &process_env);
@@ -955,7 +1014,7 @@ impl Lifecycle {
         self.log.clear_tail();
         self.log
             .note(&format!("Starting the server on port {port}"));
-        match ServerChild::spawn(&self.exe, &env, &self.log) {
+        match ServerChild::spawn(&self.exe, &env, &self.paths.data, &self.log) {
             Ok(child) => {
                 self.child = Some(child);
                 Phase::Starting {
@@ -968,6 +1027,11 @@ impl Lifecycle {
 
     fn running(&mut self) -> Phase {
         if let Some(Handoff { pending, .. }) = self.handoff.take() {
+            let mut status = lock(&self.status);
+            if status.update.last_error.as_deref() == Some(UNFINISHED_UPDATE) {
+                status.update.last_error = None;
+            }
+            drop(status);
             match handoff::confirm(&self.paths) {
                 Ok(()) => self
                     .log

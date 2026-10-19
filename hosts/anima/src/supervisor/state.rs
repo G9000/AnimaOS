@@ -114,6 +114,26 @@ pub struct Conflict {
     pub pending: Action,
 }
 
+/// What an update refused while the last one waits shows (the control API,
+/// the CLI and the tray).
+pub const UNFINISHED_UPDATE: &str = "Start Anima to finish the last update first";
+
+/// Why a requested action was not taken; the control API answers 409.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    /// Another action is pending.
+    Busy(Conflict),
+    /// An update was installed but its server has not run yet: another
+    /// update would replace the binary a rollback needs.
+    UnfinishedUpdate,
+}
+
+impl From<Conflict> for Refusal {
+    fn from(conflict: Conflict) -> Self {
+        Refusal::Busy(conflict)
+    }
+}
+
 /// Decides what `requested` does in `state` while `pending` is under way.
 pub fn next(
     state: &ServerState,

@@ -57,6 +57,19 @@ fn running_menu_items() {
 }
 
 #[test]
+fn an_update_error_is_shown_under_the_update_item() {
+    let mut status = sample_status(ServerState::Stopped);
+    status.update.last_error = Some("Start Anima to finish the last update first".into());
+    let model = menu_model(&status);
+    let ids = ids(&model);
+    let at = ids.iter().position(|id| *id == "update-error").unwrap();
+    assert_eq!(ids[at - 1], "check");
+    let line = item(&model, "update-error");
+    assert_eq!(line.label, "Start Anima to finish the last update first");
+    assert!(!line.enabled);
+}
+
+#[test]
 fn stopped_shows_start_and_disables_open() {
     let mut status = sample_status(ServerState::Stopped);
     status.autostart = false;

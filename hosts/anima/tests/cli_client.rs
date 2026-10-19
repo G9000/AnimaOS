@@ -54,7 +54,22 @@ struct Home {
 }
 
 impl Home {
+    /// Set up, with a `ws` folder in the home as the workspace.
     fn new() -> Self {
+        let home = Self::not_set_up();
+        let workspace = home.workspace();
+        std::fs::create_dir_all(&workspace).unwrap();
+        let config = format!(
+            "workspace = {:?}\n{}",
+            workspace.to_string_lossy(),
+            home.config_text()
+        );
+        std::fs::write(home.root().join("config.toml"), config).unwrap();
+        home
+    }
+
+    /// Before `anima setup`: ports, but no workspace.
+    fn not_set_up() -> Self {
         let dir = tempfile::tempdir().unwrap();
         let (server_port, control_port) = (free_port(), free_port());
         let root = dir.path().join(".animaos-swarm");
@@ -79,6 +94,10 @@ impl Home {
 
     fn root(&self) -> PathBuf {
         self.dir.path().join(".animaos-swarm")
+    }
+
+    fn workspace(&self) -> PathBuf {
+        self.dir.path().join("ws")
     }
 
     fn anima(&self, args: &[&str]) -> Output {
@@ -221,8 +240,10 @@ fn status_prints_running_line() {
         "{stdout}"
     );
     assert!(first.ends_with("0 connectors"), "{stdout}");
-    // No workspace is configured, so there is no `Workspace:` line.
-    assert!(!stdout.contains("Workspace:"), "{stdout}");
+    assert!(
+        stdout.contains(&format!("Workspace: {}", home.workspace().display())),
+        "{stdout}"
+    );
 }
 
 #[test]
@@ -278,6 +299,25 @@ fn start_command_spawns_a_supervisor_when_none_runs() {
     assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
     assert!(refuses_connections(home.control_port));
     assert!(refuses_connections(home.server_port));
+}
+
+#[test]
+fn start_and_open_refuse_before_setup() {
+    let home = Home::not_set_up();
+    for args in [&["start"][..], &[][..]] {
+        let output = home.anima(args);
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        assert_eq!(
+            text(&output.stderr).trim(),
+            "Anima isn't set up yet. Run `anima setup` first.",
+            "{args:?}"
+        );
+        assert!(text(&output.stdout).is_empty(), "{args:?}");
+    }
+    // Nothing was started, and nothing is left running.
+    assert!(refuses_connections(home.control_port));
+    assert!(refuses_connections(home.server_port));
+    assert!(home.read_token("control-token").is_none());
 }
 
 #[test]

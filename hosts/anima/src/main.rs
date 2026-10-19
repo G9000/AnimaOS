@@ -41,7 +41,10 @@ fn main() -> ExitCode {
         Some(Command::Supervise {
             background,
             no_tray,
-        }) => report(supervisor::supervise(tray::wanted(no_tray, background))),
+        }) => report_code(supervisor::supervise(
+            tray::wanted(no_tray, background),
+            background,
+        )),
         None => report_code(commands::open::open()),
         Some(Command::Status) => report_code(commands::status::status()),
         Some(Command::Start) => report_code(commands::lifecycle::start()),
