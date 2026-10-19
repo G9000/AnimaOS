@@ -23,6 +23,10 @@ The installers come from cargo-dist and put `anima` in dist's default location (
 
 `anima setup` asks for the workspace folder, the port and whether to start at login, and offers to import provider API keys found in your shell (a login-started Anima never sees the shell environment). It then starts Anima and opens the console. It is safe to re-run.
 
+Imported keys reach chat and the other model calls. Memory embeddings, speech-to-text and coding-agent key passthrough still read the environment variable, so if you use them, set the variable in your login environment as well.
+
+Until `anima setup` has chosen a workspace, `anima`, `anima start` and `anima supervise` refuse to run and say ``Anima isn't set up yet. Run `anima setup` first.`` Anima also won't start its server in a workspace that is your home folder, contains `~/.animaos-swarm/` or is inside it.
+
 ## Commands
 
 | Command | What it does |
@@ -45,9 +49,9 @@ The installers come from cargo-dist and put `anima` in dist's default location (
 - **Stop** turns the server off. The tray icon stays, shows "Stopped", and has a Start item.
 - **Quit** exits everything, tray included. Anima returns at next login (if autostart is on) or when you run `anima`.
 
-Restart, Stop, Quit and Update wait for running tasks first ("Waiting for N tasks to finish"). While it waits, the console shows a button that skips the wait ("Stop now", "Restart now" or "Update now") next to **Cancel**, the tray offers **Cancel**, and on the CLI you use `--now`. While an update is downloading, Stop, Restart, Quit and Cancel abandon the download.
+Restart, Stop, Quit and Update wait for running tasks first ("Waiting for N tasks to finish"). While it waits, the console shows a button that skips the wait ("Stop now", "Restart now", "Quit now" or "Update now") next to **Cancel**, the tray offers **Cancel**, and on the CLI you use `--now`. While an update is downloading, Stop, Restart, Quit and Cancel abandon the download.
 
-Agents need owner approval to run `anima stop|quit|restart|update|config|autostart|setup|start|supervise`.
+Agents need owner approval to run `anima stop|quit|restart|update|config|autostart|setup|start|supervise`, or any command that names `/api/system` or the control port (`127.0.0.1:8788`). Anima's token, config and provider-key files count as secrets, like `~/.ssh` keys.
 
 ## Side by side with `bun dev`
 
