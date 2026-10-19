@@ -57,30 +57,9 @@ beforeEach(() => {
   vi.spyOn(daemon, 'recentMemories').mockResolvedValue([]);
   vi.spyOn(daemon, 'searchMemories').mockResolvedValue([]);
   vi.spyOn(daemon, 'listFacts').mockResolvedValue([]);
-  vi.spyOn(daemon, 'getMemoryViews').mockResolvedValue({
-    version: 0,
-    viewDigest: 'empty',
-    userProfile: [],
-    agentNotes: [],
-    unavailable: [],
-  });
-  vi.spyOn(daemon, 'memoryViewCandidates').mockResolvedValue({
-    candidates: [],
-    hasMore: false,
-  });
-  vi.spyOn(daemon, 'selectMemoryViews').mockResolvedValue({
-    version: 0,
-    viewDigest: 'empty',
-    userProfile: [],
-    agentNotes: [],
-    unavailable: [],
-  });
-  vi.spyOn(daemon, 'correctMemoryViewSource').mockResolvedValue({
-    version: 0,
-    viewDigest: 'empty',
-    userProfile: [],
-    agentNotes: [],
-    unavailable: [],
+  vi.spyOn(daemon, 'coreMemory').mockResolvedValue({
+    user: { used: 0, limit: 1500, entries: [] },
+    notes: { used: 0, limit: 2500, entries: [] },
   });
   vi.spyOn(daemon, 'listMemoryEntities').mockResolvedValue([]);
   vi.spyOn(daemon, 'listMemoryRelationships').mockResolvedValue([]);
@@ -259,6 +238,30 @@ describe('MemoryPage: memories', () => {
     expect(
       screen.getByRole('heading', { name: 'What your companion remembers' }),
     ).toBeVisible();
+  });
+
+  it('offers no Edit on a core memory entry and points to its block', async () => {
+    vi.mocked(daemon.recentMemories).mockResolvedValue([
+      memoryFixture('m1', { content: 'Prefers metric', tags: ['core:user'] }),
+      memoryFixture('m2', { content: 'Needs bun', tags: ['core:notes'] }),
+      memoryFixture('m3', { content: 'Likes tea', tags: ['drink'] }),
+    ]);
+    renderPage();
+
+    const row = async (text: string) =>
+      (await screen.findByText(text)).closest('li') as HTMLElement;
+    const about = await row('Prefers metric');
+    expect(within(about).queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(within(about).getByText('Edit in About you')).toBeVisible();
+    expect(within(about).getByRole('button', { name: 'Delete' })).toBeVisible();
+    const notes = await row('Needs bun');
+    expect(within(notes).queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(within(notes).getByText('Edit in Agent notes')).toBeVisible();
+    const ordinary = await row('Likes tea');
+    expect(
+      within(ordinary).getByRole('button', { name: 'Edit' }),
+    ).toBeVisible();
+    expect(within(ordinary).queryByText(/Edit in/)).toBeNull();
   });
 
   it('lists memories with type, importance, tags, and date', async () => {
@@ -885,14 +888,21 @@ describe('MemoryPage: memories', () => {
 });
 
 describe('MemoryPage: About you', () => {
-  it('M40_shows_an_owner_controlled_profile_and_agent_notes_panel', async () => {
+  it('shows the core memory panel with both blocks', async () => {
     const user = userEvent.setup();
     renderPage();
 
     await user.click(screen.getByRole('tab', { name: 'About you' }));
     expect(
-      await screen.findByRole('heading', { name: 'Profile & agent notes' }),
+      await screen.findByRole('heading', { name: 'Always remembered' }),
     ).toBeVisible();
+    expect(
+      await screen.findByRole('region', { name: 'About you' }),
+    ).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Agent notes' })).toBeVisible();
+    expect(daemon.coreMemory).toHaveBeenCalledWith('agent-main', {
+      signal: expect.any(AbortSignal),
+    });
   });
 
   async function openAbout() {
@@ -906,427 +916,6 @@ describe('MemoryPage: About you', () => {
   it('shows the empty state', async () => {
     await openAbout();
     expect(await screen.findByText(FACTS_EMPTY)).toBeVisible();
-  });
-
-  it('selects an exact saved source into the profile with the current view version and hash', async () => {
-    const source = {
-      id: 'fact-source-1',
-      content: 'Prefers short answers',
-      sourceHash: 'sha256-current',
-    };
-    vi.mocked(daemon.memoryViewCandidates).mockResolvedValue({
-      candidates: [source],
-      hasMore: false,
-    });
-    vi.mocked(daemon.getMemoryViews).mockResolvedValue({
-      version: 7,
-      viewDigest: 'view-7',
-      userProfile: [],
-      agentNotes: [],
-      unavailable: [],
-    });
-    vi.mocked(daemon.selectMemoryViews).mockResolvedValue({
-      version: 8,
-      viewDigest: 'view-8',
-      userProfile: [source],
-      agentNotes: [],
-      unavailable: [],
-    });
-    const user = await openAbout();
-
-    await screen.findByText('Prefers short answers');
-    await user.click(screen.getByRole('button', { name: 'Add to profile' }));
-    await user.click(
-      screen.getByRole('button', { name: 'Save profile and notes' }),
-    );
-
-    await waitFor(() =>
-      expect(daemon.selectMemoryViews).toHaveBeenCalledWith('agent-main', {
-        expectedVersion: 7,
-        userProfile: [{ id: 'fact-source-1', sourceHash: 'sha256-current' }],
-        agentNotes: [],
-      }),
-    );
-    expect(await screen.findByLabelText('Your profile')).toHaveTextContent(
-      'Prefers short answers',
-    );
-  });
-
-  it('keeps correction text after a stale source conflict without retrying', async () => {
-    const source = {
-      id: 'fact-source-1',
-      content: 'Prefers short answers',
-      sourceHash: 'sha256-current',
-    };
-    vi.mocked(daemon.getMemoryViews).mockResolvedValue({
-      version: 7,
-      viewDigest: 'view-7',
-      userProfile: [source],
-      agentNotes: [],
-      unavailable: [],
-    });
-    vi.mocked(daemon.correctMemoryViewSource).mockRejectedValue(
-      new DaemonHttpError(409, { error: 'Source changed' }),
-    );
-    const user = await openAbout();
-    const editor = await screen.findByRole('textbox', {
-      name: 'Correct this saved fact',
-    });
-    await user.clear(editor);
-    await user.type(editor, 'Keep responses concise.');
-    await user.click(screen.getByRole('button', { name: 'Save correction' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      /Your edits are kept/,
-    );
-    expect(editor).toHaveValue('Keep responses concise.');
-    expect(daemon.correctMemoryViewSource).toHaveBeenCalledOnce();
-    expect(daemon.correctMemoryViewSource).toHaveBeenCalledWith(
-      'agent-main',
-      'fact-source-1',
-      {
-        expectedVersion: 7,
-        expectedContent: 'Prefers short answers',
-        expectedSourceHash: 'sha256-current',
-        content: 'Keep responses concise.',
-      },
-    );
-  });
-
-  it('requires explicit removal of unavailable source references before saving', async () => {
-    vi.mocked(daemon.getMemoryViews).mockResolvedValue({
-      version: 9,
-      viewDigest: 'view-9',
-      userProfile: [],
-      agentNotes: [],
-      unavailable: [{ id: 'gone-source', reason: 'unavailable' }],
-    });
-    const user = await openAbout();
-    const save = await screen.findByRole('button', {
-      name: 'Save profile and notes',
-    });
-    expect(save).toBeDisabled();
-
-    await user.click(
-      screen.getByRole('button', { name: 'Remove unavailable sources' }),
-    );
-    expect(save).toBeEnabled();
-    await user.click(save);
-    await waitFor(() =>
-      expect(daemon.selectMemoryViews).toHaveBeenCalledWith('agent-main', {
-        expectedVersion: 9,
-        userProfile: [],
-        agentNotes: [],
-      }),
-    );
-  });
-
-  it('ignores a late profile response after switching agents', async () => {
-    let resolveOld!: (
-      value: Awaited<ReturnType<typeof daemon.getMemoryViews>>,
-    ) => void;
-    const oldSource = {
-      id: 'old-fact',
-      content: 'Old agent fact',
-      sourceHash: 'old-hash',
-    };
-    const newSource = {
-      id: 'new-fact',
-      content: 'New agent fact',
-      sourceHash: 'new-hash',
-    };
-    vi.mocked(daemon.getMemoryViews).mockImplementation((agentId) =>
-      agentId === 'agent-old'
-        ? new Promise((resolve) => {
-            resolveOld = resolve;
-          })
-        : Promise.resolve({
-            version: 1,
-            viewDigest: 'new-view',
-            userProfile: [newSource],
-            agentNotes: [],
-            unavailable: [],
-          }),
-    );
-    const view = render(<MemoryPage agentId="agent-old" online epoch={1} />);
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('tab', { name: 'About you' }));
-    view.rerender(<MemoryPage agentId="agent-new" online epoch={1} />);
-    const newProfile = await screen.findByRole('region', {
-      name: 'Your profile',
-    });
-    expect(
-      await within(newProfile).findByText('New agent fact', {
-        selector: 'span',
-      }),
-    ).toBeVisible();
-    resolveOld({
-      version: 1,
-      viewDigest: 'old-view',
-      userProfile: [oldSource],
-      agentNotes: [],
-      unavailable: [],
-    });
-    await waitFor(() =>
-      expect(
-        within(screen.getByRole('region', { name: 'Your profile' })).getByText(
-          'New agent fact',
-          { selector: 'span' },
-        ),
-      ).toBeVisible(),
-    );
-    expect(screen.queryByText('Old agent fact')).not.toBeInTheDocument();
-  });
-
-  it('keeps the exact reviewed source snapshot when a later search returns changed text', async () => {
-    const reviewed = {
-      id: 'fact-1',
-      content: 'Reviewed source text',
-      sourceHash: 'hash-reviewed',
-    };
-    const fresh = {
-      id: 'fact-1',
-      content: 'New canonical text',
-      sourceHash: 'hash-fresh',
-    };
-    vi.mocked(daemon.memoryViewCandidates)
-      .mockResolvedValueOnce({ candidates: [reviewed], hasMore: false })
-      .mockResolvedValueOnce({ candidates: [fresh], hasMore: false });
-    vi.mocked(daemon.selectMemoryViews).mockRejectedValue(
-      new DaemonHttpError(409, { error: 'Source changed' }),
-    );
-    const user = await openAbout();
-
-    await user.click(
-      await screen.findByRole('button', { name: 'Add to profile' }),
-    );
-    await user.type(
-      screen.getByRole('searchbox', {
-        name: 'Find saved facts for profile or notes',
-      }),
-      'new',
-    );
-    await user.click(screen.getByRole('button', { name: 'Find saved facts' }));
-
-    expect(await screen.findByText('New canonical text')).toBeVisible();
-    expect(
-      within(screen.getByRole('region', { name: 'Your profile' })).getByText(
-        'Reviewed source text',
-      ),
-    ).toBeVisible();
-    await user.click(
-      screen.getByRole('button', { name: 'Save profile and notes' }),
-    );
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      /edits are kept/i,
-    );
-    expect(daemon.selectMemoryViews).toHaveBeenCalledWith('agent-main', {
-      expectedVersion: 0,
-      userProfile: [{ id: 'fact-1', sourceHash: 'hash-reviewed' }],
-      agentNotes: [],
-    });
-  });
-
-  it('keeps an unsaved reviewed pick pinned when refresh prunes the bounded snapshot cache', async () => {
-    const reviewed = {
-      id: 'fact-reviewed',
-      content: 'Pinned reviewed fact',
-      sourceHash: 'hash-reviewed',
-    };
-    let initialCandidateRequest = true;
-    vi.mocked(daemon.memoryViewCandidates).mockImplementation(
-      async (_agentId, query) => {
-        if (query === undefined) {
-          if (initialCandidateRequest) {
-            initialCandidateRequest = false;
-            return { candidates: [reviewed], hasMore: false };
-          }
-          return {
-            candidates: Array.from({ length: 50 }, (_, index) => ({
-              id: `refresh-${index}`,
-              content: `Refresh candidate ${index}`,
-              sourceHash: `refresh-hash-${index}`,
-            })),
-            hasMore: false,
-          };
-        }
-        const batch = Number(query.replace('batch-', ''));
-        return {
-          candidates: Array.from({ length: 50 }, (_, index) => ({
-            id: `batch-${batch}-fact-${index}`,
-            content: `Batch ${batch} candidate ${index}`,
-            sourceHash: `batch-${batch}-hash-${index}`,
-          })),
-          hasMore: false,
-        };
-      },
-    );
-    const user = await openAbout();
-
-    await user.click(
-      await screen.findByRole('button', { name: 'Add to profile' }),
-    );
-    const search = screen.getByRole('searchbox', {
-      name: 'Find saved facts for profile or notes',
-    });
-    for (let batch = 0; batch < 6; batch += 1) {
-      fireEvent.change(search, { target: { value: `batch-${batch}` } });
-      fireEvent.submit(search.closest('form')!);
-      expect(
-        await screen.findByText(`Batch ${batch} candidate 49`),
-      ).toBeVisible();
-    }
-
-    await user.click(
-      screen.getByRole('button', { name: 'Refresh profile and notes' }),
-    );
-    expect(await screen.findByText('Refresh candidate 49')).toBeVisible();
-    const profile = screen.getByRole('region', { name: 'Your profile' });
-    expect(within(profile).getByText('Pinned reviewed fact')).toBeVisible();
-    expect(
-      within(profile).getByRole('button', { name: 'Remove from profile' }),
-    ).toBeVisible();
-  });
-
-  it('retains a correction draft through explicit refresh and requires a new save', async () => {
-    const oldSource = {
-      id: 'fact-1',
-      content: 'Old saved text',
-      sourceHash: 'hash-old',
-    };
-    const currentSource = {
-      id: 'fact-1',
-      content: 'Current saved text',
-      sourceHash: 'hash-current',
-    };
-    vi.mocked(daemon.getMemoryViews)
-      .mockResolvedValueOnce({
-        version: 4,
-        viewDigest: 'view-4',
-        userProfile: [oldSource],
-        agentNotes: [],
-        unavailable: [],
-      })
-      .mockResolvedValueOnce({
-        version: 5,
-        viewDigest: 'view-5',
-        userProfile: [currentSource],
-        agentNotes: [],
-        unavailable: [],
-      })
-      .mockResolvedValue({
-        version: 6,
-        viewDigest: 'view-6',
-        userProfile: [
-          {
-            ...currentSource,
-            content: 'My corrected text',
-            sourceHash: 'hash-corrected',
-          },
-        ],
-        agentNotes: [],
-        unavailable: [],
-      });
-    vi.mocked(daemon.correctMemoryViewSource)
-      .mockRejectedValueOnce(
-        new DaemonHttpError(409, { error: 'Stale source' }),
-      )
-      .mockResolvedValue({
-        version: 6,
-        viewDigest: 'view-6',
-        userProfile: [
-          {
-            id: 'fact-1',
-            content: 'My corrected text',
-            sourceHash: 'hash-corrected',
-          },
-        ],
-        agentNotes: [],
-        unavailable: [],
-      });
-    const user = await openAbout();
-    const editor = await screen.findByRole('textbox', {
-      name: 'Correct this saved fact',
-    });
-    await user.clear(editor);
-    await user.type(editor, 'My corrected text');
-    await user.click(screen.getByRole('button', { name: 'Save correction' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      /Your edits are kept/,
-    );
-
-    await user.click(
-      screen.getByRole('button', { name: 'Refresh profile and notes' }),
-    );
-    await waitFor(() => expect(editor).toHaveValue('My corrected text'));
-    expect(
-      within(screen.getByRole('region', { name: 'Your profile' })).getByText(
-        'Current saved text',
-      ),
-    ).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Save correction' }));
-    await waitFor(() =>
-      expect(daemon.correctMemoryViewSource).toHaveBeenCalledTimes(2),
-    );
-    expect(daemon.correctMemoryViewSource).toHaveBeenLastCalledWith(
-      'agent-main',
-      'fact-1',
-      {
-        expectedVersion: 5,
-        expectedContent: 'Current saved text',
-        expectedSourceHash: 'hash-current',
-        content: 'My corrected text',
-      },
-    );
-  });
-
-  it('blocks correction while a selection change is unsaved', async () => {
-    const saved = {
-      id: 'fact-1',
-      content: 'Saved preference',
-      sourceHash: 'hash-1',
-    };
-    const candidate = {
-      id: 'fact-2',
-      content: 'Another saved fact',
-      sourceHash: 'hash-2',
-    };
-    vi.mocked(daemon.getMemoryViews).mockResolvedValue({
-      version: 3,
-      viewDigest: 'view-3',
-      userProfile: [saved],
-      agentNotes: [],
-      unavailable: [],
-    });
-    vi.mocked(daemon.memoryViewCandidates).mockResolvedValue({
-      candidates: [saved, candidate],
-      hasMore: false,
-    });
-    const user = await openAbout();
-    const eligible = screen.getByRole('list', { name: 'Eligible saved facts' });
-    const candidateRow = within(eligible)
-      .getAllByRole('listitem')
-      .find((item) => item.textContent?.includes('Another saved fact'));
-    expect(candidateRow).toBeDefined();
-    await user.click(
-      within(candidateRow!).getByRole('button', { name: 'Add to notes' }),
-    );
-    const editor = await screen.findByRole('textbox', {
-      name: 'Correct this saved fact',
-    });
-    await user.clear(editor);
-    await user.type(editor, 'Corrected preference');
-
-    expect(
-      screen.getByText('Save your selection changes before correcting a fact.'),
-    ).toBeVisible();
-    expect(
-      screen.getByRole('button', { name: 'Save correction' }),
-    ).toBeDisabled();
-    expect(daemon.correctMemoryViewSource).not.toHaveBeenCalled();
-    expect(
-      screen.getByRole('button', { name: 'Save profile and notes' }),
-    ).toBeEnabled();
   });
 
   it('groups preferences apart and edits a fact by replacing it', async () => {
@@ -1559,6 +1148,20 @@ describe('MemoryPage: People & things', () => {
 });
 
 describe('MemoryPage: page', () => {
+  it('offers an Export menu for this agent or all agents', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText(MEMORY_EMPTY);
+
+    await user.click(screen.getByRole('button', { name: 'Export' }));
+    expect(
+      screen.getByRole('menuitem', { name: 'JSON, this agent' }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('menuitem', { name: 'Markdown, all agents' }),
+    ).toBeVisible();
+  });
+
   it('offers a memory search status check on the online page', () => {
     renderPage();
 
@@ -1580,6 +1183,9 @@ describe('MemoryPage: page', () => {
         dimension: 384,
         vectorCount: 0,
         persisted: false,
+        status: 'off',
+        done: 0,
+        total: 0,
       },
       evaluation: {
         passed: false,

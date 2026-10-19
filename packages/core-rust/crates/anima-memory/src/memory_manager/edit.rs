@@ -257,6 +257,20 @@ impl MemoryManager {
         Ok(Some(updated))
     }
 
+    /// Clear a memory's session so it no longer hides from agent context.
+    /// Every other field stays; `MemoryPatch` deliberately cannot change a session.
+    pub fn detach_session(&mut self, id: &str) -> Result<Memory, MemoryError> {
+        let memory = self
+            .memories
+            .get_mut(id)
+            .ok_or(MemoryError::MemoryNotFound)?;
+        memory.session_id = None;
+        let updated = memory.clone();
+        self.index
+            .add_document(updated.id.clone(), build_index_text(&updated));
+        Ok(updated)
+    }
+
     /// None: no such memory.
     ///
     /// Removes the memory and its index entry, then strips its id from every

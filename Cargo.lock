@@ -184,8 +184,10 @@ name = "anima-memory"
 version = "0.1.0"
 dependencies = [
  "anima-core",
+ "async-trait",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

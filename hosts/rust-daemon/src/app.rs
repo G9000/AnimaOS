@@ -12,7 +12,10 @@ use axum::Router;
 use tokio::net::TcpListener;
 use tokio::sync::{RwLock, Semaphore};
 
-use self::{lifecycle::shutdown_signal, persistence::configure_persistence};
+use self::{
+    lifecycle::shutdown_signal,
+    persistence::{configure_persistence, skip_memory_model_load, start_memory_model_load},
+};
 use crate::agent_runs::AgentRunCoordinator;
 use crate::connectors::credentials::{
     InMemoryCredentialStore, OsKeyringCredentialStore, TelegramBotToken,
@@ -211,6 +214,7 @@ pub async fn app_with_configured_persistence(config: DaemonConfig) -> io::Result
         Arc::new(DeterministicModelAdapter),
     )));
     configure_persistence(&state, &config).await?;
+    skip_memory_model_load(&state).await;
     state.write().await.chatgpt_auth = crate::chatgpt_auth::ChatGptAuth::new();
     let runtime = daemon_runtime(Arc::clone(&state), &config)?;
     state
@@ -240,6 +244,8 @@ pub async fn app_with_configured_persistence(config: DaemonConfig) -> io::Result
 pub async fn serve(listener: TcpListener, config: DaemonConfig) -> io::Result<()> {
     // Only the real daemon reads explicit operator configuration. Embeddings
     // and deterministic constructors remain independent of ambient config.
+    // An unknown external memory provider id stops boot.
+    crate::memory_provider::install(crate::memory_provider::from_env().map_err(io::Error::other)?);
     let tool_rpc_config =
         crate::tool_rpc::ToolRpcConfig::parse(std::env::var_os("ANIMAOS_RS_TOOL_RPC_PYTHON_PATH"))
             .map_err(io::Error::other)?;
@@ -281,6 +287,7 @@ pub async fn serve(listener: TcpListener, config: DaemonConfig) -> io::Result<()
     )));
 
     configure_persistence(&state, &config).await?;
+    start_memory_model_load(&state).await;
 
     {
         let mut guard = state.write().await;

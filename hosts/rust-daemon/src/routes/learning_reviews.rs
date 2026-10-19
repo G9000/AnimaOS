@@ -123,7 +123,7 @@ pub(super) async fn cancel_review(
 
 #[utoipa::path(patch, path = "/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}", tag="learning",
     params(("agent_id"=String, Path),("review_id"=String, Path),("proposal_id"=String, Path)), request_body=LearningDecisionRequest,
-    responses((status=200, description="Versioned owner decision saved; no fact/skill change", body=LearningReviewEnvelope),
+    responses((status=200, description="Versioned owner decision saved; accepting a core-memory edit applies it, nothing else changes facts or skills", body=LearningReviewEnvelope),
     (status=400, description="Invalid decision", body=ErrorBody), (status=403, description="Local owner required", body=ErrorBody),
     (status=404, description="Proposal not found", body=ErrorBody), (status=409, description="Stale decision version", body=ErrorBody),
     (status=503, description="Save failed", body=ErrorBody)))]
@@ -157,7 +157,7 @@ pub(super) async fn decide_proposal(
 
 #[utoipa::path(post, path = "/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}/undo", tag="learning",
     params(("agent_id"=String, Path),("review_id"=String, Path),("proposal_id"=String, Path)), request_body=LearningUndoRequest,
-    responses((status=200, description="Free-mode lesson forgotten: its memory is deleted and the proposal dismissed", body=LearningReviewEnvelope),
+    responses((status=200, description="Free-mode lesson forgotten (its memory is deleted) or applied core-memory edit reversed; the proposal is dismissed", body=LearningReviewEnvelope),
     (status=400, description="Invalid fields", body=ErrorBody), (status=403, description="Local owner required", body=ErrorBody),
     (status=404, description="Lesson not found", body=ErrorBody), (status=409, description="Not a kept lesson, or a stale version", body=ErrorBody),
     (status=503, description="Save failed", body=ErrorBody)))]

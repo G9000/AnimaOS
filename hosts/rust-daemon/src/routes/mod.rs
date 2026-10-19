@@ -14,6 +14,7 @@ mod coding;
 mod community_bundles;
 mod connectors;
 mod contracts;
+mod core_memory;
 mod discord;
 mod events;
 mod folder_picker;
@@ -32,7 +33,7 @@ mod mcp;
 mod mcp_tests;
 mod memories;
 mod memory_edits;
-mod memory_views;
+mod memory_export;
 mod multipart;
 pub(crate) use multipart::MAX_FORM_HEADER_BYTES;
 mod oauth_apps;
@@ -226,8 +227,8 @@ use crate::runtime_model::provider_summaries_with_pool;
         skills::delete_skill, skills::approve_skill,
         skills::list_skill_drafts, skills::approve_skill_draft, skills::reject_skill_draft,
         skills::import_skill, skills::skill_ledger, skills::revert_last_skill_change,
-        memory_edits::patch_memory, memory_edits::delete_memory,
-        memory_views::get_views, memory_views::candidates, memory_views::select_views, memory_views::correct_source,
+        memory_edits::patch_memory, memory_edits::delete_memory, memory_export::export_memories,
+        core_memory::get_core_memory, core_memory::add_entry, core_memory::replace_entry, core_memory::delete_entry,
         memory_edits::list_facts, memory_edits::patch_fact, memory_edits::delete_fact,
         memory_edits::delete_entity,
         logs::list_logs, logs::stream_logs,
@@ -1047,9 +1048,12 @@ fn router_with_services_with_policies_and_integrations(
             axum::routing::delete(approvals::delete_approval_rule),
         )
         .route("/api/skills", get(skills::list_skills))
-        .route("/api/agents/{agent_id}/memory-views", get(memory_views::get_views).patch(memory_views::select_views))
-        .route("/api/agents/{agent_id}/memory-views/candidates", get(memory_views::candidates))
-        .route("/api/agents/{agent_id}/memory-views/sources/{memory_id}", axum::routing::patch(memory_views::correct_source))
+        .route("/api/agents/{agent_id}/core-memory", get(core_memory::get_core_memory))
+        .route("/api/agents/{agent_id}/core-memory/{block}", axum::routing::post(core_memory::add_entry))
+        .route(
+            "/api/agents/{agent_id}/core-memory/{block}/{entry_id}",
+            axum::routing::patch(core_memory::replace_entry).delete(core_memory::delete_entry),
+        )
         .route(
             "/api/skills/import",
             axum::routing::post(skills::import_skill),
@@ -1152,6 +1156,7 @@ fn router_with_services_with_policies_and_integrations(
             axum::routing::post(add_evaluated_memory_entry),
         )
         .route("/api/memories/recall", get(recall_memories_entry))
+        .route("/api/memories/export", get(memory_export::export_memories))
         .route("/api/memories/facts", get(memory_edits::list_facts))
         .route(
             "/api/memories/facts/{fact_id}",
@@ -2717,6 +2722,7 @@ mod tests {
     mod automations;
     mod autonomy;
     mod capabilities;
+    mod core_memory;
     mod docs_contracts;
     mod events;
     mod foreign_sessions;
@@ -2725,7 +2731,7 @@ mod tests {
     mod learning_reviews;
     mod logs;
     mod memory_edits;
-    mod memory_views;
+    mod memory_export;
     mod provider_keys;
     mod runs;
     mod sessions;

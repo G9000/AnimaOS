@@ -3,7 +3,7 @@ mod disk;
 pub(crate) mod manifest;
 pub(crate) mod runtime;
 mod scan;
-mod selection;
+pub(crate) mod selection;
 pub(crate) mod write_policy;
 use anima_core::agent_files::{AgentFileRenderBudget, RenderedAgentFiles};
 pub(crate) use manifest::*;

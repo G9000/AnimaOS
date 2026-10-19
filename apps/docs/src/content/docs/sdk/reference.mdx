@@ -195,7 +195,8 @@ Accessed via `client.memories`.
 | Field | Type | Description |
 |-------|------|-------------|
 | `passed` | `boolean` | Overall health |
-| `embeddings` | `MemoryEmbeddingStatus` | Embedding status |
+| `embeddings` | `MemoryEmbeddingStatus` | Embedding status, including the search model's `status` (`downloading`, `rebuilding`, `ready`, `fallback`, `off`), `done`/`total` and a fallback `reason` |
+| `externalProvider` | `ExternalMemoryProviderStatus` (optional) | External memory provider `id`, `status` (`ready`/`unavailable`) and `reason` |
 | `evaluation` | `MemoryEvalReport` | Self-test report |
 
 ---

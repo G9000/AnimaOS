@@ -624,4 +624,122 @@ describe('LearningReviewPanel', () => {
     });
     await waitFor(() => expect(checkbox).toBeChecked());
   });
+
+  it('renders each core-memory edit of a conversation review and accepts or rejects it', async () => {
+    const user = userEvent.setup();
+    const proposal = review().proposals[0]!;
+    const conversation = review({
+      id: 'review-conversation',
+      trigger: 'conversation',
+      proposals: [
+        {
+          ...proposal,
+          id: 'edit-add',
+          observation: 'The owner asked for kilometres.',
+          coreEdit: {
+            action: 'add',
+            block: 'user',
+            text: 'Prefers metric units',
+          },
+        },
+        {
+          ...proposal,
+          id: 'edit-replace',
+          observation: 'The owner corrected the indentation.',
+          coreEdit: {
+            action: 'replace',
+            block: 'notes',
+            oldText: 'Indent with tabs',
+            text: 'Indent with four spaces',
+          },
+        },
+        {
+          ...proposal,
+          id: 'edit-remove',
+          observation: 'The owner moved.',
+          decision: 'acknowledged',
+          memoryId: 'mem-1',
+          coreEdit: {
+            action: 'remove',
+            block: 'user',
+            oldText: 'Lives in Paris',
+          },
+        },
+        {
+          ...proposal,
+          id: 'edit-failed',
+          observation: 'Too much.',
+          decision: 'failed',
+          coreEdit: {
+            action: 'add',
+            block: 'notes',
+            text: 'x',
+            error:
+              'Agent notes is full (2,500/2,500 chars). Replace or remove an entry first.',
+          },
+        },
+      ],
+    });
+    const api = apiMock({
+      listReviews: vi.fn(async () => [conversation]),
+      getReview: vi.fn(async () => conversation),
+      decideProposal: vi.fn(async (_agentId, _reviewId, proposalId, input) => ({
+        ...conversation,
+        proposals: conversation.proposals.map((item) =>
+          item.id === proposalId
+            ? {
+                ...item,
+                decision: input.decision,
+                decisionVersion: input.expectedVersion + 1,
+              }
+            : item,
+        ),
+      })),
+    });
+    render(<LearningReviewPanel agentId="agent-1" api={api} />);
+
+    expect(await screen.findByText('Conversation review')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Read review' }));
+    expect(
+      await screen.findByText('Add to About you: Prefers metric units'),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        'Replace in Agent notes: Indent with tabs → Indent with four spaces',
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText('Remove from About you: Lives in Paris'),
+    ).toBeVisible();
+    expect(screen.getByText('Applied to core memory')).toBeVisible();
+    expect(
+      screen.getByText(
+        'Not applied: Agent notes is full (2,500/2,500 chars). Replace or remove an entry first.',
+      ),
+    ).toBeVisible();
+    // A core edit is not advice and never becomes a skill draft.
+    expect(
+      screen.queryByRole('button', { name: 'Create skill draft' }),
+    ).toBeNull();
+
+    const [accept] = screen.getAllByRole('button', { name: 'Accept' });
+    await user.click(accept!);
+    expect(api.decideProposal).toHaveBeenCalledWith(
+      'agent-1',
+      'review-conversation',
+      'edit-add',
+      { decision: 'acknowledged', expectedVersion: 3 },
+    );
+    await waitFor(() =>
+      expect(screen.getAllByText('Applied to core memory')).toHaveLength(2),
+    );
+    await user.click(screen.getByRole('button', { name: 'Reject' }));
+    expect(api.decideProposal).toHaveBeenCalledWith(
+      'agent-1',
+      'review-conversation',
+      'edit-replace',
+      { decision: 'dismissed', expectedVersion: 3 },
+    );
+    expect(await screen.findByText('Rejected')).toBeVisible();
+  });
 });

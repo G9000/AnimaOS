@@ -11,6 +11,7 @@ mod community_bundles;
 mod components;
 mod connectors;
 mod control_plane_store;
+mod core_memory;
 mod events;
 mod fallback_model;
 mod filesystem_checkpoints;
@@ -22,9 +23,9 @@ mod live;
 mod logs;
 mod mcp;
 mod memory_embeddings;
+mod memory_provider;
 mod memory_store;
 mod memory_text;
-mod memory_views;
 mod model;
 mod provider_keys;
 mod routes;
@@ -36,6 +37,7 @@ mod side_model;
 mod skills;
 mod speech;
 mod state;
+mod threat_scan;
 mod tool_rpc;
 mod tools;
 mod usage;
@@ -46,6 +48,7 @@ pub mod postgres;
 pub use attachments::documents::worker::document_worker_entry;
 pub use logs::init_tracing;
 
+pub use app::persistence::runtime_memory_store_label;
 pub use app::{
     app, app_with_config, app_with_configured_persistence, app_with_database, serve, DaemonConfig,
     PersistenceMode,

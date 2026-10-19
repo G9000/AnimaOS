@@ -2,7 +2,9 @@ import type { DaemonClient } from './client.js';
 import type { SkillDraft } from './skills.js';
 import type { RunTokenUsage } from './runs.js';
 
-export type LearningReviewTrigger = 'manual' | 'automatic';
+/** `conversation`: every ten owner messages the recent conversation is
+ *  reviewed, and the review may propose core-memory edits. */
+export type LearningReviewTrigger = 'manual' | 'automatic' | 'conversation';
 export type LearningReviewState =
   | 'queued'
   | 'running'
@@ -10,7 +12,13 @@ export type LearningReviewState =
   | 'cancelled'
   | 'interrupted'
   | 'failed';
-export type LearningProposalDecision = 'pending' | 'dismissed' | 'acknowledged';
+/** `failed`: a core-memory rule refused the edit; the reason is
+ *  `coreEdit.error`. Never an owner decision. */
+export type LearningProposalDecision =
+  | 'pending'
+  | 'dismissed'
+  | 'acknowledged'
+  | 'failed';
 /** `free`: long tasks are reviewed by themselves and lessons are kept at
  *  once, with Undo. `strict`: every lesson waits for the owner. */
 export type LearningMode = 'free' | 'strict';
@@ -23,8 +31,32 @@ export interface LearningProposal {
   decision: LearningProposalDecision;
   decisionVersion: number;
   skillDraftId?: string | null;
-  /** The memory a Free-mode lesson was kept as; Undo forgets it. */
+  /** The memory a Free-mode lesson was kept as; Undo forgets it. For an
+   *  applied core edit, the entry it added, replaced or removed. */
   memoryId?: string | null;
+  /** Set when the proposal is a core-memory edit rather than a lesson. */
+  coreEdit?: LearningCoreEdit | null;
+}
+
+/** A core-memory edit a conversation review proposed. `user` is About you,
+ *  `notes` is Agent notes. Accepting applies it; Undo reverses it. */
+export interface LearningCoreEdit {
+  action: 'add' | 'replace' | 'remove';
+  block: 'user' | 'notes';
+  text?: string | null;
+  oldText?: string | null;
+  /** Why a core-memory rule refused it (budget, no match, scanner). */
+  error?: string | null;
+  /** A replaced entry's text before the edit. */
+  previousText?: string | null;
+  /** A removed entry, kept so Undo can restore it. */
+  removed?: {
+    id: string;
+    content: string;
+    createdAt: number;
+    tags: string[];
+    importance: number;
+  } | null;
 }
 
 export interface LearningSkillDraftInput {
@@ -138,7 +170,7 @@ export class LearningClient {
   }
 
   /** Forgets a kept Free-mode lesson: its memory is deleted, the proposal
-   *  dismissed. */
+   *  dismissed. For an applied core edit, reverses the edit. */
   async undoLesson(
     agentId: string,
     reviewId: string,

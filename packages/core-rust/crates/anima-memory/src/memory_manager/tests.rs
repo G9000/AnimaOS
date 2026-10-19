@@ -510,13 +510,37 @@ fn context_filters_owner_type_and_visibility_before_limits() {
         }),
     );
 
+    // Reflections are core-eligible now; the caller's predicate decides which ones are visible.
     let selected = manager.select_context(context_options("citron tea preference", 1), |memory| {
-        !memory
-            .tags
-            .as_ref()
-            .is_some_and(|tags| tags.iter().any(|tag| tag == "hidden"))
+        memory.memory_type == MemoryType::Fact
+            && !memory
+                .tags
+                .as_ref()
+                .is_some_and(|tags| tags.iter().any(|tag| tag == "hidden"))
     });
     assert_eq!(selected, vec![own]);
+}
+
+#[test]
+fn context_accepts_a_reflection_when_the_predicate_allows_it() {
+    let mut manager = MemoryManager::new();
+    let lesson = add_memory(
+        &mut manager,
+        base(|memory| {
+            memory.memory_type = MemoryType::Reflection;
+            memory.content = "Lesson: always confirm the citron tea order.".into();
+            memory.tags = Some(vec!["learning-review".into()]);
+        }),
+    );
+    let ids = |predicate: &dyn Fn(&super::Memory) -> bool| {
+        manager
+            .select_context(context_options("citron tea", 6), |memory| predicate(memory))
+            .into_iter()
+            .map(|memory| memory.id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ids(&|_| true), vec![lesson.id.clone()]);
+    assert!(ids(&|memory| memory.memory_type == MemoryType::Fact).is_empty());
 }
 
 #[test]
@@ -870,7 +894,6 @@ fn semantic_context_filters_canonical_scope_and_visibility_before_native_top_k()
     }
     for exclusion in [
         "foreign",
-        "reflection",
         "observation",
         "task",
         "world",
@@ -885,7 +908,6 @@ fn semantic_context_filters_canonical_scope_and_visibility_before_native_top_k()
                 memory.content = format!("excluded evidence {exclusion}");
                 match exclusion {
                     "foreign" => memory.agent_id = "other".into(),
-                    "reflection" => memory.memory_type = MemoryType::Reflection,
                     "observation" => memory.memory_type = MemoryType::Observation,
                     "task" => memory.memory_type = MemoryType::TaskResult,
                     "world" => memory.world_id = Some("world".into()),

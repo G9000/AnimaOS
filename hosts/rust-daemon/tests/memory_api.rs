@@ -393,6 +393,16 @@ async fn memory_readiness_reports_eval_and_embedding_status() {
     assert_eq!(readiness["passed"], true);
     assert_eq!(readiness["embeddings"]["enabled"], true);
     assert_eq!(readiness["embeddings"]["provider"], "local");
+    assert_eq!(readiness["embeddings"]["status"], "ready");
+    assert_eq!(
+        readiness["embeddings"]["done"],
+        readiness["embeddings"]["total"]
+    );
+    assert!(readiness["embeddings"].get("reason").is_none());
+    // No external memory provider by default.
+    assert_eq!(readiness["externalProvider"]["id"], "none");
+    assert_eq!(readiness["externalProvider"]["status"], "ready");
+    assert!(readiness["externalProvider"].get("reason").is_none());
     assert_eq!(readiness["evaluation"]["passed"], true);
     assert_eq!(readiness["evaluation"]["totalChecks"].as_u64(), Some(14));
 }

@@ -162,3 +162,47 @@
     width: 100%;
   }
 }
+.memory-core-title {
+  color: var(--color-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.memory-usage {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-line);
+}
+.memory-usage-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-accent);
+}
+.memory-export {
+  position: relative;
+}
+.memory-export-menu {
+  position: absolute;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  min-width: 14rem;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  background: var(--color-panel);
+  padding: 6px;
+}
+.memory-export-menu button {
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: var(--color-ink);
+  font-size: 13px;
+  text-align: left;
+}
+.memory-export-menu button:hover,
+.memory-export-menu button:focus-visible {
+  background: var(--color-panel-2);
+}

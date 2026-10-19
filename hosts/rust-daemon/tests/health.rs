@@ -300,6 +300,8 @@ async fn serve_exposes_health_and_error_paths_over_real_http() {
         "ANIMAOS_RS_CONTROL_PLANE_FILE",
         workspace.path().join("control-plane.json"),
     );
+    // serve loads the default search model in the background; tests never download it.
+    let _embeddings = EnvVarGuard::set("ANIMAOS_RS_MEMORY_EMBEDDINGS", "local");
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("listener binds");

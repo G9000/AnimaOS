@@ -1,12 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::io;
+use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anima_memory::{
     InMemoryVectorIndex, Memory, MemoryManager, MemoryTextEmbedder, MemoryVectorError,
-    MemoryVectorIndex, VectorMemoryHit,
+    MemoryVectorIndex, RecentMemoryOptions, VectorMemoryHit,
 };
 use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
 use reqwest::blocking::Client as BlockingHttpClient;
@@ -14,9 +15,15 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::RwLock as AsyncRwLock;
-use tracing::warn;
+use tracing::{info, warn};
 
 pub(crate) type SharedMemoryEmbeddings = Arc<AsyncRwLock<MemoryEmbeddingRuntime>>;
+
+/// Memories re-embedded per step of a model rebuild. The memory lock is never
+/// held while a batch is embedded.
+const REBUILD_BATCH_SIZE: usize = 32;
+/// Longest fallback reason the readiness route reports.
+const FALLBACK_REASON_CHARS: usize = 160;
 
 const DEFAULT_EMBEDDING_DIMENSION: usize = 96;
 const MIN_EMBEDDING_DIMENSION: usize = 24;
@@ -44,6 +51,56 @@ pub(crate) struct MemoryEmbeddingStatus {
     pub(crate) vector_count: usize,
     pub(crate) persisted: bool,
     pub(crate) storage_file: Option<PathBuf>,
+    pub(crate) load: MemoryEmbeddingLoad,
+    /// Memories with a vector from the active embedder, out of `total`.
+    pub(crate) done: usize,
+    pub(crate) total: usize,
+}
+
+/// Where the configured embedder stands (spec "Embeddings"). Until it is
+/// `Ready`, vector search only sees vectors the active embedder made, and BM25
+/// covers the rest.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum MemoryEmbeddingLoad {
+    /// The model is downloading or loading; recall runs on hashed vectors.
+    Pending,
+    /// The model is active and memories are being re-embedded with it.
+    Rebuilding {
+        done: usize,
+        total: usize,
+    },
+    Ready,
+    /// The model did not load; hashed vectors stay until restart.
+    Fallback(String),
+    /// Vectors are turned off.
+    Off,
+}
+
+impl MemoryEmbeddingLoad {
+    pub(crate) fn label(&self) -> &'static str {
+        match self {
+            Self::Pending => "downloading",
+            Self::Rebuilding { .. } => "rebuilding",
+            Self::Ready => "ready",
+            Self::Fallback(_) => "fallback",
+            Self::Off => "off",
+        }
+    }
+}
+
+/// An embedder that finished loading, ready to replace the interim one.
+pub(crate) struct LoadedMemoryEmbedder(MemoryEmbeddingProvider);
+
+/// Loads the configured model off the async runtime. Production opens or
+/// downloads fastembed's files; tests pass fakes, so they never download.
+pub(crate) type MemoryModelLoader =
+    Box<dyn FnOnce() -> Result<LoadedMemoryEmbedder, String> + Send + Sync>;
+
+/// What a model swap left to embed, under the generation it started.
+struct RebuildPlan {
+    generation: u64,
+    embedder: MemoryEmbeddingProvider,
+    pending: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -59,6 +116,16 @@ pub(crate) struct MemoryEmbeddingRuntime {
     index: InMemoryVectorIndex<MemoryEmbeddingProvider>,
     indexed_content: HashMap<String, [u8; 32]>,
     store: Option<SqliteMemoryEmbeddingStore>,
+    load: MemoryEmbeddingLoad,
+    /// Bumped on every embedder swap. Query vectors carry it, so one prepared
+    /// before a swap is never scored against the new index.
+    generation: u64,
+    /// False while the hashed embedder stands in for a model that is loading
+    /// or failed: the store keeps only the configured model's vectors.
+    persist_vectors: bool,
+    /// Provider and model of the embedder still loading, if any.
+    awaiting: Option<(String, String)>,
+    model_loader: Option<MemoryModelLoader>,
 }
 
 /// Cloneable query-only view. Model inference can run without holding the live
@@ -86,40 +153,93 @@ impl MemoryEmbeddingRuntime {
     }
 
     pub(crate) fn local(dimension: usize) -> Self {
-        let embedder = MemoryEmbeddingProvider::Local(LocalMemoryEmbedder::new(
+        Self::from_provider(MemoryEmbeddingProvider::Local(LocalMemoryEmbedder::new(
             dimension.max(MIN_EMBEDDING_DIMENSION),
-        ));
-        Self {
-            enabled: true,
-            embedder: embedder.clone(),
-            index: InMemoryVectorIndex::new(embedder),
-            indexed_content: HashMap::new(),
-            store: None,
-        }
+        )))
     }
 
     pub(crate) fn disabled() -> Self {
-        let embedder =
-            MemoryEmbeddingProvider::Local(LocalMemoryEmbedder::new(DEFAULT_EMBEDDING_DIMENSION));
-        Self {
-            enabled: false,
-            embedder: embedder.clone(),
-            index: InMemoryVectorIndex::new(embedder),
-            indexed_content: HashMap::new(),
-            store: None,
-        }
+        let mut runtime = Self::from_provider(MemoryEmbeddingProvider::Local(
+            LocalMemoryEmbedder::new(DEFAULT_EMBEDDING_DIMENSION),
+        ));
+        runtime.enabled = false;
+        runtime.load = MemoryEmbeddingLoad::Off;
+        runtime
     }
 
-    pub(crate) fn from_env(default_sqlite_path: Option<PathBuf>) -> io::Result<Self> {
-        let mode = std::env::var("ANIMAOS_RS_MEMORY_EMBEDDINGS")
-            .unwrap_or_else(|_| LOCAL_PROVIDER.to_string())
-            .to_ascii_lowercase();
-        if matches!(mode.as_str(), "0" | "off" | "false" | "disabled") {
+    /// Starts on hashed vectors while `loader` brings up the configured model
+    /// in the background (spec "Embeddings").
+    fn awaiting_model(provider: &str, model: String, loader: MemoryModelLoader) -> Self {
+        let mut runtime = Self::local_default();
+        runtime.load = MemoryEmbeddingLoad::Pending;
+        runtime.persist_vectors = false;
+        runtime.awaiting = Some((provider.to_string(), model));
+        runtime.model_loader = Some(loader);
+        runtime
+    }
+
+    /// `ANIMAOS_RS_MEMORY_EMBEDDINGS` picks the mode; unset means `fastembed`,
+    /// whose model loads later through [`Self::take_model_loader`] (see
+    /// [`embeddings_mode`] for the one exception).
+    pub(crate) fn from_env(
+        default_sqlite_path: Option<PathBuf>,
+        default_model_cache_dir: Option<PathBuf>,
+    ) -> io::Result<Self> {
+        let explicit = std::env::var("ANIMAOS_RS_MEMORY_EMBEDDINGS").ok();
+        if explicit.as_deref().is_some_and(|mode| {
+            matches!(
+                mode.to_ascii_lowercase().as_str(),
+                "0" | "off" | "false" | "disabled"
+            )
+        }) {
             return Ok(Self::disabled());
         }
 
         let dimension = embedding_dimension_from_env()?;
-        let embedder = match mode.as_str() {
+        let (mode, kept_local) = embeddings_mode(explicit.as_deref(), dimension);
+        if kept_local {
+            tracing::warn!(
+                dimension = dimension.unwrap_or_default(),
+                "ANIMAOS_RS_MEMORY_EMBEDDING_DIMENSIONS is set without ANIMAOS_RS_MEMORY_EMBEDDINGS: \
+                 keeping hashed `local` vectors. To switch to the fastembed model, unset \
+                 ANIMAOS_RS_MEMORY_EMBEDDING_DIMENSIONS (or set ANIMAOS_RS_MEMORY_EMBEDDINGS=fastembed \
+                 with the model's dimension, 384 for multilingual-e5-small)"
+            );
+        }
+        let mut runtime = if matches!(
+            mode.as_str(),
+            FASTEMBED_PROVIDER | "local-model" | "local-neural" | "local-multilingual"
+        ) {
+            // The configuration is checked now; only the download waits.
+            let config = FastEmbedEmbeddingConfig::from_env(dimension, default_model_cache_dir)?;
+            let model = config.model_name.clone();
+            Self::awaiting_model(
+                FASTEMBED_PROVIDER,
+                model,
+                Box::new(move || {
+                    FastEmbedMemoryEmbedder::load(config)
+                        .map(|embedder| {
+                            LoadedMemoryEmbedder(MemoryEmbeddingProvider::FastEmbed(embedder))
+                        })
+                        .map_err(|error| error.to_string())
+                }),
+            )
+        } else {
+            Self::from_provider(Self::provider_from_env(&mode, dimension)?)
+        };
+        let storage_path =
+            env_path("ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE")?.or(default_sqlite_path);
+        if let Some(path) = storage_path {
+            runtime.store = Some(SqliteMemoryEmbeddingStore::new(path)?);
+        }
+        Ok(runtime)
+    }
+
+    fn provider_from_env(
+        mode: &str,
+        dimension: Option<usize>,
+    ) -> io::Result<MemoryEmbeddingProvider> {
+        Ok(match mode {
             LOCAL_PROVIDER | "local-hash" | "local-semantic" => {
                 let dimension = dimension.unwrap_or(DEFAULT_EMBEDDING_DIMENSION);
                 if dimension < MIN_EMBEDDING_DIMENSION {
@@ -131,9 +251,6 @@ impl MemoryEmbeddingRuntime {
                     ));
                 }
                 MemoryEmbeddingProvider::Local(LocalMemoryEmbedder::new(dimension))
-            }
-            FASTEMBED_PROVIDER | "local-model" | "local-neural" | "local-multilingual" => {
-                MemoryEmbeddingProvider::FastEmbed(FastEmbedMemoryEmbedder::from_env(dimension)?)
             }
             OLLAMA_PROVIDER => MemoryEmbeddingProvider::OpenAiCompatible(
                 OpenAiCompatibleMemoryEmbedder::from_env(OpenAiCompatibleEmbeddingConfig {
@@ -192,15 +309,7 @@ impl MemoryEmbeddingRuntime {
                     "ANIMAOS_RS_MEMORY_EMBEDDINGS must be local, fastembed, ollama, openai, openai-compatible, or disabled",
                 ))
             }
-        };
-
-        let mut runtime = Self::from_provider(embedder);
-        let storage_path =
-            env_path("ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE")?.or(default_sqlite_path);
-        if let Some(path) = storage_path {
-            runtime.store = Some(SqliteMemoryEmbeddingStore::new(path)?);
-        }
-        Ok(runtime)
+        })
     }
 
     fn from_provider(embedder: MemoryEmbeddingProvider) -> Self {
@@ -210,22 +319,32 @@ impl MemoryEmbeddingRuntime {
             index: InMemoryVectorIndex::new(embedder),
             indexed_content: HashMap::new(),
             store: None,
+            load: MemoryEmbeddingLoad::Ready,
+            generation: 0,
+            persist_vectors: true,
+            awaiting: None,
+            model_loader: None,
         }
     }
 
     pub(crate) fn status(&self) -> MemoryEmbeddingStatus {
+        let (provider, model) = match (&self.awaiting, self.enabled) {
+            (_, false) => ("disabled".to_string(), "none".to_string()),
+            (Some((provider, model)), true) => (provider.clone(), model.clone()),
+            (None, true) => (
+                self.embedder.provider().to_string(),
+                self.embedder.model().to_string(),
+            ),
+        };
+        let (done, total) = match &self.load {
+            MemoryEmbeddingLoad::Rebuilding { done, total } => (*done, *total),
+            MemoryEmbeddingLoad::Ready => (self.index.len(), self.index.len()),
+            _ => (0, 0),
+        };
         MemoryEmbeddingStatus {
             enabled: self.enabled,
-            provider: if self.enabled {
-                self.embedder.provider().to_string()
-            } else {
-                "disabled".to_string()
-            },
-            model: if self.enabled {
-                self.embedder.model().to_string()
-            } else {
-                "none".to_string()
-            },
+            provider,
+            model,
             dimension: self
                 .index
                 .dimension()
@@ -234,13 +353,22 @@ impl MemoryEmbeddingRuntime {
             vector_count: self.index.len(),
             persisted: self.store.is_some(),
             storage_file: self.store.as_ref().map(|store| store.path.clone()),
+            load: self.load.clone(),
+            done,
+            total,
         }
+    }
+
+    /// Identifies the vectors in the index: the embedder's model and the swap
+    /// that installed it.
+    fn vector_key(&self) -> String {
+        format!("{}#{}", self.embedder.storage_model(), self.generation)
     }
 
     pub(crate) fn query_embedder(&self) -> Option<MemoryQueryEmbedder> {
         self.enabled.then(|| MemoryQueryEmbedder {
             embedder: self.embedder.clone(),
-            model_key: self.embedder.storage_model(),
+            model_key: self.vector_key(),
         })
     }
 
@@ -266,7 +394,7 @@ impl MemoryEmbeddingRuntime {
         limit: usize,
         eligible: &dyn Fn(&str) -> bool,
     ) -> Vec<VectorMemoryHit> {
-        if !self.enabled || self.embedder.storage_model() != model_key {
+        if !self.enabled || self.vector_key() != model_key {
             return Vec::new();
         }
         self.index
@@ -289,12 +417,14 @@ impl MemoryEmbeddingRuntime {
         let mut stored_by_id = HashMap::new();
         let storage_model = self.embedder.storage_model();
         if let Some(store) = &self.store {
-            for stored in store.load_all().map_err(|error| error.to_string())? {
-                if valid_ids.contains(&stored.memory_id)
-                    && stored.model == storage_model
-                    && self.embedder.accepts_dimension(stored.vector.len())
-                {
-                    stored_by_id.insert(stored.memory_id, (stored.vector, stored.content_hash));
+            if self.persist_vectors {
+                for stored in store.load_all().map_err(|error| error.to_string())? {
+                    if valid_ids.contains(&stored.memory_id)
+                        && stored.model == storage_model
+                        && self.embedder.accepts_dimension(stored.vector.len())
+                    {
+                        stored_by_id.insert(stored.memory_id, (stored.vector, stored.content_hash));
+                    }
                 }
             }
             report.removed_stale_vectors = store
@@ -325,7 +455,7 @@ impl MemoryEmbeddingRuntime {
                 .upsert_embedding(memory.id.clone(), vector.clone())
                 .map_err(|error| error.message().to_string())?;
             self.indexed_content.insert(memory.id.clone(), digest);
-            if let Some(store) = &self.store {
+            if let Some(store) = self.store.as_ref().filter(|_| self.persist_vectors) {
                 store
                     .upsert(&memory.id, &storage_model, &vector, &digest)
                     .map_err(|error| error.to_string())?;
@@ -349,7 +479,7 @@ impl MemoryEmbeddingRuntime {
             .map_err(|error| error.message().to_string())?;
         let digest = content_digest(&memory.content);
         self.indexed_content.insert(memory.id.clone(), digest);
-        if let Some(store) = &self.store {
+        if let Some(store) = self.store.as_ref().filter(|_| self.persist_vectors) {
             store
                 .upsert(&memory.id, &self.embedder.storage_model(), &vector, &digest)
                 .map_err(|error| error.to_string())?;
@@ -368,6 +498,239 @@ impl MemoryEmbeddingRuntime {
                 .map_err(|error| error.to_string())?;
         }
         Ok(())
+    }
+
+    /// Hands out the background model loader once; `None` when nothing loads.
+    pub(crate) fn take_model_loader(&mut self) -> Option<MemoryModelLoader> {
+        self.model_loader.take()
+    }
+
+    /// The model did not load: keep the hashed vectors until restart.
+    pub(crate) fn fall_back(&mut self, error: &str) {
+        self.model_loader = None;
+        self.load = MemoryEmbeddingLoad::Fallback(fallback_reason(error));
+    }
+
+    /// Installs the loaded model. Every interim vector is dropped at once, so
+    /// a search never mixes embedders: until a memory is re-embedded it is
+    /// reachable only through BM25. Stored vectors this model made for the
+    /// current text are reused; the rest are returned to embed.
+    fn begin_rebuild(
+        &mut self,
+        loaded: LoadedMemoryEmbedder,
+        memories: &[Memory],
+        stored: Vec<StoredEmbedding>,
+    ) -> RebuildPlan {
+        let embedder = loaded.0;
+        self.generation += 1;
+        self.embedder = embedder.clone();
+        self.index = InMemoryVectorIndex::new(embedder.clone());
+        self.indexed_content.clear();
+        self.awaiting = None;
+        self.model_loader = None;
+        self.persist_vectors = true;
+
+        let storage_model = embedder.storage_model();
+        let mut stored_by_id: HashMap<_, _> = stored
+            .into_iter()
+            .filter(|stored| {
+                stored.model == storage_model && embedder.accepts_dimension(stored.vector.len())
+            })
+            .filter_map(|stored| {
+                let digest = stored.content_hash?;
+                Some((stored.memory_id, (stored.vector, digest)))
+            })
+            .collect();
+        let mut pending = Vec::new();
+        for memory in memories {
+            let digest = content_digest(&memory.content);
+            if let Some((vector, stored_digest)) = stored_by_id.remove(&memory.id) {
+                if stored_digest == digest
+                    && self
+                        .index
+                        .upsert_embedding(memory.id.clone(), vector)
+                        .is_ok()
+                {
+                    self.indexed_content.insert(memory.id.clone(), digest);
+                    continue;
+                }
+            }
+            pending.push((memory.id.clone(), memory.content.clone()));
+        }
+        self.load = MemoryEmbeddingLoad::Rebuilding {
+            done: memories.len() - pending.len(),
+            total: memories.len(),
+        };
+        RebuildPlan {
+            generation: self.generation,
+            embedder,
+            pending,
+        }
+    }
+
+    /// Indexes one re-embedded batch. A memory changed, deleted or already
+    /// indexed by a write since the snapshot is skipped. Returns `false` when
+    /// another swap replaced this rebuild.
+    fn apply_rebuild_batch(
+        &mut self,
+        generation: u64,
+        memories: &MemoryManager,
+        batch: &[(String, String)],
+        vectors: Vec<Option<Vec<f32>>>,
+    ) -> bool {
+        if self.generation != generation {
+            return false;
+        }
+        let mut rows = Vec::new();
+        for ((memory_id, content), vector) in batch.iter().zip(vectors) {
+            let Some(vector) = vector else {
+                continue;
+            };
+            let unchanged = memories
+                .get(memory_id)
+                .is_some_and(|memory| memory.content == *content);
+            if !unchanged || self.indexed_content.contains_key(memory_id) {
+                continue;
+            }
+            if self
+                .index
+                .upsert_embedding(memory_id.clone(), vector.clone())
+                .is_err()
+            {
+                continue;
+            }
+            let digest = content_digest(content);
+            self.indexed_content.insert(memory_id.clone(), digest);
+            rows.push((memory_id.as_str(), vector, digest));
+        }
+        if let (Some(store), false) = (&self.store, rows.is_empty()) {
+            if let Err(error) = store.upsert_many(&self.embedder.storage_model(), &rows) {
+                warn!(%error, "could not save rebuilt memory embeddings; they stay in process");
+            }
+        }
+        if let MemoryEmbeddingLoad::Rebuilding { done, total } = &mut self.load {
+            *done = (*done + batch.len()).min(*total);
+        }
+        true
+    }
+
+    fn finish_rebuild(&mut self, generation: u64) {
+        if self.generation == generation
+            && matches!(self.load, MemoryEmbeddingLoad::Rebuilding { .. })
+        {
+            self.load = MemoryEmbeddingLoad::Ready;
+        }
+    }
+}
+
+/// Loads the configured model and rebuilds every vector with it, off the
+/// async runtime: boot never waits for the download (spec "Embeddings").
+/// A detached thread rather than `spawn_blocking`, because dropping the tokio
+/// runtime waits for blocking tasks and shutdown must not wait for a download.
+pub(crate) fn spawn_model_load(
+    memory: Arc<AsyncRwLock<MemoryManager>>,
+    embeddings: SharedMemoryEmbeddings,
+    loader: MemoryModelLoader,
+) -> io::Result<std::thread::JoinHandle<()>> {
+    std::thread::Builder::new()
+        .name("memory-model-load".into())
+        .spawn(move || run_model_load(&memory, &embeddings, loader))
+}
+
+fn run_model_load(
+    memory: &AsyncRwLock<MemoryManager>,
+    embeddings: &AsyncRwLock<MemoryEmbeddingRuntime>,
+    loader: MemoryModelLoader,
+) {
+    let loaded = match std::panic::catch_unwind(AssertUnwindSafe(loader)) {
+        Ok(Ok(loaded)) => loaded,
+        Ok(Err(error)) => {
+            warn!(%error, "the memory search model did not load; using basic search until restart");
+            embeddings.blocking_write().fall_back(&error);
+            return;
+        }
+        Err(_) => {
+            warn!("the memory search model loader panicked; using basic search until restart");
+            embeddings
+                .blocking_write()
+                .fall_back("the search model loader crashed");
+            return;
+        }
+    };
+    let store = embeddings.blocking_read().store.clone();
+    let stored = match store.as_ref().map(SqliteMemoryEmbeddingStore::load_all) {
+        Some(Ok(stored)) => stored,
+        Some(Err(error)) => {
+            warn!(%error, "could not read saved memory embeddings; re-embedding every memory");
+            Vec::new()
+        }
+        None => Vec::new(),
+    };
+    let plan = {
+        // Snapshot and swap under one memory read, so no write slips between them.
+        let memory = memory.blocking_read();
+        let memories = memory.get_recent(RecentMemoryOptions {
+            limit: Some(usize::MAX),
+            ..RecentMemoryOptions::default()
+        });
+        embeddings
+            .blocking_write()
+            .begin_rebuild(loaded, &memories, stored)
+    };
+    for batch in plan.pending.chunks(REBUILD_BATCH_SIZE) {
+        let texts: Vec<&str> = batch.iter().map(|(_, content)| content.as_str()).collect();
+        let vectors = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            plan.embedder.embed_memory_batch(&texts)
+        }))
+        .unwrap_or_else(|_| vec![None; texts.len()]);
+        let memory = memory.blocking_read();
+        if !embeddings.blocking_write().apply_rebuild_batch(
+            plan.generation,
+            &memory,
+            batch,
+            vectors,
+        ) {
+            return;
+        }
+    }
+    let mut runtime = embeddings.blocking_write();
+    runtime.finish_rebuild(plan.generation);
+    let status = runtime.status();
+    info!(
+        provider = %status.provider,
+        model = %status.model,
+        vector_count = status.vector_count,
+        "memory search model ready"
+    );
+}
+
+/// The owner-facing reason: the first line, without paths or URLs and cut
+/// short. The log keeps the full error.
+fn fallback_reason(error: &str) -> String {
+    let line = error
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default();
+    let reason = line
+        .split_whitespace()
+        .map(|word| {
+            if word.contains('/') || word.contains('\\') {
+                "…"
+            } else {
+                word
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(FALLBACK_REASON_CHARS)
+        .collect::<String>();
+    if reason.trim().is_empty() {
+        "the search model did not load".to_string()
+    } else {
+        reason
     }
 }
 
@@ -448,6 +811,9 @@ enum MemoryEmbeddingProvider {
     Local(LocalMemoryEmbedder),
     FastEmbed(FastEmbedMemoryEmbedder),
     OpenAiCompatible(OpenAiCompatibleMemoryEmbedder),
+    /// Stands in for a downloaded model in tests.
+    #[cfg(test)]
+    Fake(test_support::FakeModelEmbedder),
 }
 
 impl MemoryEmbeddingProvider {
@@ -456,6 +822,8 @@ impl MemoryEmbeddingProvider {
             Self::Local(_) => LOCAL_PROVIDER,
             Self::FastEmbed(_) => FASTEMBED_PROVIDER,
             Self::OpenAiCompatible(embedder) => &embedder.provider,
+            #[cfg(test)]
+            Self::Fake(_) => test_support::FAKE_PROVIDER,
         }
     }
 
@@ -464,6 +832,8 @@ impl MemoryEmbeddingProvider {
             Self::Local(_) => LOCAL_MODEL,
             Self::FastEmbed(embedder) => &embedder.model_name,
             Self::OpenAiCompatible(embedder) => &embedder.model,
+            #[cfg(test)]
+            Self::Fake(_) => test_support::FAKE_MODEL,
         }
     }
 
@@ -472,6 +842,12 @@ impl MemoryEmbeddingProvider {
             Self::Local(_) => LOCAL_MODEL.to_string(),
             Self::FastEmbed(embedder) => format!("{FASTEMBED_PROVIDER}:{}", embedder.model_name),
             Self::OpenAiCompatible(embedder) => format!("{}:{}", embedder.provider, embedder.model),
+            #[cfg(test)]
+            Self::Fake(_) => format!(
+                "{}:{}",
+                test_support::FAKE_PROVIDER,
+                test_support::FAKE_MODEL
+            ),
         }
     }
 
@@ -480,6 +856,8 @@ impl MemoryEmbeddingProvider {
             Self::Local(embedder) => Some(embedder.dimension),
             Self::FastEmbed(embedder) => Some(embedder.dimension),
             Self::OpenAiCompatible(embedder) => Some(embedder.dimension),
+            #[cfg(test)]
+            Self::Fake(embedder) => Some(embedder.dimension()),
         }
     }
 
@@ -495,7 +873,22 @@ impl MemoryEmbeddingProvider {
             Self::Local(embedder) => embedder.embed(text),
             Self::FastEmbed(embedder) => embedder.embed_memory(text),
             Self::OpenAiCompatible(embedder) => embedder.embed(text),
+            #[cfg(test)]
+            Self::Fake(embedder) => embedder.embed(text),
         }
+    }
+
+    /// Embeds a rebuild batch; a text that cannot embed gets `None`.
+    fn embed_memory_batch(&self, texts: &[&str]) -> Vec<Option<Vec<f32>>> {
+        if let Self::FastEmbed(embedder) = self {
+            if let Some(vectors) = embedder.embed_passages(texts) {
+                return vectors;
+            }
+        }
+        texts
+            .iter()
+            .map(|text| self.embed_memory(text).ok())
+            .collect()
     }
 
     fn embed_query(&self, text: &str) -> Result<Vec<f32>, MemoryVectorError> {
@@ -503,6 +896,8 @@ impl MemoryEmbeddingProvider {
             Self::Local(embedder) => embedder.embed(text),
             Self::FastEmbed(embedder) => embedder.embed_query(text),
             Self::OpenAiCompatible(embedder) => embedder.embed(text),
+            #[cfg(test)]
+            Self::Fake(embedder) => embedder.embed(text),
         }
     }
 }
@@ -585,8 +980,9 @@ struct FastEmbedEmbeddingConfig {
 }
 
 impl FastEmbedMemoryEmbedder {
-    fn from_env(dimension: Option<usize>) -> io::Result<Self> {
-        let config = FastEmbedEmbeddingConfig::from_env(dimension)?;
+    /// Opens the model, downloading it into the cache on first use. Blocking:
+    /// the daemon runs it on a background thread.
+    fn load(config: FastEmbedEmbeddingConfig) -> io::Result<Self> {
         let mut options = TextInitOptions::new(config.model.clone())
             .with_show_download_progress(config.show_download_progress);
         if let Some(cache_dir) = &config.cache_dir {
@@ -607,6 +1003,44 @@ impl FastEmbedMemoryEmbedder {
 
     fn embed_query(&self, text: &str) -> Result<Vec<f32>, MemoryVectorError> {
         self.embed_prefixed(text, FastEmbedTextRole::Query)
+    }
+
+    /// One model call for a rebuild batch; `None` when that call fails.
+    fn embed_passages(&self, texts: &[&str]) -> Option<Vec<Option<Vec<f32>>>> {
+        let inputs: Vec<(usize, String)> = texts
+            .iter()
+            .enumerate()
+            .filter_map(|(index, text)| {
+                let text = text.trim();
+                (!text.is_empty())
+                    .then(|| (index, self.prefixed_text(text, FastEmbedTextRole::Passage)))
+            })
+            .collect();
+        let mut vectors = vec![None; texts.len()];
+        if inputs.is_empty() {
+            return Some(vectors);
+        }
+        let embeddings = self
+            .model
+            .lock()
+            .ok()?
+            .embed(
+                inputs
+                    .iter()
+                    .map(|(_, input)| input.as_str())
+                    .collect::<Vec<_>>(),
+                Some(REBUILD_BATCH_SIZE),
+            )
+            .ok()?;
+        if embeddings.len() != inputs.len() {
+            return None;
+        }
+        for ((index, _), embedding) in inputs.iter().zip(embeddings) {
+            if embedding.len() == self.dimension {
+                vectors[*index] = Some(embedding);
+            }
+        }
+        Some(vectors)
     }
 
     fn embed_prefixed(
@@ -652,7 +1086,9 @@ enum FastEmbedTextRole {
 }
 
 impl FastEmbedEmbeddingConfig {
-    fn from_env(dimension: Option<usize>) -> io::Result<Self> {
+    /// The cache dir comes from [`model_cache_dir`]; `default_cache_dir` is
+    /// `models/` beside the memory store, when there is one.
+    fn from_env(dimension: Option<usize>, default_cache_dir: Option<PathBuf>) -> io::Result<Self> {
         let model_name = std::env::var("ANIMAOS_RS_MEMORY_EMBEDDING_MODEL")
             .ok()
             .map(|value| value.trim().to_string())
@@ -678,10 +1114,15 @@ impl FastEmbedEmbeddingConfig {
             model_name: resolved_model_name,
             dimension: expected_dimension,
             prompt_style,
-            cache_dir: env_path("ANIMAOS_RS_MEMORY_EMBEDDINGS_CACHE_DIR")?,
+            cache_dir: model_cache_dir(
+                env_path("ANIMAOS_RS_MEMORY_EMBEDDINGS_CACHE_DIR")?,
+                default_cache_dir,
+                &UserCacheEnv::current(),
+            ),
+            // Progress bars would fill the daemon's logs; opt in with the env.
             show_download_progress: bool_from_env(
                 "ANIMAOS_RS_MEMORY_EMBEDDINGS_SHOW_DOWNLOAD_PROGRESS",
-                true,
+                false,
             )?,
         })
     }
@@ -827,6 +1268,17 @@ struct OpenAiEmbeddingData {
     embedding: Vec<f32>,
 }
 
+const UPSERT_EMBEDDING_SQL: &str = r#"
+    INSERT INTO memory_embeddings(memory_id, model, dimension, vector_json, updated_at, content_hash)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+    ON CONFLICT(memory_id) DO UPDATE SET
+        model = excluded.model,
+        dimension = excluded.dimension,
+        vector_json = excluded.vector_json,
+        updated_at = excluded.updated_at,
+        content_hash = excluded.content_hash
+"#;
+
 #[derive(Clone, Debug)]
 struct SqliteMemoryEmbeddingStore {
     path: PathBuf,
@@ -967,16 +1419,7 @@ impl SqliteMemoryEmbeddingStore {
         let vector_json = serde_json::to_string(vector).map_err(json_error)?;
         self.connection()?
             .execute(
-                r#"
-                INSERT INTO memory_embeddings(memory_id, model, dimension, vector_json, updated_at, content_hash)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                ON CONFLICT(memory_id) DO UPDATE SET
-                    model = excluded.model,
-                    dimension = excluded.dimension,
-                    vector_json = excluded.vector_json,
-                    updated_at = excluded.updated_at,
-                    content_hash = excluded.content_hash
-                "#,
+                UPSERT_EMBEDDING_SQL,
                 params![
                     memory_id,
                     model,
@@ -988,6 +1431,32 @@ impl SqliteMemoryEmbeddingStore {
             )
             .map(|_| ())
             .map_err(sqlite_error)
+    }
+
+    /// Saves a rebuild batch in one transaction.
+    fn upsert_many(&self, model: &str, rows: &[(&str, Vec<f32>, [u8; 32])]) -> io::Result<()> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        {
+            let mut statement = transaction
+                .prepare(UPSERT_EMBEDDING_SQL)
+                .map_err(sqlite_error)?;
+            let updated_at = anima_core::primitives::now_millis().to_string();
+            for (memory_id, vector, digest) in rows {
+                let vector_json = serde_json::to_string(vector).map_err(json_error)?;
+                statement
+                    .execute(params![
+                        memory_id,
+                        model,
+                        vector.len() as i64,
+                        vector_json,
+                        updated_at,
+                        encode_digest(digest),
+                    ])
+                    .map_err(sqlite_error)?;
+            }
+        }
+        transaction.commit().map_err(sqlite_error)
     }
 
     fn delete_many(&self, memory_ids: &[String]) -> io::Result<usize> {
@@ -1013,6 +1482,71 @@ impl SqliteMemoryEmbeddingStore {
             .collect::<Vec<_>>();
         self.delete_many(&stale_ids)
     }
+}
+
+/// The mode `ANIMAOS_RS_MEMORY_EMBEDDINGS` names, lowercased; unset means
+/// `fastembed`, except when `ANIMAOS_RS_MEMORY_EMBEDDING_DIMENSIONS` is set:
+/// that knob predates the fastembed default and meant hashed vectors, so an
+/// upgraded daemon keeps `local` rather than refusing to boot. The flag says
+/// that exception applied, for the boot warning.
+fn embeddings_mode(explicit: Option<&str>, dimension: Option<usize>) -> (String, bool) {
+    match explicit {
+        Some(mode) => (mode.to_ascii_lowercase(), false),
+        None if dimension.is_some() => (LOCAL_PROVIDER.to_string(), true),
+        None => (FASTEMBED_PROVIDER.to_string(), false),
+    }
+}
+
+/// What the per-user cache location depends on, read once from the
+/// environment.
+#[derive(Clone, Debug, Default)]
+struct UserCacheEnv {
+    macos: bool,
+    home: Option<PathBuf>,
+    xdg_cache_home: Option<PathBuf>,
+}
+
+impl UserCacheEnv {
+    fn current() -> Self {
+        let non_empty = |name: &str| {
+            std::env::var_os(name)
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+        };
+        Self {
+            macos: cfg!(target_os = "macos"),
+            home: non_empty("HOME").or_else(|| non_empty("USERPROFILE")),
+            xdg_cache_home: non_empty("XDG_CACHE_HOME"),
+        }
+    }
+}
+
+/// Where the embedding model is cached: `explicit`
+/// (`ANIMAOS_RS_MEMORY_EMBEDDINGS_CACHE_DIR`), then `beside_store` (`models/`
+/// next to the memory store), then the per-user cache: macOS
+/// `~/Library/Caches/animaos/models`, elsewhere `$XDG_CACHE_HOME/animaos/models`
+/// or `~/.cache/animaos/models`. Never the working directory; `None` (fastembed's
+/// own default) only when there is no home directory either.
+fn model_cache_dir(
+    explicit: Option<PathBuf>,
+    beside_store: Option<PathBuf>,
+    user: &UserCacheEnv,
+) -> Option<PathBuf> {
+    explicit.or(beside_store).or_else(|| {
+        let base = if user.macos {
+            user.home.as_ref()?.join("Library").join("Caches")
+        } else {
+            match user
+                .xdg_cache_home
+                .as_ref()
+                .filter(|path| path.is_absolute())
+            {
+                Some(xdg) => xdg.clone(),
+                None => user.home.as_ref()?.join(".cache"),
+            }
+        };
+        Some(base.join("animaos").join("models"))
+    })
 }
 
 fn env_path(name: &'static str) -> io::Result<Option<PathBuf>> {
@@ -1235,6 +1769,100 @@ static SEMANTIC_GROUPS: &[&[&str]] = &[
     &["agent", "assistant", "worker", "planner", "critic"],
     &["user", "operator", "human", "customer"],
 ];
+
+/// Model loaders and a fake model for tests, so no test downloads a model.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc;
+
+    use super::*;
+
+    pub(super) const FAKE_PROVIDER: &str = "fake";
+    pub(super) const FAKE_MODEL: &str = "fake-model";
+
+    /// Hashed vectors under another model id, counting every embed call.
+    #[derive(Clone, Debug)]
+    pub(crate) struct FakeModelEmbedder {
+        hashed: LocalMemoryEmbedder,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl FakeModelEmbedder {
+        pub(super) fn dimension(&self) -> usize {
+            self.hashed.dimension
+        }
+
+        pub(super) fn embed(&self, text: &str) -> Result<Vec<f32>, MemoryVectorError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.hashed.embed(text)
+        }
+    }
+
+    pub(crate) fn fake_model(dimension: usize) -> (LoadedMemoryEmbedder, Arc<AtomicUsize>) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let embedder = FakeModelEmbedder {
+            hashed: LocalMemoryEmbedder::new(dimension),
+            calls: Arc::clone(&calls),
+        };
+        (
+            LoadedMemoryEmbedder(MemoryEmbeddingProvider::Fake(embedder)),
+            calls,
+        )
+    }
+
+    /// A loader that succeeds at once with the fake model.
+    pub(crate) fn fake_model_loader(dimension: usize) -> (MemoryModelLoader, Arc<AtomicUsize>) {
+        let (loaded, calls) = fake_model(dimension);
+        (Box::new(move || Ok(loaded)), calls)
+    }
+
+    pub(crate) fn failing_model_loader(error: &str) -> MemoryModelLoader {
+        let error = error.to_string();
+        Box::new(move || Err(error))
+    }
+
+    /// A loader that waits until the returned sender fires (or is dropped).
+    pub(crate) fn gated_model_loader(dimension: usize) -> (MemoryModelLoader, mpsc::Sender<()>) {
+        let (release, gate) = mpsc::channel::<()>();
+        let gate = Mutex::new(gate);
+        let (loaded, _) = fake_model(dimension);
+        let loader: MemoryModelLoader = Box::new(move || {
+            let _ = gate.lock().expect("gate lock").recv();
+            Ok(loaded)
+        });
+        (loader, release)
+    }
+
+    /// The runtime fastembed mode boots with, waiting on `loader` instead.
+    pub(crate) fn awaiting(loader: MemoryModelLoader) -> MemoryEmbeddingRuntime {
+        MemoryEmbeddingRuntime::awaiting_model(FAKE_PROVIDER, FAKE_MODEL.to_string(), loader)
+    }
+
+    /// Swaps in the fake model and re-embeds only `reembedded`, as a rebuild
+    /// part way through.
+    pub(crate) fn swap_part_way(
+        runtime: &mut MemoryEmbeddingRuntime,
+        memories: &MemoryManager,
+        dimension: usize,
+        reembedded: &[&str],
+    ) {
+        let (loaded, _) = fake_model(dimension);
+        let all = memories.get_recent(RecentMemoryOptions {
+            limit: Some(usize::MAX),
+            ..RecentMemoryOptions::default()
+        });
+        let plan = runtime.begin_rebuild(loaded, &all, Vec::new());
+        let batch: Vec<_> = plan
+            .pending
+            .into_iter()
+            .filter(|(id, _)| reembedded.contains(&id.as_str()))
+            .collect();
+        let texts: Vec<&str> = batch.iter().map(|(_, content)| content.as_str()).collect();
+        let vectors = plan.embedder.embed_memory_batch(&texts);
+        assert!(runtime.apply_rebuild_batch(plan.generation, memories, &batch, vectors));
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -1790,7 +2418,7 @@ mod tests {
             EnvGuard::set("ANIMAOS_RS_MEMORY_EMBEDDING_DIMENSIONS", "4"),
         ];
 
-        let mut runtime = MemoryEmbeddingRuntime::from_env(None)
+        let mut runtime = MemoryEmbeddingRuntime::from_env(None, None)
             .expect("ollama embedding runtime should configure");
         runtime
             .upsert_memory(&test_memory("memory-1", "semantic memory"))
@@ -1814,7 +2442,7 @@ mod tests {
             EnvGuard::unset("OPENAI_TOKEN"),
         ];
 
-        let error = match MemoryEmbeddingRuntime::from_env(None) {
+        let error = match MemoryEmbeddingRuntime::from_env(None, None) {
             Ok(_) => panic!("openai provider should require an API key"),
             Err(error) => error,
         };
@@ -1832,7 +2460,7 @@ mod tests {
             EnvGuard::set("ANIMAOS_RS_MEMORY_EMBEDDING_DIMENSIONS", "4"),
         ];
 
-        let error = match MemoryEmbeddingRuntime::from_env(None) {
+        let error = match MemoryEmbeddingRuntime::from_env(None, None) {
             Ok(_) => panic!("small embedding dimension should be rejected"),
             Err(error) => error,
         };
@@ -1851,14 +2479,17 @@ mod tests {
             EnvGuard::unset("ANIMAOS_RS_MEMORY_EMBEDDINGS_SHOW_DOWNLOAD_PROGRESS"),
         ];
 
-        let config = FastEmbedEmbeddingConfig::from_env(None)
+        let config = FastEmbedEmbeddingConfig::from_env(None, None)
             .expect("default fastembed config should parse without downloading");
 
         assert_eq!(config.model, EmbeddingModel::MultilingualE5Small);
         assert_eq!(config.model_name, DEFAULT_FASTEMBED_MODEL);
         assert_eq!(config.dimension, 384);
         assert_eq!(config.prompt_style, FastEmbedPromptStyle::E5);
-        assert!(config.show_download_progress);
+        assert!(
+            !config.show_download_progress,
+            "download progress bars stay out of daemon logs"
+        );
         drop(guards);
     }
 
@@ -1877,7 +2508,7 @@ mod tests {
             ),
         ];
 
-        let config = FastEmbedEmbeddingConfig::from_env(Some(1024))
+        let config = FastEmbedEmbeddingConfig::from_env(Some(1024), None)
             .expect("alias config should parse without downloading");
 
         assert_eq!(config.model, EmbeddingModel::BGEM3);
@@ -1899,7 +2530,7 @@ mod tests {
             EnvGuard::unset("ANIMAOS_RS_MEMORY_EMBEDDINGS_SHOW_DOWNLOAD_PROGRESS"),
         ];
 
-        let error = match FastEmbedEmbeddingConfig::from_env(Some(768)) {
+        let error = match FastEmbedEmbeddingConfig::from_env(Some(768), None) {
             Ok(_) => panic!("dimension mismatch should fail before model download"),
             Err(error) => error,
         };
@@ -1925,7 +2556,8 @@ mod tests {
             ),
         ];
 
-        let embedder = FastEmbedMemoryEmbedder::from_env(None)
+        let config = FastEmbedEmbeddingConfig::from_env(None, None).expect("config parses");
+        let embedder = FastEmbedMemoryEmbedder::load(config)
             .expect("fastembed model should download and load");
         let memory = embedder
             .embed_memory("Le gusta el te de menta antes de las demos de lanzamiento")
@@ -1981,8 +2613,14 @@ mod tests {
                     "false",
                 ),
             ];
-            let runtime = MemoryEmbeddingRuntime::from_env(None)
-                .expect("genuine cached E5 backend should load");
+            let mut runtime = MemoryEmbeddingRuntime::from_env(None, None)
+                .expect("fastembed configuration should parse");
+            let loader = runtime
+                .take_model_loader()
+                .expect("fastembed loads in the background");
+            let loaded = loader().expect("genuine cached E5 backend should load");
+            let plan = runtime.begin_rebuild(loaded, &[], Vec::new());
+            runtime.finish_rebuild(plan.generation);
             drop(guards);
             runtime
         };
@@ -2109,6 +2747,475 @@ mod tests {
             assert!(excluded_ids.iter().all(|id| !context.text.contains(id)));
         }
         assert_eq!(memory.read().await.snapshot(), before);
+    }
+
+    #[test]
+    fn unset_env_defaults_to_fastembed_and_boots_on_hashed_vectors_without_loading() {
+        let _env_lock = ENV_LOCK.lock().expect("env lock should not poison");
+        let guards = [
+            EnvGuard::unset("ANIMAOS_RS_MEMORY_EMBEDDINGS"),
+            EnvGuard::unset("ANIMAOS_RS_MEMORY_EMBEDDING_MODEL"),
+            EnvGuard::unset("ANIMAOS_RS_MEMORY_EMBEDDING_DIMENSIONS"),
+            EnvGuard::unset("ANIMAOS_RS_MEMORY_EMBEDDINGS_CACHE_DIR"),
+            EnvGuard::unset("ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE"),
+        ];
+
+        let mut runtime = MemoryEmbeddingRuntime::from_env(None, None)
+            .expect("the default mode configures without downloading");
+        let status = runtime.status();
+        assert_eq!(status.provider, FASTEMBED_PROVIDER);
+        assert_eq!(status.model, DEFAULT_FASTEMBED_MODEL);
+        assert_eq!(status.load, MemoryEmbeddingLoad::Pending);
+        assert_eq!(status.load.label(), "downloading");
+        assert_eq!(status.dimension, DEFAULT_EMBEDDING_DIMENSION);
+        runtime
+            .upsert_memory(&test_memory(
+                "memory-1",
+                "Operator wants concise ship notes",
+            ))
+            .unwrap();
+        assert_eq!(runtime.search("release briefing style", 1).len(), 1);
+        assert!(
+            runtime.take_model_loader().is_some(),
+            "the model loads later, in the background"
+        );
+        assert!(runtime.take_model_loader().is_none());
+
+        let local = EnvGuard::set("ANIMAOS_RS_MEMORY_EMBEDDINGS", LOCAL_PROVIDER);
+        let mut runtime = MemoryEmbeddingRuntime::from_env(None, None).unwrap();
+        assert_eq!(runtime.status().provider, LOCAL_PROVIDER);
+        assert_eq!(runtime.status().load, MemoryEmbeddingLoad::Ready);
+        assert!(runtime.take_model_loader().is_none());
+        drop(local);
+        let off = EnvGuard::set("ANIMAOS_RS_MEMORY_EMBEDDINGS", "off");
+        let status = MemoryEmbeddingRuntime::from_env(None, None)
+            .unwrap()
+            .status();
+        assert!(!status.enabled);
+        assert_eq!(status.load, MemoryEmbeddingLoad::Off);
+        drop(off);
+        // An upgraded daemon with only the dimensions knob keeps booting.
+        let dimensions = EnvGuard::set("ANIMAOS_RS_MEMORY_EMBEDDING_DIMENSIONS", "256");
+        let status = MemoryEmbeddingRuntime::from_env(None, None)
+            .expect("only the dimensions knob still boots")
+            .status();
+        assert_eq!(status.provider, LOCAL_PROVIDER);
+        assert_eq!(status.dimension, 256);
+        drop(dimensions);
+        drop(guards);
+    }
+
+    #[test]
+    fn model_cache_dir_without_a_store_is_the_per_user_cache() {
+        let home = PathBuf::from("/home/owner");
+        let user = |macos, xdg: Option<&str>| UserCacheEnv {
+            macos,
+            home: Some(home.clone()),
+            xdg_cache_home: xdg.map(PathBuf::from),
+        };
+        assert_eq!(
+            model_cache_dir(None, None, &user(true, Some("/xdg"))),
+            Some(home.join("Library/Caches/animaos/models"))
+        );
+        assert_eq!(
+            model_cache_dir(None, None, &user(false, Some("/xdg"))),
+            Some(PathBuf::from("/xdg/animaos/models"))
+        );
+        assert_eq!(
+            model_cache_dir(None, None, &user(false, None)),
+            Some(home.join(".cache/animaos/models"))
+        );
+        // A relative XDG_CACHE_HOME is ignored, as the XDG spec says.
+        assert_eq!(
+            model_cache_dir(None, None, &user(false, Some("relative"))),
+            Some(home.join(".cache/animaos/models"))
+        );
+        // The store-adjacent dir, then the explicit setting, win.
+        let beside = PathBuf::from("data/models");
+        assert_eq!(
+            model_cache_dir(None, Some(beside.clone()), &user(true, None)),
+            Some(beside.clone())
+        );
+        assert_eq!(
+            model_cache_dir(Some("explicit".into()), Some(beside), &user(true, None)),
+            Some(PathBuf::from("explicit"))
+        );
+        // Without a home directory only fastembed's default is left.
+        assert_eq!(model_cache_dir(None, None, &UserCacheEnv::default()), None);
+    }
+
+    #[test]
+    fn only_the_dimensions_knob_set_keeps_hashed_local_vectors() {
+        assert_eq!(
+            embeddings_mode(None, None),
+            (FASTEMBED_PROVIDER.into(), false)
+        );
+        assert_eq!(
+            embeddings_mode(None, Some(256)),
+            (LOCAL_PROVIDER.into(), true),
+            "an upgraded operator's dimension meant hashed vectors"
+        );
+        assert_eq!(
+            embeddings_mode(Some("FastEmbed"), Some(384)),
+            (FASTEMBED_PROVIDER.into(), false)
+        );
+        assert_eq!(
+            embeddings_mode(Some("local"), Some(256)),
+            (LOCAL_PROVIDER.into(), false)
+        );
+    }
+
+    #[test]
+    fn model_cache_dir_prefers_env_then_beside_the_memory_store_then_fastembed_default() {
+        let _env_lock = ENV_LOCK.lock().expect("env lock should not poison");
+        let guards = [
+            EnvGuard::unset("ANIMAOS_RS_MEMORY_EMBEDDING_MODEL"),
+            EnvGuard::unset("ANIMAOS_RS_MEMORY_EMBEDDING_DIMENSIONS"),
+            EnvGuard::unset("ANIMAOS_RS_MEMORY_EMBEDDINGS_CACHE_DIR"),
+        ];
+        let beside_store = PathBuf::from("data").join("models");
+
+        let config = FastEmbedEmbeddingConfig::from_env(None, Some(beside_store.clone())).unwrap();
+        assert_eq!(config.cache_dir, Some(beside_store.clone()));
+        let config = FastEmbedEmbeddingConfig::from_env(None, None).unwrap();
+        assert_eq!(
+            config.cache_dir,
+            model_cache_dir(None, None, &UserCacheEnv::current()),
+            "the per-user cache, never the working directory"
+        );
+        let env = EnvGuard::set("ANIMAOS_RS_MEMORY_EMBEDDINGS_CACHE_DIR", "explicit-cache");
+        let config = FastEmbedEmbeddingConfig::from_env(None, Some(beside_store)).unwrap();
+        assert_eq!(config.cache_dir, Some(PathBuf::from("explicit-cache")));
+        drop(env);
+        drop(guards);
+    }
+
+    #[tokio::test]
+    async fn a_failing_loader_falls_back_and_search_keeps_working() {
+        let memory = test_memory("memory-1", "Operator wants concise ship notes");
+        let manager = manager_with(vec![memory.clone()]);
+        let mut runtime = test_support::awaiting(test_support::failing_model_loader(
+            "could not fetch https://huggingface.co/intfloat/model.onnx into /Users/someone/cache: offline\nsecond line",
+        ));
+        runtime.rebuild_from_memories(&[memory]).unwrap();
+        let loader = runtime.take_model_loader().unwrap();
+        let embeddings = Arc::new(AsyncRwLock::new(runtime));
+
+        join(spawn_model_load(
+            Arc::clone(&manager),
+            Arc::clone(&embeddings),
+            loader,
+        ))
+        .await;
+
+        let runtime = embeddings.read().await;
+        let status = runtime.status();
+        let MemoryEmbeddingLoad::Fallback(reason) = &status.load else {
+            panic!("a failed load falls back, got {:?}", status.load);
+        };
+        assert_eq!(reason, "could not fetch … into … offline");
+        assert_eq!(status.load.label(), "fallback");
+        assert_eq!(status.provider, test_support::FAKE_PROVIDER);
+        assert_eq!(status.dimension, DEFAULT_EMBEDDING_DIMENSION);
+        let hits = runtime.search("release briefing style", 1);
+        assert_eq!(hits.len(), 1, "hashed vectors are kept");
+        assert_eq!(hits[0].memory_id, "memory-1");
+    }
+
+    #[tokio::test]
+    async fn a_slow_loader_does_not_block_boot_and_finishes_in_the_background() {
+        let memory = test_memory("memory-1", "Operator wants concise ship notes");
+        let manager = manager_with(vec![memory.clone()]);
+        let (loader, release) = test_support::gated_model_loader(40);
+        let mut runtime = test_support::awaiting(loader);
+        runtime.rebuild_from_memories(&[memory]).unwrap();
+        let loader = runtime.take_model_loader().unwrap();
+        let embeddings = Arc::new(AsyncRwLock::new(runtime));
+
+        let load = spawn_model_load(Arc::clone(&manager), Arc::clone(&embeddings), loader).unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!load.is_finished(), "the loader is still waiting");
+        {
+            let runtime = embeddings.read().await;
+            assert_eq!(runtime.status().load, MemoryEmbeddingLoad::Pending);
+            assert_eq!(runtime.search("release briefing style", 1).len(), 1);
+        }
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), join(Ok(load)))
+            .await
+            .expect("the load finishes once released");
+
+        let status = embeddings.read().await.status();
+        assert_eq!(status.load, MemoryEmbeddingLoad::Ready);
+        assert_eq!((status.done, status.total), (1, 1));
+        assert_eq!(status.dimension, 40);
+        assert_eq!(status.model, test_support::FAKE_MODEL);
+    }
+
+    #[test]
+    fn during_rebuilding_hashed_vectors_are_never_returned() {
+        let reembedded = test_memory("memory-new", "Operator wants concise ship notes");
+        let hashed_only = test_memory("memory-old", "Operator likes short release briefs");
+        let manager = MemoryManager::new();
+        let mut manager = manager;
+        manager.replace_snapshot(anima_memory::MemoryManagerSnapshot {
+            memories: vec![reembedded.clone(), hashed_only.clone()],
+            ..Default::default()
+        });
+        // The fake model has the hashed dimension, so only the embedder
+        // identity keeps the two kinds of vectors apart.
+        let (loader, _) = test_support::fake_model_loader(DEFAULT_EMBEDDING_DIMENSION);
+        let mut runtime = test_support::awaiting(loader);
+        runtime
+            .rebuild_from_memories(&[reembedded.clone(), hashed_only.clone()])
+            .unwrap();
+        assert_eq!(runtime.search("release briefing style", 2).len(), 2);
+        let old_query = runtime.query_embedder().unwrap();
+        let old_vector = old_query.embed_query("release briefing style").unwrap();
+
+        test_support::swap_part_way(
+            &mut runtime,
+            &manager,
+            DEFAULT_EMBEDDING_DIMENSION,
+            &["memory-new"],
+        );
+
+        assert_eq!(
+            runtime.status().load,
+            MemoryEmbeddingLoad::Rebuilding { done: 1, total: 2 }
+        );
+        assert_eq!(runtime.status().load.label(), "rebuilding");
+        let ids = |hits: Vec<VectorMemoryHit>| {
+            hits.into_iter()
+                .map(|hit| hit.memory_id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ids(runtime.search("release briefing style", 5)),
+            ["memory-new"]
+        );
+        assert_eq!(
+            ids(runtime
+                .for_memories(&manager)
+                .search("release briefing style", 5)),
+            ["memory-new"]
+        );
+        assert!(
+            runtime
+                .search_precomputed_query(old_query.model_key(), &old_vector, 5, &|_| true)
+                .is_empty(),
+            "a query vector from the old embedder is never scored"
+        );
+        let new_query = runtime.query_embedder().unwrap();
+        assert_ne!(new_query.model_key(), old_query.model_key());
+        let new_vector = new_query.embed_query("release briefing style").unwrap();
+        assert_eq!(
+            ids(runtime.search_precomputed_query(new_query.model_key(), &new_vector, 5, &|_| true)),
+            ["memory-new"]
+        );
+    }
+
+    #[test]
+    fn a_memory_changed_deleted_or_rewritten_during_a_batch_is_skipped() {
+        use anima_memory::MemoryPatch;
+        let memories = vec![
+            test_memory("changed", "Operator wants concise ship notes"),
+            test_memory("deleted", "Billing ledger exports include invoice IDs"),
+            test_memory("rewritten", "Latency budget is tight"),
+            test_memory("kept", "Rollback plan needs review"),
+        ];
+        let mut manager = MemoryManager::new();
+        manager.replace_snapshot(anima_memory::MemoryManagerSnapshot {
+            memories: memories.clone(),
+            ..Default::default()
+        });
+        let (loaded, _) = test_support::fake_model(40);
+        let mut runtime = MemoryEmbeddingRuntime::local_default();
+        let plan = runtime.begin_rebuild(loaded, &memories, Vec::new());
+        assert_eq!(plan.pending.len(), 4);
+
+        manager
+            .update_memory(
+                "changed",
+                MemoryPatch {
+                    content: Some("Operator wants long notes".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        manager.forget("deleted");
+        // A write after the swap already indexed this one with the model.
+        let rewritten = test_memory("rewritten", "Latency budget is tight");
+        runtime.upsert_memory(&rewritten).unwrap();
+        let texts: Vec<&str> = plan.pending.iter().map(|(_, text)| text.as_str()).collect();
+        let vectors = plan.embedder.embed_memory_batch(&texts);
+        assert!(runtime.apply_rebuild_batch(plan.generation, &manager, &plan.pending, vectors));
+        runtime.finish_rebuild(plan.generation);
+
+        let mut indexed: Vec<_> = runtime.indexed_content.keys().cloned().collect();
+        indexed.sort();
+        assert_eq!(indexed, ["kept", "rewritten"]);
+        assert_eq!(runtime.status().load, MemoryEmbeddingLoad::Ready);
+        assert!(
+            !runtime.apply_rebuild_batch(plan.generation + 1, &manager, &[], Vec::new()),
+            "a stale rebuild stops"
+        );
+    }
+
+    #[tokio::test]
+    async fn rebuild_runs_in_batches_persists_model_vectors_and_reuses_them_after_restart() {
+        let path = temp_sqlite_path("model-rebuild");
+        let _ = remove_file(&path);
+        let memories: Vec<_> = (0..70)
+            .map(|index| {
+                test_memory(
+                    &format!("memory-{index:02}"),
+                    &format!("ship notes {index}"),
+                )
+            })
+            .collect();
+        let manager = manager_with(memories.clone());
+
+        let boot = |loader: MemoryModelLoader| {
+            let mut runtime = test_support::awaiting(loader);
+            runtime.store = Some(SqliteMemoryEmbeddingStore::new(path.clone()).unwrap());
+            let report = runtime.rebuild_from_memories(&memories).unwrap();
+            assert_eq!(
+                report.loaded_vectors, 0,
+                "interim vectors never load from the store"
+            );
+            runtime
+        };
+        let (loader, calls) = test_support::fake_model_loader(40);
+        let mut runtime = boot(loader);
+        assert!(
+            runtime
+                .store
+                .as_ref()
+                .unwrap()
+                .load_all()
+                .unwrap()
+                .is_empty(),
+            "interim hashed vectors are never saved"
+        );
+        let loader = runtime.take_model_loader().unwrap();
+        let embeddings = Arc::new(AsyncRwLock::new(runtime));
+        join(spawn_model_load(
+            Arc::clone(&manager),
+            Arc::clone(&embeddings),
+            loader,
+        ))
+        .await;
+        let status = embeddings.read().await.status();
+        assert_eq!(status.load, MemoryEmbeddingLoad::Ready);
+        assert_eq!(
+            (status.done, status.total, status.vector_count),
+            (70, 70, 70)
+        );
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 70);
+        let stored = SqliteMemoryEmbeddingStore::new(path.clone())
+            .unwrap()
+            .load_all()
+            .unwrap();
+        assert_eq!(stored.len(), 70);
+        assert!(stored
+            .iter()
+            .all(|row| row.model == "fake:fake-model" && row.vector.len() == 40));
+
+        // Restart: boot on hashed vectors again, without overwriting the
+        // saved model vectors, then reuse them once the model is back.
+        let (loader, calls) = test_support::fake_model_loader(40);
+        let mut runtime = boot(loader);
+        let stored = runtime.store.as_ref().unwrap().load_all().unwrap();
+        assert!(stored.iter().all(|row| row.model == "fake:fake-model"));
+        let loader = runtime.take_model_loader().unwrap();
+        let embeddings = Arc::new(AsyncRwLock::new(runtime));
+        join(spawn_model_load(
+            Arc::clone(&manager),
+            Arc::clone(&embeddings),
+            loader,
+        ))
+        .await;
+        let status = embeddings.read().await.status();
+        assert_eq!(status.load, MemoryEmbeddingLoad::Ready);
+        assert_eq!(status.vector_count, 70);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let _ = remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn hashed_vectors_saved_by_local_mode_are_reembedded_by_the_model() {
+        let path = temp_sqlite_path("local-to-model");
+        let _ = remove_file(&path);
+        let memories = vec![
+            test_memory("memory-1", "Operator wants concise ship notes"),
+            test_memory("memory-2", "Billing ledger exports include invoice IDs"),
+        ];
+        let mut local = MemoryEmbeddingRuntime::local_default();
+        local.store = Some(SqliteMemoryEmbeddingStore::new(path.clone()).unwrap());
+        local.rebuild_from_memories(&memories).unwrap();
+        assert!(
+            local
+                .store
+                .as_ref()
+                .unwrap()
+                .load_all()
+                .unwrap()
+                .iter()
+                .all(|row| row.model == LOCAL_MODEL
+                    && row.vector.len() == DEFAULT_EMBEDDING_DIMENSION)
+        );
+
+        let (loader, calls) = test_support::fake_model_loader(DEFAULT_EMBEDDING_DIMENSION);
+        let mut runtime = test_support::awaiting(loader);
+        runtime.store = Some(SqliteMemoryEmbeddingStore::new(path.clone()).unwrap());
+        runtime.rebuild_from_memories(&memories).unwrap();
+        let loader = runtime.take_model_loader().unwrap();
+        let embeddings = Arc::new(AsyncRwLock::new(runtime));
+        join(spawn_model_load(
+            manager_with(memories),
+            Arc::clone(&embeddings),
+            loader,
+        ))
+        .await;
+
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        let stored = SqliteMemoryEmbeddingStore::new(path.clone())
+            .unwrap()
+            .load_all()
+            .unwrap();
+        assert!(stored.iter().all(|row| row.model == "fake:fake-model"));
+        let _ = remove_file(&path);
+    }
+
+    #[test]
+    fn fallback_reason_keeps_the_first_line_without_paths_or_urls() {
+        assert_eq!(
+            fallback_reason("Failed to load C:\\models\\e5.onnx: bad file\nstack"),
+            "Failed to load … bad file"
+        );
+        assert_eq!(fallback_reason("\n\n"), "the search model did not load");
+        assert_eq!(
+            fallback_reason(&"word ".repeat(100)).chars().count(),
+            FALLBACK_REASON_CHARS
+        );
+    }
+
+    /// Waits for a model load thread without blocking the test runtime.
+    async fn join(load: io::Result<std::thread::JoinHandle<()>>) {
+        let load = load.expect("the load thread starts");
+        tokio::task::spawn_blocking(move || load.join().expect("the load thread finishes"))
+            .await
+            .unwrap();
+    }
+
+    fn manager_with(memories: Vec<Memory>) -> Arc<AsyncRwLock<MemoryManager>> {
+        let mut manager = MemoryManager::new();
+        manager.replace_snapshot(anima_memory::MemoryManagerSnapshot {
+            memories,
+            ..Default::default()
+        });
+        Arc::new(AsyncRwLock::new(manager))
     }
 
     fn test_memory(id: &str, content: &str) -> Memory {

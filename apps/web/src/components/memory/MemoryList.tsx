@@ -11,6 +11,7 @@ import { formatWhen } from '../../lib/approvals';
 import {
   DELETE_MEMORY_PROMPT,
   MEMORY_TYPE_LABELS,
+  coreBlockLabel,
   describeFact,
   formatTags,
   importanceLabel,
@@ -88,6 +89,8 @@ function MemoryRow({
   const trailRequest = useRef(0);
   const displayedMemory =
     mode === 'delete' && deleteSnapshot ? deleteSnapshot : memory;
+  // The daemon refuses a generic edit of a core entry (409); its panel owns it.
+  const coreBlock = coreBlockLabel(memory.tags);
 
   const toggleTrail = async () => {
     if (trail) {
@@ -170,13 +173,17 @@ function MemoryRow({
       )}
       {mode === 'view' && (
         <div className="memory-actions">
-          <button
-            type="button"
-            className="studio-tool-button"
-            onClick={() => setMode('edit')}
-          >
-            Edit
-          </button>
+          {coreBlock ? (
+            <span className="memory-note">Edit in {coreBlock}</span>
+          ) : (
+            <button
+              type="button"
+              className="studio-tool-button"
+              onClick={() => setMode('edit')}
+            >
+              Edit
+            </button>
+          )}
           <button
             type="button"
             className="studio-tool-button"

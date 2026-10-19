@@ -60,3 +60,6 @@ test-output
 .env
 .env.local
 target/
+
+# fastembed model cache (a daemon run without a memory store, before the per-user cache default)
+.fastembed_cache/

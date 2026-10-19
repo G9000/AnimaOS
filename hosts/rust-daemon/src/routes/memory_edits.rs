@@ -31,6 +31,7 @@ use super::memories::{persist_memory_store, remove_memory_embeddings};
 use super::sessions::rejected;
 use super::{parse_json_body, ApiError, AppState};
 use crate::app::SharedDaemonState;
+use crate::core_memory::{self, files};
 use crate::memory_embeddings::{MemoryEmbeddingRuntime, SharedMemoryEmbeddings};
 use crate::memory_store::{MemoryMutation, MemoryStoreConfig};
 use crate::memory_text::{
@@ -63,6 +64,7 @@ const FACT_REPLACEMENT_CONFIDENCE: f64 = 1.0;
         (status = 400, description = "No field to change, or a field is invalid", body = ErrorBody),
         (status = 403, description = "Local owner required", body = ErrorBody),
         (status = 404, description = "No such memory", body = ErrorBody),
+        (status = 409, description = "A core entry changes only through the core-memory routes; also when the change would make a core-tagged memory an entry its block cannot fit", body = ErrorBody),
         (status = 503, description = "The change could not be saved and was undone, or did not finish", body = ErrorBody)
     ))]
 pub(super) async fn patch_memory(
@@ -85,8 +87,26 @@ pub(super) async fn patch_memory(
         Ok(patch) => patch,
         Err(error) => return rejected(error),
     };
+    // A core entry changes only through the core-memory routes, which keep the
+    // budgets; and no memory may gain a core tag here.
+    if patch
+        .tags
+        .as_ref()
+        .and_then(Option::as_ref)
+        .is_some_and(|tags| core_memory::names_core_tag(tags))
+    {
+        return rejected(ApiError::conflict(core_memory::CORE_ENTRY_ROUTE_REFUSED));
+    }
     let daemon = state.daemon.clone();
-    match locked(apply_patch(daemon, memory_id, patch)).await {
+    match locked(apply_patch_checked(daemon, memory_id, patch, |current| {
+        if core_memory::is_core_entry(current) {
+            Err(ApiError::conflict(core_memory::CORE_ENTRY_ROUTE_REFUSED))
+        } else {
+            Ok(())
+        }
+    }))
+    .await
+    {
         Ok(memory) => answer(&MemoryResponse::from(&memory)),
         Err(error) => rejected(error),
     }
@@ -309,7 +329,7 @@ pub(super) async fn delete_entity(
 }
 
 /// Runs `work` in its own task and awaits it. A dropped caller does not cancel it; a panicked or cancelled task is a 503 MEMORY_TASK_FAILED.
-async fn locked<T: Send + 'static>(
+pub(super) async fn locked<T: Send + 'static>(
     work: impl Future<Output = Result<T, ApiError>> + Send + 'static,
 ) -> Result<T, ApiError> {
     match tokio::spawn(work).await {
@@ -365,7 +385,7 @@ pub(super) fn memory_patch(input: MemoryPatchRequest) -> Result<MemoryPatch, Api
     })
 }
 
-async fn memory_handles(
+pub(super) async fn memory_handles(
     daemon: &SharedDaemonState,
 ) -> (
     SharedMemoryStore,
@@ -380,14 +400,6 @@ async fn memory_handles(
     )
 }
 
-async fn apply_patch(
-    daemon: SharedDaemonState,
-    memory_id: String,
-    patch: MemoryPatch,
-) -> Result<Memory, ApiError> {
-    apply_patch_checked(daemon, memory_id, patch, |_| Ok(())).await
-}
-
 /// Reuse the sole canonical mutation/save/index path with an additional guard.
 /// The predicate observes the full current record under the same write lock.
 pub(super) async fn apply_patch_checked(
@@ -398,6 +410,12 @@ pub(super) async fn apply_patch_checked(
 ) -> Result<Memory, ApiError> {
     let content_changed = patch.content.is_some();
     let (memory_handle, embeddings_handle, memory_store) = memory_handles(&daemon).await;
+    let workspace_root = daemon
+        .read()
+        .await
+        .workspace
+        .as_ref()
+        .map(|workspace| workspace.root_path.clone());
     let mut memory_guard = memory_handle.write().await;
     let current = memory_guard
         .get(&memory_id)
@@ -409,6 +427,10 @@ pub(super) async fn apply_patch_checked(
             .update_memory(&memory_id, patch)
             .map_err(|error| ApiError::bad_request(error.message()))?
             .ok_or_else(ApiError::not_found)?;
+        // Dropping the unsaved mutation undoes the edit.
+        if !core_memory::generic_edit_fits(&mutation, &current, &memory) {
+            return Err(ApiError::conflict(core_memory::CORE_ENTRY_ROUTE_REFUSED));
+        }
         persist_memory_store(
             memory_store.as_ref(),
             &mut mutation,
@@ -424,6 +446,10 @@ pub(super) async fn apply_patch_checked(
         &memory,
         content_changed,
     );
+    // A memory the edit made a core entry joins its agent's file copy.
+    if core_memory::is_core_entry(&memory) {
+        files::write_copies(workspace_root.as_deref(), &memory_guard, &memory.agent_id);
+    }
     drop(memory_guard);
     Ok(memory)
 }
@@ -434,6 +460,12 @@ async fn apply_delete(
     expected_content: Option<String>,
 ) -> Result<MemoryDeleteResponse, ApiError> {
     let (memory_handle, embeddings_handle, memory_store) = memory_handles(&daemon).await;
+    let workspace_root = daemon
+        .read()
+        .await
+        .workspace
+        .as_ref()
+        .map(|workspace| workspace.root_path.clone());
     let mut memory_guard = memory_handle.write().await;
     let current = memory_guard
         .get(&memory_id)
@@ -458,6 +490,11 @@ async fn apply_delete(
         deletion
     };
     remove_memory_embeddings(&embeddings_handle, std::slice::from_ref(&memory_id)).await;
+    // Deleting a core entry is allowed (it cannot break a budget), but the
+    // agent's file copy must follow, under the same lock.
+    if core_memory::is_core_entry(&current) {
+        files::write_copies(workspace_root.as_deref(), &memory_guard, &current.agent_id);
+    }
     drop(memory_guard);
     Ok(MemoryDeleteResponse {
         id: memory_id,
@@ -591,7 +628,11 @@ async fn apply_entity_delete(
     })
 }
 
-fn sync_embedding(runtime: &mut MemoryEmbeddingRuntime, memory: &Memory, content_changed: bool) {
+pub(super) fn sync_embedding(
+    runtime: &mut MemoryEmbeddingRuntime,
+    memory: &Memory,
+    content_changed: bool,
+) {
     sync_embedding_with(
         runtime,
         memory,

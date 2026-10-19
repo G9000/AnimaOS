@@ -201,10 +201,9 @@ impl DaemonState {
         runtime.set_agent_files(files.clone());
         self.wire_runtime(&mut runtime);
         if let Some(summary) = summary {
-            let mut providers = crate::components::default_providers_with_memory_views(
+            let mut providers = crate::components::default_providers_in_zone(
                 Arc::clone(&self.memory),
                 Arc::clone(&self.memory_embeddings),
-                Arc::clone(&self.memory_view_selections),
                 self.owner_time_zone.clone(),
             );
             providers

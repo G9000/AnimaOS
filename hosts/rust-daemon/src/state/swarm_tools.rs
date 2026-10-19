@@ -9,6 +9,8 @@ use anima_swarm::SwarmDelegation;
 
 use crate::tools::ToolExecutionContext;
 
+const SWARM_CORE_MEMORY_REFUSED: &str = "core_memory is unavailable to swarm members";
+
 pub(super) async fn execute_swarm_tool(
     send: Arc<CoordinatorSendFn>,
     broadcast: Arc<CoordinatorBroadcastFn>,
@@ -88,6 +90,8 @@ pub(super) async fn execute_swarm_tool(
 
             delegate_task(agent_name, instruction).await
         }
+        // Swarm members read their agent's core memory but never edit it.
+        "core_memory" => TaskResult::error(SWARM_CORE_MEMORY_REFUSED, 0),
         _ => {
             tool_context
                 .execute_tool(agent, user_message, tool_call)
@@ -370,6 +374,41 @@ mod tests {
                 .as_slice(),
             &["team update".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn core_memory_is_refused_even_when_a_member_lists_it() {
+        let mut agent = agent_state();
+        agent.config.tools = Some(vec![anima_core::ToolDescriptor {
+            name: "core_memory".into(),
+            description: String::new(),
+            parameters_schema: BTreeMap::new(),
+            examples: None,
+        }]);
+        let context = tool_context();
+        let result = execute_swarm_tool(
+            noop_send(),
+            noop_broadcast(),
+            noop_participants(),
+            None,
+            None,
+            context.clone(),
+            agent,
+            user_message(),
+            tool_call(
+                "core_memory",
+                BTreeMap::from([
+                    ("action".into(), DataValue::String("add".into())),
+                    ("block".into(), DataValue::String("user".into())),
+                    ("text".into(), DataValue::String("prefers tea".into())),
+                ]),
+            ),
+        )
+        .await;
+
+        assert_eq!(result.status, TaskStatus::Error);
+        assert_eq!(result.error.as_deref(), Some(SWARM_CORE_MEMORY_REFUSED));
+        assert!(context.memory.read().await.snapshot().memories.is_empty());
     }
 
     fn noop_send() -> Arc<CoordinatorSendFn> {

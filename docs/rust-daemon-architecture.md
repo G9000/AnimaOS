@@ -339,7 +339,7 @@ At a high level:
 
 For tests, the daemon can also be constructed with the deterministic model adapter instead of the real environment-based adapter.
 
-## Memory, Providers, And Evaluators
+## Memory And Providers
 
 Every daemon instance creates one shared `MemoryManager`.
 
@@ -349,7 +349,6 @@ That memory store is used by:
 | --------------------------- | ---------------------------------------------------------- |
 | Memory HTTP routes          | Create, search, and recent-memory APIs.                    |
 | `RecentMemoriesProvider`    | Injects recent memory context into runtime execution.      |
-| `ReflectionMemoryEvaluator` | Persists reflection-style memory after runtime evaluation. |
 | Agent run handler           | Persists final `task_result` memory on successful runs.    |
 
 This means HTTP memory APIs and runtime memory behavior are operating on the same in-process store.

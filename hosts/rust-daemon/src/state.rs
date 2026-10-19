@@ -36,7 +36,7 @@ use tokio::sync::Semaphore;
 use tokio::sync::{Mutex as AsyncMutex, RwLock as AsyncRwLock};
 use tracing::{info, warn};
 
-use crate::components::{default_evaluators, default_providers_with_memory_views};
+use crate::components::default_providers_in_zone;
 use crate::connectors::gcalendar::{
     CalendarManager, CalendarPendingWriteRecord, GoogleCalendarConnectorRecord,
 };
@@ -1625,8 +1625,6 @@ pub(crate) struct DaemonState {
     pub(crate) memory: SharedMemoryStore,
     pub(crate) memory_embeddings: SharedMemoryEmbeddings,
     pub(crate) memory_store: Option<MemoryStoreConfig>,
-    pub(crate) memory_views: crate::memory_views::MemoryViewRegistry,
-    pub(crate) memory_view_selections: crate::memory_views::SharedMemoryViewSelections,
     pub(crate) mcp_registry: crate::mcp::McpRegistry,
     pub(crate) mcp_publication: crate::mcp::SharedMcpPublication,
     pub(crate) mcp_manager: Option<crate::mcp::McpManager>,
@@ -1686,6 +1684,10 @@ pub(crate) struct DaemonState {
     /// The owner's time zone as their web console last reported it; saved in
     /// the control plane so Telegram and scheduled runs use it too.
     pub(crate) owner_time_zone: crate::clock::OwnerTimeZone,
+    /// Evaluators a test injects into every wired runtime. Production wires
+    /// none; this lets tests hold a run past its model answer.
+    #[cfg(test)]
+    pub(crate) test_evaluators: Vec<Arc<dyn anima_core::Evaluator>>,
     /// The model side tasks use before the agent's own (spec: side-task model).
     pub(crate) side_model: Option<anima_core::ModelChoice>,
     pub(crate) history: crate::history::SharedHistory,
@@ -2249,8 +2251,6 @@ impl DaemonState {
             provider_keys: crate::provider_keys::KeyPool::open(None, &Default::default())
                 .expect("an in-memory key pool opens without I/O"),
             memory_store: None,
-            memory_views: crate::memory_views::MemoryViewRegistry::default(),
-            memory_view_selections: crate::memory_views::MemoryViewRegistry::default().published(),
             mcp_registry: crate::mcp::McpRegistry::default(),
             community_bundles: Vec::new(),
             community_generation: 0,
@@ -2298,6 +2298,8 @@ impl DaemonState {
             schedule_fires: crate::schedules::FireLog::default(),
             pricing_overrides: Vec::new(),
             owner_time_zone: crate::clock::OwnerTimeZone::default(),
+            #[cfg(test)]
+            test_evaluators: Vec::new(),
             side_model: None,
             history: crate::history::HistoryService::ephemeral(),
             session_limiter: crate::sessions::SessionCreateLimiter::default(),
@@ -2345,7 +2347,6 @@ impl DaemonState {
 
     pub(crate) fn set_memory_store(&mut self, memory_store: Option<MemoryStoreConfig>) {
         self.memory_store = memory_store;
-        self.publish_restored_memory_views();
     }
 
     /// Installs a history service; it first replays the saved deletions the
@@ -2569,12 +2570,8 @@ impl DaemonState {
         let learning = self.learning.snapshot();
         snapshot.learning_reviews = learning.reviews;
         snapshot.learning_policies = learning.policies;
-        snapshot.memory_views = self
-            .memory_views
-            .snapshot()
-            .into_iter()
-            .filter(|row| self.agents.contains_key(&row.agent_id))
-            .collect();
+        snapshot.conversation_counts = learning.conversation_counts;
+        snapshot.conversation_turns = learning.conversation_turns;
         snapshot
     }
 
@@ -2791,17 +2788,12 @@ impl DaemonState {
             crate::learning::LearningSnapshot {
                 reviews: snapshot.learning_reviews,
                 policies: snapshot.learning_policies,
+                conversation_counts: snapshot.conversation_counts,
+                conversation_turns: snapshot.conversation_turns,
             },
             &self.live_agent_ids(),
             anima_core::primitives::now_millis(),
         );
-        self.memory_views = crate::memory_views::MemoryViewRegistry::restored(
-            snapshot.memory_views,
-            &self.live_agent_ids(),
-        );
-        // Preserve the handle already held by restored runtimes. Only durable
-        // references are published; canonical content stays in MemoryManager.
-        self.publish_restored_memory_views();
         // Spec §4.8: the runs that waited are interrupted above; the
         // approvals they waited on expire next to them.
         self.approvals = crate::approvals::ApprovalRegistry::restored(
@@ -2922,8 +2914,8 @@ impl DaemonState {
         crate::learning::LearningRegistry::validate(&crate::learning::LearningSnapshot {
             reviews: snapshot.learning_reviews.clone(),
             policies: snapshot.learning_policies.clone(),
+            ..crate::learning::LearningSnapshot::default()
         })?;
-        crate::memory_views::MemoryViewRegistry::validate(&snapshot.memory_views)?;
         if snapshot.jobs.len() > 200 {
             return Err("job snapshot exceeds the record limit".into());
         }
@@ -3588,16 +3580,10 @@ impl DaemonState {
     ) -> Result<AgentRuntimeSnapshot, String> {
         config.tools = self.resolve_agent_tools(None, config.tools)?;
         let mut runtime = AgentRuntime::new(config, Arc::clone(&self.model_adapter));
-        runtime.set_providers(default_providers_with_memory_views(
+        runtime.set_providers(default_providers_in_zone(
             Arc::clone(&self.memory),
             Arc::clone(&self.memory_embeddings),
-            Arc::clone(&self.memory_view_selections),
             self.owner_time_zone.clone(),
-        ));
-        runtime.set_evaluators(default_evaluators(
-            Arc::clone(&self.memory),
-            Arc::clone(&self.memory_embeddings),
-            self.memory_store.clone(),
         ));
         if let Some(db) = &self.db {
             runtime.set_database(Arc::clone(db));
@@ -3652,17 +3638,15 @@ impl DaemonState {
     }
 
     fn wire_runtime(&self, runtime: &mut AgentRuntime) {
-        runtime.set_providers(default_providers_with_memory_views(
+        runtime.set_providers(default_providers_in_zone(
             Arc::clone(&self.memory),
             Arc::clone(&self.memory_embeddings),
-            Arc::clone(&self.memory_view_selections),
             self.owner_time_zone.clone(),
         ));
-        runtime.set_evaluators(default_evaluators(
-            Arc::clone(&self.memory),
-            Arc::clone(&self.memory_embeddings),
-            self.memory_store.clone(),
-        ));
+        #[cfg(test)]
+        if !self.test_evaluators.is_empty() {
+            runtime.set_evaluators(self.test_evaluators.clone());
+        }
         if let Some(db) = &self.db {
             runtime.set_database(Arc::clone(db));
         }
@@ -3763,23 +3747,6 @@ impl DaemonState {
             publication.known.retain(|(owner, _), _| owner != agent_id);
             publication.live.retain(|(owner, _), _| owner != agent_id);
         }
-    }
-
-    fn publish_restored_memory_views(&self) {
-        let rows = if self.memory_store.is_some() {
-            self.memory_views
-                .snapshot()
-                .into_iter()
-                .filter(|row| self.agents.contains_key(&row.agent_id))
-                .map(|row| (row.agent_id.clone(), row))
-                .collect()
-        } else {
-            Default::default()
-        };
-        *self
-            .memory_view_selections
-            .write()
-            .unwrap_or_else(|error| error.into_inner()) = rows;
     }
 
     pub(crate) fn restore_removed_agent(
