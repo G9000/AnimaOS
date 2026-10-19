@@ -9,6 +9,7 @@ pub(crate) mod model;
 mod processing;
 #[cfg(test)]
 mod runtime_tests;
+pub(crate) mod sender;
 pub(crate) mod text;
 #[cfg(test)]
 mod text_tests;

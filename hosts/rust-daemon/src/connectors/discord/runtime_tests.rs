@@ -1131,5 +1131,7 @@ mod gateway_tests;
 
 #[path = "multi_channel_tests.rs"]
 mod multi_channel_tests;
+#[path = "speaker_tests.rs"]
+mod speaker_tests;
 #[path = "typing_tests.rs"]
 mod typing_tests;
