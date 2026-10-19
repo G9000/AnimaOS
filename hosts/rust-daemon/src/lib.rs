@@ -46,8 +46,9 @@ pub mod postgres;
 pub use attachments::documents::worker::document_worker_entry;
 pub use logs::init_tracing;
 
+pub use app::entry::{bind_addr_from_env, config_from_env, run_from_env, ServeOptions};
 pub use app::{
-    app, app_with_config, app_with_configured_persistence, app_with_database, serve, DaemonConfig,
-    PersistenceMode,
+    app, app_with_config, app_with_configured_persistence, app_with_database, serve, serve_with,
+    DaemonConfig, PersistenceMode,
 };
 mod chatgpt_auth;

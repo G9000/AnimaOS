@@ -1,3 +1,4 @@
+pub(crate) mod entry;
 pub(crate) mod lifecycle;
 pub(crate) mod persistence;
 
@@ -12,7 +13,7 @@ use axum::Router;
 use tokio::net::TcpListener;
 use tokio::sync::{RwLock, Semaphore};
 
-use self::{lifecycle::shutdown_signal, persistence::configure_persistence};
+use self::{entry::ServeOptions, lifecycle::shutdown_signal, persistence::configure_persistence};
 use crate::agent_runs::AgentRunCoordinator;
 use crate::connectors::credentials::{
     InMemoryCredentialStore, OsKeyringCredentialStore, TelegramBotToken,
@@ -238,6 +239,15 @@ pub async fn app_with_configured_persistence(config: DaemonConfig) -> io::Result
 }
 
 pub async fn serve(listener: TcpListener, config: DaemonConfig) -> io::Result<()> {
+    serve_with(listener, config, ServeOptions::default()).await
+}
+
+/// [`serve`] with host additions: a UI fallback router and a shutdown handle.
+pub async fn serve_with(
+    listener: TcpListener,
+    config: DaemonConfig,
+    options: ServeOptions,
+) -> io::Result<()> {
     // Only the real daemon reads explicit operator configuration. Embeddings
     // and deterministic constructors remain independent of ambient config.
     let tool_rpc_config =
@@ -294,13 +304,26 @@ pub async fn serve(listener: TcpListener, config: DaemonConfig) -> io::Result<()
         // model call.
         guard.set_generated_titles(true);
     }
+    let ServeOptions { ui, shutdown } = options;
+    let shutdown = async move {
+        match shutdown {
+            Some(requested) => {
+                tokio::select! {
+                    _ = shutdown_signal() => {}
+                    _ = requested.notified() => {}
+                }
+            }
+            None => shutdown_signal().await,
+        }
+    };
     serve_with_state_and_voice(
         listener,
         state,
         config,
-        shutdown_signal(),
+        shutdown,
         crate::runtime_model::transcription_service_from_env(),
         crate::runtime_model::speech_service_from_env(),
+        ui,
     )
     .await
 }
@@ -321,6 +344,7 @@ pub(crate) async fn serve_with_state(
         shutdown,
         crate::voice::VoiceService::disabled(),
         crate::speech::SpeechService::disabled(),
+        None,
     )
     .await
 }
@@ -332,6 +356,7 @@ async fn serve_with_state_and_voice(
     shutdown: impl Future<Output = ()> + Send + 'static,
     voice: crate::voice::VoiceService,
     speech: crate::speech::SpeechService,
+    ui: Option<Router>,
 ) -> io::Result<()> {
     let bind_is_loopback = listener.local_addr()?.ip().is_loopback();
     let mut runtime = daemon_runtime(Arc::clone(&state), &config)?;
@@ -352,6 +377,11 @@ async fn serve_with_state_and_voice(
     let live = state.read().await.live.clone();
     let browser_state = state.clone();
     let router = router_with_runtime(state, config, runtime, bind_is_loopback);
+    // Added last, so every daemon route wins over the host's UI.
+    let router = match ui {
+        Some(ui) => router.fallback_service(ui),
+        None => router,
+    };
     // Router installation uses uncontended construction-time state. Restored
     // workers and the scanner may acquire it immediately after being started.
     jobs.start().await.map_err(|error| {
