@@ -8,6 +8,7 @@ mod config;
 mod paths;
 mod server_env;
 mod supervisor;
+mod tray;
 mod ui;
 
 use std::io;
@@ -36,8 +37,10 @@ fn main() -> ExitCode {
 
     match Cli::parse().command {
         Some(Command::Run) => report(commands::run::run()),
-        // There is no tray yet: with or without `--no-tray` it runs headless.
-        Some(Command::Supervise { .. }) => report(supervisor::supervise()),
+        Some(Command::Supervise {
+            background,
+            no_tray,
+        }) => report(supervisor::supervise(tray::wanted(no_tray, background))),
         None => report_code(commands::open::open()),
         Some(Command::Status) => report_code(commands::status::status()),
         Some(Command::Start) => report_code(commands::lifecycle::start()),

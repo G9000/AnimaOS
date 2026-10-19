@@ -1,7 +1,8 @@
 //! `anima supervise`: runs the server (`anima run`) as a child, restarts it
 //! when it crashes, and gates Stop / Restart / Quit / Update behind the
-//! server's drain so running work is never cut off. The CLI, the tray and the
-//! server's console relay drive it over the control API.
+//! server's drain so running work is never cut off. The CLI and the server's
+//! console relay drive it over the control API; the tray sends the same
+//! requests through a `Link`.
 //!
 //! One task owns the child and the state. It never waits on anything outside
 //! its `select!`, so an action request is always answered promptly.
@@ -27,7 +28,7 @@ use std::time::Duration;
 
 use anima_daemon::system::InFlight;
 use tokio::net::TcpListener;
-use tokio::sync::{mpsc, watch, Notify};
+use tokio::sync::{mpsc, oneshot, watch, Notify};
 
 use tokio::time::Instant;
 
@@ -37,7 +38,7 @@ use crate::server_env::{effective_port, server_env};
 use child::{ServerApi, ServerChild, ShutdownRequest};
 use control_api::ActionRequest;
 use logs::ServerLog;
-use state::{backoff_secs, next, Transition, UpdateStatus};
+use state::{backoff_secs, next, Conflict, Transition, UpdateStatus};
 use tokens::{AdminToken, ControlToken};
 
 /// The status the control API serves; the lifecycle task keeps it current.
@@ -72,84 +73,197 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Runs the supervisor until it is asked to quit. A supervisor already
-/// listening on the control port means there is nothing to do.
-pub fn supervise() -> io::Result<()> {
-    let paths = AnimaPaths::discover()?;
-    paths.ensure()?;
-    let cfg = Config::load(&paths.config_file)?;
-    tokio::runtime::Builder::new_multi_thread()
+/// Runs the supervisor until it is asked to quit, with the tray when `tray`
+/// is set. A supervisor already listening on the control port means there is
+/// nothing to do.
+pub fn supervise(tray: bool) -> io::Result<()> {
+    let Some(supervisor) = Supervisor::bind()? else {
+        println!("Anima is already running");
+        return Ok(());
+    };
+    let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .build()?
-        .block_on(supervise_async(paths, cfg))
+        .build()?;
+    if tray {
+        crate::tray::run(runtime, supervisor)
+    } else {
+        runtime.block_on(supervisor.run())
+    }
 }
 
-async fn supervise_async(paths: AnimaPaths, cfg: Config) -> io::Result<()> {
-    let listener = match TcpListener::bind(("127.0.0.1", cfg.control_port)).await {
-        Ok(listener) => listener,
-        Err(error) if error.kind() == io::ErrorKind::AddrInUse => {
-            println!("Anima is already running");
-            return Ok(());
+/// A supervisor that holds the control port, ready to run.
+pub struct Supervisor {
+    paths: AnimaPaths,
+    cfg: Config,
+    listener: std::net::TcpListener,
+    control_token: ControlToken,
+    admin_token: AdminToken,
+    api: ServerApi,
+    status: SharedStatus,
+    log: ServerLog,
+    requests_tx: mpsc::Sender<ActionRequest>,
+    requests: mpsc::Receiver<ActionRequest>,
+}
+
+impl Supervisor {
+    /// Takes the control port; `None` when another supervisor has it.
+    fn bind() -> io::Result<Option<Self>> {
+        let paths = AnimaPaths::discover()?;
+        paths.ensure()?;
+        let cfg = Config::load(&paths.config_file)?;
+        let listener = match std::net::TcpListener::bind(("127.0.0.1", cfg.control_port)) {
+            Ok(listener) => listener,
+            Err(error) if error.kind() == io::ErrorKind::AddrInUse => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        listener.set_nonblocking(true)?;
+        let (control_token, admin_token) = tokens::ensure(&paths)?;
+        let process_env: BTreeMap<String, String> = std::env::vars().collect();
+        let port = effective_port(&cfg, &process_env);
+        let api_key = process_env
+            .get("ANIMAOS_RS_API_KEY")
+            .map(|key| key.trim().to_string())
+            .filter(|key| !key.is_empty());
+        let api = ServerApi::new(port, admin_token.clone(), api_key)?;
+        let status: SharedStatus = Arc::new(Mutex::new(SupervisorStatus {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            state: ServerState::Starting,
+            server_url: server_url(port),
+            workspace: cfg.workspace.clone(),
+            workspace_problem: workspace_problem(&cfg, &paths),
+            data_dir: paths.data.clone(),
+            autostart: cfg.autostart,
+            connectors: None,
+            pending: None,
+            update: UpdateStatus::default(),
+        }));
+        let (requests_tx, requests) = mpsc::channel(16);
+        Ok(Some(Self {
+            log: ServerLog::open(&paths.logs),
+            paths,
+            cfg,
+            listener,
+            control_token,
+            admin_token,
+            api,
+            status,
+            requests_tx,
+            requests,
+        }))
+    }
+
+    /// What the tray drives this supervisor with, on `runtime`.
+    pub fn link(&self, runtime: tokio::runtime::Handle) -> Link {
+        Link {
+            requests: self.requests_tx.clone(),
+            status: Arc::clone(&self.status),
+            paths: self.paths.clone(),
+            log: self.log.clone(),
+            runtime,
         }
-        Err(error) => return Err(error),
-    };
-    let (control_token, admin_token) = tokens::ensure(&paths)?;
-    let process_env: BTreeMap<String, String> = std::env::vars().collect();
-    let port = effective_port(&cfg, &process_env);
-    let api_key = process_env
-        .get("ANIMAOS_RS_API_KEY")
-        .map(|key| key.trim().to_string())
-        .filter(|key| !key.is_empty());
-    let api = ServerApi::new(port, admin_token.clone(), api_key)?;
-    let status: SharedStatus = Arc::new(Mutex::new(SupervisorStatus {
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        state: ServerState::Starting,
-        server_url: server_url(port),
-        workspace: cfg.workspace.clone(),
-        workspace_problem: workspace_problem(&cfg, &paths),
-        data_dir: paths.data.clone(),
-        autostart: cfg.autostart,
-        connectors: None,
-        pending: None,
-        update: UpdateStatus::default(),
-    }));
+    }
 
-    let (requests_tx, requests) = mpsc::channel(16);
-    let router = control_api::router(control_token.clone(), Arc::clone(&status), requests_tx);
-    let stop_serving = Arc::new(Notify::new());
-    let serving = {
-        let stop = Arc::clone(&stop_serving);
-        tokio::spawn(async move {
-            axum::serve(listener, router)
-                .with_graceful_shutdown(async move { stop.notified().await })
-                .await
-        })
-    };
+    /// Runs until it is asked to quit.
+    pub async fn run(self) -> io::Result<()> {
+        let listener = TcpListener::from_std(self.listener)?;
+        let router = control_api::router(
+            self.control_token.clone(),
+            Arc::clone(&self.status),
+            self.requests_tx,
+        );
+        let stop_serving = Arc::new(Notify::new());
+        let serving = {
+            let stop = Arc::clone(&stop_serving);
+            tokio::spawn(async move {
+                axum::serve(listener, router)
+                    .with_graceful_shutdown(async move { stop.notified().await })
+                    .await
+            })
+        };
 
-    let (api_tx, api_rx) = watch::channel(api.clone());
-    let connectors = tokio::spawn(refresh_connectors(Arc::clone(&status), api_rx));
-    let lifecycle = Lifecycle {
-        exe: std::env::current_exe()?,
-        control_url: format!("http://127.0.0.1:{}", cfg.control_port),
-        control_token,
-        admin_token,
-        log: ServerLog::open(&paths.logs),
-        paths,
-        cfg,
-        api,
-        api_tx,
-        status,
-        child: None,
-        crashes: 0,
-        running_since: None,
-    };
-    lifecycle.run(requests, termination_signals()).await;
+        let (api_tx, api_rx) = watch::channel(self.api.clone());
+        let connectors = tokio::spawn(refresh_connectors(Arc::clone(&self.status), api_rx));
+        let lifecycle = Lifecycle {
+            exe: std::env::current_exe()?,
+            control_url: format!("http://127.0.0.1:{}", self.cfg.control_port),
+            control_token: self.control_token,
+            admin_token: self.admin_token,
+            log: self.log,
+            paths: self.paths,
+            cfg: self.cfg,
+            api: self.api,
+            api_tx,
+            status: self.status,
+            child: None,
+            crashes: 0,
+            running_since: None,
+        };
+        lifecycle.run(self.requests, termination_signals()).await;
 
-    connectors.abort();
-    // Let the answer to the last request (a quit) reach its caller.
-    stop_serving.notify_one();
-    let _ = tokio::time::timeout(Duration::from_secs(2), serving).await;
-    Ok(())
+        connectors.abort();
+        // Let the answer to the last request (a quit) reach its caller.
+        stop_serving.notify_one();
+        let _ = tokio::time::timeout(Duration::from_secs(2), serving).await;
+        Ok(())
+    }
+}
+
+/// The tray's handle on a supervisor: its status, and the same action
+/// requests the control API makes.
+#[derive(Clone)]
+pub struct Link {
+    requests: mpsc::Sender<ActionRequest>,
+    status: SharedStatus,
+    paths: AnimaPaths,
+    log: ServerLog,
+    runtime: tokio::runtime::Handle,
+}
+
+// Only the macOS and Windows trays use all of it.
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
+impl Link {
+    pub fn status(&self) -> SupervisorStatus {
+        lock(&self.status).clone()
+    }
+
+    pub fn runtime(&self) -> &tokio::runtime::Handle {
+        &self.runtime
+    }
+
+    /// Requests `action` the way the control API does, so the same gate
+    /// applies; a refusal goes to the log.
+    pub fn request(&self, action: Action) {
+        let requests = self.requests.clone();
+        let log = self.log.clone();
+        self.runtime.spawn(async move {
+            let (reply, answer) = oneshot::channel();
+            let request = ActionRequest {
+                action,
+                force: false,
+                reply,
+            };
+            if requests.send(request).await.is_err() {
+                return;
+            }
+            if let Ok(Err(Conflict { pending })) = answer.await {
+                log.note(&format!(
+                    "The tray asked for {action:?}, but {pending:?} is in progress"
+                ));
+            }
+        });
+    }
+
+    /// Turns start at login on or off, as `anima autostart on|off` does.
+    pub fn set_autostart(&self, on: bool) -> io::Result<()> {
+        crate::commands::autostart::apply(&self.paths, on)?;
+        lock(&self.status).autostart = on;
+        Ok(())
+    }
+
+    /// A line in the supervisor's log.
+    pub fn note(&self, message: &str) {
+        self.log.note(message);
+    }
 }
 
 fn server_url(port: u16) -> String {

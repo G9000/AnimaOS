@@ -1,5 +1,6 @@
-//! The control API on `127.0.0.1:{control_port}`, used by the CLI, the tray
-//! and the server's console relay. Every route needs
+//! The control API on `127.0.0.1:{control_port}`, used by the CLI and the
+//! server's console relay (the tray, in-process, sends the same
+//! `ActionRequest`s). Every route needs
 //! `Authorization: Bearer <control-token>`.
 
 use std::time::Duration;

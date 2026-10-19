@@ -35,6 +35,8 @@ fn anima_command(home: &Path, args: &[&str]) -> Command {
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env("ANIMAOS_RS_KEYCHAIN_NAMESPACE", "test")
+        // A supervisor `anima start` spawns shows no tray icon.
+        .env("ANIMA_NO_TRAY", "1")
         .stdin(Stdio::null());
     command
 }
