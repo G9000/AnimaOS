@@ -73,3 +73,7 @@ path = "tests/fixtures/mcp_stdio_peer.rs"
 
 [lints]
 workspace = true
+
+# Only `anima` ships in releases (dist-workspace.toml).
+[package.metadata.dist]
+dist = false

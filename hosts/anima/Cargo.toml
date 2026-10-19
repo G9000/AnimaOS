@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+repository = "https://github.com/G9000/animaOS-SWARM"
 
 [[bin]]
 name = "anima"
@@ -53,3 +54,8 @@ tower = { version = "0.5", features = ["util"] }
 
 [lints]
 workspace = true
+
+# Release builds (dist-workspace.toml) embed the web console.
+[package.metadata.dist]
+dist = true
+features = ["bundled-ui"]

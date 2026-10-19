@@ -14,6 +14,8 @@ mod verify;
 #[cfg(test)]
 mod handoff_tests;
 #[cfg(test)]
+mod sign_script_tests;
+#[cfg(test)]
 mod tests;
 
 use std::{fmt, io};

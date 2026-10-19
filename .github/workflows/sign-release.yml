@@ -1,0 +1,47 @@
+# Signs each release archive with minisign, so `anima update` will install it.
+#
+# dist runs this after it has published the release (post-announce-jobs in
+# dist-workspace.toml). Until the .minisig files are uploaded, the updater treats
+# the release as incomplete and does not offer it. The signature format and the
+# MINISIGN_* secrets are described in tools/release/README.md.
+
+name: Sign release
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+jobs:
+  sign:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ fromJson(inputs.plan).announcement_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install minisign
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y minisign
+      - name: Download the archives
+        run: >
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets
+          --pattern 'anima-*.tar.gz' --pattern 'anima-*.zip'
+      - name: Sign the archives
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          key="$RUNNER_TEMP/minisign.key"
+          trap 'rm -f "$key"' EXIT
+          (umask 077 && printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key")
+          tools/release/sign-assets.sh "${TAG#v}" "$key" assets/anima-*
+      - name: Upload the signatures
+        run: gh release upload "$TAG" assets/*.minisig --repo "$GITHUB_REPOSITORY" --clobber
