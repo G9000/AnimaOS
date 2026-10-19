@@ -14,7 +14,8 @@
         "default",
         "{workspaceRoot}/Cargo.toml",
         "{workspaceRoot}/Cargo.lock",
-        "{workspaceRoot}/packages/core-rust/crates/**/*"
+        "{workspaceRoot}/packages/core-rust/crates/**/*",
+        "{workspaceRoot}/hosts/rust-daemon/**/*"
       ]
     },
     "test": {
@@ -27,7 +28,8 @@
         "default",
         "{workspaceRoot}/Cargo.toml",
         "{workspaceRoot}/Cargo.lock",
-        "{workspaceRoot}/packages/core-rust/crates/**/*"
+        "{workspaceRoot}/packages/core-rust/crates/**/*",
+        "{workspaceRoot}/hosts/rust-daemon/**/*"
       ]
     },
     "lint": {
@@ -40,7 +42,8 @@
         "default",
         "{workspaceRoot}/Cargo.toml",
         "{workspaceRoot}/Cargo.lock",
-        "{workspaceRoot}/packages/core-rust/crates/**/*"
+        "{workspaceRoot}/packages/core-rust/crates/**/*",
+        "{workspaceRoot}/hosts/rust-daemon/**/*"
       ]
     }
   }
