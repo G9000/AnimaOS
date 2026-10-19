@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
 use std::process::{ExitStatus, Stdio};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anima_daemon::system::InFlight;
@@ -17,6 +18,8 @@ use super::tokens::AdminToken;
 
 /// Every call to the server gives up after this long.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+/// A health probe is answered at once or not at all.
+const HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// A running `anima run`. Dropping it kills the server's process tree.
 pub struct ServerChild {
@@ -33,7 +36,9 @@ impl ServerChild {
         command
             .arg("run")
             .envs(env)
-            .stdin(Stdio::null())
+            // Held open for the child's lifetime: when this process dies,
+            // the server sees end of input and shuts itself down.
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut command = CommandWrap::from(command);
@@ -56,7 +61,11 @@ impl ServerChild {
         }
         let (exit_tx, exit) = watch::channel(None);
         let (kill, kill_rx) = oneshot::channel();
-        tokio::spawn(watch_child(child, kill_rx, exit_tx));
+        let lifeline = child.stdin().take();
+        tokio::spawn(async move {
+            watch_child(child, kill_rx, exit_tx).await;
+            drop(lifeline);
+        });
         Ok(Self {
             exit,
             kill: Some(kill),
@@ -68,6 +77,10 @@ impl ServerChild {
         if let Some(kill) = self.kill.take() {
             let _ = kill.send(());
         }
+    }
+
+    pub fn is_alive(&self) -> bool {
+        self.exit.borrow().is_none()
     }
 
     /// A handle that resolves when the server exits.
@@ -162,6 +175,8 @@ pub struct ServerApi {
     base: String,
     admin: AdminToken,
     api_key: Option<String>,
+    /// Drain calls go out one at a time, in order.
+    drain_order: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl ServerApi {
@@ -177,6 +192,7 @@ impl ServerApi {
             base: format!("http://127.0.0.1:{port}"),
             admin,
             api_key,
+            drain_order: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 
@@ -210,28 +226,63 @@ impl ServerApi {
 
     /// `GET /health` answered 200.
     pub async fn healthy(&self) -> bool {
-        self.send(reqwest::Method::GET, "/health").await.is_some()
+        let probe = self
+            .request(reqwest::Method::GET, "/health")
+            .timeout(HEALTH_TIMEOUT)
+            .send()
+            .await;
+        matches!(probe, Ok(response) if response.status().is_success())
+    }
+
+    /// Runs one drain call to completion on its own task, after the drain
+    /// calls before it: dropping the caller neither cuts it off nor lets a
+    /// later call overtake it (a cancel can't land before a begin).
+    async fn drain_call<T, F, Fut>(&self, call: F) -> Option<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(ServerApi) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Option<T>> + Send + 'static,
+    {
+        let order = Arc::clone(&self.drain_order);
+        let api = self.clone();
+        tokio::spawn(async move {
+            let _turn = order.lock_owned().await;
+            call(api).await
+        })
+        .await
+        .ok()
+        .flatten()
     }
 
     /// `POST /api/system/drain`.
     pub async fn begin_drain(&self) -> Option<DrainStatus> {
-        self.send(reqwest::Method::POST, "/api/system/drain")
-            .await?
-            .json()
-            .await
-            .ok()
+        self.drain_call(|api| async move {
+            api.send(reqwest::Method::POST, "/api/system/drain")
+                .await?
+                .json()
+                .await
+                .ok()
+        })
+        .await
     }
 
     /// `GET /api/system/drain`.
     pub async fn drain_status(&self) -> Option<DrainStatus> {
-        self.get_json("/api/system/drain").await
+        self.drain_call(|api| async move { api.get_json("/api/system/drain").await })
+            .await
     }
 
-    /// `DELETE /api/system/drain`.
-    pub async fn cancel_drain(&self) -> bool {
-        self.send(reqwest::Method::DELETE, "/api/system/drain")
-            .await
-            .is_some()
+    /// `DELETE /api/system/drain`, then `GET` to confirm the server is no
+    /// longer draining.
+    pub async fn end_drain(&self) -> bool {
+        self.drain_call(|api| async move {
+            api.send(reqwest::Method::DELETE, "/api/system/drain")
+                .await?;
+            let status: DrainStatus = api.get_json("/api/system/drain").await?;
+            (!status.draining).then_some(())
+        })
+        .await
+        .is_some()
     }
 
     /// `POST /api/system/shutdown`.

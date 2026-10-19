@@ -68,7 +68,7 @@ pub struct SupervisorStatus {
     pub autostart: bool,
     /// The server's connectors, when it could be asked.
     pub connectors: Option<u32>,
-    /// The gated action under way.
+    /// The action under way: a gated one, or `cancel` until the server confirms its drain ended.
     pub pending: Option<Action>,
     pub update: UpdateStatus,
 }
@@ -84,7 +84,7 @@ pub enum Transition {
     Shutdown(Action),
     /// Start the server.
     Spawn,
-    /// End the drain; the server keeps running.
+    /// End the drain on the server (confirmed before the state is `running` again).
     CancelDrain,
     /// No server is running: Stop becomes Stopped, Update goes to the updater.
     Settle(Action),
@@ -101,6 +101,8 @@ impl Transition {
         match self {
             Transition::Drain(action) | Transition::Shutdown(action) => Some(*action),
             Transition::Settle(Action::Update) => Some(Action::Update),
+            // Until the server confirms the drain is over.
+            Transition::CancelDrain => Some(Action::Cancel),
             _ => None,
         }
     }
@@ -128,6 +130,14 @@ pub fn next(
         ServerState::Draining { action, .. } => Some(*action),
         _ => None,
     });
+    // Ending a drain blocks nothing: a gated action simply drains again.
+    if pending == Some(Cancel) {
+        return Ok(match requested {
+            Start | Cancel | CheckUpdate => Transition::Stay,
+            gated if force => Transition::Shutdown(gated),
+            gated => Transition::Drain(gated),
+        });
+    }
     if let Some(pending) = pending {
         return match requested {
             Cancel if draining => Ok(Transition::CancelDrain),
@@ -137,6 +147,9 @@ pub fn next(
         };
     }
     let transition = match state {
+        // A drain can be left on the server (one begun elsewhere, or a cancel
+        // that never landed): ending it again is harmless.
+        ServerState::Running if requested == Cancel => Transition::CancelDrain,
         ServerState::Starting | ServerState::Running => match requested {
             Start | Cancel | CheckUpdate => Transition::Stay,
             // A server still starting has no work to drain.

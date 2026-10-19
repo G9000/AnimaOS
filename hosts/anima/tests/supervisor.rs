@@ -23,8 +23,12 @@ fn free_port() -> u16 {
 /// `anima supervise --no-tray` for `home`, without the caller's Anima
 /// variables and never touching the real keychain items.
 fn supervise_command(home: &Path) -> Command {
+    anima_command(home, &["supervise", "--no-tray"])
+}
+
+fn anima_command(home: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_anima"));
-    command.args(["supervise", "--no-tray"]);
+    command.args(args);
     for (key, _) in std::env::vars_os() {
         let key = key.to_string_lossy().into_owned();
         if key.starts_with("ANIMA") {
@@ -37,6 +41,14 @@ fn supervise_command(home: &Path) -> Command {
         .env("ANIMAOS_RS_KEYCHAIN_NAMESPACE", "test")
         .stdin(Stdio::null());
     command
+}
+
+fn spawn_supervisor(home: &Path) -> Child {
+    supervise_command(home)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap()
 }
 
 /// A supervisor under test. Dropping it quits the supervisor (which stops
@@ -65,13 +77,8 @@ impl Supervisor {
             format!("port = {server_port}\ncontrol_port = {control_port}\nautostart = false\n{extra_config}\n[updates]\ncheck = false\n"),
         )
         .unwrap();
-        let child = supervise_command(home.path())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
         Self {
-            child,
+            child: spawn_supervisor(home.path()),
             home,
             server_port,
             control_port,
@@ -81,6 +88,33 @@ impl Supervisor {
                 .build()
                 .unwrap(),
         }
+    }
+
+    /// A new supervisor process in the same home, after the last one exited.
+    fn respawn(&mut self) {
+        assert!(
+            self.child.try_wait().unwrap().is_some(),
+            "the previous supervisor is still running"
+        );
+        self.child = spawn_supervisor(self.home.path());
+    }
+
+    /// The server's own `GET /api/system/drain`.
+    fn server_drain(&self) -> Value {
+        self.server_call(reqwest::Method::GET, "/api/system/drain")
+            .json()
+            .unwrap()
+    }
+
+    fn server_call(&self, method: reqwest::Method, path: &str) -> reqwest::blocking::Response {
+        self.client
+            .request(
+                method,
+                format!("http://127.0.0.1:{}{path}", self.server_port),
+            )
+            .bearer_auth(self.read_token("admin-token").expect("admin-token"))
+            .send()
+            .unwrap()
     }
 
     fn root(&self) -> PathBuf {
@@ -367,4 +401,144 @@ fn missing_workspace_still_runs() {
         "workspaceProblem: {problem:?}"
     );
     assert_eq!(status["workspace"], missing.to_string_lossy().as_ref());
+}
+
+#[test]
+fn cancel_ends_the_server_drain() {
+    let supervisor = Supervisor::start("");
+    supervisor.wait_for_kind("running");
+
+    // Cancel while the first drain call is still in flight.
+    let (code, body) = supervisor.action("stop", false);
+    assert_eq!(code, 202, "{body}");
+    let (code, body) = supervisor.action("cancel", false);
+    assert_eq!(code, 202, "{body}");
+    supervisor.wait_for("the cancel to be confirmed", |status| {
+        status["state"]["kind"] == "running" && status["pending"].is_null()
+    });
+    assert_eq!(supervisor.server_drain()["draining"], false);
+
+    // A drain left on the server while running is ended by a cancel too.
+    let begun = supervisor.server_call(reqwest::Method::POST, "/api/system/drain");
+    assert_eq!(begun.status().as_u16(), 202);
+    assert_eq!(supervisor.server_drain()["draining"], true);
+    let (code, body) = supervisor.action("cancel", false);
+    assert_eq!(code, 202, "{body}");
+    assert_eq!(body["pending"], "cancel", "{body}");
+    supervisor.wait_for("the cancel to be confirmed", |status| {
+        status["state"]["kind"] == "running" && status["pending"].is_null()
+    });
+    assert_eq!(supervisor.server_drain()["draining"], false);
+}
+
+/// Kills a process by pid when dropped, in case the test fails before it
+/// exits on its own.
+#[cfg(unix)]
+struct KillPidOnDrop(u32);
+
+#[cfg(unix)]
+impl Drop for KillPidOnDrop {
+    fn drop(&mut self) {
+        let _ = Command::new("kill")
+            .args(["-9", &self.0.to_string()])
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
+#[cfg(unix)]
+fn process_alive(pid: u32) -> bool {
+    Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(unix)]
+#[test]
+fn server_exits_when_its_supervisor_is_killed() {
+    let mut supervisor = Supervisor::start("");
+    supervisor.wait_for_kind("running");
+    let children = Command::new("pgrep")
+        .args(["-P", &supervisor.child.id().to_string()])
+        .output()
+        .unwrap();
+    let server: u32 = String::from_utf8_lossy(&children.stdout)
+        .lines()
+        .next()
+        .and_then(|line| line.trim().parse().ok())
+        .expect("the supervisor has a server child");
+    let _server_guard = KillPidOnDrop(server);
+
+    // SIGKILL: the supervisor gets no chance to stop its server.
+    supervisor.child.kill().unwrap();
+    supervisor.child.wait().unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(45);
+    while process_alive(server) {
+        assert!(
+            Instant::now() < deadline,
+            "the server outlived its supervisor"
+        );
+        thread::sleep(Duration::from_millis(200));
+    }
+    assert!(refuses_connections(supervisor.server_port));
+
+    supervisor.respawn();
+    supervisor.wait_for_kind("running");
+}
+
+/// Kills a child when dropped.
+struct KillOnDrop(Child);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[test]
+fn stale_server_on_the_port_is_shut_down_first() {
+    let home = tempfile::tempdir().unwrap();
+    let port = free_port();
+    let root = home.path().join(".animaos-swarm");
+    std::fs::create_dir_all(&root).unwrap();
+    // A server from an earlier supervisor shares its admin token.
+    std::fs::write(root.join("admin-token"), "stale-server-admin-token\n").unwrap();
+    let mut stale = KillOnDrop(
+        anima_command(home.path(), &["run"])
+            .env("ANIMAOS_RS_PORT", port.to_string())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .no_proxy()
+        .build()
+        .unwrap();
+    let deadline = Instant::now() + STARTUP;
+    while !client
+        .get(format!("http://127.0.0.1:{port}/health"))
+        .send()
+        .is_ok_and(|response| response.status().is_success())
+    {
+        assert!(Instant::now() < deadline, "the stale server never started");
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    let supervisor = Supervisor::start_in(home, port, "");
+    supervisor.wait_for_kind("running");
+    let exited = stale.0.try_wait().unwrap();
+    assert!(exited.is_some(), "the stale server is still running");
+    // The server answering now is the supervisor's own: it relays to it.
+    let relayed: Value = supervisor
+        .server_call(reqwest::Method::GET, "/api/system")
+        .json()
+        .unwrap();
+    assert_eq!(relayed["state"]["kind"], "running", "{relayed}");
 }

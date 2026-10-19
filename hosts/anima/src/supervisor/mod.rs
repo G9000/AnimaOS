@@ -26,7 +26,7 @@ use std::time::Duration;
 use anima_daemon::system::InFlight;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch, Notify};
-use tokio::task::JoinHandle;
+
 use tokio::time::Instant;
 
 use crate::config::{validate_workspace, Config, WorkspaceProblem};
@@ -42,7 +42,15 @@ use tokens::{AdminToken, ControlToken};
 pub type SharedStatus = Arc<Mutex<SupervisorStatus>>;
 
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
+/// `/health` must still answer this long after it first did, with the
+/// child alive, before the server counts as running.
+const READY_CONFIRM: Duration = Duration::from_secs(1);
+/// How long a server left from an earlier supervisor gets to shut down.
+const CLEAR_TIMEOUT: Duration = Duration::from_secs(45);
 const HEALTH_POLL: Duration = Duration::from_millis(250);
+/// Retries of a cancel the server has not confirmed: 0.5, 1, 2, … capped.
+const CANCEL_RETRY_FIRST: Duration = Duration::from_millis(250);
+const CANCEL_RETRY_MAX: Duration = Duration::from_secs(5);
 const DRAIN_POLL: Duration = Duration::from_secs(1);
 /// How many `inFlight.total() == 0` readings in a row settle a drain: a
 /// single zero can be read before new work has registered.
@@ -132,7 +140,6 @@ async fn supervise_async(paths: AnimaPaths, cfg: Config) -> io::Result<()> {
         child: None,
         crashes: 0,
         running_since: None,
-        cancel_drain: None,
     };
     lifecycle.run(requests, termination_signals()).await;
 
@@ -229,10 +236,19 @@ async fn refresh_connectors(status: SharedStatus, api: watch::Receiver<ServerApi
 /// Where the lifecycle is; `ServerState` is what the status shows of it.
 #[derive(Debug, Clone, Copy)]
 enum Phase {
+    /// Before spawning: a server left from an earlier supervisor that still
+    /// answers on the port is asked to shut down, until `deadline`.
+    Clearing {
+        deadline: Instant,
+    },
     Starting {
         deadline: Instant,
     },
     Running,
+    /// Ending the drain on the server, `attempt` retries in.
+    Cancelling {
+        attempt: u32,
+    },
     Draining {
         action: Action,
         /// The server took `POST /api/system/drain`.
@@ -254,8 +270,14 @@ enum Phase {
 
 /// What a phase's own work came to.
 enum Event {
+    /// Nothing answers on the server port any more.
+    PortFree,
+    /// A server there would not shut down.
+    PortBusy,
     Ready,
     NotReady,
+    /// The server confirmed (`true`) that it is no longer draining.
+    Cancelled(bool),
     Drain {
         reading: Option<child::DrainStatus>,
         began: bool,
@@ -283,8 +305,6 @@ struct Lifecycle {
     /// Crashes in a row, for the backoff.
     crashes: u32,
     running_since: Option<Instant>,
-    /// A `DELETE /api/system/drain` still on its way; a new drain waits for it.
-    cancel_drain: Option<JoinHandle<()>>,
 }
 
 impl Lifecycle {
@@ -323,42 +343,69 @@ impl Lifecycle {
     }
 
     /// The phase's own work, which owns everything it needs.
-    fn work(&mut self, phase: Phase) -> Work {
+    fn work(&self, phase: Phase) -> Work {
         let api = self.api.clone();
         match phase {
+            Phase::Clearing { deadline } => Box::pin(async move {
+                if !api.healthy().await {
+                    return Event::PortFree;
+                }
+                api.shutdown().await;
+                loop {
+                    tokio::time::sleep(HEALTH_POLL).await;
+                    if !api.healthy().await {
+                        return Event::PortFree;
+                    }
+                    if Instant::now() >= deadline {
+                        return Event::PortBusy;
+                    }
+                }
+            }),
             Phase::Starting { deadline } => Box::pin(async move {
+                let answers = || async {
+                    matches!(
+                        tokio::time::timeout_at(deadline, api.healthy()).await,
+                        Ok(true)
+                    )
+                };
                 loop {
                     if Instant::now() >= deadline {
                         return Event::NotReady;
                     }
-                    if let Ok(true) = tokio::time::timeout_at(deadline, api.healthy()).await {
-                        return Event::Ready;
+                    // A child that lost the port dies within this pause, so
+                    // a server it did not start can't pass for it.
+                    if answers().await {
+                        tokio::time::sleep(READY_CONFIRM).await;
+                        if answers().await {
+                            return Event::Ready;
+                        }
                     }
                     tokio::time::sleep(HEALTH_POLL).await;
                 }
             }),
-            Phase::Draining { begun, polls, .. } => {
-                let cancel = self.cancel_drain.take();
-                Box::pin(async move {
-                    if let Some(cancel) = cancel {
-                        let _ = cancel.await;
+            Phase::Cancelling { attempt } => Box::pin(async move {
+                if attempt > 0 {
+                    let backoff = CANCEL_RETRY_FIRST.saturating_mul(1 << attempt.min(5));
+                    tokio::time::sleep(backoff.min(CANCEL_RETRY_MAX)).await;
+                }
+                Event::Cancelled(api.end_drain().await)
+            }),
+            Phase::Draining { begun, polls, .. } => Box::pin(async move {
+                if polls > 0 {
+                    tokio::time::sleep(DRAIN_POLL).await;
+                }
+                if begun {
+                    Event::Drain {
+                        reading: api.drain_status().await,
+                        began: false,
                     }
-                    if polls > 0 {
-                        tokio::time::sleep(DRAIN_POLL).await;
+                } else {
+                    Event::Drain {
+                        reading: api.begin_drain().await,
+                        began: true,
                     }
-                    if begun {
-                        Event::Drain {
-                            reading: api.drain_status().await,
-                            began: false,
-                        }
-                    } else {
-                        Event::Drain {
-                            reading: api.begin_drain().await,
-                            began: true,
-                        }
-                    }
-                })
-            }
+                }
+            }),
             Phase::Stopping { killed: false, .. } => Box::pin(async move {
                 if api.shutdown().await != ShutdownRequest::Unreachable {
                     tokio::time::sleep(EXIT_GRACE).await;
@@ -425,7 +472,7 @@ impl Lifecycle {
         let status = status.map_or_else(|| "unknown status".to_string(), |s| s.to_string());
         self.log.note(&format!("The server exited ({status})"));
         match phase {
-            Phase::Starting { .. } | Phase::Running => {
+            Phase::Starting { .. } | Phase::Running | Phase::Cancelling { .. } => {
                 // `anima run` reports a fatal error as its last line.
                 let fatal = self
                     .log
@@ -441,12 +488,24 @@ impl Lifecycle {
                 self.crash(message)
             }
             Phase::Draining { action, .. } | Phase::Stopping { action, .. } => self.finish(action),
-            Phase::Stopped | Phase::Crashed { .. } | Phase::Exit => phase,
+            Phase::Clearing { .. } | Phase::Stopped | Phase::Crashed { .. } | Phase::Exit => phase,
         }
     }
 
     fn on_event(&mut self, phase: Phase, event: Event) -> Phase {
         match (phase, event) {
+            (Phase::Clearing { .. }, Event::PortFree) => self.spawn_child(),
+            (Phase::Clearing { .. }, Event::PortBusy) => {
+                self.log
+                    .note("The server already on the port would not shut down");
+                self.crash(format!("Port {} is in use", self.port()))
+            }
+            // The exit, if the child is gone, is handled as such next.
+            (Phase::Starting { .. }, Event::Ready)
+                if !self.child.as_ref().is_some_and(ServerChild::is_alive) =>
+            {
+                phase
+            }
             (Phase::Starting { .. }, Event::Ready) => {
                 self.running_since = Some(Instant::now());
                 self.log.note("The server is ready");
@@ -510,6 +569,17 @@ impl Lifecycle {
             },
             (Phase::Stopping { action, .. }, Event::Gone) => self.finish(action),
             (Phase::Crashed { .. }, Event::Retry) => self.start(),
+            (Phase::Cancelling { .. }, Event::Cancelled(true)) => {
+                self.log.note("Drain cancelled");
+                self.running()
+            }
+            (Phase::Cancelling { attempt }, Event::Cancelled(false)) => {
+                self.log
+                    .note("The server has not confirmed the drain ended; trying again");
+                Phase::Cancelling {
+                    attempt: attempt.saturating_add(1),
+                }
+            }
             (phase, _) => phase,
         }
     }
@@ -557,6 +627,17 @@ impl Lifecycle {
             status.workspace_problem = workspace_problem(&self.cfg, &self.paths);
             status.autostart = self.cfg.autostart;
         }
+        self.running_since = None;
+        self.set_state(ServerState::Starting, None);
+        Phase::Clearing {
+            deadline: Instant::now() + CLEAR_TIMEOUT,
+        }
+    }
+
+    /// Spawns the server once its port is free.
+    fn spawn_child(&mut self) -> Phase {
+        let process_env: BTreeMap<String, String> = std::env::vars().collect();
+        let port = effective_port(&self.cfg, &process_env);
         let mut env = server_env(&self.cfg, &self.paths, &process_env);
         // The supervisor's own calls depend on the server holding this admin
         // token, so it wins over an inherited one.
@@ -572,11 +653,9 @@ impl Lifecycle {
         self.log.clear_tail();
         self.log
             .note(&format!("Starting the server on port {port}"));
-        self.running_since = None;
         match ServerChild::spawn(&self.exe, &env, &self.log) {
             Ok(child) => {
                 self.child = Some(child);
-                self.set_state(ServerState::Starting, None);
                 Phase::Starting {
                     deadline: Instant::now() + READY_TIMEOUT,
                 }
@@ -629,13 +708,12 @@ impl Lifecycle {
         }
     }
 
+    /// Ends the drain on the server. The state stays as it is (draining, or
+    /// running) with `cancel` pending until the server confirms.
     fn cancel(&mut self) -> Phase {
-        self.log.note("Drain cancelled");
-        let api = self.api.clone();
-        self.cancel_drain = Some(tokio::spawn(async move {
-            api.cancel_drain().await;
-        }));
-        self.running()
+        self.log.note("Cancelling the drain");
+        lock(&self.status).pending = Some(Action::Cancel);
+        Phase::Cancelling { attempt: 0 }
     }
 
     /// Asks the server to shut down for `action`; the server then has

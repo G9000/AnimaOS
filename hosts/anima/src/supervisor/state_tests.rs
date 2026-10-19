@@ -53,7 +53,24 @@ fn cancel_clears_pending() {
     )
     .unwrap();
     assert_eq!(transition, Transition::CancelDrain);
-    assert_eq!(transition.pending(), None);
+    // The stop is no longer pending; the cancel is, until the server confirms.
+    assert_eq!(transition.pending(), Some(Action::Cancel));
+    let cancelling = |action| next(&draining(Action::Stop), Some(Action::Cancel), action, false);
+    assert_eq!(cancelling(Action::Cancel), Ok(Transition::Stay));
+    // A cancel under way blocks nothing: a gated action drains again.
+    assert_eq!(
+        cancelling(Action::Restart),
+        Ok(Transition::Drain(Action::Restart))
+    );
+    assert_eq!(
+        next(
+            &ServerState::Running,
+            Some(Action::Cancel),
+            Action::Quit,
+            true
+        ),
+        Ok(Transition::Shutdown(Action::Quit))
+    );
     // Nothing to cancel once the server is being stopped.
     assert_eq!(
         next(
@@ -66,8 +83,13 @@ fn cancel_clears_pending() {
             pending: Action::Stop
         })
     );
+    // While running, a cancel still ends any drain left on the server.
     assert_eq!(
         next(&ServerState::Running, None, Action::Cancel, false),
+        Ok(Transition::CancelDrain)
+    );
+    assert_eq!(
+        next(&ServerState::Stopped, None, Action::Cancel, false),
         Ok(Transition::Stay)
     );
 }
