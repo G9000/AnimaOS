@@ -45,7 +45,7 @@ The installers come from cargo-dist and put `anima` in dist's default location (
 - **Stop** turns the server off. The tray icon stays, shows "Stopped", and has a Start item.
 - **Quit** exits everything, tray included. Anima returns at next login (if autostart is on) or when you run `anima`.
 
-Restart, Stop, Quit and Update wait for running tasks first ("Waiting for N tasks to finish"). The tray and console offer **Stop now** or **Cancel**; on the CLI use `--now`. While an update is downloading, Stop, Restart, Quit and Cancel abandon the download.
+Restart, Stop, Quit and Update wait for running tasks first ("Waiting for N tasks to finish"). While it waits, the console shows a button that skips the wait ("Stop now", "Restart now" or "Update now") next to **Cancel**, the tray offers **Cancel**, and on the CLI you use `--now`. While an update is downloading, Stop, Restart, Quit and Cancel abandon the download.
 
 Agents need owner approval to run `anima stop|quit|restart|update|config|autostart|setup|start|supervise`.
 
