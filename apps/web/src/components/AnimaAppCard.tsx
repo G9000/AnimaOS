@@ -38,6 +38,7 @@ const IN_FLIGHT_LABELS: [keyof SystemInFlight, string][] = [
 const NOW_LABELS: Partial<Record<SystemAction, string>> = {
   restart: 'Restart now',
   update: 'Update now',
+  quit: 'Quit now',
 };
 
 const AFTER_DRAIN: Partial<Record<SystemAction, string>> = {
@@ -284,7 +285,7 @@ export function AnimaAppCard({
             )}
           </ul>
           {AFTER_DRAIN[state.action] && (
-            <p className="system-note">{AFTER_DRAIN[state.action]} then.</p>
+            <p className="system-note">{AFTER_DRAIN[state.action]}.</p>
           )}
           <div className="anima-app-actions">
             <button

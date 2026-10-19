@@ -138,6 +138,34 @@ describe('AnimaAppCard', () => {
     expect(screen.queryByRole('button', { name: 'Restart' })).toBeNull();
   });
 
+  it('names what happens after the drain', async () => {
+    await renderCard(mockClient(draining({ jobs: 1 })));
+
+    expect(screen.getByText('Anima will stop.')).toBeVisible();
+  });
+
+  it('offers Quit now while a quit waits for work', async () => {
+    await renderCard(
+      mockClient(
+        draining(
+          { jobs: 1 },
+          {
+            state: {
+              kind: 'draining',
+              action: 'quit',
+              inFlight: { ...noWork, jobs: 1 },
+            },
+            pending: 'quit',
+          },
+        ),
+      ),
+    );
+
+    expect(screen.getByText('Anima will quit.')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Quit now' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Stop now' })).toBeNull();
+  });
+
   it('Stop now forces the draining action', async () => {
     const client = mockClient(draining({ chatRuns: 2, jobs: 1 }));
     await renderCard(client);
@@ -237,7 +265,7 @@ describe('AnimaAppCard', () => {
     });
     await userEvent
       .setup({ advanceTimers: vi.advanceTimersByTime })
-      .click(screen.getByRole('button', { name: 'Stop now' }));
+      .click(screen.getByRole('button', { name: 'Quit now' }));
 
     expect(client.action).toHaveBeenCalledWith('quit', { force: true });
     expect(screen.getByText(STOPPED_COPY)).toBeVisible();
