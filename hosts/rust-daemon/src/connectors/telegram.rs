@@ -18,6 +18,8 @@ const DEFAULT_LONG_POLL_SECONDS: u64 = 30;
 const MAX_CHAT_ID_LENGTH: usize = 32;
 // Telegram text messages are limited to 4096 Unicode scalars. The daemon applies the same
 // conservative ceiling to connector input before it can enter durable state or an agent room.
+/// Shown to the user verbatim as the connector's status message.
+const POLL_CONFLICT_MESSAGE: &str = "This bot is already connected somewhere else.";
 const MAX_TELEGRAM_INPUT_TEXT_SCALARS: usize = 4096;
 // Explicit metadata ceilings keep a valid-sized HTTP response from becoming oversized durable
 // connector metadata if an upstream response does not follow Telegram's documented field limits.
@@ -160,7 +162,8 @@ impl TelegramClient {
                 },
                 self.config.long_poll_request_timeout,
             )
-            .await?;
+            .await
+            .map_err(map_poll_conflict)?;
 
         let mut seen_update_ids = HashSet::with_capacity(updates.len());
         let mut maximum_update_id = None;
@@ -320,10 +323,16 @@ pub(crate) enum TelegramTransportError {
     Configuration,
     Transport,
     Timeout,
-    HttpStatus { status: u16 },
+    HttpStatus {
+        status: u16,
+    },
     ResponseTooLarge,
     InvalidResponse,
-    UpstreamApi { code: Option<i64> },
+    UpstreamApi {
+        code: Option<i64>,
+    },
+    /// Another process is already long-polling `getUpdates` for this bot.
+    PollConflict,
     InvalidChatId,
     InvalidOffset,
     InvalidMessage,
@@ -340,6 +349,7 @@ impl TelegramTransportError {
         Self::ResponseTooLarge,
         Self::InvalidResponse,
         Self::UpstreamApi { code: Some(401) },
+        Self::PollConflict,
         Self::InvalidChatId,
         Self::InvalidOffset,
         Self::InvalidMessage,
@@ -367,6 +377,7 @@ impl fmt::Display for TelegramTransportError {
             Self::UpstreamApi { code: None } => {
                 formatter.write_str("Telegram API rejected the request")
             }
+            Self::PollConflict => formatter.write_str(POLL_CONFLICT_MESSAGE),
             Self::InvalidChatId => formatter.write_str("Telegram chat identifier is invalid"),
             Self::InvalidOffset => formatter.write_str("Telegram update offset is invalid"),
             Self::InvalidMessage => formatter.write_str("Telegram message is empty"),
@@ -418,6 +429,19 @@ pub(crate) fn chunk_telegram_text(text: &str) -> Vec<&str> {
     }
     chunks.push(&text[chunk_start..]);
     chunks
+}
+
+/// Telegram answers a second concurrent `getUpdates` with HTTP 409 and an
+/// `error_code` 409 envelope. Only the polling call maps it; other methods keep
+/// their generic error.
+fn map_poll_conflict(error: TelegramTransportError) -> TelegramTransportError {
+    match error {
+        TelegramTransportError::HttpStatus { status: 409 }
+        | TelegramTransportError::UpstreamApi { code: Some(409) } => {
+            TelegramTransportError::PollConflict
+        }
+        other => other,
+    }
 }
 
 fn validate_chat_id(chat_id: &str) -> Result<i64, TelegramTransportError> {
@@ -917,6 +941,53 @@ mod tests {
                 TelegramTransportError::InvalidResponse
             );
         }
+    }
+
+    const CONFLICT_BODY: &str = r#"{"ok":false,"error_code":409,"description":"Conflict: terminated by other getUpdates request"}"#;
+
+    async fn client_for_status(status: StatusCode, body: &'static str) -> TelegramClient {
+        client_for(Router::new().fallback(any(move || async move {
+            Response::builder()
+                .status(status)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .unwrap()
+        })))
+        .await
+    }
+
+    #[tokio::test]
+    async fn get_updates_maps_a_409_conflict_to_poll_conflict() {
+        // Telegram answers a competing getUpdates with HTTP 409 and this envelope; the
+        // envelope alone (HTTP 200) must map the same way.
+        for status in [StatusCode::CONFLICT, StatusCode::OK] {
+            let client = client_for_status(status, CONFLICT_BODY).await;
+            let error = client.get_updates(&token(), 0).await.unwrap_err();
+            assert_eq!(error, TelegramTransportError::PollConflict, "{status}");
+            assert_eq!(
+                error.to_string(),
+                "This bot is already connected somewhere else."
+            );
+            assert_sanitized(&error);
+        }
+    }
+
+    #[tokio::test]
+    async fn only_get_updates_maps_409_to_poll_conflict() {
+        let client = client_for_status(StatusCode::OK, CONFLICT_BODY).await;
+        assert_eq!(
+            client.get_me(&token()).await.unwrap_err(),
+            TelegramTransportError::UpstreamApi { code: Some(409) }
+        );
+        assert_eq!(
+            client.send_message(&token(), "9", "hi").await.unwrap_err(),
+            TelegramTransportError::UpstreamApi { code: Some(409) }
+        );
+        let client = client_for_status(StatusCode::CONFLICT, CONFLICT_BODY).await;
+        assert_eq!(
+            client.get_me(&token()).await.unwrap_err(),
+            TelegramTransportError::HttpStatus { status: 409 }
+        );
     }
 
     #[tokio::test]

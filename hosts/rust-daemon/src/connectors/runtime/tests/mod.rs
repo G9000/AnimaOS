@@ -34,6 +34,7 @@ struct FakeTransport {
     remaining_poll_failures: AtomicUsize,
     remaining_send_failures: AtomicUsize,
     revoked_poll: AtomicBool,
+    conflict_poll: AtomicBool,
     revoked_send: AtomicBool,
 }
 
@@ -333,6 +334,9 @@ impl TelegramTransport for FakeTransport {
         self.poll_calls.fetch_add(1, Ordering::SeqCst);
         if self.revoked_poll.swap(false, Ordering::SeqCst) {
             return Err(TelegramTransportError::UpstreamApi { code: Some(401) });
+        }
+        if self.conflict_poll.load(Ordering::SeqCst) {
+            return Err(TelegramTransportError::PollConflict);
         }
         if self
             .remaining_poll_failures

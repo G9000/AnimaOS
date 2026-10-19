@@ -200,6 +200,44 @@ async fn dropping_last_manager_owner_cancels_the_in_flight_poll() {
 }
 
 #[tokio::test]
+async fn a_poll_conflict_is_reported_and_backs_off_instead_of_retrying_fast() {
+    let state = state_with_agent();
+    let agent_id = state.read().await.list_agents()[0].state.id.clone();
+    let transport = Arc::new(FakeTransport::default());
+    transport.conflict_poll.store(true, Ordering::SeqCst);
+    let manager = manager(
+        state,
+        Arc::new(InMemoryCredentialStore::default()),
+        transport.clone(),
+    );
+    let connector = manager
+        .create(
+            agent_id,
+            TelegramBotToken::parse("42:conflict-token").unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        wait_for_status(
+            &manager,
+            &connector.id,
+            super::ConnectorRuntimeStatus::PollConflict,
+            Duration::from_secs(2),
+        )
+        .await
+    );
+    // A generic failure retries after 100 ms; a conflict must wait far longer.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(transport.poll_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        manager.status(&connector.id).await,
+        Some(super::ConnectorRuntimeStatus::PollConflict)
+    );
+    manager.shutdown().await;
+}
+
+#[tokio::test]
 async fn restored_connector_without_a_credential_is_safe_and_does_not_block_startup() {
     let state = state_with_agent();
     let agent_id = state.read().await.list_agents()[0].state.id.clone();

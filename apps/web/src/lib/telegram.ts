@@ -7,7 +7,12 @@ const STATUS_LABELS: Record<TelegramConnectorStatus, string> = {
   error: 'Error',
   degraded: 'Degraded',
   reconciling: 'Reconciling',
+  pollConflict: 'Connected elsewhere',
 };
+
+/** Shown when another Anima copy is already polling the same bot. */
+export const POLL_CONFLICT_COPY =
+  'This bot is already connected somewhere else.';
 
 export function connectorStatusLabel(status: string): string {
   return STATUS_LABELS[status as TelegramConnectorStatus] ?? 'Unavailable';

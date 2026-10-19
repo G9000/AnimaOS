@@ -45,6 +45,8 @@ const DELIVERED_RETENTION_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 const MAX_RETAINED_DELIVERED: usize = 1000;
 const POLL_RETRY_INITIAL: Duration = Duration::from_millis(100);
 const POLL_RETRY_MAX: Duration = Duration::from_secs(30);
+/// Wait this long after Telegram reports another poller, instead of hammering it.
+const POLL_CONFLICT_RETRY: Duration = Duration::from_secs(60);
 const PAIRING_CANDIDATE_TTL_MS: u64 = 10 * 60 * 1000;
 const MAX_RETAINED_TERMINAL_INBOUND: usize = 1000;
 const MAX_LIVE_INBOUND: usize = 100;
@@ -104,6 +106,8 @@ pub(crate) enum ConnectorRuntimeStatus {
     Error,
     Degraded,
     Reconciling,
+    /// Another Anima copy is already polling this bot.
+    PollConflict,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -418,6 +422,13 @@ fn is_revoked_credential(error: TelegramTransportError) -> bool {
         TelegramTransportError::HttpStatus { status: 401 }
             | TelegramTransportError::UpstreamApi { code: Some(401) }
     )
+}
+
+fn poll_retry_delay(error: TelegramTransportError, current: Duration) -> Duration {
+    match error {
+        TelegramTransportError::PollConflict => POLL_CONFLICT_RETRY,
+        _ => current,
+    }
 }
 
 fn next_poll_backoff(current: Duration) -> Duration {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { TelegramConnector } from '../lib/daemon-api';
-import { connectorStatusLabel } from '../lib/telegram';
+import { POLL_CONFLICT_COPY, connectorStatusLabel } from '../lib/telegram';
 import { AlertIcon, TrashIcon } from './icons';
 import { ErrorBanner, SectionTitle, primaryBtnCls } from './ui-bits';
 
@@ -74,6 +74,9 @@ export function TelegramSettings({
               Restart
             </button>
           </div>
+          {connector.status === 'pollConflict' ? (
+            <p className="mt-3 text-xs text-ink-2">{POLL_CONFLICT_COPY}</p>
+          ) : null}
           {connector.pendingPairing ? (
             <div className="mt-3 rounded-lg border border-accent/25 bg-accent/[0.06] p-3">
               <p className="text-xs text-ink">

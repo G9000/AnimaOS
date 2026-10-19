@@ -213,6 +213,7 @@ pub(crate) fn connector_status_name(status: ConnectorRuntimeStatus) -> &'static 
         ConnectorRuntimeStatus::Error => "error",
         ConnectorRuntimeStatus::Degraded => "degraded",
         ConnectorRuntimeStatus::Reconciling => "reconciling",
+        ConnectorRuntimeStatus::PollConflict => "pollConflict",
     }
 }
 

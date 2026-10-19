@@ -79,9 +79,9 @@ impl ConnectorFailure for TelegramTransportError {
             | Self::UpstreamApi {
                 code: Some(401 | 403),
             } => ConnectorErrorKind::Authentication,
-            Self::HttpStatus { status: 429 } | Self::UpstreamApi { code: Some(429) } => {
-                ConnectorErrorKind::Retryable
-            }
+            Self::HttpStatus { status: 429 }
+            | Self::UpstreamApi { code: Some(429) }
+            | Self::PollConflict => ConnectorErrorKind::Retryable,
             // Network errors may follow a remote effect. Classification cannot authorize a retry.
             Self::Transport
             | Self::Timeout

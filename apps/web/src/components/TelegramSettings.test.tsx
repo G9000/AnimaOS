@@ -22,6 +22,31 @@ const connector: TelegramConnector = {
 };
 
 describe('TelegramSettings', () => {
+  it('says so plainly when another Anima copy is polling the same bot', () => {
+    const props = {
+      busy: null,
+      error: null,
+      connect: vi.fn(),
+      replace: vi.fn(),
+      approve: vi.fn(),
+      restart: vi.fn(),
+      disconnect: vi.fn(),
+    };
+    const view = render(
+      <TelegramSettings
+        {...props}
+        connector={{ ...connector, status: 'pollConflict' }}
+      />,
+    );
+    expect(
+      screen.getByText('This bot is already connected somewhere else.'),
+    ).toBeInTheDocument();
+    view.rerender(<TelegramSettings {...props} connector={connector} />);
+    expect(
+      screen.queryByText('This bot is already connected somewhere else.'),
+    ).not.toBeInTheDocument();
+  });
+
   it('fp02 Telegram clears unsubmitted secrets and blocks offline actions', async () => {
     const user = userEvent.setup();
     const p = {

@@ -260,7 +260,8 @@ export type TelegramConnectorStatus =
   | 'credentialRequired'
   | 'error'
   | 'degraded'
-  | 'reconciling';
+  | 'reconciling'
+  | 'pollConflict';
 
 export interface TelegramChat {
   id: string;
