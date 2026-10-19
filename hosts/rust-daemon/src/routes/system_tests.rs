@@ -24,6 +24,15 @@ const ADMIN_TOKEN: &str = "supervisor-admin";
 /// A router whose local-owner policy accepts `ADMIN_TOKEN`, as the packaged
 /// supervisor's child daemon does.
 fn app() -> axum::Router {
+    app_with_scheduler().0
+}
+
+/// `app()` with its scheduler, for a test that saves an automation first.
+fn app_with_scheduler() -> (
+    axum::Router,
+    crate::schedules::SchedulerService,
+    crate::app::SharedDaemonState,
+) {
     let state = Arc::new(RwLock::new(DaemonState::new()));
     let limiter = Arc::new(Semaphore::new(8));
     let runs = AgentRunCoordinator::new(Arc::clone(&state), Arc::clone(&limiter));
@@ -54,8 +63,8 @@ fn app() -> axum::Router {
         oauth_apps.clone(),
     );
     let jobs = crate::jobs::JobService::new(Arc::clone(&state), runs.clone());
-    super::router_with_services_with_policies(
-        state,
+    let router = super::router_with_services_with_policies(
+        Arc::clone(&state),
         DaemonConfig::default(),
         limiter,
         runs,
@@ -63,13 +72,14 @@ fn app() -> axum::Router {
         calendar,
         mail,
         oauth_apps,
-        scheduler,
+        scheduler.clone(),
         jobs,
         crate::history::HistoryWorkerOwner::new(),
         crate::logs::global(),
         LocalOwnerPolicy::for_test(true, Some(ADMIN_TOKEN)),
         ApiKeyPolicy::for_test(None),
-    )
+    );
+    (router, scheduler, state)
 }
 
 async fn send(
@@ -211,6 +221,46 @@ async fn a_drain_refuses_new_work_with_503() {
             "{path}"
         );
     }
+}
+
+#[tokio::test]
+async fn a_drain_refuses_run_now_with_503() {
+    let (app, scheduler, state) = app_with_scheduler();
+    let agent_id = state
+        .write()
+        .await
+        .create_agent(crate::agent_runs::test_support::companion_config("drain"))
+        .unwrap()
+        .state
+        .id;
+    let (schedule, _) = scheduler
+        .create(
+            agent_id.clone(),
+            "Check status".into(),
+            crate::schedules::ScheduleTrigger::Interval {
+                interval_ms: 60_000,
+            },
+            crate::schedules::ScheduleTarget::Workspace,
+            true,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let origin = [("origin", OWNER_ORIGIN)];
+    let (status, _) = send(&app, "POST", "/api/system/drain", &origin).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+
+    let path = format!("/api/agents/{agent_id}/schedules/{}/run", schedule.id);
+    let (status, body) = send(&app, "POST", &path, &origin).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert_eq!(body["code"], "schedule_draining");
+    assert_eq!(
+        body["error"],
+        "Anima is restarting; send the message again in a moment"
+    );
+    assert_eq!(state.read().await.schedules[&schedule.id], schedule);
 }
 
 #[tokio::test]

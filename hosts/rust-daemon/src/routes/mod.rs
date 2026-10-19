@@ -381,6 +381,8 @@ impl AppState {
 pub(crate) enum ApiErrorKind {
     General,
     DaemonShuttingDown,
+    /// A drain before a restart refused new work; nothing was accepted.
+    DaemonDraining,
 }
 
 #[derive(Debug)]
@@ -397,6 +399,12 @@ impl ApiError {
     pub(crate) fn daemon_shutting_down(message: impl Into<String>) -> Self {
         let mut error = Self::service_unavailable(message);
         error.kind = ApiErrorKind::DaemonShuttingDown;
+        error
+    }
+
+    pub(crate) fn daemon_draining(message: impl Into<String>) -> Self {
+        let mut error = Self::service_unavailable(message);
+        error.kind = ApiErrorKind::DaemonDraining;
         error
     }
 

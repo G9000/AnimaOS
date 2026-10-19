@@ -194,6 +194,8 @@ pub(crate) enum ScheduleError {
     Conflict(&'static str),
     /// The scheduler is at its admission cap (429).
     Busy(&'static str),
+    /// A drain before a restart refuses new runs (503).
+    Draining,
     /// The history store could not be read (503).
     HistoryUnavailable,
     TargetUnavailable,
@@ -569,6 +571,10 @@ async fn claim_manual(
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if *closing {
             return Err(ScheduleError::Conflict(SCHEDULE_PRODUCER_SHUTTING_DOWN));
+        }
+        // Run now and trigger_automation start new runs, refused while draining.
+        if inner.runs.is_draining() {
+            return Err(ScheduleError::Draining);
         }
         let previous = state
             .schedules
@@ -1345,6 +1351,27 @@ mod tests {
         service.inner.runs.cancel_drain();
         assert_eq!(service.tick_at(now_ms()).await.unwrap(), 1);
         assert!(state.read().await.schedules[&due.id].last_fired.is_some());
+    }
+
+    #[tokio::test]
+    async fn run_now_is_refused_while_draining_and_claims_nothing() {
+        let (service, state, agent_id, _) = service();
+        let due = due_schedule(&service, &agent_id).await;
+        service.inner.runs.begin_drain();
+        assert_eq!(
+            service.run_now(&agent_id, &due.id).await,
+            Err(ScheduleError::Draining)
+        );
+        assert_eq!(state.read().await.schedules[&due.id], due, "no claim saved");
+        assert_eq!(service.in_flight_count().await, 0);
+
+        service.inner.runs.cancel_drain();
+        let claimed = service.run_now(&agent_id, &due.id).await.unwrap();
+        assert!(claimed
+            .last_fired
+            .as_ref()
+            .is_some_and(|fired| fired.manual));
+        service.drain().await;
     }
 
     #[tokio::test]

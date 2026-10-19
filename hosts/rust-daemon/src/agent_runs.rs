@@ -41,7 +41,7 @@ pub(crate) use self::queue::{
     ACCEPTED_AT_METADATA_KEY, CLIENT_REQUEST_ID_METADATA_KEY, IDEMPOTENCY_KEY_REUSED, QUEUE_FULL,
     RUN_NOT_QUEUED, RUN_STOPPED_BEFORE_START, SESSION_CANNOT_SEND, SESSION_CANNOT_STEER,
 };
-pub(crate) use self::shutdown::is_shutting_down;
+pub(crate) use self::shutdown::{is_draining_refusal, is_shutting_down, DAEMON_DRAINING};
 pub(crate) use self::stop::AGENT_BEING_DELETED;
 
 pub(crate) struct AgentRunPermit(OwnedSemaphorePermit);

@@ -350,6 +350,11 @@ fn schedule_error(error: ScheduleError) -> AxumResponse {
         ScheduleError::Busy(message) => {
             error_response(StatusCode::TOO_MANY_REQUESTS, "schedule_busy", message)
         }
+        ScheduleError::Draining => error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "schedule_draining",
+            crate::agent_runs::DAEMON_DRAINING,
+        ),
         ScheduleError::HistoryUnavailable => error_response(
             StatusCode::SERVICE_UNAVAILABLE,
             "schedule_history_unavailable",

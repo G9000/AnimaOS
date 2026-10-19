@@ -606,6 +606,88 @@ async fn received_turn_uses_native_coordinator_session_and_stable_run_link() {
     drop(state);
     manager.runs.shutdown().await;
 }
+async fn received_one(manager: &DiscordManager, c: &DiscordConnectorRecord) {
+    manager
+        .accept_batch(
+            c.id.clone(),
+            DiscordMessageBatch {
+                messages: vec![incoming(c, "9007199254740993")],
+                next_cursor: "9007199254740993".into(),
+                boundary_proven: true,
+            },
+        )
+        .await
+        .unwrap();
+}
+
+async fn receipt_state(manager: &DiscordManager) -> DiscordProcessingState {
+    let state = manager.state.read().await;
+    state
+        .discord_inbound
+        .values()
+        .next()
+        .unwrap()
+        .processing_state
+        .clone()
+}
+
+async fn processed_after_cancel(manager: &DiscordManager, c: &DiscordConnectorRecord) {
+    manager.runs.cancel_drain();
+    assert!(manager.process_one(c.id.clone()).await.unwrap());
+    within(async {
+        while receipt_state(manager).await != DiscordProcessingState::Processed {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    manager.runs.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_drain_leaves_a_received_turn_for_after_cancel() {
+    let (manager, _, c) = setup().await;
+    received_one(&manager, &c).await;
+    manager.runs.begin_drain();
+
+    assert!(!manager.process_one(c.id.clone()).await.unwrap());
+    assert_eq!(
+        receipt_state(&manager).await,
+        DiscordProcessingState::Received
+    );
+    processed_after_cancel(&manager, &c).await;
+}
+
+#[tokio::test]
+async fn a_drain_that_begins_mid_pickup_puts_the_receipt_back() {
+    let (manager, _, c) = setup().await;
+    received_one(&manager, &c).await;
+    // Hold the pickup's save (the receipt is Processing), then drain.
+    let gate = manager
+        .state
+        .write()
+        .await
+        .install_test_control_plane_save_gate(false);
+    let picking = tokio::spawn({
+        let manager = manager.clone();
+        let id = c.id.clone();
+        async move { manager.process_one(id).await }
+    });
+    within(gate.entered.acquire()).await.unwrap().forget();
+    assert_eq!(
+        receipt_state(&manager).await,
+        DiscordProcessingState::Processing
+    );
+    manager.runs.begin_drain();
+    gate.release.add_permits(1);
+
+    assert!(!within(picking).await.unwrap().unwrap());
+    assert_eq!(
+        receipt_state(&manager).await,
+        DiscordProcessingState::Received
+    );
+    processed_after_cancel(&manager, &c).await;
+}
+
 #[tokio::test]
 async fn unproven_scan_and_capacity_pressure_admit_nothing_and_do_not_move_cursor() {
     let (manager, _, c) = setup().await;

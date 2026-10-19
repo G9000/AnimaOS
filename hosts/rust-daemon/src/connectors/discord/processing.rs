@@ -133,14 +133,21 @@ impl DiscordManager {
                 start,
             )
             .await;
-        if accepted.is_err() {
+        if let Err(error) = &accepted {
+            // A drain that began after the pickup accepted nothing: the
+            // receipt goes back to received, for the restart or a cancel.
+            let deferred = crate::agent_runs::is_draining_refusal(error);
             let _txn = self.transaction.lock().await;
             let persist = {
                 let mut state = self.state.write().await;
                 let key = (c.id.clone(), inbound.message_id.clone());
                 if let Some(r) = state.discord_inbound.get_mut(&key) {
                     if r == &inbound {
-                        r.processing_state = DiscordProcessingState::Stopped;
+                        r.processing_state = if deferred {
+                            DiscordProcessingState::Received
+                        } else {
+                            DiscordProcessingState::Stopped
+                        };
                     }
                 }
                 state.control_plane_persist_request()
@@ -149,6 +156,9 @@ impl DiscordManager {
                 .save()
                 .await
                 .map_err(|_| DiscordManagerError::Persistence)?;
+            if deferred {
+                return Ok(false);
+            }
             return Err(DiscordManagerError::Persistence);
         }
         if let Ok(AcceptedRun::Replayed(run)) = accepted {

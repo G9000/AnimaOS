@@ -151,10 +151,17 @@ pub(super) fn shutting_down() -> ApiError {
     ApiError::daemon_shutting_down(DAEMON_SHUTTING_DOWN)
 }
 
-/// `accept_run`'s refusal while draining: a plain 503, never `shutting_down()`,
-/// so no caller takes the message for one accepted and left queued.
+/// `accept_run`'s refusal while draining: a 503 of its own kind, never
+/// `shutting_down()`, so no caller takes the message for one accepted and
+/// left queued; `is_draining_refusal` tells it apart.
 pub(super) fn draining() -> ApiError {
-    ApiError::service_unavailable(DAEMON_DRAINING)
+    ApiError::daemon_draining(DAEMON_DRAINING)
+}
+
+/// Whether a refusal came from a drain: nothing was accepted, so the caller
+/// can leave its message for later.
+pub(crate) fn is_draining_refusal(error: &ApiError) -> bool {
+    error.kind() == ApiErrorKind::DaemonDraining
 }
 
 /// Whether a start ended with `shutting_down()`: its run never started, so
@@ -246,6 +253,20 @@ mod typed_shutdown_tests {
         assert!(accepted.is_closing());
         drop(going);
         assert!(accepted.close_and_wait().await.is_empty());
+    }
+    #[test]
+    fn a_draining_refusal_is_its_own_kind_and_never_a_shutdown() {
+        let refusal = draining();
+        assert_eq!(
+            refusal.status(),
+            axum::http::StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert!(is_draining_refusal(&refusal));
+        assert!(!is_shutting_down(&refusal));
+        assert!(!is_draining_refusal(&shutting_down()));
+        assert!(!is_draining_refusal(&ApiError::service_unavailable(
+            DAEMON_DRAINING
+        )));
     }
     #[test]
     fn draining_keeps_queued_runs_starting_and_never_closes() {
