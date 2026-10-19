@@ -93,9 +93,11 @@ console.log(report.removedMemoryIds.length);
 ```typescript
 const ready = await client.memories.readiness();
 console.log(ready.passed, ready.embeddings.vectorCount);
+console.log(ready.embeddings.status, ready.embeddings.done, ready.embeddings.total);
+console.log(ready.externalProvider?.status);
 ```
 
-This is the operational check for the memory subsystem: embeddings, vector counts, and evaluation self-tests.
+This is the operational check for the memory subsystem: embeddings, vector counts, and evaluation self-tests. `embeddings.status` says where the search model stands (`downloading`, `rebuilding` with `done` of `total`, `ready`, `fallback` with a `reason`, or `off`), and `externalProvider` reports the external memory provider (`none` by default).
 
 ## Entities and Relationships
 

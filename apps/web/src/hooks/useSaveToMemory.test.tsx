@@ -15,7 +15,6 @@ import {
 const target: SaveToMemoryTarget = {
   agentId: 'agent-main',
   agentName: 'Nova',
-  sessionId: 'room-1',
 };
 
 function message(text: string, id = 'm1'): ChatMessage {
@@ -27,7 +26,7 @@ afterEach(() => {
 });
 
 describe('useSaveToMemory', () => {
-  it('sends the message as a Fact with importance 0.75, the saved-from-chat tag, and the session id', async () => {
+  it('sends the message as a Fact with importance 0.75 and the saved-from-chat tag, and no session id', async () => {
     const saveMemory = vi
       .spyOn(daemon, 'saveMemory')
       .mockResolvedValue(memoryFixture('mem-1'));
@@ -46,8 +45,8 @@ describe('useSaveToMemory', () => {
       content: 'Likes tea',
       importance: 0.75,
       tags: ['saved-from-chat'],
-      sessionId: 'room-1',
     });
+    expect(saveMemory.mock.calls[0]?.[0]).not.toHaveProperty('sessionId');
   });
 
   it('a saved message answers saved again without calling the daemon', async () => {

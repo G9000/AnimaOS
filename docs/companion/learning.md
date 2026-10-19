@@ -36,16 +36,15 @@ The additive owner route is POST `/api/agents/{agent_id}/learning-reviews/{revie
 
 M39 covers the procedural adoption wave, including two fresh independently checked tasks using the approved skill. Saved advice, an installed file or a load receipt alone is insufficient. Optional dialogue-only or unattended Fact curation remains separate.
 
-## Selected profile facts and agent notes
+## Core memory: About you and agent notes
 
-In **Memory → About you → Profile & agent notes**, select up to six current saved private Facts for this companion. Split them between **Your profile** and **Notes for this agent**. Search displays at most50 candidates; narrow the search when more match. These are owner-selected source records, not independently verified truths or new tool permissions. Temporal facts remain separate.
+The six owner-selected memory pins (memory views) were folded into core memory: profile pins became **About you** entries and agent-note pins became **Agent notes** entries, at boot, while each block's budget allowed. The memory-views routes, their SDK methods and the console panel are gone.
 
-The daemon saves ordered IDs and a selection version. Current canonical memory supplies the displayed text and source hash; no second profile text store exists. Every new run resolves the eligible records again, puts selected sources ahead of ordinary relevance and deduplicates them. All sources share the existing six-record/4800-character quoted context budget, with800-character excerpts. Long sources may be shortened or omitted by that budget. A running task keeps its initial context; the next task sees a correction.
+Core memory is two always-on blocks per agent at the top of every run's context: About you (1,500 characters) and Agent notes (2,500 characters), one entry at most 500. The agent edits them with the `core_memory` tool (`add`, `replace`, `remove`, with `old_text` a unique part of one entry); conversation reviews propose edits, applied at once in Free mode or on the owner's accept in Strict mode. The owner edits them in **Memory → About you → Always remembered** or through these owner-only, no-store routes, exposed as `client.memories` SDK methods:
 
-Save selection changes before correcting a selected saved fact. Correction pins the current selection version, full exact source text and all canonical metadata through its hash. It reuses the ordinary canonical memory save and search-index path. A changed source or selection returns a conflict: refresh, inspect the current source and explicitly save again. No automatic retry occurs. Selection and source correction are separate commits. Other memory editors retain their existing behavior.
+- GET `/api/agents/{agent_id}/core-memory`: both blocks with usage, entries in creation order.
+- POST `/api/agents/{agent_id}/core-memory/{block}` with `{ text }`: add an entry (`block` is `user` or `notes`).
+- PATCH `/api/agents/{agent_id}/core-memory/{block}/{entry_id}` with `{ text }`: replace an entry in place.
+- DELETE `/api/agents/{agent_id}/core-memory/{block}/{entry_id}`: remove an entry.
 
-Missing, deleted, foreign, hidden or ineligible selected sources are unavailable; inaccessible text is never returned. Remove unavailable references explicitly before saving a replacement selection. Missing durable memory disables context selections while owner views retain their version and unavailable references. A failed save can have an uncertain durable outcome; inspect current records before trying again.
-
-Owner contracts are GET/PATCH `/api/agents/{agent_id}/memory-views`, GET its `/candidates?query=...` and PATCH its `/sources/{memory_id}`. SDK methods live on `client.memories`. Selection requires `expectedVersion`, ordered `userProfile` and `agentNotes` arrays of `{id,sourceHash}`. Correction requires `expectedVersion`, `expectedContent`, `expectedSourceHash` and `content`. All routes require owner access and use no-store responses. Version16 backs up version15 independently as `.pre-memory-views.bak`; older daemons refuse this format.
-
-This M40 slice uses exact-entry guards and Anima's existing canonical store for profile facts and agent notes. Standard Markdown synchronization, automatic profile inference and unattended curation are outside this wave. Exact local gates and the two fresh corrected-preference/restart trials are recorded in [harness acceptance](harness-acceptance.md) and the [M40 plan](../superpowers/plans/2026-10-13-companion-profile-memory-m40.md).
+Owner edits follow the same budgets; text the threat scanner flags is saved with `warnings`, and renders hidden (`[entry hidden: flagged <ids>]`) wherever the model reads it. The daemon keeps a read-only copy in the agent's profile directory as `USER.md` and `MEMORY.md`.

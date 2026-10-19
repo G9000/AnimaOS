@@ -89,7 +89,9 @@ pub async fn run_from_env(options: ServeOptions) -> io::Result<()> {
         max_concurrent_runs = config.max_concurrent_runs,
         max_runs_per_agent = config.max_runs_per_agent,
         max_background_processes = config.max_background_processes,
-        runtime_memory_store = runtime_memory_store_label(),
+        runtime_memory_store = super::persistence::runtime_memory_store_label(
+            config.persistence_mode == PersistenceMode::Postgres
+        ),
         control_plane_durability = control_plane_store_label(),
         "anima-daemon listening"
     );
@@ -102,16 +104,6 @@ fn control_plane_store_label() -> String {
         return format!("json:{path}");
     }
     "ephemeral".to_string()
-}
-
-fn runtime_memory_store_label() -> String {
-    if let Ok(path) = std::env::var("ANIMAOS_RS_MEMORY_SQLITE_FILE") {
-        return format!("sqlite:{path}");
-    }
-    if let Ok(path) = std::env::var("ANIMAOS_RS_MEMORY_FILE") {
-        return format!("json:{path}");
-    }
-    "memory-only".to_string()
 }
 
 fn parse_env_usize(name: &str, default: usize) -> io::Result<usize> {

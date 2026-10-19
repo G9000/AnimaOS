@@ -42,7 +42,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 232, "complete registered operation count");
+    assert_eq!(actual.len(), 233, "complete registered operation count");
     let message_search_additions = [("GET", "/api/agents/{agent_id}/message-search")];
     for (method, path) in message_search_additions {
         assert!(
@@ -184,6 +184,33 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             "coding app operation must be registered"
         );
     }
+    // These replace the four memory-view operations, removed when pins folded
+    // into core memory; the pre-M58 and pre-M49 counts below drop by four.
+    let core_memory_additions = [
+        ("GET", "/api/agents/{agent_id}/core-memory"),
+        ("POST", "/api/agents/{agent_id}/core-memory/{block}"),
+        (
+            "PATCH",
+            "/api/agents/{agent_id}/core-memory/{block}/{entry_id}",
+        ),
+        (
+            "DELETE",
+            "/api/agents/{agent_id}/core-memory/{block}/{entry_id}",
+        ),
+    ];
+    for (method, path) in core_memory_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "core memory operation must be registered"
+        );
+    }
+    let memory_export_additions = [("GET", "/api/memories/export")];
+    for (method, path) in memory_export_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "memory export must be registered"
+        );
+    }
     let import_additions = [
         ("GET", "/api/foreign-sessions"),
         ("GET", "/api/foreign-sessions/{handle}/preview"),
@@ -215,9 +242,11 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                     && !credential_additions.contains(&(method.as_str(), path.as_str()))
                     && !report_additions.contains(&(method.as_str(), path.as_str()))
                     && !main_chat_additions.contains(&(method.as_str(), path.as_str()))
+                    && !core_memory_additions.contains(&(method.as_str(), path.as_str()))
+                    && !memory_export_additions.contains(&(method.as_str(), path.as_str()))
             })
             .count(),
-        197,
+        193,
         "all pre-M58 operations remain present"
     );
     let additions = [
@@ -257,9 +286,11 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                     && !credential_additions.contains(&(method.as_str(), path.as_str()))
                     && !report_additions.contains(&(method.as_str(), path.as_str()))
                     && !main_chat_additions.contains(&(method.as_str(), path.as_str()))
+                    && !core_memory_additions.contains(&(method.as_str(), path.as_str()))
+                    && !memory_export_additions.contains(&(method.as_str(), path.as_str()))
             )
             .count(),
-        192,
+        188,
         "pre-M49 registered operations remain present"
     );
     assert_eq!(

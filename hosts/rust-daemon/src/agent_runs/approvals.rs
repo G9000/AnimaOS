@@ -163,13 +163,13 @@ impl AgentRunCoordinator {
     /// Whether `agent_id`'s own configuration lists `tool`, or `None` once the
     /// agent is gone. A run uses a copy of it that may add tools (the peer and
     /// team tools), so this alone does not say whether the run may call one.
+    /// `core_memory` counts as listed while `memory_add` is, as runs add it, so
+    /// revoking `memory_add` during an approval wait revokes it too.
     pub(crate) async fn configured_tool(&self, agent_id: &str, tool: &str) -> Option<bool> {
-        self.state
-            .read()
-            .await
-            .agents
-            .get(agent_id)
-            .map(|runtime| runtime.config().allows_tool(tool))
+        self.state.read().await.agents.get(agent_id).map(|runtime| {
+            let config = runtime.config();
+            config.allows_tool(tool) || (tool == "core_memory" && config.allows_tool("memory_add"))
+        })
     }
 
     /// How long a run from `source` waits for the owner (spec §7.3).

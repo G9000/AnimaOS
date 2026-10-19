@@ -284,6 +284,8 @@ console.log('Vector count:', ready.embeddings.vectorCount);
 console.log('Embedding provider:', ready.embeddings.provider);
 console.log('Model:', ready.embeddings.model);
 console.log('Dimension:', ready.embeddings.dimension);
+console.log('Search model:', ready.embeddings.status, ready.embeddings.done, '/', ready.embeddings.total);
+console.log('External provider:', ready.externalProvider?.id, ready.externalProvider?.status);
 console.log('Evaluation checks:', ready.evaluation.passedChecks, '/', ready.evaluation.totalChecks);
 ```
 
@@ -293,6 +295,7 @@ console.log('Evaluation checks:', ready.evaluation.passedChecks, '/', ready.eval
 |-------|------|-------------|
 | `passed` | `boolean` | Overall health status |
 | `embeddings` | `MemoryEmbeddingStatus` | Embedding engine status |
+| `externalProvider` | `ExternalMemoryProviderStatus` (optional) | The external memory provider beside the local store (`none` by default); absent from older daemons |
 | `evaluation` | `MemoryEvalReport` | Self-test results |
 
 ### `MemoryEmbeddingStatus`
@@ -306,6 +309,18 @@ console.log('Evaluation checks:', ready.evaluation.passedChecks, '/', ready.eval
 | `vectorCount` | `number` | Number of vectors stored |
 | `persisted` | `boolean` | Whether vectors are persisted |
 | `storageFile` | `string \| null` | Path to vector store file |
+| `status` | `MemoryEmbeddingLoadStatus` | `downloading`, `rebuilding`, `ready`, `fallback` or `off`: the search model loads in the background after boot |
+| `done` | `number` | Memories with a vector from the active embedder |
+| `total` | `number` | Memories to embed; `rebuilding` shows `done` of `total` |
+| `reason` | `string` (optional) | Why search fell back to basic search; only with `fallback` |
+
+### `ExternalMemoryProviderStatus`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | Provider id, e.g. `none` |
+| `status` | `'ready' \| 'unavailable'` | Whether the provider answers |
+| `reason` | `string` (optional) | Why it is unavailable; only with `unavailable` |
 
 ## Relationships
 

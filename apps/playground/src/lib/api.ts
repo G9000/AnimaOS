@@ -238,6 +238,21 @@ export interface MemoryEmbeddingStatus {
   vectorCount: number;
   persisted: boolean;
   storageFile?: string | null;
+  /** Where the search model stands: it loads in the background after boot. */
+  status: 'downloading' | 'rebuilding' | 'ready' | 'fallback' | 'off';
+  /** Memories with a vector from the active embedder, out of `total`. */
+  done: number;
+  total: number;
+  /** Why search fell back to basic search; only with `fallback`. */
+  reason?: string;
+}
+
+/** The external memory provider beside the local store; `none` by default. */
+export interface ExternalMemoryProviderStatus {
+  id: string;
+  status: 'ready' | 'unavailable';
+  /** Why it is unavailable; only with `unavailable`. */
+  reason?: string;
 }
 
 export interface MemoryEvalCheckResult {
@@ -262,6 +277,8 @@ export interface MemoryEvalReport {
 export interface MemoryReadiness {
   passed: boolean;
   embeddings: MemoryEmbeddingStatus;
+  /** Absent from daemons that predate the external provider plug-in point. */
+  externalProvider?: ExternalMemoryProviderStatus;
   evaluation: MemoryEvalReport;
 }
 

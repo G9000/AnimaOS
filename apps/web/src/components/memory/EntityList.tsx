@@ -12,7 +12,7 @@ const KIND_LABELS: Record<MemoryEntity['kind'], string> = {
   external: 'Thing',
 };
 
-/** Deleting the user entity is soft: the evaluator recreates it (ruling 2). */
+/** Deleting the user entity is soft: it can come back when the companion learns about you (ruling 2). */
 export const USER_ENTITY_NOTE =
   'Your companion adds this again when it learns about you.';
 

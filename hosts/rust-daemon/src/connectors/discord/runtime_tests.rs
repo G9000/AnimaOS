@@ -69,6 +69,7 @@ use std::sync::atomic::AtomicU64;
 use tokio::sync::{RwLock, Semaphore};
 #[derive(Default)]
 struct FakeTransport {
+    sent_chunks: StdMutex<Vec<(String, String)>>,
     typing_calls: AtomicUsize,
     typing_inflight: AtomicUsize,
     typing_gate: AtomicBool,
@@ -122,9 +123,12 @@ impl DiscordTransport for FakeTransport {
     async fn get_channel(
         &self,
         _: &DiscordBotToken,
-        _: &str,
+        channel: &str,
     ) -> Result<DiscordChannelMetadata, DiscordTransportError> {
-        Ok(fixture_connector().channel)
+        Ok(DiscordChannelMetadata {
+            id: channel.into(),
+            ..fixture_connector().channel
+        })
     }
     async fn latest_cursor(
         &self,
@@ -158,9 +162,13 @@ impl DiscordTransport for FakeTransport {
         &self,
         _: &DiscordBotToken,
         channel: &str,
-        _: &str,
+        text: &str,
         _: &str,
     ) -> Result<DiscordSendReceipt, DiscordTransportError> {
+        self.sent_chunks
+            .lock()
+            .unwrap()
+            .push((channel.into(), text.into()));
         self.sends.fetch_add(1, Ordering::SeqCst);
         self.entered.0.add_permits(1);
         if self.gate.load(Ordering::SeqCst) {
@@ -1202,5 +1210,10 @@ fn setup_transport_errors_retain_safe_actionable_reasons() {
 
 #[path = "gateway_tests.rs"]
 mod gateway_tests;
+
+#[path = "multi_channel_tests.rs"]
+mod multi_channel_tests;
+#[path = "speaker_tests.rs"]
+mod speaker_tests;
 #[path = "typing_tests.rs"]
 mod typing_tests;

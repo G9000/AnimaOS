@@ -92,6 +92,9 @@ pub(crate) struct ToolExecutionContext {
     tool_registry: ToolRegistry,
     pub(super) process_manager: SharedProcessManager,
     pub(super) workspace_root: Option<PathBuf>,
+    /// The workspace that holds the core memory file copy. Unlike
+    /// `workspace_root`, a worktree helper's checkout never replaces it.
+    pub(super) core_files_root: Option<PathBuf>,
     checkpoint_root: Option<PathBuf>,
     action_approved: bool,
     protected_write: Option<crate::agent_files::write_policy::ProtectedWrite>,
@@ -181,6 +184,7 @@ impl ToolExecutionContext {
             memory_store,
             tool_registry,
             process_manager,
+            core_files_root: workspace_root.clone(),
             workspace_root,
             checkpoint_root: None,
             action_approved: false,
@@ -436,6 +440,12 @@ impl ToolExecutionContext {
             Ok(value) => value,
             Err(reason) => return TaskResult::error(reason, 0),
         };
+        if protected
+            .as_ref()
+            .is_some_and(|target| target.is_core_copy(&agent.id))
+        {
+            return TaskResult::error(crate::agent_files::write_policy::CORE_COPY_REFUSED, 0);
+        }
         if protected.is_some() && self.approvals.is_none() {
             return TaskResult::error(crate::agent_files::write_policy::REFUSED, 0);
         }
@@ -765,6 +775,38 @@ impl ToolRegistry {
                 ]),
             ),
             memory::execute_memory_add,
+        );
+        let mut core_memory_parameters = object_parameters(vec![
+            required_parameter(
+                "action",
+                string_enum_parameter("The edit to make", &["add", "replace", "remove"]),
+            ),
+            required_parameter(
+                "block",
+                string_enum_parameter(
+                    "user (About you, the owner's profile) or notes (Agent notes)",
+                    &["user", "notes"],
+                ),
+            ),
+            optional_parameter(
+                "text",
+                non_blank_string_parameter("The new entry, for add and replace"),
+            ),
+            optional_parameter(
+                "old_text",
+                non_blank_string_parameter(
+                    "A short unique part of the one entry to replace or remove",
+                ),
+            ),
+        ]);
+        core_memory_parameters.insert("additionalProperties".into(), DataValue::Bool(false));
+        registry.register(
+            tool_descriptor(
+                "core_memory",
+                &crate::core_memory::tool_description(),
+                core_memory_parameters,
+            ),
+            memory::execute_core_memory,
         );
         registry.register(
             tool_descriptor(

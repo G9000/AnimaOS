@@ -2,7 +2,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anima_memory::{MemoryManager, RecentMemoryOptions};
+use anima_memory::{MemoryManager, MemoryType, RecentMemoryOptions};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use tracing::{info, warn};
@@ -15,8 +15,8 @@ use crate::control_plane_store::{
 use crate::history::{
     HistoryService, HistoryStore, MemoryHistoryStore, PostgresHistoryStore, SqliteHistoryStore,
 };
-use crate::memory_embeddings::MemoryEmbeddingRuntime;
-use crate::memory_store::{load_memory_snapshot, MemoryStoreConfig};
+use crate::memory_embeddings::{spawn_model_load, MemoryEmbeddingRuntime};
+use crate::memory_store::{load_memory_snapshot, MemoryMutation, MemoryStoreConfig};
 use crate::postgres::SqlxPostgresAdapter;
 use crate::state::{memory_query_expander_from_env, memory_text_analyzer_from_env};
 
@@ -29,9 +29,11 @@ pub(crate) async fn configure_persistence(
     let control_plane_store = control_plane_store_from_env(postgres_pool.as_ref())?;
     let history_sqlite = non_empty_env_path(HISTORY_SQLITE_FILE_ENV)?;
 
-    let default_embedding_store = configure_memory_store(state, memory_store).await?;
-    configure_memory_embeddings(state, default_embedding_store).await?;
-    configure_control_plane_and_history(state, control_plane_store, history_sqlite).await
+    let memory_store = configure_memory_store(state, memory_store).await?;
+    configure_memory_embeddings(state, memory_store.as_ref()).await?;
+    configure_control_plane_and_history(state, control_plane_store, history_sqlite).await?;
+    write_core_memory_copies(state).await;
+    Ok(())
 }
 
 async fn configure_database(
@@ -117,15 +119,21 @@ async fn configure_control_plane_store(
             );
         }
     }
-    let (restored_agents, restored_swarms) = if let Some(snapshot) = snapshot {
-        state
+    let (restored_agents, restored_swarms, legacy_pins) = if let Some(mut snapshot) = snapshot {
+        let legacy_pins = std::mem::take(&mut snapshot.legacy_pins);
+        let (agents, swarms) = state
             .write()
             .await
             .restore_control_plane_snapshot(snapshot)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        (agents, swarms, legacy_pins)
     } else {
-        (0, 0)
+        (0, 0, Vec::new())
     };
+    // Before the save below, which drops the pins from the control plane.
+    if !legacy_pins.is_empty() {
+        migrate_legacy_pins(state, &legacy_pins).await?;
+    }
 
     {
         let mut guard = state.write().await;
@@ -151,6 +159,70 @@ async fn configure_control_plane_store(
         "runtime control plane store configured"
     );
     Ok(())
+}
+
+/// Folds the memory-view pins of an older control plane into core memory and
+/// persists the memory store. A failed save refuses boot with the control
+/// plane still unsaved, so the pins are kept and the next boot retries.
+async fn migrate_legacy_pins(
+    state: &SharedDaemonState,
+    pins: &[crate::core_memory::migration::LegacyPins],
+) -> io::Result<()> {
+    let (memory, memory_store, live_agents) = {
+        let guard = state.read().await;
+        (
+            guard.memory_handle(),
+            guard.memory_store_config(),
+            guard.agents.keys().cloned().collect(),
+        )
+    };
+    let mut manager = memory.write().await;
+    let mut mutation = MemoryMutation::new(&mut manager);
+    let report = crate::core_memory::migration::migrate_pins(&mut mutation, pins, &live_agents);
+    for skipped in &report.skipped {
+        info!(
+            agent_id = %skipped.agent_id,
+            memory_id = %skipped.memory_id,
+            reason = %skipped.reason,
+            "left a memory pin out of core memory"
+        );
+    }
+    if !report.moved.is_empty() {
+        mutation
+            .persist(memory_store.as_ref())
+            .await
+            .map_err(|error| {
+                io::Error::new(
+                    error.kind(),
+                    format!("could not save memory pins moved into core memory: {error}"),
+                )
+            })?;
+    }
+    info!(
+        moved = report.moved.len(),
+        skipped = report.skipped.len(),
+        "moved memory pins into core memory"
+    );
+    Ok(())
+}
+
+/// Writes every agent's core memory file copy once at boot.
+async fn write_core_memory_copies(state: &SharedDaemonState) {
+    let (memory, workspace_root, agents) = {
+        let guard = state.read().await;
+        (
+            guard.memory_handle(),
+            guard
+                .workspace
+                .as_ref()
+                .map(|workspace| workspace.root_path.clone()),
+            guard.agents.keys().cloned().collect::<Vec<_>>(),
+        )
+    };
+    let manager = memory.read().await;
+    for agent_id in agents {
+        crate::core_memory::files::write_copies(workspace_root.as_deref(), &manager, &agent_id);
+    }
 }
 
 /// The SQLite history file (spec §13.1); defaults beside the control plane.
@@ -209,7 +281,7 @@ pub(crate) fn default_history_sqlite_path(control_plane_file: &Path) -> PathBuf 
 async fn configure_memory_store(
     state: &SharedDaemonState,
     config: Option<MemoryStoreConfig>,
-) -> io::Result<Option<PathBuf>> {
+) -> io::Result<Option<MemoryStoreConfig>> {
     let Some(config) = config else {
         state.write().await.set_memory_store(None);
         return Ok(None);
@@ -235,6 +307,20 @@ async fn configure_memory_store(
     if let Some(snapshot) = load_memory_snapshot(&config).await? {
         manager.replace_snapshot(snapshot);
     }
+    let repaired_count = match repair_saved_from_chat_sessions(&mut manager, &config).await {
+        Ok(count) => count,
+        Err(error) => {
+            // A failed save restores the loaded state; the repair retries on the next boot.
+            warn!(%error, "could not repair saved-from-chat memories; retrying on the next boot");
+            0
+        }
+    };
+    if repaired_count > 0 {
+        info!(
+            repaired_count,
+            "detached saved-from-chat memories from their chat sessions"
+        );
+    }
     let loaded_count = manager.size();
     {
         let mut guard = state.write().await;
@@ -248,14 +334,59 @@ async fn configure_memory_store(
         loaded_count,
         "runtime memory store configured"
     );
-    Ok(config.embedding_store_default())
+    Ok(Some(config))
 }
 
+/// Tag the web console puts on facts the owner saves from a chat message.
+const SAVED_FROM_CHAT_TAG: &str = "saved-from-chat";
+
+/// Facts saved from chat used to carry the chat's session, which keeps them out of every
+/// run's context. Clear that session and persist once; a clean store is a no-op.
+async fn repair_saved_from_chat_sessions(
+    manager: &mut MemoryManager,
+    config: &MemoryStoreConfig,
+) -> io::Result<usize> {
+    let stuck: Vec<String> = manager
+        .get_recent_filtered(
+            RecentMemoryOptions {
+                limit: Some(usize::MAX),
+                ..RecentMemoryOptions::default()
+            },
+            |memory| {
+                memory.memory_type == MemoryType::Fact
+                    && memory.session_id.is_some()
+                    && memory
+                        .tags
+                        .as_ref()
+                        .is_some_and(|tags| tags.iter().any(|tag| tag == SAVED_FROM_CHAT_TAG))
+            },
+        )
+        .into_iter()
+        .map(|memory| memory.id)
+        .collect();
+    if stuck.is_empty() {
+        return Ok(0);
+    }
+    let mut mutation = MemoryMutation::new(manager);
+    for id in &stuck {
+        mutation
+            .detach_session(id)
+            .map_err(|error| io::Error::new(io::ErrorKind::Other, error.message()))?;
+    }
+    mutation.persist(Some(config)).await?;
+    Ok(stuck.len())
+}
+
+/// Builds the embeddings runtime on hashed vectors. A configured model loads
+/// later, in the background, through [`start_memory_model_load`].
 async fn configure_memory_embeddings(
     state: &SharedDaemonState,
-    default_sqlite_path: Option<PathBuf>,
+    memory_store: Option<&MemoryStoreConfig>,
 ) -> io::Result<()> {
-    let mut embeddings = MemoryEmbeddingRuntime::from_env(default_sqlite_path)?;
+    let mut embeddings = MemoryEmbeddingRuntime::from_env(
+        memory_store.and_then(MemoryStoreConfig::embedding_store_default),
+        memory_store.and_then(default_model_cache_dir),
+    )?;
     let memories = {
         let memory = { state.read().await.memory_handle() };
         let memory_guard = memory.read().await;
@@ -274,6 +405,7 @@ async fn configure_memory_embeddings(
         enabled = status.enabled,
         provider = %status.provider,
         model = %status.model,
+        status = status.load.label(),
         dimension = status.dimension,
         vector_count = status.vector_count,
         persisted = status.persisted,
@@ -285,18 +417,108 @@ async fn configure_memory_embeddings(
     Ok(())
 }
 
-fn memory_store_from_env(postgres_pool: Option<&PgPool>) -> io::Result<Option<MemoryStoreConfig>> {
-    let json = non_empty_env_path("ANIMAOS_RS_MEMORY_FILE")?;
-    let sqlite = non_empty_env_path("ANIMAOS_RS_MEMORY_SQLITE_FILE")?;
+/// The search model is cached in `models/` beside the memory store file
+/// (spec "Embeddings"); without a store file, fastembed picks its own cache.
+fn default_model_cache_dir(memory_store: &MemoryStoreConfig) -> Option<PathBuf> {
+    memory_store
+        .file_path()
+        .map(|path| path.with_file_name(MODEL_CACHE_DIR_NAME))
+}
 
+const MODEL_CACHE_DIR_NAME: &str = "models";
+
+/// Starts loading the configured search model in the background. Boot never
+/// waits for it: recall runs on hashed vectors and BM25 meanwhile.
+pub(crate) async fn start_memory_model_load(state: &SharedDaemonState) {
+    let (memory, embeddings) = {
+        let guard = state.read().await;
+        (guard.memory_handle(), guard.memory_embeddings_handle())
+    };
+    let Some(loader) = embeddings.write().await.take_model_loader() else {
+        return;
+    };
+    // A thread that cannot start leaves search on hashed vectors, like a failed load.
+    let fallback = Arc::clone(&embeddings);
+    let loading = spawn_model_load(memory, embeddings, loader);
+    match loading {
+        Ok(_) => info!("loading the memory search model in the background"),
+        Err(error) => {
+            warn!(%error, "could not start loading the memory search model");
+            fallback.write().await.fall_back(&error.to_string());
+        }
+    }
+}
+
+/// Embedded and test daemons never download a model; they keep basic search.
+pub(crate) async fn skip_memory_model_load(state: &SharedDaemonState) {
+    let embeddings = { state.read().await.memory_embeddings_handle() };
+    let mut runtime = embeddings.write().await;
+    if runtime.take_model_loader().is_some() {
+        runtime.fall_back("the search model loads only in the served daemon");
+    }
+}
+
+/// File name of the memory store kept next to the control-plane file when none is configured.
+const DEFAULT_MEMORY_SQLITE_FILE: &str = "memory.sqlite";
+
+/// Which memory store the daemon uses. Pure over already-read values so the choice can be
+/// tested without touching process env, and so the startup log shares the decision.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum MemoryStoreChoice {
+    Json(PathBuf),
+    Sqlite(PathBuf),
+    Postgres,
+}
+
+/// Explicit JSON or SQLite file wins, then Postgres, then `memory.sqlite` next to the
+/// control-plane file. No control-plane file means memory-only, as before.
+fn memory_store_choice(
+    json: Option<PathBuf>,
+    sqlite: Option<PathBuf>,
+    postgres: bool,
+    control_plane_file: Option<&Path>,
+) -> io::Result<Option<MemoryStoreChoice>> {
     match (json, sqlite) {
         (Some(_), Some(_)) => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "set only one of ANIMAOS_RS_MEMORY_FILE or ANIMAOS_RS_MEMORY_SQLITE_FILE",
         )),
-        (Some(path), None) => Ok(Some(MemoryStoreConfig::Json(path))),
-        (None, Some(path)) => Ok(Some(MemoryStoreConfig::Sqlite(path))),
-        (None, None) => Ok(postgres_pool.cloned().map(MemoryStoreConfig::Postgres)),
+        (Some(path), None) => Ok(Some(MemoryStoreChoice::Json(path))),
+        (None, Some(path)) => Ok(Some(MemoryStoreChoice::Sqlite(path))),
+        (None, None) if postgres => Ok(Some(MemoryStoreChoice::Postgres)),
+        (None, None) => Ok(control_plane_file.map(|control_plane| {
+            let dir = control_plane.parent().unwrap_or_else(|| Path::new(""));
+            MemoryStoreChoice::Sqlite(dir.join(DEFAULT_MEMORY_SQLITE_FILE))
+        })),
+    }
+}
+
+fn memory_store_choice_from_env(postgres: bool) -> io::Result<Option<MemoryStoreChoice>> {
+    let json = non_empty_env_path("ANIMAOS_RS_MEMORY_FILE")?;
+    let sqlite = non_empty_env_path("ANIMAOS_RS_MEMORY_SQLITE_FILE")?;
+    let control_plane = non_empty_env_path("ANIMAOS_RS_CONTROL_PLANE_FILE")?;
+    memory_store_choice(json, sqlite, postgres, control_plane.as_deref())
+}
+
+fn memory_store_from_env(postgres_pool: Option<&PgPool>) -> io::Result<Option<MemoryStoreConfig>> {
+    Ok(
+        memory_store_choice_from_env(postgres_pool.is_some())?.and_then(|choice| match choice {
+            MemoryStoreChoice::Json(path) => Some(MemoryStoreConfig::Json(path)),
+            MemoryStoreChoice::Sqlite(path) => Some(MemoryStoreConfig::Sqlite(path)),
+            MemoryStoreChoice::Postgres => postgres_pool.cloned().map(MemoryStoreConfig::Postgres),
+        }),
+    )
+}
+
+/// Startup-log label for the memory store, derived from the same choice the daemon makes.
+/// `postgres` says whether the daemon runs with a Postgres pool.
+pub fn runtime_memory_store_label(postgres: bool) -> String {
+    match memory_store_choice_from_env(postgres) {
+        Ok(Some(MemoryStoreChoice::Sqlite(path))) => format!("sqlite:{}", path.display()),
+        Ok(Some(MemoryStoreChoice::Json(path))) => format!("json:{}", path.display()),
+        Ok(Some(MemoryStoreChoice::Postgres)) => "postgres".to_string(),
+        Ok(None) => "memory-only".to_string(),
+        Err(error) => format!("invalid ({error})"),
     }
 }
 
@@ -333,6 +555,289 @@ mod tests {
             "anima-persistence-{label}-{}",
             uuid::Uuid::new_v4()
         ))
+    }
+
+    fn chat_fact(
+        manager: &mut MemoryManager,
+        agent: &str,
+        content: &str,
+        tags: &[&str],
+        session: Option<&str>,
+    ) -> anima_memory::Memory {
+        manager
+            .add(anima_memory::NewMemory {
+                agent_id: agent.into(),
+                agent_name: "operator".into(),
+                memory_type: MemoryType::Fact,
+                content: content.into(),
+                importance: 0.75,
+                tags: Some(tags.iter().map(|tag| tag.to_string()).collect()),
+                scope: Some(anima_memory::MemoryScope::Private),
+                room_id: None,
+                world_id: None,
+                session_id: session.map(str::to_string),
+            })
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn boot_repair_detaches_saved_from_chat_facts_so_context_returns_them() {
+        use anima_core::{AgentConfig, Content, Message, MessageRole};
+
+        let dir = temp_dir("saved-from-chat");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = MemoryStoreConfig::Json(dir.join("memory.json"));
+        let runtime = anima_core::AgentRuntime::new(
+            AgentConfig {
+                name: "operator".into(),
+                model: "gpt-5.4".into(),
+                bio: None,
+                lore: None,
+                knowledge: None,
+                topics: None,
+                adjectives: None,
+                style: None,
+                provider: None,
+                system: None,
+                tools: None,
+                plugins: None,
+                settings: None,
+                fallbacks: Vec::new(),
+            },
+            Arc::new(crate::model::DeterministicModelAdapter),
+        );
+        let mut manager = MemoryManager::new();
+        let stuck = chat_fact(
+            &mut manager,
+            runtime.id(),
+            "citron tea is unsweetened",
+            &["saved-from-chat"],
+            Some("session-1"),
+        );
+        // Facts the agent saved itself with a session, and facts with no session, stay as they are.
+        let agent_saved = chat_fact(
+            &mut manager,
+            runtime.id(),
+            "citron tea comes in a blue cup",
+            &["from-agent"],
+            Some("session-2"),
+        );
+        let clean = chat_fact(
+            &mut manager,
+            runtime.id(),
+            "citron tea steeps for three minutes",
+            &["saved-from-chat"],
+            None,
+        );
+        let ask = |memory: Arc<tokio::sync::RwLock<MemoryManager>>| {
+            let runtime = &runtime;
+            async move {
+                let providers = crate::components::default_providers(
+                    memory,
+                    Arc::new(tokio::sync::RwLock::new(MemoryEmbeddingRuntime::disabled())),
+                );
+                providers[0]
+                    .get(
+                        runtime,
+                        &Message {
+                            id: "m".into(),
+                            agent_id: runtime.id().into(),
+                            room_id: "room".into(),
+                            content: Content {
+                                text: "citron tea".into(),
+                                attachments: None,
+                                metadata: None,
+                            },
+                            role: MessageRole::User,
+                            created_at_ms: 1,
+                        },
+                    )
+                    .await
+                    .unwrap()
+                    .text
+            }
+        };
+        let shared = Arc::new(tokio::sync::RwLock::new(MemoryManager::new()));
+        shared.write().await.replace_snapshot(manager.snapshot());
+        assert!(
+            !ask(shared.clone()).await.contains(&stuck.id),
+            "the session hides the fact before repair"
+        );
+
+        assert_eq!(
+            repair_saved_from_chat_sessions(&mut manager, &config)
+                .await
+                .unwrap(),
+            1
+        );
+
+        assert_eq!(manager.get(&stuck.id).unwrap().session_id, None);
+        assert_eq!(manager.get(&stuck.id).unwrap().content, stuck.content);
+        assert_eq!(
+            manager.get(&agent_saved.id).unwrap().session_id.as_deref(),
+            Some("session-2")
+        );
+        assert_eq!(manager.get(&clean.id), Some(clean));
+        let saved = load_memory_snapshot(&config).await.unwrap().unwrap();
+        assert_eq!(
+            saved
+                .memories
+                .iter()
+                .find(|memory| memory.id == stuck.id)
+                .unwrap()
+                .session_id,
+            None,
+            "the repair is persisted"
+        );
+        shared.write().await.replace_snapshot(manager.snapshot());
+        assert!(ask(shared).await.contains(&stuck.id));
+
+        let before = std::fs::metadata(dir.join("memory.json"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert_eq!(
+            repair_saved_from_chat_sessions(&mut manager, &config)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            std::fs::metadata(dir.join("memory.json"))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            before,
+            "a clean store is not rewritten"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn boot_moves_memory_pins_into_core_memory_once_and_writes_the_copies() {
+        use crate::agent_files::selection::profile_relative;
+        use crate::core_memory::files::HEADER;
+
+        let dir = temp_dir("memory-pins");
+        let workspace = dir.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let memory_config = MemoryStoreConfig::Json(dir.join("memory.json"));
+        let control_config = ControlPlaneStoreConfig::Json(dir.join("control-plane.json"));
+
+        // An older control plane: one agent whose owner pinned three facts.
+        let mut older = crate::state::DaemonState::new();
+        let agent = older
+            .create_agent(anima_core::AgentConfig {
+                name: "operator".into(),
+                model: "gpt-5.4".into(),
+                bio: None,
+                lore: None,
+                knowledge: None,
+                topics: None,
+                adjectives: None,
+                style: None,
+                provider: None,
+                system: None,
+                tools: None,
+                plugins: None,
+                settings: None,
+                fallbacks: Vec::new(),
+            })
+            .unwrap()
+            .state
+            .id;
+        older.workspace = Some(crate::control_plane_store::WorkspaceConfig {
+            root_path: workspace.clone(),
+            company_name: "Test".into(),
+            mission: String::new(),
+            values: vec![],
+        });
+        let mut manager = MemoryManager::new();
+        let profile = chat_fact(
+            &mut manager,
+            &agent,
+            "prefers metric units",
+            &["saved-from-chat"],
+            None,
+        );
+        let note = chat_fact(&mut manager, &agent, "the build needs bun", &[], None);
+        let too_long = chat_fact(&mut manager, &agent, &"x".repeat(600), &[], None);
+        crate::memory_store::save_memory_manager(Some(&memory_config), &manager)
+            .await
+            .unwrap();
+        let mut snapshot = serde_json::to_value(older.control_plane_snapshot()).unwrap();
+        snapshot["memoryViews"] = serde_json::json!([{
+            "agentId": agent,
+            "version": 2,
+            "userProfileIds": [profile.id, too_long.id],
+            "agentNoteIds": [note.id]
+        }]);
+        std::fs::write(dir.join("control-plane.json"), snapshot.to_string()).unwrap();
+
+        let boot = || async {
+            let state: SharedDaemonState =
+                Arc::new(tokio::sync::RwLock::new(crate::state::DaemonState::new()));
+            configure_memory_store(&state, Some(memory_config.clone()))
+                .await
+                .unwrap();
+            configure_control_plane_store(&state, Some(control_config.clone()))
+                .await
+                .unwrap();
+            write_core_memory_copies(&state).await;
+            state
+        };
+        let too_long_id = too_long.id.clone();
+        let blocks = |state: SharedDaemonState| {
+            let agent = agent.clone();
+            let too_long_id = too_long_id.clone();
+            async move {
+                let memory = state.read().await.memory_handle();
+                let manager = memory.read().await;
+                let (user, notes) = crate::core_memory::blocks_for(&manager, &agent);
+                let ids = |entries: Vec<anima_memory::Memory>| {
+                    entries
+                        .into_iter()
+                        .map(|memory| memory.id)
+                        .collect::<Vec<_>>()
+                };
+                (ids(user), ids(notes), manager.get(&too_long_id).unwrap())
+            }
+        };
+
+        let state = boot().await;
+        let (user, notes, skipped) = blocks(state).await;
+        assert_eq!(user, [profile.id.clone()]);
+        assert_eq!(notes, [note.id.clone()]);
+        assert_eq!(skipped, too_long, "an over-long pin is left untouched");
+        let saved = load_memory_snapshot(&memory_config).await.unwrap().unwrap();
+        assert!(saved.memories.iter().any(|memory| memory.id == profile.id
+            && memory
+                .tags
+                .as_ref()
+                .unwrap()
+                .contains(&"core:user".to_string())));
+        let control = std::fs::read_to_string(dir.join("control-plane.json")).unwrap();
+        assert!(!control.contains("memoryViews"), "the pins are dropped");
+        let profile_dir = workspace.join(profile_relative(&agent));
+        assert_eq!(
+            std::fs::read_to_string(profile_dir.join("USER.md")).unwrap(),
+            format!("{HEADER}\n- prefers metric units\n")
+        );
+        assert_eq!(
+            std::fs::read_to_string(profile_dir.join("MEMORY.md")).unwrap(),
+            format!("{HEADER}\n- the build needs bun\n")
+        );
+
+        let memory_before = std::fs::read(dir.join("memory.json")).unwrap();
+        let state = boot().await;
+        assert_eq!(
+            std::fs::read(dir.join("memory.json")).unwrap(),
+            memory_before,
+            "a second boot changes nothing"
+        );
+        let (user, notes, _) = blocks(state).await;
+        assert_eq!((user, notes), (vec![profile.id], vec![note.id]));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -1159,6 +1664,122 @@ mod tests {
             "the atomic writer's temp file must not survive a failed rename"
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn memory_defaults_to_sqlite_next_to_the_control_plane_file() {
+        let control_plane = Path::new("/data/anima/control-plane.json");
+        let choice = memory_store_choice(None, None, false, Some(control_plane)).unwrap();
+        assert_eq!(
+            choice,
+            Some(MemoryStoreChoice::Sqlite(PathBuf::from(
+                "/data/anima/memory.sqlite"
+            )))
+        );
+        // A bare file name resolves next to it in the working directory.
+        let choice = memory_store_choice(None, None, false, Some(Path::new("cp.json"))).unwrap();
+        assert_eq!(
+            choice,
+            Some(MemoryStoreChoice::Sqlite(PathBuf::from("memory.sqlite")))
+        );
+    }
+
+    #[test]
+    fn an_explicit_memory_store_beats_the_default() {
+        let control_plane = Path::new("/data/anima/control-plane.json");
+        let json = PathBuf::from("/elsewhere/memory.json");
+        let sqlite = PathBuf::from("/elsewhere/memory.db");
+        assert_eq!(
+            memory_store_choice(Some(json.clone()), None, false, Some(control_plane)).unwrap(),
+            Some(MemoryStoreChoice::Json(json.clone()))
+        );
+        assert_eq!(
+            memory_store_choice(None, Some(sqlite.clone()), false, Some(control_plane)).unwrap(),
+            Some(MemoryStoreChoice::Sqlite(sqlite.clone()))
+        );
+        assert!(memory_store_choice(Some(json), Some(sqlite), false, Some(control_plane)).is_err());
+        // Postgres is configured memory too, so it keeps winning over the file default.
+        assert_eq!(
+            memory_store_choice(None, None, true, Some(control_plane)).unwrap(),
+            Some(MemoryStoreChoice::Postgres)
+        );
+    }
+
+    #[test]
+    fn without_a_control_plane_file_memory_stays_memory_only() {
+        assert_eq!(memory_store_choice(None, None, false, None).unwrap(), None);
+    }
+
+    #[test]
+    fn the_model_cache_sits_in_models_beside_the_memory_store_file() {
+        let sqlite = MemoryStoreConfig::Sqlite(PathBuf::from("/data/anima/memory.sqlite"));
+        assert_eq!(
+            default_model_cache_dir(&sqlite),
+            Some(PathBuf::from("/data/anima/models"))
+        );
+        let json = MemoryStoreConfig::Json(PathBuf::from("memory.json"));
+        assert_eq!(
+            default_model_cache_dir(&json),
+            Some(PathBuf::from("models"))
+        );
+    }
+
+    #[tokio::test]
+    async fn boot_starts_the_model_load_without_waiting_for_it() {
+        use crate::memory_embeddings::{test_support, MemoryEmbeddingLoad};
+
+        let state: SharedDaemonState =
+            Arc::new(tokio::sync::RwLock::new(crate::state::DaemonState::new()));
+        let (loader, release) = test_support::gated_model_loader(40);
+        state
+            .write()
+            .await
+            .replace_memory_embeddings(test_support::awaiting(loader));
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            start_memory_model_load(&state),
+        )
+        .await
+        .expect("boot does not wait for the model");
+        let embeddings = state.read().await.memory_embeddings_handle();
+        assert_eq!(
+            embeddings.read().await.status().load,
+            MemoryEmbeddingLoad::Pending
+        );
+
+        release.send(()).unwrap();
+        for _ in 0..200 {
+            if embeddings.read().await.status().load == MemoryEmbeddingLoad::Ready {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            embeddings.read().await.status().load,
+            MemoryEmbeddingLoad::Ready
+        );
+        assert_eq!(embeddings.read().await.status().dimension, 40);
+    }
+
+    #[tokio::test]
+    async fn an_embedded_daemon_keeps_basic_search_instead_of_downloading() {
+        use crate::memory_embeddings::{test_support, MemoryEmbeddingLoad};
+
+        let state: SharedDaemonState =
+            Arc::new(tokio::sync::RwLock::new(crate::state::DaemonState::new()));
+        let (loader, calls) = test_support::fake_model_loader(40);
+        state
+            .write()
+            .await
+            .replace_memory_embeddings(test_support::awaiting(loader));
+
+        skip_memory_model_load(&state).await;
+
+        let embeddings = state.read().await.memory_embeddings_handle();
+        let status = embeddings.read().await.status();
+        assert!(matches!(status.load, MemoryEmbeddingLoad::Fallback(_)));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 }
 

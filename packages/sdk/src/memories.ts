@@ -103,47 +103,47 @@ export interface MemoryRecallResult {
   importanceScore: number;
 }
 
-/** Owner-selected views over current canonical private Fact records. */
-export interface MemoryViewSource {
+/** The two core memory blocks: "About you" is `user`, "Agent notes" is `notes`. */
+export type CoreMemoryBlockName = 'user' | 'notes';
+
+/** Untrusted text: the companion may have written it, so show it as text. */
+export interface CoreMemoryEntry {
   id: string;
   content: string;
-  sourceHash: string;
+  /** Scanner ids the text trips; the agent sees a flagged entry only as these. */
+  flagged: string[];
 }
 
-export interface MemoryViewUnavailable {
-  id: string;
-  reason: 'unavailable';
+export interface CoreMemoryBlock {
+  /** Characters the entries use together, out of `limit`. */
+  used: number;
+  limit: number;
+  /** In creation order. */
+  entries: CoreMemoryEntry[];
 }
 
-export interface MemoryViews {
-  version: number;
-  viewDigest: string;
-  userProfile: MemoryViewSource[];
-  agentNotes: MemoryViewSource[];
-  unavailable: MemoryViewUnavailable[];
+export interface CoreMemory {
+  user: CoreMemoryBlock;
+  notes: CoreMemoryBlock;
 }
 
-export interface MemoryViewPick {
-  id: string;
-  sourceHash: string;
+/** The answer to an add, edit or delete: both blocks as they are now. */
+export interface CoreMemoryEdit extends CoreMemory {
+  /** The entry added, changed or removed. */
+  entryId: string;
+  /** False for an exact duplicate add, which changes nothing. */
+  changed: boolean;
+  /** Scanner ids on the new text; it was saved anyway. */
+  warnings: string[];
 }
 
-export interface MemoryViewsSelectionInput {
-  expectedVersion: number;
-  userProfile: MemoryViewPick[];
-  agentNotes: MemoryViewPick[];
-}
+export type MemoryExportFormat = 'json' | 'md';
 
-export interface MemoryViewCandidates {
-  candidates: MemoryViewSource[];
-  hasMore: boolean;
-}
-
-export interface MemoryViewCorrectionInput {
-  expectedVersion: number;
-  expectedContent: string;
-  expectedSourceHash: string;
-  content: string;
+export interface MemoryExportOptions {
+  /** `json` (default) or `md`. */
+  format?: MemoryExportFormat;
+  /** One agent; every agent when absent. */
+  agentId?: string;
 }
 
 export interface MemoryEvidenceTrace {
@@ -171,6 +171,14 @@ export interface MemoryRetentionReport {
   removedRelationshipIds: string[];
 }
 
+/** Where the search model stands: it loads in the background after boot. */
+export type MemoryEmbeddingLoadStatus =
+  | 'downloading'
+  | 'rebuilding'
+  | 'ready'
+  | 'fallback'
+  | 'off';
+
 export interface MemoryEmbeddingStatus {
   enabled: boolean;
   provider: string;
@@ -179,6 +187,12 @@ export interface MemoryEmbeddingStatus {
   vectorCount: number;
   persisted: boolean;
   storageFile?: string | null;
+  status: MemoryEmbeddingLoadStatus;
+  /** Memories with a vector from the active embedder, out of `total`. */
+  done: number;
+  total: number;
+  /** Why search fell back to basic search; only with `fallback`. */
+  reason?: string;
 }
 
 export interface MemoryEvalCheckResult {
@@ -200,9 +214,19 @@ export interface MemoryEvalReport {
   cases: MemoryEvalCaseResult[];
 }
 
+/** The external memory provider beside the local store; `none` by default. */
+export interface ExternalMemoryProviderStatus {
+  id: string;
+  status: 'ready' | 'unavailable';
+  /** Why it is unavailable; only with `unavailable`. */
+  reason?: string;
+}
+
 export interface MemoryReadiness {
   passed: boolean;
   embeddings: MemoryEmbeddingStatus;
+  /** Absent from daemons that predate the external provider plug-in point. */
+  externalProvider?: ExternalMemoryProviderStatus;
   evaluation: MemoryEvalReport;
 }
 
@@ -441,49 +465,63 @@ export class MemoriesClient {
     return response.facts;
   }
 
-  async getViews(
+  async coreMemory(
     agentId: string,
     options: { signal?: AbortSignal } = {},
-  ): Promise<MemoryViews> {
-    return this.client.requestJson<MemoryViews>(
-      `${agentPath(agentId)}/memory-views`,
+  ): Promise<CoreMemory> {
+    return this.client.requestJson<CoreMemory>(
+      `${agentPath(agentId)}/core-memory`,
       { signal: options.signal },
     );
   }
 
-  async selectViews(
+  async addCoreEntry(
     agentId: string,
-    input: MemoryViewsSelectionInput,
-  ): Promise<MemoryViews> {
-    return this.client.requestJson<MemoryViews>(
-      `${agentPath(agentId)}/memory-views`,
-      { method: 'PATCH', body: input },
+    block: CoreMemoryBlockName,
+    text: string,
+  ): Promise<CoreMemoryEdit> {
+    return this.client.requestJson<CoreMemoryEdit>(
+      `${agentPath(agentId)}/core-memory/${block}`,
+      { method: 'POST', body: { text } },
     );
   }
 
-  async viewCandidates(
+  async updateCoreEntry(
     agentId: string,
-    query?: string,
-    options: { signal?: AbortSignal } = {},
-  ): Promise<MemoryViewCandidates> {
+    block: CoreMemoryBlockName,
+    entryId: string,
+    text: string,
+  ): Promise<CoreMemoryEdit> {
+    return this.client.requestJson<CoreMemoryEdit>(
+      `${agentPath(agentId)}/core-memory/${block}/${encodeURIComponent(entryId)}`,
+      { method: 'PATCH', body: { text } },
+    );
+  }
+
+  async removeCoreEntry(
+    agentId: string,
+    block: CoreMemoryBlockName,
+    entryId: string,
+  ): Promise<CoreMemoryEdit> {
+    return this.client.requestJson<CoreMemoryEdit>(
+      `${agentPath(agentId)}/core-memory/${block}/${encodeURIComponent(entryId)}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  /** The owner's memory as a downloadable file: JSON (default) or Markdown. */
+  async exportMemories(options: MemoryExportOptions = {}): Promise<Blob> {
     const search = new URLSearchParams();
-    if (query !== undefined) search.set('q', query);
-    const suffix = search.size ? `?${search.toString()}` : '';
-    return this.client.requestJson<MemoryViewCandidates>(
-      `${agentPath(agentId)}/memory-views/candidates${suffix}`,
-      { signal: options.signal },
-    );
-  }
-
-  async correctViewSource(
-    agentId: string,
-    sourceId: string,
-    input: MemoryViewCorrectionInput,
-  ): Promise<MemoryViews> {
-    return this.client.requestJson<MemoryViews>(
-      `${agentPath(agentId)}/memory-views/sources/${encodeURIComponent(sourceId)}`,
-      { method: 'PATCH', body: input },
-    );
+    if (options.format !== undefined) {
+      search.set('format', options.format);
+    }
+    if (options.agentId !== undefined) {
+      search.set('agentId', options.agentId);
+    }
+    const path = search.size
+      ? `/api/memories/export?${search.toString()}`
+      : '/api/memories/export';
+    return this.client.requestBlob(path);
   }
 
   async replaceFact(

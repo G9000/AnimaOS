@@ -49,13 +49,13 @@ pub(crate) use gcalendar::*;
 pub(crate) use logs::{LogLineResponse, LogsEnvelope};
 pub(crate) use memories::{
     AgentRelationshipCreateRequest, AgentRelationshipQuery, AgentRelationshipResponse,
-    AgentRelationshipsEnvelope, MemoriesEnvelope, MemoryCreateRequest, MemoryEntitiesEnvelope,
-    MemoryEntityCreateRequest, MemoryEntityQuery, MemoryEntityResponse,
-    MemoryEvaluationOutcomeResponse, MemoryEvaluationRequest, MemoryEvaluationResponse,
-    MemoryEvidenceTraceResponse, MemoryReadinessResponse, MemoryRecallEnvelope, MemoryRecallQuery,
-    MemoryRecallResultResponse, MemoryResponse, MemoryRetentionReportResponse,
-    MemoryRetentionRequest, MemorySearchEnvelope, MemorySearchQuery, MemorySearchResultResponse,
-    RecentMemoriesQuery,
+    AgentRelationshipsEnvelope, ExternalProviderStatusResponse, MemoriesEnvelope,
+    MemoryCreateRequest, MemoryEntitiesEnvelope, MemoryEntityCreateRequest, MemoryEntityQuery,
+    MemoryEntityResponse, MemoryEvaluationOutcomeResponse, MemoryEvaluationRequest,
+    MemoryEvaluationResponse, MemoryEvidenceTraceResponse, MemoryReadinessResponse,
+    MemoryRecallEnvelope, MemoryRecallQuery, MemoryRecallResultResponse, MemoryResponse,
+    MemoryRetentionReportResponse, MemoryRetentionRequest, MemorySearchEnvelope, MemorySearchQuery,
+    MemorySearchResultResponse, RecentMemoriesQuery,
 };
 pub(crate) use memory_edits::{
     EntityDeleteResponse, FactDeleteResponse, FactPatchRequest, FactReplacedResponse,

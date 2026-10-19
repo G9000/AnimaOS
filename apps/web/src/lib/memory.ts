@@ -83,6 +83,16 @@ export function formatTags(tags: readonly string[] | null | undefined): string {
   return tags ? tags.join(', ') : '';
 }
 
+/** The core memory block a memory belongs to ("About you" or "Agent notes"),
+ *  or null for an ordinary memory. Core entries change only in that panel. */
+export function coreBlockLabel(
+  tags: readonly string[] | null | undefined,
+): 'About you' | 'Agent notes' | null {
+  if (tags?.includes('core:user')) return 'About you';
+  if (tags?.includes('core:notes')) return 'Agent notes';
+  return null;
+}
+
 export function importanceLabel(importance: number): 'High' | 'Medium' | 'Low' {
   if (importance >= 0.7) return 'High';
   if (importance >= 0.4) return 'Medium';

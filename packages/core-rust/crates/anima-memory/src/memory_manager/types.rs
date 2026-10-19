@@ -35,6 +35,7 @@ pub enum MemoryError {
     InvalidTemporalValidityRange,
     InvalidMemoryContent,
     EntityOwnsMemories,
+    MemoryNotFound,
 }
 
 impl MemoryError {
@@ -66,6 +67,7 @@ impl MemoryError {
             }
             Self::InvalidMemoryContent => "content must not be empty",
             Self::EntityOwnsMemories => "entity still owns memories",
+            Self::MemoryNotFound => "memory not found",
         }
     }
 }

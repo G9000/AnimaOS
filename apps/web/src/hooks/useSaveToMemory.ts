@@ -20,7 +20,6 @@ export type SaveOutcome =
 export interface SaveToMemoryTarget {
   agentId: string;
   agentName: string;
-  sessionId: string;
 }
 
 export interface SavedState {
@@ -51,10 +50,12 @@ function contentOf(message: ChatMessage): {
 }
 
 /**
- * Saves a chat message as a Fact (spec §10). One save per message: a saved
- * message answers 'saved' again without calling the daemon, and a save in
- * flight is shared. Both functions keep their identity while the target
- * does, so the transcript's bubbles do not render again when one is saved.
+ * Saves a chat message as a Fact (spec §10). The Fact carries no session,
+ * because a session-scoped Fact never reaches a run's context. One save per
+ * message: a saved message answers 'saved' again without calling the daemon,
+ * and a save in flight is shared. Both functions keep their identity while the
+ * target does, so the transcript's bubbles do not render again when one is
+ * saved.
  */
 export function useSaveToMemory(target: SaveToMemoryTarget | null): {
   save: (message: ChatMessage) => Promise<SaveOutcome>;
@@ -64,7 +65,6 @@ export function useSaveToMemory(target: SaveToMemoryTarget | null): {
   const inFlight = useRef(new Map<string, Promise<SaveOutcome>>());
   const agentId = target?.agentId;
   const agentName = target?.agentName;
-  const sessionId = target?.sessionId;
 
   const save = useCallback(
     (message: ChatMessage): Promise<SaveOutcome> => {
@@ -74,7 +74,7 @@ export function useSaveToMemory(target: SaveToMemoryTarget | null): {
       }
       const pending = inFlight.current.get(message.id);
       if (pending) return pending;
-      if (!agentId || !agentName || !sessionId) return Promise.resolve(FAILED);
+      if (!agentId || !agentName) return Promise.resolve(FAILED);
       const { content, shortened } = contentOf(message);
       if (!content) return Promise.resolve(FAILED);
       const request = daemon
@@ -85,7 +85,6 @@ export function useSaveToMemory(target: SaveToMemoryTarget | null): {
           content,
           importance: SAVED_IMPORTANCE,
           tags: [SAVED_FROM_CHAT_TAG],
-          sessionId,
         })
         .then(
           (): SaveOutcome => {
@@ -103,7 +102,7 @@ export function useSaveToMemory(target: SaveToMemoryTarget | null): {
       inFlight.current.set(message.id, request);
       return request;
     },
-    [agentId, agentName, sessionId],
+    [agentId, agentName],
   );
   const savedState = useCallback(
     (messageId: string) => saved.current.get(messageId) ?? null,

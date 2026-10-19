@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use super::shared::{parse_importance, parse_usize, required_string};
-use crate::memory_embeddings::MemoryEmbeddingStatus;
+use crate::memory_embeddings::{MemoryEmbeddingLoad, MemoryEmbeddingStatus};
 
 fn parse_relationship_endpoint_kind(value: &str) -> Result<RelationshipEndpointKind, &'static str> {
     RelationshipEndpointKind::from_str(value)
@@ -180,6 +180,14 @@ pub(crate) struct MemoryEmbeddingStatusResponse {
     pub(crate) vector_count: usize,
     pub(crate) persisted: bool,
     pub(crate) storage_file: Option<String>,
+    /// `downloading`, `rebuilding`, `ready`, `fallback`, or `off`.
+    pub(crate) status: String,
+    /// Memories with a vector from the active embedder, out of `total`.
+    pub(crate) done: usize,
+    pub(crate) total: usize,
+    /// Why search fell back to hashed vectors, without paths or URLs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -207,11 +215,24 @@ pub(crate) struct MemoryEvalReportResponse {
     pub(crate) cases: Vec<MemoryEvalCaseResultResponse>,
 }
 
+/// The external memory provider beside the local store (`none` by default).
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ExternalProviderStatusResponse {
+    pub(crate) id: String,
+    /// `ready` or `unavailable`.
+    pub(crate) status: String,
+    /// Why it is unavailable; only with `unavailable`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) reason: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MemoryReadinessResponse {
     pub(crate) passed: bool,
     pub(crate) embeddings: MemoryEmbeddingStatusResponse,
+    pub(crate) external_provider: ExternalProviderStatusResponse,
     pub(crate) evaluation: MemoryEvalReportResponse,
 }
 
@@ -941,6 +962,13 @@ impl From<&MemoryEmbeddingStatus> for MemoryEmbeddingStatusResponse {
                 .storage_file
                 .as_ref()
                 .map(|path| path.display().to_string()),
+            status: value.load.label().to_string(),
+            done: value.done,
+            total: value.total,
+            reason: match &value.load {
+                MemoryEmbeddingLoad::Fallback(reason) => Some(reason.clone()),
+                _ => None,
+            },
         }
     }
 }
@@ -981,5 +1009,56 @@ impl From<&MemoryEvalReport> for MemoryEvalReportResponse {
                 .map(MemoryEvalCaseResultResponse::from)
                 .collect(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn status(load: MemoryEmbeddingLoad, done: usize, total: usize) -> MemoryEmbeddingStatus {
+        MemoryEmbeddingStatus {
+            enabled: true,
+            provider: "fastembed".into(),
+            model: "intfloat/multilingual-e5-small".into(),
+            dimension: 96,
+            vector_count: 3,
+            persisted: true,
+            storage_file: None,
+            load,
+            done,
+            total,
+        }
+    }
+
+    #[test]
+    fn readiness_reports_the_embedding_load_status() {
+        let json = |load, done, total| {
+            serde_json::to_value(MemoryEmbeddingStatusResponse::from(&status(
+                load, done, total,
+            )))
+            .unwrap()
+        };
+
+        let rebuilding = json(MemoryEmbeddingLoad::Rebuilding { done: 2, total: 5 }, 2, 5);
+        assert_eq!(rebuilding["provider"], "fastembed");
+        assert_eq!(rebuilding["model"], "intfloat/multilingual-e5-small");
+        assert_eq!(rebuilding["status"], "rebuilding");
+        assert_eq!(
+            (rebuilding["done"].as_u64(), rebuilding["total"].as_u64()),
+            (Some(2), Some(5))
+        );
+        assert!(rebuilding.get("reason").is_none());
+
+        let fallback = json(MemoryEmbeddingLoad::Fallback("offline".into()), 0, 0);
+        assert_eq!(fallback["status"], "fallback");
+        assert_eq!(fallback["reason"], "offline");
+
+        assert_eq!(
+            json(MemoryEmbeddingLoad::Pending, 0, 0)["status"],
+            "downloading"
+        );
+        assert_eq!(json(MemoryEmbeddingLoad::Ready, 3, 3)["status"], "ready");
+        assert_eq!(json(MemoryEmbeddingLoad::Off, 0, 0)["status"], "off");
     }
 }

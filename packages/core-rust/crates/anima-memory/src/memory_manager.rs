@@ -124,7 +124,10 @@ impl MemoryManager {
         }
         let eligible = |memory: &Memory| {
             memory.agent_id == opts.agent_id
-                && memory.memory_type == MemoryType::Fact
+                && matches!(
+                    memory.memory_type,
+                    MemoryType::Fact | MemoryType::Reflection
+                )
                 && memory.world_id.is_none()
                 && memory.session_id.is_none()
                 && (memory.scope != MemoryScope::Room
@@ -1185,12 +1188,35 @@ impl MemoryManager {
         policy: MemoryRetentionPolicy,
         now: u64,
     ) -> Result<MemoryRetentionReport, MemoryError> {
+        self.apply_retention_protecting_at(policy, now, |_| false)
+    }
+
+    /// Retention that leaves every memory `protected` accepts untouched: it is
+    /// never decayed or removed and does not count toward `max_memories`.
+    pub fn apply_retention_protecting(
+        &mut self,
+        policy: MemoryRetentionPolicy,
+        protected: impl Fn(&Memory) -> bool,
+    ) -> Result<MemoryRetentionReport, MemoryError> {
+        self.apply_retention_protecting_at(policy, now_millis(), protected)
+    }
+
+    pub fn apply_retention_protecting_at(
+        &mut self,
+        policy: MemoryRetentionPolicy,
+        now: u64,
+        protected: impl Fn(&Memory) -> bool,
+    ) -> Result<MemoryRetentionReport, MemoryError> {
         if let Some(min_importance) = policy.min_importance {
             validate_importance(min_importance)?;
         }
         let mut report = MemoryRetentionReport::default();
         if let Some(half_life) = policy.decay_half_life_millis.filter(|value| *value > 0) {
-            for memory in self.memories.values_mut() {
+            for memory in self
+                .memories
+                .values_mut()
+                .filter(|memory| !protected(memory))
+            {
                 let age = now.saturating_sub(memory.created_at);
                 if age == 0 {
                     continue;
@@ -1211,14 +1237,14 @@ impl MemoryManager {
 
         let mut removed = BTreeSet::new();
         if let Some(max_age) = policy.max_age_millis {
-            for memory in self.memories.values() {
+            for memory in self.memories.values().filter(|memory| !protected(memory)) {
                 if now.saturating_sub(memory.created_at) > max_age {
                     removed.insert(memory.id.clone());
                 }
             }
         }
         if let Some(min_importance) = policy.min_importance {
-            for memory in self.memories.values() {
+            for memory in self.memories.values().filter(|memory| !protected(memory)) {
                 if memory.importance < min_importance {
                     removed.insert(memory.id.clone());
                 }
@@ -1228,7 +1254,7 @@ impl MemoryManager {
             let mut ranked: Vec<_> = self
                 .memories
                 .values()
-                .filter(|memory| !removed.contains(&memory.id))
+                .filter(|memory| !removed.contains(&memory.id) && !protected(memory))
                 .cloned()
                 .collect();
             ranked.sort_by(|left, right| {

@@ -169,4 +169,62 @@ describe('learning client', () => {
       ],
     ]);
   });
+
+  it('reads conversation reviews with core-memory edits and undoes an applied edit', async () => {
+    const conversation = {
+      ...review,
+      trigger: 'conversation' as const,
+      evidenceAnchors: ['turn:run-1'],
+      proposals: [
+        {
+          id: 'edit-1',
+          observation: 'The owner asked for kilometres.',
+          suggestion: 'Add to About you: Prefers metric units',
+          anchors: ['turn:run-1'],
+          decision: 'acknowledged' as const,
+          decisionVersion: 1,
+          memoryId: 'mem-1',
+          coreEdit: {
+            action: 'add' as const,
+            block: 'user' as const,
+            text: 'Prefers metric units',
+          },
+        },
+        {
+          id: 'edit-2',
+          observation: 'Over budget.',
+          suggestion: 'Add to Agent notes: x',
+          anchors: ['turn:run-1'],
+          decision: 'failed' as const,
+          decisionVersion: 1,
+          coreEdit: {
+            action: 'add' as const,
+            block: 'notes' as const,
+            text: 'x',
+            error:
+              'Agent notes is full (2,500/2,500 chars). Replace or remove an entry first.',
+          },
+        },
+      ],
+    };
+    const { learning, requests } = transport((url) =>
+      url.endsWith('/learning-reviews')
+        ? Response.json({ reviews: [conversation] })
+        : Response.json({ review: conversation }),
+    );
+
+    const [listed] = await learning.listReviews('agent/a');
+    expect(listed?.trigger).toBe('conversation');
+    expect(listed?.proposals[0]?.coreEdit?.text).toBe('Prefers metric units');
+    expect(listed?.proposals[1]?.decision).toBe('failed');
+    await learning.undoLesson('agent/a', 'review/1', 'edit-1', {
+      expectedVersion: 1,
+    });
+    expect(requests[1]).toMatchObject({
+      url: '/api/agents/agent%2Fa/learning-reviews/review%2F1/proposals/edit-1/undo',
+    });
+    expect(requests[1]?.init?.body).toBe(
+      JSON.stringify({ expectedVersion: 1 }),
+    );
+  });
 });

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type {
+  LearningCoreEdit,
   LearningDecision,
   LearningPolicy,
+  LearningProposal,
   LearningReview,
   LearningSkillDraftInput,
   Skill,
@@ -335,7 +337,11 @@ export function LearningReviewPanel({
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="font-medium text-ink">Task review</p>
+                <p className="font-medium text-ink">
+                  {review.trigger === 'conversation'
+                    ? 'Conversation review'
+                    : 'Task review'}
+                </p>
                 <p className="mt-1 text-xs text-ink-3">
                   {review.state} · {review.proposals.length} suggestion
                   {review.proposals.length === 1 ? '' : 's'}
@@ -385,107 +391,232 @@ export function LearningReviewPanel({
                     {review.error.message}
                   </p>
                 ) : null}
-                {review.proposals.map((proposal) => (
-                  <LearningSkillDraftForm
-                    key={proposal.id}
-                    agentId={agentId}
-                    review={review}
-                    proposal={proposal}
-                    api={api}
-                    disabled={disabled || busy}
-                    onCreated={(draft) => {
-                      if (
-                        generation.current !== panelGeneration ||
-                        currentAgent.current !== agentId
-                      )
-                        return;
-                      setReviews((current) =>
-                        current.map((item) =>
-                          item.id !== review.id
-                            ? item
-                            : {
-                                ...item,
-                                proposals: item.proposals.map(
-                                  (currentProposal) =>
-                                    currentProposal.id === proposal.id
-                                      ? {
-                                          ...currentProposal,
-                                          skillDraftId: draft.id,
-                                        }
-                                      : currentProposal,
-                                ),
-                              },
-                        ),
-                      );
-                    }}
-                    onSavingChange={(saving) => {
-                      if (generation.current !== panelGeneration) return false;
-                      if (saving) {
-                        if (busyRef.current) return false;
-                        busyRef.current = true;
-                        setBusy(true);
-                        return true;
+                {review.proposals.map((proposal) =>
+                  proposal.coreEdit ? (
+                    <CoreEditProposal
+                      key={proposal.id}
+                      proposal={proposal}
+                      edit={proposal.coreEdit}
+                      disabled={disabled || busy}
+                      onDecide={(decision) =>
+                        void decide(review, proposal.id, decision)
                       }
-                      busyRef.current = false;
-                      setBusy(false);
-                      return true;
-                    }}
-                    onOpenSkills={onOpenSkills}
-                  >
-                    <p className="text-xs font-semibold uppercase tracking-wider text-amber-300">
-                      Unverified advice · not a saved fact or approved skill
-                    </p>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-ink-3">
-                      Observation
-                    </p>
-                    <p className="mt-1 whitespace-pre-wrap break-words text-sm text-ink">
-                      {proposal.observation}
-                    </p>
-                    <p className="mt-2 text-xs font-semibold uppercase tracking-wider text-ink-3">
-                      Suggestion
-                    </p>
-                    <p className="mt-1 whitespace-pre-wrap break-words text-sm text-ink-2">
-                      {proposal.suggestion}
-                    </p>
-                    <p className="mt-2 text-xs text-ink-3">
-                      Evidence: {proposal.anchors.join(', ') || 'task record'}
-                    </p>
-                    {proposal.decision === 'pending' ? (
-                      <div className="mt-3 flex gap-2">
-                        <button
-                          type="button"
-                          className="studio-tool-button"
-                          disabled={disabled || busy}
-                          onClick={() =>
-                            void decide(review, proposal.id, 'acknowledged')
-                          }
-                        >
-                          Acknowledge
-                        </button>
-                        <button
-                          type="button"
-                          className="studio-tool-button"
-                          disabled={disabled || busy}
-                          onClick={() =>
-                            void decide(review, proposal.id, 'dismissed')
-                          }
-                        >
-                          Dismiss
-                        </button>
-                      </div>
-                    ) : (
-                      <p className="mt-3 text-xs text-ink-3">
-                        {proposal.decision}
-                      </p>
-                    )}
-                  </LearningSkillDraftForm>
-                ))}
+                    />
+                  ) : review.trigger === 'conversation' ? (
+                    // A conversation's lessons are not tied to one task, so
+                    // they cannot become a skill draft.
+                    <div
+                      key={proposal.id}
+                      className="rounded-lg border border-line p-3"
+                    >
+                      <LessonBody
+                        proposal={proposal}
+                        disabled={disabled || busy}
+                        onDecide={(decision) =>
+                          void decide(review, proposal.id, decision)
+                        }
+                      />
+                    </div>
+                  ) : (
+                    <LearningSkillDraftForm
+                      key={proposal.id}
+                      agentId={agentId}
+                      review={review}
+                      proposal={proposal}
+                      api={api}
+                      disabled={disabled || busy}
+                      onCreated={(draft) => {
+                        if (
+                          generation.current !== panelGeneration ||
+                          currentAgent.current !== agentId
+                        )
+                          return;
+                        setReviews((current) =>
+                          current.map((item) =>
+                            item.id !== review.id
+                              ? item
+                              : {
+                                  ...item,
+                                  proposals: item.proposals.map(
+                                    (currentProposal) =>
+                                      currentProposal.id === proposal.id
+                                        ? {
+                                            ...currentProposal,
+                                            skillDraftId: draft.id,
+                                          }
+                                        : currentProposal,
+                                  ),
+                                },
+                          ),
+                        );
+                      }}
+                      onSavingChange={(saving) => {
+                        if (generation.current !== panelGeneration)
+                          return false;
+                        if (saving) {
+                          if (busyRef.current) return false;
+                          busyRef.current = true;
+                          setBusy(true);
+                          return true;
+                        }
+                        busyRef.current = false;
+                        setBusy(false);
+                        return true;
+                      }}
+                      onOpenSkills={onOpenSkills}
+                    >
+                      <LessonBody
+                        proposal={proposal}
+                        disabled={disabled || busy}
+                        onDecide={(decision) =>
+                          void decide(review, proposal.id, decision)
+                        }
+                      />
+                    </LearningSkillDraftForm>
+                  ),
+                )}
               </div>
             ) : null}
           </article>
         ))}
       </div>
     </section>
+  );
+}
+
+function LessonBody({
+  proposal,
+  disabled,
+  onDecide,
+}: {
+  proposal: LearningProposal;
+  disabled: boolean;
+  onDecide: (decision: LearningDecision) => void;
+}) {
+  return (
+    <>
+      <p className="text-xs font-semibold uppercase tracking-wider text-amber-300">
+        Unverified advice · not a saved fact or approved skill
+      </p>
+      <p className="text-xs font-semibold uppercase tracking-wider text-ink-3">
+        Observation
+      </p>
+      <p className="mt-1 whitespace-pre-wrap break-words text-sm text-ink">
+        {proposal.observation}
+      </p>
+      <p className="mt-2 text-xs font-semibold uppercase tracking-wider text-ink-3">
+        Suggestion
+      </p>
+      <p className="mt-1 whitespace-pre-wrap break-words text-sm text-ink-2">
+        {proposal.suggestion}
+      </p>
+      <p className="mt-2 text-xs text-ink-3">
+        Evidence: {proposal.anchors.join(', ') || 'task record'}
+      </p>
+      {proposal.decision === 'pending' ? (
+        <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            className="studio-tool-button"
+            disabled={disabled}
+            onClick={() => onDecide('acknowledged')}
+          >
+            Acknowledge
+          </button>
+          <button
+            type="button"
+            className="studio-tool-button"
+            disabled={disabled}
+            onClick={() => onDecide('dismissed')}
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : (
+        <p className="mt-3 text-xs text-ink-3">{proposal.decision}</p>
+      )}
+    </>
+  );
+}
+
+const CORE_BLOCK_LABEL: Record<LearningCoreEdit['block'], string> = {
+  user: 'About you',
+  notes: 'Agent notes',
+};
+
+/** "Add to About you: …", "Replace in Agent notes: … → …", "Remove from …". */
+function coreEditLine(edit: LearningCoreEdit): string {
+  const label = CORE_BLOCK_LABEL[edit.block];
+  switch (edit.action) {
+    case 'add':
+      return `Add to ${label}: ${edit.text ?? ''}`;
+    case 'replace':
+      return `Replace in ${label}: ${edit.oldText ?? ''} → ${edit.text ?? ''}`;
+    case 'remove':
+      return `Remove from ${label}: ${edit.oldText ?? ''}`;
+  }
+}
+
+const CORE_DECISION_LABEL: Record<
+  Exclude<LearningProposal['decision'], 'pending'>,
+  string
+> = {
+  acknowledged: 'Applied to core memory',
+  dismissed: 'Rejected',
+  failed: 'Not applied',
+};
+
+/** A core-memory edit from a conversation review: accepting applies it. */
+function CoreEditProposal({
+  proposal,
+  edit,
+  disabled,
+  onDecide,
+}: {
+  proposal: LearningProposal;
+  edit: LearningCoreEdit;
+  disabled: boolean;
+  onDecide: (decision: LearningDecision) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-line p-3">
+      <p className="text-xs font-semibold uppercase tracking-wider text-ink-3">
+        Core memory edit
+      </p>
+      <p className="mt-1 whitespace-pre-wrap break-words text-sm text-ink">
+        {coreEditLine(edit)}
+      </p>
+      <p className="mt-1 whitespace-pre-wrap break-words text-sm text-ink-2">
+        {proposal.observation}
+      </p>
+      {proposal.decision === 'pending' ? (
+        <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            className="studio-tool-button"
+            disabled={disabled}
+            onClick={() => onDecide('acknowledged')}
+          >
+            Accept
+          </button>
+          <button
+            type="button"
+            className="studio-tool-button"
+            disabled={disabled}
+            onClick={() => onDecide('dismissed')}
+          >
+            Reject
+          </button>
+        </div>
+      ) : (
+        <p className="mt-3 text-xs text-ink-3">
+          {CORE_DECISION_LABEL[proposal.decision]}
+          {proposal.decision === 'failed' && edit.error
+            ? `: ${edit.error}`
+            : ''}
+        </p>
+      )}
+    </div>
   );
 }
 

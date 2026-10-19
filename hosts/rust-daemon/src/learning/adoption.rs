@@ -275,6 +275,11 @@ fn checked_proposal<'a>(
         .iter()
         .find(|proposal| proposal.id == proposal_id)
         .ok_or_else(ApiError::not_found)?;
+    if proposal.core_edit.is_some() {
+        return Err(ApiError::conflict(
+            "A core memory edit cannot become a skill",
+        ));
+    }
     if proposal.decision == LearningDecision::Dismissed
         || proposal.decision_version != input.expected_version
     {

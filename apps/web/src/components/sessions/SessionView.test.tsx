@@ -473,10 +473,10 @@ describe('SessionView', () => {
       expect.objectContaining({
         agentId: 'helper-7',
         agentName: 'Researcher',
-        sessionId: 'room-9',
         content: 'Found the answer',
       }),
     );
+    expect(saveMemory.mock.calls[0]?.[0]).not.toHaveProperty('sessionId');
   });
 
   it('saves a helper’s message with the session’s own agent when the agent shown is the companion', async () => {

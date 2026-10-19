@@ -19,8 +19,8 @@ import {
   type AutomationTrigger,
   type HeartbeatInput,
   type MemoryFactOptions,
-  type MemoryViewsSelectionInput,
-  type MemoryViewCorrectionInput,
+  type CoreMemoryBlockName,
+  type MemoryExportOptions,
   type McpCreateInput,
   type McpUpdateInput,
   type McpVersionInput,
@@ -704,20 +704,27 @@ export const daemon = {
   saveMemory: (input: CreateMemoryInput) => setupClient.memories.create(input),
   listFacts: (options: MemoryFactOptions) =>
     setupClient.memories.facts(options),
-  getMemoryViews: (agentId: string, options: { signal?: AbortSignal } = {}) =>
-    setupClient.memories.getViews(agentId, options),
-  selectMemoryViews: (agentId: string, input: MemoryViewsSelectionInput) =>
-    setupClient.memories.selectViews(agentId, input),
-  memoryViewCandidates: (
+  coreMemory: (agentId: string, options: { signal?: AbortSignal } = {}) =>
+    setupClient.memories.coreMemory(agentId, options),
+  addCoreEntry: (
     agentId: string,
-    query?: string,
-    options: { signal?: AbortSignal } = {},
-  ) => setupClient.memories.viewCandidates(agentId, query, options),
-  correctMemoryViewSource: (
+    block: CoreMemoryBlockName,
+    text: string,
+  ) => setupClient.memories.addCoreEntry(agentId, block, text),
+  updateCoreEntry: (
     agentId: string,
-    sourceId: string,
-    input: MemoryViewCorrectionInput,
-  ) => setupClient.memories.correctViewSource(agentId, sourceId, input),
+    block: CoreMemoryBlockName,
+    entryId: string,
+    text: string,
+  ) => setupClient.memories.updateCoreEntry(agentId, block, entryId, text),
+  removeCoreEntry: (
+    agentId: string,
+    block: CoreMemoryBlockName,
+    entryId: string,
+  ) => setupClient.memories.removeCoreEntry(agentId, block, entryId),
+  /** The owner's memory as a file: JSON or Markdown, one agent or all. */
+  exportMemories: (options: MemoryExportOptions = {}) =>
+    setupClient.memories.exportMemories(options),
   replaceFact: (id: string, value: string) =>
     setupClient.memories.replaceFact(id, value),
   deleteFact: (id: string) => setupClient.memories.deleteFact(id),

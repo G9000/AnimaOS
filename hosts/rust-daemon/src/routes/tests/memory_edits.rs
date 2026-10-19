@@ -20,35 +20,6 @@ use anima_memory::{NewTemporalFact, RelationshipEndpointKind, TemporalFact, Temp
 const OWNER_ORIGIN: &str = "http://localhost:4200";
 const FOREIGN_ORIGIN: &str = "http://evil.example";
 
-#[tokio::test]
-async fn m40_empty_owner_memory_views_read_has_a_versioned_derived_view() {
-    let mut state = DaemonState::new();
-    let agent = state
-        .create_agent(test_config("Profile companion"))
-        .unwrap()
-        .state
-        .id;
-    let state = Arc::new(RwLock::new(state));
-    let app = router(state, DaemonConfig::default());
-    let response = send(
-        &app,
-        "GET",
-        &format!("/api/agents/{agent}/memory-views"),
-        None,
-    )
-    .await;
-    assert_eq!(
-        response.status(),
-        StatusCode::OK,
-        "the owner can read an empty selected-fact view without creating a profile store"
-    );
-    assert_eq!(response.headers()["cache-control"], "no-store");
-    let view = json_body(response).await;
-    assert_eq!(view["version"], 0);
-    assert_eq!(view["userProfile"], json!([]));
-    assert_eq!(view["agentNotes"], json!([]));
-}
-
 fn request(method: &str, uri: &str, origin: &str, body: Option<Value>) -> Request<Body> {
     let builder = Request::builder()
         .method(method)

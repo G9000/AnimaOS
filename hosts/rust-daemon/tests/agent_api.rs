@@ -625,102 +625,8 @@ async fn run_agent_reuses_async_runtime_state_across_provider_and_tool_paths() {
         .lines()
         .any(|line| line == "\"provider context memory\""));
     assert!(tool_run.contains("provider context memory"));
-    assert!(recent_response.contains("\"type\":\"reflection\""));
-}
-
-#[tokio::test]
-async fn run_agent_persists_reflection_memory_from_evaluator() {
-    let app = test_app();
-    let (_, create_response) = create_agent(&app, r#"{"name":"operator","model":"gpt-5.4"}"#).await;
-    let agent_id = extract_json_string_field(&create_response, "id");
-
-    let (run_status, run_response) = run_agent(
-        &app,
-        &agent_id,
-        r#"{"text":"I prefer terse release summaries","metadata":{"userId":"user-42","userName":"Leo"}}"#,
-    )
-    .await;
-    let (_, recent_response) = send_empty_request(
-        &app,
-        "GET",
-        &format!("/api/agents/{agent_id}/memories/recent?limit=3"),
-    )
-    .await;
-    let (relationships_status, relationships_response) = send_empty_request(
-        &app,
-        "GET",
-        "/api/memories/relationships?entityId=user-42&targetKind=user",
-    )
-    .await;
-
-    assert_eq!(run_status, StatusCode::OK);
-    assert!(run_response.contains("\"status\":\"success\""));
-    assert!(recent_response.contains("\"type\":\"reflection\""));
-    assert!(recent_response
-        .contains("evaluated response: operator handled task: I prefer terse release summaries"));
-    assert!(recent_response.contains("user stated preference: I prefer terse release summaries"));
-    assert_eq!(relationships_status, StatusCode::OK);
-    let relationships_json: Value =
-        serde_json::from_str(&relationships_response).expect("relationships response is json");
-    let relationships = relationships_json["relationships"]
-        .as_array()
-        .expect("relationships should be an array");
-    assert_eq!(relationships.len(), 1);
-    let relationship = &relationships[0];
-    assert_eq!(relationship["targetKind"], "user");
-    assert_eq!(relationship["targetAgentId"], "user-42");
-    assert_eq!(relationship["relationshipType"], "responds_to");
-    assert!(relationship["tags"]
-        .as_array()
-        .expect("relationship tags should be an array")
-        .iter()
-        .any(|tag| tag == "relation:communication_preference"));
-    let relationship_id = relationship["id"]
-        .as_str()
-        .expect("relationship should include id");
-    let evidence_memory_ids = relationship["evidenceMemoryIds"]
-        .as_array()
-        .expect("relationship should include evidence memory ids");
-    assert!(evidence_memory_ids.len() >= 2);
-    let evidence_memory_id = evidence_memory_ids[0]
-        .as_str()
-        .expect("evidence memory id should be a string");
-
-    let (recall_status, recall_response) = send_empty_request(
-        &app,
-        "GET",
-        "/api/memories/recall?q=no-keyword-match&entityId=user-42&recentLimit=0&limit=5",
-    )
-    .await;
-    assert_eq!(recall_status, StatusCode::OK);
-    let recall_json: Value =
-        serde_json::from_str(&recall_response).expect("recall response is json");
-    let recall_results = recall_json["results"]
-        .as_array()
-        .expect("recall results should be an array");
-    assert!(recall_results.iter().any(|result| {
-        result["memory"]["id"] == evidence_memory_id
-            && result["relationshipScore"].as_f64().unwrap_or_default() > 0.0
-    }));
-
-    let (trace_status, trace_response) = send_empty_request(
-        &app,
-        "GET",
-        &format!("/api/memories/{evidence_memory_id}/trace"),
-    )
-    .await;
-    assert_eq!(trace_status, StatusCode::OK);
-    let trace_json: Value = serde_json::from_str(&trace_response).expect("trace response is json");
-    assert!(trace_json["relationships"]
-        .as_array()
-        .expect("trace relationships should be an array")
-        .iter()
-        .any(|trace_relationship| trace_relationship["id"] == relationship_id));
-    assert!(trace_json["entities"]
-        .as_array()
-        .expect("trace entities should be an array")
-        .iter()
-        .any(|entity| entity["id"] == "user-42"));
+    assert!(recent_response.contains("\"type\":\"task_result\""));
+    assert!(!recent_response.contains("\"type\":\"reflection\""));
 }
 
 #[tokio::test]
@@ -741,7 +647,7 @@ async fn run_agent_without_user_metadata_does_not_create_user_relationship() {
 
     assert_eq!(run_status, StatusCode::OK);
     assert_eq!(recent_status, StatusCode::OK);
-    assert!(recent_response.contains("\"type\":\"reflection\""));
+    assert!(!recent_response.contains("\"type\":\"reflection\""));
     assert_eq!(relationships_status, StatusCode::OK);
     assert!(relationships_response.contains("\"relationships\":[]"));
 }

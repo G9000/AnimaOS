@@ -52,6 +52,7 @@ const WRITE_TOOLS: &[&str] = &[
     "todo_write",
     "todo_list",
     "memory_add",
+    "core_memory",
     "memory_update",
     "memory_remove",
     "memory_consolidate",

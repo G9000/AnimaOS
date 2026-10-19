@@ -14,7 +14,7 @@ struct FakeSession {
     closed: Arc<AtomicUsize>,
 }
 impl GatewayFactory for FakeGateway {
-    fn session(&self, _: &DiscordBotToken) -> Box<dyn GatewaySession> {
+    fn session(&self, _: &DiscordBotToken, _: &str) -> Box<dyn GatewaySession> {
         Box::new(FakeSession {
             events: self.events.lock().unwrap().take().unwrap(),
             connected: self.connected.clone(),

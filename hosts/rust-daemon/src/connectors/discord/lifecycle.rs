@@ -37,12 +37,10 @@ impl DiscordManager {
             if state.get_agent(&agent).is_none() {
                 return Err(DiscordManagerError::NotFound);
             }
-            if state
-                .discord_connectors
-                .values()
-                .any(|c| c.agent_id == agent && c.deleted_at_ms.is_none())
-            {
-                return Err(DiscordManagerError::Conflict);
+            if state.discord_connectors.values().any(|c| {
+                c.agent_id == agent && c.channel.id == channel && c.deleted_at_ms.is_none()
+            }) {
+                return Err(DiscordManagerError::DuplicateChannel);
             }
         }
         let adapter = self.registry.discord(&token, &channel);

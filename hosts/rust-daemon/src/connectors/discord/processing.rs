@@ -278,6 +278,7 @@ impl DiscordManager {
                 DataValue::String(inbound.sender.id.clone()),
             );
         }
+        let text = inbound.as_ref().map_or(text, sender::attributed_text);
         let request = AgentRunRequest {
             agent_id: c.agent_id.clone(),
             content: Content {

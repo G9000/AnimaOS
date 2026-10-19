@@ -10,6 +10,9 @@ interface Props {
 }
 
 interface Snapshot {
+  search: string;
+  /** "External memory: <id> — ready"; absent for the default `none`. */
+  externalMemory: string | null;
   enabled: boolean;
   provider: string;
   model: string;
@@ -71,12 +74,71 @@ function modelName(value: unknown): value is string {
   );
 }
 
+const FALLBACK_GENERIC = 'the search model could not load';
+
+// The daemon leaves paths and URLs out of the reason; anything that still
+// looks like one, or carries controls, shows the generic reason instead.
+function fallbackReason(
+  value: unknown,
+  generic: string = FALLBACK_GENERIC,
+): string {
+  const unsafe = (character: string) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127 || character === '/' || character === '\\';
+  };
+  return typeof value === 'string' &&
+    value.trim().length > 0 &&
+    value.length <= 200 &&
+    ![...value].some(unsafe)
+    ? value
+    : generic;
+}
+
+// The search model loads in the background after boot; `null` is malformed.
+function searchStatus(embeddings: Record<string, unknown>): string | null {
+  switch (embeddings.status) {
+    case 'downloading':
+      return 'Downloading the search model…';
+    case 'rebuilding':
+      return count(embeddings.done) &&
+        count(embeddings.total) &&
+        embeddings.done <= embeddings.total
+        ? `Rebuilding search (${embeddings.done}/${embeddings.total})`
+        : null;
+    case 'ready':
+      return 'Search ready';
+    case 'fallback':
+      return `Basic search: ${fallbackReason(embeddings.reason)}`;
+    case 'off':
+      return 'Basic search: vector search is off';
+    default:
+      return null;
+  }
+}
+
+// The external memory provider beside the local store. `none` shows nothing;
+// a malformed entry shows nothing rather than failing the whole status.
+function externalMemoryStatus(value: unknown): string | null {
+  const provider = record(value);
+  if (!provider || !name(provider.id) || provider.id === 'none') return null;
+  switch (provider.status) {
+    case 'ready':
+      return `External memory: ${provider.id} — ready`;
+    case 'unavailable':
+      return `External memory: ${provider.id} — unavailable: ${fallbackReason(provider.reason, 'no reason given')}`;
+    default:
+      return null;
+  }
+}
+
 function projectReadiness(value: unknown): Snapshot | null {
   const top = record(value);
   const embeddings = record(top?.embeddings);
   const evaluation = record(top?.evaluation);
+  const search = embeddings ? searchStatus(embeddings) : null;
   if (
     !embeddings ||
+    search === null ||
     !evaluation ||
     typeof embeddings.enabled !== 'boolean' ||
     !name(embeddings.provider) ||
@@ -91,6 +153,8 @@ function projectReadiness(value: unknown): Snapshot | null {
     return null;
   }
   return {
+    search,
+    externalMemory: externalMemoryStatus(top?.externalProvider),
     enabled: embeddings.enabled,
     provider: embeddings.provider,
     model: embeddings.model,
@@ -202,6 +266,8 @@ export function MemorySearchStatus({ agentId, online, epoch }: Props) {
       )}
       {visible && !busy && (
         <div aria-live="polite">
+          <p>{visible.search}</p>
+          {visible.externalMemory && <p>{visible.externalMemory}</p>}
           <p>
             Daemon-wide vector index: {visible.enabled ? 'enabled' : 'disabled'}
             .

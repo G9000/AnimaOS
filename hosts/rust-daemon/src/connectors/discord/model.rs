@@ -50,6 +50,15 @@ pub(crate) struct DiscordBotIdentity {
 pub(crate) enum DiscordChannelKind {
     GuildText,
 }
+impl DiscordChannelKind {
+    /// Whether the channel is a direct message with one approved user. A guild
+    /// channel is shared, so its messages may come from anyone approved.
+    pub(crate) fn is_direct_message(&self) -> bool {
+        match self {
+            Self::GuildText => false,
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DiscordChannelMetadata {

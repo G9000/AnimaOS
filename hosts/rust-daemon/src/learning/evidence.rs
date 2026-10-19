@@ -181,3 +181,199 @@ pub(super) async fn capture_source(
         adapter,
     })
 }
+
+/// The anchor a conversation brief gives one turn.
+pub(super) fn turn_anchor(run_id: &str) -> String {
+    format!("turn:{run_id}")
+}
+
+/// The run ids a conversation review's anchors name, oldest first.
+pub(super) fn anchored_turns(anchors: &[String]) -> Vec<String> {
+    anchors
+        .iter()
+        .filter_map(|anchor| anchor.strip_prefix("turn:"))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Bytes each owner message and reply starts with in a conversation brief;
+/// both shrink further while the brief is over `BRIEF_LIMIT`.
+const TURN_TEXT_LIMIT: usize = 900;
+
+/// One counted turn: the owner's message and the agent's accepted reply.
+struct Turn {
+    run_id: String,
+    session_id: String,
+    owner: String,
+    reply_id: String,
+    reply: String,
+}
+
+/// A conversation review's evidence: the agent's last counted owner turns
+/// (`run_ids`, oldest first, ending with `source_run_id`) and its current core
+/// memory. A turn whose run or reply is gone is left out. The digest covers
+/// only the turns, so a core edit between admission and dispatch does not
+/// cancel the review; the blocks in the brief are those at admission.
+pub(super) async fn capture_conversation(
+    state: &SharedDaemonState,
+    agent_id: &str,
+    source_run_id: &str,
+    run_ids: &[String],
+) -> Result<CapturedSource, ApiError> {
+    let (config, adapter, store, memory, hot_runs) = {
+        let guard = state.read().await;
+        let runtime = guard.agents.get(agent_id).ok_or_else(ApiError::not_found)?;
+        if crate::agent_runs::is_helper_config(runtime.config()) {
+            return Err(ApiError::conflict("Learning review source is not eligible"));
+        }
+        let hot_runs: Vec<_> = run_ids
+            .iter()
+            .map(|id| guard.runs.get(id).cloned())
+            .collect();
+        (
+            runtime.config().clone(),
+            Arc::clone(&guard.model_adapter),
+            guard.history.store(),
+            guard.memory_handle(),
+            hot_runs,
+        )
+    };
+    let mut turns = Vec::new();
+    for (run_id, hot) in run_ids.iter().zip(hot_runs) {
+        let run = match hot {
+            Some(run) => Some(run),
+            None => store.get_run(run_id).await.map_err(|_| {
+                ApiError::service_unavailable("Learning source history is unavailable")
+            })?,
+        };
+        let Some(run) = run.filter(|run| {
+            run.agent_id == agent_id
+                && run.status == RunStatus::Completed
+                && run.error.is_none()
+                && run.stop.is_none()
+        }) else {
+            continue;
+        };
+        let Some(reply_id) = run.reply_message_id.clone() else {
+            continue;
+        };
+        let hot = {
+            let guard = state.read().await;
+            guard.agents.get(agent_id).and_then(|runtime| {
+                runtime
+                    .messages()
+                    .iter()
+                    .find(|message| message.id == reply_id && message.room_id == run.session_id)
+                    .cloned()
+            })
+        };
+        let reply = match hot {
+            Some(message) => Some((false, message)),
+            None => store
+                .get_message(agent_id, &run.session_id, &reply_id)
+                .await
+                .map_err(|_| {
+                    ApiError::service_unavailable("Learning source history is unavailable")
+                })?
+                .map(|stored| (stored.hidden, stored.message)),
+        };
+        let Some((false, reply)) = reply else {
+            continue;
+        };
+        if reply.role != MessageRole::Assistant || reply.content.text.trim().is_empty() {
+            continue;
+        }
+        turns.push(Turn {
+            run_id: run.id,
+            session_id: run.session_id,
+            owner: run.input.text,
+            reply_id,
+            reply: reply.content.text,
+        });
+    }
+    let session_id = turns
+        .iter()
+        .find(|turn| turn.run_id == source_run_id)
+        .map(|turn| turn.session_id.clone())
+        .ok_or_else(|| ApiError::conflict("Learning source reply is not eligible"))?;
+    let identity: Vec<_> = turns
+        .iter()
+        .map(|turn| {
+            json!({"runId":turn.run_id,"sessionId":turn.session_id,"input":turn.owner,
+                "replyId":turn.reply_id,"replyText":turn.reply})
+        })
+        .collect();
+    let digest = format!(
+        "{:x}",
+        Sha256::digest(
+            serde_json::to_vec(&json!({"agentId":agent_id,"turns":identity}))
+                .expect("JSON evidence serializes")
+        )
+    );
+    let core = {
+        let manager = memory.read().await;
+        let (user, notes) = crate::core_memory::blocks_for(&manager, agent_id);
+        format!(
+            "{}{}",
+            crate::core_memory::render_block(crate::core_memory::CoreBlock::User, &user),
+            crate::core_memory::render_block(crate::core_memory::CoreBlock::Notes, &notes)
+        )
+    };
+    let anchors: Vec<String> = turns.iter().map(|turn| turn_anchor(&turn.run_id)).collect();
+    let mut brief = json!({"kind":"conversation","sourceRunId":source_run_id,
+        "turns":turns.iter().map(|turn| {
+            let owner = bounded_text(&turn.owner, TURN_TEXT_LIMIT);
+            let reply = bounded_text(&turn.reply, TURN_TEXT_LIMIT);
+            json!({"anchor":turn_anchor(&turn.run_id),
+                "owner":{"text":owner,"shortened":owner.len()!=turn.owner.len()},
+                "reply":{"text":reply,"shortened":reply.len()!=turn.reply.len()}})
+        }).collect::<Vec<_>>(),
+        "coreMemory":core,"anchors":anchors,
+        "meaning":"The owner's recent messages and the agent's replies, oldest first, then the current core memory blocks."});
+    let mut rendered = brief.to_string();
+    while rendered.len() > BRIEF_LIMIT {
+        // Shorten the longest message first; the blocks only when no turn
+        // text is left to cut.
+        let longest = brief["turns"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .flat_map(|(index, turn)| {
+                ["owner", "reply"].map(|side| {
+                    let length = turn[side]["text"].as_str().map_or(0, str::len);
+                    (length, index, side)
+                })
+            })
+            .max();
+        match longest {
+            Some((length, index, side)) if length > 0 => {
+                let text = brief["turns"][index][side]["text"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned();
+                brief["turns"][index][side]["text"] =
+                    json!(bounded_text(&text, length.saturating_sub(128)));
+                brief["turns"][index][side]["shortened"] = json!(true);
+            }
+            _ => {
+                let current = brief["coreMemory"].as_str().unwrap_or_default().to_owned();
+                if current.is_empty() {
+                    return Err(ApiError::conflict("Learning evidence exceeds its bound"));
+                }
+                brief["coreMemory"] =
+                    json!(bounded_text(&current, current.len().saturating_sub(256)));
+            }
+        }
+        rendered = brief.to_string();
+    }
+    Ok(CapturedSource {
+        action_count: 0,
+        session_id,
+        brief: rendered,
+        digest,
+        anchors,
+        config,
+        adapter,
+    })
+}

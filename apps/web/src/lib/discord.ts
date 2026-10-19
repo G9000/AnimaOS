@@ -54,6 +54,12 @@ export function safeDiscordError(error: unknown): string {
       : null;
   // Never render backend/provider text, even for recognized error codes.
   switch (code) {
+    case 'discord_channel_already_connected':
+      return 'This channel is already connected to this agent. Open the existing connection or select a different channel.';
+    case 'discord_delivery_uncertain':
+      return 'A reply may already be in Discord. Review uncertain delivery on this connection before continuing.';
+    case 'agent_busy':
+      return 'This agent has a run in progress. Wait for it to finish or stop the run before retrying.';
     case 'connector_token_invalid':
       return 'Discord rejected the bot token. Enter a valid token from the Bot page in the Discord Developer Portal.';
     case 'discord_permission_denied':
@@ -76,7 +82,7 @@ export function safeDiscordError(error: unknown): string {
   if (status === 400)
     return 'Check the server, channel, approved user IDs, and private-channel confirmation.';
   if (status === 409)
-    return 'This change is blocked. Check uncertain delivery or an existing connection. Replacement tokens must belong to the same bot.';
+    return 'This change conflicts with the saved connection. Refresh status and check the selected server, channel, and bot. Replacement tokens must belong to the same bot.';
   if (status === 422)
     return 'Discord rejected the setup. Check the bot token and selected channel permissions.';
   if (status === 401 || status === 403)

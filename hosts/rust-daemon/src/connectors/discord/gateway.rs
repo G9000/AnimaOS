@@ -44,27 +44,79 @@ pub(crate) trait GatewaySession: Send {
 }
 
 pub(crate) trait GatewayFactory: Send + Sync {
-    fn session(&self, token: &DiscordBotToken) -> Box<dyn GatewaySession>;
+    fn session(&self, token: &DiscordBotToken, bot_id: &str) -> Box<dyn GatewaySession>;
 }
 
-pub(crate) struct NativeGatewayFactory;
-impl GatewayFactory for NativeGatewayFactory {
-    fn session(&self, token: &DiscordBotToken) -> Box<dyn GatewaySession> {
+#[derive(Default)]
+pub(crate) struct NativeGatewayFactory {
+    identify_queues: StdMutex<HashMap<String, twilight_gateway::queue::InMemoryQueue>>,
+}
+impl NativeGatewayFactory {
+    fn config(&self, token: &DiscordBotToken, bot_id: &str) -> twilight_gateway::Config {
+        // Discord's identify budget belongs to the verified bot, not a channel or
+        // token generation. Reuse it across connections, restarts, and token updates.
+        let queue = self
+            .identify_queues
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .entry(bot_id.into())
+            .or_default()
+            .clone();
         // No member, presence, DM, voice, role, or arbitrary command subscriptions.
-        let config = ConfigBuilder::new(
+        ConfigBuilder::new(
             token.expose().to_owned(),
             Intents::GUILD_MESSAGES | Intents::MESSAGE_CONTENT,
         )
+        .queue(queue)
         .presence(UpdatePresencePayload {
             activities: vec![],
             afk: false,
             since: None,
             status: Status::Online,
         })
-        .build();
+        .build()
+    }
+}
+impl GatewayFactory for NativeGatewayFactory {
+    fn session(&self, token: &DiscordBotToken, bot_id: &str) -> Box<dyn GatewaySession> {
         Box::new(NativeSession {
-            shard: Shard::with_config(ShardId::ONE, config),
+            shard: Shard::with_config(ShardId::ONE, self.config(token, bot_id)),
         })
+    }
+}
+
+#[cfg(test)]
+mod native_tests {
+    use super::*;
+    use twilight_gateway::queue::Queue;
+
+    #[tokio::test]
+    async fn same_bot_sessions_share_identify_pacing_across_token_replacement() {
+        let factory = NativeGatewayFactory::default();
+        let first = factory.config(&DiscordBotToken::parse("test.old-token").unwrap(), "11");
+        let next = factory.config(&DiscordBotToken::parse("test.new-token").unwrap(), "11");
+        let other_bot = factory.config(&DiscordBotToken::parse("test.other-bot").unwrap(), "12");
+        tokio::time::timeout(Duration::from_secs(1), first.queue().enqueue(0))
+            .await
+            .expect("first bot login may start immediately")
+            .unwrap();
+        let cancelled = next.queue().enqueue(0);
+        drop(cancelled);
+        let mut second = next.queue().enqueue(0);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut second)
+                .await
+                .is_err(),
+            "another channel for the same bot must wait for the shared identify bucket"
+        );
+        tokio::time::timeout(Duration::from_secs(1), other_bot.queue().enqueue(0))
+            .await
+            .expect("other bots retain independent login budgets")
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(6), second)
+            .await
+            .expect("cancelled requests do not consume the next login bucket")
+            .unwrap();
     }
 }
 
@@ -156,7 +208,7 @@ impl DiscordManager {
         };
         self.set_gateway_health(&c.id, epoch, DiscordRuntimeStatus::Connecting, None)
             .await;
-        let mut session = factory.session(&token);
+        let mut session = factory.session(&token, &c.bot.id);
         let mut close = self.close.clone();
         let mut probe = tokio::time::interval(Duration::from_secs(1));
         let mut ready = false;

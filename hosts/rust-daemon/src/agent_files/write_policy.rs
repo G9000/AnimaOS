@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 
 pub(crate) const EXACT_MARKER: &str = "_anima_exact_instruction_write";
 pub(crate) const REFUSED: &str = "Instruction file write requires an exact owner approval";
+pub(crate) const CORE_COPY_REFUSED: &str =
+    "USER.md and MEMORY.md are generated from core memory; use the core_memory tool.";
 const MAX_REVISION_BYTES: u64 = 262144;
 
 pub(crate) fn protected_name(path: &str) -> bool {
@@ -125,6 +127,25 @@ pub(crate) fn capture(
 }
 
 impl ProtectedWrite {
+    /// Whether this targets the agent's own core memory file copy
+    /// (`core_memory::files`), which no approval can unlock.
+    pub(crate) fn is_core_copy(&self, agent_id: &str) -> bool {
+        let directory = super::selection::profile_relative(agent_id);
+        [
+            crate::core_memory::CoreBlock::User,
+            crate::core_memory::CoreBlock::Notes,
+        ]
+        .into_iter()
+        .any(|block| {
+            // Case-insensitive: on the usual macOS file system `user.md` is the
+            // same file.
+            self.relative.eq_ignore_ascii_case(&format!(
+                "{directory}/{}",
+                crate::core_memory::files::file_name(block)
+            ))
+        })
+    }
+
     /// Compare the exact captured raw preimage, rather than reopening a path.
     /// The checkpoint adapter retains this state through its final write lease.
     pub(crate) fn matches_preimage(&self, source: Option<&[u8]>) -> bool {
@@ -194,6 +215,31 @@ mod tests {
         for path in ["notes.md", "SOUL.md.txt", "cursor/rules/x.mdc"] {
             assert!(!protected_name(path));
         }
+    }
+    #[test]
+    fn only_the_agents_own_profile_user_and_memory_files_are_its_core_copy() {
+        let root = std::env::temp_dir().join(format!("anima-core-copy-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let own = super::super::selection::profile_relative("agent-1");
+        let captured = |path: &str| capture(Some(&root), &call(path)).unwrap().unwrap();
+        for path in [
+            format!("{own}/USER.md"),
+            format!("{own}/MEMORY.md"),
+            format!("{own}/user.MD"),
+            format!("./{own}/MEMORY.md"),
+        ] {
+            assert!(captured(&path).is_core_copy("agent-1"), "{path}");
+        }
+        for path in [
+            format!("{own}/SOUL.md"),
+            format!("{own}/nested/USER.md"),
+            "USER.md".to_string(),
+            "MEMORY.md".to_string(),
+        ] {
+            assert!(!captured(&path).is_core_copy("agent-1"), "{path}");
+        }
+        assert!(!captured(&format!("{own}/USER.md")).is_core_copy("agent-2"));
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn approval_is_body_free_and_revision_bound() {

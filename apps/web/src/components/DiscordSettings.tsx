@@ -284,6 +284,12 @@ export function DiscordSettings(p: DiscordSettingsProps) {
     <section className="space-y-3" aria-label="Discord connection setup">
       <SectionTitle>Discord</SectionTitle>
       <p className="text-xs leading-relaxed text-ink-2">
+        Connect this agent to multiple channels by adding a connection for each
+        channel. Replies stay in the channel where each message arrives. Each
+        connection has its own conversation; messages sent from that web
+        conversation also go to its selected channel.
+      </p>
+      <p className="text-xs leading-relaxed text-ink-2">
         Create a bot in the{' '}
         <a
           className="underline"

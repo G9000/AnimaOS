@@ -175,8 +175,16 @@ pub(crate) struct ControlPlaneSnapshot {
     pub(crate) learning_reviews: Vec<crate::learning::LearningReviewRecord>,
     #[serde(default)]
     pub(crate) learning_policies: Vec<crate::learning::LearningPolicy>,
+    /// Owner messages counted toward each agent's next conversation review.
     #[serde(default)]
-    pub(crate) memory_views: Vec<crate::memory_views::MemoryViewSelection>,
+    pub(crate) conversation_counts: std::collections::BTreeMap<String, u32>,
+    /// Each agent's last counted owner turns (run ids, oldest first).
+    #[serde(default)]
+    pub(crate) conversation_turns: std::collections::BTreeMap<String, Vec<String>>,
+    /// Memory pins from before core memory. Read only so the boot migration
+    /// can fold them into core memory; never written again.
+    #[serde(default, rename = "memoryViews", skip_serializing)]
+    pub(crate) legacy_pins: Vec<crate::core_memory::migration::LegacyPins>,
     #[serde(default)]
     pub(crate) mcp_connections: Vec<crate::mcp::McpConnectionRecord>,
     #[serde(default)]
@@ -698,7 +706,9 @@ impl ControlPlaneSnapshot {
             side_model: None,
             learning_reviews: vec![],
             learning_policies: vec![],
-            memory_views: vec![],
+            conversation_counts: Default::default(),
+            conversation_turns: Default::default(),
+            legacy_pins: vec![],
             mcp_connections: vec![],
             community_bundles: vec![],
             community_generation: 0,
@@ -710,6 +720,25 @@ impl ControlPlaneSnapshot {
 mod tests {
     use super::{ControlPlaneSnapshot, WorkspaceConfig};
     use std::path::PathBuf;
+
+    #[test]
+    fn legacy_memory_pins_are_read_but_never_written() {
+        let snapshot: ControlPlaneSnapshot = serde_json::from_value(serde_json::json!({
+            "version": 21,
+            "memoryViews": [{
+                "agentId": "agent-1",
+                "version": 2,
+                "userProfileIds": ["mem-1"],
+                "agentNoteIds": ["mem-2"]
+            }]
+        }))
+        .unwrap();
+        assert_eq!(snapshot.legacy_pins[0].agent_id, "agent-1");
+        assert_eq!(snapshot.legacy_pins[0].user_profile_ids, ["mem-1"]);
+        assert_eq!(snapshot.legacy_pins[0].agent_note_ids, ["mem-2"]);
+        let written = serde_json::to_value(&snapshot).unwrap();
+        assert!(written.get("memoryViews").is_none());
+    }
 
     #[test]
     fn v3_snapshot_without_workspace_loads_as_unconfigured() {
@@ -1391,7 +1420,7 @@ mod learning_snapshot_tests {
         std::fs::write(&path, original).unwrap();
         let config = ControlPlaneStoreConfig::Json(path.clone());
         let loaded = load_control_plane_snapshot(&config).await.unwrap().unwrap();
-        assert!(loaded.memory_views.is_empty());
+        assert!(loaded.legacy_pins.is_empty());
         let prior_backup = pre_upgrade_backup_path(&path, 14);
         std::fs::write(&prior_backup, "prior adoption backup").unwrap();
         write_pre_upgrade_backup(&config, 15).await.unwrap();

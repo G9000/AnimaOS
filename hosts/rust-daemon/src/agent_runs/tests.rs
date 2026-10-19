@@ -792,13 +792,14 @@ async fn spawn_helper_timeout_releases_capacity_and_saves_failed_state() {
 }
 
 /// Residual fix R3 (scoped re-review of the M3 fix wave): the model call
-/// itself can answer before the deadline, but the reflection-memory
-/// evaluator that runs after it (spec: no cancellation checkpoint exists
-/// past a model call that already answered) can still be mid-flight,
-/// genuinely blocked, when the deadline elapses. If it then finishes
-/// inside the S2-H cancel grace, the parent must get that reply, not
-/// "Helper task timed out", and no failure is recorded over a run the
-/// runtime already completed.
+/// can answer before the helper deadline while an evaluator that runs
+/// after it (no cancellation checkpoint exists past a model call that
+/// already answered) is still blocked when the deadline elapses. If the
+/// run then finishes inside the S2-H cancel grace, the parent must get
+/// that reply, not "Helper task timed out", and no failure is recorded
+/// over a run the runtime already completed. The daemon wires no
+/// evaluator itself, so the test injects one that blocks on the memory
+/// write lock.
 #[tokio::test]
 async fn a_helper_finishing_inside_the_grace_keeps_its_success_result() {
     let entered = Arc::new(Semaphore::new(0));
@@ -816,6 +817,9 @@ async fn a_helper_finishing_inside_the_grace_keeps_its_success_result() {
         .await
         .restore_agent_config(&lead.id, lead.config.clone());
     let memory = state.read().await.memory_handle();
+    state.write().await.test_evaluators = vec![Arc::new(MemoryLockEvaluator {
+        memory: memory.clone(),
+    })];
 
     let running = {
         let coordinator = coordinator.clone();
@@ -825,11 +829,10 @@ async fn a_helper_finishing_inside_the_grace_keeps_its_success_result() {
         )
     };
     // The helper's provider context (a memory *read*) and its top-of-loop
-    // stop checkpoint have already passed cleanly once the model call is
-    // entered; only now do we take memory's write lock, so it is the
-    // reflection-memory evaluator (run right after the model answers,
-    // with no cancellation checkpoint before its own completion) that
-    // blocks on it, not anything earlier.
+    // stop checkpoint have already passed once the model call is entered;
+    // only now do we take memory's write lock, so it is the evaluator (run
+    // right after the model answers, with no cancellation checkpoint before
+    // its own completion) that blocks on it, not anything earlier.
     tokio::time::timeout(Duration::from_secs(3), entered.acquire())
         .await
         .unwrap()
@@ -877,6 +880,37 @@ async fn a_helper_finishing_inside_the_grace_keeps_its_success_result() {
 struct SignalThenAnswerAdapter {
     entered: Arc<Semaphore>,
     proceed: Arc<Semaphore>,
+}
+
+/// Test-only evaluator that blocks on the memory write lock after the
+/// model has answered, then accepts.
+struct MemoryLockEvaluator {
+    memory: crate::state::SharedMemoryStore,
+}
+
+#[async_trait]
+impl anima_core::Evaluator for MemoryLockEvaluator {
+    fn name(&self) -> &str {
+        "memory-lock"
+    }
+
+    fn description(&self) -> &str {
+        "Blocks on the memory write lock after the model answers"
+    }
+
+    async fn validate(&self, _runtime: &AgentRuntime, _message: &Message) -> Result<bool, String> {
+        Ok(true)
+    }
+
+    async fn evaluate(
+        &self,
+        _runtime: &AgentRuntime,
+        _message: &Message,
+        _response: &Content,
+    ) -> Result<anima_core::EvaluatorResult, String> {
+        drop(self.memory.write().await);
+        Ok(anima_core::EvaluatorResult::default())
+    }
 }
 
 #[async_trait]
@@ -3804,4 +3838,43 @@ async fn a_silent_checkin_stores_no_task_result_memory_or_reflection() {
         memory.read().await.size() >= 1,
         "a check-in that spoke is remembered as before"
     );
+}
+
+#[tokio::test]
+async fn a_completed_chat_run_writes_no_reflection_or_derived_memory() {
+    let (coordinator, agent_id) = coordinator_with_agent(Arc::new(CheckinModel), 4).await;
+    let mut run = room_request(&agent_id, "room-1", "I prefer terse release summaries");
+    run.content.metadata = Some(BTreeMap::from([
+        ("userId".to_string(), DataValue::String("user-42".into())),
+        ("userName".to_string(), DataValue::String("Leo".into())),
+    ]));
+    let memory = coordinator.state.read().await.memory_handle();
+
+    coordinator.run(run).await.unwrap();
+
+    let guard = memory.read().await;
+    let stored = guard.get_recent(anima_memory::RecentMemoryOptions {
+        limit: Some(50),
+        ..Default::default()
+    });
+    assert_eq!(stored.len(), 1, "exactly the task result is stored");
+    assert!(
+        stored
+            .iter()
+            .all(|memory| memory.memory_type == anima_memory::MemoryType::TaskResult),
+        "only the task result is stored, found {:?}",
+        stored
+            .iter()
+            .map(|memory| (&memory.memory_type, &memory.content))
+            .collect::<Vec<_>>()
+    );
+    assert!(guard
+        .list_agent_relationships(anima_memory::AgentRelationshipOptions::default())
+        .is_empty());
+    assert!(guard
+        .list_temporal_relationships(anima_memory::TemporalRelationshipOptions {
+            include_inactive: true,
+            ..Default::default()
+        })
+        .is_empty());
 }

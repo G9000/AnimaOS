@@ -2,10 +2,11 @@ import { useRef, useState, type FormEvent } from 'react';
 import type { MemoryType } from '@animaOS-SWARM/sdk';
 
 import { EntityList, entityKey } from '../components/memory/EntityList';
+import { ExportMenu } from '../components/memory/ExportMenu';
 import { FactList } from '../components/memory/FactList';
 import { MemoryList } from '../components/memory/MemoryList';
 import { MemorySearchStatus } from '../components/memory/MemorySearchStatus';
-import { ProfileMemoryPanel } from '../components/memory/ProfileMemoryPanel';
+import { CoreMemoryPanel } from '../components/memory/CoreMemoryPanel';
 import { useMemory } from '../hooks/useMemory';
 import { COMPANION_UNREACHABLE } from '../lib/approvals';
 import {
@@ -125,6 +126,7 @@ export function MemoryPage({ agentId, online, epoch }: MemoryPageProps) {
             Refresh
           </button>
         )}
+        <ExportMenu agentId={agentId} />
       </div>
       <MemorySearchStatus agentId={agentId} online={online} epoch={epoch} />
       {headerError && (
@@ -252,7 +254,7 @@ export function MemoryPage({ agentId, online, epoch }: MemoryPageProps) {
             <h3 ref={headingRef} tabIndex={-1}>
               About you
             </h3>
-            <ProfileMemoryPanel agentId={agentId} epoch={epoch} />
+            <CoreMemoryPanel agentId={agentId} epoch={epoch} />
             <label className="memory-meta">
               <input
                 type="checkbox"

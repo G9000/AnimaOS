@@ -91,6 +91,16 @@ impl<'a> MemoryMutation<'a> {
     }
 
     fn finish_persist(&mut self, result: io::Result<()>) -> io::Result<()> {
+        if result.is_ok() {
+            // An external memory provider mirrors what was just saved. With
+            // none the diff never runs.
+            if let Some(previous) = &self.previous {
+                let manager = &*self.manager;
+                crate::memory_provider::mirror_persisted(&previous.memories, || {
+                    manager.snapshot().memories
+                });
+            }
+        }
         if result.is_ok()
             || result.as_ref().err().is_some_and(|error| {
                 error

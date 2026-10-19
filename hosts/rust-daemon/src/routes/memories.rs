@@ -6,16 +6,17 @@ use tracing::warn;
 
 use super::contracts::{
     AgentRelationshipCreateRequest, AgentRelationshipQuery, AgentRelationshipResponse,
-    AgentRelationshipsEnvelope, MemoriesEnvelope, MemoryCreateRequest, MemoryEntitiesEnvelope,
-    MemoryEntityCreateRequest, MemoryEntityQuery, MemoryEntityResponse,
-    MemoryEvaluationOutcomeResponse, MemoryEvaluationRequest, MemoryEvaluationResponse,
-    MemoryEvidenceTraceResponse, MemoryReadinessResponse, MemoryRecallEnvelope, MemoryRecallQuery,
-    MemoryRecallResultResponse, MemoryResponse, MemoryRetentionReportResponse,
-    MemoryRetentionRequest, MemorySearchEnvelope, MemorySearchQuery, MemorySearchResultResponse,
-    RecentMemoriesQuery,
+    AgentRelationshipsEnvelope, ExternalProviderStatusResponse, MemoriesEnvelope,
+    MemoryCreateRequest, MemoryEntitiesEnvelope, MemoryEntityCreateRequest, MemoryEntityQuery,
+    MemoryEntityResponse, MemoryEvaluationOutcomeResponse, MemoryEvaluationRequest,
+    MemoryEvaluationResponse, MemoryEvidenceTraceResponse, MemoryReadinessResponse,
+    MemoryRecallEnvelope, MemoryRecallQuery, MemoryRecallResultResponse, MemoryResponse,
+    MemoryRetentionReportResponse, MemoryRetentionRequest, MemorySearchEnvelope, MemorySearchQuery,
+    MemorySearchResultResponse, RecentMemoriesQuery,
 };
 use super::ApiError;
 use crate::app::SharedDaemonState;
+use crate::core_memory;
 use crate::memory_embeddings::SharedMemoryEmbeddings;
 use crate::memory_store::{MemoryMutation, MemoryStoreConfig};
 use crate::memory_text::{has_hidden_text, MEMORY_TEXT_HIDDEN};
@@ -36,6 +37,14 @@ pub(crate) async fn handle_create_memory(
             .any(|tag| has_hidden_text(tag))
     {
         return Err(ApiError::bad_request_static(MEMORY_TEXT_HIDDEN));
+    }
+
+    if new_memory
+        .tags
+        .as_deref()
+        .is_some_and(core_memory::names_core_tag)
+    {
+        return Err(ApiError::bad_request_static(core_memory::CORE_TAG_RESERVED));
     }
 
     let (memory_handle, embeddings_handle, memory_store) = {
@@ -219,6 +228,13 @@ pub(crate) async fn handle_add_evaluated_memory(
     let (new_memory, options) = request
         .into_domain()
         .map_err(ApiError::bad_request_static)?;
+    if new_memory
+        .tags
+        .as_deref()
+        .is_some_and(core_memory::names_core_tag)
+    {
+        return Err(ApiError::bad_request_static(core_memory::CORE_TAG_RESERVED));
+    }
 
     let (memory_handle, embeddings_handle, memory_store) = {
         let guard = state.read().await;
@@ -302,9 +318,22 @@ pub(crate) async fn handle_memory_readiness(
         embeddings_guard.status()
     };
 
+    // The external provider never gates readiness: the local store is complete
+    // without it.
+    let (provider_id, provider_status) = crate::memory_provider::status().await;
+    let (status, reason) = match provider_status {
+        anima_memory::ProviderStatus::Ready => ("ready", None),
+        anima_memory::ProviderStatus::Unavailable(reason) => ("unavailable", Some(reason)),
+    };
+
     Ok(MemoryReadinessResponse {
         passed: eval_report.passed() && embedding_status.enabled,
         embeddings: (&embedding_status).into(),
+        external_provider: ExternalProviderStatusResponse {
+            id: provider_id,
+            status: status.into(),
+            reason,
+        },
         evaluation: (&eval_report).into(),
     })
 }
@@ -330,7 +359,9 @@ pub(crate) async fn handle_apply_memory_retention(
         let mut memory_guard = memory_handle.write().await;
         let mut memory_guard = MemoryMutation::new(&mut memory_guard);
         let report = memory_guard
-            .apply_retention(policy)
+            // Core entries are the owner's always-on notes: retention never
+            // decays or deletes them (the core-memory routes do).
+            .apply_retention_protecting(policy, core_memory::is_core_entry)
             .map_err(|error| ApiError::bad_request(error.message()))?;
         if !report.decayed_memories.is_empty()
             || !report.removed_memory_ids.is_empty()

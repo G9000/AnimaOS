@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use anima_core::{
     AgentState, Content, DataValue, Message, TaskResult, ToolCall, MAX_CAPABILITY_ID_BYTES,
@@ -10,10 +11,13 @@ use anima_memory::{
 use futures::future::BoxFuture;
 use tracing::warn;
 
+use crate::core_memory::commit::{commit, reindex_for, CommitError, CoreStores};
+use crate::core_memory::{self, CoreAgent, CoreBlock, CoreChange, CoreEdit, ScanMode};
 use crate::memory_store::MemoryMutation;
 use crate::memory_text::{
     has_hidden_text, MAX_MEMORY_EDIT_CHARS, MEMORY_CONTENT_INVALID, MEMORY_TEXT_HIDDEN,
 };
+use crate::threat_scan::refuse_flagged;
 
 use super::ToolExecutionContext;
 
@@ -104,12 +108,17 @@ pub(super) fn execute_memory_search(
     })
 }
 
+/// One memory for `memory_search` and `recent_memories`. A core entry the
+/// scanner flags shows its id and marker only, as in context.
 fn render_memory(memory: &Memory) -> String {
+    let flagged = core_memory::is_core_entry(memory)
+        .then(|| core_memory::flagged_marker(&memory.content))
+        .flatten();
     format!(
         "Memory ID: {}\nType: {}\nContent:\n{}",
         memory.id,
         memory.memory_type.as_str(),
-        memory.content
+        flagged.as_deref().unwrap_or(&memory.content)
     )
 }
 
@@ -185,6 +194,13 @@ pub(super) fn execute_memory_consolidate(
         let group_tag = format!("cg:{}", uuid::Uuid::new_v4().simple());
         let consolidation = {
             let mut guard = context.memory.write().await;
+            if sources.iter().any(|source| {
+                guard
+                    .get(&source.id)
+                    .is_some_and(|memory| core_memory::is_core_entry(&memory))
+            }) {
+                return TaskResult::error(core_memory::CORE_ENTRY_EDIT_REFUSED, 0);
+            }
             let mut mutation = MemoryMutation::new(&mut guard);
             let result = match mutation.consolidate_facts(
                 &agent.id,
@@ -289,10 +305,24 @@ pub(super) fn execute_memory_remove(
                     0,
                 );
             }
-            let mut mutation = MemoryMutation::new(&mut guard);
-            let _ = mutation.delete_memory(&id);
-            if let Err(error) = mutation.persist(context.memory_store.as_ref()).await {
-                return TaskResult::error(format!("failed to persist memory removal: {error}"), 0);
+            {
+                let mut mutation = MemoryMutation::new(&mut guard);
+                let _ = mutation.delete_memory(&id);
+                if let Err(error) = mutation.persist(context.memory_store.as_ref()).await {
+                    return TaskResult::error(
+                        format!("failed to persist memory removal: {error}"),
+                        0,
+                    );
+                }
+            }
+            // A removed core entry leaves the agent's file copy, under the
+            // same lock, as every other core change does.
+            if core_memory::is_core_entry(&current) {
+                core_memory::files::write_copies(
+                    context.core_files_root.as_deref(),
+                    &guard,
+                    &agent.id,
+                );
             }
         }
         // Recheck canonical absence after persistence. Keep the read lock while
@@ -350,6 +380,9 @@ pub(super) fn execute_memory_update(
         if has_hidden_text(&content) {
             return TaskResult::error(MEMORY_TEXT_HIDDEN, 0);
         }
+        if let Err(error) = refuse_flagged(&content) {
+            return TaskResult::error(error, 0);
+        }
 
         let memory = {
             let mut guard = context.memory.write().await;
@@ -360,6 +393,9 @@ pub(super) fn execute_memory_update(
             };
             if !visible_memory(&current) {
                 return TaskResult::error(MEMORY_TEXT_HIDDEN, 0);
+            }
+            if core_memory::is_core_entry(&current) {
+                return TaskResult::error(core_memory::CORE_ENTRY_EDIT_REFUSED, 0);
             }
             if current.content != expected {
                 return TaskResult::error(
@@ -379,8 +415,21 @@ pub(super) fn execute_memory_update(
                 Ok(None) => return TaskResult::error("memory not found", 0),
                 Err(error) => return TaskResult::error(error.message(), 0),
             };
+            // Dropping the unsaved mutation undoes the edit.
+            if !core_memory::generic_edit_fits(&mutation, &current, &updated) {
+                return TaskResult::error(core_memory::CORE_ENTRY_EDIT_REFUSED, 0);
+            }
             if let Err(error) = mutation.persist(context.memory_store.as_ref()).await {
                 return TaskResult::error(format!("failed to persist memory: {error}"), 0);
+            }
+            drop(mutation);
+            // A memory the edit made a core entry joins its agent's file copy.
+            if core_memory::is_core_entry(&updated) {
+                core_memory::files::write_copies(
+                    context.core_files_root.as_deref(),
+                    &guard,
+                    &agent.id,
+                );
             }
             updated
         };
@@ -431,6 +480,9 @@ pub(super) fn execute_memory_add(
         };
         if has_hidden_text(&content) {
             return TaskResult::error(MEMORY_TEXT_HIDDEN, 0);
+        }
+        if let Err(error) = refuse_flagged(&content) {
+            return TaskResult::error(error, 0);
         }
 
         let memory_type =
@@ -519,6 +571,102 @@ pub(super) fn execute_memory_add(
                 } else {
                     format!("memory already saved: {content}")
                 },
+                attachments: None,
+                metadata: Some(metadata),
+            },
+            0,
+        )
+    })
+}
+
+/// Reads `{ action, block, text?, old_text? }` into a core-memory edit.
+fn core_memory_edit(
+    args: &BTreeMap<String, DataValue>,
+) -> Result<(CoreBlock, CoreEdit), &'static str> {
+    if args
+        .keys()
+        .any(|key| !matches!(key.as_str(), "action" | "block" | "text" | "old_text"))
+    {
+        return Err("core_memory accepts only action, block, text and old_text");
+    }
+    let string = |key: &str| match args.get(key) {
+        Some(DataValue::String(value)) => Some(value.clone()),
+        _ => None,
+    };
+    let action = string("action");
+    if !matches!(action.as_deref(), Some("add" | "replace" | "remove")) {
+        return Err("core_memory action must be add, replace or remove");
+    }
+    let block = string("block")
+        .as_deref()
+        .and_then(CoreBlock::parse)
+        .ok_or("core_memory block must be user or notes")?;
+    let edit = match (action.as_deref(), string("text"), string("old_text")) {
+        (Some("add"), Some(text), _) => CoreEdit::Add { text },
+        (Some("add"), None, _) => return Err("core_memory add needs text"),
+        (Some("replace"), Some(text), Some(old_text)) => CoreEdit::Replace { old_text, text },
+        (Some("replace"), _, _) => return Err("core_memory replace needs old_text and text"),
+        (_, _, Some(old_text)) => CoreEdit::Remove { old_text },
+        _ => return Err("core_memory remove needs old_text"),
+    };
+    Ok((block, edit))
+}
+
+pub(super) fn execute_core_memory(
+    context: ToolExecutionContext,
+    agent: AgentState,
+    _user_message: Message,
+    tool_call: ToolCall,
+) -> BoxFuture<'static, TaskResult<Content>> {
+    Box::pin(async move {
+        let (block, edit) = match core_memory_edit(&tool_call.args) {
+            Ok(parsed) => parsed,
+            Err(error) => return TaskResult::error(error, 0),
+        };
+        let stores = CoreStores {
+            memory: Arc::clone(&context.memory),
+            embeddings: Arc::clone(&context.memory_embeddings),
+            store: context.memory_store.clone(),
+            files_root: context.core_files_root.clone(),
+        };
+        let agent_ref = CoreAgent {
+            id: &agent.id,
+            name: &agent.name,
+        };
+        let outcome = match commit(&stores, &agent.id, |manager| {
+            let outcome =
+                core_memory::apply_edit(manager, agent_ref, block, edit, ScanMode::Refuse)?;
+            let reindex = reindex_for(&outcome.change);
+            Ok((outcome, reindex))
+        })
+        .await
+        {
+            Ok(outcome) => outcome,
+            Err(CommitError::Refused(error)) => return TaskResult::error(error, 0),
+            Err(CommitError::Persist(error)) => {
+                return TaskResult::error(format!("failed to persist core memory: {error}"), 0)
+            }
+        };
+
+        let memory_id = match &outcome.change {
+            CoreChange::Added(memory)
+            | CoreChange::AlreadyPresent(memory)
+            | CoreChange::Removed(memory) => memory.id.clone(),
+            CoreChange::Replaced { current, .. } => current.id.clone(),
+        };
+        let metadata = BTreeMap::from([
+            ("memoryId".into(), DataValue::String(memory_id)),
+            ("block".into(), DataValue::String(block.as_str().into())),
+            ("used".into(), DataValue::Number(outcome.used() as f64)),
+            ("budget".into(), DataValue::Number(block.budget() as f64)),
+        ]);
+        TaskResult::success(
+            Content {
+                text: format!(
+                    "{}\n{}",
+                    outcome.summary(),
+                    core_memory::render_block(block, &outcome.entries)
+                ),
                 attachments: None,
                 metadata: Some(metadata),
             },

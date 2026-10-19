@@ -19,6 +19,9 @@ const fixture = (
     vectorCount: 7,
     persisted: true,
     storageFile: 'C:\\private\\secret-index.json',
+    status: 'ready',
+    done: 7,
+    total: 7,
   },
   evaluation: {
     passed: true,
@@ -72,8 +75,60 @@ describe('MemorySearchStatus', () => {
     expect(
       screen.getByText(/Local fixture checks: 3 of 3 passed/),
     ).toBeVisible();
+    expect(screen.getByText('Search ready')).toBeVisible();
     expect(screen.queryByText(/secret-index/)).toBeNull();
     expect(screen.queryByText(/overall ready/i)).toBeNull();
+  });
+
+  it.each([
+    [{ id: 'mem0', status: 'ready' }, 'External memory: mem0 — ready'],
+    [
+      { id: 'mem0', status: 'unavailable', reason: 'service unreachable' },
+      'External memory: mem0 — unavailable: service unreachable',
+    ],
+    [
+      { id: 'mem0', status: 'unavailable', reason: 'failed at /etc/secret' },
+      'External memory: mem0 — unavailable: no reason given',
+    ],
+  ] as const)(
+    'shows the external memory provider %j as a status line',
+    async (externalProvider, line) => {
+      vi.spyOn(daemon, 'memoryReadiness').mockResolvedValue(
+        fixture({ externalProvider: { ...externalProvider } }),
+      );
+      await userEvent.setup().click(
+        render(panel()).getByRole('button', {
+          name: 'Check memory search status',
+        }),
+      );
+      expect(await screen.findByText(line)).toBeVisible();
+      expect(screen.queryByText(/\/etc\/secret/)).toBeNull();
+    },
+  );
+
+  it.each([
+    ['the none provider', { id: 'none', status: 'ready' }],
+    ['a missing provider', undefined],
+    ['a malformed provider', { id: 'x/y', status: 'ready' }],
+  ] as const)('shows no external memory line for %s', async (_label, value) => {
+    vi.spyOn(daemon, 'memoryReadiness').mockResolvedValue(
+      fixture(
+        value
+          ? {
+              externalProvider: {
+                ...value,
+              } as MemoryReadiness['externalProvider'],
+            }
+          : {},
+      ),
+    );
+    await userEvent.setup().click(
+      render(panel()).getByRole('button', {
+        name: 'Check memory search status',
+      }),
+    );
+    expect(await screen.findByText('Search ready')).toBeVisible();
+    expect(screen.queryByText(/External memory/)).toBeNull();
   });
 
   it('keeps disabled and empty index separate from saved-memory and fixture-check status', async () => {
@@ -110,6 +165,58 @@ describe('MemorySearchStatus', () => {
     expect(screen.getByText(/2 local fixture checks failed/)).toBeVisible();
     expect(screen.getByText(/Saved memories and keyword search/)).toBeVisible();
   });
+
+  it.each([
+    [
+      { status: 'downloading', done: 0, total: 0 },
+      'Downloading the search model…',
+    ],
+    [
+      { status: 'rebuilding', done: 12, total: 40 },
+      'Rebuilding search (12/40)',
+    ],
+    [{ status: 'ready', done: 7, total: 7 }, 'Search ready'],
+    [
+      {
+        status: 'fallback',
+        done: 0,
+        total: 0,
+        reason: 'model download failed',
+      },
+      'Basic search: model download failed',
+    ],
+    [
+      {
+        status: 'fallback',
+        done: 0,
+        total: 0,
+        reason: 'could not read C:\\Users\\me\\models',
+      },
+      'Basic search: the search model could not load',
+    ],
+    [
+      { status: 'fallback', done: 0, total: 0 },
+      'Basic search: the search model could not load',
+    ],
+    [
+      { status: 'off', done: 0, total: 0 },
+      'Basic search: vector search is off',
+    ],
+  ] as const)(
+    'shows where the background search model stands: %j',
+    async (load, text) => {
+      vi.spyOn(daemon, 'memoryReadiness').mockResolvedValue(
+        fixture({ embeddings: { ...fixture().embeddings, ...load } }),
+      );
+      await userEvent.setup().click(
+        render(panel()).getByRole('button', {
+          name: 'Check memory search status',
+        }),
+      );
+      expect(await screen.findByText(text)).toBeVisible();
+      expect(screen.queryByText(/Users/)).toBeNull();
+    },
+  );
 
   it('reports zero checks without calling them passed', async () => {
     vi.spyOn(daemon, 'memoryReadiness').mockResolvedValue(
@@ -193,6 +300,16 @@ describe('MemorySearchStatus', () => {
     },
     { embeddings: { ...fixture().embeddings, model: 'safe\nsecret' } },
     { evaluation: { ...fixture().evaluation, passedChecks: undefined } },
+    { embeddings: { ...fixture().embeddings, status: 'loading' } },
+    { embeddings: { ...fixture().embeddings, status: undefined } },
+    {
+      embeddings: {
+        ...fixture().embeddings,
+        status: 'rebuilding',
+        done: 9,
+        total: 4,
+      },
+    },
   ])(
     'shows generic unavailable for malformed projected fields %#',
     async (change) => {

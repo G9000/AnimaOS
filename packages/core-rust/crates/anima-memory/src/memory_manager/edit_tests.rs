@@ -132,7 +132,8 @@ fn consolidate_facts_preserves_sources_citations_and_indexed_history() {
                 query: "sourcealpha sourcebeta".into(),
                 limit: 6
             },
-            |_| true
+            // Archived sources are Reflections; hosts keep them out of context by predicate.
+            |memory| memory.memory_type == MemoryType::Fact
         )
         .is_empty());
     let mut restored = MemoryManager::new();
@@ -1004,4 +1005,33 @@ fn an_entity_is_matched_by_kind_and_id() {
     assert!(agent_deletion.removed_relationship_ids.is_empty());
     assert_eq!(agent_deletion.removed_fact_ids.len(), 1);
     assert!(!entity_exists(&manager, Agent, "same"));
+}
+
+#[test]
+fn detach_session_clears_only_the_session() {
+    let mut manager = MemoryManager::new();
+    let before = add(&mut manager, "a1", "sessionwombat shares a burrow");
+
+    let after = manager.detach_session(&before.id).unwrap();
+
+    assert_eq!(after.session_id, None);
+    assert_eq!(after.id, before.id);
+    assert_eq!(after.content, before.content);
+    assert_eq!(after.tags, before.tags);
+    assert_eq!(after.created_at, before.created_at);
+    assert_eq!(after.scope, before.scope);
+    assert_eq!(after.room_id, before.room_id);
+    assert_eq!(after.world_id, before.world_id);
+    assert_eq!(manager.get(&before.id), Some(after));
+    assert!(found(&manager, "session-1").is_empty());
+    assert_eq!(found(&manager, "sessionwombat"), vec![before.id]);
+}
+
+#[test]
+fn detach_session_on_an_unknown_id_is_an_error() {
+    let mut manager = MemoryManager::new();
+    assert_eq!(
+        manager.detach_session("missing"),
+        Err(MemoryError::MemoryNotFound)
+    );
 }
