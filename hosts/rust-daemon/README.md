@@ -361,6 +361,13 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/foreign-sessions/{handle}/import`                                    |
 | `GET`    | `/api/agents/{agent_id}/autonomy`                                                            |
 | `PUT`    | `/api/agents/{agent_id}/autonomy`                                                            |
+| `GET`    | `/api/settings/side-model`                                                                   |
+| `PUT`    | `/api/settings/side-model`                                                                   |
+| `GET`    | `/api/provider-keys`                                                                         |
+| `POST`   | `/api/provider-keys/{provider}`                                                              |
+| `DELETE` | `/api/provider-keys/{provider}/{key_id}`                                                     |
+| `PUT`    | `/api/provider-keys/{provider}/strategy`                                                     |
+| `POST`   | `/api/provider-keys/{provider}/{key_id}/wake`                                                |
 <!-- openapi-route-inventory:end -->
 
 ### Current workspace report downloads
@@ -766,6 +773,27 @@ Every usage route requires local-owner authorization and answers `Cache-Control:
 | `GET`  | `/api/usage/export.csv?from=&to=&agentId=`                                   | The range as `text/csv` attachment (`anima-usage-<from>-<to>.csv`), oldest first; cells that start with `=`, `+`, `-`, `@`, tab, or CR get a leading `'` so spreadsheets read them as text. `400` past 100,000 calls (choose a shorter range).                                                                                                                                                                                          |
 | `GET`  | `/api/usage/pricing`                                                         | `{ overrides, tableDate }`.                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `PUT`  | `/api/usage/pricing`                                                         | Replace all overrides with `{ overrides: [{ provider, model, inputMicrosPerMtok, outputMicrosPerMtok, cachedInputMicrosPerMtok? }] }` (at most 100; `model` is a lowercase prefix and the longest match wins; each provider, by canonical name, and model may appear once). New prices apply to calls recorded afterwards; stored rows keep their price. `400` for an invalid list; `503` when it cannot be saved (the old list stays). |
+
+### Side-task model
+
+Both routes require local-owner authorization and answer `Cache-Control: no-store` (errors included). The side-task model is one workspace setting that titles, compaction, the smart check and learning reviews try before the agent's own model; when it fails (a wrong name, no key), the call is made again on the agent's own model. Unset, nothing changes. It is saved in the control plane. Usage rows and the learning review name the model that answered.
+
+| Method | Path                       | Description |
+| ------ | -------------------------- | ----------- |
+| `GET`  | `/api/settings/side-model` | `{ provider, model }`, or `null` when none is set. |
+| `PUT`  | `/api/settings/side-model` | Body `{ provider, model }` or `null` (clear), answered with the saved value. `provider` is trimmed, lowercased and must be one the daemon can route to; `model` is trimmed, non-empty, at most 200 characters. `400` for an invalid body; `503` when it cannot be saved (the old one stays). |
+
+### Provider API keys
+
+All five routes require local-owner authorization and answer `Cache-Control: no-store` (errors included). Each provider has a pool of keys; a key that hits a limit, is rejected or runs out of credit rests for a while and the call moves on to the next ready key. The key from the provider's environment variable is always key `env`, listed first, and is never written to the key file. Keys are returned masked only (`sk-pro…abcd`); request bodies are never logged. Added keys are saved in `ANIMAOS_RS_PROVIDER_KEYS_FILE`, or `provider-keys.json` next to the control-plane file; with neither, they last until restart and the list says `persisted: false`. `GET /api/providers` reports a provider as `configured` when its pool holds a key, from the environment or the file.
+
+| Method   | Path                                             | Description |
+| -------- | ------------------------------------------------ | ----------- |
+| `GET`    | `/api/provider-keys`                             | `{ providers: [{ id, strategy, persisted, keys: [{ id, label, masked, source: "env" or "file", status: "ready" or "resting", restingUntilMs, lastError, uses }] }] }` for every provider that takes a key. |
+| `POST`   | `/api/provider-keys/{provider}`                  | Body `{ label?, key }`; answers `201` with the key as listed. `key` and `label` are trimmed; `key` must be non-empty and at most 2,000 characters; `label` is cut to 80. `400` for an unknown provider or a bad key; `409` for a key already in the pool; `503` when the key file cannot be written (nothing changes). |
+| `DELETE` | `/api/provider-keys/{provider}/{key_id}`         | Removes a file key and answers `{ deleted: true }`. `404` for an unknown key; `409` for the environment key. Removing a key never wakes a resting one. |
+| `PUT`    | `/api/provider-keys/{provider}/strategy`         | Body `{ strategy }`: `fill_first` (default), `round_robin`, `random` or `least_used`; answers the provider's entry. `400` for an unknown provider or strategy. |
+| `POST`   | `/api/provider-keys/{provider}/{key_id}/wake`    | "Try now": ends the key's rest at once and clears its error, the environment key (`env`) included, for example after topping up credit; answers the key as listed. `404` for an unknown key. A failure on the next call rests it again. |
 
 ### Logs
 

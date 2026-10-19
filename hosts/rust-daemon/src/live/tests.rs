@@ -220,6 +220,54 @@ fn a_step_usage_records_when_and_how_long() {
 }
 
 #[test]
+fn a_step_answered_by_a_fallback_keeps_the_model_that_answered() {
+    let hub = LiveHub::new(8);
+    let runs = hub.runs();
+    runs.register("run_1");
+    runs.note_served(
+        "run_1",
+        "run_1:1",
+        "anthropic",
+        "claude-sonnet-5-5",
+        "was rate limited",
+    );
+    runs.record_step_usage_at("run_1", "run_1:1", TokenUsage::default(), 1_000);
+    runs.record_step_usage_at("run_1", "run_1:2", TokenUsage::default(), 2_000);
+    let steps = runs.steps("run_1");
+    assert_eq!(steps[0].provider.as_deref(), Some("anthropic"));
+    assert_eq!(steps[0].model.as_deref(), Some("claude-sonnet-5-5"));
+    assert_eq!(
+        steps[0].fallback_reason.as_deref(),
+        Some("was rate limited")
+    );
+    assert_eq!(
+        (
+            &steps[1].provider,
+            &steps[1].model,
+            &steps[1].fallback_reason
+        ),
+        (&None, &None, &None),
+        "a step the primary answered records no model"
+    );
+}
+
+#[test]
+fn a_usage_for_another_step_does_not_take_a_noted_fallback() {
+    let hub = LiveHub::new(8);
+    let runs = hub.runs();
+    runs.register("run_1");
+    runs.note_served(
+        "run_1",
+        "run_1:1",
+        "anthropic",
+        "claude-sonnet-5-5",
+        "was overloaded",
+    );
+    runs.record_step_usage_at("run_1", "run_1:2", TokenUsage::default(), 2_000);
+    assert_eq!(runs.steps("run_1")[0].model, None);
+}
+
+#[test]
 fn a_usage_without_a_started_step_has_zero_duration() {
     let hub = LiveHub::new(8);
     let runs = hub.runs();
@@ -553,6 +601,48 @@ mod coalescing {
             &[],
         );
         assert_eq!(snapshot["runs"][0]["tools"][0]["sources"], sources);
+        drop(observer);
+        drop(live_run);
+    }
+
+    #[tokio::test]
+    async fn a_fallback_step_publishes_which_model_answered_and_records_it() {
+        let hub = LiveHub::new(16);
+        let run = record("agent-1");
+        let mut subscription = hub.subscribe("agent-1").unwrap();
+        let live_run = LiveRun::register(hub.clone(), &run, None);
+        let observer = live_run.observer();
+        let step_id = format!("{}:1", run.id);
+
+        observer.on_frame(RunFrame::StepStarted {
+            step_id: step_id.clone(),
+        });
+        observer.on_frame(RunFrame::ModelServed {
+            step_id: step_id.clone(),
+            provider: "anthropic".into(),
+            model: "claude-sonnet-5-5".into(),
+            reason: "was rate limited".into(),
+        });
+        observer.on_frame(RunFrame::StepUsage {
+            step_id: step_id.clone(),
+            usage: Default::default(),
+        });
+
+        let event = next_event(&mut subscription).await;
+        assert_eq!(event.body.type_name(), "model.fallback");
+        let json = event.to_json(1);
+        assert_eq!(json["stepId"], step_id);
+        assert_eq!(json["provider"], "anthropic");
+        assert_eq!(json["model"], "claude-sonnet-5-5");
+        assert_eq!(json["reason"], "was rate limited");
+        assert_eq!(json["primary"]["provider"], "openai");
+        assert_eq!(json["primary"]["model"], "gpt-5.4");
+        let steps = hub.runs().steps(&run.id);
+        assert_eq!(steps[0].model.as_deref(), Some("claude-sonnet-5-5"));
+        assert_eq!(
+            steps[0].fallback_reason.as_deref(),
+            Some("was rate limited")
+        );
         drop(observer);
         drop(live_run);
     }

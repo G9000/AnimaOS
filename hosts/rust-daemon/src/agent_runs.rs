@@ -165,6 +165,7 @@ fn helper_config_base(parent: &AgentState, name: String) -> AgentConfig {
             ]),
         }),
         lore: None, knowledge: None, topics: None, adjectives: None, style: None, plugins: None,
+        fallbacks: parent.config.fallbacks.clone(),
     }
 }
 
@@ -2817,6 +2818,8 @@ mod completion_tests;
 mod context_tests;
 #[cfg(test)]
 mod conversation_tests;
+#[cfg(test)]
+mod fallback_tests;
 #[cfg(test)]
 mod learning_tests;
 #[cfg(test)]

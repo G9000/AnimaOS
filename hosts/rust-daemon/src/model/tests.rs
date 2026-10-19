@@ -222,6 +222,7 @@ fn config_with_tools(tool_names: &[&str]) -> AgentConfig {
         ),
         plugins: None,
         settings: None,
+        fallbacks: Vec::new(),
     }
 }
 
@@ -331,7 +332,9 @@ fn deterministic_stream_sends_word_deltas_then_the_generated_response() {
         .iter()
         .filter_map(|frame| match frame {
             ModelStreamFrame::TextDelta(text) => Some(text.as_str()),
-            ModelStreamFrame::Usage(_) | ModelStreamFrame::Final(_) => None,
+            ModelStreamFrame::Usage(_)
+            | ModelStreamFrame::Served { .. }
+            | ModelStreamFrame::Final(_) => None,
         })
         .collect();
     assert_eq!(deltas, generated.content.text);

@@ -409,6 +409,7 @@ async fn generate_agency_from_prepared(
         tools: None,
         plugins: None,
         settings: None,
+        fallbacks: Vec::new(),
     };
 
     let request = ModelGenerateRequest {
@@ -660,6 +661,7 @@ async fn generate_seed_memories(
         tools: None,
         plugins: None,
         settings: None,
+        fallbacks: Vec::new(),
     };
 
     let request = ModelGenerateRequest {

@@ -437,6 +437,8 @@ const TranscriptEntry = memo(function TranscriptEntry({
       );
     case 'learning-review':
       return <TaskReviewAction run={item.run} />;
+    case 'model-note':
+      return <p className="model-note">{item.text}</p>;
     case 'pending':
       return (
         <PendingMessage

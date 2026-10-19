@@ -228,6 +228,10 @@ pub(crate) struct ControlPlaneSnapshot {
     /// The owner's IANA time zone, as their web console last reported it.
     #[serde(default)]
     pub(crate) owner_time_zone: Option<String>,
+    /// The workspace's model for titles, compaction, the smart check and
+    /// learning reviews; `None` uses each agent's own.
+    #[serde(default)]
+    pub(crate) side_model: Option<anima_core::ModelChoice>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -691,6 +695,7 @@ impl ControlPlaneSnapshot {
             schedule_fires: vec![],
             pricing_overrides: vec![],
             owner_time_zone: None,
+            side_model: None,
             learning_reviews: vec![],
             learning_policies: vec![],
             memory_views: vec![],

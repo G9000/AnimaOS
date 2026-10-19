@@ -1153,6 +1153,7 @@ fn default_swarm_config() -> SwarmConfig {
             tools: None,
             plugins: None,
             settings: None,
+            fallbacks: Vec::new(),
         },
         workers: Vec::new(),
         max_concurrent_agents: None,

@@ -34,6 +34,15 @@ pub enum RunFrame {
     TextDelta { step_id: String, text: String },
     /// Provider-reported usage of one model call.
     StepUsage { step_id: String, usage: TokenUsage },
+    /// A fallback model answered the step instead of the agent's primary.
+    /// Sent once the call has finished, before its `StepUsage`; `reason` says
+    /// what happened to the primary (e.g. "was rate limited").
+    ModelServed {
+        step_id: String,
+        provider: String,
+        model: String,
+        reason: String,
+    },
     /// The model call ended; `message_id` is the message it recorded, if any.
     StepFinished {
         step_id: String,
@@ -98,6 +107,14 @@ pub(crate) struct StepSink {
     text: Mutex<String>,
     response: Mutex<Option<ModelGenerateResponse>>,
     usage: Mutex<Option<TokenUsage>>,
+    served: Mutex<Option<ServedBy>>,
+}
+
+/// The fallback model that answered a call, as its adapter reported it.
+pub(crate) struct ServedBy {
+    pub(crate) provider: String,
+    pub(crate) model: String,
+    pub(crate) reason: String,
 }
 
 impl StepSink {
@@ -108,6 +125,7 @@ impl StepSink {
             text: Mutex::new(String::new()),
             response: Mutex::new(None),
             usage: Mutex::new(None),
+            served: Mutex::new(None),
         }
     }
 
@@ -123,6 +141,11 @@ impl StepSink {
             .lock_recover()
             .clone()
             .filter(|usage| usage.total_tokens > 0)
+    }
+
+    /// The fallback model that answered, when one did.
+    pub(crate) fn take_served(&self) -> Option<ServedBy> {
+        self.served.lock_recover().take()
     }
 
     pub(crate) fn take_response(&self) -> Option<ModelGenerateResponse> {
@@ -148,6 +171,17 @@ impl ModelStreamSink for StepSink {
             }
             ModelStreamFrame::Usage(usage) => {
                 *self.usage.lock_recover() = Some(usage);
+            }
+            ModelStreamFrame::Served {
+                provider,
+                model,
+                reason,
+            } => {
+                *self.served.lock_recover() = Some(ServedBy {
+                    provider,
+                    model,
+                    reason,
+                });
             }
             ModelStreamFrame::Final(response) => {
                 *self.response.lock_recover() = Some(response);

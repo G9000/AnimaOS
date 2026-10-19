@@ -33,6 +33,8 @@ export interface AgentDetail {
   status: 'Idle' | 'Running' | 'Completed' | 'Failed' | 'Terminated';
   token_usage: TokenUsage;
   system?: string | null;
+  /** Models tried, in order, when the main one fails before replying. */
+  fallbacks?: { provider: string; model: string }[];
   messages: ChatMessage[];
 }
 

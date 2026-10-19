@@ -321,3 +321,144 @@ async fn a_title_call_that_never_answers_times_out_and_keeps_the_first_message_t
         "a timed-out title call was dropped and records nothing"
     );
 }
+
+fn side(provider: &str, model: &str) -> anima_core::ModelChoice {
+    anima_core::ModelChoice {
+        provider: provider.into(),
+        model: model.into(),
+    }
+}
+
+async fn wait_for_generated_title(coordinator: &super::AgentRunCoordinator, agent_id: &str) {
+    within("the title", async {
+        loop {
+            let titled = coordinator
+                .state
+                .read()
+                .await
+                .sessions
+                .get(agent_id, "chat:new")
+                .is_some_and(|session| session.title_source == TitleSource::Generated);
+            if titled {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+}
+
+fn provider_and_model(config: &anima_core::AgentConfig) -> (&str, &str) {
+    (
+        config.provider.as_deref().unwrap_or(""),
+        config.model.as_str(),
+    )
+}
+
+/// The workspace side model names the chat, and its usage row says so.
+#[tokio::test]
+async fn titles_use_the_side_model_when_set() {
+    let model = ScriptedModel::with_secondary(
+        vec![Step::Text(vec!["Lisbon in May is lovely."])],
+        vec![Step::Text(vec!["\"Lisbon Trip Plan\""])],
+    );
+    let (coordinator, agent_id) = coordinator_with(model.clone()).await;
+    {
+        let mut guard = coordinator.state.write().await;
+        guard.set_generated_titles(true);
+        guard.set_side_model(Some(side("anthropic", "claude-haiku-x")));
+    }
+
+    coordinator
+        .run(chat_request(
+            &agent_id,
+            "chat:new",
+            "Help me plan a trip to Lisbon",
+        ))
+        .await
+        .unwrap();
+    wait_for_generated_title(&coordinator, &agent_id).await;
+
+    let configs = model.secondary_configs();
+    assert_eq!(configs.len(), 1);
+    assert_eq!(
+        provider_and_model(&configs[0]),
+        ("anthropic", "claude-haiku-x")
+    );
+    let rows = wait_for_usage(&coordinator).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        (rows[0].provider.as_str(), rows[0].model.as_str()),
+        ("anthropic", "claude-haiku-x"),
+        "the row names the model that answered"
+    );
+}
+
+/// A side model that errors (wrong name, no key) never costs the chat its
+/// title: the agent's own model answers, and only it is recorded.
+#[tokio::test]
+async fn a_failing_side_model_falls_back_to_the_agents_model() {
+    let model = ScriptedModel::with_secondary(
+        vec![Step::Text(vec!["Lisbon in May is lovely."])],
+        vec![
+            Step::Fail("model not found"),
+            Step::Text(vec!["\"Lisbon Trip Plan\""]),
+        ],
+    );
+    let (coordinator, agent_id) = coordinator_with(model.clone()).await;
+    {
+        let mut guard = coordinator.state.write().await;
+        guard.set_generated_titles(true);
+        guard.set_side_model(Some(side("anthropic", "no-such-model")));
+    }
+
+    coordinator
+        .run(chat_request(
+            &agent_id,
+            "chat:new",
+            "Help me plan a trip to Lisbon",
+        ))
+        .await
+        .unwrap();
+    wait_for_generated_title(&coordinator, &agent_id).await;
+
+    let configs = model.secondary_configs();
+    assert_eq!(configs.len(), 2);
+    assert_eq!(
+        provider_and_model(&configs[0]),
+        ("anthropic", "no-such-model")
+    );
+    assert_eq!(provider_and_model(&configs[1]), ("openai", "gpt-5.4"));
+    let rows = wait_for_usage(&coordinator).await;
+    assert_eq!(rows.len(), 1, "the failed call spent nothing");
+    assert_eq!(
+        (rows[0].provider.as_str(), rows[0].model.as_str()),
+        ("openai", "gpt-5.4")
+    );
+}
+
+/// Without a side model a title takes exactly one call on the agent's own.
+#[tokio::test]
+async fn no_side_model_is_unchanged() {
+    let model = ScriptedModel::with_secondary(
+        vec![Step::Text(vec!["Lisbon in May is lovely."])],
+        vec![Step::Fail("must not be asked twice")],
+    );
+    let (coordinator, agent_id) = coordinator_with(model.clone()).await;
+    coordinator.state.write().await.set_generated_titles(true);
+
+    coordinator
+        .run(chat_request(
+            &agent_id,
+            "chat:new",
+            "Help me plan a trip to Lisbon",
+        ))
+        .await
+        .unwrap();
+    wait_for_title_call(&model).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let configs = model.secondary_configs();
+    assert_eq!(configs.len(), 1, "one call, no retry");
+    assert_eq!(provider_and_model(&configs[0]), ("openai", "gpt-5.4"));
+}

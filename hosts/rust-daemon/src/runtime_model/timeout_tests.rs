@@ -66,6 +66,7 @@ impl Fixture {
                     base_url: format!("{origin}/v1"),
                 },
             )]),
+            ..ProviderAdapterConfig::default()
         });
         Self {
             adapter,

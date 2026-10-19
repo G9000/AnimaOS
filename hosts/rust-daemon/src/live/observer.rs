@@ -98,6 +98,9 @@ struct RunInner {
     run_id: String,
     agent_id: String,
     session_id: String,
+    /// The run's own model, which a fallback step is told apart from.
+    primary_provider: Option<String>,
+    primary_model: String,
     parent_agent_id: Option<String>,
     coalescer: Mutex<DeltaCoalescer>,
     timer_armed: AtomicBool,
@@ -197,6 +200,25 @@ impl RunObserver for RunEvents {
                 inner.hub.runs().start_step(&inner.run_id, &step_id);
             }
             RunFrame::TextDelta { step_id, text } => inner.text(&step_id, &text),
+            RunFrame::ModelServed {
+                step_id,
+                provider,
+                model,
+                reason,
+            } => {
+                inner
+                    .hub
+                    .runs()
+                    .note_served(&inner.run_id, &step_id, &provider, &model, &reason);
+                inner.publish_after_flush(Some(inner.event(LiveEventBody::ModelFallback {
+                    step_id,
+                    provider,
+                    model,
+                    reason,
+                    primary_provider: inner.primary_provider.clone(),
+                    primary_model: inner.primary_model.clone(),
+                })));
+            }
             RunFrame::StepUsage { step_id, usage } => {
                 inner
                     .hub
@@ -346,6 +368,8 @@ impl LiveRun {
                 run_id: record.id.clone(),
                 agent_id: record.agent_id.clone(),
                 session_id: record.session_id.clone(),
+                primary_provider: record.provider.clone(),
+                primary_model: record.model.clone(),
                 parent_agent_id,
                 coalescer: Mutex::new(DeltaCoalescer::default()),
                 timer_armed: AtomicBool::new(false),

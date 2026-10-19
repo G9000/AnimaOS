@@ -3185,7 +3185,8 @@ impl<L: EngineLiveEventSink> ModelStreamSink for EngineModelSink<'_, L> {
                     })
                     .await;
             }
-            ModelStreamFrame::Usage(_) => {}
+            // Which model answered is not recorded by the durable engine yet.
+            ModelStreamFrame::Usage(_) | ModelStreamFrame::Served { .. } => {}
             ModelStreamFrame::Final(response) => {
                 let mut final_response = self
                     .final_response
@@ -3464,5 +3465,6 @@ fn agent_config(definition: &AgentDefinition, manifests: &[CapabilityManifest]) 
         ),
         plugins: None,
         settings: None,
+        fallbacks: Vec::new(),
     }
 }

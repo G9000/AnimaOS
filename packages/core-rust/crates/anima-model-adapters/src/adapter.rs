@@ -1,6 +1,8 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use anima_core::{
-    AgentConfig, ModelAdapter, ModelGenerateRequest, ModelGenerateResponse, ModelStreamFrame,
-    ModelStreamSink,
+    classify_model_error, AgentConfig, ModelAdapter, ModelFailureKind, ModelGenerateRequest,
+    ModelGenerateResponse, ModelStreamFrame, ModelStreamSink,
 };
 use async_trait::async_trait;
 use reqwest::Client;
@@ -14,7 +16,7 @@ use crate::openai_compatible::{build_openai_compatible_body, parse_openai_compat
 use crate::stream::{
     consume_anthropic_sse, consume_google_sse, consume_ollama_ndjson, consume_openai_sse,
 };
-use crate::transport::transport_error;
+use crate::transport::{transport_error, with_retry_hint};
 use crate::ProviderDefinition;
 use crate::{ProviderAdapterConfig, ProviderCredential};
 
@@ -536,7 +538,23 @@ impl ProviderModelAdapter {
             .ok_or_else(|| format!("unknown model provider: {requested}"))?;
         let definition = &entry.definition;
         let credential = self.credential_for(definition.id, definition.default_base_url);
+        self.with_key_rotation(
+            definition,
+            &credential,
+            || true,
+            |credential| self.generate_with(&entry, credential, config, request),
+        )
+        .await
+    }
 
+    async fn generate_with(
+        &self,
+        entry: &crate::catalog::CatalogEntry,
+        credential: ProviderCredential,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+    ) -> Result<ModelGenerateResponse, String> {
+        let definition = &entry.definition;
         match entry.kind {
             ProviderKind::Anthropic => self.generate_anthropic(credential, config, request).await,
             ProviderKind::Google => self.generate_google(credential, config, request).await,
@@ -587,6 +605,30 @@ impl ProviderModelAdapter {
             .ok_or_else(|| format!("unknown model provider: {requested}"))?;
         let definition = &entry.definition;
         let credential = self.credential_for(definition.id, definition.default_base_url);
+        // Another key may only take over a stream that has not yet told the
+        // consumer anything, or the reply would repeat or mix two answers.
+        let counted = FrameCountingSink {
+            inner: sink,
+            frames: AtomicUsize::new(0),
+        };
+        self.with_key_rotation(
+            definition,
+            &credential,
+            || counted.frames.load(Ordering::SeqCst) == 0,
+            |credential| self.stream_with(&entry, credential, config, request, &counted),
+        )
+        .await
+    }
+
+    async fn stream_with(
+        &self,
+        entry: &crate::catalog::CatalogEntry,
+        credential: ProviderCredential,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        sink: &dyn ModelStreamSink,
+    ) -> Result<(), String> {
+        let definition = &entry.definition;
         match entry.kind {
             ProviderKind::Anthropic => {
                 self.stream_anthropic(credential, config, request, sink)
@@ -622,6 +664,104 @@ impl ProviderModelAdapter {
                 .await
             }
         }
+    }
+
+    /// Runs `attempt` with a key from the key source. A failure that blames the
+    /// key (rate limit, auth, billing) is reported and the attempt repeats with
+    /// the next untried pick, at most once per distinct key the source hands
+    /// out. When the source holds keys but every one rests, nothing is sent and
+    /// the error says why and until when (`every_key_resting`).
+    /// Without a key source, or when it has no key for the provider, the one
+    /// attempt runs with the configured credential, exactly as before.
+    async fn with_key_rotation<T, Fut>(
+        &self,
+        definition: &ProviderDefinition,
+        credential: &ProviderCredential,
+        may_rotate: impl Fn() -> bool,
+        mut attempt: impl FnMut(ProviderCredential) -> Fut,
+    ) -> Result<T, String>
+    where
+        Fut: std::future::Future<Output = Result<T, String>>,
+    {
+        let Some(source) = self.config.key_source.as_deref() else {
+            return attempt(credential.clone()).await;
+        };
+        let provider = definition.id;
+        let mut tried: Vec<String> = Vec::new();
+        let mut last_error: Option<String> = None;
+        loop {
+            let picked = source
+                .pick_untried(provider, &tried)
+                .filter(|(key_id, _)| !tried.contains(key_id));
+            let Some((key_id, key)) = picked else {
+                return match last_error {
+                    Some(error) => Err(error),
+                    // The source holds keys for this provider but none is
+                    // ready: send nothing (the configured credential may be
+                    // that very key, resting) and report why, so fallback
+                    // can engage.
+                    None if source.holds_keys(provider) => Err(every_key_resting(
+                        definition.label,
+                        source.resting(provider),
+                    )),
+                    None => attempt(credential.clone()).await,
+                };
+            };
+            tried.push(key_id.clone());
+            let mut keyed = credential.clone();
+            keyed.api_key = Some(key);
+            match attempt(keyed).await {
+                Ok(value) => {
+                    source.report(provider, &key_id, None);
+                    return Ok(value);
+                }
+                Err(error) => {
+                    let failure = classify_model_error(&error);
+                    source.report(provider, &key_id, Some(&failure));
+                    if failure.kind.rotates_key() && may_rotate() {
+                        last_error = Some(error);
+                        continue;
+                    }
+                    return Err(error);
+                }
+            }
+        }
+    }
+}
+
+/// The error for a call whose keys all rest: the status matches the cause
+/// (402 out of credit, 401 key rejected, 429 rate limited) and says until when,
+/// so it classifies as that cause with a retry hint. Without a cause, a 429.
+fn every_key_resting(label: &str, resting: Option<crate::KeysResting>) -> String {
+    let Some(resting) = resting else {
+        return format!("{label} API error (429): every key is resting");
+    };
+    let (status, cause) = match resting.kind {
+        ModelFailureKind::Billing => (402, "out of credit"),
+        ModelFailureKind::AuthFailed => (401, "key rejected"),
+        _ => (429, "rate limited"),
+    };
+    let until = resting
+        .ready_at
+        .map(|at| format!(" until {at}"))
+        .unwrap_or_default();
+    format!(
+        "{label} API error ({status}): every key is resting \u{2014} {cause}{until} (retry after {}s)",
+        resting.ready_in_s.max(1)
+    )
+}
+
+/// Counts the frames a stream attempt has handed to the consumer.
+struct FrameCountingSink<'a> {
+    inner: &'a dyn ModelStreamSink,
+    frames: AtomicUsize,
+}
+
+#[async_trait]
+impl ModelStreamSink for FrameCountingSink<'_> {
+    async fn emit(&self, frame: ModelStreamFrame) -> Result<(), String> {
+        self.frames.fetch_add(1, Ordering::SeqCst);
+        self.inner.emit(frame).await
     }
 }
 
@@ -682,11 +822,15 @@ async fn response_payload(
     image_request: bool,
 ) -> Result<serde_json::Value, String> {
     let status = response.status();
+    let headers = response.headers().clone();
     // Never read an upstream diagnostic body for an image-bearing request.
     if image_request && !status.is_success() {
-        return Err(format!(
-            "{provider} API error ({}): {IMAGE_REQUEST_FAILED}",
-            status.as_u16()
+        return Err(with_retry_hint(
+            format!(
+                "{provider} API error ({}): {IMAGE_REQUEST_FAILED}",
+                status.as_u16()
+            ),
+            &headers,
         ));
     }
     let text = response
@@ -694,10 +838,13 @@ async fn response_payload(
         .await
         .map_err(|error| transport_error(provider, "response read", error))?;
     if !status.is_success() {
-        return Err(format!(
-            "{provider} API error ({}): {}",
-            status.as_u16(),
-            sanitize_upstream_body(&text, api_key)
+        return Err(with_retry_hint(
+            format!(
+                "{provider} API error ({}): {}",
+                status.as_u16(),
+                sanitize_upstream_body(&text, api_key)
+            ),
+            &headers,
         ));
     }
     serde_json::from_str(&text)

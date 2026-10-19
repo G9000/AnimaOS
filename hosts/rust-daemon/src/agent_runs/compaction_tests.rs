@@ -1499,3 +1499,136 @@ async fn compaction_never_replays_foreign_or_changed_document_sources() {
         }
     }
 }
+
+fn side_choice(provider: &str, model: &str) -> anima_core::ModelChoice {
+    anima_core::ModelChoice {
+        provider: provider.into(),
+        model: model.into(),
+    }
+}
+
+fn provider_and_model(config: &anima_core::AgentConfig) -> (&str, &str) {
+    (
+        config.provider.as_deref().unwrap_or(""),
+        config.model.as_str(),
+    )
+}
+
+/// Compaction summarizes on the side model, and the usage row names it.
+#[tokio::test]
+async fn compaction_uses_the_side_model_when_set() {
+    let model = ScriptedModel::with_secondary(
+        vec![Step::Text(vec!["Booked"])],
+        vec![Step::Text(vec!["They planned a trip to Lisbon."])],
+    );
+    let (coordinator, agent_id) = long_session(model.clone(), true).await;
+    coordinator
+        .state
+        .write()
+        .await
+        .set_side_model(Some(side_choice("anthropic", "claude-haiku-x")));
+
+    coordinator
+        .run(chat_request(&agent_id, "chat:long", "book one"))
+        .await
+        .unwrap();
+
+    let configs = model.secondary_configs();
+    assert_eq!(configs.len(), 1);
+    assert_eq!(
+        provider_and_model(&configs[0]),
+        ("anthropic", "claude-haiku-x")
+    );
+    let rows = coordinator.state.read().await.history.pending_usage();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        (rows[0].provider.as_str(), rows[0].model.as_str()),
+        ("anthropic", "claude-haiku-x")
+    );
+}
+
+/// A failing side model falls back to the agent's own, which is the only
+/// call recorded.
+#[tokio::test]
+async fn a_failing_side_model_falls_back_to_the_agents_model_for_compaction() {
+    let model = ScriptedModel::with_secondary(
+        vec![Step::Text(vec!["Booked"])],
+        vec![
+            Step::Fail("no key for anthropic"),
+            Step::Text(vec!["They planned a trip to Lisbon."]),
+        ],
+    );
+    let (coordinator, agent_id) = long_session(model.clone(), true).await;
+    coordinator
+        .state
+        .write()
+        .await
+        .set_side_model(Some(side_choice("anthropic", "claude-haiku-x")));
+
+    coordinator
+        .run(chat_request(&agent_id, "chat:long", "book one"))
+        .await
+        .unwrap();
+
+    let configs = model.secondary_configs();
+    assert_eq!(configs.len(), 2);
+    assert_eq!(
+        provider_and_model(&configs[0]),
+        ("anthropic", "claude-haiku-x")
+    );
+    assert_eq!(provider_and_model(&configs[1]), ("openai", "gpt-5.4"));
+    {
+        let guard = coordinator.state.read().await;
+        let session = guard.sessions.get(&agent_id, "chat:long").unwrap();
+        assert_eq!(
+            session.summary.as_ref().unwrap().text,
+            "They planned a trip to Lisbon."
+        );
+        assert_eq!(session.compaction_error, None);
+    }
+    let rows = coordinator.state.read().await.history.pending_usage();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        (rows[0].provider.as_str(), rows[0].model.as_str()),
+        ("openai", "gpt-5.4")
+    );
+}
+
+/// A hanging side model gets half the compaction's time, so the agent's own
+/// model still writes the summary before the deadline.
+#[tokio::test]
+async fn a_hanging_side_model_leaves_the_agents_model_time_to_summarize() {
+    let model = ScriptedModel::with_secondary(
+        vec![Step::Text(vec!["Booked"])],
+        vec![
+            Step::Hold(Vec::new()),
+            Step::Text(vec!["They planned a trip to Lisbon."]),
+        ],
+    );
+    let (coordinator, agent_id) = long_session(model.clone(), true).await;
+    let coordinator = coordinator.with_compaction_timeout(Duration::from_millis(600));
+    coordinator
+        .state
+        .write()
+        .await
+        .set_side_model(Some(side_choice("anthropic", "claude-haiku-x")));
+
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        coordinator.run(chat_request(&agent_id, "chat:long", "book one")),
+    )
+    .await
+    .expect("the compaction deadline bounds the run")
+    .unwrap();
+
+    let configs = model.secondary_configs();
+    assert_eq!(configs.len(), 2);
+    assert_eq!(provider_and_model(&configs[1]), ("openai", "gpt-5.4"));
+    let guard = coordinator.state.read().await;
+    let session = guard.sessions.get(&agent_id, "chat:long").unwrap();
+    assert_eq!(
+        session.summary.as_ref().unwrap().text,
+        "They planned a trip to Lisbon."
+    );
+    assert_eq!(session.compaction_error, None);
+}

@@ -42,7 +42,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 219, "complete registered operation count");
+    assert_eq!(actual.len(), 226, "complete registered operation count");
     let message_search_additions = [("GET", "/api/agents/{agent_id}/message-search")];
     for (method, path) in message_search_additions {
         assert!(
@@ -98,6 +98,29 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         assert!(
             actual.contains(&(method.to_string(), path.to_string())),
             "explicit speech operation must be registered"
+        );
+    }
+    let side_model_additions = [
+        ("GET", "/api/settings/side-model"),
+        ("PUT", "/api/settings/side-model"),
+    ];
+    for (method, path) in side_model_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "side-task model operation must be registered"
+        );
+    }
+    let provider_key_additions = [
+        ("GET", "/api/provider-keys"),
+        ("POST", "/api/provider-keys/{provider}"),
+        ("DELETE", "/api/provider-keys/{provider}/{key_id}"),
+        ("PUT", "/api/provider-keys/{provider}/strategy"),
+        ("POST", "/api/provider-keys/{provider}/{key_id}/wake"),
+    ];
+    for (method, path) in provider_key_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "provider key pool operation must be registered"
         );
     }
     let autonomy_additions = [
@@ -167,6 +190,8 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             .filter(|(method, path)| {
                 !coding_additions.contains(&(method.as_str(), path.as_str()))
                     && !autonomy_additions.contains(&(method.as_str(), path.as_str()))
+                    && !side_model_additions.contains(&(method.as_str(), path.as_str()))
+                    && !provider_key_additions.contains(&(method.as_str(), path.as_str()))
                     && !skill_ledger_additions.contains(&(method.as_str(), path.as_str()))
                     && !learning_undo_additions.contains(&(method.as_str(), path.as_str()))
                     && !import_additions.contains(&(method.as_str(), path.as_str()))
@@ -206,6 +231,8 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                 |(method, path)| !additions.contains(&(method.as_str(), path.as_str()))
                     && !coding_additions.contains(&(method.as_str(), path.as_str()))
                     && !autonomy_additions.contains(&(method.as_str(), path.as_str()))
+                    && !side_model_additions.contains(&(method.as_str(), path.as_str()))
+                    && !provider_key_additions.contains(&(method.as_str(), path.as_str()))
                     && !skill_ledger_additions.contains(&(method.as_str(), path.as_str()))
                     && !learning_undo_additions.contains(&(method.as_str(), path.as_str()))
                     && !import_additions.contains(&(method.as_str(), path.as_str()))
@@ -238,6 +265,7 @@ fn owner_console_path(path: &str) -> bool {
         || path.starts_with("/api/logs")
         || path.starts_with("/api/usage")
         || path.starts_with("/api/pricing")
+        || path.starts_with("/api/settings")
         || path.starts_with("/api/skills")
         || (path.starts_with("/api/agents/")
             && [

@@ -36,6 +36,58 @@ fn reserved_room_prefix_list() -> String {
     format!("{}, and {last}", rest.join(", "))
 }
 
+/// How many fallback models an agent may list.
+const MAX_FALLBACKS: usize = 3;
+
+/// Checks the agent's fallback chain against its own model.
+fn check_fallbacks(config: &anima_core::AgentConfig) -> Result<(), ApiError> {
+    if config.fallbacks.len() > MAX_FALLBACKS {
+        return Err(ApiError::bad_request_static(
+            "an agent may list at most 3 fallback models",
+        ));
+    }
+    let primary_provider = crate::runtime_model::canonical_provider(
+        config
+            .provider
+            .as_deref()
+            .map(str::trim)
+            .filter(|provider| !provider.is_empty())
+            .unwrap_or("deterministic"),
+    );
+    let mut listed = Vec::new();
+    for choice in &config.fallbacks {
+        if choice.provider.is_empty() || choice.model.is_empty() {
+            return Err(ApiError::bad_request_static(
+                "fallback provider and model must not be empty",
+            ));
+        }
+        if crate::runtime_model::is_mock_provider(&choice.provider) {
+            return Err(ApiError::bad_request_static(
+                "the test providers (deterministic, test) cannot be fallbacks",
+            ));
+        }
+        if !crate::runtime_model::is_routable_provider(&choice.provider) {
+            return Err(ApiError::bad_request(format!(
+                "fallback provider '{}' is not a known provider",
+                choice.provider
+            )));
+        }
+        let provider = crate::runtime_model::canonical_provider(&choice.provider);
+        if provider == primary_provider && choice.model == config.model.trim() {
+            return Err(ApiError::bad_request_static(
+                "a fallback model must differ from the agent's own model",
+            ));
+        }
+        if listed.contains(&(provider.clone(), choice.model.as_str())) {
+            return Err(ApiError::bad_request_static(
+                "each fallback model may be listed only once",
+            ));
+        }
+        listed.push((provider, choice.model.as_str()));
+    }
+    Ok(())
+}
+
 pub(crate) async fn handle_create_agent(
     body: Vec<u8>,
     state: &SharedDaemonState,
@@ -44,6 +96,7 @@ pub(crate) async fn handle_create_agent(
     let config = request
         .into_domain()
         .map_err(ApiError::bad_request_static)?;
+    check_fallbacks(&config)?;
 
     let (snapshot, persist_request) = {
         let mut guard = state.write().await;
@@ -163,6 +216,19 @@ pub(crate) async fn handle_update_agent(
         })
         .transpose()?
         .flatten();
+    if patch.provider.is_some() || patch.model.is_some() || patch.fallbacks.is_some() {
+        let mut patched = previous.state.config.clone();
+        if let Some(model) = &patch.model {
+            patched.model = model.clone();
+        }
+        if let Some(provider) = &patch.provider {
+            patched.provider = (!provider.is_empty()).then(|| provider.clone());
+        }
+        if let Some(fallbacks) = &patch.fallbacks {
+            patched.fallbacks = fallbacks.clone();
+        }
+        check_fallbacks(&patched)?;
+    }
     let snapshot = match guard.update_agent(agent_id, patch) {
         Ok(snapshot) => snapshot,
         Err(UpdateAgentError::InvalidTools(message)) => return Err(ApiError::bad_request(message)),
@@ -924,7 +990,146 @@ mod tests {
             tools: None,
             plugins: None,
             settings: Some(AgentSettings::default()),
+            fallbacks: Vec::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn fallbacks_are_validated() {
+        let state = Arc::new(RwLock::new(DaemonState::new()));
+        let agent_id = state
+            .write()
+            .await
+            .create_agent(test_config("operator"))
+            .expect("agent should be created")
+            .state
+            .id;
+        let patch = |fallbacks: serde_json::Value| {
+            serde_json::json!({ "fallbacks": fallbacks })
+                .to_string()
+                .into_bytes()
+        };
+        let choice = |provider: &str, model: &str| serde_json::json!({ "provider": provider, "model": model });
+
+        for (fallbacks, message) in [
+            (
+                serde_json::json!([
+                    choice("anthropic", "a"),
+                    choice("anthropic", "b"),
+                    choice("anthropic", "c"),
+                    choice("anthropic", "d"),
+                ]),
+                "an agent may list at most 3 fallback models",
+            ),
+            (
+                serde_json::json!([choice("openai", "gpt-5.4")]),
+                "a fallback model must differ from the agent's own model",
+            ),
+            (
+                serde_json::json!([choice("nope", "x")]),
+                "fallback provider 'nope' is not a known provider",
+            ),
+            (
+                serde_json::json!([choice("anthropic", " ")]),
+                "fallback provider and model must not be empty",
+            ),
+            (
+                serde_json::json!([choice("deterministic", "x")]),
+                "the test providers (deterministic, test) cannot be fallbacks",
+            ),
+            (
+                serde_json::json!([choice("Test", "x")]),
+                "the test providers (deterministic, test) cannot be fallbacks",
+            ),
+            (
+                serde_json::json!([choice("OpenAI", "gpt-5.4")]),
+                "a fallback model must differ from the agent's own model",
+            ),
+            (
+                serde_json::json!([
+                    choice("anthropic", "claude-x"),
+                    choice("anthropic", "claude-x")
+                ]),
+                "each fallback model may be listed only once",
+            ),
+            (
+                serde_json::json!([choice("google", "gemini-x"), choice("Gemini", "gemini-x")]),
+                "each fallback model may be listed only once",
+            ),
+        ] {
+            let error = handle_update_agent(&agent_id, patch(fallbacks.clone()), &state)
+                .await
+                .expect_err(&fallbacks.to_string());
+            assert_eq!(error.status(), StatusCode::BAD_REQUEST, "{fallbacks}");
+            assert_eq!(error.message(), message, "{fallbacks}");
+        }
+
+        let saved = handle_update_agent(
+            &agent_id,
+            patch(serde_json::json!([choice("anthropic", "claude-x")])),
+            &state,
+        )
+        .await
+        .expect("a valid chain saves");
+        assert_eq!(
+            serde_json::to_value(&saved.agent.state.config).unwrap()["fallbacks"],
+            serde_json::json!([choice("anthropic", "claude-x")])
+        );
+
+        // The primary may not move onto a listed fallback either.
+        let error = handle_update_agent(
+            &agent_id,
+            br#"{"provider":"anthropic","model":"claude-x"}"#.to_vec(),
+            &state,
+        )
+        .await
+        .expect_err("the primary would repeat a fallback");
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+
+        // An alias names the same provider as its id.
+        let error = handle_update_agent(
+            &agent_id,
+            br#"{"provider":"gemini","model":"gemini-x","fallbacks":[{"provider":"google","model":"gemini-x"}]}"#.to_vec(),
+            &state,
+        )
+        .await
+        .expect_err("gemini is google");
+        assert_eq!(
+            error.message(),
+            "a fallback model must differ from the agent's own model"
+        );
+
+        let cleared = handle_update_agent(&agent_id, patch(serde_json::json!([])), &state)
+            .await
+            .expect("an empty list clears the chain");
+        assert_eq!(
+            serde_json::to_value(&cleared.agent.state.config).unwrap()["fallbacks"],
+            serde_json::json!([])
+        );
+        assert!(state
+            .read()
+            .await
+            .get_agent(&agent_id)
+            .unwrap()
+            .state
+            .config
+            .fallbacks
+            .is_empty());
+
+        let error = handle_create_agent(
+            serde_json::json!({
+                "name": "twin",
+                "provider": "openai",
+                "model": "gpt-5.4",
+                "fallbacks": [choice("openai", "gpt-5.4")],
+            })
+            .to_string()
+            .into_bytes(),
+            &state,
+        )
+        .await
+        .expect_err("a new agent's chain is validated too");
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

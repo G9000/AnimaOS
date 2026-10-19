@@ -37,9 +37,11 @@ mod multipart;
 pub(crate) use multipart::MAX_FORM_HEADER_BYTES;
 mod oauth_apps;
 mod profile;
+mod provider_keys;
 mod runs;
 mod schedules;
 mod sessions;
+mod side_model;
 mod skills;
 mod speech;
 mod status;
@@ -96,7 +98,7 @@ pub(crate) use self::contracts::{
 pub(crate) use self::http::configured_bind_is_loopback;
 use self::http::{json_response, make_http_span, read_limited_body, request_query};
 pub(super) use self::http::{parse_json_body, serialize_json};
-use crate::runtime_model::provider_summaries;
+use crate::runtime_model::provider_summaries_with_pool;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -231,6 +233,9 @@ use crate::runtime_model::provider_summaries;
         logs::list_logs, logs::stream_logs,
         usage::usage_summary, usage::usage_records, usage::usage_export,
         usage::get_pricing, usage::put_pricing,
+        side_model::get_side_model, side_model::put_side_model,
+        provider_keys::list_keys, provider_keys::add_key, provider_keys::remove_key, provider_keys::set_strategy,
+        provider_keys::wake_key,
         status::get_status,
         attachments::upload, attachments::serve,
         voice::capabilities, voice::transcribe, voice::cancel,
@@ -281,6 +286,7 @@ use crate::runtime_model::provider_summaries;
         (name = "learning", description = "Owner-controlled bounded task review and unverified advice"),
         (name = "approvals", description = "Tool approvals: pending requests, decisions, policies, and rules"),
         (name = "skills", description = "Owner-approved skills, drafts, and imports"),
+        (name = "settings", description = "Owner-set workspace settings"),
         (name = "logs", description = "The redacted daemon log tail and its live stream"),
         (name = "status", description = "One status aggregate for the Health page"),
         (name = "usage", description = "Model-call usage, cost summaries, CSV export, and price overrides"),
@@ -1082,6 +1088,27 @@ fn router_with_services_with_policies_and_integrations(
         .route(
             "/api/usage/pricing",
             get(usage::get_pricing).put(usage::put_pricing),
+        )
+        .route(
+            "/api/settings/side-model",
+            get(side_model::get_side_model).put(side_model::put_side_model),
+        )
+        .route("/api/provider-keys", get(provider_keys::list_keys))
+        .route(
+            "/api/provider-keys/{provider}",
+            axum::routing::post(provider_keys::add_key),
+        )
+        .route(
+            "/api/provider-keys/{provider}/strategy",
+            axum::routing::put(provider_keys::set_strategy),
+        )
+        .route(
+            "/api/provider-keys/{provider}/{key_id}",
+            axum::routing::delete(provider_keys::remove_key),
+        )
+        .route(
+            "/api/provider-keys/{provider}/{key_id}/wake",
+            axum::routing::post(provider_keys::wake_key),
         )
         .route("/api/ready", get(ready_entry))
         .route(
@@ -2342,7 +2369,8 @@ async fn list_providers_entry(State(state): State<AppState>) -> AxumResponse {
 /// The provider catalog with each provider's `configured` flag, ChatGPT
 /// last; shared by `/api/providers` and the status aggregate.
 async fn provider_responses(daemon: &SharedDaemonState) -> Vec<ProviderResponse> {
-    let mut providers = provider_summaries()
+    let pool = daemon.read().await.provider_keys.clone();
+    let mut providers = provider_summaries_with_pool(&pool)
         .into_iter()
         .map(|summary| ProviderResponse {
             id: summary.id.to_string(),
@@ -2501,8 +2529,12 @@ async fn bootstrap_workspace_entry(
         (status = 400, description = "Invalid path or anima.yaml", body = ErrorBody)
     )
 )]
-async fn inspect_workspace_entry(Query(query): Query<WorkspaceInspectQuery>) -> AxumResponse {
-    match workspace::handle_inspect_workspace(&query.root_path).await {
+async fn inspect_workspace_entry(
+    State(state): State<AppState>,
+    Query(query): Query<WorkspaceInspectQuery>,
+) -> AxumResponse {
+    let pool = state.daemon.read().await.provider_keys.clone();
+    match workspace::handle_inspect_workspace(&query.root_path, &pool).await {
         Ok(response) => json_response(StatusCode::OK, &response),
         Err(error) => error.into_response(),
     }
@@ -2694,8 +2726,10 @@ mod tests {
     mod logs;
     mod memory_edits;
     mod memory_views;
+    mod provider_keys;
     mod runs;
     mod sessions;
+    mod side_model;
     mod skills;
     mod status;
     mod swarm_reliability;
@@ -4666,6 +4700,7 @@ mod tests {
             tools: None,
             plugins: None,
             settings: Some(AgentSettings::default()),
+            fallbacks: Vec::new(),
         }
     }
 }

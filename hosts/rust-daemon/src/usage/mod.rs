@@ -193,14 +193,19 @@ pub(crate) fn usage_records_for_run(
     let provider = run.provider.clone().unwrap_or_else(|| "unknown".into());
     let source = UsageSource::from(run.source);
     let fallback_ms = run.started_at_ms.unwrap_or(run.created_at_ms);
-    let call = |id: String, duration_ms: u64, created_at_ms: u64| UsageCall {
+    // A step a fallback model answered is priced at that model; any other
+    // step (including one saved before fallbacks) at the run's own.
+    let call = |id: String,
+                duration_ms: u64,
+                created_at_ms: u64,
+                served: Option<(&String, &String)>| UsageCall {
         id,
         agent_id: run.agent_id.clone(),
         session_id: Some(run.session_id.clone()),
         run_id: Some(run.id.clone()),
         source,
-        provider: provider.clone(),
-        model: run.model.clone(),
+        provider: served.map_or_else(|| provider.clone(), |(provider, _)| provider.clone()),
+        model: served.map_or_else(|| run.model.clone(), |(_, model)| model.clone()),
         duration_ms,
         created_at_ms,
     };
@@ -218,7 +223,12 @@ pub(crate) fn usage_records_for_run(
             step.at_ms
         };
         records.push(usage_record(
-            &call(step.step_id.clone(), step.duration_ms, at_ms),
+            &call(
+                step.step_id.clone(),
+                step.duration_ms,
+                at_ms,
+                step.provider.as_ref().zip(step.model.as_ref()),
+            ),
             &step.usage,
             overrides,
         ));
@@ -227,7 +237,7 @@ pub(crate) fn usage_records_for_run(
     if rest.total_tokens > 0 {
         let at_ms = run.finished_at_ms.unwrap_or(fallback_ms);
         records.push(usage_record(
-            &call(format!("{}:rest", run.id), 0, at_ms),
+            &call(format!("{}:rest", run.id), 0, at_ms, None),
             &rest,
             overrides,
         ));
@@ -255,7 +265,17 @@ mod tests {
             usage,
             at_ms,
             duration_ms,
+            provider: None,
+            model: None,
+            fallback_reason: None,
         }
+    }
+
+    fn served_by(mut step: RunStepUsage, provider: &str, model: &str) -> RunStepUsage {
+        step.provider = Some(provider.into());
+        step.model = Some(model.into());
+        step.fallback_reason = Some("was rate limited".into());
+        step
     }
 
     fn run(source: RunSource) -> RunRecord {
@@ -319,6 +339,90 @@ mod tests {
         assert_eq!(records[0].provider, "unknown");
         assert_eq!(records[0].pricing_source, PricingSource::Unknown);
         assert_eq!(records[0].cost_micros, None);
+    }
+
+    #[test]
+    fn steps_answered_by_a_fallback_are_priced_at_the_fallback_model() {
+        let mut run = run(RunSource::Web);
+        run.steps = vec![
+            served_by(
+                step("run_1:1", tokens(1_000, 500), 2_000, 10),
+                "openai",
+                "gpt-x",
+            ),
+            served_by(
+                step("run_1:2", tokens(1_000, 500), 3_000, 10),
+                "anthropic",
+                "claude-sonnet-5-5",
+            ),
+        ];
+        run.usage = tokens(2_000, 1_000);
+        let records = usage_records_for_run(&run, &[]);
+        assert_eq!(records.len(), 2);
+        assert_eq!(
+            (records[0].provider.as_str(), records[0].model.as_str()),
+            ("openai", "gpt-x")
+        );
+        assert_eq!(
+            (records[1].provider.as_str(), records[1].model.as_str()),
+            ("anthropic", "claude-sonnet-5-5")
+        );
+        let at_run_model = usage_record(
+            &UsageCall {
+                id: "x".into(),
+                agent_id: "agent-a".into(),
+                session_id: None,
+                run_id: None,
+                source: UsageSource::Chat,
+                provider: "anthropic".into(),
+                model: "claude-sonnet-5-5".into(),
+                duration_ms: 0,
+                created_at_ms: 0,
+            },
+            &tokens(1_000, 500),
+            &[],
+        );
+        assert_eq!(
+            records[1].cost_micros, at_run_model.cost_micros,
+            "priced with the model that answered, not the run's"
+        );
+        assert_eq!(records[1].pricing_source, at_run_model.pricing_source);
+    }
+
+    #[test]
+    fn old_steps_without_a_model_use_the_run_model() {
+        let mut run = run(RunSource::Web);
+        run.steps = vec![
+            step("run_1:1", tokens(10, 5), 2_000, 10),
+            served_by(step("run_1:2", tokens(10, 5), 3_000, 10), "openai", "gpt-x"),
+        ];
+        run.usage = tokens(20, 10);
+        let records = usage_records_for_run(&run, &[]);
+        assert_eq!(
+            (records[0].provider.as_str(), records[0].model.as_str()),
+            ("anthropic", "claude-fable-5-1")
+        );
+        assert_eq!(
+            (records[1].provider.as_str(), records[1].model.as_str()),
+            ("openai", "gpt-x")
+        );
+    }
+
+    #[test]
+    fn a_step_saved_before_fallbacks_still_reads() {
+        // A fallback step's JSON carries the model fields; a legacy row
+        // lacks them, and a step the primary answered writes none.
+        let saved = serde_json::to_value(step("run_1:1", tokens(1, 1), 1, 2)).unwrap();
+        assert!(saved.get("provider").is_none() && saved.get("fallbackReason").is_none());
+        let step: RunStepUsage = serde_json::from_value(saved).unwrap();
+        assert_eq!(step.provider, None);
+        assert_eq!(step.model, None);
+        assert_eq!(step.fallback_reason, None);
+
+        let step = served_by(step, "openai", "gpt-x");
+        let saved = serde_json::to_value(&step).unwrap();
+        assert_eq!(saved["fallbackReason"], "was rate limited");
+        assert_eq!(serde_json::from_value::<RunStepUsage>(saved).unwrap(), step);
     }
 
     #[test]

@@ -172,6 +172,17 @@ pub(crate) struct RunStepUsage {
     /// How long the step took; 0 when unknown.
     #[serde(default)]
     pub(crate) duration_ms: u64,
+    /// The provider that answered, when a fallback did instead of the run's
+    /// own; `None` means the run's provider (and for steps saved before
+    /// fallbacks existed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) provider: Option<String>,
+    /// The model that answered, set with `provider`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) model: Option<String>,
+    /// Why the run's own model did not answer, e.g. "was rate limited".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) fallback_reason: Option<String>,
 }
 
 /// A steer saved with the run it joined (spec §4.7; controller ruling, M3

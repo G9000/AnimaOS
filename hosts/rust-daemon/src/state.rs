@@ -1267,6 +1267,7 @@ mod tests {
             tools: None,
             plugins: None,
             settings: Some(AgentSettings::default()),
+            fallbacks: Vec::new(),
         }
     }
 
@@ -1685,6 +1686,8 @@ pub(crate) struct DaemonState {
     /// The owner's time zone as their web console last reported it; saved in
     /// the control plane so Telegram and scheduled runs use it too.
     pub(crate) owner_time_zone: crate::clock::OwnerTimeZone,
+    /// The model side tasks use before the agent's own (spec: side-task model).
+    pub(crate) side_model: Option<anima_core::ModelChoice>,
     pub(crate) history: crate::history::SharedHistory,
     /// Session creations per agent per minute (spec §14); not persisted.
     pub(crate) session_limiter: crate::sessions::SessionCreateLimiter,
@@ -1702,6 +1705,8 @@ pub(crate) struct DaemonState {
     pub(crate) workspace: Option<WorkspaceConfig>,
     pub(crate) model_adapter: Arc<dyn ModelAdapter>,
     pub(crate) chatgpt_auth: crate::chatgpt_auth::ChatGptAuth,
+    /// The provider API key pool the model adapters draw from (spec: key pools).
+    pub(crate) provider_keys: crate::provider_keys::KeyPool,
     pub(crate) tool_registry: ToolRegistry,
     pub(crate) process_manager: SharedProcessManager,
     pub(crate) event_fanout: EventFanout,
@@ -2241,6 +2246,8 @@ impl DaemonState {
             memory,
             memory_embeddings,
             chatgpt_auth: crate::chatgpt_auth::ChatGptAuth::in_memory(),
+            provider_keys: crate::provider_keys::KeyPool::open(None, &Default::default())
+                .expect("an in-memory key pool opens without I/O"),
             memory_store: None,
             memory_views: crate::memory_views::MemoryViewRegistry::default(),
             memory_view_selections: crate::memory_views::MemoryViewRegistry::default().published(),
@@ -2291,6 +2298,7 @@ impl DaemonState {
             schedule_fires: crate::schedules::FireLog::default(),
             pricing_overrides: Vec::new(),
             owner_time_zone: crate::clock::OwnerTimeZone::default(),
+            side_model: None,
             history: crate::history::HistoryService::ephemeral(),
             session_limiter: crate::sessions::SessionCreateLimiter::default(),
             tool_grants_applied: std::collections::BTreeSet::new(),
@@ -2557,6 +2565,7 @@ impl DaemonState {
         snapshot.schedule_fires = self.schedule_fires.snapshot();
         snapshot.pricing_overrides = self.pricing_overrides.clone();
         snapshot.owner_time_zone = self.owner_time_zone.get().map(|zone| zone.name().to_string());
+        snapshot.side_model = self.side_model.clone();
         let learning = self.learning.snapshot();
         snapshot.learning_reviews = learning.reviews;
         snapshot.learning_policies = learning.policies;
@@ -2576,6 +2585,15 @@ impl DaemonState {
         overrides: Vec<crate::usage::PricingOverride>,
     ) -> Vec<crate::usage::PricingOverride> {
         std::mem::replace(&mut self.pricing_overrides, overrides)
+    }
+
+    /// Sets the side-task model and returns the previous one (for a rollback
+    /// after a failed save).
+    pub(crate) fn set_side_model(
+        &mut self,
+        choice: Option<anima_core::ModelChoice>,
+    ) -> Option<anima_core::ModelChoice> {
+        std::mem::replace(&mut self.side_model, choice)
     }
 
     pub(crate) fn restore_control_plane_snapshot(
@@ -2831,6 +2849,7 @@ impl DaemonState {
                 .ok()
         });
         self.owner_time_zone.set(owner_zone);
+        self.side_model = snapshot.side_model.clone();
 
         if relabelled_messages > 0 || relabelled_runs > 0 || mapped_runs > 0 {
             info!(
@@ -3649,9 +3668,10 @@ impl DaemonState {
         }
     }
 
-    /// The run copy owns this session/workspace binding; secondary calls keep the base adapter.
+    /// The run copy owns this session/workspace binding and its fallback
+    /// position; secondary calls keep the base adapter.
     fn session_model_adapter(&self, agent_id: &str, room_id: &str) -> Arc<dyn ModelAdapter> {
-        Arc::new(crate::attachments::model::AttachmentModelAdapter::new(
+        let attachments = crate::attachments::model::AttachmentModelAdapter::new(
             Arc::clone(&self.model_adapter),
             self.history.store(),
             self.workspace
@@ -3659,7 +3679,10 @@ impl DaemonState {
                 .map(|workspace| workspace.root_path.clone()),
             agent_id.to_string(),
             crate::sessions::session_id_for_room(room_id),
-        ))
+        );
+        Arc::new(crate::fallback_model::FallbackModelAdapter::new(Arc::new(
+            attachments,
+        )))
     }
 
     fn restore_agent_snapshot(&mut self, mut snapshot: AgentRuntimeSnapshot) -> Result<(), String> {

@@ -75,6 +75,7 @@ fn config(tools: &[&str]) -> AgentConfig {
         }),
         plugins: None,
         settings: None,
+        fallbacks: Vec::new(),
     }
 }
 
@@ -750,4 +751,96 @@ fn partial_usage_is_none_for_a_zero_total() {
     block_on(sink.emit(ModelStreamFrame::Usage(usage(5, 0)))).unwrap();
     block_on(sink.emit(ModelStreamFrame::Usage(usage(5, 2)))).unwrap();
     assert_eq!(sink.partial_usage(), Some(usage(5, 2)), "the latest wins");
+}
+
+/// Answers as a fallback model would: `Served` just before `Final`.
+struct ServedByFallback;
+
+#[async_trait]
+impl ModelAdapter for ServedByFallback {
+    fn provider(&self) -> &str {
+        "served-by-fallback"
+    }
+
+    async fn generate(
+        &self,
+        _config: &AgentConfig,
+        _request: &ModelGenerateRequest,
+    ) -> Result<ModelGenerateResponse, String> {
+        Err("the runtime streams every model call".into())
+    }
+
+    async fn stream(
+        &self,
+        _config: &AgentConfig,
+        _request: &ModelGenerateRequest,
+        sink: &dyn ModelStreamSink,
+    ) -> Result<(), String> {
+        sink.emit(ModelStreamFrame::Served {
+            provider: "anthropic".into(),
+            model: "claude-sonnet-5-5".into(),
+            reason: "was rate limited".into(),
+        })
+        .await?;
+        sink.emit(ModelStreamFrame::Final(ModelGenerateResponse {
+            content: text("done"),
+            tool_calls: None,
+            usage: usage(7, 3),
+            stop_reason: ModelStopReason::End,
+        }))
+        .await
+    }
+}
+
+#[test]
+fn a_step_answered_by_a_fallback_reports_the_model_before_its_usage() {
+    let frames = Arc::new(Frames::default());
+    let mut runtime = AgentRuntime::new(config(&[]), Arc::new(ServedByFallback));
+    runtime.init();
+    runtime.set_run_id("run_f");
+    runtime.set_run_observer(frames.clone());
+
+    let result = block_on(runtime.run(text("hi")));
+
+    assert_eq!(result.status, TaskStatus::Success);
+    let frames = frames.take();
+    let served_at = frames
+        .iter()
+        .position(|frame| {
+            *frame
+                == RunFrame::ModelServed {
+                    step_id: "run_f:1".into(),
+                    provider: "anthropic".into(),
+                    model: "claude-sonnet-5-5".into(),
+                    reason: "was rate limited".into(),
+                }
+        })
+        .expect("a ModelServed frame for the step");
+    let usage_at = frames
+        .iter()
+        .position(|frame| matches!(frame, RunFrame::StepUsage { .. }))
+        .unwrap();
+    assert!(served_at < usage_at);
+}
+
+#[test]
+fn a_step_answered_by_the_primary_reports_no_model() {
+    let frames = Arc::new(Frames::default());
+    let mut runtime = AgentRuntime::new(
+        config(&[]),
+        Arc::new(UsageThenEnd {
+            usage: None,
+            cancel: None,
+            error: None,
+        }),
+    );
+    runtime.init();
+    runtime.set_run_observer(frames.clone());
+
+    block_on(runtime.run(text("hi")));
+
+    assert!(!frames
+        .take()
+        .iter()
+        .any(|frame| matches!(frame, RunFrame::ModelServed { .. })));
 }

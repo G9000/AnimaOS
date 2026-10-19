@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { emptyLiveRun } from './session-events';
+import { emptyLiveRun, type LiveRun } from './session-events';
 import {
   argumentsSummary,
   buildHistory,
@@ -1001,5 +1001,153 @@ describe('mergeSessionRuns', () => {
     expect(
       mergeSessionRuns([staleQueuedLive], [awaitingLedger])[0].run.status,
     ).toBe('awaiting_approval');
+  });
+});
+
+describe('the note after a fallback', () => {
+  const usage = { promptTokens: 1, completionTokens: 1, totalTokens: 2 };
+  const fallbackStep = (stepId: string, reason = 'was rate limited') => ({
+    stepId,
+    usage,
+    provider: 'anthropic',
+    model: 'claude-sonnet-5-5',
+    fallbackReason: reason,
+  });
+  const completed = (
+    steps: LiveRun['run']['steps'],
+    replyMessageId = 'reply',
+  ) =>
+    emptyLiveRun(
+      runFixture('run-1', {
+        status: 'completed',
+        startedAtMs: 1,
+        model: 'gpt-5',
+        provider: 'openai',
+        replyMessageId,
+        steps,
+      }),
+    );
+  const reply = (stepId = 'run-1:1') =>
+    message('reply', 'Assistant', 'Done.', { runId: 'run-1', stepId });
+  const notes = (items: TranscriptItem[]) =>
+    items.flatMap((item) => (item.kind === 'model-note' ? [item.text] : []));
+
+  it('shows which model answered after a fallback', () => {
+    const items = buildTranscript({
+      messages: [message('ask', 'User', 'Hi', { runId: 'run-1' }), reply()],
+      runs: [completed([fallbackStep('run-1:1')])],
+    });
+    expect(kinds(items)).toEqual(['message', 'message', 'model-note']);
+    expect(notes(items)).toEqual([
+      'Answered by anthropic claude-sonnet-5-5 because gpt-5 was rate limited.',
+    ]);
+  });
+
+  it('shows nothing for a run the primary answered', () => {
+    const items = buildTranscript({
+      messages: [reply()],
+      runs: [completed([{ stepId: 'run-1:1', usage }])],
+    });
+    expect(notes(items)).toEqual([]);
+  });
+
+  it('says it once while the run stays on the fallback', () => {
+    const items = buildTranscript({
+      messages: [
+        message('calls', 'Assistant', '', {
+          runId: 'run-1',
+          stepId: 'run-1:1',
+          toolCalls: [{ id: 'c1', name: 'calculate', args: {} }],
+        }),
+        message('result', 'Tool', '4', {
+          runId: 'run-1',
+          stepId: 'run-1:1',
+          toolCallId: 'c1',
+          toolStatus: 'success',
+        }),
+        reply('run-1:2'),
+      ],
+      runs: [completed([fallbackStep('run-1:1'), fallbackStep('run-1:2')])],
+    });
+    expect(notes(items)).toHaveLength(1);
+    // Placed after the tool work of the step that fell back, before the reply.
+    expect(kinds(items)).toEqual(['tools', 'model-note', 'message']);
+  });
+
+  it('says it again when the reason changes', () => {
+    const items = buildTranscript({
+      messages: [
+        message('calls', 'Assistant', 'Checking', {
+          runId: 'run-1',
+          stepId: 'run-1:1',
+        }),
+        reply('run-1:2'),
+      ],
+      runs: [
+        completed([
+          fallbackStep('run-1:1'),
+          fallbackStep('run-1:2', 'was overloaded'),
+        ]),
+      ],
+    });
+    expect(notes(items)).toEqual([
+      'Answered by anthropic claude-sonnet-5-5 because gpt-5 was rate limited.',
+      'Answered by anthropic claude-sonnet-5-5 because gpt-5 was overloaded.',
+    ]);
+  });
+
+  it('says it again when a primary step came between', () => {
+    const items = buildTranscript({
+      messages: [
+        message('one', 'Assistant', 'Checking', {
+          runId: 'run-1',
+          stepId: 'run-1:1',
+        }),
+        message('two', 'Assistant', 'Still checking', {
+          runId: 'run-1',
+          stepId: 'run-1:2',
+        }),
+        reply('run-1:3'),
+      ],
+      runs: [
+        completed([
+          fallbackStep('run-1:1'),
+          { stepId: 'run-1:2', usage },
+          fallbackStep('run-1:3'),
+        ]),
+      ],
+    });
+    expect(notes(items)).toEqual([
+      'Answered by anthropic claude-sonnet-5-5 because gpt-5 was rate limited.',
+      'Answered by anthropic claude-sonnet-5-5 because gpt-5 was rate limited.',
+    ]);
+  });
+
+  it('shows the note of a run still streaming, from its live event', () => {
+    const live: LiveRun = {
+      ...emptyLiveRun(
+        runFixture('run-1', {
+          status: 'running',
+          startedAtMs: 1,
+          model: 'gpt-5',
+          provider: 'openai',
+        }),
+      ),
+      steps: [{ stepId: 'run-1:1', text: 'Working', textOffset: 0 }],
+      fallbacks: [
+        {
+          stepId: 'run-1:1',
+          provider: 'anthropic',
+          model: 'claude-sonnet-5-5',
+          reason: 'was out of credit',
+          primary: { provider: 'openai', model: 'gpt-5' },
+        },
+      ],
+    };
+    const items = buildTranscript({ messages: [], runs: [live] });
+    expect(kinds(items)).toEqual(['run', 'model-note']);
+    expect(notes(items)).toEqual([
+      'Answered by anthropic claude-sonnet-5-5 because gpt-5 was out of credit.',
+    ]);
   });
 });

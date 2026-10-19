@@ -1,6 +1,7 @@
 import {
   isTerminalRunStatus,
   type Automation,
+  type ModelFallback,
   type Run,
   type SessionMessageAttachment,
   type WebSource,
@@ -83,6 +84,7 @@ export type TranscriptItem =
   | { kind: 'run'; key: string; live: LiveRun }
   | { kind: 'outcome'; key: string; run: Run }
   | { kind: 'learning-review'; key: string; run: Run }
+  | { kind: 'model-note'; key: string; text: string }
   | { kind: 'pending'; key: string; pending: PendingBubble }
   | { kind: 'trimmed'; key: string };
 
@@ -480,6 +482,8 @@ export interface TranscriptHistory {
   readonly startedAtMs: readonly (number | null)[];
   /** The index of each run's last item. */
   readonly lastOfRun: ReadonlyMap<string, number>;
+  /** The index of the last item of each model call (a step id). */
+  readonly lastOfStep: ReadonlyMap<string, number>;
   /** Runs whose committed partial reply is labelled "Stopped". */
   readonly stoppedRuns: ReadonlySet<string>;
   /** When the oldest loaded message was created; null without history. */
@@ -502,6 +506,7 @@ export function buildHistory(input: HistoryInput): TranscriptHistory {
     startedAtMs.push(at);
   };
   const lastOfRun = new Map<string, number>();
+  const lastOfStep = new Map<string, number>();
   const stoppedRuns = new Set<string>();
   // Ruling 3: an orphan tool card (its call is not in the same block)
   // takes its name from the matching assistant message's `toolCalls`,
@@ -659,6 +664,11 @@ export function buildHistory(input: HistoryInput): TranscriptHistory {
         }
       }
     }
+    // The model call's own messages: its reply, or the calls it made. A
+    // tool result belongs to the call before it, so it adds no anchor.
+    const messageStepId = stringField(metadata, 'stepId');
+    if (messageStepId && message.role === 'Assistant')
+      lastOfStep.set(messageStepId, items.length - 1);
     if (runId) {
       if (!answeredEarlier) lastOfRun.set(runId, items.length - 1);
       if (metadata.stopped === true) stoppedRuns.add(runId);
@@ -680,6 +690,7 @@ export function buildHistory(input: HistoryInput): TranscriptHistory {
     items,
     startedAtMs,
     lastOfRun,
+    lastOfStep,
     stoppedRuns,
     oldestLoadedMs:
       input.messages.length > 0 ? input.messages[0].created_at_ms : null,
@@ -700,7 +711,74 @@ interface RunInsert {
   after: number;
   /** The run's place in `runs`, which keeps ties in order. */
   order: number;
+  /** Breaks a tie within one run: the higher rank sits later. */
+  rank: number;
   items: TranscriptItem[];
+}
+
+/** The owner's note that a fallback model answered a step. */
+function modelNoteText(note: ModelFallback): string {
+  return `Answered by ${note.provider} ${note.model} because ${note.primary.model} ${note.reason}.`;
+}
+
+function stepNumber(stepId: string): number {
+  const number = Number(stepId.slice(stepId.lastIndexOf(':') + 1));
+  return Number.isFinite(number) ? number : Number.MAX_SAFE_INTEGER;
+}
+
+/**
+ * The steps of a run a fallback model answered, from the run's record and
+ * from its stream (a step that is still going is only on the stream). A run
+ * that stays on the fallback says so once: a step repeating the previous
+ * note's model and reason adds none, unless a step the primary answered came
+ * between them.
+ */
+function modelNotes(live: LiveRun): { stepId: string; note: TranscriptItem }[] {
+  const { run } = live;
+  /** `null` for a recorded step the agent's own model answered. */
+  const byStep = new Map<string, ModelFallback | null>();
+  for (const step of run.steps)
+    byStep.set(
+      step.stepId,
+      step.provider && step.model && step.fallbackReason
+        ? {
+            stepId: step.stepId,
+            provider: step.provider,
+            model: step.model,
+            reason: step.fallbackReason,
+            primary: { provider: run.provider, model: run.model },
+          }
+        : null,
+    );
+  for (const fallback of live.fallbacks ?? [])
+    if (!byStep.get(fallback.stepId)) byStep.set(fallback.stepId, fallback);
+  const notes: { stepId: string; note: TranscriptItem }[] = [];
+  let previous: ModelFallback | null = null;
+  for (const [, fallback] of [...byStep.entries()].sort(
+    ([left], [right]) => stepNumber(left) - stepNumber(right),
+  )) {
+    if (!fallback) {
+      previous = null;
+      continue;
+    }
+    if (
+      previous &&
+      previous.provider === fallback.provider &&
+      previous.model === fallback.model &&
+      previous.reason === fallback.reason
+    )
+      continue;
+    previous = fallback;
+    notes.push({
+      stepId: fallback.stepId,
+      note: {
+        kind: 'model-note',
+        key: `model-note:${run.id}:${fallback.stepId}`,
+        text: modelNoteText(fallback),
+      },
+    });
+  }
+  return notes;
 }
 
 /**
@@ -719,7 +797,7 @@ export function placeRuns(
   history: TranscriptHistory,
   input: LiveInput,
 ): TranscriptItem[] {
-  const { lastOfRun, stoppedRuns, startedAtMs } = history;
+  const { lastOfRun, lastOfStep, stoppedRuns, startedAtMs } = history;
   const oldestLoaded = history.oldestLoadedMs;
   const olderHistory = input.olderHistory ?? true;
   const items = [...history.items];
@@ -740,7 +818,16 @@ export function placeRuns(
       run,
     };
     const after = lastOfRun.get(run.id);
+    const notes = modelNotes(live);
     if (after !== undefined) {
+      // Each note follows the model call it is about.
+      for (const { stepId, note } of notes)
+        inserts.push({
+          after: lastOfStep.get(stepId) ?? after,
+          order,
+          rank: 0,
+          items: [note],
+        });
       const itemsForRun: TranscriptItem[] = [];
       if (
         hasOutcome(run) &&
@@ -761,13 +848,14 @@ export function placeRuns(
           run,
         });
       if (itemsForRun.length > 0)
-        inserts.push({ after, order, items: itemsForRun });
+        inserts.push({ after, order, rank: 1, items: itemsForRun });
       continue;
     }
     // A queued message the owner cancelled leaves nothing behind.
     if (run.status === 'cancelled' && run.startedAtMs === null) continue;
     const shown: TranscriptItem[] = [
       { kind: 'run', key: `run:${run.id}`, live },
+      ...notes.map(({ note }) => note),
       ...(hasOutcome(run) ? [outcome] : []),
     ];
     const streamed = live.steps.length > 0 || live.tools.length > 0;
@@ -778,14 +866,22 @@ export function placeRuns(
     const loaded =
       oldestLoaded === null || run.createdAtMs >= oldestLoaded || !olderHistory;
     if (hasOutcome(run) && loaded)
-      inserts.push({ after: anchorFor(run.createdAtMs), order, items: shown });
+      inserts.push({
+        after: anchorFor(run.createdAtMs),
+        order,
+        rank: 1,
+        items: shown,
+      });
   }
   // Descending by anchor so an earlier splice never shifts a later one's
   // target index; descending by original order within a tie so splicing
   // (which pushes the most-recently-inserted item back) still lands the
   // ties in their original relative order (spec §15.2).
   inserts.sort(
-    (left, right) => right.after - left.after || right.order - left.order,
+    (left, right) =>
+      right.after - left.after ||
+      right.order - left.order ||
+      right.rank - left.rank,
   );
   for (const insert of inserts)
     items.splice(insert.after + 1, 0, ...insert.items);

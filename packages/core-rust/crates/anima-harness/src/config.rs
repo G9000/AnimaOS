@@ -193,6 +193,7 @@ impl HarnessBuilder {
                 let credential = resolve_credential(definition, self.api_key, self.base_url);
                 let adapter = ProviderModelAdapter::new(ProviderAdapterConfig {
                     providers: BTreeMap::from([(definition.id.to_owned(), credential)]),
+                    ..ProviderAdapterConfig::default()
                 });
                 (
                     Arc::new(adapter) as Arc<dyn ModelAdapter>,
@@ -227,6 +228,7 @@ impl HarnessBuilder {
                 max_tool_iterations: self.max_tool_iterations,
                 additional: BTreeMap::new(),
             }),
+            fallbacks: Vec::new(),
         };
 
         Ok(Harness::new(

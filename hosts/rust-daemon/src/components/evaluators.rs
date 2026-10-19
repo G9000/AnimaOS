@@ -711,6 +711,7 @@ mod tests {
                 tools: None,
                 plugins: None,
                 settings: None,
+                fallbacks: Vec::new(),
             },
             Arc::new(DeterministicModelAdapter),
         );
@@ -806,6 +807,7 @@ mod tests {
                 tools: None,
                 plugins: None,
                 settings: None,
+                fallbacks: Vec::new(),
             },
             Arc::new(DeterministicModelAdapter),
         );

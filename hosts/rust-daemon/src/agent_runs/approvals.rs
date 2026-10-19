@@ -122,10 +122,17 @@ impl AgentRunCoordinator {
             max_tokens: Some(16),
         };
         let meter = Metered::new(adapter);
-        let answer = tokio::time::timeout(SMART_CHECK_TIMEOUT, async {
-            use anima_core::ModelAdapter;
-            meter.generate(&config, &request).await
-        })
+        let deadline = tokio::time::Instant::now() + SMART_CHECK_TIMEOUT;
+        let answer = tokio::time::timeout_at(
+            deadline,
+            crate::side_model::side_call(&self.state, &config, deadline, |config| {
+                let (meter, request) = (&meter, &request);
+                async move {
+                    use anima_core::ModelAdapter;
+                    meter.generate(&config, request).await
+                }
+            }),
+        )
         .await;
         if answer.is_ok() {
             let call = SecondaryCall::for_config(

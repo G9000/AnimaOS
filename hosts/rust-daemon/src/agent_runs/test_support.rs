@@ -95,6 +95,7 @@ pub(crate) struct ScriptedModel {
     requests: StdMutex<Vec<ModelGenerateRequest>>,
     configs: StdMutex<Vec<AgentConfig>>,
     secondary_requests: StdMutex<Vec<ModelGenerateRequest>>,
+    secondary_configs: StdMutex<Vec<AgentConfig>>,
 }
 
 impl ScriptedModel {
@@ -120,6 +121,7 @@ impl ScriptedModel {
             requests: StdMutex::new(Vec::new()),
             configs: StdMutex::new(Vec::new()),
             secondary_requests: StdMutex::new(Vec::new()),
+            secondary_configs: StdMutex::new(Vec::new()),
         })
     }
 
@@ -129,6 +131,11 @@ impl ScriptedModel {
     }
     pub(crate) fn configs(&self) -> Vec<AgentConfig> {
         self.configs.lock().unwrap().clone()
+    }
+
+    /// The config of every `generate` call, oldest first.
+    pub(crate) fn secondary_configs(&self) -> Vec<AgentConfig> {
+        self.secondary_configs.lock().unwrap().clone()
     }
 
     /// Every `generate` request (compaction and titles), oldest first.
@@ -196,9 +203,10 @@ impl ModelAdapter for ScriptedModel {
 
     async fn generate(
         &self,
-        _config: &AgentConfig,
+        config: &AgentConfig,
         request: &ModelGenerateRequest,
     ) -> Result<ModelGenerateResponse, String> {
+        self.secondary_configs.lock().unwrap().push(config.clone());
         match self.next_secondary(request) {
             Step::Text(chunks) => Ok(response(chunks.concat(), None)),
             Step::Tools(calls) => Ok(response(String::new(), Some(calls))),
@@ -283,6 +291,7 @@ pub(crate) fn companion_config(name: &str) -> AgentConfig {
         ),
         plugins: None,
         settings: Some(AgentSettings::default()),
+        fallbacks: Vec::new(),
     }
 }
 

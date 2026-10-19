@@ -7,6 +7,7 @@ import type {
   DaemonTaskResult,
   DaemonToolDescriptor,
 } from './daemon-types.js';
+import type { ModelChoice } from './provider-keys.js';
 
 export interface AgentSnapshot {
   state: DaemonAgentState;
@@ -191,6 +192,9 @@ export interface AgentUpdateInput {
   /** An empty string clears the custom system prompt. */
   system?: string;
   tools?: AgentToolInput[];
+  /** Models tried in order when the primary fails before replying: at most
+   *  three, none equal to the primary. An empty list clears them. */
+  fallbacks?: ModelChoice[];
 }
 
 /** A registered daemon tool name or a JSON descriptor. */

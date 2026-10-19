@@ -283,6 +283,7 @@ mod tests {
             tools: None,
             plugins: None,
             settings: Some(settings),
+            fallbacks: Vec::new(),
         }
     }
 

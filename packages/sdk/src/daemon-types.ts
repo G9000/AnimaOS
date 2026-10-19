@@ -1,5 +1,7 @@
 import type { AgentStatus, Attachment, TokenUsage } from '@animaOS-SWARM/core';
 
+import type { ModelChoice } from './provider-keys.js';
+
 export type AgentFileKind = 'soul' | 'anima' | 'agents' | 'claude' | 'cursor';
 export type AgentFileState =
   | 'loaded'
@@ -105,6 +107,8 @@ export interface DaemonAgentConfig {
   tools: DaemonToolDescriptor[] | null;
   plugins: DaemonPluginDescriptor[] | null;
   settings: DaemonAgentSettings | null;
+  /** Omitted by the daemon when there are none. */
+  fallbacks?: ModelChoice[];
 }
 
 export interface DaemonAgentState {

@@ -9,7 +9,7 @@ use anima_model_adapters::{
     provider_definitions, ProviderAdapterConfig, ProviderCredential, ProviderModelAdapter,
 };
 use async_trait::async_trait;
-use std::{future::Future, time::Duration};
+use std::{collections::BTreeMap, future::Future, sync::Arc, time::Duration};
 
 use crate::model::DeterministicModelAdapter;
 
@@ -21,8 +21,20 @@ fn first_env_value(names: &[&str]) -> Option<String> {
     })
 }
 
+/// Provider id to the key the environment supplies for it: the seed of the
+/// key pool's `env` key.
+pub(crate) fn provider_env_keys() -> BTreeMap<String, String> {
+    provider_definitions()
+        .iter()
+        .filter_map(|definition| {
+            first_env_value(definition.api_key_envs).map(|key| (definition.id.to_owned(), key))
+        })
+        .collect()
+}
+
 fn provider_config_from_env() -> ProviderAdapterConfig {
     ProviderAdapterConfig {
+        key_source: None,
         providers: provider_definitions()
             .iter()
             .map(|definition| {
@@ -36,6 +48,35 @@ fn provider_config_from_env() -> ProviderAdapterConfig {
             })
             .collect(),
     }
+}
+
+/// Whether `RuntimeModelAdapter` can route a call to `provider` (an id or
+/// alias, any case).
+pub(crate) fn is_routable_provider(provider: &str) -> bool {
+    let provider = provider.trim().to_ascii_lowercase();
+    matches!(provider.as_str(), "deterministic" | "test" | "chatgpt")
+        || provider_definitions().iter().any(|definition| {
+            definition.id == provider || definition.aliases.contains(&provider.as_str())
+        })
+}
+
+/// `provider` as the id it routes to: trimmed, lower case, and an alias such
+/// as `gemini` read as its provider's id (`google`).
+pub(crate) fn canonical_provider(provider: &str) -> String {
+    let provider = provider.trim().to_ascii_lowercase();
+    provider_definitions()
+        .iter()
+        .find(|definition| definition.aliases.contains(&provider.as_str()))
+        .map_or(provider, |definition| definition.id.to_owned())
+}
+
+/// Whether `provider` is one of the built-in mock providers (`deterministic`,
+/// `test`): valid as an agent's own model, never as a fallback or side model.
+pub(crate) fn is_mock_provider(provider: &str) -> bool {
+    matches!(
+        provider.trim().to_ascii_lowercase().as_str(),
+        "deterministic" | "test"
+    )
 }
 
 #[derive(Clone, Debug)]
@@ -257,6 +298,21 @@ pub(crate) fn provider_summaries() -> Vec<ProviderSummary> {
     provider_summaries_for_config(&provider_config_from_env())
 }
 
+/// The provider catalog with `configured` also true for a provider whose key
+/// pool holds a key (env or file), resting or not: it is configured, and the
+/// key list shows when it is resting.
+pub(crate) fn provider_summaries_with_pool(
+    pool: &crate::provider_keys::KeyPool,
+) -> Vec<ProviderSummary> {
+    let mut summaries = provider_summaries();
+    for summary in &mut summaries {
+        if summary.requires_key && !summary.configured && pool.holds_keys(summary.id) {
+            summary.configured = true;
+        }
+    }
+    summaries
+}
+
 fn provider_summaries_for_config(config: &ProviderAdapterConfig) -> Vec<ProviderSummary> {
     let mut summaries = Vec::with_capacity(provider_definitions().len() + 1);
     summaries.push(ProviderSummary {
@@ -299,11 +355,17 @@ impl RuntimeModelAdapter {
         }
     }
 
+    /// `provider_keys` supplies the API key for each call and rotates on key
+    /// failures; the environment keys remain the fallback for providers it
+    /// holds no key for.
     pub(crate) fn try_from_env(
         chatgpt_auth: crate::chatgpt_auth::ChatGptAuth,
+        provider_keys: Option<crate::provider_keys::KeyPool>,
     ) -> Result<Self, String> {
+        let mut config = provider_config_from_env();
+        config.key_source = provider_keys.map(|pool| Arc::new(pool) as Arc<_>);
         Ok(Self {
-            providers: ProviderModelAdapter::try_new(provider_config_from_env())?,
+            providers: ProviderModelAdapter::try_new(config)?,
             chatgpt_auth,
         })
     }

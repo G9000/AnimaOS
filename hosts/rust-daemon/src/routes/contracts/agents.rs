@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use anima_core::{
     AgentConfig, AgentConfigUpdate, AgentRuntimeSnapshot, AgentSettings, AgentState, DataValue,
-    Message, MessageRole, PluginDescriptor, ToolDescriptor, ToolExample,
+    Message, MessageRole, ModelChoice, PluginDescriptor, ToolDescriptor, ToolExample,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -51,6 +51,23 @@ pub(crate) struct AgentSettingsResponse {
     pub(crate) additional: BTreeMap<String, Value>,
 }
 
+/// A provider + model the agent falls back to, in order.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ModelChoiceResponse {
+    pub(crate) provider: String,
+    pub(crate) model: String,
+}
+
+impl From<&ModelChoice> for ModelChoiceResponse {
+    fn from(value: &ModelChoice) -> Self {
+        Self {
+            provider: value.provider.clone(),
+            model: value.model.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AgentConfigResponse {
@@ -67,6 +84,8 @@ pub(crate) struct AgentConfigResponse {
     pub(crate) tools: Option<Vec<ToolDescriptorResponse>>,
     pub(crate) plugins: Option<Vec<PluginDescriptorResponse>>,
     pub(crate) settings: Option<AgentSettingsResponse>,
+    /// Tried in order when the agent's own model fails before any text.
+    pub(crate) fallbacks: Vec<ModelChoiceResponse>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -201,6 +220,32 @@ pub(crate) struct AgentSettingsRequest {
     pub(crate) additional: HashMap<String, Value>,
 }
 
+/// A fallback provider + model. The route checks the chain as a whole.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ModelChoiceRequest {
+    pub(crate) provider: String,
+    pub(crate) model: String,
+}
+
+impl ModelChoiceRequest {
+    fn into_domain(self) -> ModelChoice {
+        ModelChoice {
+            provider: self.provider.trim().to_ascii_lowercase(),
+            model: self.model.trim().to_string(),
+        }
+    }
+}
+
+fn parse_fallbacks(requests: Option<Vec<ModelChoiceRequest>>) -> Option<Vec<ModelChoice>> {
+    requests.map(|requests| {
+        requests
+            .into_iter()
+            .map(ModelChoiceRequest::into_domain)
+            .collect()
+    })
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AgentConfigRequest {
@@ -217,6 +262,8 @@ pub(crate) struct AgentConfigRequest {
     pub(crate) tools: Option<Vec<ToolDescriptorRequest>>,
     pub(crate) plugins: Option<Vec<PluginDescriptorRequest>>,
     pub(crate) settings: Option<AgentSettingsRequest>,
+    /// At most 3, none equal to the agent's own provider + model.
+    pub(crate) fallbacks: Option<Vec<ModelChoiceRequest>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
@@ -227,6 +274,8 @@ pub(crate) struct AgentUpdateRequest {
     pub(crate) provider: Option<String>,
     pub(crate) system: Option<String>,
     pub(crate) tools: Option<Vec<ToolDescriptorRequest>>,
+    /// Replaces the fallback chain; `[]` clears it.
+    pub(crate) fallbacks: Option<Vec<ModelChoiceRequest>>,
 }
 
 impl AgentUpdateRequest {
@@ -243,11 +292,13 @@ impl AgentUpdateRequest {
         let provider = self.provider.map(|value| value.trim().to_string());
         let system = self.system.map(|value| value.trim().to_string());
         let tools = parse_tool_requests(self.tools)?;
+        let fallbacks = parse_fallbacks(self.fallbacks);
         if name.is_none()
             && model.is_none()
             && provider.is_none()
             && system.is_none()
             && tools.is_none()
+            && fallbacks.is_none()
         {
             return Err("at least one field must be provided");
         }
@@ -257,6 +308,7 @@ impl AgentUpdateRequest {
             provider,
             system,
             tools,
+            fallbacks,
         })
     }
 }
@@ -329,6 +381,7 @@ impl AgentConfigRequest {
                 .settings
                 .map(AgentSettingsRequest::into_domain)
                 .transpose()?,
+            fallbacks: parse_fallbacks(self.fallbacks).unwrap_or_default(),
         })
     }
 }
@@ -519,6 +572,11 @@ impl From<&AgentConfig> for AgentConfigResponse {
                 .as_ref()
                 .map(|plugins| plugins.iter().map(PluginDescriptorResponse::from).collect()),
             settings: value.settings.as_ref().map(AgentSettingsResponse::from),
+            fallbacks: value
+                .fallbacks
+                .iter()
+                .map(ModelChoiceResponse::from)
+                .collect(),
         }
     }
 }

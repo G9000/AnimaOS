@@ -35,6 +35,11 @@ pub(crate) struct MeteredCall {
     pub(crate) usage: TokenUsage,
     pub(crate) at_ms: u64,
     pub(crate) duration_ms: u64,
+    /// The provider and model of the config the call ran with, so one meter
+    /// can hold calls on different models (a side-task model and the
+    /// agent's own after it failed) and each is priced as what answered.
+    pub(crate) provider: Option<String>,
+    pub(crate) model: String,
 }
 
 impl Metered {
@@ -76,12 +81,15 @@ impl ModelAdapter for Metered {
             usage: response.usage.clone(),
             at_ms,
             duration_ms,
+            provider: config.provider.clone(),
+            model: config.model.clone(),
         });
         Ok(response)
     }
 }
 
-/// What a secondary call was for.
+/// What a secondary call was for. Its `provider` and `model` stand for a
+/// metered call that kept none.
 #[derive(Clone, Debug)]
 pub(crate) struct SecondaryCall {
     pub(crate) agent_id: String,
@@ -133,6 +141,10 @@ pub(crate) async fn record_secondary(
     let records = calls
         .iter()
         .map(|metered| {
+            let (provider, model) = match &metered.provider {
+                Some(provider) => (provider.clone(), metered.model.clone()),
+                None => (call.provider.clone(), call.model.clone()),
+            };
             usage_record(
                 &UsageCall {
                     id: format!("usage_{}", Uuid::new_v4()),
@@ -140,8 +152,8 @@ pub(crate) async fn record_secondary(
                     session_id: call.session_id.clone(),
                     run_id: None,
                     source: call.source,
-                    provider: call.provider.clone(),
-                    model: call.model.clone(),
+                    provider,
+                    model,
                     duration_ms: metered.duration_ms,
                     created_at_ms: metered.at_ms,
                 },
@@ -236,6 +248,7 @@ mod tests {
             tools: None,
             plugins: None,
             settings: None,
+            fallbacks: Vec::new(),
         }
     }
 
@@ -374,6 +387,34 @@ mod tests {
         );
         assert_eq!(row.cost_micros, Some(3_000 + 4_500));
         assert!(meter.take().is_empty(), "recording takes the calls");
+    }
+
+    #[tokio::test]
+    async fn each_call_is_recorded_with_the_config_it_ran_with() {
+        let state = shared_state();
+        let meter = meter(Reply::Usage(tokens(10, 2)));
+        let mut side = config();
+        side.provider = Some("anthropic".into());
+        side.model = "claude-haiku-x".into();
+        meter.generate(&side, &request()).await.unwrap();
+        meter.generate(&config(), &request()).await.unwrap();
+        record_secondary(
+            &state,
+            &meter,
+            SecondaryCall::for_config("agent-a", None, UsageSource::Title, &config()),
+        )
+        .await;
+
+        let rows = state.read().await.history.pending_usage();
+        let mut models: Vec<_> = rows
+            .iter()
+            .map(|row| (row.provider.as_str(), row.model.as_str()))
+            .collect();
+        models.sort_unstable();
+        assert_eq!(
+            models,
+            [("anthropic", "claude-haiku-x"), ("openai", "gpt-x-mini")]
+        );
     }
 
     #[test]

@@ -140,6 +140,7 @@ async fn setup() -> (DriveManager, SharedDaemonState, Arc<FakeTransport>, String
             tools: None,
             plugins: None,
             settings: Some(anima_core::AgentSettings::default()),
+            fallbacks: Vec::new(),
         })
         .unwrap()
         .state

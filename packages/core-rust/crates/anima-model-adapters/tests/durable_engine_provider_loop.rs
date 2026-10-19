@@ -538,6 +538,7 @@ async fn run_provider_restart(provider: &str, seed: u128, scenario: RestartScena
                 base_url: provider_base,
             },
         )]),
+        ..ProviderAdapterConfig::default()
     });
     let policy = Arc::new(ApprovalCurrentPolicy {
         approved: AtomicBool::new(false),
@@ -753,6 +754,7 @@ async fn run_provider_loop(provider: &str, seed: u128) {
                 base_url: provider_base,
             },
         )]),
+        ..ProviderAdapterConfig::default()
     });
     let engine = DurableAgentEngine::new(
         store,

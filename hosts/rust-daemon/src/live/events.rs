@@ -63,6 +63,17 @@ pub(crate) enum LiveEventBody {
         recovered: bool,
         sources: Vec<crate::tools::web_search::WebSource>,
     },
+    /// A fallback model answered a step instead of the run's own model; the
+    /// transcript tells the owner. `primary_*` is the run's own model.
+    ModelFallback {
+        step_id: String,
+        provider: String,
+        model: String,
+        /// Why the run's own model did not answer, e.g. "was rate limited".
+        reason: String,
+        primary_provider: Option<String>,
+        primary_model: String,
+    },
     ApprovalRequested(ApprovalRequest),
     ApprovalResolved(ApprovalRequest),
     /// A skill or a draft changed, or a scan found something new (spec §6);
@@ -98,6 +109,7 @@ impl LiveEventBody {
             Self::MessageCreated { .. } => "message.created",
             Self::ToolStarted { .. } => "tool.started",
             Self::ToolFinished { .. } => "tool.finished",
+            Self::ModelFallback { .. } => "model.fallback",
             Self::ApprovalRequested(_) => "approval.requested",
             Self::ApprovalResolved(_) => "approval.resolved",
             Self::SkillUpdated { .. } => "skill.updated",
@@ -238,6 +250,20 @@ impl LiveEvent {
                 if !sources.is_empty() {
                     value["sources"] = json!(sources);
                 }
+            }
+            LiveEventBody::ModelFallback {
+                step_id,
+                provider,
+                model,
+                reason,
+                primary_provider,
+                primary_model,
+            } => {
+                value["stepId"] = json!(step_id);
+                value["provider"] = json!(provider);
+                value["model"] = json!(model);
+                value["reason"] = json!(reason);
+                value["primary"] = json!({ "provider": primary_provider, "model": primary_model });
             }
             LiveEventBody::ApprovalRequested(approval)
             | LiveEventBody::ApprovalResolved(approval) => {

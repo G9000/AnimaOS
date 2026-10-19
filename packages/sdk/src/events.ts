@@ -24,6 +24,17 @@ export interface LiveToolCard {
   sources?: WebSource[];
 }
 
+/** A fallback model answering a step instead of the run's own model. */
+export interface ModelFallback {
+  stepId: string;
+  provider: string;
+  model: string;
+  /** Why the run's own model did not answer, e.g. "was rate limited". */
+  reason: string;
+  /** The run's own model. */
+  primary: { provider: string | null; model: string };
+}
+
 /** An active run as a new stream first sees it (spec §6). */
 export interface SnapshotRun {
   run: Run;
@@ -106,6 +117,7 @@ export type AgentEvent =
       recovered: boolean;
       sources?: WebSource[];
     })
+  | (EventBase & ModelFallback & { type: 'model.fallback' })
   | (EventBase & {
       type: 'approval.requested' | 'approval.resolved';
       approval: Approval;

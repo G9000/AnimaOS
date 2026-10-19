@@ -158,9 +158,18 @@ export {
   isRunLifecycleEvent,
   isSkillEvent,
 } from './events.js';
+export { KEY_STRATEGIES } from './provider-keys.js';
+export type {
+  AddProviderKeyInput,
+  KeyStrategy,
+  ModelChoice,
+  ProviderKey,
+  ProviderKeys,
+} from './provider-keys.js';
 export type {
   AgentEvent,
   LiveToolCard,
+  ModelFallback,
   RunLifecycleEventType,
   SnapshotRun,
   WebSource,

@@ -2847,6 +2847,7 @@ fn test_config(name: &str) -> AgentConfig {
         tools: None,
         plugins: None,
         settings: Some(AgentSettings::default()),
+        fallbacks: Vec::new(),
     }
 }
 

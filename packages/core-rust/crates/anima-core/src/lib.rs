@@ -25,6 +25,7 @@ pub use external_tools::{
 pub mod filesystem_checkpoints;
 pub mod memory;
 pub mod model;
+pub mod model_error;
 pub mod persistence;
 pub mod policy;
 pub mod primitives;
@@ -35,7 +36,7 @@ pub mod tool_rpc;
 
 pub use agent::{
     tool_not_configured_error, AgentConfig, AgentConfigUpdate, AgentSettings, AgentState,
-    AgentStatus, PluginDescriptor, TokenUsage, ToolDescriptor, ToolExample,
+    AgentStatus, ModelChoice, PluginDescriptor, TokenUsage, ToolDescriptor, ToolExample,
 };
 pub use capability::{
     CapabilityAttempt, CapabilityAttemptLineageState, CapabilityContextError, CapabilityError,
@@ -118,6 +119,7 @@ pub use model::{
     model_transport_delay, ModelAdapter, ModelGenerateRequest, ModelGenerateResponse,
     ModelStopReason, ModelStreamFrame, ModelStreamSink, ToolCall,
 };
+pub use model_error::{classify_model_error, ModelFailure, ModelFailureKind};
 pub use persistence::{DatabaseAdapter, PersistenceError, PersistenceResult, Step, StepStatus};
 pub use policy::{
     ApprovalDecision, ApprovalDecisionKind, ApprovalRequest, ApprovalValidity, AutonomyGrant,

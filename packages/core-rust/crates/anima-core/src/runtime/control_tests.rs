@@ -57,6 +57,7 @@ fn config() -> AgentConfig {
         }]),
         plugins: None,
         settings: None,
+        fallbacks: Vec::new(),
     }
 }
 

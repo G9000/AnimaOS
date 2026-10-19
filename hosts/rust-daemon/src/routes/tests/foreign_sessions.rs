@@ -40,6 +40,7 @@ fn agent_config(name: &str, helper: bool) -> AgentConfig {
         tools: None,
         plugins: None,
         settings: Some(settings),
+        fallbacks: Vec::new(),
     }
 }
 

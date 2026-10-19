@@ -1485,6 +1485,7 @@ mod tests {
             tools: None,
             plugins: None,
             settings: None,
+            fallbacks: Vec::new(),
         };
 
         let config = with_swarm_messaging_tools(config, &registry);
@@ -1566,6 +1567,7 @@ mod tests {
             tools: None,
             plugins: None,
             settings: None,
+            fallbacks: Vec::new(),
         }
     }
 }

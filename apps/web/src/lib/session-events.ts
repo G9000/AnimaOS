@@ -4,6 +4,7 @@ import {
   type AgentEvent,
   type Approval,
   type LiveToolCard,
+  type ModelFallback,
   type Run,
   type SessionMessageAttachment,
 } from '@animaOS-SWARM/sdk';
@@ -37,6 +38,8 @@ export interface LiveRun {
   }[];
   /** The run's calls waiting for the owner, oldest first (spec §7.3). */
   approvals: Approval[];
+  /** Steps a fallback model answered instead of the run's own, in order. */
+  fallbacks?: ModelFallback[];
 }
 
 export interface LiveState {
@@ -390,6 +393,24 @@ export function applyEvent(state: LiveState, event: AgentEvent): LiveState {
         steps[index] = step;
         return { ...live, phase: null, steps };
       });
+    case 'model.fallback':
+      return updateRun(next, runId, (live) =>
+        live.fallbacks?.some((known) => known.stepId === event.stepId)
+          ? live
+          : {
+              ...live,
+              fallbacks: [
+                ...(live.fallbacks ?? []),
+                {
+                  stepId: event.stepId,
+                  provider: event.provider,
+                  model: event.model,
+                  reason: event.reason,
+                  primary: event.primary,
+                },
+              ],
+            },
+      );
     case 'tool.started':
       return updateRun(next, runId, (live) => ({
         ...live,

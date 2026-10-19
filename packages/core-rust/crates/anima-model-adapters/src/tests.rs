@@ -25,6 +25,8 @@ use crate::{
 
 #[path = "attachments_error_tests.rs"]
 mod attachment_errors;
+#[path = "key_rotation_tests.rs"]
+mod key_rotation;
 
 struct FrameSink(Mutex<Vec<ModelStreamFrame>>);
 
@@ -406,6 +408,7 @@ async fn injected_reqwest_client_is_used_by_the_adapter() {
                 base_url: format!("{base_url}/v1"),
             },
         )]),
+        ..ProviderAdapterConfig::default()
     };
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
@@ -925,7 +928,10 @@ fn adapter_with(entries: &[(&str, Option<&str>, &str)]) -> ProviderModelAdapter 
             )
         })
         .collect();
-    ProviderModelAdapter::new(ProviderAdapterConfig { providers })
+    ProviderModelAdapter::new(ProviderAdapterConfig {
+        providers,
+        ..ProviderAdapterConfig::default()
+    })
 }
 
 fn agent_config(provider: &str, tools: bool) -> AgentConfig {
@@ -953,6 +959,7 @@ fn agent_config(provider: &str, tools: bool) -> AgentConfig {
         }),
         plugins: None,
         settings: None,
+        fallbacks: Vec::new(),
     }
 }
 
@@ -1882,9 +1889,10 @@ async fn openrouter_error_finish_reason_fails_the_call_by_name() {
         .await
         .unwrap_err();
 
+    assert_eq!(error, "OpenRouter stream error: server_error");
     assert_eq!(
-        error,
-        "OpenRouter stream failed with finish_reason \"error\""
+        anima_core::classify_model_error(&error).kind,
+        anima_core::ModelFailureKind::Overloaded
     );
 
     // Any other provider's unrecognized `error` reason ends the reply, as `generate` does.
@@ -2088,6 +2096,69 @@ async fn an_anthropic_stream_without_message_stop_is_incomplete() {
 }
 
 #[tokio::test]
+async fn an_anthropic_stream_error_event_names_its_type_but_not_its_message() {
+    let base_url = sse_server(
+        "/v1/messages",
+        concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":9}}}\n\n",
+            "event: error\n",
+            "data: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded secret-ish detail\"}}\n\n"
+        )
+        .into(),
+    )
+    .await;
+    let adapter = adapter_with(&[("anthropic", Some("key"), &base_url)]);
+
+    let (result, _frames) = stream_frames(&adapter, &agent_config("anthropic", false)).await;
+
+    let error = result.unwrap_err();
+    assert_eq!(error, "Anthropic stream error: overloaded_error");
+    assert_eq!(
+        anima_core::classify_model_error(&error).kind,
+        anima_core::ModelFailureKind::Overloaded
+    );
+}
+
+#[tokio::test]
+async fn an_anthropic_stream_error_with_an_odd_type_keeps_it_out_of_the_message() {
+    let base_url = sse_server(
+        "/v1/messages",
+        "data: {\"type\":\"error\",\"error\":{\"type\":\"sk-ant-leak with spaces\"}}\n\n".into(),
+    )
+    .await;
+    let adapter = adapter_with(&[("anthropic", Some("key"), &base_url)]);
+
+    let (result, _frames) = stream_frames(&adapter, &agent_config("anthropic", false)).await;
+
+    assert_eq!(result.unwrap_err(), "Anthropic stream error");
+}
+
+#[tokio::test]
+async fn an_openrouter_numeric_stream_error_code_reads_as_a_status() {
+    let base_url = sse_server(
+        "/api/v1/chat/completions",
+        concat!(
+            "data: {\"error\":{\"code\":429,\"message\":\"slow down\"},\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\"},\"finish_reason\":\"error\"}]}\n\n",
+            "data: [DONE]\n\n"
+        )
+        .into(),
+    )
+    .await;
+    let adapter = adapter_with(&[("openrouter", Some("key"), &format!("{base_url}/api/v1"))]);
+
+    let error = stream_final(&adapter, &agent_config("openrouter", false))
+        .await
+        .unwrap_err();
+
+    assert_eq!(error, "OpenRouter stream error (429)");
+    assert_eq!(
+        anima_core::classify_model_error(&error).kind,
+        anima_core::ModelFailureKind::RateLimited
+    );
+}
+
+#[tokio::test]
 async fn a_google_stream_error_payload_fails_the_call() {
     let base_url = sse_server(
         "/v1beta/models/gemini-2.0-flash:streamGenerateContent",
@@ -2102,9 +2173,14 @@ async fn a_google_stream_error_payload_fails_the_call() {
 
     let (result, frames) = stream_frames(&adapter, &google_config(false)).await;
 
+    let error = result.unwrap_err();
     assert_eq!(
-        result.unwrap_err(),
+        error,
         "Google stream failed: INTERNAL: An internal error has occurred."
+    );
+    assert_eq!(
+        anima_core::classify_model_error(&error).kind,
+        anima_core::ModelFailureKind::Overloaded
     );
     assert_eq!(
         without_usage(frames),
@@ -2412,6 +2488,114 @@ async fn anthropic_and_openai_streams_return_the_second_error_after_one_retry() 
         .await
         .unwrap_err();
     assert_eq!(error, "OpenAI API error (400): bad request");
+}
+
+#[tokio::test]
+async fn rate_limit_errors_carry_the_retry_hint() {
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(|| async {
+            (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                [("retry-after", "12")],
+                "slow down",
+            )
+        }),
+    );
+    let base_url = spawn_server(app).await;
+    let adapter = adapter_with(&[("openai", Some("key"), &format!("{base_url}/v1"))]);
+    let error = adapter
+        .generate(&agent_config("openai", false), &request())
+        .await
+        .unwrap_err();
+    assert_eq!(error, "OpenAI API error (429): slow down (retry after 12s)");
+    let failure = anima_core::classify_model_error(&error);
+    assert_eq!(failure.kind, anima_core::ModelFailureKind::RateLimited);
+    assert_eq!(failure.retry_after_s, Some(12));
+
+    // A streamed request's second failure keeps the hint after the retry prefix.
+    let app = Router::new().route(
+        "/v1/messages",
+        post(|| async {
+            (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                [("anthropic-ratelimit-requests-reset", "2999-01-01T00:00:00Z")],
+                "limited",
+            )
+        }),
+    );
+    let base_url = spawn_server(app).await;
+    let error = adapter_with(&[("anthropic", Some("key"), &base_url)])
+        .stream(
+            &agent_config("anthropic", false),
+            &request(),
+            &FrameSink(Mutex::new(Vec::new())),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        error.starts_with("After one retry: Anthropic API error (429): limited (retry after "),
+        "{error}"
+    );
+    assert!(anima_core::classify_model_error(&error)
+        .retry_after_s
+        .is_some_and(|seconds| seconds > 1_000_000));
+
+    // No header, no hint.
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(|| async { (axum::http::StatusCode::TOO_MANY_REQUESTS, "plain") }),
+    );
+    let base_url = spawn_server(app).await;
+    let error = adapter_with(&[("openai", Some("key"), &format!("{base_url}/v1"))])
+        .generate(&agent_config("openai", false), &request())
+        .await
+        .unwrap_err();
+    assert_eq!(error, "OpenAI API error (429): plain");
+}
+
+#[tokio::test]
+async fn image_request_failures_keep_status_and_hint_but_no_upstream_body() {
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(|| async {
+            (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                [("retry-after", "12")],
+                "secret-upstream-body",
+            )
+        }),
+    );
+    let base_url = spawn_server(app).await;
+    let adapter = adapter_with(&[("openai", Some("key"), &format!("{base_url}/v1"))]);
+    let mut image = request();
+    image.messages[0].content.attachments = Some(vec![anima_core::Attachment {
+        attachment_type: anima_core::AttachmentType::Image,
+        name: "photo.png".into(),
+        data: "data:image/png;base64,aGVsbG8=".into(),
+        mime_type: Some("image/png".into()),
+    }]);
+    let config = agent_config("openai", false);
+    let generated = adapter.generate(&config, &image).await.unwrap_err();
+    let streamed = adapter
+        .stream(&config, &image, &FrameSink(Mutex::new(Vec::new())))
+        .await
+        .unwrap_err();
+    for error in [generated, streamed] {
+        assert!(!error.contains("secret-upstream-body"), "{error}");
+        assert!(
+            error.starts_with("Image request failed; upstream details omitted"),
+            "{error}"
+        );
+        let failure = anima_core::classify_model_error(&error);
+        assert_eq!(
+            failure.kind,
+            anima_core::ModelFailureKind::RateLimited,
+            "{error}"
+        );
+        assert_eq!(failure.status, Some(429));
+        assert_eq!(failure.retry_after_s, Some(12));
+    }
 }
 
 // --- S1-F: Google parallel calls to one tool without ids get unique ids.

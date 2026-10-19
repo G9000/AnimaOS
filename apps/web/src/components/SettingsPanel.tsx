@@ -18,6 +18,9 @@ import { ChatGptConnection } from './ChatGptConnection';
 import { ChatGptModelSelect } from './ChatGptModelSelect';
 import { AgentProfileDetails } from './AgentProfileDetails';
 import { AgentFilesPanel } from './AgentFilesPanel';
+import { FallbackModels } from './models/FallbackModels';
+import { ProviderKeys } from './models/ProviderKeys';
+import { SideModel } from './models/SideModel';
 import { ErrorBanner, SectionTitle, labelCls, primaryBtnCls } from './ui-bits';
 
 /** The parts of the companion's own configuration. Each Settings page shows
@@ -534,7 +537,26 @@ export function SettingsPanel({
               }
             />
           )}
+          <FallbackModels
+            key={agent.id}
+            primary={{ provider: agent.provider, model: agent.model }}
+            fallbacks={agent.fallbacks ?? []}
+            providers={providers}
+            disabled={controlsDisabled}
+            save={(fallbacks) => saveSettings({ fallbacks })}
+          />
         </section>
+      )}
+
+      {shows('model') && (
+        <>
+          <ProviderKeys
+            providers={providers}
+            onChanged={refreshProviders}
+            disabled={controlsDisabled}
+          />
+          <SideModel providers={providers} disabled={controlsDisabled} />
+        </>
       )}
 
       {shows('access') && (

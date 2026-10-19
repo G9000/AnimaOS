@@ -620,6 +620,7 @@ fn test_config() -> AgentConfig {
         tools: None,
         plugins: None,
         settings: Some(AgentSettings::default()),
+        fallbacks: Vec::new(),
     }
 }
 include!("../attachment_tests.rs");

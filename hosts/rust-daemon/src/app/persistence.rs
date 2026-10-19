@@ -469,6 +469,7 @@ mod tests {
                 tools: None,
                 plugins: None,
                 settings: None,
+                fallbacks: Vec::new(),
             })
             .unwrap()
             .state
@@ -572,6 +573,7 @@ mod tests {
             tools: None,
             plugins: None,
             settings: None,
+            fallbacks: Vec::new(),
         }
     }
 

@@ -18,6 +18,7 @@ use crate::sessions::compaction::{
 };
 use crate::sessions::context::{mark_context_trimmed, newest_left_out, ContextBudget};
 use crate::sessions::{SessionCompactionError, SessionSummary};
+use crate::side_model::side_call;
 use crate::state::{RunBuild, RunContextReport};
 use crate::usage::metered::{record_secondary, Metered, SecondaryCall};
 use crate::usage::UsageSource;
@@ -186,6 +187,13 @@ impl AgentRunCoordinator {
         };
         let budget_tokens = ContextBudget::for_config(&config).budget_tokens;
         let meter = Metered::new(adapter);
+        // Controller ruling 3 (audit M7): a stop ends the run at once. Fix
+        // round 1: the read and the call end by the compaction's deadline,
+        // or a helper's earlier one; the save below is never cut short.
+        let own_deadline = Instant::now() + self.compaction_timeout;
+        let deadline = run
+            .and_then(|run| run.deadline)
+            .map_or(own_deadline, |helper| helper.min(own_deadline));
         let work = async {
             let turns: Cow<'_, [Message]> = match &pruned {
                 None => Cow::Borrowed(dropped),
@@ -214,23 +222,14 @@ impl AgentRunCoordinator {
             }
             let mut turns = turns.into_owned();
             documents.prepare_compaction_documents(&mut turns).await;
-            let text = summarize(
-                &meter,
-                &config,
-                previous.as_ref().map(|summary| summary.text.as_str()),
-                &turns,
-                budget_tokens,
-            )
+            let previous = previous.as_ref().map(|summary| summary.text.as_str());
+            let text = side_call(&self.state, &config, deadline, |config| {
+                let (meter, turns) = (&meter, &turns);
+                async move { summarize(meter, &config, previous, turns, budget_tokens).await }
+            })
             .await?;
             Ok::<_, String>((text, turns.len()))
         };
-        // Controller ruling 3 (audit M7): a stop ends the run at once. Fix
-        // round 1: the read and the call end by the compaction's deadline,
-        // or a helper's earlier one; the save below is never cut short.
-        let own_deadline = Instant::now() + self.compaction_timeout;
-        let deadline = run
-            .and_then(|run| run.deadline)
-            .map_or(own_deadline, |helper| helper.min(own_deadline));
         let acceptance_cancel = cancel.clone();
         let stopped = async move {
             match cancel {

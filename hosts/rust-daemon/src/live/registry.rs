@@ -51,11 +51,23 @@ struct LiveRunState {
     /// length rather than a recount of the retained text.
     text_units: u64,
     steps: Vec<RunStepUsage>,
+    /// The fallback model that answered the step now finishing; its usage
+    /// frame follows, and takes this with it.
+    served: Option<ServedStep>,
     /// The current step's id and when it started, for its duration.
     step_started: Option<(String, u64)>,
     /// Distinct tool names, noted here instead of under the state write lock
     /// (M1 carry-forward); saves and reads merge them into the ledger record.
     tools_started: Vec<String>,
+}
+
+/// A fallback model that answered one step.
+#[derive(Debug)]
+struct ServedStep {
+    step_id: String,
+    provider: String,
+    model: String,
+    reason: String,
 }
 
 #[derive(Debug, Default)]
@@ -96,6 +108,7 @@ impl LiveRuns {
                 view: LiveRunView::default(),
                 text_units: 0,
                 steps: Vec::new(),
+                served: None,
                 step_started: None,
                 tools_started: Vec::new(),
             })
@@ -233,6 +246,26 @@ impl LiveRuns {
         }
     }
 
+    /// Notes that a fallback model answered `step_id`, for the usage that
+    /// follows it.
+    pub(crate) fn note_served(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        provider: &str,
+        model: &str,
+        reason: &str,
+    ) {
+        if let Some(run) = self.lock().get_mut(run_id) {
+            run.served = Some(ServedStep {
+                step_id: step_id.to_string(),
+                provider: provider.to_string(),
+                model: model.to_string(),
+                reason: reason.to_string(),
+            });
+        }
+    }
+
     /// Keeps one model call's usage (spec §4.1 `steps`, at most 50).
     pub(crate) fn record_step_usage(&self, run_id: &str, step_id: &str, usage: TokenUsage) {
         self.record_step_usage_at(run_id, step_id, usage, now_millis());
@@ -255,11 +288,15 @@ impl LiveRuns {
                     .as_ref()
                     .filter(|(started_id, _)| started_id == step_id)
                     .map_or(0, |(_, started_ms)| now_ms.saturating_sub(*started_ms));
+                let served = run.served.take().filter(|served| served.step_id == step_id);
                 run.steps.push(RunStepUsage {
                     step_id: step_id.to_string(),
                     usage,
                     at_ms: now_ms,
                     duration_ms,
+                    provider: served.as_ref().map(|served| served.provider.clone()),
+                    model: served.as_ref().map(|served| served.model.clone()),
+                    fallback_reason: served.map(|served| served.reason),
                 });
             }
         }

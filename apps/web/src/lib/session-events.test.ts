@@ -745,3 +745,32 @@ describe('automation events', () => {
     expect(reconnected.automationsVersion).toBe(2);
   });
 });
+
+it('keeps the model a fallback answered with, once per step', () => {
+  const run = runFixture('run_1');
+  const fallback = (seq: number): AgentEvent => ({
+    type: 'model.fallback',
+    agentId: run.agentId,
+    sessionId: run.sessionId,
+    runId: run.id,
+    seq,
+    at: 1,
+    stepId: 'run_1:1',
+    provider: 'anthropic',
+    model: 'claude-sonnet-5-5',
+    reason: 'was rate limited',
+    primary: { provider: 'openai', model: 'gpt-4.1' },
+  });
+  const started = applyEvent(EMPTY_LIVE_STATE, runEvent('run.started', run, 1));
+  const once = applyEvent(started, fallback(2));
+  expect(once.runs.run_1.fallbacks).toEqual([
+    {
+      stepId: 'run_1:1',
+      provider: 'anthropic',
+      model: 'claude-sonnet-5-5',
+      reason: 'was rate limited',
+      primary: { provider: 'openai', model: 'gpt-4.1' },
+    },
+  ]);
+  expect(applyEvent(once, fallback(3)).runs.run_1.fallbacks).toHaveLength(1);
+});

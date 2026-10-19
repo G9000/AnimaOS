@@ -1330,3 +1330,104 @@ async fn a_floor_ask_says_why_the_command_is_risky() {
         .unwrap();
     running.await.unwrap().unwrap();
 }
+
+/// An agent with the smart check on, and the state to ask it through.
+async fn smart_check_agent(
+    model: std::sync::Arc<ScriptedModel>,
+) -> (AgentRunCoordinator, anima_core::AgentState) {
+    let (coordinator, agent_id) = super::test_support::coordinator_with(model).await;
+    let agent = {
+        let mut guard = coordinator.state.write().await;
+        guard
+            .autonomy
+            .set(crate::approvals::autonomy::AgentAutonomy {
+                agent_id: agent_id.clone(),
+                mode: crate::approvals::autonomy::AutonomyMode::Strict,
+                smart_check: true,
+                deny_patterns: Vec::new(),
+                smart_policy: String::new(),
+            });
+        guard.agents[&agent_id].state()
+    };
+    (coordinator, agent)
+}
+
+fn smart_side(provider: &str, model: &str) -> anima_core::ModelChoice {
+    anima_core::ModelChoice {
+        provider: provider.into(),
+        model: model.into(),
+    }
+}
+
+#[tokio::test]
+async fn the_smart_check_uses_the_side_model_when_set() {
+    use crate::approvals::autonomy::SmartVerdict;
+    let model = ScriptedModel::with_secondary(vec![], vec![Step::Text(vec!["APPROVE"])]);
+    let (coordinator, agent) = smart_check_agent(model.clone()).await;
+    coordinator
+        .state
+        .write()
+        .await
+        .set_side_model(Some(smart_side("anthropic", "claude-haiku-x")));
+
+    let verdict = coordinator
+        .smart_check(&agent, "chat:smart", "rm -rf dist", "deletes files")
+        .await;
+
+    assert_eq!(verdict, SmartVerdict::Approve);
+    let configs = model.secondary_configs();
+    assert_eq!(configs.len(), 1);
+    assert_eq!(configs[0].provider.as_deref(), Some("anthropic"));
+    assert_eq!(configs[0].model, "claude-haiku-x");
+    let rows = coordinator.state.read().await.history.pending_usage();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        (rows[0].provider.as_str(), rows[0].model.as_str()),
+        ("anthropic", "claude-haiku-x")
+    );
+}
+
+#[tokio::test]
+async fn a_failing_side_model_falls_back_to_the_agents_model_for_the_smart_check() {
+    use crate::approvals::autonomy::SmartVerdict;
+    let model =
+        ScriptedModel::with_secondary(vec![], vec![Step::Fail("no key"), Step::Text(vec!["DENY"])]);
+    let (coordinator, agent) = smart_check_agent(model.clone()).await;
+    coordinator
+        .state
+        .write()
+        .await
+        .set_side_model(Some(smart_side("anthropic", "claude-haiku-x")));
+
+    let verdict = coordinator
+        .smart_check(&agent, "chat:smart", "rm -rf dist", "deletes files")
+        .await;
+
+    assert_eq!(verdict, SmartVerdict::Deny);
+    let configs = model.secondary_configs();
+    assert_eq!(configs.len(), 2);
+    assert_eq!(configs[1].provider.as_deref(), Some("openai"));
+    assert_eq!(configs[1].model, "gpt-5.4");
+    let rows = coordinator.state.read().await.history.pending_usage();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].provider, "openai");
+}
+
+#[tokio::test]
+async fn the_smart_check_without_a_side_model_is_one_call_on_the_agents_model() {
+    use crate::approvals::autonomy::SmartVerdict;
+    let model = ScriptedModel::with_secondary(
+        vec![],
+        vec![Step::Text(vec!["APPROVE"]), Step::Text(vec!["DENY"])],
+    );
+    let (coordinator, agent) = smart_check_agent(model.clone()).await;
+
+    let verdict = coordinator
+        .smart_check(&agent, "chat:smart", "rm -rf dist", "deletes files")
+        .await;
+
+    assert_eq!(verdict, SmartVerdict::Approve);
+    let configs = model.secondary_configs();
+    assert_eq!(configs.len(), 1);
+    assert_eq!(configs[0].provider.as_deref(), Some("openai"));
+}

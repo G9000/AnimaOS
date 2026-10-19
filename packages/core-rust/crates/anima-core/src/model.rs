@@ -52,6 +52,13 @@ pub enum ModelStreamFrame {
     TextDelta(String),
     /// Provider-reported usage so far; each frame replaces the last. `Final` still carries the definitive usage.
     Usage(TokenUsage),
+    /// A fallback model answered instead of the agent's primary. Sent before
+    /// `Final`; `reason` says what happened to the primary (e.g. "was rate limited").
+    Served {
+        provider: String,
+        model: String,
+        reason: String,
+    },
     Final(ModelGenerateResponse),
 }
 
@@ -129,6 +136,7 @@ mod tests {
             tools: None,
             plugins: None,
             settings: None,
+            fallbacks: Vec::new(),
         }
     }
 

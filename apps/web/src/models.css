@@ -1,0 +1,146 @@
+/* API keys, fallback models and the side-task model (spec 2026-10-19). */
+.key-provider {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgb(255 255 255 / 0.07);
+  border-radius: 12px;
+}
+.key-provider-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.key-provider-name {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+.key-strategy {
+  width: auto;
+  max-width: 100%;
+  font-size: 12px;
+}
+.key-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.key-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  font-size: 12px;
+}
+.key-masked {
+  font-family: var(--font-mono);
+  color: var(--color-ink);
+}
+.key-label,
+.key-status {
+  color: var(--color-ink-3);
+}
+.key-row.is-resting .key-status {
+  color: var(--color-amber);
+}
+.key-row .key-status {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.key-add,
+.key-add-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.key-add-row {
+  flex-direction: row;
+  align-items: center;
+}
+.key-add-row > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.key-add-provider {
+  width: auto;
+}
+.key-warning {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgb(227 187 112 / 0.3);
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+.key-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-danger, #e5484d);
+}
+.fallback-models {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid rgb(255 255 255 / 0.07);
+}
+.fallback-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fallback-row {
+  display: grid;
+  grid-template-columns: 20px minmax(110px, 1fr) minmax(130px, 1.4fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+.fallback-number {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+.fallback-actions {
+  display: flex;
+  gap: 4px;
+}
+.fallback-problem {
+  grid-column: 2 / -1;
+}
+.fallback-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.side-model-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(130px, 1.4fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+@media (max-width: 560px) {
+  .fallback-row,
+  .side-model-row {
+    grid-template-columns: 1fr;
+  }
+  .fallback-problem {
+    grid-column: auto;
+  }
+  .key-add-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

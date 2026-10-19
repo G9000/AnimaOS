@@ -18,6 +18,7 @@ import {
 import { savePreferredVoice } from '../../lib/voice-preference';
 import { ChatGptConnection } from '../ChatGptConnection';
 import { ChatGptModelSelect } from '../ChatGptModelSelect';
+import { AddKeyForm } from '../models/AddKeyForm';
 import { ResumeCard } from './ResumeCard';
 import { VoiceCheck } from './VoiceCheck';
 import { HaloOrb } from '../halo/HaloOrb';
@@ -114,7 +115,7 @@ function defaultModel(provider: string): string {
 function providerGuidance(provider: DaemonProvider): string {
   if (provider.configured) return 'Ready';
   if (!provider.requiresKey) return 'Not running on the server';
-  return `Set ${provider.apiKeyEnvs[0] ?? 'its API key'} on the server`;
+  return 'Add an API key below to use it';
 }
 
 function greeting(owner: string, personality: Personality): string {
@@ -596,6 +597,10 @@ export function CompanionSetup({
   const sourceProviders = (providers ?? [])
     .filter((item) => source && item.id !== 'chatgpt' && sourceOf(item) === source)
     .sort((left, right) => Number(right.configured) - Number(left.configured));
+  // Providers that only need a key from the owner.
+  const keyProviders = sourceProviders.filter(
+    (item) => item.requiresKey && !item.configured,
+  );
 
   const heading = (title: string, description: string, hero = false) => (
     <div
@@ -903,6 +908,18 @@ export function CompanionSetup({
                       />
                     ))}
                   </div>
+                  {source === 'key' && keyProviders.length > 0 && (
+                    <>
+                      <span className="onboarding__label">Add API key</span>
+                      <AddKeyForm
+                        providers={keyProviders}
+                        buttonLabel="Add API key"
+                        variant="onboarding"
+                        warnIfNotPersisted
+                        onAdded={refreshProviders}
+                      />
+                    </>
+                  )}
                 </div>
                 {provider && (
                   <div className="onboarding__section">

@@ -196,6 +196,7 @@ pub(crate) async fn handle_generate_profile(
         tools: None,
         plugins: None,
         settings: None,
+        fallbacks: Vec::new(),
     };
     let model_request = ModelGenerateRequest {
         system: "You output only valid JSON objects.".into(),

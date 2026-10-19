@@ -18,12 +18,22 @@ pub(crate) fn request_contains_images(request: &ModelGenerateRequest) -> bool {
     })
 }
 
+/// An image-bearing request never shows upstream text. Only the numeric status and
+/// retry hint survive, as `Image request failed; upstream details omitted (429)
+/// (retry after 12s)`, so the failure still classifies for key rotation and fallback.
 pub(crate) fn request_error(error: String, image_request: bool) -> String {
-    if image_request {
-        IMAGE_REQUEST_FAILED.into()
-    } else {
-        error
+    if !image_request {
+        return error;
     }
+    let failure = anima_core::classify_model_error(&error);
+    let mut message = IMAGE_REQUEST_FAILED.to_owned();
+    if let Some(status) = failure.status {
+        message.push_str(&format!(" ({status})"));
+    }
+    if let Some(seconds) = failure.retry_after_s {
+        message.push_str(&format!(" (retry after {seconds}s)"));
+    }
+    message
 }
 
 /// Missing model metadata is deliberately treated as no image support.

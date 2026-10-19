@@ -82,6 +82,7 @@ fn config() -> anima_core::AgentConfig {
         tools: None,
         plugins: None,
         settings: None,
+        fallbacks: Vec::new(),
     }
 }
 async fn fixture() -> (Temp, SharedDaemonState, String, AttachmentRecord) {

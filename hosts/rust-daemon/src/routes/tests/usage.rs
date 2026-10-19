@@ -527,6 +527,9 @@ fn finished_run(agent_id: &str, run_id: &str) -> RunRecord {
         usage: usage.clone(),
         at_ms: 1_001,
         duration_ms: 5,
+        provider: None,
+        model: None,
+        fallback_reason: None,
     }];
     run.usage = usage;
     run.finish(RunStatus::Completed, None, 2_000);

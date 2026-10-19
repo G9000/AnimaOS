@@ -16,7 +16,7 @@ use super::profile::profile_preset;
 use super::ApiError;
 use crate::app::SharedDaemonState;
 use crate::control_plane_store::WorkspaceConfig;
-use crate::runtime_model::provider_summaries;
+use crate::runtime_model::provider_summaries_with_pool;
 
 pub(super) const MAX_WORKSPACE_AVATAR_BYTES: usize = 5 * 1024 * 1024;
 const WORKSPACE_AVATAR_DIRECTORY: &str = "assets";
@@ -147,6 +147,7 @@ pub(crate) async fn handle_get_workspace_avatar(
 /// directory; the web console always sends absolute paths.
 pub(crate) async fn handle_inspect_workspace(
     root_path: &str,
+    provider_keys: &crate::provider_keys::KeyPool,
 ) -> Result<WorkspaceInspectResponse, ApiError> {
     let not_found = || WorkspaceInspectResponse {
         found: false,
@@ -185,7 +186,7 @@ pub(crate) async fn handle_inspect_workspace(
     // providerAvailable mirrors the providers catalog: unknown or
     // unconfigured providers (and the deterministic adapter) report false.
     // Every agent must be ready, including explicit per-agent overrides.
-    let providers = provider_summaries();
+    let providers = provider_summaries_with_pool(provider_keys);
     let provider_available = std::iter::once(&config.orchestrator)
         .chain(&config.agents)
         .all(|agent| {
@@ -367,6 +368,7 @@ fn prepare_bootstrap_agent(
         tools: Some(tools),
         plugins: None,
         settings: None,
+        fallbacks: Vec::new(),
     };
 
     let mut yaml = AgencyYamlAgent::orchestrator(
@@ -651,6 +653,7 @@ pub(crate) async fn handle_resume_workspace(
                 }),
                 plugins: None,
                 settings: is_orchestrator.then(workspace_lead_settings),
+                fallbacks: Vec::new(),
             })
         };
     // Reject yaml-internal duplicate names before any mutation; create_agent

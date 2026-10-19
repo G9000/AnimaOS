@@ -85,7 +85,16 @@ export interface Run {
   error: { code: string; message: string } | null;
   stop: { requestedAtMs: number } | null;
   toolsStarted: string[];
-  steps: { stepId: string; usage: RunTokenUsage }[];
+  steps: {
+    stepId: string;
+    usage: RunTokenUsage;
+    /** The provider and model that answered, when a fallback did instead of
+     *  the run's own; absent otherwise. */
+    provider?: string;
+    model?: string;
+    /** Why the run's own model did not answer, e.g. "was rate limited". */
+    fallbackReason?: string;
+  }[];
   usage: RunTokenUsage;
   model: string;
   provider: string | null;

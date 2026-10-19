@@ -222,7 +222,7 @@ fn diagnostic_adapter(opt_in: Option<OsString>) -> Result<RuntimeModelAdapter, &
     }
     // The explicit opt-in above precedes auth construction, environment provider
     // loading, vault access, client creation and any filesystem/network work.
-    RuntimeModelAdapter::try_from_env(crate::chatgpt_auth::ChatGptAuth::new())
+    RuntimeModelAdapter::try_from_env(crate::chatgpt_auth::ChatGptAuth::new(), None)
         .map_err(|_| "M48 diagnostic adapter is unavailable")
 }
 

@@ -408,6 +408,7 @@ fn config() -> AgentConfig {
             )]),
             examples: None,
         }]),
+        fallbacks: Vec::new(),
     }
 }
 
@@ -1816,4 +1817,29 @@ async fn m48_provider_diagnostic_explanations_do_not_enable_retries() {
             "diagnostic recognition must preserve one-attempt behavior"
         );
     }
+}
+
+#[tokio::test]
+async fn subscription_rate_limit_carries_the_retry_hint() {
+    use axum::{http::StatusCode, routing::post};
+    let (endpoint, task) = server(axum::Router::new().route(
+        "/responses",
+        post(|| async {
+            (
+                StatusCode::TOO_MANY_REQUESTS,
+                [("retry-after", "7")],
+                "secret-sentinel",
+            )
+        }),
+    ))
+    .await;
+    let mut adapter = ChatGptResponsesAdapter::new("fake".into(), "account".into()).unwrap();
+    adapter.endpoint = endpoint;
+    let error = adapter.generate(&config(), &request()).await.unwrap_err();
+    assert!(error.ends_with("(retry after 7s)"), "{error}");
+    assert!(!error.contains("secret-sentinel"));
+    let failure = anima_core::classify_model_error(&error);
+    assert_eq!(failure.kind, anima_core::ModelFailureKind::RateLimited);
+    assert_eq!(failure.retry_after_s, Some(7));
+    task.abort();
 }

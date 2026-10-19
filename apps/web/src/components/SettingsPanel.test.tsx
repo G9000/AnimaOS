@@ -48,6 +48,14 @@ const providers: DaemonProvider[] = [
   },
 ];
 
+// The model page also lists API keys and the side-task model; keep these
+// tests independent of those owner reads.
+beforeEach(() => {
+  vi.spyOn(daemon, 'providerKeys').mockResolvedValue({ providers: [] });
+  vi.spyOn(daemon, 'sideModel').mockResolvedValue(null);
+});
+afterEach(() => vi.restoreAllMocks());
+
 function agent(overrides: Partial<AgentDetail> = {}): AgentDetail {
   return {
     id: 'agent-main',
@@ -94,6 +102,55 @@ function renderPanel(
 
   return { ...render(<SettingsPanel {...props} />), props };
 }
+
+describe('model resilience settings', () => {
+  it('saves fallback models through the agent update, and shows keys and the side-task model', async () => {
+    const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+    renderPanel(
+      agent({
+        fallbacks: [{ provider: 'anthropic', model: 'claude-haiku-4-5' }],
+      }),
+      { saveSettings, sections: ['model'] },
+    );
+    expect(screen.getByRole('heading', { name: 'API keys' })).toBeVisible();
+    expect(
+      screen.getByRole('heading', { name: 'Side-task model' }),
+    ).toBeVisible();
+    expect(screen.getByLabelText('Fallback 1 model')).toHaveValue(
+      'claude-haiku-4-5',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Remove fallback 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save fallbacks' }));
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith({ fallbacks: [] }),
+    );
+  });
+  it('drops an unsaved fallback draft when another agent is shown', async () => {
+    const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+    const { rerender, props } = renderPanel(agent({ id: 'agent-a' }), {
+      saveSettings,
+      sections: ['model'],
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add fallback' }));
+    expect(screen.getByLabelText('Fallback 1 model')).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Save fallbacks' }),
+    ).toBeEnabled();
+
+    rerender(
+      <SettingsPanel
+        {...props}
+        sections={['model']}
+        agent={agent({ id: 'agent-b', name: 'Bo' })}
+      />,
+    );
+    expect(screen.queryByLabelText('Fallback 1 model')).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Save fallbacks' }),
+    ).toBeDisabled();
+    expect(saveSettings).not.toHaveBeenCalled();
+  });
+});
 
 describe('m83 independent owner web permissions', () => {
   afterEach(() => vi.restoreAllMocks());

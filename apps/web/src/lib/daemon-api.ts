@@ -43,6 +43,11 @@ import {
   type AgentJobInput,
   type AgentJobRetryInput,
   type AgentJobReviewInput,
+  type AddProviderKeyInput,
+  type KeyStrategy,
+  type ModelChoice,
+  type ProviderKey,
+  type ProviderKeys,
   type CreateMemoryInput,
   type CreateDiscordConnectorInput,
   type ConnectDriveInput,
@@ -64,6 +69,11 @@ import {
 } from '@animaOS-SWARM/sdk';
 
 export type {
+  AddProviderKeyInput,
+  KeyStrategy,
+  ModelChoice,
+  ProviderKey,
+  ProviderKeys,
   DiscordConnector,
   DiscordConnectorStatus,
   CreateDiscordConnectorInput,
@@ -168,6 +178,15 @@ export interface DaemonProvider {
   apiKeyEnvs: string[];
 }
 
+/**
+ * The built-in mock providers: fine as an agent's own model, but the daemon
+ * refuses them as a fallback or the side-task model.
+ */
+export function isMockProvider(id: string): boolean {
+  const normalized = id.trim().toLowerCase();
+  return normalized === 'deterministic' || normalized === 'test';
+}
+
 interface DaemonTokenUsage {
   promptTokens: number;
   completionTokens: number;
@@ -210,6 +229,8 @@ export interface DaemonSnapshot {
       adjectives?: string[] | null;
       style?: string | null;
       tools?: DaemonToolDescriptor[] | null;
+      /** Omitted by the daemon when there are none. */
+      fallbacks?: ModelChoice[] | null;
       settings?: { additional?: Record<string, unknown> } | null;
     };
     createdAtMs: number;
@@ -226,6 +247,8 @@ export interface AgentUpdateInput {
   provider?: string;
   system?: string;
   tools?: string[];
+  /** At most three, none equal to the primary; `[]` clears them. */
+  fallbacks?: ModelChoice[];
 }
 
 export type TelegramConnectorStatus =
@@ -834,6 +857,39 @@ export const daemon = {
 
   listProviders: () => request<{ providers: DaemonProvider[] }>('/providers'),
 
+  /** The key pool per provider; keys only ever come back masked. */
+  providerKeys: () =>
+    request<{ providers: ProviderKeys[] }>('/provider-keys'),
+  /** 201 with the masked key; 400 and 409 carry the daemon's reason. */
+  addProviderKey: (provider: string, input: AddProviderKeyInput) =>
+    request<ProviderKey>(`/provider-keys/${encodeURIComponent(provider)}`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  removeProviderKey: (provider: string, keyId: string) =>
+    request<{ deleted: boolean }>(
+      `/provider-keys/${encodeURIComponent(provider)}/${encodeURIComponent(keyId)}`,
+      { method: 'DELETE' },
+    ),
+  /** "Try now": ends a resting key's rest, the env key included. */
+  wakeProviderKey: (provider: string, keyId: string) =>
+    request<ProviderKey>(
+      `/provider-keys/${encodeURIComponent(provider)}/${encodeURIComponent(keyId)}/wake`,
+      { method: 'POST' },
+    ),
+  setKeyStrategy: (provider: string, strategy: KeyStrategy) =>
+    request<ProviderKeys>(
+      `/provider-keys/${encodeURIComponent(provider)}/strategy`,
+      { method: 'PUT', body: JSON.stringify({ strategy }) },
+    ),
+  /** The model for small background tasks, or null for each agent's own. */
+  sideModel: () => request<ModelChoice | null>('/settings/side-model'),
+  setSideModel: (choice: ModelChoice | null) =>
+    request<ModelChoice | null>('/settings/side-model', {
+      method: 'PUT',
+      body: JSON.stringify(choice),
+    }),
+
   listAgents: () => request<{ agents: DaemonSnapshot[] }>('/agents'),
 
   getAgent: (id: string) => request<{ agent: DaemonSnapshot }>(`/agents/${id}`),
@@ -1112,6 +1168,9 @@ export function toAgentDetail(snapshot: DaemonSnapshot): AgentDetail {
       total_tokens: state.tokenUsage.totalTokens,
     },
     system: state.config.system,
+    ...(state.config.fallbacks?.length
+      ? { fallbacks: state.config.fallbacks }
+      : {}),
     messages: snapshot.messages
       .filter((m) => {
         // hide check-in plumbing: tagged prompt messages + silent ticks

@@ -52,6 +52,17 @@ pub struct AgentConfig {
     pub tools: Option<Vec<ToolDescriptor>>,
     pub plugins: Option<Vec<PluginDescriptor>>,
     pub settings: Option<AgentSettings>,
+    /// Models tried in order when the primary fails before any text streams.
+    /// Absent in configs saved before fallbacks existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fallbacks: Vec<ModelChoice>,
+}
+
+/// One provider + model pair an agent may answer with.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelChoice {
+    pub provider: String,
+    pub model: String,
 }
 
 impl AgentConfig {
@@ -75,6 +86,9 @@ pub struct AgentConfigUpdate {
     pub provider: Option<String>,
     pub system: Option<String>,
     pub tools: Option<Vec<ToolDescriptor>>,
+    /// Replaces the fallback chain; `Some(vec![])` clears it.
+    #[serde(default)]
+    pub fallbacks: Option<Vec<ModelChoice>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,6 +176,27 @@ mod tests {
     use std::str::FromStr;
 
     #[test]
+    fn configs_saved_before_fallbacks_load_with_an_empty_chain_and_save_unchanged() {
+        let saved = serde_json::json!({
+            "name": "agent", "model": "gpt-a", "bio": null, "lore": null,
+            "knowledge": null, "topics": null, "adjectives": null, "style": null,
+            "provider": "openai", "system": null, "tools": null, "plugins": null,
+            "settings": null,
+        });
+        let mut config: AgentConfig = serde_json::from_value(saved.clone()).unwrap();
+        assert!(config.fallbacks.is_empty());
+        assert_eq!(serde_json::to_value(&config).unwrap(), saved);
+
+        config.fallbacks.push(super::ModelChoice {
+            provider: "anthropic".into(),
+            model: "claude-b".into(),
+        });
+        let round_trip: AgentConfig =
+            serde_json::from_value(serde_json::to_value(&config).unwrap()).unwrap();
+        assert_eq!(round_trip, config);
+    }
+
+    #[test]
     fn token_usage_saturating_add_sums_all_five_fields_and_saturates_on_overflow() {
         let mut total = TokenUsage {
             prompt_tokens: 1,
@@ -242,6 +277,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 ..AgentSettings::default()
             }),
+            fallbacks: Vec::new(),
         };
 
         let state = AgentState {

@@ -11,6 +11,7 @@ use crate::live::LiveEventBody;
 use crate::runs::RunChangeSet;
 use crate::sessions::titles::{auto_title_enabled, generate_title};
 use crate::sessions::{SessionKind, TitleSource};
+use crate::side_model::side_call;
 use crate::usage::metered::{record_secondary, Metered, SecondaryCall};
 use crate::usage::UsageSource;
 
@@ -125,9 +126,13 @@ impl AgentRunCoordinator {
         // The call's tokens count whether or not its title is usable (spec
         // §11); a timed-out call was dropped and records nothing.
         let meter = Metered::new(adapter);
-        let generated = tokio::time::timeout(
-            self.title_timeout,
-            generate_title(&meter, &config, &first, &reply),
+        let deadline = tokio::time::Instant::now() + self.title_timeout;
+        let generated = tokio::time::timeout_at(
+            deadline,
+            side_call(&self.state, &config, deadline, |config| {
+                let (meter, first, reply) = (&meter, &first, &reply);
+                async move { generate_title(meter, &config, first, reply).await }
+            }),
         )
         .await;
         if generated.is_ok() {

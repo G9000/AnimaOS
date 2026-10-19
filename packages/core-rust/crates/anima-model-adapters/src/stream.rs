@@ -182,6 +182,51 @@ pub(crate) async fn consume_ollama_ndjson(
 const MAX_STREAM_BYTES: usize = 64 * 1024 * 1024;
 /// The bound on one SSE event or NDJSON line, checked per frame after splitting.
 pub(crate) const MAX_STREAM_EVENT_BYTES: usize = 256 * 1024;
+/// Why a stop reason could not be read.
+enum StopError {
+    /// The provider's documented mid-stream failure (OpenRouter's `error`).
+    Failed,
+    Other(String),
+}
+
+impl StopError {
+    fn into_message(self) -> String {
+        match self {
+            Self::Failed => stream_parse_error(),
+            Self::Other(error) => error,
+        }
+    }
+}
+
+impl From<String> for StopError {
+    fn from(error: String) -> Self {
+        Self::Other(error)
+    }
+}
+
+/// A mid-stream provider error, named by the provider's enumerated error type or
+/// code so it can be classified: `"{Provider} stream error: overloaded_error"`, or
+/// `"{Provider} stream error (429)"` for an HTTP-like numeric code. Only a short
+/// identifier-shaped value is kept; upstream messages never reach the text.
+fn named_stream_error(provider_label: &str, kind: Option<&Value>) -> String {
+    match kind {
+        Some(Value::Number(code)) => match code.as_u64().filter(|code| (100..600).contains(code)) {
+            Some(code) => format!("{provider_label} stream error ({code})"),
+            None => format!("{provider_label} stream error"),
+        },
+        Some(Value::String(token))
+            if !token.is_empty()
+                && token.len() <= 64
+                && token
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'.' || b == b'-') =>
+        {
+            format!("{provider_label} stream error: {token}")
+        }
+        _ => format!("{provider_label} stream error"),
+    }
+}
+
 const MAX_STREAM_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_STREAM_TOOL_CALLS: usize = 32;
 
@@ -252,7 +297,15 @@ impl StreamAccumulator {
         // Moonshot reports stream usage inside its final choice.
         self.usage.merge_openai(choice.get("usage"))?;
         if let Some(reason) = choice.get("finish_reason").filter(|value| !value.is_null()) {
-            let reason = self.stop_reason_for(reason, false)?;
+            let reason = self
+                .stop_reason_for(reason, false)
+                .map_err(|error| match error {
+                    StopError::Failed => named_stream_error(
+                        self.provider_label,
+                        payload.get("error").and_then(|error| error.get("code")),
+                    ),
+                    StopError::Other(error) => error,
+                })?;
             self.set_stop_reason(reason)?;
             self.terminal = true;
         }
@@ -400,12 +453,17 @@ impl StreamAccumulator {
                     .and_then(|delta| delta.get("stop_reason"))
                     .filter(|reason| !reason.is_null())
                 {
-                    let reason = self.stop_reason_for(reason, true)?;
+                    let reason = self
+                        .stop_reason_for(reason, true)
+                        .map_err(StopError::into_message)?;
                     self.set_stop_reason(reason)?;
                 }
                 Ok(None)
             }
-            "error" => Err("provider stream failed".to_owned()),
+            "error" => Err(named_stream_error(
+                self.provider_label,
+                payload.get("error").and_then(|error| error.get("type")),
+            )),
             _ => Err(stream_parse_error()),
         }
     }
@@ -429,7 +487,11 @@ impl StreamAccumulator {
     /// `content_filter`, `insufficient_system_resource`, `model_length`, ...) ends
     /// the reply, logged at debug level. The one exception is OpenRouter's `error`,
     /// which it documents as a mid-stream failure.
-    fn stop_reason_for(&self, reason: &Value, anthropic: bool) -> Result<ModelStopReason, String> {
+    fn stop_reason_for(
+        &self,
+        reason: &Value,
+        anthropic: bool,
+    ) -> Result<ModelStopReason, StopError> {
         Ok(match (reason.as_str(), anthropic) {
             (Some("length" | "max_tokens"), _) => ModelStopReason::MaxTokens,
             (Some("tool_calls"), false) | (Some("tool_use"), true) => ModelStopReason::ToolCall,
@@ -437,10 +499,7 @@ impl StreamAccumulator {
                 ModelStopReason::End
             }
             (Some("error"), false) if self.provider_id == "openrouter" => {
-                return Err(format!(
-                    "{} stream failed with finish_reason \"error\"",
-                    self.provider_label
-                ));
+                return Err(StopError::Failed);
             }
             _ => {
                 let raw = if self.image_request {

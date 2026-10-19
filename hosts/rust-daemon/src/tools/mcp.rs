@@ -349,6 +349,7 @@ mod tests {
                 tools: None,
                 plugins: None,
                 settings: None,
+                fallbacks: Vec::new(),
             },
             created_at_ms: 1,
             token_usage: Default::default(),

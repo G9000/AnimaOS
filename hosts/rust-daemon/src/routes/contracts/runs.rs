@@ -32,6 +32,15 @@ pub(crate) struct RunStopResponse {
 pub(crate) struct RunStepResponse {
     pub(crate) step_id: String,
     pub(crate) usage: TokenUsageResponse,
+    /// The provider and model that answered, when a fallback did instead of
+    /// the run's own; absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) model: Option<String>,
+    /// Why the run's own model did not answer, e.g. "was rate limited".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) fallback_reason: Option<String>,
 }
 
 /// Response-only disposition; native launch keys and steer contents stay private.
@@ -184,6 +193,9 @@ impl From<&RunRecord> for RunResponse {
                 .map(|step| RunStepResponse {
                     step_id: step.step_id.clone(),
                     usage: TokenUsageResponse::from(&step.usage),
+                    provider: step.provider.clone(),
+                    model: step.model.clone(),
+                    fallback_reason: step.fallback_reason.clone(),
                 })
                 .collect(),
             usage: TokenUsageResponse::from(&record.usage),

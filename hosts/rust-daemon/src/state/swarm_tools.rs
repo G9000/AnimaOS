@@ -441,6 +441,7 @@ mod tests {
             tools: None,
             plugins: None,
             settings: None,
+            fallbacks: Vec::new(),
         }
     }
 }

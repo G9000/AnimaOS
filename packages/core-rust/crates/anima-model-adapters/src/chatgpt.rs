@@ -355,7 +355,15 @@ struct HttpFailure {
     retryable: bool,
 }
 
+/// The failure as diagnosed, plus a ` (retry after Ns)` hint when the provider sent one.
 async fn http_failure(response: reqwest::Response) -> HttpFailure {
+    let headers = response.headers().clone();
+    let mut failure = diagnose_http_failure(response).await;
+    failure.diagnostic = crate::transport::with_retry_hint(failure.diagnostic, &headers);
+    failure
+}
+
+async fn diagnose_http_failure(response: reqwest::Response) -> HttpFailure {
     let status = response.status();
     let fallback = http_status_failure(status.as_u16());
     let retryable_status = matches!(status.as_u16(), 502 | 503 | 504);

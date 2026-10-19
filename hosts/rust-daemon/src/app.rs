@@ -270,10 +270,13 @@ pub async fn serve(listener: TcpListener, config: DaemonConfig) -> io::Result<()
         None => None,
     };
     let chatgpt_auth = crate::chatgpt_auth::ChatGptAuth::new();
+    let provider_keys =
+        crate::provider_keys::open_from_env(&crate::runtime_model::provider_env_keys());
     let state = Arc::new(RwLock::new(configured_state(
         &config,
         Arc::new(
-            RuntimeModelAdapter::try_from_env(chatgpt_auth.clone()).map_err(io::Error::other)?,
+            RuntimeModelAdapter::try_from_env(chatgpt_auth.clone(), Some(provider_keys.clone()))
+                .map_err(io::Error::other)?,
         ),
     )));
 
@@ -282,6 +285,7 @@ pub async fn serve(listener: TcpListener, config: DaemonConfig) -> io::Result<()
     {
         let mut guard = state.write().await;
         guard.chatgpt_auth = chatgpt_auth;
+        guard.provider_keys = provider_keys;
         guard.browser_setup = browser_setup;
         guard.tool_rpc_service = crate::tool_rpc::ToolRpcService::new(tool_rpc_config);
         guard.checkpoint_root = checkpoint_root;
@@ -860,6 +864,7 @@ mod tests {
                 tools: None,
                 plugins: None,
                 settings: None,
+                fallbacks: Vec::new(),
             })
             .unwrap()
             .state
@@ -941,6 +946,7 @@ mod tests {
                 tools: None,
                 plugins: None,
                 settings: None,
+                fallbacks: Vec::new(),
             })
             .unwrap()
             .state
@@ -1084,6 +1090,7 @@ mod tests {
                 tools: None,
                 plugins: None,
                 settings: None,
+                fallbacks: Vec::new(),
             })
             .unwrap()
             .state

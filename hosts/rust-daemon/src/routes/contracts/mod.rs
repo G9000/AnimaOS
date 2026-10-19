@@ -14,6 +14,7 @@ mod logs;
 pub(crate) mod mcp;
 mod memories;
 mod memory_edits;
+mod provider_keys;
 mod providers;
 mod runs;
 mod schedules;
@@ -39,7 +40,7 @@ pub(crate) use agents::{
     AgentConfigRequest, AgentEnvelope, AgentProfileEnvelope, AgentProfileResponse,
     AgentRecentMemoriesQuery, AgentRunEnvelope, AgentRuntimeSnapshotResponse,
     AgentSummariesEnvelope, AgentSummaryResponse, AgentUpdateRequest, AgentsEnvelope,
-    GenerateProfileRequest,
+    GenerateProfileRequest, ModelChoiceResponse,
 };
 pub(crate) use approvals::*;
 pub(crate) use attachments::{AttachmentEnvelope, AttachmentResponse};
@@ -61,6 +62,7 @@ pub(crate) use memory_edits::{
     MemoryDeleteRequest, MemoryDeleteResponse, MemoryFactResponse, MemoryFactsEnvelope,
     MemoryPatchRequest,
 };
+pub(crate) use provider_keys::{ProviderKeyResponse, ProviderKeysEnvelope, ProviderKeysResponse};
 pub(crate) use providers::{ProviderResponse, ProvidersEnvelope};
 pub(crate) use runs::*;
 pub(crate) use schedules::*;

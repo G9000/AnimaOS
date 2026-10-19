@@ -75,6 +75,7 @@ async fn runtime_adapter_routes_openai_requests_through_provider_adapter() {
                 base_url: format!("{base_url}/v1"),
             },
         )]),
+        ..ProviderAdapterConfig::default()
     });
 
     let response = adapter
@@ -104,6 +105,7 @@ fn provider_summaries_are_canonical_and_never_include_credentials() {
                 base_url: "https://private.example/v1".into(),
             },
         )]),
+        ..ProviderAdapterConfig::default()
     };
 
     let summaries = provider_summaries_for_config(&config);
@@ -144,6 +146,7 @@ fn agent_config(provider: &str) -> AgentConfig {
         tools: None,
         plugins: None,
         settings: None,
+        fallbacks: Vec::new(),
     }
 }
 
@@ -217,6 +220,7 @@ async fn runtime_adapter_streams_provider_deltas_and_deterministic_words() {
                 base_url: format!("{base_url}/v1"),
             },
         )]),
+        ..ProviderAdapterConfig::default()
     });
 
     let frames = Frames(Mutex::new(Vec::new()));

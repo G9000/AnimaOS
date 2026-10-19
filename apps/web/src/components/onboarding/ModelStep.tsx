@@ -4,6 +4,7 @@ import { MODEL_SUGGESTIONS, type DaemonProvider } from '../../lib/daemon-api';
 import { labelCls } from '../ui-bits';
 import { ChatGptConnection } from '../ChatGptConnection';
 import { ChatGptModelSelect } from '../ChatGptModelSelect';
+import { AddKeyForm } from '../models/AddKeyForm';
 
 export interface ModelStepProps {
   providers: DaemonProvider[] | null;
@@ -41,8 +42,7 @@ function providerGuidance(provider: DaemonProvider): string {
     return 'Unavailable in the daemon';
   }
 
-  const envName = provider.apiKeyEnvs[0] ?? 'the provider API key';
-  return `Unavailable: set ${envName} in the daemon environment`;
+  return 'Add an API key below to use it';
 }
 
 export function ModelStep({
@@ -69,6 +69,13 @@ export function ModelStep({
   const chatGpt = providers?.find((candidate) => candidate.id === 'chatgpt');
   const selectedProvider = providers?.find(
     (candidate) => candidate.id === provider,
+  );
+  // Providers that only need a key from the owner.
+  const keyProviders = (providers ?? []).filter(
+    (candidate) =>
+      candidate.requiresKey &&
+      !candidate.configured &&
+      candidate.id !== 'chatgpt',
   );
 
   useEffect(() => {
@@ -240,7 +247,7 @@ export function ModelStep({
                   <p id="provider-catalog-empty" className="text-sm text-ink-2">
                     {chatGpt
                       ? 'Connect your ChatGPT subscription above, or configure another provider and retry.'
-                      : 'No providers are configured. Add a provider credential to the daemon environment, then retry.'}
+                      : 'No providers are configured. Add an API key below to start.'}
                   </p>
                   <button
                     ref={retryButtonRef}
@@ -253,6 +260,17 @@ export function ModelStep({
                   </button>
                 </div>
               ) : null}
+              {keyProviders.length > 0 && (
+                <div className="space-y-2">
+                  <p className={labelCls}>Add API key</p>
+                  <AddKeyForm
+                    providers={keyProviders}
+                    buttonLabel="Add API key"
+                    warnIfNotPersisted
+                    onAdded={onRetryProviders}
+                  />
+                </div>
+              )}
             </>
           )}
         </div>

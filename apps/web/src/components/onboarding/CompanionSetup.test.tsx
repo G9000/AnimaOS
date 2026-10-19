@@ -41,14 +41,14 @@ afterEach(() => {
 let setAutonomy: MockInstance<typeof daemon.setAutonomy>;
 beforeEach(() => {
   vi.spyOn(daemon, 'inspectWorkspace').mockResolvedValue({ found: false });
-  setAutonomy = vi.spyOn(daemon, 'setAutonomy').mockImplementation(
-    async (_id, patch) => ({
+  setAutonomy = vi
+    .spyOn(daemon, 'setAutonomy')
+    .mockImplementation(async (_id, patch) => ({
       mode: patch.mode ?? 'free',
       smartCheck: false,
       denyPatterns: [],
       policy: DEFAULT_APPROVAL_POLICY,
-    }),
-  );
+    }));
 });
 
 function renderSetup(
@@ -113,7 +113,9 @@ describe('CompanionSetup', () => {
       '/my/existing/files',
     );
     await user.click(button('Continue'));
-    await user.click(await screen.findByRole('button', { name: 'Finish setup' }));
+    await user.click(
+      await screen.findByRole('button', { name: 'Finish setup' }),
+    );
     await waitFor(() => expect(create).toHaveBeenCalledOnce());
     expect(daemon.inspectWorkspace).toHaveBeenCalledWith('/my/existing/files');
     expect(create.mock.calls[0][0].workspace.rootPath).toBe(
@@ -306,6 +308,74 @@ describe('CompanionSetup', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it('accepts an API key in the model step instead of an env hint', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
+    const add = vi.spyOn(daemon, 'addProviderKey').mockResolvedValue({
+      id: 'key_abc123def456',
+      label: null,
+      masked: 'sk-ant…wxyz',
+      source: 'file',
+      status: 'ready',
+      restingUntilMs: null,
+      lastError: null,
+      uses: 0,
+    });
+    const retryProviders = vi.fn();
+    renderSetup({
+      retryProviders,
+      providers: [
+        {
+          id: 'anthropic',
+          label: 'Anthropic',
+          configured: false,
+          requiresKey: true,
+          apiKeyEnvs: ['ANTHROPIC_API_KEY'],
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    await start(user);
+    await user.click(screen.getByRole('radio', { name: /Use an API key/ }));
+    expect(screen.queryByText(/ANTHROPIC_API_KEY/)).toBeNull();
+    const field = screen.getByLabelText('API key for Anthropic');
+    expect(field).toHaveAttribute('type', 'password');
+    await user.type(field, 'sk-ant-secret-wxyz');
+    await user.click(button('Add API key'));
+    expect(add).toHaveBeenCalledWith('anthropic', {
+      key: 'sk-ant-secret-wxyz',
+    });
+    await waitFor(() => expect(retryProviders).toHaveBeenCalledOnce());
+    await waitFor(() => expect(field).toHaveValue(''));
+  });
+
+  it('warns that keys added in setup last until the daemon restarts', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
+    vi.spyOn(daemon, 'providerKeys').mockResolvedValue({
+      providers: [
+        { id: 'anthropic', strategy: 'fill_first', persisted: false, keys: [] },
+      ],
+    });
+    renderSetup({
+      providers: [
+        {
+          id: 'anthropic',
+          label: 'Anthropic',
+          configured: false,
+          requiresKey: true,
+          apiKeyEnvs: ['ANTHROPIC_API_KEY'],
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    await start(user);
+    await user.click(screen.getByRole('radio', { name: /Use an API key/ }));
+    expect(
+      await screen.findByText(
+        'Keys added here last until the daemon restarts. Set ANIMAOS_RS_PROVIDER_KEYS_FILE to keep them.',
+      ),
+    ).toBeVisible();
+  });
+
   it('refreshes providers once when an already-connected ChatGPT account loads', async () => {
     vi.spyOn(ChatGptClient.prototype, 'status').mockResolvedValue({
       connected: true,
@@ -410,7 +480,9 @@ describe('CompanionSetup', () => {
       }),
     );
     await screen.findByText(/Received model metadata/);
-    await user.click(screen.getByRole('radio', { name: /Use my ChatGPT plan/ }));
+    await user.click(
+      screen.getByRole('radio', { name: /Use my ChatGPT plan/ }),
+    );
     expect(screen.getByRole('textbox', { name: 'Custom model' })).toHaveValue(
       'Owner.Exact/Model',
     );
@@ -420,7 +492,9 @@ describe('CompanionSetup', () => {
     await user.type(agentName, 'Kept name');
     await user.click(button('Continue'));
     await user.click(button('Continue'));
-    await user.click(await screen.findByRole('button', { name: 'Finish setup' }));
+    await user.click(
+      await screen.findByRole('button', { name: 'Finish setup' }),
+    );
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         agent: expect.objectContaining({
@@ -516,12 +590,16 @@ describe('CompanionSetup', () => {
     await user.click(button('Continue'));
     await user.type(screen.getByRole('textbox', { name: 'Your name' }), 'Sam');
     await user.click(screen.getByRole('radio', { name: /Driven/ }));
-    expect(screen.getByText(/Good (morning|afternoon|evening), Sam\./)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Good (morning|afternoon|evening), Sam\./),
+    ).toBeInTheDocument();
     await user.click(button('Continue'));
     await user.click(screen.getByRole('radio', { name: /Operate/ }));
     await user.click(screen.getByRole('checkbox', { name: /read the web/ }));
     await user.click(button('Continue'));
-    await user.click(await screen.findByRole('button', { name: 'Finish setup' }));
+    await user.click(
+      await screen.findByRole('button', { name: 'Finish setup' }),
+    );
     await waitFor(() => expect(create).toHaveBeenCalledOnce());
     const agent = create.mock.calls[0][0].agent;
     expect(agent.system).toContain("The owner's name is Sam.");
@@ -546,7 +624,9 @@ describe('CompanionSetup', () => {
     expect(screen.getByRole('radio', { name: /^Strict/ })).not.toBeChecked();
     await user.click(screen.getByRole('radio', { name: /Operate/ }));
     await user.click(button('Continue'));
-    await user.click(await screen.findByRole('button', { name: 'Finish setup' }));
+    await user.click(
+      await screen.findByRole('button', { name: 'Finish setup' }),
+    );
     await waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
     expect(setAutonomy).toHaveBeenCalledWith('main', { mode: 'free' });
     expect(setPolicy).not.toHaveBeenCalled();
@@ -564,7 +644,9 @@ describe('CompanionSetup', () => {
     await toAccess(user);
     await user.click(screen.getByRole('radio', { name: /^Strict/ }));
     await user.click(button('Continue'));
-    await user.click(await screen.findByRole('button', { name: 'Finish setup' }));
+    await user.click(
+      await screen.findByRole('button', { name: 'Finish setup' }),
+    );
     await waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
     expect(setAutonomy).toHaveBeenCalledWith('main', { mode: 'strict' });
   });
@@ -577,17 +659,48 @@ describe('CompanionSetup', () => {
     const setPolicy = vi.spyOn(daemon, 'setApprovalPolicy');
     vi.spyOn(daemon, 'codingApps').mockResolvedValue({
       apps: [
-        { id: 'claude-code', name: 'Claude Code', found: true, version: '2.1.286', problem: null, bundleId: 'anima.coding.claude-code', manifestText: 'claude-manifest' },
-        { id: 'codex', name: 'Codex', found: true, version: null, problem: "installed but won't start", bundleId: 'anima.coding.codex', manifestText: 'codex-manifest' },
-        { id: 'opencode', name: 'OpenCode', found: false, version: null, problem: null, bundleId: 'anima.coding.opencode', manifestText: 'opencode-manifest' },
+        {
+          id: 'claude-code',
+          name: 'Claude Code',
+          found: true,
+          version: '2.1.286',
+          problem: null,
+          bundleId: 'anima.coding.claude-code',
+          manifestText: 'claude-manifest',
+        },
+        {
+          id: 'codex',
+          name: 'Codex',
+          found: true,
+          version: null,
+          problem: "installed but won't start",
+          bundleId: 'anima.coding.codex',
+          manifestText: 'codex-manifest',
+        },
+        {
+          id: 'opencode',
+          name: 'OpenCode',
+          found: false,
+          version: null,
+          problem: null,
+          bundleId: 'anima.coding.opencode',
+          manifestText: 'opencode-manifest',
+        },
       ],
-      handoff: { bundleId: 'anima.coding.delegate', manifestText: 'handoff-manifest' },
+      handoff: {
+        bundleId: 'anima.coding.delegate',
+        manifestText: 'handoff-manifest',
+      },
     });
     const review = vi
       .spyOn(communityBundlesOwnerApi, 'review')
       .mockImplementation(async (_agentId, input) => {
-        if (input.manifestText === 'handoff-manifest') throw new Error('bad manifest');
-        return { id: `review-${input.manifestText}`, reviewDigest: 'digest' } as never;
+        if (input.manifestText === 'handoff-manifest')
+          throw new Error('bad manifest');
+        return {
+          id: `review-${input.manifestText}`,
+          reviewDigest: 'digest',
+        } as never;
       });
     const install = vi
       .spyOn(communityBundlesOwnerApi, 'install')
@@ -598,25 +711,33 @@ describe('CompanionSetup', () => {
     await start(user);
     await user.click(button('Continue'));
     await user.click(button('Coder'));
-    expect(screen.getByRole('textbox', { name: 'Agent name' })).toHaveValue('Coder');
+    expect(screen.getByRole('textbox', { name: 'Agent name' })).toHaveValue(
+      'Coder',
+    );
     expect(screen.getByRole('textbox', { name: "What it's for" })).toHaveValue(
       'Hands coding work to the coding apps on this computer, then reads the changes and runs the checks itself.',
     );
     await user.click(button('Continue'));
     expect(screen.getByRole('radio', { name: /Operate/ })).toBeChecked();
     expect(screen.getByRole('radio', { name: /^Free/ })).toBeChecked();
-    const chips = await screen.findByRole('list', { name: 'Coding apps on this computer' });
+    const chips = await screen.findByRole('list', {
+      name: 'Coding apps on this computer',
+    });
     expect(chips).toHaveTextContent('Claude CodeFound · 2.1.286');
     expect(chips).toHaveTextContent('CodexNeeds reinstall');
     expect(chips).toHaveTextContent('OpenCodeNot found');
     await user.click(button('Continue'));
-    await user.click(await screen.findByRole('button', { name: 'Finish setup' }));
+    await user.click(
+      await screen.findByRole('button', { name: 'Finish setup' }),
+    );
     expect(await screen.findByRole('status')).toHaveTextContent(
       "know-how for handing off work didn't install",
     );
     const agent = create.mock.calls[0][0].agent;
     expect(agent.name).toBe('Coder');
-    expect(agent.tools).toEqual(expect.arrayContaining(['app_start', 'acp_start']));
+    expect(agent.tools).toEqual(
+      expect.arrayContaining(['app_start', 'acp_start']),
+    );
     expect(agent.system).toContain('Hands coding work to the coding apps');
     expect(setAutonomy).toHaveBeenCalledWith('coder', { mode: 'free' });
     expect(setPolicy).not.toHaveBeenCalled();
@@ -656,7 +777,9 @@ describe('CompanionSetup', () => {
     expect(screen.getByText(/me\.png/)).toBeVisible();
     await user.click(button('Continue'));
     await user.click(button('Continue'));
-    await user.click(await screen.findByRole('button', { name: 'Finish setup' }));
+    await user.click(
+      await screen.findByRole('button', { name: 'Finish setup' }),
+    );
     await waitFor(() => expect(created).toHaveBeenCalledOnce());
     expect(upload).toHaveBeenCalledWith('main', file);
   });
@@ -722,11 +845,13 @@ describe('CompanionSetup', () => {
       screen.queryByRole('button', { name: 'Open an existing workspace' }),
     ).not.toBeInTheDocument();
     await toAccess(user);
-    expect(screen.getByRole('textbox', { name: 'Home folder' })).toHaveAttribute(
-      'readonly',
-    );
+    expect(
+      screen.getByRole('textbox', { name: 'Home folder' }),
+    ).toHaveAttribute('readonly');
     await user.click(button('Continue'));
-    await user.click(await screen.findByRole('button', { name: 'Finish setup' }));
+    await user.click(
+      await screen.findByRole('button', { name: 'Finish setup' }),
+    );
     await waitFor(() => expect(create).toHaveBeenCalledOnce());
     expect(bootstrap).not.toHaveBeenCalled();
     expect(daemon.inspectWorkspace).not.toHaveBeenCalled();
@@ -735,7 +860,9 @@ describe('CompanionSetup', () => {
         settings: { additional: { workspaceRole: 'lead' } },
       }),
     );
-    expect(create.mock.calls[0][0].system).toContain('Workspace context: Keep me');
+    expect(create.mock.calls[0][0].system).toContain(
+      'Workspace context: Keep me',
+    );
   });
 
   it('blocks progress when a selected provider becomes unavailable', async () => {

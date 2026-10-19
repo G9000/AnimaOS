@@ -336,6 +336,7 @@ mod tests {
                     .collect(),
                 ..AgentSettings::default()
             }),
+            fallbacks: Vec::new(),
         }
     }
 

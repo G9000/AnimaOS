@@ -191,6 +191,7 @@ async fn setup() -> (DiscordManager, Arc<FakeTransport>, DiscordConnectorRecord)
             tools: None,
             plugins: None,
             settings: Some(anima_core::AgentSettings::default()),
+            fallbacks: Vec::new(),
         })
         .unwrap();
     let mut c = fixture_connector();

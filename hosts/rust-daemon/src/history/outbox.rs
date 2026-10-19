@@ -889,6 +889,7 @@ mod tests {
             tools: None,
             plugins: None,
             settings: Some(AgentSettings::default()),
+            fallbacks: Vec::new(),
         }
     }
 
@@ -1728,6 +1729,9 @@ mod tests {
                 usage: tokens(10, 2),
                 at_ms: 1_000 + step,
                 duration_ms: 5,
+                provider: None,
+                model: None,
+                fallback_reason: None,
             })
             .collect();
         run.usage = tokens(10 * steps, 2 * steps);

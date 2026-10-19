@@ -17,6 +17,7 @@ use super::records::*;
 use crate::app::SharedDaemonState;
 use crate::memory_store::MemoryMutation;
 use crate::routes::ApiError;
+use crate::side_model::side_call;
 
 const REVIEW_OUTPUT_LIMIT: usize = 6 * 1024;
 
@@ -532,11 +533,30 @@ impl LearningService {
         };
         // Never drop the physical request on facade timeout/cancel. Adapters get
         // a sink error; the permit remains held until their stream actually exits.
-        let stream_result =
-            std::panic::AssertUnwindSafe(source.adapter.stream(&config, &request, sink.as_ref()))
-                .catch_unwind()
-                .await
-                .unwrap_or_else(|_| Err("Learning model exited unexpectedly".into()));
+        // With a workspace side model the review tries it first and, if that
+        // errors (or has not answered halfway to the deadline, when its call is
+        // dropped) before the sink rejected anything, the pinned model's chain.
+        let ran = Mutex::new((config.provider.clone(), config.model.clone()));
+        let side_deadline = tokio::time::Instant::from_std(sink.deadline);
+        let stream_result = side_call(&self.state, &config, side_deadline, |config| {
+            let (adapter, request, sink, ran) = (&source.adapter, &request, &sink, &ran);
+            async move {
+                {
+                    let mut data = sink.data.lock().unwrap();
+                    if data.rejected || Instant::now() >= sink.deadline {
+                        return Err("Learning review stream rejected".to_string());
+                    }
+                    *data = StreamData::default();
+                }
+                *ran.lock().unwrap() = (config.provider.clone(), config.model.clone());
+                std::panic::AssertUnwindSafe(adapter.stream(&config, request, sink.as_ref()))
+                    .catch_unwind()
+                    .await
+                    .unwrap_or_else(|_| Err("Learning model exited unexpectedly".into()))
+            }
+        })
+        .await;
+        let (ran_provider, ran_model) = ran.into_inner().unwrap();
         let data = sink.data.lock().unwrap().clone();
         let _transaction = self.transactions.lock().await;
         let fresh = tokio::time::timeout_at(
@@ -567,6 +587,9 @@ impl LearningService {
         // Observational usage is retained even for cancelled/failed requests.
         current.usage = data.usage.clone();
         current.usage_complete = data.final_usage_reported;
+        // The row names the model that answered, a side model or the pinned one.
+        current.provider = ran_provider;
+        current.model = ran_model;
         if current.state == LearningReviewState::Running {
             let parsed = data
                 .final_response
@@ -835,6 +858,8 @@ fn shadow_config(source: &AgentConfig) -> AgentConfig {
             temperature: Some(0.0),
             ..AgentSettings::default()
         }),
+        // A review falls back through the agent's own chain.
+        fallbacks: source.fallbacks.clone(),
     }
 }
 
@@ -901,7 +926,8 @@ impl ModelStreamSink for ReviewSink {
                     return Err("Learning review output bound exceeded".into());
                 }
             }
-            ModelStreamFrame::Usage(_) => {}
+            // Side calls use the bare adapter; no fallback model serves them.
+            ModelStreamFrame::Usage(_) | ModelStreamFrame::Served { .. } => {}
             ModelStreamFrame::Final(response) => {
                 if response.content.text.len() > REVIEW_OUTPUT_LIMIT
                     || response.stop_reason != ModelStopReason::End

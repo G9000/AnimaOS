@@ -114,6 +114,7 @@ async fn fixture(ambiguous: bool) -> (SharedDaemonState, MailManager, Arc<Fake>,
             tools: None,
             plugins: None,
             settings: None,
+            fallbacks: Vec::new(),
         })
         .unwrap()
         .state

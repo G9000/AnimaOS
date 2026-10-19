@@ -307,6 +307,9 @@ impl AgentRuntime {
         if let Some(tools) = patch.tools {
             config.tools = Some(tools);
         }
+        if let Some(fallbacks) = patch.fallbacks {
+            config.fallbacks = fallbacks;
+        }
     }
 
     /// Replace the complete configuration, preserving optional field shapes.
@@ -621,6 +624,14 @@ impl AgentRuntime {
                         metadata.remove(BUDGET_WRAPUP_METADATA_KEY);
                     }
                     self.apply_token_usage(&response.usage);
+                    if let Some(served) = sink.take_served() {
+                        self.emit_frame(RunFrame::ModelServed {
+                            step_id: step_id.clone(),
+                            provider: served.provider,
+                            model: served.model,
+                            reason: served.reason,
+                        });
+                    }
                     self.emit_frame(RunFrame::StepUsage {
                         step_id: step_id.clone(),
                         usage: response.usage.clone(),

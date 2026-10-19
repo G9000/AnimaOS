@@ -412,6 +412,7 @@ fn test_config(name: &str) -> AgentConfig {
         tools: None,
         plugins: None,
         settings: None,
+        fallbacks: Vec::new(),
     }
 }
 

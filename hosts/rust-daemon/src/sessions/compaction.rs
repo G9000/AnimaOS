@@ -375,6 +375,7 @@ mod tests {
             tools: Some(Vec::new()),
             plugins: None,
             settings: Some(AgentSettings::default()),
+            fallbacks: Vec::new(),
         }
     }
 
