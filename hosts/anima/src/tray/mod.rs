@@ -38,6 +38,53 @@ fn desktop_session() -> bool {
             .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()))
 }
 
+/// Runs a closure when dropped, on unwinding as on a normal return.
+#[cfg(any(target_os = "macos", windows, test))]
+struct OnDrop<F: FnOnce()>(Option<F>);
+
+#[cfg(any(target_os = "macos", windows, test))]
+impl<F: FnOnce()> OnDrop<F> {
+    fn new(run: F) -> Self {
+        Self(Some(run))
+    }
+}
+
+#[cfg(any(target_os = "macos", windows, test))]
+impl<F: FnOnce()> Drop for OnDrop<F> {
+    fn drop(&mut self) {
+        if let Some(run) = self.0.take() {
+            run();
+        }
+    }
+}
+
+#[cfg(test)]
+mod on_drop_tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use super::OnDrop;
+
+    #[test]
+    fn fires_on_return() {
+        let fired = AtomicBool::new(false);
+        {
+            let _guard = OnDrop::new(|| fired.store(true, Ordering::SeqCst));
+        }
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn fires_when_a_panic_unwinds() {
+        let fired = AtomicBool::new(false);
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = OnDrop::new(|| fired.store(true, Ordering::SeqCst));
+            panic!("the supervisor panicked");
+        }));
+        assert!(outcome.is_err());
+        assert!(fired.load(Ordering::SeqCst));
+    }
+}
+
 /// This build has no tray on this system: runs headless.
 #[cfg(not(any(target_os = "macos", windows)))]
 pub fn run(runtime: tokio::runtime::Runtime, supervisor: Supervisor) -> io::Result<()> {
@@ -67,6 +114,7 @@ mod native {
 
     use super::icon;
     use super::menu::{icon_for, menu_model, MenuItemModel, TrayIconKind, SEPARATOR};
+    use super::OnDrop;
     use crate::supervisor::{Action, Link, Supervisor, SupervisorStatus};
 
     /// How often the status is looked at for a change to show.
@@ -105,9 +153,13 @@ mod native {
             std::thread::Builder::new()
                 .name("supervisor".to_string())
                 .spawn(move || {
+                    // Ends the event loop however this thread ends, a panic
+                    // included, so no tray outlives the supervisor.
+                    let _end_loop = OnDrop::new(move || {
+                        let _ = proxy.send_event(UserEvent::Exited);
+                    });
                     let result = runtime.block_on(supervisor.run());
                     runtime.shutdown_timeout(RUNTIME_SHUTDOWN);
-                    let _ = proxy.send_event(UserEvent::Exited);
                     result
                 })?
         };
