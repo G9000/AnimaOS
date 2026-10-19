@@ -340,6 +340,9 @@ pub(super) async fn send_connector_message(
     if let Err(rejection) = state.local_owner.authorize(request.headers()) {
         return local_owner_error(rejection);
     }
+    if let Err(error) = state.agent_runs.refuse_while_draining() {
+        return error_response(error.status(), "daemon_draining", error.message());
+    }
     let idempotency_key = match connector_idempotency_key(request.headers()) {
         Ok(key) => key,
         Err(response) => return response,

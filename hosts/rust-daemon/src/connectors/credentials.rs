@@ -328,7 +328,8 @@ struct OsKeyringBackend;
 
 impl OsKeyringBackend {
     fn entry(service: &str, account: &str) -> Result<keyring::Entry, BackendError> {
-        keyring::Entry::new(service, account).map_err(|_| BackendError::Unavailable)
+        keyring::Entry::new(&crate::keychain::service_name(service), account)
+            .map_err(|_| BackendError::Unavailable)
     }
 }
 

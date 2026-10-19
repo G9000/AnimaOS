@@ -23,6 +23,7 @@ Shared guidance for GPT-6 Astra and GPT-5.6 coding agents, adapted from the offi
 - `packages/*` is for reusable libraries, SDKs, runtime ports, and shared tooling.
 - `hosts/*` is for runnable backend host processes only. Hosts wrap a core implementation and expose it over a runtime boundary such as HTTP, WebSocket, SSE, jobs, or another process interface.
 - `hosts/rust-daemon` is the ready Rust host. It embeds the Telegram connector runtime, including polling, pairing, delivery, persistence, and restart recovery. `hosts/elixir-phoenix` and `hosts/python-service` are placeholder host projects until implemented.
+- `hosts/anima` is the installable `anima` program (supervisor, tray, updater) wrapping `rust-daemon`.
 - `apps/*` is for user-facing app surfaces such as the `web` runtime console, `playground`, `web-e2e`, the Astro docs apps, and the legacy local TypeScript server.
 - `tools/*` is for workspace tooling such as the `workspace-dev` launcher.
 

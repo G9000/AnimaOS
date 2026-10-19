@@ -151,7 +151,8 @@ trait Backend: Send + Sync {
 struct KeyringBackend;
 impl KeyringBackend {
     fn entry(account: &str) -> Result<keyring::Entry, DriveError> {
-        keyring::Entry::new(SERVICE, account).map_err(|_| DriveError::Credential)
+        keyring::Entry::new(&crate::keychain::service_name(SERVICE), account)
+            .map_err(|_| DriveError::Credential)
     }
 }
 impl Backend for KeyringBackend {

@@ -182,6 +182,7 @@ impl JobService {
         key: &str,
         max_attempts: u32,
     ) -> Result<GoalView, JobError> {
+        self.refuse_while_draining()?;
         if title.trim().is_empty()
             || title.chars().count() > 160
             || objective.trim().is_empty()

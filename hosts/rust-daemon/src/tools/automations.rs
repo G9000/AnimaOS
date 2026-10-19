@@ -246,6 +246,7 @@ fn refusal(error: ScheduleError) -> String {
         | ScheduleError::Conflict(message)
         | ScheduleError::Busy(message) => message.to_string(),
         ScheduleError::Rejected(message) => message,
+        ScheduleError::Draining => crate::agent_runs::DAEMON_DRAINING.to_string(),
         ScheduleError::NotFound => AUTOMATION_NOT_YOURS.to_string(),
         ScheduleError::AgentNotFound => AUTOMATIONS_UNAVAILABLE.to_string(),
         ScheduleError::TargetUnavailable => TELEGRAM_NOT_READY.to_string(),

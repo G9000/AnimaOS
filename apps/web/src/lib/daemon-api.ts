@@ -110,6 +110,9 @@ const setupClient = createDaemonClient({
   },
 });
 
+/** The Anima app's lifecycle (`/api/system`), with the owner transport. */
+export const systemApi = setupClient.system;
+
 /** All external-tool owner actions use the shared owner transport policy. */
 export const mcpOwnerApi = {
   list: (agentId: string, options?: { signal?: AbortSignal }) =>
@@ -257,7 +260,8 @@ export type TelegramConnectorStatus =
   | 'credentialRequired'
   | 'error'
   | 'degraded'
-  | 'reconciling';
+  | 'reconciling'
+  | 'pollConflict';
 
 export interface TelegramChat {
   id: string;

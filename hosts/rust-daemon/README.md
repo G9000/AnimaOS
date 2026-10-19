@@ -1,5 +1,7 @@
 # anima-daemon
 
+The installable `anima` program wraps this daemon; see [Packaged Anima](../../apps/contributor-docs/src/content/docs/packaged-anima.md).
+
 ## Connector contributions
 
 The Rust connector contract and Telegram pilot support reviewed, trusted source
@@ -369,6 +371,12 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `DELETE` | `/api/provider-keys/{provider}/{key_id}`                                                     |
 | `PUT`    | `/api/provider-keys/{provider}/strategy`                                                     |
 | `POST`   | `/api/provider-keys/{provider}/{key_id}/wake`                                                |
+| `GET`    | `/api/system/drain`                                                                          |
+| `POST`   | `/api/system/drain`                                                                          |
+| `DELETE` | `/api/system/drain`                                                                          |
+| `POST`   | `/api/system/shutdown`                                                                       |
+| `GET`    | `/api/system`                                                                                |
+| `POST`   | `/api/system/actions/{action}`                                                               |
 <!-- openapi-route-inventory:end -->
 
 ### Current workspace report downloads
@@ -506,6 +514,7 @@ separate existing operation.
 | `ANIMAOS_RS_PORT`                                     | No                         | Bind port (default `8080`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `ANIMA_PUBLIC_BASE_URL`                               | No                         | Public HTTPS origin for Google Calendar/Gmail/Outlook OAuth callbacks, e.g. `https://companion.example.com`. Must be a canonical origin without credentials, a path, query, or fragment; loopback HTTP is permitted for local testing. Invalid configuration fails startup. Defaults to `http://127.0.0.1:8080` when absent. Register the exact callback URLs shown in connector settings with the provider.                                                                                                                                                                                                                                                                                                   |
 | `ANIMA_ALLOWED_UI_ORIGINS`                            | No                         | Comma-separated additional exact browser origins allowed to perform local-owner connector and schedule mutations. The built-in local development origins are `http://localhost:4200`, `http://127.0.0.1:4200`, `http://localhost:4201`, and `http://127.0.0.1:4201`; wildcards and suffix matching are not supported.                                                                                                                                                                                                                                                                                                                                                                                          |
+| `ANIMA_SUPERVISOR_URL`, `ANIMA_SUPERVISOR_TOKEN`      | No                         | Set by the `anima` supervisor: the base URL of its control API and the bearer token for it. Both must be set to enable the `/api/system` relay; unset, `GET /api/system` reports `supervised: false`. Read once at startup; the token is never returned or logged. |
 | `ANIMA_LOCAL_ADMIN_TOKEN`                             | No                         | Bearer token for originless local-owner clients. When unset, originless connector and schedule mutations are disabled. The daemon snapshots this value at startup, compares it in constant time, and never returns or logs it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `ANIMAOS_RS_MAX_REQUEST_BYTES`                        | No                         | Request body size limit in bytes (default `65536` / 64 KB).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `ANIMAOS_RS_REQUEST_TIMEOUT_SECS`                     | No                         | Timeout in seconds for standard API routes (default `30`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -796,6 +805,28 @@ All five routes require local-owner authorization and answer `Cache-Control: no-
 | `DELETE` | `/api/provider-keys/{provider}/{key_id}`         | Removes a file key and answers `{ deleted: true }`. `404` for an unknown key; `409` for the environment key. Removing a key never wakes a resting one. |
 | `PUT`    | `/api/provider-keys/{provider}/strategy`         | Body `{ strategy }`: `fill_first` (default), `round_robin`, `random` or `least_used`; answers the provider's entry. `400` for an unknown provider or strategy. |
 | `POST`   | `/api/provider-keys/{provider}/{key_id}/wake`    | "Try now": ends the key's rest at once and clears its error, the environment key (`env`) included, for example after topping up credit; answers the key as listed. `404` for an unknown key. A failure on the next call rests it again. |
+
+### Drain and shutdown
+
+A supervisor calls these before Stop, Restart, Quit or Update, so no running agent work is cut off: it begins a drain, polls until nothing is in flight (or the owner forces it), then asks for shutdown. All four require local-owner authorization (an allowed Origin, or `Authorization: Bearer <ANIMA_LOCAL_ADMIN_TOKEN>` without one) and answer `Cache-Control: no-store`. While draining, new chat messages, legacy runs, peer messages, connector sends, swarm runs, jobs and goals are refused with `503` and `Anima is restarting; send the message again in a moment`; Telegram and Discord messages stay received, and due automations and queued jobs stay due, until the restart or a cancel. Accepted runs, queued ones included, still start and finish. `inFlight` is `{ chatRuns, queuedRuns, swarmRuns, helperRuns, jobs, backgroundProcesses, appSessions, acpSessions }`.
+
+| Method   | Path                   | Description |
+| -------- | ---------------------- | ----------- |
+| `POST`   | `/api/system/drain`    | Begins draining (again is harmless); `202` with `{ draining: true, inFlight }`. |
+| `GET`    | `/api/system/drain`    | `{ draining, inFlight }`. |
+| `DELETE` | `/api/system/drain`    | Cancels the drain; `204`. Admission is as before. |
+| `POST`   | `/api/system/shutdown` | `202`, then the same graceful shutdown as SIGTERM. |
+
+### Supervisor relay
+
+When the `anima` supervisor starts the daemon it sets `ANIMA_SUPERVISOR_URL` (for example `http://127.0.0.1:8788`) and `ANIMA_SUPERVISOR_TOKEN`; both must be set. The daemon reads them once at startup, and the console, which only talks to the daemon, reads the supervisor's status and starts its lifecycle actions through these routes. The daemon adds the supervisor's bearer token itself, so the browser never sees it, and a call to the supervisor times out after 5 seconds. Both routes require local-owner authorization (`GET` accepts the console's same-origin read) and answer `Cache-Control: no-store`.
+
+| Method | Path                           | Description |
+| ------ | ------------------------------ | ----------- |
+| `GET`  | `/api/system`                  | Under a supervisor, its `GET /v1/status` answer as it sent it. Otherwise `{ supervised: false, version }`. |
+| `POST` | `/api/system/actions/{action}` | `action` is `start`, `stop`, `restart`, `quit`, `update`, `check-update` or `cancel`; anything else is `404`. The body `{ force }` is optional (`force` skips waiting for running work) and goes to the supervisor's `POST /v1/actions/{action}`, whose status and body pass through (`202`, `409` and so on). `409` `{ error }` when not running under the supervisor, and `400` for a malformed body. |
+
+A supervisor that is down or too slow answers `502` `{ "error": "The Anima supervisor is not responding" }` on both routes.
 
 ### Logs
 

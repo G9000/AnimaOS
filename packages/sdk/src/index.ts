@@ -284,6 +284,16 @@ export type {
   StatusRuns,
   StatusStorage,
 } from './status.js';
+export { SystemClient } from './system.js';
+export type {
+  SupervisorStatusJson,
+  SystemAction,
+  SystemActionOptions,
+  SystemInFlight,
+  SystemState,
+  SystemStatus,
+  SystemUpdate,
+} from './system.js';
 export { ChatGptClient } from './chatgpt.js';
 export type {
   ChatGptLogin,

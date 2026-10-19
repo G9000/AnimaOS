@@ -12,6 +12,7 @@ members = [
     "packages/core-rust/crates/anima-schedule",
     "packages/core-rust/crates/anima-swarm",
     "hosts/rust-daemon",
+    "hosts/anima",
 ]
 resolver = "2"
 
@@ -26,3 +27,8 @@ sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "migrate", "m
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

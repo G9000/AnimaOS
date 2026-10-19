@@ -78,6 +78,7 @@ export default defineConfig({
           { label: 'HTTP API', link: '/hosts/rust-daemon/api/' },
           { label: 'Operations', link: '/hosts/rust-daemon/ops/' },
         ]},
+        { label: 'Packaged Anima', link: '/packaged-anima/' },
         { label: 'Workflow', collapsed: false, items: [
           { label: 'Local Playbook', link: '/workflow/playbook/' },
           { label: 'Development', link: '/workflow/dev/' },

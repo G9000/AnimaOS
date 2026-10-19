@@ -76,6 +76,10 @@ impl ConnectorManager {
         &self,
         connector_id: String,
     ) -> Result<bool, ConnectorManagerError> {
+        // A drain before a restart leaves received messages for later.
+        if self.runs.is_draining() {
+            return Ok(false);
+        }
         let inbound = {
             let _mutation = self.mutation_lock.lock().await;
             let (key, previous, persist) = {

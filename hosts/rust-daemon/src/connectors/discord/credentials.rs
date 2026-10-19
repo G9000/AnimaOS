@@ -203,7 +203,8 @@ trait Backend: Send + Sync {
 struct KeyringBackend;
 impl KeyringBackend {
     fn entry(account: &str) -> Result<keyring::Entry, DiscordCredentialError> {
-        keyring::Entry::new(SERVICE, account).map_err(|_| DiscordCredentialError::Unavailable)
+        keyring::Entry::new(&crate::keychain::service_name(SERVICE), account)
+            .map_err(|_| DiscordCredentialError::Unavailable)
     }
 }
 impl Backend for KeyringBackend {

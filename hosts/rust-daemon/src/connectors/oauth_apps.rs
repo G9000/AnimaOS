@@ -264,8 +264,8 @@ impl OAuthVaultBackend for OsOAuthVault {
         service: &str,
         account: &str,
     ) -> Result<Option<Zeroizing<String>>, OAuthVaultError> {
-        let entry =
-            keyring::Entry::new(service, account).map_err(|_| OAuthVaultError::Unavailable)?;
+        let entry = keyring::Entry::new(&crate::keychain::service_name(service), account)
+            .map_err(|_| OAuthVaultError::Unavailable)?;
         match entry.get_password() {
             Ok(v) => Ok(Some(Zeroizing::new(v))),
             Err(keyring::Error::NoEntry) => Ok(None),
@@ -273,14 +273,14 @@ impl OAuthVaultBackend for OsOAuthVault {
         }
     }
     fn put(&self, service: &str, account: &str, payload: &str) -> Result<(), OAuthVaultError> {
-        keyring::Entry::new(service, account)
+        keyring::Entry::new(&crate::keychain::service_name(service), account)
             .map_err(|_| OAuthVaultError::Unavailable)?
             .set_password(payload)
             .map_err(|_| OAuthVaultError::Unavailable)
     }
     fn delete(&self, service: &str, account: &str) -> Result<(), OAuthVaultError> {
-        let entry =
-            keyring::Entry::new(service, account).map_err(|_| OAuthVaultError::Unavailable)?;
+        let entry = keyring::Entry::new(&crate::keychain::service_name(service), account)
+            .map_err(|_| OAuthVaultError::Unavailable)?;
         match entry.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(_) => Err(OAuthVaultError::Unavailable),

@@ -580,3 +580,26 @@ async fn fp04_failed_trigger_admission_save_restores_the_occurrence_and_starts_n
     assert!(service.inner.jobs.lock().await.is_empty());
     assert!(model.requests().is_empty());
 }
+
+#[tokio::test]
+async fn a_tool_trigger_is_refused_while_draining_and_claims_nothing() {
+    let model = ScriptedModel::new(vec![]);
+    let (service, state, agent, _) = fixture(model.clone());
+    let original = test_automation(&agent, "mine");
+    state
+        .write()
+        .await
+        .schedules
+        .insert(original.id.clone(), original.clone());
+    let link = ledger_run(&service.inner.runs, &agent, "chat:drain-trigger").await;
+    service.inner.runs.begin_drain();
+    let result = service
+        .inner
+        .runs
+        .trigger_automation_from_run(&agent, trigger_authority(&link, &original.id), &original.id)
+        .await;
+    assert_eq!(result, Err(ScheduleError::Draining));
+    assert_eq!(state.read().await.schedules[&original.id], original);
+    assert!(service.inner.jobs.lock().await.is_empty());
+    assert!(model.requests().is_empty());
+}
