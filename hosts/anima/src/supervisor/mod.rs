@@ -10,6 +10,8 @@ mod child;
 mod control_api;
 mod logs;
 mod state;
+pub use logs::LOG_FILE_NAME;
+pub use state::{Action, ServerState, SupervisorStatus};
 #[cfg(test)]
 mod state_tests;
 pub mod tokens;
@@ -29,13 +31,13 @@ use tokio::sync::{mpsc, watch, Notify};
 
 use tokio::time::Instant;
 
-use crate::config::{validate_workspace, Config, WorkspaceProblem};
+use crate::config::{validate_workspace, Config};
 use crate::paths::AnimaPaths;
 use crate::server_env::{effective_port, server_env};
 use child::{ServerApi, ServerChild, ShutdownRequest};
 use control_api::ActionRequest;
 use logs::ServerLog;
-use state::{backoff_secs, next, Action, ServerState, SupervisorStatus, Transition, UpdateStatus};
+use state::{backoff_secs, next, Transition, UpdateStatus};
 use tokens::{AdminToken, ControlToken};
 
 /// The status the control API serves; the lifecycle task keeps it current.
@@ -157,19 +159,7 @@ fn server_url(port: u16) -> String {
 fn workspace_problem(cfg: &Config, paths: &AnimaPaths) -> Option<String> {
     let workspace = cfg.workspace.as_ref()?;
     let home = paths.root.parent()?;
-    let problem = validate_workspace(workspace, home, paths).err()?;
-    Some(match problem {
-        WorkspaceProblem::Missing(path) => {
-            format!("Workspace folder not found: {}", path.display())
-        }
-        WorkspaceProblem::IsHome => "The workspace can't be your home folder".to_string(),
-        WorkspaceProblem::ContainsDataRoot => {
-            "The workspace can't contain the Anima data folder".to_string()
-        }
-        WorkspaceProblem::InsideDataRoot => {
-            "The workspace can't be inside the Anima data folder".to_string()
-        }
-    })
+    Some(validate_workspace(workspace, home, paths).err()?.message())
 }
 
 /// Ctrl-C (and SIGTERM on Unix), each one sent as a `()`.

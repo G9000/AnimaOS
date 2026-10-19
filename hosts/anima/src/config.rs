@@ -54,7 +54,6 @@ impl Config {
     }
 
     /// Atomic write (temp file in the same directory, then rename), mode 0600 on Unix.
-    #[allow(dead_code)] // used by `anima setup` / `anima config set` in a later task
     pub fn save(&self, path: &Path) -> io::Result<()> {
         let text = toml::to_string_pretty(self)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
@@ -104,6 +103,24 @@ pub enum WorkspaceProblem {
     InsideDataRoot,
     /// The folder does not exist.
     Missing(PathBuf),
+}
+
+impl WorkspaceProblem {
+    /// The problem, worded for the person who chose the folder.
+    pub fn message(&self) -> String {
+        match self {
+            WorkspaceProblem::Missing(path) => {
+                format!("Workspace folder not found: {}", path.display())
+            }
+            WorkspaceProblem::IsHome => "The workspace can't be your home folder".to_string(),
+            WorkspaceProblem::ContainsDataRoot => {
+                "The workspace can't contain the Anima data folder".to_string()
+            }
+            WorkspaceProblem::InsideDataRoot => {
+                "The workspace can't be inside the Anima data folder".to_string()
+            }
+        }
+    }
 }
 
 /// Canonicalizes where the path exists, so symlinks and `..` can't dodge the rules.

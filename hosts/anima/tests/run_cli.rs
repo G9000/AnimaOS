@@ -113,7 +113,7 @@ fn anima_run_serves_health_with_temp_home() {
 #[test]
 fn unimplemented_commands_exit_with_status_two() {
     let output = Command::new(env!("CARGO_BIN_EXE_anima"))
-        .arg("status")
+        .arg("setup")
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));

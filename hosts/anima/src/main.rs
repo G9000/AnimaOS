@@ -1,6 +1,7 @@
 //! Packaged Anima entry point.
 
 mod cli;
+mod client;
 mod commands;
 mod config;
 mod paths;
@@ -14,6 +15,7 @@ use std::process::ExitCode;
 use clap::Parser;
 
 use cli::{Cli, Command};
+use supervisor::Action;
 
 fn main() -> ExitCode {
     // Worker re-exec must be recognised before clap sees the arguments.
@@ -35,12 +37,32 @@ fn main() -> ExitCode {
         Some(Command::Run) => report(commands::run::run()),
         // There is no tray yet: with or without `--no-tray` it runs headless.
         Some(Command::Supervise { .. }) => report(supervisor::supervise()),
-        // `open` and the other commands land with the supervisor.
-        _ => {
+        None => report_code(commands::open::open()),
+        Some(Command::Status) => report_code(commands::status::status()),
+        Some(Command::Start) => report_code(commands::lifecycle::start()),
+        Some(Command::Stop { now }) => report_action(Action::Stop, now),
+        Some(Command::Restart { now }) => report_action(Action::Restart, now),
+        Some(Command::Quit { now }) => report_action(Action::Quit, now),
+        Some(Command::Update { now }) => report_action(Action::Update, now),
+        Some(Command::Logs { follow }) => report_code(commands::logs::logs(follow)),
+        Some(Command::Config { action }) => report_code(commands::config_cmd::config(action)),
+        // Setup and autostart land with their own tasks.
+        Some(Command::Setup { .. } | Command::Autostart { .. }) => {
             eprintln!("not yet available");
             ExitCode::from(2)
         }
     }
+}
+
+fn report_action(action: Action, now: bool) -> ExitCode {
+    report_code(commands::lifecycle::run_action(action, now))
+}
+
+fn report_code(result: io::Result<ExitCode>) -> ExitCode {
+    result.unwrap_or_else(|error| {
+        eprintln!("anima: {error}");
+        ExitCode::FAILURE
+    })
 }
 
 fn report(result: io::Result<()>) -> ExitCode {
