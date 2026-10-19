@@ -33,6 +33,16 @@ fn app_with_scheduler() -> (
     crate::schedules::SchedulerService,
     crate::app::SharedDaemonState,
 ) {
+    app_with_supervisor(crate::system::SupervisorRelay::unsupervised())
+}
+
+fn app_with_supervisor(
+    supervisor: crate::system::SupervisorRelay,
+) -> (
+    axum::Router,
+    crate::schedules::SchedulerService,
+    crate::app::SharedDaemonState,
+) {
     let state = Arc::new(RwLock::new(DaemonState::new()));
     let limiter = Arc::new(Semaphore::new(8));
     let runs = AgentRunCoordinator::new(Arc::clone(&state), Arc::clone(&limiter));
@@ -78,6 +88,7 @@ fn app_with_scheduler() -> (
         crate::logs::global(),
         LocalOwnerPolicy::for_test(true, Some(ADMIN_TOKEN)),
         ApiKeyPolicy::for_test(None),
+        supervisor,
     );
     (router, scheduler, state)
 }
@@ -88,6 +99,16 @@ async fn send(
     path: &str,
     auth: &[(&str, &str)],
 ) -> (StatusCode, Value) {
+    send_body(app, method, path, auth, Body::empty()).await
+}
+
+async fn send_body(
+    app: &axum::Router,
+    method: &str,
+    path: &str,
+    auth: &[(&str, &str)],
+    body: Body,
+) -> (StatusCode, Value) {
     let mut builder = Request::builder()
         .method(method)
         .uri(path)
@@ -97,7 +118,7 @@ async fn send(
     }
     let response = app
         .clone()
-        .oneshot(builder.body(Body::empty()).unwrap())
+        .oneshot(builder.body(body).unwrap())
         .await
         .unwrap();
     let status = response.status();
@@ -294,4 +315,317 @@ async fn shutdown_route_stops_server() {
         .expect("the server stops within the shutdown budget")
         .unwrap()
         .unwrap();
+}
+
+const SUPERVISOR_TOKEN: &str = "supervisor-control";
+
+/// What the fake supervisor saw: method, path, `Authorization`, body.
+type Seen = Arc<std::sync::Mutex<Vec<(String, String, Option<String>, String)>>>;
+
+/// A stand-in for the supervisor's control API on `127.0.0.1:0`. `update`
+/// answers `409`, everything else `202`; status answers its own JSON.
+async fn fake_supervisor() -> (String, Seen) {
+    use axum::extract::Path;
+    use axum::http::HeaderMap;
+    use axum::routing::{get, post};
+
+    fn record(seen: &Seen, method: &str, path: String, headers: &HeaderMap, body: String) {
+        let auth = headers
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        seen.lock()
+            .unwrap()
+            .push((method.to_string(), path, auth, body));
+    }
+
+    let seen = Seen::default();
+    let status_seen = Arc::clone(&seen);
+    let action_seen = Arc::clone(&seen);
+    let router = axum::Router::new()
+        .route(
+            "/v1/status",
+            get(move |headers: HeaderMap| async move {
+                record(
+                    &status_seen,
+                    "GET",
+                    "/v1/status".into(),
+                    &headers,
+                    String::new(),
+                );
+                axum::Json(serde_json::json!({"state": "running", "version": "9.9.9"}))
+            }),
+        )
+        .route(
+            "/v1/actions/{action}",
+            post(
+                move |Path(action): Path<String>, headers: HeaderMap, body: String| async move {
+                    record(
+                        &action_seen,
+                        "POST",
+                        format!("/v1/actions/{action}"),
+                        &headers,
+                        body,
+                    );
+                    if action == "update" {
+                        (
+                            StatusCode::CONFLICT,
+                            axum::Json(serde_json::json!({"error": "already updating"})),
+                        )
+                    } else {
+                        (
+                            StatusCode::ACCEPTED,
+                            axum::Json(serde_json::json!({"accepted": action})),
+                        )
+                    }
+                },
+            ),
+        );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, router).await });
+    (url, seen)
+}
+
+fn supervised(url: &str) -> axum::Router {
+    app_with_supervisor(crate::system::SupervisorRelay::new(Some((
+        url.to_string(),
+        SUPERVISOR_TOKEN.to_string(),
+    ))))
+    .0
+}
+
+fn json_body(value: &str) -> Body {
+    Body::from(value.to_string())
+}
+
+#[tokio::test]
+async fn status_proxies_with_bearer() {
+    let (url, seen) = fake_supervisor().await;
+    // A trailing slash on the configured URL is harmless.
+    let app = supervised(&format!("{url}/"));
+    let (status, body) = send(&app, "GET", "/api/system", &[("origin", OWNER_ORIGIN)]).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body,
+        serde_json::json!({"state": "running", "version": "9.9.9"})
+    );
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![(
+            "GET".to_string(),
+            "/v1/status".to_string(),
+            Some(format!("Bearer {SUPERVISOR_TOKEN}")),
+            String::new(),
+        )]
+    );
+    let (status, _) = send(&app, "GET", "/api/system", &[]).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "reads need the local owner");
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        1,
+        "a refused read is not relayed"
+    );
+}
+
+#[tokio::test]
+async fn status_unsupervised_reports_version() {
+    let app = app();
+    let (status, body) = send(&app, "GET", "/api/system", &[("origin", OWNER_ORIGIN)]).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body,
+        serde_json::json!({"supervised": false, "version": env!("CARGO_PKG_VERSION")})
+    );
+    // The exact path does not shadow the drain routes.
+    let (status, body) = send(
+        &app,
+        "GET",
+        "/api/system/drain",
+        &[("origin", OWNER_ORIGIN)],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["draining"], false);
+}
+
+#[tokio::test]
+async fn action_proxied_with_force() {
+    let (url, seen) = fake_supervisor().await;
+    let app = supervised(&url);
+    let origin = [("origin", OWNER_ORIGIN)];
+
+    let (status, body) = send_body(
+        &app,
+        "POST",
+        "/api/system/actions/restart",
+        &origin,
+        json_body(r#"{"force":true}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(body, serde_json::json!({"accepted": "restart"}));
+
+    // No body: force is false. The supervisor's own refusal passes through.
+    let (status, body) = send(&app, "POST", "/api/system/actions/update", &origin).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body, serde_json::json!({"error": "already updating"}));
+
+    let token = format!("Bearer {ADMIN_TOKEN}");
+    let (status, _) = send(
+        &app,
+        "POST",
+        "/api/system/actions/check-update",
+        &[("authorization", token.as_str())],
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "the admin token may also act");
+
+    let seen = seen.lock().unwrap();
+    let bearer = Some(format!("Bearer {SUPERVISOR_TOKEN}"));
+    let relayed: Vec<_> = seen
+        .iter()
+        .map(|(method, path, auth, body)| {
+            let force = serde_json::from_str::<Value>(body).unwrap()["force"].clone();
+            (method.as_str(), path.as_str(), auth.clone(), force)
+        })
+        .collect();
+    assert_eq!(
+        relayed,
+        vec![
+            (
+                "POST",
+                "/v1/actions/restart",
+                bearer.clone(),
+                Value::Bool(true)
+            ),
+            (
+                "POST",
+                "/v1/actions/update",
+                bearer.clone(),
+                Value::Bool(false)
+            ),
+            (
+                "POST",
+                "/v1/actions/check-update",
+                bearer,
+                Value::Bool(false)
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn unknown_action_404() {
+    let (url, seen) = fake_supervisor().await;
+    let app = supervised(&url);
+    for action in ["reboot", "drain", "START", "shutdown"] {
+        let (status, body) = send(
+            &app,
+            "POST",
+            &format!("/api/system/actions/{action}"),
+            &[("origin", OWNER_ORIGIN)],
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{action}");
+        assert!(body["error"].is_string());
+    }
+    assert!(
+        seen.lock().unwrap().is_empty(),
+        "nothing unknown is relayed"
+    );
+}
+
+#[tokio::test]
+async fn action_requires_owner() {
+    let (url, seen) = fake_supervisor().await;
+    let app = supervised(&url);
+    let foreign = [("origin", "https://foreign.example.invalid")];
+    let wrong_token = [("authorization", "Bearer wrong")];
+    // The supervisor's own token is not the daemon's admin token.
+    let supervisor_token = format!("Bearer {SUPERVISOR_TOKEN}");
+    let supervisor_token = [("authorization", supervisor_token.as_str())];
+    for auth in [
+        &[][..],
+        &foreign[..],
+        &wrong_token[..],
+        &supervisor_token[..],
+    ] {
+        let (status, _) = send(&app, "POST", "/api/system/actions/stop", auth).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{auth:?}");
+    }
+    assert!(
+        seen.lock().unwrap().is_empty(),
+        "a refused action is not relayed"
+    );
+}
+
+#[tokio::test]
+async fn action_rejects_a_malformed_body() {
+    let (url, seen) = fake_supervisor().await;
+    let app = supervised(&url);
+    for body in [
+        r#"{"force":"yes"}"#,
+        "not json",
+        r#"{"force":true,"other":1}"#,
+    ] {
+        let (status, _) = send_body(
+            &app,
+            "POST",
+            "/api/system/actions/stop",
+            &[("origin", OWNER_ORIGIN)],
+            json_body(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    }
+    assert!(seen.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn action_unsupervised_409() {
+    let app = app();
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/api/system/actions/stop",
+        &[("origin", OWNER_ORIGIN)],
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        body,
+        serde_json::json!({"error": "Anima is not running under the supervisor"})
+    );
+}
+
+#[tokio::test]
+async fn supervisor_down_502() {
+    // A port that was open a moment ago and is not any more.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    drop(listener);
+    let app = supervised(&url);
+    let origin = [("origin", OWNER_ORIGIN)];
+    let expected = serde_json::json!({"error": "The Anima supervisor is not responding"});
+
+    let (status, body) = send(&app, "GET", "/api/system", &origin).await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert_eq!(body, expected);
+
+    let (status, body) = send(&app, "POST", "/api/system/actions/restart", &origin).await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert_eq!(body, expected);
+}
+
+#[test]
+fn a_relay_needs_an_http_url() {
+    let off = |url: &str| {
+        !crate::system::SupervisorRelay::new(Some((url.to_string(), "token".to_string())))
+            .is_supervised()
+    };
+    assert!(off("not a url"));
+    assert!(off("file:///tmp/supervisor.sock"));
+    assert!(!off("http://127.0.0.1:8788"));
+    assert!(!crate::system::SupervisorRelay::new(None).is_supervised());
 }

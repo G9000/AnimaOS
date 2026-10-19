@@ -42,7 +42,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 230, "complete registered operation count");
+    assert_eq!(actual.len(), 232, "complete registered operation count");
     let message_search_additions = [("GET", "/api/agents/{agent_id}/message-search")];
     for (method, path) in message_search_additions {
         assert!(
@@ -128,11 +128,13 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         ("POST", "/api/system/drain"),
         ("DELETE", "/api/system/drain"),
         ("POST", "/api/system/shutdown"),
+        ("GET", "/api/system"),
+        ("POST", "/api/system/actions/{action}"),
     ];
     for (method, path) in system_additions {
         assert!(
             actual.contains(&(method.to_string(), path.to_string())),
-            "drain and shutdown operation must be registered"
+            "system operation must be registered"
         );
     }
     let autonomy_additions = [

@@ -381,6 +381,7 @@ mod tests {
             crate::logs::global(),
             LocalOwnerPolicy::for_test(true, None),
             ApiKeyPolicy::for_test(None),
+            crate::system::SupervisorRelay::unsupervised(),
         )
     }
 

@@ -240,6 +240,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         provider_keys::list_keys, provider_keys::add_key, provider_keys::remove_key, provider_keys::set_strategy,
         provider_keys::wake_key,
         system::begin_drain, system::drain_status, system::cancel_drain, system::shutdown,
+        system::status, system::action,
         status::get_status,
         attachments::upload, attachments::serve,
         voice::capabilities, voice::transcribe, voice::cancel,
@@ -293,7 +294,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         (name = "settings", description = "Owner-set workspace settings"),
         (name = "logs", description = "The redacted daemon log tail and its live stream"),
         (name = "status", description = "One status aggregate for the Health page"),
-        (name = "system", description = "Drain and shutdown for a supervisor"),
+        (name = "system", description = "Drain and shutdown for a supervisor, and the relay of the console's status reads and lifecycle actions to it"),
         (name = "usage", description = "Model-call usage, cost summaries, CSV export, and price overrides"),
         (name = "workspace", description = "Workspace configuration and onboarding"),
     )
@@ -322,6 +323,8 @@ struct AppState {
     logs: Arc<crate::logs::LogBuffer>,
     /// Drain and shutdown for a supervisor (`/api/system/*`).
     drain: crate::system::DrainController,
+    /// The supervisor that started this daemon, when one did (`/api/system`).
+    supervisor: crate::system::SupervisorRelay,
     /// When this router was built, in epoch milliseconds (spec 11.3 uptime).
     started_at_ms: u64,
     /// Keeps the history worker's loop running while this router lives.
@@ -671,6 +674,7 @@ pub(crate) fn router_with_all_integrations(
         voice,
         speech,
         drain,
+        crate::system::SupervisorRelay::from_env(),
     )
 }
 
@@ -689,6 +693,7 @@ fn router_with_services_with_policies(
     logs: Arc<crate::logs::LogBuffer>,
     local_owner: self::http::LocalOwnerPolicy,
     api_key: self::http::ApiKeyPolicy,
+    supervisor: crate::system::SupervisorRelay,
 ) -> Router {
     let discord = crate::connectors::discord::DiscordManager::unconfigured(
         Arc::clone(&state),
@@ -710,6 +715,7 @@ fn router_with_services_with_policies(
         local_owner,
         api_key,
         discord,
+        supervisor,
     )
 }
 
@@ -729,6 +735,7 @@ fn router_with_services_with_policies_and_discord(
     local_owner: self::http::LocalOwnerPolicy,
     api_key: self::http::ApiKeyPolicy,
     discord: crate::connectors::discord::DiscordManager,
+    supervisor: crate::system::SupervisorRelay,
 ) -> Router {
     let drive = crate::connectors::drive::DriveManager::unconfigured(
         &state,
@@ -761,6 +768,7 @@ fn router_with_services_with_policies_and_discord(
         crate::voice::VoiceService::disabled(),
         crate::speech::SpeechService::disabled(),
         drain,
+        supervisor,
     )
 }
 
@@ -784,6 +792,7 @@ fn router_with_services_with_policies_and_integrations(
     voice: crate::voice::VoiceService,
     speech: crate::speech::SpeechService,
     drain: crate::system::DrainController,
+    supervisor: crate::system::SupervisorRelay,
 ) -> Router {
     if let Ok(mut guard) = state.try_write() {
         guard.mail_manager = Some(mail.clone());
@@ -845,6 +854,7 @@ fn router_with_services_with_policies_and_integrations(
         local_owner,
         logs,
         drain,
+        supervisor,
         started_at_ms: anima_core::primitives::now_millis(),
         _history_owner: history_owner,
     };
@@ -1150,6 +1160,11 @@ fn router_with_services_with_policies_and_integrations(
                 .delete(system::cancel_drain),
         )
         .route("/api/system/shutdown", axum::routing::post(system::shutdown))
+        .route("/api/system", get(system::status))
+        .route(
+            "/api/system/actions/{action}",
+            axum::routing::post(system::action),
+        )
         .route("/api/ready", get(ready_entry))
         .route(
             "/api/workspace",
@@ -3657,6 +3672,7 @@ mod tests {
             crate::logs::global(),
             LocalOwnerPolicy::for_test(true, Some("local-admin")),
             ApiKeyPolicy::for_test(Some("global-api")),
+            crate::system::SupervisorRelay::unsupervised(),
         );
 
         let cases = [
