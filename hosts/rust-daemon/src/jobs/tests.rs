@@ -651,3 +651,50 @@ mod goal_tests;
 
 #[path = "shutdown_tests.rs"]
 mod shutdown_tests;
+
+#[tokio::test]
+async fn a_drain_refuses_new_jobs_and_goals_and_defers_queued_dispatch() {
+    let (service, agent, path) = setup();
+    let queued = service
+        .create(&agent, "queued", "prompt", "queued")
+        .await
+        .unwrap();
+    service.runs.begin_drain();
+    let refusals = [
+        service
+            .create(&agent, "new", "prompt", "new")
+            .await
+            .map(drop),
+        service
+            .create_goal("Goal", "Objective", "goal", 3)
+            .await
+            .map(drop),
+    ];
+    for refused in refusals {
+        assert!(
+            matches!(&refused, Err(JobError::Unavailable(message))
+                if message == "Anima is restarting; send the message again in a moment"),
+            "{refused:?}"
+        );
+    }
+
+    service.start().await.unwrap();
+    // Several dispatcher ticks pass; the queued job is left for later.
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert_eq!(
+        service.state.read().await.jobs[&queued.id].status,
+        AgentJobStatus::Queued
+    );
+    assert_eq!(service.in_flight_count().await, 0);
+
+    service.runs.cancel_drain();
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while service.state.read().await.jobs[&queued.id].status != AgentJobStatus::Completed {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the queued job dispatches once the drain is cancelled");
+    service.shutdown().await;
+    let _ = std::fs::remove_file(path);
+}

@@ -66,6 +66,8 @@ impl ToolExecutionContext {
     }
 }
 
+#[cfg(test)]
+pub(crate) use self::background::start_background_process_from_root;
 pub(crate) use self::background::{
     background_process_count, new_shared_process_manager_with_limit, SharedProcessManager,
     DEFAULT_MAX_BACKGROUND_PROCESSES,

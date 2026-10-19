@@ -306,6 +306,18 @@ impl SchedulerService {
         }
     }
 
+    /// Occurrences claimed and not yet finished, from the claim through the
+    /// run and its recorded outcome: what a drain waits for.
+    pub(crate) async fn in_flight_count(&self) -> usize {
+        self.inner
+            .jobs
+            .lock()
+            .await
+            .values()
+            .filter(|job| !job.is_finished())
+            .count()
+    }
+
     /// Owner and companion changes to automations (spec §9).
     pub(crate) fn automations(&self) -> AutomationService {
         AutomationService::new(
@@ -411,6 +423,12 @@ impl SchedulerService {
         // Persistence failure closes admission for this tick; the next tick retries.
         let active_schedules = jobs.keys().cloned().collect();
         reconcile_interrupted(inner, now, &active_schedules).await?;
+        // A drain before a restart defers due occurrences rather than drop
+        // them: they stay due, for the restart's catch-up or the next tick
+        // once the drain is cancelled.
+        if inner.runs.is_draining() {
+            return Ok(0);
+        }
         let due_ids = {
             let state = inner.state.read().await;
             let mut ids = state
@@ -1312,6 +1330,21 @@ mod tests {
         assert!(guard.schedules[&bad.id].last_fired.is_none());
         assert!(guard.schedules[&good.id].last_fired.is_some());
         assert!(guard.schedules[&good.id].enabled);
+    }
+
+    #[tokio::test]
+    async fn a_due_occurrence_waits_out_a_drain_and_fires_once_it_is_cancelled() {
+        let (service, state, agent_id, _) = service();
+        let due = due_schedule(&service, &agent_id).await;
+        service.inner.runs.begin_drain();
+        assert_eq!(service.tick_at(now_ms()).await.unwrap(), 0);
+        let deferred = state.read().await.schedules[&due.id].clone();
+        assert_eq!(deferred, due, "still due, neither fired nor dropped");
+        assert_eq!(service.in_flight_count().await, 0);
+
+        service.inner.runs.cancel_drain();
+        assert_eq!(service.tick_at(now_ms()).await.unwrap(), 1);
+        assert!(state.read().await.schedules[&due.id].last_fired.is_some());
     }
 
     #[tokio::test]

@@ -60,6 +60,30 @@ impl JobService {
         }
     }
 
+    /// Job and goal admissions are refused while the daemon drains.
+    fn refuse_while_draining(&self) -> Result<(), JobError> {
+        self.runs
+            .refuse_while_draining()
+            .map_err(|error| JobError::Unavailable(error.message().to_string()))
+    }
+
+    /// Running attempts, including those waiting for their delegations: the
+    /// jobs a drain waits for. Queued jobs are durable and wait for dispatch.
+    pub(crate) async fn in_flight_count(&self) -> usize {
+        self.state
+            .read()
+            .await
+            .jobs
+            .values()
+            .filter(|job| {
+                matches!(
+                    job.status,
+                    AgentJobStatus::Running | AgentJobStatus::PendingDelegations
+                )
+            })
+            .count()
+    }
+
     // Keep the transaction alive even if a browser drops its response future.
     async fn mutate<T, F>(&self, action: F) -> Result<T, JobError>
     where
@@ -163,6 +187,7 @@ impl JobService {
         requires_approval: bool,
         goal_id: Option<&str>,
     ) -> Result<AgentJobRecord, JobError> {
+        self.refuse_while_draining()?;
         let goal_id = goal_id.map(str::to_owned);
         if !(1..=3).contains(&max_attempts) {
             return Err(JobError::Validation(
@@ -528,6 +553,11 @@ impl JobService {
             }
             if *stop.borrow() {
                 break;
+            }
+            // A drain before a restart claims nothing new: queued jobs are
+            // durable and dispatch after the restart, or once it is cancelled.
+            if self.runs.is_draining() {
+                continue;
             }
             let mut queued: Vec<_> = {
                 let state = self.state.read().await;

@@ -46,6 +46,9 @@ mod skills;
 mod speech;
 mod status;
 mod swarms;
+mod system;
+#[cfg(test)]
+mod system_tests;
 mod usage;
 mod voice;
 mod workspace;
@@ -236,6 +239,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         side_model::get_side_model, side_model::put_side_model,
         provider_keys::list_keys, provider_keys::add_key, provider_keys::remove_key, provider_keys::set_strategy,
         provider_keys::wake_key,
+        system::begin_drain, system::drain_status, system::cancel_drain, system::shutdown,
         status::get_status,
         attachments::upload, attachments::serve,
         voice::capabilities, voice::transcribe, voice::cancel,
@@ -289,6 +293,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         (name = "settings", description = "Owner-set workspace settings"),
         (name = "logs", description = "The redacted daemon log tail and its live stream"),
         (name = "status", description = "One status aggregate for the Health page"),
+        (name = "system", description = "Drain and shutdown for a supervisor"),
         (name = "usage", description = "Model-call usage, cost summaries, CSV export, and price overrides"),
         (name = "workspace", description = "Workspace configuration and onboarding"),
     )
@@ -315,6 +320,8 @@ struct AppState {
     jobs: crate::jobs::JobService,
     local_owner: self::http::LocalOwnerPolicy,
     logs: Arc<crate::logs::LogBuffer>,
+    /// Drain and shutdown for a supervisor (`/api/system/*`).
+    drain: crate::system::DrainController,
     /// When this router was built, in epoch milliseconds (spec 11.3 uptime).
     started_at_ms: u64,
     /// Keeps the history worker's loop running while this router lives.
@@ -588,6 +595,12 @@ pub(crate) fn router_with_all_services_and_discord(
         agent_runs.control_plane_transactions(),
         oauth_apps.clone(),
     );
+    let drain = crate::system::DrainController::new(
+        Arc::clone(&state),
+        agent_runs.clone(),
+        jobs.clone(),
+        scheduler.clone(),
+    );
     router_with_all_integrations(
         state,
         config,
@@ -606,6 +619,7 @@ pub(crate) fn router_with_all_services_and_discord(
         drive,
         crate::voice::VoiceService::disabled(),
         crate::speech::SpeechService::disabled(),
+        drain,
     )
 }
 
@@ -627,6 +641,7 @@ pub(crate) fn router_with_all_integrations(
     drive: crate::connectors::drive::DriveManager,
     voice: crate::voice::VoiceService,
     speech: crate::speech::SpeechService,
+    drain: crate::system::DrainController,
 ) -> Router {
     router_with_services_with_policies_and_integrations(
         state,
@@ -647,6 +662,7 @@ pub(crate) fn router_with_all_integrations(
         drive,
         voice,
         speech,
+        drain,
     )
 }
 
@@ -711,6 +727,12 @@ fn router_with_services_with_policies_and_discord(
         agent_runs.control_plane_transactions(),
         oauth_apps.clone(),
     );
+    let drain = crate::system::DrainController::new(
+        Arc::clone(&state),
+        agent_runs.clone(),
+        jobs.clone(),
+        scheduler.clone(),
+    );
     router_with_services_with_policies_and_integrations(
         state,
         config,
@@ -730,6 +752,7 @@ fn router_with_services_with_policies_and_discord(
         drive,
         crate::voice::VoiceService::disabled(),
         crate::speech::SpeechService::disabled(),
+        drain,
     )
 }
 
@@ -752,6 +775,7 @@ fn router_with_services_with_policies_and_integrations(
     drive: crate::connectors::drive::DriveManager,
     voice: crate::voice::VoiceService,
     speech: crate::speech::SpeechService,
+    drain: crate::system::DrainController,
 ) -> Router {
     if let Ok(mut guard) = state.try_write() {
         guard.mail_manager = Some(mail.clone());
@@ -812,6 +836,7 @@ fn router_with_services_with_policies_and_integrations(
         jobs,
         local_owner,
         logs,
+        drain,
         started_at_ms: anima_core::primitives::now_millis(),
         _history_owner: history_owner,
     };
@@ -1110,6 +1135,13 @@ fn router_with_services_with_policies_and_integrations(
             "/api/provider-keys/{provider}/{key_id}/wake",
             axum::routing::post(provider_keys::wake_key),
         )
+        .route(
+            "/api/system/drain",
+            get(system::drain_status)
+                .post(system::begin_drain)
+                .delete(system::cancel_drain),
+        )
+        .route("/api/system/shutdown", axum::routing::post(system::shutdown))
         .route("/api/ready", get(ready_entry))
         .route(
             "/api/workspace",
@@ -2150,6 +2182,9 @@ async fn run_agent_entry(
     Path(agent_id): Path<String>,
     request: AxumRequest,
 ) -> AxumResponse {
+    if let Err(error) = state.agent_runs.refuse_while_draining() {
+        return error.into_response();
+    }
     // Fail fast before reading the body when the daemon is saturated. Nothing is
     // reserved here. Once the body parses, the run takes a unit of its agent's
     // waiting budget (503 when that is exhausted), its room, an agent slot, and
@@ -2181,6 +2216,9 @@ async fn peer_message_entry(
     Path(sender_id): Path<String>,
     request: AxumRequest,
 ) -> AxumResponse {
+    if let Err(error) = state.agent_runs.refuse_while_draining() {
+        return error.into_response();
+    }
     let body = match read_limited_body(request, state.config.max_request_bytes).await {
         Ok(body) => body,
         Err(response) => return response,
@@ -2311,6 +2349,9 @@ async fn run_swarm_entry(
     Path(swarm_id): Path<String>,
     request: AxumRequest,
 ) -> AxumResponse {
+    if let Err(error) = state.agent_runs.refuse_while_draining() {
+        return error.into_response();
+    }
     let permit = match state.run_limiter.clone().try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => {

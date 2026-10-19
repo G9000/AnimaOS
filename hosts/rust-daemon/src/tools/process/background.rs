@@ -230,7 +230,7 @@ pub(super) fn start_background_process(
 }
 
 #[cfg(test)]
-pub(in super::super) fn start_background_process_from_root(
+pub(crate) fn start_background_process_from_root(
     process_manager: &SharedProcessManager,
     workspace_root: &Path,
     command: &str,

@@ -368,6 +368,10 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `DELETE` | `/api/provider-keys/{provider}/{key_id}`                                                     |
 | `PUT`    | `/api/provider-keys/{provider}/strategy`                                                     |
 | `POST`   | `/api/provider-keys/{provider}/{key_id}/wake`                                                |
+| `GET`    | `/api/system/drain`                                                                          |
+| `POST`   | `/api/system/drain`                                                                          |
+| `DELETE` | `/api/system/drain`                                                                          |
+| `POST`   | `/api/system/shutdown`                                                                       |
 <!-- openapi-route-inventory:end -->
 
 ### Current workspace report downloads
@@ -794,6 +798,17 @@ All five routes require local-owner authorization and answer `Cache-Control: no-
 | `DELETE` | `/api/provider-keys/{provider}/{key_id}`         | Removes a file key and answers `{ deleted: true }`. `404` for an unknown key; `409` for the environment key. Removing a key never wakes a resting one. |
 | `PUT`    | `/api/provider-keys/{provider}/strategy`         | Body `{ strategy }`: `fill_first` (default), `round_robin`, `random` or `least_used`; answers the provider's entry. `400` for an unknown provider or strategy. |
 | `POST`   | `/api/provider-keys/{provider}/{key_id}/wake`    | "Try now": ends the key's rest at once and clears its error, the environment key (`env`) included, for example after topping up credit; answers the key as listed. `404` for an unknown key. A failure on the next call rests it again. |
+
+### Drain and shutdown
+
+A supervisor calls these before Stop, Restart, Quit or Update, so no running agent work is cut off: it begins a drain, polls until nothing is in flight (or the owner forces it), then asks for shutdown. All four require local-owner authorization (an allowed Origin, or `Authorization: Bearer <ANIMA_LOCAL_ADMIN_TOKEN>` without one) and answer `Cache-Control: no-store`. While draining, new chat messages, legacy runs, peer messages, connector sends, swarm runs, jobs and goals are refused with `503` and `Anima is restarting; send the message again in a moment`; Telegram and Discord messages stay received, and due automations and queued jobs stay due, until the restart or a cancel. Accepted runs, queued ones included, still start and finish. `inFlight` is `{ chatRuns, queuedRuns, swarmRuns, helperRuns, jobs, backgroundProcesses, appSessions, acpSessions }`.
+
+| Method   | Path                   | Description |
+| -------- | ---------------------- | ----------- |
+| `POST`   | `/api/system/drain`    | Begins draining (again is harmless); `202` with `{ draining: true, inFlight }`. |
+| `GET`    | `/api/system/drain`    | `{ draining, inFlight }`. |
+| `DELETE` | `/api/system/drain`    | Cancels the drain; `204`. Admission is as before. |
+| `POST`   | `/api/system/shutdown` | `202`, then the same graceful shutdown as SIGTERM. |
 
 ### Logs
 

@@ -26,9 +26,15 @@ pub(crate) const ACCEPTED_RUN_SHUTDOWN_WAIT_MS: u64 = 30_000;
 pub(crate) const DAEMON_SHUTTING_DOWN: &str =
     "The daemon is shutting down; send the message again once it restarts";
 
+/// `accept_run`'s answer (503) while a drain before a restart is under way.
+pub(crate) const DAEMON_DRAINING: &str = "Anima is restarting; send the message again in a moment";
+
 #[derive(Debug, Default)]
 struct Lifecycle {
     closing: bool,
+    /// A drain before a restart (`crate::system`): new messages are refused,
+    /// while queued and going runs carry on. It never sets `closing`.
+    draining: bool,
     /// Accepted runs a session queue started whose start has not ended.
     going: HashSet<String>,
 }
@@ -68,6 +74,18 @@ impl Drop for GoingRun {
 impl AcceptedRuns {
     pub(super) fn is_closing(&self) -> bool {
         self.lifecycle.borrow().closing
+    }
+
+    pub(super) fn is_draining(&self) -> bool {
+        self.lifecycle.borrow().draining
+    }
+
+    fn set_draining(&self, draining: bool) {
+        self.lifecycle.send_if_modified(|lifecycle| {
+            let changed = lifecycle.draining != draining;
+            lifecycle.draining = draining;
+            changed
+        });
     }
 
     /// Counts `run_id` as going, or `None` once shutdown has begun. The check
@@ -133,6 +151,12 @@ pub(super) fn shutting_down() -> ApiError {
     ApiError::daemon_shutting_down(DAEMON_SHUTTING_DOWN)
 }
 
+/// `accept_run`'s refusal while draining: a plain 503, never `shutting_down()`,
+/// so no caller takes the message for one accepted and left queued.
+pub(super) fn draining() -> ApiError {
+    ApiError::service_unavailable(DAEMON_DRAINING)
+}
+
 /// Whether a start ended with `shutting_down()`: its run never started, so
 /// its session queue leaves it queued.
 pub(crate) fn is_shutting_down(error: &ApiError) -> bool {
@@ -170,6 +194,28 @@ impl AgentRunCoordinator {
         self.accepted_runs.is_closing()
     }
 
+    /// Begins a drain: new messages are refused until `cancel_drain` or
+    /// shutdown, while accepted runs, queued ones included, start and finish.
+    pub(crate) fn begin_drain(&self) {
+        self.accepted_runs.set_draining(true);
+    }
+
+    pub(crate) fn cancel_drain(&self) {
+        self.accepted_runs.set_draining(false);
+    }
+
+    pub(crate) fn is_draining(&self) -> bool {
+        self.accepted_runs.is_draining()
+    }
+
+    /// The drain refusal, for an entry point that admits new work.
+    pub(crate) fn refuse_while_draining(&self) -> Result<(), ApiError> {
+        if self.is_draining() {
+            return Err(draining());
+        }
+        Ok(())
+    }
+
     /// A shorter shutdown wait, so tests need not wait thirty seconds.
     #[cfg(test)]
     pub(crate) fn with_accepted_shutdown_wait(mut self, wait: Duration) -> Self {
@@ -200,5 +246,15 @@ mod typed_shutdown_tests {
         assert!(accepted.is_closing());
         drop(going);
         assert!(accepted.close_and_wait().await.is_empty());
+    }
+    #[test]
+    fn draining_keeps_queued_runs_starting_and_never_closes() {
+        let accepted = AcceptedRuns::default();
+        accepted.set_draining(true);
+        assert!(accepted.is_draining());
+        assert!(!accepted.is_closing());
+        assert!(accepted.begin("queued").is_some());
+        accepted.set_draining(false);
+        assert!(!accepted.is_draining());
     }
 }

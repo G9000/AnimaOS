@@ -37,6 +37,7 @@ mod side_model;
 mod skills;
 mod speech;
 mod state;
+pub mod system;
 mod tool_rpc;
 mod tools;
 mod usage;

@@ -24,6 +24,15 @@ use super::swarm_tools::execute_swarm_tool;
 use super::{DaemonState, SharedMemoryStore};
 
 impl DaemonState {
+    /// Swarm runs going: a run holds its swarm's run lock through its final
+    /// commit and publication (`routes::swarms`).
+    pub(crate) fn running_swarm_count(&self) -> usize {
+        self.swarm_run_locks
+            .values()
+            .filter(|lock| lock.try_lock().is_err())
+            .count()
+    }
+
     pub(super) fn swarm_agent_factory(
         &self,
         event_stream: EventFanout,

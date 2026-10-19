@@ -28,6 +28,10 @@ impl DiscordManager {
         id: String,
         captured: Option<u64>,
     ) -> Result<bool, DiscordManagerError> {
+        // A drain before a restart leaves received messages for later.
+        if self.runs.is_draining() {
+            return Ok(false);
+        }
         let epoch = captured.unwrap_or_else(|| self.epoch(&id));
         let (c, inbound) = {
             let _txn = self.transaction.lock().await;

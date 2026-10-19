@@ -42,7 +42,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 226, "complete registered operation count");
+    assert_eq!(actual.len(), 230, "complete registered operation count");
     let message_search_additions = [("GET", "/api/agents/{agent_id}/message-search")];
     for (method, path) in message_search_additions {
         assert!(
@@ -123,6 +123,18 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             "provider key pool operation must be registered"
         );
     }
+    let system_additions = [
+        ("GET", "/api/system/drain"),
+        ("POST", "/api/system/drain"),
+        ("DELETE", "/api/system/drain"),
+        ("POST", "/api/system/shutdown"),
+    ];
+    for (method, path) in system_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "drain and shutdown operation must be registered"
+        );
+    }
     let autonomy_additions = [
         ("GET", "/api/agents/{agent_id}/autonomy"),
         ("PUT", "/api/agents/{agent_id}/autonomy"),
@@ -192,6 +204,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                     && !autonomy_additions.contains(&(method.as_str(), path.as_str()))
                     && !side_model_additions.contains(&(method.as_str(), path.as_str()))
                     && !provider_key_additions.contains(&(method.as_str(), path.as_str()))
+                    && !system_additions.contains(&(method.as_str(), path.as_str()))
                     && !skill_ledger_additions.contains(&(method.as_str(), path.as_str()))
                     && !learning_undo_additions.contains(&(method.as_str(), path.as_str()))
                     && !import_additions.contains(&(method.as_str(), path.as_str()))
@@ -233,6 +246,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                     && !autonomy_additions.contains(&(method.as_str(), path.as_str()))
                     && !side_model_additions.contains(&(method.as_str(), path.as_str()))
                     && !provider_key_additions.contains(&(method.as_str(), path.as_str()))
+                    && !system_additions.contains(&(method.as_str(), path.as_str()))
                     && !skill_ledger_additions.contains(&(method.as_str(), path.as_str()))
                     && !learning_undo_additions.contains(&(method.as_str(), path.as_str()))
                     && !import_additions.contains(&(method.as_str(), path.as_str()))

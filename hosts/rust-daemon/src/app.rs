@@ -50,6 +50,7 @@ struct DaemonRuntime {
     scheduler: SchedulerService,
     jobs: JobService,
     history: crate::history::HistoryWorker,
+    drain: crate::system::DrainController,
 }
 
 const DEFAULT_MAX_CONCURRENT_RUNS: usize = 8;
@@ -305,21 +306,11 @@ pub async fn serve_with(
         guard.set_generated_titles(true);
     }
     let ServeOptions { ui, shutdown } = options;
-    let shutdown = async move {
-        match shutdown {
-            Some(requested) => {
-                tokio::select! {
-                    _ = shutdown_signal() => {}
-                    _ = requested.notified() => {}
-                }
-            }
-            None => shutdown_signal().await,
-        }
-    };
     serve_with_state_and_voice(
         listener,
         state,
         config,
+        shutdown_signal(),
         shutdown,
         crate::runtime_model::transcription_service_from_env(),
         crate::runtime_model::speech_service_from_env(),
@@ -328,8 +319,8 @@ pub async fn serve_with(
     .await
 }
 
-/// Serves until `shutdown` resolves (Ctrl+C for [`serve`]), then shuts down
-/// gracefully.
+/// Serves until `shutdown` resolves (Ctrl+C for [`serve`]) or
+/// `POST /api/system/shutdown` asks, then shuts down gracefully.
 #[cfg(test)]
 pub(crate) async fn serve_with_state(
     listener: TcpListener,
@@ -342,6 +333,7 @@ pub(crate) async fn serve_with_state(
         state,
         config,
         shutdown,
+        None,
         crate::voice::VoiceService::disabled(),
         crate::speech::SpeechService::disabled(),
         None,
@@ -349,11 +341,15 @@ pub(crate) async fn serve_with_state(
     .await
 }
 
+/// `requested`, the host's shutdown handle, is notified by the host or by
+/// `POST /api/system/shutdown`; without one the route notifies its own.
+#[allow(clippy::too_many_arguments)]
 async fn serve_with_state_and_voice(
     listener: TcpListener,
     state: SharedDaemonState,
     config: DaemonConfig,
     shutdown: impl Future<Output = ()> + Send + 'static,
+    requested: Option<Arc<tokio::sync::Notify>>,
     voice: crate::voice::VoiceService,
     speech: crate::speech::SpeechService,
     ui: Option<Router>,
@@ -362,6 +358,16 @@ async fn serve_with_state_and_voice(
     let mut runtime = daemon_runtime(Arc::clone(&state), &config)?;
     runtime.voice = voice;
     runtime.speech = speech;
+    if let Some(requested) = requested {
+        runtime.drain = runtime.drain.with_shutdown(requested);
+    }
+    let requested = runtime.drain.shutdown_handle();
+    let shutdown = async move {
+        tokio::select! {
+            _ = shutdown => {}
+            _ = requested.notified() => {}
+        }
+    };
     state
         .write()
         .await
@@ -536,7 +542,14 @@ fn daemon_runtime(state: SharedDaemonState, config: &DaemonConfig) -> io::Result
         Arc::clone(&state),
         agent_runs.control_plane_transactions(),
     );
-    let scheduler = SchedulerService::new(state, agent_runs.clone(), connectors.clone());
+    let scheduler =
+        SchedulerService::new(Arc::clone(&state), agent_runs.clone(), connectors.clone());
+    let drain = crate::system::DrainController::new(
+        state,
+        agent_runs.clone(),
+        jobs.clone(),
+        scheduler.clone(),
+    );
     Ok(DaemonRuntime {
         voice: crate::voice::VoiceService::disabled(),
         speech: crate::speech::SpeechService::disabled(),
@@ -551,6 +564,7 @@ fn daemon_runtime(state: SharedDaemonState, config: &DaemonConfig) -> io::Result
         scheduler,
         jobs,
         history,
+        drain,
     })
 }
 
@@ -638,7 +652,14 @@ fn deterministic_daemon_runtime_with_mail_transport(
         Arc::clone(&state),
         agent_runs.control_plane_transactions(),
     );
-    let scheduler = SchedulerService::new(state, agent_runs.clone(), connectors.clone());
+    let scheduler =
+        SchedulerService::new(Arc::clone(&state), agent_runs.clone(), connectors.clone());
+    let drain = crate::system::DrainController::new(
+        state,
+        agent_runs.clone(),
+        jobs.clone(),
+        scheduler.clone(),
+    );
     DaemonRuntime {
         voice: crate::voice::VoiceService::disabled(),
         speech: crate::speech::SpeechService::disabled(),
@@ -653,6 +674,7 @@ fn deterministic_daemon_runtime_with_mail_transport(
         scheduler,
         jobs,
         history,
+        drain,
     }
 }
 
@@ -686,6 +708,7 @@ fn router_with_runtime(
         runtime.drive,
         runtime.voice,
         runtime.speech,
+        runtime.drain,
     );
     if tokio::runtime::Handle::try_current().is_ok() {
         history.start(&history_owner);
