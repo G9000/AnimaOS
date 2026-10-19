@@ -1,57 +1,46 @@
-# animaOS-SWARM
+![AnimaOS banner](docs/images/animaos-banner.png)
 
-**anima** is a personal AI that you own. It runs on your computer or your own server, and you talk to it in one ongoing chat, in the web console or on Telegram. It brings in helper agents for bigger jobs, shows you its plan and asks before it acts, and gets better at your work over time.
+# AnimaOS
 
-This repository is the whole stack: a Rust agent runtime, the daemon that hosts it, the TypeScript SDK, and the web console.
+**An agentic operating system**
 
-![The main chat](docs/images/main-chat.webp)
+AnimaOS brings persistent AI agents, memory, tools, and automations into one personal workspace. It runs on your computer or your own server, on top of your existing operating system. You choose the models, connect the tools, and decide how independently your agents can work.
 
-## What anima does
+Talk to anima in the web console or through a connected chat app. Give it work to do, let it bring in helpers, and follow its plans, actions, and results in the same place. Its context carries across conversations through saved memory and reusable skills.
 
-- **One main chat.** Each agent has one ongoing conversation with one memory, so "that thing from yesterday" means something. Your private Telegram chat joins it, and every message shows where it came from. Telegram groups and Discord channels get their own threads.
-- **More than one agent.** Make agents for different parts of your life and switch between them from the name in the header. The header always shows who you're talking with and what it's doing.
-- **Talk or type.** Dictate, have replies read aloud, or send recorded audio for transcription. Voice and text land in the same chat.
-- **Shows you the plan first.** Before a bigger job that changes things, anima lays out its steps and waits. Start it, send back changes, or tell it to stop asking.
-- **Asks before it acts.** Anything that runs commands, sends messages or changes files can go through approvals you control: once, for this chat, always, or denied.
-- **One place for what needs you.** Approvals, plans, Telegram pairing requests, broken connections and skills to review all wait in one inbox, next to a list of everything it changed today.
-- **Helpers for big jobs.** anima can delegate to helper agents, such as a researcher, a coder and a reviewer, supervise them, and bring back one result you can review.
-- **Learns from your work.** It keeps memory of what matters and drafts reusable skills from tasks that went well. Nothing becomes a skill until you approve it.
-- **A weekly report.** What it finished, what it changed, what it cost, what failed, and what it kept about you, from its own records.
-- **Runs where you want.** On your machine by default, or as a single-owner service on a Linux VPS with Docker, HTTPS and sign-in.
-- **Works with your stack.** Many model providers, Google Drive, Calendar and mail, reviewed MCP tools, community bundles, documents, web search and scoped browser work.
+This repository contains the system: a reusable Rust agent runtime, the daemon that hosts it, a TypeScript SDK, and the web console.
 
-## A look at it
+## What you can do
 
-| | |
-| --- | --- |
-| ![Switch agent](docs/images/switch-agent.webp) | ![Telegram group thread](docs/images/telegram-thread.webp) |
-| **Your agents.** The header shows who you're talking with and what it's doing. Switch agents from its name. | **Chat apps.** Your private Telegram chat is part of the main chat. A group gets its own thread, and replies go back to the group. |
-| ![Plan before acting](docs/images/plan.webp) | ![Needs you](docs/images/needs-you.webp) |
-| **Plans.** For bigger jobs anima shows its steps first, marks the ones that will ask again, and waits for you. | **Needs you.** Everything waiting on you in one place, answered in a click. |
-| ![Needs your OK](docs/images/needs-ok.webp) | ![Listening](docs/images/voice-listening.webp) |
-| **Approvals.** Before anything leaves your machine, anima asks. Answer with a button or by voice. | **Voice.** Hold Space and talk; your words appear over the orb, and the chat stays underneath. |
-| ![Helpers](docs/images/helpers.webp) | ![Learned a skill](docs/images/learned-skill.webp) |
-| **Helpers.** Bigger jobs go to a small team, shown right in the chat with what each one is doing. | **Learning.** When a task goes well, anima offers to keep how it did it as a skill. |
+- **Keep agents for different parts of your life.** Each agent has its own main conversation and memory. Switch between them in the console and return to their saved context.
+- **Work with files, code, and documents.** Agents can use workspace tools, run commands and background processes, research the web, and use configured services such as Google Drive, Calendar, and mail. Reviewed MCP tools and community bundles extend what they can use.
+- **Delegate bigger jobs.** An agent can bring in helpers for research, coding, or review, supervise their work, and bring the results back to your conversation.
+- **Build useful memory and skills.** Save preferences and facts, recall earlier work, and turn successful tasks into reusable skills. Review and manage what your agents keep.
+- **Schedule recurring work.** Automations and background tasks run in the daemon while the console is closed. The daemon must stay running for that work to continue.
+- **Use chat and voice.** Type, dictate, or listen to replies. Paired private Telegram messages join the main conversation; Telegram groups and Discord channels have separate threads. Recorded-audio transcription and selected-reply speech are available as server opt-ins.
+- **See what happened.** Plans, helper progress, action records, a Needs-you inbox, and weekly reports make work, approvals, failures, and recorded usage visible.
 
-## Status
+## Choose how independently agents work
 
-| Area | Today |
-| --- | --- |
-| Web console: main chat per agent, agent switcher, history, onboarding, Settings | Built |
-| Rust daemon with persistence, restart recovery and streaming | Built |
-| Telegram and Discord, embedded in the daemon; private Telegram chats join the main chat | Built |
-| Memory, task reviews, owner-approved skills, approvals, automations | Built |
-| Plans before bigger jobs (`propose_plan`), the Needs-you inbox, "Done today", the weekly report | Built |
-| Helper agents (delegation) | Built |
-| Voice: browser dictation, read aloud, recorded-audio transcription and selected-reply speech (the last two are server opt-ins) | Built |
-| Reviewed MCP tools, community bundles, documents, web search, scoped browser work | Built, with the scope limits described in [docs/companion](docs/companion) |
-| One-owner VPS deployment | Built; some acceptance checks are still manual ([guide](deploy/vps/README.md)) |
-| Undo for actions the agent took | Coming next: "Done today" lists every change, but nothing can be rolled back from it yet |
-| Wake word and hands-free voice | Coming next |
+Set autonomy per agent in Settings:
+
+- **Free:** carries out ordinary work and reports what it did, with additional checks for sensitive actions.
+- **Strict:** asks before changes, command execution, or delegation.
+- **Custom:** uses the individual approval rules you configure.
+
+Blocked commands and protected-action checks still apply. Plans and approvals follow the selected policy; granting tool access does not make every action unconditional.
+
+## Current scope
+
+The working stack is the Rust daemon and web console, with persistent agents, memory, tools, delegation, schedules, and embedded Telegram and Discord connectors. Local models are supported through Ollama; hosted providers are also available.
+
+AnimaOS is under active development. Tool and connector capabilities have specific setup and scope limits, documented in the [daily-use guide](docs/companion/daily-use.md). Browser work is currently scoped; see [browser support and limits](docs/companion/browser-work.md). Interrupted work may require review after a daemon restart. Full mission resume, universal undo, and wake-word voice are not complete.
+
+The [VPS deployment package](deploy/vps/README.md) targets one trusted owner. Public deployment, real account integrations, and microphone behavior still have manual acceptance checks; see the guide for the current verification boundary.
 
 ## Quick start
 
-With Bun and Rust installed:
+Install Bun and the Rust toolchain, then run from the repository root:
 
 ```bash
 bun install --frozen-lockfile
@@ -59,16 +48,20 @@ bun x nx run @animaOS-SWARM/sdk:build
 bun dev --host rust
 ```
 
-Open [localhost:4200](http://localhost:4200), set up your companion and connect a model provider. Setup is a few short steps: model, introductions, access and voice.
+Open [localhost:4200](http://localhost:4200), create your companion, select its workspace, and connect a model provider. Onboarding covers the model, introductions, access, and voice.
+
+The launcher selects the Rust host and starts the web console, playground, and documentation sites. The console connects to the daemon at `127.0.0.1:8080`. Restored Telegram and Discord connectors run inside the daemon.
 
 - **Run it on a server:** the [VPS deployment guide](deploy/vps/README.md) covers HTTPS, owner authentication, credentials, backups and current limits.
 - **Day-to-day setup:** [Anima daily-use setup](docs/companion/daily-use.md) covers identity files, memory, approvals, schedules and connectors.
 
-## How the repo is organised
+## Architecture
+
+Reusable engine code lives in `packages/`; runnable backend processes live in `hosts/`; user-facing surfaces live in `apps/`. Host selection stays in `tools/workspace-dev`.
 
 | Path | What lives there |
 | --- | --- |
-| `packages/core-rust` | The Rust runtime: `anima-core`, `anima-memory`, `anima-swarm`, `anima-schedule`, `anima-harness`, `anima-model-adapters`, `anima-document-content`. It has no HTTP framework and no host-specific code. |
+| `packages/core-rust` | The reusable Rust runtime: `anima-core`, `anima-memory`, `anima-swarm`, `anima-schedule`, `anima-harness`, model adapters, and document support. The core stays independent of backend hosts. |
 | `hosts/rust-daemon` | `anima-daemon`, the runnable Axum host. It exposes HTTP and SSE, and embeds the Telegram and Discord connectors. `hosts/elixir-phoenix` and `hosts/python-service` are placeholders. |
 | `packages/sdk` | The public TypeScript client for the daemon. |
 | `packages/core-ts` | The shared TypeScript core used by the SDK, CLI, TUI and UI. Execution behaviour lives in Rust. |
@@ -82,9 +75,12 @@ Open [localhost:4200](http://localhost:4200), set up your companion and connect 
 
 More detail: [Rust daemon architecture](docs/rust-daemon-architecture.md), [swarm architecture](docs/swarm-architecture.md), [package maturity](docs/package-maturity-scorecard.md).
 
+Workspace and npm package names still use `animaOS-SWARM` / `@animaOS-SWARM`; use those names in the commands below.
+
 ## Design
 
 The interface is designed in [pen.dev](https://pen.dev) before it is built. [`design/design.pen`](design/design.pen) holds every screen:
+
 - the end-to-end journey and onboarding
 - the main chat, its states (working, offline, errors, plans, receipts) and the agent switcher
 - the Needs-you inbox and the weekly report
@@ -112,7 +108,7 @@ bun run web                # the web console only (daemon must be running)
 
 Prefer Nx targets for focused work, for example `bun x nx run rust-daemon:test` or `bun x nx run-many -t typecheck,build,test -p @animaOS-SWARM/web`.
 
-## CLI and SDK (advanced)
+## CLI and SDK
 
 The CLI and terminal UI remain available for agency and SDK workflows. `create` runs locally; `launch`, `run` and `chat` talk to the daemon.
 
@@ -123,12 +119,14 @@ bun run animaos create my-agency --provider openai --model gpt-4o-mini
 
 bun run daemon                                   # in another terminal
 cd my-agency
-bun run animaos launch "Write a blog post about AI"     # TUI
-bun run animaos launch --no-tui "your task"             # plain text, one task
-bun run animaos launch --no-tui                         # plain-text prompt (/help, /health, exit)
+bun run animaos launch "Write a blog post about AI" # TUI
+bun run animaos launch --no-tui "your task"         # plain text, one task
+bun run animaos launch --no-tui                     # plain-text prompt (/help, /health, exit)
 ```
 
 Use the repo-local CLI while developing: Bun runs this workspace's `animaos` build. See [docs/SDK_USAGE.md](docs/SDK_USAGE.md) for the SDK.
+
+For task progress, background helpers, local Python, and selected-file recovery, see the [Rust autonomous runtime guide](hosts/rust-daemon/README.md#autonomous-runtime).
 
 ### Model providers
 
@@ -156,6 +154,3 @@ Rust (Axum, SQLite), Bun, TypeScript, React, Vite, Tailwind, Nx, Vitest, Playwri
 ## License
 
 MIT
-
-For task progress, background helpers, local Python and selected-file recovery,
-see the [Rust autonomous runtime guide](hosts/rust-daemon/README.md#autonomous-runtime).
