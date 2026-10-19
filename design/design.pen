@@ -620,40 +620,38 @@
               "children": [
                 {
                   "type": "frame",
-                  "id": "TeVQ9",
-                  "name": "Day Marker",
+                  "id": "rt9fK",
+                  "name": "Day",
                   "width": "fill_container",
-                  "justifyContent": "center",
+                  "gap": 12,
+                  "alignItems": "center",
                   "children": [
                     {
-                      "type": "frame",
-                      "id": "HHKGx",
-                      "name": "Day Pill",
-                      "fill": "$glass",
-                      "cornerRadius": 2,
-                      "stroke": "$glass-line",
-                      "strokeWidth": 1,
-                      "effect": {
-                        "type": "background_blur",
-                        "radius": 20
-                      },
-                      "padding": [
-                        6,
-                        12
-                      ],
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "MXOfa",
-                          "name": "Day Text",
-                          "fill": "#FFFFFFD9",
-                          "content": "Today · 9:41",
-                          "fontFamily": "$font-mono",
-                          "fontSize": 11,
-                          "fontWeight": "normal",
-                          "letterSpacing": 0.4
-                        }
-                      ]
+                      "type": "rectangle",
+                      "id": "dXKFF",
+                      "name": "Rule",
+                      "fill": "#FFFFFF14",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "Y3IfA",
+                      "name": "Text",
+                      "fill": "#FFFFFF73",
+                      "content": "TODAY",
+                      "fontFamily": "$font-mono",
+                      "fontSize": 10,
+                      "fontWeight": "normal",
+                      "letterSpacing": 1.4
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "G195i",
+                      "name": "Rule",
+                      "fill": "#FFFFFF14",
+                      "width": "fill_container",
+                      "height": 1
                     }
                   ]
                 },
@@ -724,15 +722,6 @@
                       "alignItems": "center",
                       "children": [
                         {
-                          "id": "D9ib1E",
-                          "type": "ref",
-                          "ref": "l5HerN",
-                          "name": "Agent Avatar",
-                          "width": 22,
-                          "height": 22,
-                          "cornerRadius": 2
-                        },
-                        {
                           "type": "text",
                           "id": "F2KnWc",
                           "name": "Name",
@@ -773,9 +762,9 @@
                       "gap": 10,
                       "padding": [
                         0,
+                        40,
                         0,
-                        0,
-                        30
+                        0
                       ],
                       "children": [
                         {
@@ -1672,40 +1661,38 @@
               "children": [
                 {
                   "type": "frame",
-                  "id": "W9EnEy",
-                  "name": "Day Marker",
+                  "id": "FyNjX",
+                  "name": "Day",
                   "width": "fill_container",
-                  "justifyContent": "center",
+                  "gap": 12,
+                  "alignItems": "center",
                   "children": [
                     {
-                      "type": "frame",
-                      "id": "LaUTj",
-                      "name": "Day Pill",
-                      "fill": "$glass",
-                      "cornerRadius": 2,
-                      "stroke": "$glass-line",
-                      "strokeWidth": 1,
-                      "effect": {
-                        "type": "background_blur",
-                        "radius": 20
-                      },
-                      "padding": [
-                        6,
-                        12
-                      ],
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "p46rTd",
-                          "name": "Day Text",
-                          "fill": "#FFFFFFD9",
-                          "content": "Today · 9:41",
-                          "fontFamily": "$font-mono",
-                          "fontSize": 11,
-                          "fontWeight": "normal",
-                          "letterSpacing": 0.4
-                        }
-                      ]
+                      "type": "rectangle",
+                      "id": "gEa3s",
+                      "name": "Rule",
+                      "fill": "#FFFFFF14",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "a32eq5",
+                      "name": "Text",
+                      "fill": "#FFFFFF73",
+                      "content": "TODAY",
+                      "fontFamily": "$font-mono",
+                      "fontSize": 10,
+                      "fontWeight": "normal",
+                      "letterSpacing": 1.4
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "VEh12",
+                      "name": "Rule",
+                      "fill": "#FFFFFF14",
+                      "width": "fill_container",
+                      "height": 1
                     }
                   ]
                 },
@@ -1776,15 +1763,6 @@
                       "alignItems": "center",
                       "children": [
                         {
-                          "id": "ECmuq",
-                          "type": "ref",
-                          "ref": "l5HerN",
-                          "name": "Agent Avatar",
-                          "width": 22,
-                          "height": 22,
-                          "cornerRadius": 2
-                        },
-                        {
                           "type": "text",
                           "id": "ljIib",
                           "name": "Name",
@@ -1825,9 +1803,9 @@
                       "gap": 10,
                       "padding": [
                         0,
+                        40,
                         0,
-                        0,
-                        30
+                        0
                       ],
                       "children": [
                         {
@@ -18411,40 +18389,38 @@
               "children": [
                 {
                   "type": "frame",
-                  "id": "tjw0s",
-                  "name": "Day Marker",
+                  "id": "lLNcf",
+                  "name": "Day",
                   "width": "fill_container",
-                  "justifyContent": "center",
+                  "gap": 12,
+                  "alignItems": "center",
                   "children": [
                     {
-                      "type": "frame",
-                      "id": "n7XNg",
-                      "name": "Day Pill",
-                      "fill": "$glass",
-                      "cornerRadius": 2,
-                      "stroke": "$glass-line",
-                      "strokeWidth": 1,
-                      "effect": {
-                        "type": "background_blur",
-                        "radius": 20
-                      },
-                      "padding": [
-                        6,
-                        12
-                      ],
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "O79bv",
-                          "name": "Day Text",
-                          "fill": "#FFFFFFD9",
-                          "content": "Today · 9:41",
-                          "fontFamily": "$font-mono",
-                          "fontSize": 11,
-                          "fontWeight": "normal",
-                          "letterSpacing": 0.4
-                        }
-                      ]
+                      "type": "rectangle",
+                      "id": "PSCN5",
+                      "name": "Rule",
+                      "fill": "#FFFFFF14",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "YKShW",
+                      "name": "Text",
+                      "fill": "#FFFFFF73",
+                      "content": "TODAY",
+                      "fontFamily": "$font-mono",
+                      "fontSize": 10,
+                      "fontWeight": "normal",
+                      "letterSpacing": 1.4
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "A10Sw",
+                      "name": "Rule",
+                      "fill": "#FFFFFF14",
+                      "width": "fill_container",
+                      "height": 1
                     }
                   ]
                 },
@@ -18463,15 +18439,6 @@
                       "gap": 8,
                       "alignItems": "center",
                       "children": [
-                        {
-                          "id": "y2Mac",
-                          "type": "ref",
-                          "ref": "l5HerN",
-                          "name": "Avatar",
-                          "width": 22,
-                          "height": 22,
-                          "cornerRadius": 2
-                        },
                         {
                           "type": "text",
                           "id": "MyABV",
@@ -18513,9 +18480,9 @@
                       "gap": 10,
                       "padding": [
                         0,
+                        40,
                         0,
-                        0,
-                        30
+                        0
                       ],
                       "children": [
                         {
@@ -19445,40 +19412,38 @@
               "children": [
                 {
                   "type": "frame",
-                  "id": "h5tgI",
-                  "name": "Day Marker",
+                  "id": "uDEHp",
+                  "name": "Day",
                   "width": "fill_container",
-                  "justifyContent": "center",
+                  "gap": 12,
+                  "alignItems": "center",
                   "children": [
                     {
-                      "type": "frame",
-                      "id": "IlB3E",
-                      "name": "Day Pill",
-                      "fill": "$glass",
-                      "cornerRadius": 2,
-                      "stroke": "$glass-line",
-                      "strokeWidth": 1,
-                      "effect": {
-                        "type": "background_blur",
-                        "radius": 20
-                      },
-                      "padding": [
-                        6,
-                        12
-                      ],
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "h5Ol7",
-                          "name": "Day Text",
-                          "fill": "#FFFFFFD9",
-                          "content": "Today · 9:41",
-                          "fontFamily": "$font-mono",
-                          "fontSize": 11,
-                          "fontWeight": "normal",
-                          "letterSpacing": 0.4
-                        }
-                      ]
+                      "type": "rectangle",
+                      "id": "s1gvRJ",
+                      "name": "Rule",
+                      "fill": "#FFFFFF14",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "WqFg4",
+                      "name": "Text",
+                      "fill": "#FFFFFF73",
+                      "content": "TODAY",
+                      "fontFamily": "$font-mono",
+                      "fontSize": 10,
+                      "fontWeight": "normal",
+                      "letterSpacing": 1.4
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "t7INfr",
+                      "name": "Rule",
+                      "fill": "#FFFFFF14",
+                      "width": "fill_container",
+                      "height": 1
                     }
                   ]
                 },
@@ -19547,15 +19512,6 @@
                       "alignItems": "center",
                       "children": [
                         {
-                          "id": "MXI6C",
-                          "type": "ref",
-                          "ref": "l5HerN",
-                          "name": "Anima Avatar",
-                          "width": 22,
-                          "height": 22,
-                          "cornerRadius": 2
-                        },
-                        {
                           "type": "text",
                           "id": "QYkn7",
                           "name": "Name",
@@ -19596,9 +19552,9 @@
                       "gap": 10,
                       "padding": [
                         0,
+                        40,
                         0,
-                        0,
-                        30
+                        0
                       ],
                       "children": [
                         {
@@ -19693,15 +19649,6 @@
                       "alignItems": "center",
                       "children": [
                         {
-                          "id": "Jx54c",
-                          "type": "ref",
-                          "ref": "l5HerN",
-                          "name": "Anima Avatar",
-                          "width": 22,
-                          "height": 22,
-                          "cornerRadius": 2
-                        },
-                        {
                           "type": "text",
                           "id": "Dypb9",
                           "name": "Name",
@@ -19742,9 +19689,9 @@
                       "gap": 10,
                       "padding": [
                         0,
+                        40,
                         0,
-                        0,
-                        30
+                        0
                       ],
                       "children": [
                         {
@@ -41149,40 +41096,38 @@
               "children": [
                 {
                   "type": "frame",
-                  "id": "g64YN9",
-                  "name": "Day Marker",
+                  "id": "gOTLU",
+                  "name": "Day",
                   "width": "fill_container",
-                  "justifyContent": "center",
+                  "gap": 12,
+                  "alignItems": "center",
                   "children": [
                     {
-                      "type": "frame",
-                      "id": "ZqZkF",
-                      "name": "Day Pill",
-                      "fill": "$glass",
-                      "cornerRadius": 2,
-                      "stroke": "$glass-line",
-                      "strokeWidth": 1,
-                      "effect": {
-                        "type": "background_blur",
-                        "radius": 20
-                      },
-                      "padding": [
-                        6,
-                        12
-                      ],
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "k73mmk",
-                          "name": "Day Text",
-                          "fill": "#FFFFFFD9",
-                          "content": "Today · 9:41",
-                          "fontFamily": "$font-mono",
-                          "fontSize": 11,
-                          "fontWeight": "normal",
-                          "letterSpacing": 0.4
-                        }
-                      ]
+                      "type": "rectangle",
+                      "id": "M1XEh",
+                      "name": "Rule",
+                      "fill": "#FFFFFF14",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "v9h2zF",
+                      "name": "Text",
+                      "fill": "#FFFFFF73",
+                      "content": "TODAY",
+                      "fontFamily": "$font-mono",
+                      "fontSize": 10,
+                      "fontWeight": "normal",
+                      "letterSpacing": 1.4
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "vUwh9",
+                      "name": "Rule",
+                      "fill": "#FFFFFF14",
+                      "width": "fill_container",
+                      "height": 1
                     }
                   ]
                 },
@@ -41201,15 +41146,6 @@
                       "gap": 8,
                       "alignItems": "center",
                       "children": [
-                        {
-                          "id": "XBifx",
-                          "type": "ref",
-                          "ref": "l5HerN",
-                          "name": "Avatar",
-                          "width": 22,
-                          "height": 22,
-                          "cornerRadius": 2
-                        },
                         {
                           "type": "text",
                           "id": "rNDx9",
@@ -41251,9 +41187,9 @@
                       "gap": 10,
                       "padding": [
                         0,
+                        40,
                         0,
-                        0,
-                        30
+                        0
                       ],
                       "children": [
                         {
@@ -41555,15 +41491,6 @@
                       "alignItems": "center",
                       "children": [
                         {
-                          "id": "U0u8Ak",
-                          "type": "ref",
-                          "ref": "l5HerN",
-                          "name": "Anima Avatar",
-                          "cornerRadius": 2,
-                          "width": 22,
-                          "height": 22
-                        },
-                        {
                           "type": "text",
                           "id": "P8KMJ",
                           "name": "Name",
@@ -41604,9 +41531,9 @@
                       "gap": 10,
                       "padding": [
                         0,
+                        40,
                         0,
-                        0,
-                        30
+                        0
                       ],
                       "children": [
                         {
@@ -44644,40 +44571,38 @@
               "children": [
                 {
                   "type": "frame",
-                  "id": "esEdp",
-                  "name": "Day Marker",
+                  "id": "MZmzg",
+                  "name": "Day",
                   "width": "fill_container",
-                  "justifyContent": "center",
+                  "gap": 12,
+                  "alignItems": "center",
                   "children": [
                     {
-                      "type": "frame",
-                      "id": "jKAc5",
-                      "name": "Day Pill",
-                      "fill": "$glass",
-                      "cornerRadius": 2,
-                      "stroke": "$glass-line",
-                      "strokeWidth": 1,
-                      "effect": {
-                        "type": "background_blur",
-                        "radius": 20
-                      },
-                      "padding": [
-                        6,
-                        12
-                      ],
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "i53Fa1",
-                          "name": "Day Text",
-                          "fill": "#FFFFFFD9",
-                          "content": "Today · started on Telegram, continued here",
-                          "fontFamily": "$font-mono",
-                          "fontSize": 11,
-                          "fontWeight": "normal",
-                          "letterSpacing": 0.4
-                        }
-                      ]
+                      "type": "rectangle",
+                      "id": "Rf0tk",
+                      "name": "Rule",
+                      "fill": "#FFFFFF14",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "Fq5b7",
+                      "name": "Text",
+                      "fill": "#FFFFFF73",
+                      "content": "TODAY · STARTED ON TELEGRAM, CONTINUED HERE",
+                      "fontFamily": "$font-mono",
+                      "fontSize": 10,
+                      "fontWeight": "normal",
+                      "letterSpacing": 1.4
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "vOhQn",
+                      "name": "Rule",
+                      "fill": "#FFFFFF14",
+                      "width": "fill_container",
+                      "height": 1
                     }
                   ]
                 },
@@ -49070,40 +48995,38 @@
               "children": [
                 {
                   "type": "frame",
-                  "id": "DTtXl",
-                  "name": "Day Marker",
+                  "id": "R53sqA",
+                  "name": "Day",
                   "width": "fill_container",
-                  "justifyContent": "center",
+                  "gap": 12,
+                  "alignItems": "center",
                   "children": [
                     {
-                      "type": "frame",
-                      "id": "P4NIK4",
-                      "name": "Day Pill",
-                      "fill": "$glass",
-                      "cornerRadius": 2,
-                      "stroke": "$glass-line",
-                      "strokeWidth": 1,
-                      "effect": {
-                        "type": "background_blur",
-                        "radius": 20
-                      },
-                      "padding": [
-                        6,
-                        12
-                      ],
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "tMD89",
-                          "name": "Day Text",
-                          "fill": "#FFFFFFD9",
-                          "content": "Today · started on Telegram, continued here",
-                          "fontFamily": "$font-mono",
-                          "fontSize": 11,
-                          "fontWeight": "normal",
-                          "letterSpacing": 0.4
-                        }
-                      ]
+                      "type": "rectangle",
+                      "id": "jx2j4",
+                      "name": "Rule",
+                      "fill": "#FFFFFF14",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "THUtp",
+                      "name": "Text",
+                      "fill": "#FFFFFF73",
+                      "content": "TODAY · STARTED ON TELEGRAM, CONTINUED HERE",
+                      "fontFamily": "$font-mono",
+                      "fontSize": 10,
+                      "fontWeight": "normal",
+                      "letterSpacing": 1.4
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "r2f4g",
+                      "name": "Rule",
+                      "fill": "#FFFFFF14",
+                      "width": "fill_container",
+                      "height": 1
                     }
                   ]
                 },
