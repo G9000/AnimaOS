@@ -473,3 +473,70 @@ fn logs_follow_prints_new_lines() {
     let _ = follower.wait();
     assert_eq!(second, "second");
 }
+
+// --- updates (no network: periodic checks are off, and `update` only runs
+// while the committed release key is the placeholder) --------------------------
+
+#[test]
+fn update_in_an_unconfigured_build_keeps_the_server_running() {
+    if !include_str!("../release-key.pub").contains("PLACEHOLDER") {
+        return;
+    }
+    let mut home = Home::new();
+    home.start_supervisor();
+    let output = home.anima(&["update"]);
+    assert_eq!(output.status.code(), Some(1), "{}", text(&output.stdout));
+    assert!(
+        text(&output.stderr).contains("Updates are not configured for this build"),
+        "{}",
+        text(&output.stderr)
+    );
+    // Nothing was drained or stopped.
+    let status = home.status().unwrap();
+    assert_eq!(status["state"]["kind"], "running");
+    assert_eq!(status["pending"], Value::Null);
+    assert_eq!(
+        status["update"]["lastError"],
+        "Updates are not configured for this build"
+    );
+    assert!(!refuses_connections(home.server_port));
+}
+
+#[test]
+fn a_pending_update_for_this_version_is_confirmed_once_running() {
+    let mut home = Home::new();
+    let pending = home.root().join("run").join("update-pending.json");
+    std::fs::create_dir_all(pending.parent().unwrap()).unwrap();
+    let old = home.root().join("anima.old");
+    std::fs::write(
+        &pending,
+        json!({ "from": "0.0.1", "to": env!("CARGO_PKG_VERSION"), "old": old }).to_string(),
+    )
+    .unwrap();
+    home.start_supervisor();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while pending.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(100));
+    }
+    assert!(!pending.exists(), "the pending update was not confirmed");
+    assert_eq!(home.status().unwrap()["update"]["lastError"], Value::Null);
+}
+
+#[test]
+fn a_rolled_back_update_is_reported() {
+    let mut home = Home::new();
+    let failed = home.root().join("run").join("update-failed.json");
+    std::fs::create_dir_all(failed.parent().unwrap()).unwrap();
+    std::fs::write(
+        &failed,
+        json!({ "to": "9.9.9", "error": "The server was not running within 60 seconds" })
+            .to_string(),
+    )
+    .unwrap();
+    home.start_supervisor();
+    assert_eq!(
+        home.status().unwrap()["update"]["lastError"],
+        "Update to v9.9.9 failed to start; rolled back"
+    );
+    assert!(!failed.exists());
+}

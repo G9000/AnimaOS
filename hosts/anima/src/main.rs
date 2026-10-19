@@ -10,7 +10,6 @@ mod server_env;
 mod supervisor;
 mod tray;
 mod ui;
-#[allow(dead_code, unused_imports)] // the supervisor starts using it in the next task
 mod update;
 
 use std::io;

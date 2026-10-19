@@ -11,6 +11,7 @@ mod child;
 mod control_api;
 mod logs;
 mod state;
+mod updates;
 pub use logs::LOG_FILE_NAME;
 pub use state::{Action, ServerState, SupervisorStatus};
 #[cfg(test)]
@@ -29,17 +30,19 @@ use std::time::Duration;
 use anima_daemon::system::InFlight;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot, watch, Notify};
-
+use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
 use crate::config::{validate_workspace, Config};
 use crate::paths::AnimaPaths;
 use crate::server_env::{effective_port, server_env};
+use crate::update::{self, handoff};
 use child::{ServerApi, ServerChild, ShutdownRequest};
 use control_api::ActionRequest;
 use logs::ServerLog;
 use state::{backoff_secs, next, Conflict, Transition, UpdateStatus};
 use tokens::{AdminToken, ControlToken};
+use updates::{JobProgress, Prepared, Progress, Updater};
 
 /// The status the control API serves; the lifecycle task keeps it current.
 pub type SharedStatus = Arc<Mutex<SupervisorStatus>>;
@@ -66,6 +69,10 @@ const STABLE_RUN: Duration = Duration::from_secs(10 * 60);
 const CONNECTORS_REFRESH: Duration = Duration::from_secs(10);
 const CONNECTORS_RETRY: Duration = Duration::from_secs(1);
 const PORT_IN_USE: [&str; 2] = ["Address already in use", "os error 10048"];
+/// How long a supervisor started by an update waits for the one before it to
+/// let go of the control port (Windows, where it is not an `exec`).
+const HANDOFF_BIND_WAIT: Duration = Duration::from_secs(15);
+const BIND_RETRY: Duration = Duration::from_millis(250);
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
@@ -103,6 +110,8 @@ pub struct Supervisor {
     log: ServerLog,
     requests_tx: mpsc::Sender<ActionRequest>,
     requests: mpsc::Receiver<ActionRequest>,
+    /// The update this version was installed by, until its server runs.
+    handoff: Option<handoff::PendingUpdate>,
 }
 
 impl Supervisor {
@@ -111,12 +120,20 @@ impl Supervisor {
         let paths = AnimaPaths::discover()?;
         paths.ensure()?;
         let cfg = Config::load(&paths.config_file)?;
-        let listener = match std::net::TcpListener::bind(("127.0.0.1", cfg.control_port)) {
-            Ok(listener) => listener,
-            Err(error) if error.kind() == io::ErrorKind::AddrInUse => return Ok(None),
-            Err(error) => return Err(error),
+        let Some(listener) = bind_control_port(&paths, cfg.control_port)? else {
+            return Ok(None);
         };
         listener.set_nonblocking(true)?;
+        // Only the supervisor holding the port finishes an update.
+        let mut update = UpdateStatus::default();
+        let handoff = match handoff::on_start(&paths, env!("CARGO_PKG_VERSION")) {
+            handoff::HandoffOutcome::Nothing => None,
+            handoff::HandoffOutcome::AwaitHealth(pending) => Some(pending),
+            handoff::HandoffOutcome::RolledBack { last_error } => {
+                update.last_error = Some(last_error);
+                None
+            }
+        };
         let (control_token, admin_token) = tokens::ensure(&paths)?;
         let process_env: BTreeMap<String, String> = std::env::vars().collect();
         let port = effective_port(&cfg, &process_env);
@@ -135,7 +152,7 @@ impl Supervisor {
             autostart: cfg.autostart,
             connectors: None,
             pending: None,
-            update: UpdateStatus::default(),
+            update,
         }));
         let (requests_tx, requests) = mpsc::channel(16);
         Ok(Some(Self {
@@ -149,6 +166,7 @@ impl Supervisor {
             status,
             requests_tx,
             requests,
+            handoff,
         }))
     }
 
@@ -183,6 +201,25 @@ impl Supervisor {
 
         let (api_tx, api_rx) = watch::channel(self.api.clone());
         let connectors = tokio::spawn(refresh_connectors(Arc::clone(&self.status), api_rx));
+        let updater = Updater::new(Arc::clone(&self.status));
+        let (check_now, check_requests) = mpsc::channel(1);
+        let checks = tokio::spawn(updates::run_checks(
+            updater.clone(),
+            self.paths.config_file.clone(),
+            check_requests,
+        ));
+        let (update_events, update_progress) = mpsc::unbounded_channel();
+        let handoff = self.handoff.map(|pending| {
+            self.log.note(&format!(
+                "Updated from v{} to v{}; waiting for the server to run",
+                pending.from, pending.to
+            ));
+            Handoff {
+                pending,
+                deadline: Some(Instant::now() + handoff::HEALTH_TIMEOUT),
+                reason: String::new(),
+            }
+        });
         let lifecycle = Lifecycle {
             exe: std::env::current_exe()?,
             control_url: format!("http://127.0.0.1:{}", self.cfg.control_port),
@@ -197,10 +234,20 @@ impl Supervisor {
             child: None,
             crashes: 0,
             running_since: None,
+            updater,
+            check_now,
+            update_events,
+            next_job: 0,
+            job: None,
+            prepared: None,
+            handoff,
         };
-        lifecycle.run(self.requests, termination_signals()).await;
+        lifecycle
+            .run(self.requests, termination_signals(), update_progress)
+            .await;
 
         connectors.abort();
+        checks.abort();
         // Let the answer to the last request (a quit) reach its caller.
         stop_serving.notify_one();
         let _ = tokio::time::timeout(Duration::from_secs(2), serving).await;
@@ -263,6 +310,28 @@ impl Link {
     /// A line in the supervisor's log.
     pub fn note(&self, message: &str) {
         self.log.note(message);
+    }
+}
+
+/// Binds the control port; `None` when another supervisor has it. A supervisor
+/// started by an update hand-off on Windows waits a moment for the process
+/// before it to exit and let go of the port.
+fn bind_control_port(paths: &AnimaPaths, port: u16) -> io::Result<Option<std::net::TcpListener>> {
+    let deadline = std::time::Instant::now() + HANDOFF_BIND_WAIT;
+    loop {
+        match std::net::TcpListener::bind(("127.0.0.1", port)) {
+            Ok(listener) => return Ok(Some(listener)),
+            Err(error) if error.kind() == io::ErrorKind::AddrInUse => {
+                let waiting = cfg!(windows)
+                    && handoff::under_way(paths)
+                    && std::time::Instant::now() < deadline;
+                if !waiting {
+                    return Ok(None);
+                }
+                std::thread::sleep(BIND_RETRY);
+            }
+            Err(error) => return Err(error),
+        }
     }
 }
 
@@ -369,7 +438,45 @@ enum Phase {
     Crashed {
         retry_at: Instant,
     },
+    /// An update is being checked, downloaded and verified (the `UpdateJob`)
+    /// while the server keeps running; then it goes through the gate,
+    /// without waiting for work when `force` is set.
+    Preparing {
+        force: bool,
+    },
+    /// The version this update installed did not come up: its server is
+    /// killed before the previous binary is put back.
+    RollingBack,
     Exit,
+}
+
+/// Where the lifecycle goes back to when an update is not installed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Resume {
+    Running,
+    Starting,
+    /// Running, with a drain on the server being ended.
+    Cancelling,
+    /// Stopped on purpose: it stays stopped.
+    Stopped,
+    /// Start the server.
+    Start,
+}
+
+/// An update being got ready.
+struct UpdateJob {
+    id: u64,
+    task: JoinHandle<()>,
+    resume: Resume,
+}
+
+/// The update that installed this version, until its server runs.
+struct Handoff {
+    pending: handoff::PendingUpdate,
+    /// When the server must be running by; `None` once rolling back.
+    deadline: Option<Instant>,
+    /// Why it is being rolled back.
+    reason: String,
 }
 
 /// What a phase's own work came to.
@@ -409,6 +516,15 @@ struct Lifecycle {
     /// Crashes in a row, for the backoff.
     crashes: u32,
     running_since: Option<Instant>,
+    updater: Updater,
+    /// Asks the update checks for one now.
+    check_now: mpsc::Sender<()>,
+    update_events: mpsc::UnboundedSender<JobProgress>,
+    next_job: u64,
+    job: Option<UpdateJob>,
+    /// A verified binary on its way through the gate.
+    prepared: Option<(Prepared, Resume)>,
+    handoff: Option<Handoff>,
 }
 
 impl Lifecycle {
@@ -416,20 +532,35 @@ impl Lifecycle {
         mut self,
         mut requests: mpsc::Receiver<ActionRequest>,
         mut signals: mpsc::Receiver<()>,
+        mut update_progress: mpsc::UnboundedReceiver<JobProgress>,
     ) {
         let mut phase = self.start();
         while !matches!(phase, Phase::Exit) {
             let mut exit = self.child.as_ref().map(ServerChild::exit_watch);
             let mut work = self.work(phase);
+            let handoff_due = self.handoff.as_ref().and_then(|handoff| handoff.deadline);
+            let handoff_timeout = async move {
+                match handoff_due {
+                    Some(at) => tokio::time::sleep_until(at).await,
+                    None => std::future::pending().await,
+                }
+            };
+            tokio::pin!(handoff_timeout);
             phase = loop {
                 tokio::select! {
                     Some(request) = requests.recv() => {
-                        if let Some(next) = self.handle(request) {
+                        if let Some(next) = self.handle(request, phase) {
                             break next;
                         }
                     }
                     status = child::exited(&mut exit) => break self.on_exit(phase, status),
                     event = &mut work => break self.on_event(phase, event),
+                    Some((job, progress)) = update_progress.recv() => {
+                        if let Some(next) = self.on_update(phase, job, progress) {
+                            break next;
+                        }
+                    }
+                    () = &mut handoff_timeout => break self.on_handoff_timeout(phase),
                     Some(()) = signals.recv() => break self.on_terminate(phase),
                 }
             };
@@ -524,12 +655,19 @@ impl Lifecycle {
                 tokio::time::sleep_until(retry_at).await;
                 Event::Retry
             }),
-            Phase::Running | Phase::Stopped | Phase::Exit => Box::pin(std::future::pending()),
+            Phase::RollingBack => Box::pin(async move {
+                tokio::time::sleep(KILL_GRACE).await;
+                Event::Gone
+            }),
+            // The update job reports through its own channel.
+            Phase::Running | Phase::Stopped | Phase::Preparing { .. } | Phase::Exit => {
+                Box::pin(std::future::pending())
+            }
         }
     }
 
     /// Takes a requested action, answering with the status once it is under way.
-    fn handle(&mut self, request: ActionRequest) -> Option<Phase> {
+    fn handle(&mut self, request: ActionRequest, phase: Phase) -> Option<Phase> {
         let ActionRequest {
             action,
             force,
@@ -547,15 +685,27 @@ impl Lifecycle {
             }
         };
         let next_phase = match transition {
-            Transition::Stay | Transition::CheckUpdate => None,
-            // The updater (a later task) is what makes an update available.
+            // `update --now` while the update downloads: once it is ready,
+            // don't wait for work.
+            Transition::Stay if action == Action::Update && force => match phase {
+                Phase::Preparing { force: false } => Some(Phase::Preparing { force: true }),
+                _ => None,
+            },
+            Transition::Stay => None,
+            Transition::CheckUpdate => {
+                // One already queued covers this one.
+                let _ = self.check_now.try_send(());
+                None
+            }
+            // The update is got ready first, with the server still running;
+            // only a verified binary goes through the gate.
             Transition::Drain(Action::Update)
             | Transition::Shutdown(Action::Update)
             | Transition::Settle(Action::Update)
-                if lock(&self.status).update.available.is_none() =>
+                if self.prepared.is_none() =>
             {
-                lock(&self.status).update.last_error = Some("No update is available".to_string());
-                None
+                let force = matches!(transition, Transition::Shutdown(_));
+                Some(self.prepare_update(phase, force))
             }
             Transition::Drain(action) => Some(self.drain(action)),
             Transition::Shutdown(action) => Some(self.shut_down(action)),
@@ -592,7 +742,13 @@ impl Lifecycle {
                 self.crash(message)
             }
             Phase::Draining { action, .. } | Phase::Stopping { action, .. } => self.finish(action),
-            Phase::Clearing { .. } | Phase::Stopped | Phase::Crashed { .. } | Phase::Exit => phase,
+            Phase::RollingBack => self.roll_back_update(),
+            // The update carries on; without a server it has nothing to drain.
+            Phase::Preparing { .. }
+            | Phase::Clearing { .. }
+            | Phase::Stopped
+            | Phase::Crashed { .. }
+            | Phase::Exit => phase,
         }
     }
 
@@ -672,6 +828,7 @@ impl Lifecycle {
                 None => self.finish(action),
             },
             (Phase::Stopping { action, .. }, Event::Gone) => self.finish(action),
+            (Phase::RollingBack, Event::Gone) => self.roll_back_update(),
             (Phase::Crashed { .. }, Event::Retry) => self.start(),
             (Phase::Cancelling { .. }, Event::Cancelled(true)) => {
                 self.log.note("Drain cancelled");
@@ -690,6 +847,7 @@ impl Lifecycle {
 
     /// Ctrl-C or SIGTERM: quit without waiting for work; a second one kills.
     fn on_terminate(&mut self, phase: Phase) -> Phase {
+        self.abandon_update();
         match phase {
             Phase::Stopping { killed, .. } => {
                 if !killed {
@@ -769,6 +927,17 @@ impl Lifecycle {
     }
 
     fn running(&mut self) -> Phase {
+        if let Some(Handoff { pending, .. }) = self.handoff.take() {
+            match handoff::confirm(&self.paths) {
+                Ok(()) => self
+                    .log
+                    .note(&format!("The update to v{} is done", pending.to)),
+                Err(error) => self.log.note(&format!(
+                    "The update to v{} is done, but its pending marker stays: {error}",
+                    pending.to
+                )),
+            }
+        }
         self.set_state(ServerState::Running, None);
         Phase::Running
     }
@@ -816,6 +985,8 @@ impl Lifecycle {
     /// running) with `cancel` pending until the server confirms.
     fn cancel(&mut self) -> Phase {
         self.log.note("Cancelling the drain");
+        // A cancelled update starts over with a fresh check.
+        self.prepared = None;
         lock(&self.status).pending = Some(Action::Cancel);
         Phase::Cancelling { attempt: 0 }
     }
@@ -852,15 +1023,204 @@ impl Lifecycle {
         }
     }
 
-    /// The updater (a later task) takes over here; until it exists the
-    /// server comes back as it was.
+    /// Starts getting an update ready, the server staying as it is.
+    fn prepare_update(&mut self, phase: Phase, force: bool) -> Phase {
+        let resume = match phase {
+            Phase::Running => Resume::Running,
+            Phase::Starting { .. } => Resume::Starting,
+            Phase::Cancelling { .. } => Resume::Cancelling,
+            Phase::Stopped => Resume::Stopped,
+            _ => Resume::Start,
+        };
+        self.abandon_update();
+        self.next_job += 1;
+        let id = self.next_job;
+        self.log.note("Checking for an update to install");
+        self.set_state(
+            ServerState::Updating {
+                stage: "Checking for updates".to_string(),
+            },
+            Some(Action::Update),
+        );
+        let task = updates::prepare(self.updater.clone(), id, self.update_events.clone());
+        self.job = Some(UpdateJob { id, task, resume });
+        Phase::Preparing { force }
+    }
+
+    /// The update job's progress; a new phase once it is done.
+    fn on_update(&mut self, phase: Phase, job: u64, progress: Progress) -> Option<Phase> {
+        let Phase::Preparing { force } = phase else {
+            return None;
+        };
+        if self.job.as_ref().map(|job| job.id) != Some(job) {
+            return None;
+        }
+        match progress {
+            Progress::Stage(stage) => {
+                self.set_state(ServerState::Updating { stage }, Some(Action::Update));
+                None
+            }
+            Progress::Done(outcome) => {
+                let resume = self.job.take().map_or(Resume::Start, |job| job.resume);
+                Some(match outcome {
+                    Ok(prepared) => {
+                        self.log
+                            .note(&format!("v{} is downloaded and verified", prepared.version));
+                        self.prepared = Some((prepared, resume));
+                        self.gate_update(force)
+                    }
+                    Err(error) => self.update_failed(error, resume),
+                })
+            }
+        }
+    }
+
+    /// A verified update goes through the gate like any other action.
+    fn gate_update(&mut self, force: bool) -> Phase {
+        if !self.child.as_ref().is_some_and(ServerChild::is_alive) {
+            return self.finish(Action::Update);
+        }
+        if force {
+            self.shut_down(Action::Update)
+        } else {
+            self.drain(Action::Update)
+        }
+    }
+
+    /// The server is stopped: installs the verified binary and restarts as it.
     fn hand_off_update(&mut self) -> Phase {
-        lock(&self.status).update.last_error =
-            Some("Updating is not available in this build".to_string());
+        let Some((prepared, resume)) = self.prepared.take() else {
+            return self.update_failed("No update is available".to_string(), Resume::Start);
+        };
+        let to = prepared.version;
+        self.log.note(&format!("Installing v{to}"));
+        self.set_state(
+            ServerState::Updating {
+                stage: format!("Installing v{to}"),
+            },
+            Some(Action::Update),
+        );
+        let installed = handoff::install(
+            &self.paths,
+            &self.exe,
+            &prepared.binary,
+            env!("CARGO_PKG_VERSION"),
+            &to,
+            update::swap,
+        );
+        let pending = match installed {
+            Ok(pending) => pending,
+            Err(error) => return self.update_failed(error.to_string(), resume),
+        };
+        self.log.note(&format!("Restarting as v{to}"));
+        let error = handoff::restart_into(&self.exe);
+        // Only reached when the restart failed: the old binary goes back.
+        let _ = handoff::undo(&self.paths, &pending, &self.exe);
+        self.update_failed(format!("Could not restart as v{to}: {error}"), resume)
+    }
+
+    /// The update was not installed: says why, and goes back to `resume`.
+    fn update_failed(&mut self, error: String, resume: Resume) -> Phase {
+        self.log
+            .note(&format!("The update was not installed: {error}"));
+        lock(&self.status).update.last_error = Some(error);
+        let alive = self.child.as_ref().is_some_and(ServerChild::is_alive);
+        match resume {
+            Resume::Running if alive => self.running(),
+            Resume::Starting if alive => {
+                self.set_state(ServerState::Starting, None);
+                Phase::Starting {
+                    deadline: Instant::now() + READY_TIMEOUT,
+                }
+            }
+            Resume::Cancelling if alive => {
+                self.set_state(ServerState::Running, None);
+                self.cancel()
+            }
+            Resume::Stopped => {
+                self.set_state(ServerState::Stopped, None);
+                Phase::Stopped
+            }
+            _ => self.start(),
+        }
+    }
+
+    /// Drops an update being got ready, or waiting at the gate.
+    fn abandon_update(&mut self) {
+        if let Some(job) = self.job.take() {
+            job.task.abort();
+        }
+        self.prepared = None;
+    }
+
+    /// This version's server did not run in time after an update: kills it,
+    /// then puts the previous binary back.
+    fn on_handoff_timeout(&mut self, phase: Phase) -> Phase {
+        let reason = match &lock(&self.status).state {
+            ServerState::Crashed { message, .. } => message.clone(),
+            _ => format!(
+                "The server was not running within {} seconds",
+                handoff::HEALTH_TIMEOUT.as_secs()
+            ),
+        };
+        let Some(handoff) = self.handoff.as_mut() else {
+            return phase;
+        };
+        handoff.deadline = None;
+        handoff.reason = reason;
+        let (from, to) = (handoff.pending.from.clone(), handoff.pending.to.clone());
+        self.log.note(&format!(
+            "v{to} did not start ({}); going back to v{from}",
+            handoff.reason
+        ));
+        self.abandon_update();
+        self.set_state(
+            ServerState::Updating {
+                stage: format!("Rolling back to v{from}"),
+            },
+            Some(Action::Update),
+        );
+        match self.child.as_mut() {
+            Some(child) => {
+                child.kill();
+                Phase::RollingBack
+            }
+            None => self.roll_back_update(),
+        }
+    }
+
+    /// Puts the previous binary back and restarts as it; it shows the failed update.
+    fn roll_back_update(&mut self) -> Phase {
+        self.child = None;
+        let Some(Handoff {
+            pending, reason, ..
+        }) = self.handoff.take()
+        else {
+            return self.start();
+        };
+        let restored =
+            handoff::roll_back(&self.paths, &pending, &self.exe, &reason, update::rollback);
+        let message = match restored {
+            Ok(()) => {
+                self.log.note(&format!("Restarting as v{}", pending.from));
+                let error = handoff::restart_into(&self.exe);
+                format!(
+                    "{}; restart Anima to finish ({error})",
+                    handoff::rolled_back_message(&pending.to)
+                )
+            }
+            Err(error) => format!(
+                "Update to v{} failed to start, and v{} could not be restored: {error}",
+                pending.to, pending.from
+            ),
+        };
+        self.log.note(&message);
+        lock(&self.status).update.last_error = Some(message);
         self.start()
     }
 
     fn exit(&mut self) -> Phase {
+        self.abandon_update();
         self.log.note("Quitting");
         self.set_state(ServerState::Stopped, None);
         Phase::Exit

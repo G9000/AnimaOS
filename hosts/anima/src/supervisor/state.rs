@@ -41,7 +41,7 @@ pub enum ServerState {
         message: String,
         retry_in_secs: u64,
     },
-    #[allow(dead_code)] // set by the updater (a later task)
+    /// Getting an update ready, installing it, or rolling it back.
     Updating {
         stage: String,
     },

@@ -18,6 +18,9 @@ const START_TIMEOUT: Duration = Duration::from_secs(20);
 const START_POLL: Duration = Duration::from_millis(200);
 /// How often the progress of a waiting action is refreshed.
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
+/// How long `update` waits for Anima to answer again after it restarts (as
+/// the new version, or as the old one after a rollback).
+const UPDATE_RESTART_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// What `ensure_running` found.
 pub enum Started {
@@ -185,7 +188,7 @@ pub fn run_action(action: Action, now: bool) -> io::Result<ExitCode> {
             return Ok(ExitCode::FAILURE);
         }
     };
-    follow(&paths, &cfg, &client, action, status)
+    follow(&paths, &cfg, client, action, status)
 }
 
 fn conflict_text(message: &str, pending: Option<Action>) -> String {
@@ -205,13 +208,14 @@ fn action_name(action: Action) -> Option<String> {
 fn follow(
     paths: &AnimaPaths,
     cfg: &Config,
-    client: &SupervisorClient,
+    mut client: SupervisorClient,
     action: Action,
     mut status: SupervisorStatus,
 ) -> io::Result<ExitCode> {
+    let started_on = status.version.clone();
     let mut progress = Progress::new();
     loop {
-        match judge(action, &status) {
+        match judge(action, &status, &started_on) {
             Verdict::Done(message) => {
                 progress.clear();
                 println!("{message}");
@@ -231,20 +235,49 @@ fn follow(
         thread::sleep(PROGRESS_INTERVAL);
         status = match client.status() {
             Ok(status) => status,
-            Err(error) => {
-                // Quitting (and an update, which restarts Anima) ends the
-                // supervisor, and with it the control API.
-                let gone = matches!(SupervisorClient::connect(paths, cfg), Ok(None));
-                if gone && matches!(action, Action::Quit | Action::Update) {
+            // An update restarts Anima: follow it once it answers again.
+            Err(_) if action == Action::Update => match reconnect(paths, cfg, &mut progress) {
+                Some((again, status)) => {
+                    client = again;
+                    status
+                }
+                None => {
                     progress.clear();
                     println!("{}", finished_text(action));
                     return Ok(ExitCode::SUCCESS);
                 }
+            },
+            Err(error) => {
+                // Quitting ends the supervisor, and with it the control API.
+                let gone = matches!(SupervisorClient::connect(paths, cfg), Ok(None));
                 progress.clear();
+                if gone && action == Action::Quit {
+                    println!("{}", finished_text(action));
+                    return Ok(ExitCode::SUCCESS);
+                }
                 return Err(error);
             }
         };
     }
+}
+
+/// Waits for the supervisor to answer again after an update restarted it.
+fn reconnect(
+    paths: &AnimaPaths,
+    cfg: &Config,
+    progress: &mut Progress,
+) -> Option<(SupervisorClient, SupervisorStatus)> {
+    progress.show("Restarting…");
+    let deadline = Instant::now() + UPDATE_RESTART_TIMEOUT;
+    while Instant::now() < deadline {
+        if let Ok(Some(client)) = SupervisorClient::connect(paths, cfg) {
+            if let Ok(status) = client.status() {
+                return Some((client, status));
+            }
+        }
+        thread::sleep(START_POLL);
+    }
+    None
 }
 
 /// How an action stands, judged from the status after it.
@@ -255,7 +288,19 @@ enum Verdict {
     Failed(String),
 }
 
-fn judge(action: Action, status: &SupervisorStatus) -> Verdict {
+/// `started_on` is the version that took the action: an update is done
+/// once another version runs.
+fn judge(action: Action, status: &SupervisorStatus, started_on: &str) -> Verdict {
+    if action == Action::Update && status.version != started_on {
+        return match status.state {
+            ServerState::Running if status.pending.is_none() => Verdict::Done(format!(
+                "Anima is updated to v{} · {}",
+                status.version, status.server_url
+            )),
+            // Still starting; if it can't, the old version comes back.
+            _ => Verdict::Waiting,
+        };
+    }
     if let ServerState::Crashed { message, .. } = &status.state {
         if action != Action::Stop {
             return Verdict::Failed(message.clone());
@@ -270,7 +315,8 @@ fn judge(action: Action, status: &SupervisorStatus) -> Verdict {
             Verdict::Done(format!("Anima is running · {}", status.server_url))
         }
         // The server is running again with nothing pending: the stop was
-        // cancelled (from the console, say) or the update had nothing to do.
+        // cancelled (from the console, say), or the same version is back
+        // without the update (none to install, or it was rolled back).
         (Action::Update, ServerState::Running | ServerState::Stopped) => Verdict::Failed(
             status
                 .update
@@ -295,13 +341,15 @@ fn finished_text(action: Action) -> String {
     .to_string()
 }
 
-/// The count of tasks a drain waits for, as the console words it.
+/// The count of tasks a drain waits for, as the console words it, or the
+/// stage an update is at.
 fn progress_line(state: &ServerState) -> Option<String> {
     match state {
         ServerState::Draining { in_flight, .. } => Some(format!(
             "Waiting for {} tasks to finish…",
             in_flight.total()
         )),
+        ServerState::Updating { stage } => Some(format!("{stage}…")),
         _ => None,
     }
 }
@@ -374,19 +422,67 @@ mod tests {
     }
 
     #[test]
+    fn an_update_shows_its_stages() {
+        let stage = |stage: &str| ServerState::Updating {
+            stage: stage.into(),
+        };
+        assert_eq!(
+            progress_line(&stage("Downloading v0.2.0")).as_deref(),
+            Some("Downloading v0.2.0…")
+        );
+        assert_eq!(
+            progress_line(&stage("Verifying")).as_deref(),
+            Some("Verifying…")
+        );
+        let updating = with(stage("Verifying"), Some(Action::Update));
+        assert_eq!(judge(Action::Update, &updating, "1.2.3"), Verdict::Waiting);
+    }
+
+    #[test]
+    fn an_update_is_done_when_the_new_version_runs() {
+        let mut starting = with(ServerState::Starting, None);
+        starting.version = "1.3.0".into();
+        assert_eq!(judge(Action::Update, &starting, "1.2.3"), Verdict::Waiting);
+        // Crashing is not failing yet: a rollback may follow.
+        let mut crashed = with(
+            ServerState::Crashed {
+                message: "boom".into(),
+                retry_in_secs: 1,
+            },
+            None,
+        );
+        crashed.version = "1.3.0".into();
+        assert_eq!(judge(Action::Update, &crashed, "1.2.3"), Verdict::Waiting);
+        let mut running = with(ServerState::Running, None);
+        running.version = "1.3.0".into();
+        assert_eq!(
+            judge(Action::Update, &running, "1.2.3"),
+            Verdict::Done("Anima is updated to v1.3.0 · http://127.0.0.1:8787".into())
+        );
+        // Back on the old version: the rollback says why.
+        let mut rolled_back = with(ServerState::Running, None);
+        rolled_back.update.last_error =
+            Some("Update to v1.3.0 failed to start; rolled back".into());
+        assert_eq!(
+            judge(Action::Update, &rolled_back, "1.2.3"),
+            Verdict::Failed("Update to v1.3.0 failed to start; rolled back".into())
+        );
+    }
+
+    #[test]
     fn actions_finish_in_their_own_state() {
         let stopping = with(ServerState::Stopping, Some(Action::Stop));
-        assert_eq!(judge(Action::Stop, &stopping), Verdict::Waiting);
+        assert_eq!(judge(Action::Stop, &stopping, "1.2.3"), Verdict::Waiting);
         let stopped = with(ServerState::Stopped, None);
         assert_eq!(
-            judge(Action::Stop, &stopped),
+            judge(Action::Stop, &stopped, "1.2.3"),
             Verdict::Done("Anima is stopped".into())
         );
         // A restart passes through stopped without being done.
-        assert_eq!(judge(Action::Restart, &stopped), Verdict::Waiting);
+        assert_eq!(judge(Action::Restart, &stopped, "1.2.3"), Verdict::Waiting);
         let running = with(ServerState::Running, None);
         assert!(matches!(
-            judge(Action::Restart, &running),
+            judge(Action::Restart, &running, "1.2.3"),
             Verdict::Done(text) if text.starts_with("Anima is running")
         ));
     }
@@ -394,11 +490,17 @@ mod tests {
     #[test]
     fn an_ended_drain_or_a_crash_fails_the_wait() {
         let running = with(ServerState::Running, None);
-        assert!(matches!(judge(Action::Stop, &running), Verdict::Failed(_)));
-        assert!(matches!(judge(Action::Quit, &running), Verdict::Failed(_)));
+        assert!(matches!(
+            judge(Action::Stop, &running, "1.2.3"),
+            Verdict::Failed(_)
+        ));
+        assert!(matches!(
+            judge(Action::Quit, &running, "1.2.3"),
+            Verdict::Failed(_)
+        ));
         // Being cancelled is not done yet.
         let cancelling = with(ServerState::Running, Some(Action::Cancel));
-        assert_eq!(judge(Action::Stop, &cancelling), Verdict::Waiting);
+        assert_eq!(judge(Action::Stop, &cancelling, "1.2.3"), Verdict::Waiting);
         let crashed = with(
             ServerState::Crashed {
                 message: "Port 8787 is in use".into(),
@@ -407,10 +509,13 @@ mod tests {
             None,
         );
         assert_eq!(
-            judge(Action::Restart, &crashed),
+            judge(Action::Restart, &crashed, "1.2.3"),
             Verdict::Failed("Port 8787 is in use".into())
         );
-        assert!(matches!(judge(Action::Stop, &crashed), Verdict::Waiting));
+        assert!(matches!(
+            judge(Action::Stop, &crashed, "1.2.3"),
+            Verdict::Waiting
+        ));
     }
 
     #[test]
@@ -418,7 +523,7 @@ mod tests {
         let mut running = with(ServerState::Running, None);
         running.update.last_error = Some("No update is available".into());
         assert_eq!(
-            judge(Action::Update, &running),
+            judge(Action::Update, &running, "1.2.3"),
             Verdict::Failed("No update is available".into())
         );
     }

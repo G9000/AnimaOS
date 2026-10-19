@@ -789,6 +789,56 @@ async fn download_verified_refuses_another_signer() {
 }
 
 #[tokio::test]
+async fn download_binary_reports_its_stages() {
+    let key = test_key();
+    let archive = tar_gz(&[TarEntry::File("anima-aarch64-apple-darwin/anima", b"new")]);
+    let base = serve(Served {
+        sha256: sha256_file(&archive, "anima-aarch64-apple-darwin.tar.gz"),
+        minisig: key.sign(&archive),
+        archive,
+        ..Served::default()
+    })
+    .await;
+    let stages = Mutex::new(Vec::new());
+    let binary = download_binary(
+        &http_client().unwrap(),
+        &local_release(&base),
+        &key.public,
+        |stage| stages.lock().unwrap().push(stage),
+    )
+    .await
+    .unwrap();
+    assert_eq!(binary, b"new");
+    assert_eq!(
+        stages.into_inner().unwrap(),
+        ["Downloading v0.2.0", "Verifying"]
+    );
+}
+
+#[tokio::test]
+async fn download_binary_refuses_an_unsigned_archive() {
+    let archive = tar_gz(&[TarEntry::File("anima", b"new")]);
+    let base = serve(Served {
+        sha256: sha256_file(&archive, "anima-aarch64-apple-darwin.tar.gz"),
+        minisig: test_key().sign(&archive),
+        archive,
+        ..Served::default()
+    })
+    .await;
+    let outcome = download_binary(
+        &http_client().unwrap(),
+        &local_release(&base),
+        &test_key().public,
+        |_| {},
+    )
+    .await;
+    assert!(
+        matches!(outcome, Err(UpdateError::Signature)),
+        "{outcome:?}"
+    );
+}
+
+#[tokio::test]
 async fn download_caps_the_size() {
     let base = serve(Served {
         archive: vec![7; 4096],

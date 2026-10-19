@@ -62,7 +62,7 @@ fn random_hex() -> io::Result<String> {
 }
 
 /// Temp file in the same folder, then rename, so a reader never sees half a token.
-fn write_private(path: &Path, contents: &str) -> io::Result<()> {
+pub(crate) fn write_private(path: &Path, contents: &str) -> io::Result<()> {
     let mut tmp_name = path.file_name().unwrap_or_default().to_os_string();
     tmp_name.push(format!(".tmp{}", std::process::id()));
     let tmp = path.with_file_name(tmp_name);

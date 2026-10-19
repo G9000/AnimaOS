@@ -7,7 +7,7 @@ use reqwest::{redirect, Client, StatusCode};
 use semver::Version;
 use serde::Deserialize;
 
-use super::{release_trusted_comment, verify, UpdateError};
+use super::{extract_binary, release_trusted_comment, verify, UpdateError};
 
 pub const GITHUB_API: &str = "https://api.github.com";
 pub const REPO: &str = "G9000/animaOS-SWARM";
@@ -164,27 +164,75 @@ pub async fn download(client: &Client, url: &str, limit: u64) -> Result<Vec<u8>,
     read_body(response, limit).await
 }
 
-/// Download `release`'s archive, checksum and signature, and return the archive only
-/// if [`verify`] accepts it against `public_key` (the release key in production:
-/// [`RELEASE_PUBLIC_KEY`](super::RELEASE_PUBLIC_KEY)) *and* the signature's trusted
-/// comment names this exact release: [`release_trusted_comment`] of its version,
-/// target and archive name.
+/// A release's archive with its published checksum and signature, not yet verified.
+pub struct ReleaseDownload {
+    archive: Vec<u8>,
+    sha256: Vec<u8>,
+    minisig: Vec<u8>,
+}
+
+/// Download `release`'s checksum, signature and archive.
+pub async fn download_release(
+    client: &Client,
+    release: &ReleaseInfo,
+) -> Result<ReleaseDownload, UpdateError> {
+    Ok(ReleaseDownload {
+        sha256: download(client, &release.sha256_url, MAX_SMALL_BYTES).await?,
+        minisig: download(client, &release.sig_url, MAX_SMALL_BYTES).await?,
+        archive: download(client, &release.archive_url, MAX_ARCHIVE_BYTES).await?,
+    })
+}
+
+impl ReleaseDownload {
+    /// The archive, only if [`verify`] accepts it against `public_key` (the release
+    /// key in production: [`RELEASE_PUBLIC_KEY`](super::RELEASE_PUBLIC_KEY)) *and* the
+    /// signature's trusted comment names this exact release: [`release_trusted_comment`]
+    /// of its version, target and archive name.
+    pub fn verify(self, release: &ReleaseInfo, public_key: &str) -> Result<Vec<u8>, UpdateError> {
+        verify(
+            &self.archive,
+            &String::from_utf8_lossy(&self.sha256),
+            &String::from_utf8_lossy(&self.minisig),
+            public_key,
+            &release_trusted_comment(&release.version, &release.target, &release.archive_name),
+        )?;
+        Ok(self.archive)
+    }
+}
+
+/// [`download_release`], then [`ReleaseDownload::verify`].
+#[cfg_attr(not(test), allow(dead_code))] // the supervisor uses `download_binary`
 pub async fn download_verified(
     client: &Client,
     release: &ReleaseInfo,
     public_key: &str,
 ) -> Result<Vec<u8>, UpdateError> {
-    let sha256 = download(client, &release.sha256_url, MAX_SMALL_BYTES).await?;
-    let minisig = download(client, &release.sig_url, MAX_SMALL_BYTES).await?;
-    let archive = download(client, &release.archive_url, MAX_ARCHIVE_BYTES).await?;
-    verify(
-        &archive,
-        &String::from_utf8_lossy(&sha256),
-        &String::from_utf8_lossy(&minisig),
-        public_key,
-        &release_trusted_comment(&release.version, &release.target, &release.archive_name),
-    )?;
-    Ok(archive)
+    download_release(client, release)
+        .await?
+        .verify(release, public_key)
+}
+
+/// The verified `anima` binary of `release`: downloaded, verified against
+/// `public_key` like [`download_verified`], and taken out of its archive.
+/// `stage` hears `"Downloading v{version}"`, then `"Verifying"`.
+pub async fn download_binary(
+    client: &Client,
+    release: &ReleaseInfo,
+    public_key: &str,
+    stage: impl Fn(String),
+) -> Result<Vec<u8>, UpdateError> {
+    stage(format!("Downloading v{}", release.version));
+    let download = download_release(client, release).await?;
+    stage("Verifying".to_string());
+    let release = release.clone();
+    let public_key = public_key.to_owned();
+    // Hashing, checking and unpacking up to 200 MiB is blocking work.
+    tokio::task::spawn_blocking(move || {
+        let archive = download.verify(&release, &public_key)?;
+        extract_binary(&archive, &release.target)
+    })
+    .await
+    .map_err(|error| UpdateError::Io(std::io::Error::other(error)))?
 }
 
 async fn read_body(mut response: reqwest::Response, limit: u64) -> Result<Vec<u8>, UpdateError> {

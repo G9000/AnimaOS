@@ -20,6 +20,7 @@ pub fn swap(new_binary: &[u8]) -> Result<PathBuf, UpdateError> {
 }
 
 /// [`swap`] for a binary that is not the one running (tests, or a stopped install).
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn swap_at(new_binary: &[u8], target: &Path) -> Result<PathBuf, UpdateError> {
     let old = keep_old(target)?;
     let staged = stage(new_binary, target)?;
