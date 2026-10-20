@@ -107,17 +107,17 @@ async fn test_create_agent() {
 ## TypeScript Packages
 
 ```bash
-# Core types
-bun x nx test @animaOS-SWARM/core
-
 # SDK
 bun x nx test @animaOS-SWARM/sdk
+
+# TUI
+bun x nx test @animaOS-SWARM/tui
 
 # CLI
 bun x nx test @animaOS-SWARM/cli
 
 # All TypeScript tests
-bun x nx run-many -t test -p @animaOS-SWARM/core @animaOS-SWARM/sdk @animaOS-SWARM/cli
+bun x nx run-many -t test -p @animaOS-SWARM/sdk @animaOS-SWARM/tui @animaOS-SWARM/cli
 ```
 
 ### Vitest Configuration
@@ -125,10 +125,10 @@ bun x nx run-many -t test -p @animaOS-SWARM/core @animaOS-SWARM/sdk @animaOS-SWA
 Tests use Vitest with the workspace config in `vitest.workspace.ts`:
 
 ```typescript
-export default defineWorkspace([
-  'packages/*/vitest.config.ts',
-  'tools/*/vitest.config.ts',
-]);
+export default [
+  '**/vite.config.{mjs,js,ts,mts}',
+  '**/vitest.config.{mjs,js,ts,mts}',
+];
 ```
 
 ### Mocking HTTP Calls
@@ -148,18 +148,17 @@ beforeEach(() => {
 
 ### Mocking the Event Bus
 
+The TUI exports `EventBus` and the `IEventBus` interface. Components and hooks such as `App` and `useEventLog` take an `IEventBus`, so a test can pass a mock:
+
 ```typescript
-const mockEventBus = {
-  on: vi.fn(),
+import { vi } from 'vitest';
+import type { IEventBus } from '@animaOS-SWARM/tui';
+
+const mockEventBus: IEventBus = {
+  on: vi.fn(() => () => {}),
   emit: vi.fn().mockResolvedValue(undefined),
   clear: vi.fn(),
 };
-
-const runtime = new AgentRuntime({
-  config: testConfig,
-  modelAdapter: mockAdapter,
-  eventBus: mockEventBus,
-});
 ```
 
 ## Dev Launcher

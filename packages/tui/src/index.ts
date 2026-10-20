@@ -62,3 +62,6 @@ export {
   maybeColor,
   useColorEnabled,
 } from './colors.js';
+
+export { EventBus } from './event-bus.js';
+export type { Event, EventHandler, EventType, IEventBus } from './event-bus.js';

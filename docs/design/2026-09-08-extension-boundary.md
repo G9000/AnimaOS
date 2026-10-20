@@ -6,7 +6,7 @@
 
 `hosts/rust-daemon/src/tools.rs` separately owns the daemon's registered native tool handlers. The new `GET /api/capabilities` lists these real registrations. It is a read-only discovery API, not installation, permission assignment, connection validation, or invocation of the portable registry.
 
-`packages/mod-sdk` is the existing TypeScript mod authoring helper. Its `defineModTool` types a TypeScript handler; it is not a loader for the Rust daemon. Do not present a TypeScript mod as daemon-installed until a real execution bridge exists.
+The earlier TypeScript mod system (`packages/mod-sdk`, `animaos mod`) was removed; it never ran inside the Rust daemon. Do not present a TypeScript mod as daemon-installed until a real execution bridge exists.
 
 ## The next executable extension slice
 

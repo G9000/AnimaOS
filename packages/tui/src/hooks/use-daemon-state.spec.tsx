@@ -5,7 +5,7 @@ import {
   DAEMON_CONNECTION_LOST_MESSAGE,
   DAEMON_HEALTH_UNAVAILABLE_MESSAGE,
   DAEMON_RECOVERED_MESSAGE,
-} from '@animaOS-SWARM/core';
+} from '@animaOS-SWARM/sdk';
 import { cleanupInk, flushInk, renderInk } from '../test-harness.js';
 import { useDaemonState } from './use-daemon-state.js';
 

@@ -46,7 +46,6 @@ export default defineConfig({
         { label: 'Philosophy', link: '/philosophy/' },
         { label: 'Architecture', collapsed: false, items: [
           { label: 'Monorepo Structure', link: '/architecture/monorepo/' },
-          { label: 'TypeScript Core', link: '/architecture/typescript-core/' },
         ]},
         { label: 'Rust Core', collapsed: false, items: [
           { label: 'Why Rust?', link: '/architecture/why-rust/' },

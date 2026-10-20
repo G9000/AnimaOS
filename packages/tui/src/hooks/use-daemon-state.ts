@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   DAEMON_HEALTH_UNAVAILABLE_MESSAGE,
   describeDaemonWarningTransition,
-} from '@animaOS-SWARM/core';
+} from '@animaOS-SWARM/sdk';
 
 const DAEMON_WARNING_POLL_MS = 5000;
 const DAEMON_RECOVERY_NOTICE_MS = 4000;

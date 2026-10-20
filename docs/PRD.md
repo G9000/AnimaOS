@@ -1,5 +1,7 @@
 # AnimaOS Kit - Product Requirements Document
 
+> **Note:** product framing (goals, non-goals, roadmap) dates from April 2026 and predates the companion console. The architecture and status tables were refreshed on 2026-10-20; read the root [README](../README.md) for current scope.
+
 **Version:** 0.2.0
 **Date:** 2026-04-05
 **Status:** Active
@@ -41,25 +43,20 @@ The primary operator surface is the terminal UI exposed through `animaos launch`
 ```text
 animaos-swarm/
 |-- packages/
-|   |-- core-ts/                    Shared TS contracts, plugin types, and compatibility utilities
 |   |-- core-rust/
 |   |   `-- crates/
 |   |       |-- anima-core          Reusable Rust runtime core
 |   |       |-- anima-swarm         Reusable Rust swarm coordination
 |   |       `-- anima-memory        Reusable Rust memory services
-|   |-- swarm/                      TS swarm helpers, strategies, and shared types
-|   |-- tools/                      TS tool registry, policies, hooks, and local executors
-|   |-- memory/                     BM25 search, task history, and TS memory helpers
-|   |-- sdk/                        Public TypeScript client for the Rust daemon
-|   |-- cli/                        Local `animaos` CLI and agency scaffolding
+|   |-- sdk/                        Public TypeScript client and shared types for the Rust daemon
+|   |-- cli/                        Local `animaos` CLI and single-agent scaffolding
 |   `-- tui/                        Ink-based terminal UI for launch sessions
 |-- hosts/
-|   |-- rust-daemon/                Current HTTP/SSE execution host
-|   |-- elixir-phoenix/             Placeholder for a future Elixir host
-|   `-- python-service/             Placeholder for a future Python host
+|   `-- rust-daemon/                HTTP/SSE execution host
 `-- apps/
-    |-- server/                     Existing TS server kept during restructuring
-    `-- ui/                         Secondary web dashboard (React + Vite)
+    |-- web/                        Web console (React + Vite)
+    |-- playground/                 Playground
+    `-- docs/, contributor-docs/    Astro documentation sites
 ```
 
 **Tech Stack:** Rust, Bun, TypeScript, Nx, Cargo, Vite, React, Vitest, Playwright, Oxlint
@@ -75,10 +72,10 @@ animaos-swarm/
 | Rust runtime ports | Done | Reusable Rust runtime crates now live in `packages/core-rust`, while the current runnable daemon host lives in `hosts/rust-daemon` |
 | Provider support | Done | OpenAI, Anthropic, Google/Gemini, Ollama, and several OpenAI-compatible providers run through the daemon |
 | Swarm coordination | Done | Supervisor, dynamic, and round-robin strategies are implemented |
-| CLI surface | Done | `create`, `run`, `chat`, `launch`, and `agents` are available through the local `animaos` binary |
-| SDK | Done | The TypeScript SDK provides daemon HTTP/SSE clients plus config helper factories |
+| CLI surface | Done | `create` (single agent), `run`, `chat`, `launch`, `agents`, and `assistant` are available through the local `animaos` binary |
+| SDK | Done | The TypeScript SDK provides daemon HTTP/SSE clients, shared types, and config helper factories |
 | Memory services | Done | BM25 search, task history, document storage, and recent memory retrieval are implemented in the reusable Rust core and exposed today through the current daemon host |
-| Server API | Done | Agents, swarms, documents, search, and health endpoints are available through the server app and daemon boundary |
+| Daemon API | Done | Agents, swarms, documents, search, and health endpoints are served by the Rust daemon |
 | TUI support | Done | Local launch sessions already render through the Ink-based terminal UI package |
 | Test coverage | Done | TypeScript package tests and the Rust `cargo test` suite are part of the current development flow |
 
@@ -87,10 +84,10 @@ animaos-swarm/
 | Component | Status | Details |
 |---|---|---|
 | TUI operator experience | In progress | `launch` already uses the terminal UI, but it still needs stronger navigation, trace inspection, approvals, memory drill-down, and session resume |
-| Web UI dashboard | Secondary | The UI app exists but remains a placeholder and is not the primary product surface |
+| Web console | Active | `apps/web` is the main companion console; this PRD's earlier TUI-first framing predates it |
 | Auth and audit policy | Planned | API auth, managed permission tiers, and audit surfaces still need productization |
 | Persistent relational storage | Planned | The current runtime leans on file/BM25 flows; a DB layer remains future work |
-| Plugin packaging | Planned | Core plugin types exist, but manifests, loaders, examples, and registry conventions are not first-class yet |
+| Extension packaging | Planned | The TypeScript mod system was removed; extension manifests and loaders belong in the daemon (see the extension-boundary design) |
 | Release and install polish | Planned | CI, package docs, install paths, and changelog/security posture still need tightening |
 
 ---

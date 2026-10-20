@@ -30,14 +30,14 @@ The CLI accepts the same main provider family across `create`, `launch`, `run`, 
 | Variable | Description |
 |----------|-------------|
 | `ANIMA_DAEMON_URL` | Override the daemon base URL for daemon-backed CLI commands |
-| Provider key env vars | Credentials used for generation or execution |
+| Provider key env vars | Credentials used for daemon-backed execution |
 | Provider base URL env vars | Override provider endpoints such as `OPENAI_BASE_URL` or `OLLAMA_BASE_URL` |
-| `ANIMAOS_WORKSPACE_ROOT` | Workspace root used by mod configuration and workspace-aware tooling |
+| `ANIMAOS_WORKSPACE_ROOT` | Workspace root used by the daemon's workspace tools |
 
 ## Override Rules
 
 - `--api-key` overrides the environment for the current CLI invocation.
-- `create` can use `deterministic` when you want local generation without a remote model.
+- `create` falls back to `deterministic` when no remote provider is configured.
 - Daemon-backed commands forward provider settings into the host-backed run; changing keys does not require a daemon restart.
 
 ## Common Examples
@@ -52,8 +52,8 @@ ANIMA_DAEMON_URL=https://staging.example.com \
 OPENAI_API_KEY=sk-... \
 animaos agents list
 
-# Deterministic local workspace generation
-animaos create agency local-team -p deterministic --yes
+# Deterministic local workspace scaffolding
+animaos create agent local-helper -d "Summarize notes" -p deterministic
 ```
 
 <Aside type="tip">

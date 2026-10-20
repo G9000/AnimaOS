@@ -22,7 +22,7 @@ Whether you're building a single research assistant or a fleet of cooperating ag
     The Rust core knows nothing about HTTP, databases, or filesystems. It operates on pure data structures and snapshots. Hosts provide the "reality" — the core provides the behavior.
   </Card>
   <Card title="Composable by Design" icon="seti:typescript">
-    Agents are configured, not coded. Tools, plugins, providers, and evaluators snap together like LEGO. Reuse components across projects without rewriting boilerplate.
+    Agents are configured, not coded. Tools, memory, and model settings snap together like LEGO. Reuse agent configs across projects without rewriting boilerplate.
   </Card>
   <Card title="Memory-First" icon="seti:db">
     Agents remember. The memory system isn't an afterthought — it's a first-class citizen with search, recall, evaluation, retention, and relationship tracking built in.
@@ -37,10 +37,10 @@ Whether you're building a single research assistant or a fleet of cooperating ag
 │              (SDK, CLI, or custom integration)              │
 ├─────────────────────────────────────────────────────────────┤
 │                        Host Layer                           │
-│  ┌─────────────┐  ┌──────────────┐  ┌─────────────────────┐ │
-│  │ Rust Daemon │  │ Elixir Host  │  │  Python Service     │ │
-│  │ (ready)     │  │ (planned)    │  │  (planned)          │ │
-│  └─────────────┘  └──────────────┘  └─────────────────────┘ │
+│  ┌─────────────┐                                            │
+│  │ Rust Daemon │                                            │
+│  │ (ready)     │                                            │
+│  └─────────────┘                                            │
 ├─────────────────────────────────────────────────────────────┤
 │                      Core Runtime                           │
 │  ┌──────────┐  ┌──────────────┐  ┌───────────────────────┐  │
@@ -55,7 +55,7 @@ Whether you're building a single research assistant or a fleet of cooperating ag
 
 The **core** is where all the intelligence lives. It has zero I/O dependencies — no HTTP framework, no database driver, no filesystem access. This makes it trivial to test, embed in other applications, or port to new environments.
 
-The **host** wraps the core and exposes it over a runtime boundary. The production-ready Rust host provides an Axum HTTP/SSE server. Other hosts (Elixir, Python) are planned for future releases.
+The **host** wraps the core and exposes it over a runtime boundary. The production-ready Rust host provides an Axum HTTP/SSE server. Other hosts can implement the same HTTP/SSE contract.
 
 <Aside type="note">
   With Postgres-backed daemon persistence enabled, tool steps are written durably and can be reused on an explicit retry. Reuse is request-keyed, not prompt-keyed: callers must repeat the same `retryKey` or `idempotencyKey` in request metadata for a retried run to reuse completed tool results.
@@ -68,8 +68,7 @@ The **host** wraps the core and exposes it over a runtime boundary. The producti
 An agent is an autonomous LLM-powered runtime with a configuration, state, and optional tools. You define what it knows, how it behaves, and what it can do — the runtime handles the rest.
 
 - **Configuration** — name, model, provider, system prompt, personality traits
-- **Tools** — typed actions the agent can invoke (web search, file I/O, memory access)
-- **Plugins** — reusable bundles of tools, providers, and evaluators
+- **Tools** — daemon-registered tools the agent can invoke, referenced by name or JSON descriptor (web fetch, memory search)
 - **State** — runtime status, message history, token usage
 
 [Learn more about Agents →](/sdk/agents/)

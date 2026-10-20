@@ -33,18 +33,15 @@ behavior. See [deployment acceptance](../../deploy/vps/README.md).
 
 ## Service-starting suites
 
-The default `e2e`, companion configuration and `e2e-live` suites use preview/dev
-servers or live harnesses. They are retained for separately authorized runtime
+The default `e2e` and companion configuration suites use preview/dev
+servers. They are retained for separately authorized runtime
 testing and excluded from the no-service milestone gates:
 
 ```sh
 bun x nx run @animaOS-SWARM/web-e2e:e2e
-bun x nx run @animaOS-SWARM/web-e2e:e2e-live
 ```
 
-The live suite checks legacy websocket integrations; it does not substitute for
-the current session/SSE console contract. Do not use default/live targets when
-services are prohibited.
+Do not use the default target when services are prohibited.
 
 ## Isolated memory HTTP acceptance (M61)
 

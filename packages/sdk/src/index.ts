@@ -1,4 +1,4 @@
-export { AgentsClient, action, agent, plugin } from './agents.js';
+export { AgentsClient, agent } from './agents.js';
 export { AgentFilesClient } from './agent-files.js';
 export { AttachmentsClient } from './attachments.js';
 export { VoiceClient } from './voice.js';
@@ -434,33 +434,46 @@ export type {
 } from './swarms.js';
 
 export type {
-  Action,
   AgentConfig,
   AgentSettings,
   AgentState,
   AgentStatus,
   Attachment,
   Content,
-  Plugin,
   TaskResult,
   TokenUsage,
   UUID,
-} from '@animaOS-SWARM/core';
+} from './types.js';
 
 export type {
   Memory,
   AgentRelationship,
   AgentRelationshipOptions,
+  MemoryScope,
   MemorySearchOptions,
   MemorySearchResult,
   NewAgentRelationshipInput,
   RelationshipEndpointKind,
   MemoryType,
-} from '@animaOS-SWARM/memory';
+} from './memory-types.js';
 
 export type {
   AgentMessage,
   SwarmConfig,
   SwarmState,
+  SwarmStatus,
   SwarmStrategy,
-} from '@animaOS-SWARM/swarm';
+} from './swarms.js';
+
+export {
+  DAEMON_CONNECTION_LOST_MESSAGE,
+  DAEMON_HEALTHY_MESSAGE,
+  DAEMON_HEALTH_UNAVAILABLE_MESSAGE,
+  DAEMON_RECOVERED_MESSAGE,
+  describeDaemonWarningTransition,
+  formatDaemonUnreachableWarning,
+} from './daemon-health.js';
+export type {
+  DaemonWarningSource,
+  DaemonWarningTransition,
+} from './daemon-health.js';

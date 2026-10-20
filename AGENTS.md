@@ -19,11 +19,10 @@ Shared guidance for GPT-6 Astra and GPT-5.6 coding agents, adapted from the offi
 # Repo Boundaries
 
 - `packages/core-rust` is the Rust host-agnostic core workspace. It contains reusable Rust engine crates such as `anima-core`, `anima-memory`, `anima-swarm`, `anima-schedule`, and `anima-harness` (an embeddable agent-harness crate composing `anima-core` + `anima-model-adapters`).
-- `packages/core-ts` is the TypeScript host-agnostic core package. Its npm package name is still `@animaOS-SWARM/core`.
-- `packages/*` is for reusable libraries, SDKs, runtime ports, and shared tooling.
+- `packages/*` is for reusable libraries, SDKs, runtime ports, and shared tooling. The TypeScript packages (`sdk`, `cli`, `tui`, `ui`) are thin clients of the Rust daemon; execution lives in Rust, not TypeScript.
 - `hosts/*` is for runnable backend host processes only. Hosts wrap a core implementation and expose it over a runtime boundary such as HTTP, WebSocket, SSE, jobs, or another process interface.
-- `hosts/rust-daemon` is the ready Rust host. It embeds the Telegram connector runtime, including polling, pairing, delivery, persistence, and restart recovery. `hosts/elixir-phoenix` and `hosts/python-service` are placeholder host projects until implemented.
-- `apps/*` is for user-facing app surfaces such as the `web` runtime console, `playground`, `web-e2e`, the Astro docs apps, and the legacy local TypeScript server.
+- `hosts/rust-daemon` is the ready Rust host. It embeds the Telegram connector runtime, including polling, pairing, delivery, persistence, and restart recovery.
+- `apps/*` is for user-facing app surfaces such as the `web` runtime console, `playground`, `web-e2e`, and the Astro docs apps.
 - `tools/*` is for workspace tooling such as the `workspace-dev` launcher.
 
 # Architecture Rules
@@ -31,13 +30,12 @@ Shared guidance for GPT-6 Astra and GPT-5.6 coding agents, adapted from the offi
 - Do not move reusable engine/runtime library code into `hosts/*`.
 - If code is intended to be reused by multiple hosts, put it under `packages/*`.
 - Do not make `anima-core` depend on an HTTP framework, DB driver, or host-specific runtime.
-- Do not remove or retarget `apps/server` unless explicitly asked. It is retained during the restructuring even though the long-term backend host boundary is `hosts/*`.
 - Keep host selection centralized in `tools/workspace-dev` rather than hardcoding host ports or project names in UI/client packages.
 
 # Dev Workflow
 
 - Use `bun dev --host rust` for the normal local workflow. It runs the selected host plus both browser surfaces, `@animaOS-SWARM/web` and `@animaOS-SWARM/playground`, through `workspace-dev`. The web console talks only to the daemon on `127.0.0.1:8080`. The daemon automatically starts restored Telegram connectors; no separate gateway process or token environment variable is used.
-- The current supported host keys are `rust`, `elixir`, and `python`; only `rust` is production-ready today.
+- The only supported host key is `rust`.
 - Use Nx project targets for host work: `bun x nx run rust-daemon:dev`, `bun x nx run rust-daemon:build`, `bun x nx run rust-daemon:test`, and `bun x nx run rust-daemon:lint`.
 - Use Nx project targets for docs work: `bun x nx run @animaOS-SWARM/docs:build` and `bun x nx run @animaOS-SWARM/contributor-docs:build`.
 - Use `bun x nx test workspace-dev` when changing host selection, process orchestration, or dev launcher behavior.

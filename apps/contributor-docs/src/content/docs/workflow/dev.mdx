@@ -73,15 +73,15 @@ bun x nx run @animaOS-SWARM/docs:dev
 bun x nx run @animaOS-SWARM/contributor-docs:dev
 ```
 
-Supported host keys: `rust`, `elixir`, `python`. Only `rust` is production-ready today.
+`rust` is the only supported host key.
 
 ### Port Map
 
 | Service | Port | Description |
 |---------|------|-------------|
 | Rust daemon | `8080` | HTTP API + SSE |
-| Web UI | `3000` | React web app |
-| Playground | `3001` | Interactive playground |
+| Web UI | `4200` | React web app |
+| Playground | `4201` | Interactive playground |
 | Public docs | `4321` | User-facing docs |
 | Contributor docs | `4322` | This site |
 
@@ -149,7 +149,7 @@ cargo nextest run --workspace
 bun x nx build @animaOS-SWARM/sdk
 
 # Test a package
-bun x nx test @animaOS-SWARM/core
+bun x nx test @animaOS-SWARM/tui
 
 # Type check
 bun x nx typecheck @animaOS-SWARM/sdk

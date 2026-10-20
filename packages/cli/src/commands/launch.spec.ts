@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import { executeLaunchCommand } from './launch.js';
 import { relayLaunchSwarmEvent } from './launch-events.js';
 import { LAUNCH_HISTORY_FILENAME } from './launch-history.js';
-import { ACTION_TOOL_SCHEMAS, MOD_TOOL_MAP } from '@animaOS-SWARM/tools';
 
 const DEFAULT_AGENCY_YAML = [
   'name: Launch Test Agency',
@@ -1029,61 +1028,6 @@ describe('launch command daemon plain-text mode', () => {
     );
   });
 
-  it('maps every built-in tools registry entry into a daemon descriptor', async () => {
-    const builtInToolNames = ACTION_TOOL_SCHEMAS.map((tool) => tool.name);
-
-    rmSync(agencyDir, { recursive: true, force: true });
-    agencyDir = createAgencyDir(
-      [
-        'name: Launch Test Agency',
-        'description: daemon launch fixture',
-        'model: gpt-5.4',
-        'provider: openai',
-        'strategy: round-robin',
-        'orchestrator:',
-        '  name: manager',
-        '  bio: Coordinate work',
-        '  system: Orchestrate the workers',
-        '  tools:',
-        ...builtInToolNames.map((toolName) => `    - ${toolName}`),
-        'agents:',
-        '  - name: worker-a',
-        '    bio: Execute tasks',
-        '    system: Complete the assigned work',
-      ].join('\n')
-    );
-
-    const client = {
-      swarms: mockSwarms({
-        create: vi.fn().mockResolvedValue({ id: 'swarm-1' }),
-        run: vi.fn().mockResolvedValue({
-          result: {
-            status: 'success',
-            data: { text: 'daemon launch result' },
-            durationMs: 12,
-          },
-        }),
-      }),
-    };
-
-    await executeLaunchCommand(
-      'Verify daemon tool coverage',
-      {
-        dir: agencyDir,
-        tui: false,
-      },
-      { client }
-    );
-
-    const createdSwarm = client.swarms.create.mock.calls[0]?.[0];
-    const managerToolNames = new Set(
-      (createdSwarm?.manager?.tools ?? []).map((tool: { name: string }) => tool.name)
-    );
-    const missing = builtInToolNames.filter((toolName) => !managerToolNames.has(toolName));
-
-    expect(missing).toEqual([]);
-  });
-
   it('passes maxParallelDelegations through to the daemon swarm config', async () => {
     rmSync(agencyDir, { recursive: true, force: true });
     agencyDir = createAgencyDir(
@@ -1196,90 +1140,6 @@ describe('launch command daemon plain-text mode', () => {
       'Ignoring unregistered tool slug(s) for agent "manager": strategic_roadmap. Launch binds only daemon-registered tools; other anima.yaml tool entries remain declarative.'
     );
     expect(process.exitCode).toBeUndefined();
-  });
-
-  it('resolves registered mod tools into daemon tool descriptors', async () => {
-    MOD_TOOL_MAP.set('get_price', {
-      name: 'get_price',
-      description: 'Fetch the current price of a crypto asset.',
-      parameters: {
-        type: 'object',
-        properties: {
-          symbol: { type: 'string' },
-        },
-        required: ['symbol'],
-      },
-      execute: vi.fn().mockResolvedValue({ price: 42000 }),
-    });
-
-    rmSync(agencyDir, { recursive: true, force: true });
-    agencyDir = createAgencyDir(
-      [
-        'name: Launch Test Agency',
-        'description: daemon launch fixture',
-        'model: gpt-5.4',
-        'provider: openai',
-        'strategy: round-robin',
-        'orchestrator:',
-        '  name: manager',
-        '  bio: Coordinate work',
-        '  system: Orchestrate the workers',
-        '  tools:',
-        '    - get_price',
-        'agents:',
-        '  - name: worker-a',
-        '    bio: Execute tasks',
-        '    system: Complete the assigned work',
-      ].join('\n')
-    );
-
-    const client = {
-      swarms: mockSwarms({
-        create: vi.fn().mockResolvedValue({ id: 'swarm-mod' }),
-        run: vi.fn().mockResolvedValue({
-          result: {
-            status: 'success',
-            data: { text: 'mod tool launch result' },
-            durationMs: 10,
-          },
-        }),
-      }),
-    };
-
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-    await executeLaunchCommand(
-      'Analyze BTC',
-      {
-        dir: agencyDir,
-        tui: false,
-      },
-      { client }
-    );
-
-    expect(errorSpy).not.toHaveBeenCalled();
-    expect(client.swarms.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        manager: expect.objectContaining({
-          tools: expect.arrayContaining([
-            expect.objectContaining({
-              name: 'get_price',
-              description: 'Fetch the current price of a crypto asset.',
-              parameters: {
-                type: 'object',
-                properties: { symbol: { type: 'string' } },
-                required: ['symbol'],
-              },
-            }),
-          ]),
-        }),
-      })
-    );
-
-    MOD_TOOL_MAP.delete('get_price');
-    logSpy.mockRestore();
-    errorSpy.mockRestore();
   });
 
   it('reuses one daemon swarm across plain-text interactive tasks', async () => {

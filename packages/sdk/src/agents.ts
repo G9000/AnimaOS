@@ -1,4 +1,4 @@
-import type { Action, AgentConfig, Content, Plugin } from '@animaOS-SWARM/core';
+import type { AgentConfig, Content } from './types.js';
 
 import type { DaemonClient } from './client.js';
 import type {
@@ -208,14 +208,6 @@ export type AgentToolInput =
     };
 
 export function agent<T extends AgentConfig>(config: T): T {
-  return config;
-}
-
-export function plugin<T extends Plugin>(config: T): T {
-  return config;
-}
-
-export function action<T extends Action>(config: T): T {
   return config;
 }
 

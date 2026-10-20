@@ -7,13 +7,16 @@ function repoPath(...segments: string[]) {
 }
 
 describe('repo layout', () => {
-  it('stores the TypeScript core port in packages/core-ts', () => {
-    expect(existsSync(repoPath('packages', 'core-ts', 'package.json'))).toBe(
-      true
-    );
-    expect(existsSync(repoPath('packages', 'core', 'package.json'))).toBe(
-      false
-    );
+  it('has no legacy TypeScript runtime or placeholder hosts', () => {
+    for (const legacy of [
+      ['packages', 'core-ts'],
+      ['packages', 'core'],
+      ['apps', 'server'],
+      ['hosts', 'elixir-phoenix'],
+      ['hosts', 'python-service'],
+    ]) {
+      expect(existsSync(repoPath(...legacy))).toBe(false);
+    }
   });
 
   it('stores reusable Rust crates under packages/core-rust', () => {
@@ -88,14 +91,5 @@ describe('repo layout', () => {
     expect(
       existsSync(repoPath('hosts', 'rust-daemon', 'crates', 'anima-daemon'))
     ).toBe(false);
-  });
-
-  it('stores placeholder host projects for elixir and python', () => {
-    expect(
-      existsSync(repoPath('hosts', 'elixir-phoenix', 'project.json'))
-    ).toBe(true);
-    expect(
-      existsSync(repoPath('hosts', 'python-service', 'project.json'))
-    ).toBe(true);
   });
 });

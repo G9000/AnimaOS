@@ -2,7 +2,7 @@
 
 Command-line interface for animaOS-SWARM.
 
-This package builds the local `animaos` binary used for agency scaffolding and daemon-backed commands such as `run`, `chat`, `launch`, and `agents`.
+This package builds the local `animaos` binary used for single-agent scaffolding and daemon-backed commands such as `run`, `chat`, `launch`, and `agents`.
 
 `launch` is the primary TUI workflow. Use `--no-tui` only for automation, CI, or plain-text runs.
 
@@ -10,7 +10,7 @@ Plain-text launch supports both one-shot and interactive flows. In interactive `
 
 Current CLI coverage includes:
 
-- single-agent and agency scaffolding through `create`
+- single-agent workspace scaffolding through `create agent`
 - daemon-backed execution through `run`, `chat`, `launch`, `agents`, and `assistant`
 - TUI and plain-text launch flows, including `/help` and `/health` in interactive `--no-tui` mode
 - provider and API-key forwarding into daemon-backed runs
@@ -19,9 +19,8 @@ Current CLI coverage includes:
 ## Quick Example
 
 ```bash
-# Scaffold a single agent or a full agency
-bun run animaos create agent helper -d "Answer support questions" --yes
-bun run animaos create agency demo-team --yes
+# Scaffold a single-agent workspace
+bun run animaos create agent helper -d "Answer support questions"
 
 # Run a daemon-backed task
 bun run animaos run "Summarize the current agency setup"
@@ -46,15 +45,10 @@ Run `bun run build:cli-sdk` to build the CLI and its SDK dependency, or `bun x n
 Run `bun run animaos --help` or `bun run animaos launch "your task"`.
 
 ```bash
-# Interactive picker: agent or agency
-bun run animaos create
-
-# Explicit modes
 bun run animaos create agent helper -d "Research medical literature"
-bun run animaos create agency content-team -d "Research topics and write articles" -s 5
 ```
 
-`create` uses configured remote provider credentials when available, and falls back to a deterministic local scaffolder when no provider key is present. Pass `-p openai`, `-p anthropic`, or another provider to force LLM generation.
+`create agent` writes a launchable workspace (`anima.yaml`, an org chart, and a profile). It uses a configured remote provider when credentials are available and records `deterministic` otherwise; pass `-p openai`, `-p anthropic`, or another provider to choose one. Multi-agent teams are authored by hand in `anima.yaml`; `launch` runs them.
 
 ```bash
 # Single-shot plain-text launch

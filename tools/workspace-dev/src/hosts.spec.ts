@@ -18,18 +18,16 @@ const DEV_CONTROL_PLANE = join(
 
 describe('workspace-dev host registry', () => {
   it('recognizes the supported host keys', () => {
-    expect(HOST_KEYS).toEqual(['rust', 'elixir', 'python']);
+    expect(HOST_KEYS).toEqual(['rust']);
     expect(isHostKey('rust')).toBe(true);
-    expect(isHostKey('elixir')).toBe(true);
-    expect(isHostKey('python')).toBe(true);
+    expect(isHostKey('elixir')).toBe(false);
   });
 
-  it('marks rust as the ready host project', () => {
+  it('registers the rust daemon host project', () => {
     expect(getHostDefinition('rust')).toEqual({
       key: 'rust',
       projectName: 'rust-daemon',
       baseUrl: 'http://127.0.0.1:8080',
-      status: 'ready',
       env: {
         ANIMAOS_RS_HOST: '127.0.0.1',
         ANIMAOS_RS_PORT: '8080',
@@ -37,22 +35,9 @@ describe('workspace-dev host registry', () => {
     });
   });
 
-  it('marks elixir and python as placeholders', () => {
-    expect(getHostDefinition('elixir')).toMatchObject({
-      key: 'elixir',
-      projectName: 'elixir-phoenix',
-      status: 'placeholder',
-    });
-    expect(getHostDefinition('python')).toMatchObject({
-      key: 'python',
-      projectName: 'python-service',
-      status: 'placeholder',
-    });
-  });
-
   it('rejects unknown hosts with a clear error', () => {
     expect(() => getHostDefinition('go')).toThrowError(
-      "Unknown host 'go'. Expected one of: rust, elixir, python."
+      "Unknown host 'go'. Expected one of: rust."
     );
   });
 
@@ -91,11 +76,6 @@ describe('workspace-dev host registry', () => {
       expect(
         hostProcessEnv(rust, { ANIMAOS_DEV_EPHEMERAL: '1' }, '/home/dev')
       ).toEqual(rust.env);
-    });
-
-    it('adds nothing for other hosts', () => {
-      const elixir = getHostDefinition('elixir');
-      expect(hostProcessEnv(elixir, {}, '/home/dev')).toEqual(elixir.env);
     });
   });
 });

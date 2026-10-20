@@ -46,20 +46,20 @@ export OPENAI_API_KEY="sk-..."
 
 ## Quick Start (CLI Only - No Code!)
 
-You can create and use an agency directly from the CLI without writing any code:
+You can scaffold an agent workspace and run it from the CLI without writing any code:
 
 ```bash
-# 1. Create an agency (no daemon required)
-bun run animaos create my-agency \
+# 1. Create an agent workspace (no daemon required)
+bun run animaos create agent my-agent \
+  -d "Research assistant" \
   --provider openai \
-  --model gpt-4o-mini \
-  --api-key "$OPENAI_API_KEY"
+  --model gpt-4o-mini
 
 # 2. Start the daemon (in a new terminal)
 bun run daemon
 
-# 3. Use your agency
-cd my-agency
+# 3. Launch it
+cd my-agent
 bun run animaos launch "Write a blog post about AI" --no-tui
 ```
 
@@ -90,7 +90,7 @@ Runtime ownership in the current repo:
 - The reusable Rust runtime core lives in `packages/core-rust`.
 - The runnable Rust daemon host lives in `hosts/rust-daemon`.
 - `@animaOS-SWARM/sdk` is a TypeScript client over the daemon's HTTP and SSE APIs.
-- `@animaOS-SWARM/core` is the TypeScript core port in `packages/core-ts`; it provides shared contracts and typed helpers such as `agent()`, `action()`, and `plugin()`.
+- `@animaOS-SWARM/sdk` also owns the shared TypeScript types and typed helpers such as `agent()` and `swarm()`. There is no TypeScript execution runtime.
 
 ---
 
@@ -100,19 +100,19 @@ Runtime ownership in the current repo:
 
 | Command | Needs Daemon | Description |
 |---------|-------------|-------------|
-| `create` | No | Create a new agency (local files only) |
+| `create` | No | Create a new single-agent workspace (local files only) |
 | `launch` | Yes | Launch a task in an agency directory |
 | `run` | Yes | Run a one-off agent or swarm task |
 | `chat` | Yes | Start an interactive chat session |
 
-### Creating an Agency
+### Creating an Agent Workspace
 
 ```bash
-# Create a new agency (no daemon needed)
-bun run animaos create my-agency \
+# Create a new agent workspace (no daemon needed)
+bun run animaos create agent my-agent \
+  -d "Research assistant" \
   --provider openai \
-  --model gpt-4o-mini \
-  --api-key "$OPENAI_API_KEY"
+  --model gpt-4o-mini
 ```
 
 ### Launching Tasks
@@ -149,11 +149,9 @@ bun run animaos chat
 
 ```typescript
 import {
-  action,
   agent,
   createDaemonClient,
   DaemonHttpError,
-  plugin,
   swarm,
 } from '@animaOS-SWARM/sdk';
 ```
@@ -176,31 +174,15 @@ const customClient = createDaemonClient({
 #### Create an Agent
 
 ```typescript
-import { action, agent } from '@animaOS-SWARM/sdk';
-
-const memorySearch = action({
-  name: 'memory_search',
-  description: 'Search stored memories by keyword',
-  parameters: {
-    query: { type: 'string', description: 'Search query' },
-    limit: { type: 'number', description: 'Maximum matches to return' },
-  },
-  handler: async (_runtime, _message, args) => {
-    const query = typeof args.query === 'string' ? args.query : '';
-    return {
-      status: 'success',
-      data: { text: `Search requested for: ${query}` },
-      durationMs: 0,
-    };
-  },
-});
+import { agent } from '@animaOS-SWARM/sdk';
 
 const myAgent = agent({
   name: 'researcher',
   provider: 'openai',
   model: 'gpt-4o-mini',
   system: 'You are a research assistant specializing in technology.',
-  tools: [memorySearch],
+  // Tools are daemon-registered names (or JSON descriptors).
+  tools: ['memory_search'],
   settings: {
     temperature: 0.7,
     maxTokens: 2000,
@@ -379,45 +361,6 @@ const searchResults = await client.memories.search('daemon memory', {
 const recent = await client.memories.recent({
   agentId: 'agent-uuid-here',
   limit: 3,
-});
-```
-
-### Defining Actions
-
-```typescript
-import { action } from '@animaOS-SWARM/sdk';
-
-const searchAction = action({
-  name: 'web_search',
-  description: 'Search the web for information',
-  parameters: {
-    query: { type: 'string', description: 'Search query' },
-  },
-  handler: async (_runtime, _message, args) => {
-    const query = typeof args.query === 'string' ? args.query : '';
-    return {
-      status: 'success',
-      data: { text: `Results for ${query}` },
-      durationMs: 0,
-    };
-  },
-});
-```
-
-### Defining Plugins
-
-```typescript
-import { plugin } from '@animaOS-SWARM/sdk';
-
-const notesPlugin = plugin({
-  name: 'notes',
-  description: 'Registers startup and cleanup hooks for note-oriented agents',
-  init: async (runtime) => {
-    console.log(`Plugin initialized for ${runtime.agentId}`);
-  },
-  cleanup: async (runtime) => {
-    console.log(`Plugin cleaned up for ${runtime.agentId}`);
-  },
 });
 ```
 
@@ -701,5 +644,4 @@ console.log(agents.map((agent) => agent.state.id));
 - [Project README](../README.md) - Overview and quick start
 - [Rust Core](../packages/core-rust/) - Reusable Rust runtime crates
 - [Rust Daemon Host](../hosts/rust-daemon/) - Runnable Rust host, API surface, and operational commands
-- [Core Package](../packages/core-ts/) - TypeScript core port with shared contracts and utilities
 - [SDK Source](../packages/sdk/src/) - TypeScript daemon client implementation

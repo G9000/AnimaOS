@@ -15,7 +15,6 @@
     "lint": "oxlint --config .oxlintrc.json packages/*/src apps/*/src",
     "lint:fix": "oxlint --fix --config .oxlintrc.json packages/*/src apps/*/src",
     "projects": "bun x nx show projects",
-    "server": "bun x nx serve @animaOS-SWARM/server",
     "test": "bun x nx run-many -t test",
     "typecheck": "bun x nx run-many -t typecheck",
     "web": "bun x nx dev @animaOS-SWARM/web",

@@ -1,6 +1,6 @@
 import React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { EventBus } from '@animaOS-SWARM/core';
+import { EventBus } from './event-bus.js';
 import { App } from './index.js';
 import { cleanupInk, flushInk, renderInk } from './test-harness.js';
 

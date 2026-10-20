@@ -17,7 +17,6 @@ describe('workspace-dev orchestration', () => {
         key: 'rust',
         projectName: 'rust-daemon',
         baseUrl: 'http://127.0.0.1:8080',
-        status: 'ready',
         env: {
           ANIMAOS_RS_HOST: '127.0.0.1',
           ANIMAOS_RS_PORT: '8080',
@@ -81,7 +80,6 @@ describe('workspace-dev orchestration', () => {
         key: 'rust',
         projectName: 'rust-daemon',
         baseUrl: 'http://127.0.0.1:8080',
-        status: 'ready',
         env: {
           ANIMAOS_RS_HOST: '127.0.0.1',
           ANIMAOS_RS_PORT: '8080',
@@ -118,14 +116,5 @@ describe('workspace-dev orchestration', () => {
         },
       ],
     });
-  });
-
-  it('rejects placeholder hosts before any process starts', () => {
-    expect(() => buildWorkspaceDevPlan('elixir')).toThrowError(
-      "Host 'elixir' is registered as a placeholder and is not implemented yet."
-    );
-    expect(() => buildWorkspaceDevPlan('python')).toThrowError(
-      "Host 'python' is registered as a placeholder and is not implemented yet."
-    );
   });
 });

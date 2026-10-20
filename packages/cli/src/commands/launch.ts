@@ -9,10 +9,10 @@ import {
   describeDaemonWarningTransition,
   formatDaemonUnreachableWarning,
   type AgentConfig,
-  type IEventBus,
+  type SwarmConfig,
   type TaskResult,
-} from '@animaOS-SWARM/core';
-import type { SwarmConfig } from '@animaOS-SWARM/sdk';
+} from '@animaOS-SWARM/sdk';
+import type { IEventBus } from '@animaOS-SWARM/tui';
 import { loadAgency, agencyExists } from '../agency/loader.js';
 import {
   loadSeedMemories,
@@ -42,7 +42,6 @@ import {
   resolveDaemonModelSettings,
   toRuntimeTaskResult,
 } from './utils.js';
-import { MOD_TOOL_MAP } from '@animaOS-SWARM/tools';
 
 export interface LaunchOptions {
   dir: string;
@@ -454,7 +453,6 @@ function formatUnsupportedDaemonToolWarning(
 
 function daemonToolsForAgent(agent: AgentDefinition): ResolvedDaemonTools {
   const supportedToolNames = new Set<string>(DEFAULT_DAEMON_TOOL_NAMES);
-  const modToolDescriptors = new Map<string, DaemonToolDescriptor>();
   const unsupportedTools: string[] = [];
 
   for (const rawToolName of agent.tools ?? []) {
@@ -466,16 +464,6 @@ function daemonToolsForAgent(agent: AgentDefinition): ResolvedDaemonTools {
     const normalizedToolName = daemonToolName(toolName);
     if (DAEMON_TOOL_DESCRIPTOR_MAP.has(normalizedToolName)) {
       supportedToolNames.add(normalizedToolName);
-      continue;
-    }
-
-    const modTool = MOD_TOOL_MAP.get(normalizedToolName);
-    if (modTool) {
-      modToolDescriptors.set(modTool.name, {
-        name: modTool.name,
-        description: modTool.description,
-        parameters: { ...modTool.parameters }, // shallow copy — don't mutate the live ModToolHandler
-      });
       continue;
     }
 
@@ -496,7 +484,7 @@ function daemonToolsForAgent(agent: AgentDefinition): ResolvedDaemonTools {
   });
 
   return {
-    descriptors: [...builtinDescriptors, ...modToolDescriptors.values()],
+    descriptors: builtinDescriptors,
     unsupportedToolNames: unsupportedTools,
   };
 }
@@ -737,9 +725,8 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function loadDaemonTuiRuntime(): Promise<DaemonTuiRuntime> {
-  const [{ EventBus }, { render }, { default: React }, { App }] =
+  const [{ render }, { default: React }, { App, EventBus }] =
     await Promise.all([
-      import('@animaOS-SWARM/core'),
       import('ink'),
       import('react'),
       import('@animaOS-SWARM/tui'),

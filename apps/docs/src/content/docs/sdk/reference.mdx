@@ -217,8 +217,8 @@ Accessed via `client.memories`.
 | `topics` | `string[]` | — |
 | `adjectives` | `string[]` | — |
 | `style` | `string` | — |
-| `tools` | `Action[]` | — |
-| `plugins` | `Plugin[]` | — |
+| `tools` | `AgentToolInput[]` | — |
+| `plugins` | `DaemonPluginDescriptor[]` | — |
 | `settings` | `AgentSettings` | — |
 
 ### `AgentSettings`
@@ -283,61 +283,27 @@ Accessed via `client.memories`.
 
 ## Component Types
 
-### `Action`
+### `AgentToolInput`
 
-| Field | Type | Required |
-|-------|------|----------|
-| `name` | `string` | ✅ |
-| `description` | `string` | ✅ |
-| `parametersSchema` | `Record<string, unknown>` | ✅ |
-| `handler` | `(runtime, message, args) => Promise<TaskResult>` | ✅ |
-| `validate` | `(runtime, message) => Promise<boolean>` | — |
-| `examples` | `ActionExample[]` | — |
+`string | { name: string; description?: string; parameters?: Record<string, unknown>; examples?: DaemonToolDescriptor['examples'] }`
 
-### `Plugin`
+A string names a daemon-registered tool. An object is a JSON descriptor.
+
+### `DaemonToolDescriptor`
 
 | Field | Type |
 |-------|------|
 | `name` | `string` |
 | `description` | `string` |
-| `actions` | `Action[]` |
-| `providers` | `Provider[]` |
-| `evaluators` | `Evaluator[]` |
-| `init` | `(runtime) => Promise<void>` |
-| `cleanup` | `(runtime) => Promise<void>` |
+| `parameters` | `Record<string, unknown>` |
+| `examples` | `Array<{ input: string; args: Record<string, unknown>; output: string }> \| null` |
 
-### `Provider`
+### `DaemonPluginDescriptor`
 
 | Field | Type |
 |-------|------|
 | `name` | `string` |
 | `description` | `string` |
-| `get` | `(runtime, message) => Promise<ProviderResult>` |
-
-### `ProviderResult`
-
-| Field | Type |
-|-------|------|
-| `text` | `string` |
-| `metadata` | `Record<string, unknown>` |
-
-### `Evaluator`
-
-| Field | Type |
-|-------|------|
-| `name` | `string` |
-| `description` | `string` |
-| `validate` | `(runtime, message) => Promise<boolean>` |
-| `handler` | `(runtime, message, response) => Promise<EvaluatorResult>` |
-
-### `EvaluatorResult`
-
-| Field | Type |
-|-------|------|
-| `score` | `number` |
-| `feedback` | `string` |
-| `followUp` | `Content` |
-| `metadata` | `Record<string, unknown>` |
 
 ---
 
@@ -349,8 +315,6 @@ These are typed identity functions that provide full IntelliSense when defining 
 |----------|-----------|---------|
 | `agent(config)` | `<T extends AgentConfig>(config: T) => T` | Typed `AgentConfig` helper |
 | `swarm(config)` | `<T extends SwarmConfig>(config: T) => T` | Typed `SwarmConfig` helper |
-| `action(config)` | `<T extends Action>(config: T) => T` | Typed `Action` helper |
-| `plugin(config)` | `<T extends Plugin>(config: T) => T` | Typed `Plugin` helper |
 
 ---
 
