@@ -9,6 +9,13 @@ use async_trait::async_trait;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::Semaphore;
 
+#[test]
+fn generic_email_is_a_distinct_non_oauth_provider() {
+    let provider = Provider::parse("email").expect("generic email provider");
+    assert_eq!(provider.name(), "email");
+    assert_eq!(serde_json::to_string(&provider).unwrap(), "\"email\"");
+}
+
 #[derive(Default)]
 struct Fake {
     exchanges: AtomicUsize,

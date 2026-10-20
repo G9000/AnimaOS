@@ -18,6 +18,7 @@ const api = vi.hoisted(() => ({
   disconnectDrive: vi.fn(),
   mailStatus: vi.fn(),
   connectMail: vi.fn(),
+  connectGenericEmail: vi.fn(),
   disconnectMail: vi.fn(),
   mailMessages: vi.fn(),
   mailDrafts: vi.fn(),
@@ -50,6 +51,226 @@ const draft = {
   state: 'pending',
   error: null,
 };
+
+function emailCard() {
+  return within(screen.getByRole('region', { name: 'Email' }));
+}
+
+function fillEmailSetup() {
+  const card = emailCard();
+  for (const [label, value] of [
+    ['Email address', 'agent@example.com'],
+    ['IMAP host', 'imap.example.com'],
+    ['IMAP username', 'receive-user'],
+    ['IMAP password', 'receiving-secret'],
+    ['SMTP host', 'smtp.example.com'],
+    ['SMTP username', 'send-user'],
+    ['SMTP password', 'sending-secret'],
+  ])
+    fireEvent.change(card.getByLabelText(label), { target: { value } });
+  return card;
+}
+
+it('connects generic email without OAuth, clearing secrets before setup settles', async () => {
+  let finish!: (value: unknown) => void;
+  api.connectGenericEmail.mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  render(<ConnectorsView agentId="main" telegram={null} />);
+  const card = fillEmailSetup();
+  await waitFor(() =>
+    expect(card.getByRole('button', { name: 'Connect Email' })).toBeEnabled(),
+  );
+  expect(card.getByText(/No OAuth app registration/)).toBeVisible();
+  fireEvent.click(card.getByRole('button', { name: 'Connect Email' }));
+  expect(api.connectGenericEmail).toHaveBeenCalledWith('main', {
+    address: 'agent@example.com',
+    imap: {
+      host: 'imap.example.com',
+      port: 993,
+      security: 'tls',
+      username: 'receive-user',
+    },
+    smtp: {
+      host: 'smtp.example.com',
+      port: 465,
+      security: 'tls',
+      username: 'send-user',
+    },
+    imapPassword: 'receiving-secret',
+    smtpPassword: 'sending-secret',
+    autoReply: { enabled: false, allowedSenders: [], authservId: '' },
+  });
+  expect(card.getByLabelText('IMAP password')).toHaveValue('');
+  expect(card.getByLabelText('SMTP password')).toHaveValue('');
+  expect(api.connectMail).not.toHaveBeenCalled();
+  await act(async () => finish({ connector: { id: 'email-1' } }));
+  expect(card.getByLabelText('IMAP password')).toHaveValue('');
+});
+
+it('requires explicit allowed senders and the receiving server ID for automatic replies', async () => {
+  api.connectGenericEmail.mockResolvedValue({ connector: { id: 'email-1' } });
+  render(<ConnectorsView agentId="main" telegram={null} />);
+  const card = fillEmailSetup();
+  await waitFor(() =>
+    expect(card.getByRole('button', { name: 'Connect Email' })).toBeEnabled(),
+  );
+  const automatic = card.getByRole('checkbox', {
+    name: 'Automatically reply to allowed senders',
+  });
+  expect(automatic).not.toBeChecked();
+  fireEvent.click(automatic);
+  fireEvent.click(card.getByRole('button', { name: 'Connect Email' }));
+  expect(card.getByRole('alert')).toHaveTextContent(
+    'Add at least one allowed sender',
+  );
+  expect(api.connectGenericEmail).not.toHaveBeenCalled();
+  fireEvent.change(card.getByLabelText('Allowed senders'), {
+    target: { value: 'friend@example.com, OTHER@example.com' },
+  });
+  fireEvent.click(card.getByRole('button', { name: 'Connect Email' }));
+  expect(card.getByRole('alert')).toHaveTextContent('Receiving mail server ID');
+  fireEvent.change(card.getByLabelText('Receiving mail server ID'), {
+    target: { value: 'mx.example.com' },
+  });
+  fireEvent.change(card.getByLabelText('SMTP security'), {
+    target: { value: 'starttls' },
+  });
+  fireEvent.change(card.getByLabelText('SMTP port'), {
+    target: { value: '587' },
+  });
+  fireEvent.click(card.getByRole('button', { name: 'Connect Email' }));
+  await waitFor(() =>
+    expect(api.connectGenericEmail).toHaveBeenCalledWith(
+      'main',
+      expect.objectContaining({
+        smtp: {
+          host: 'smtp.example.com',
+          port: 587,
+          security: 'starttls',
+          username: 'send-user',
+        },
+        autoReply: {
+          enabled: true,
+          allowedSenders: ['friend@example.com', 'other@example.com'],
+          authservId: 'mx.example.com',
+        },
+      }),
+    ),
+  );
+  expect(
+    card.getByText(/Only new mail received after connecting/),
+  ).toBeVisible();
+});
+
+it('clears generic email passwords on lifetime and agent changes and redacts setup failures', async () => {
+  api.connectGenericEmail.mockRejectedValue(
+    new Error('provider echoed receiving-secret'),
+  );
+  const view = render(
+    <ConnectorsView agentId="main" telegram={null} online epoch={1} />,
+  );
+  let card = fillEmailSetup();
+  await waitFor(() =>
+    expect(card.getByRole('button', { name: 'Connect Email' })).toBeEnabled(),
+  );
+  fireEvent.click(card.getByRole('button', { name: 'Connect Email' }));
+  expect(await card.findByRole('alert')).toHaveTextContent(
+    'This action could not be completed',
+  );
+  expect(screen.queryByText(/provider echoed/)).not.toBeInTheDocument();
+  fillEmailSetup();
+  view.rerender(
+    <ConnectorsView agentId="main" telegram={null} online={false} epoch={1} />,
+  );
+  expect(card.getByLabelText('IMAP password')).toHaveValue('');
+  expect(card.getByLabelText('SMTP password')).toHaveValue('');
+  expect(card.getByLabelText('Email address')).toHaveValue('agent@example.com');
+  view.rerender(
+    <ConnectorsView agentId="other" telegram={null} online epoch={2} />,
+  );
+  card = emailCard();
+  expect(card.getByLabelText('IMAP password')).toHaveValue('');
+  expect(card.getByLabelText('SMTP password')).toHaveValue('');
+  expect(card.getByLabelText('Email address')).toHaveValue('');
+  await waitFor(() =>
+    expect(card.getByRole('button', { name: 'Connect Email' })).toBeEnabled(),
+  );
+});
+
+it('does not let an obsolete email setup response alter another agent or retain passwords after remount', async () => {
+  let finish!: (value: unknown) => void;
+  api.connectGenericEmail.mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = render(<ConnectorsView agentId="main" telegram={null} />);
+  const card = fillEmailSetup();
+  await waitFor(() =>
+    expect(card.getByRole('button', { name: 'Connect Email' })).toBeEnabled(),
+  );
+  fireEvent.click(card.getByRole('button', { name: 'Connect Email' }));
+  view.rerender(<ConnectorsView agentId="other" telegram={null} />);
+  await waitFor(() =>
+    expect(
+      emailCard().getByRole('button', { name: 'Connect Email' }),
+    ).toBeEnabled(),
+  );
+  const reads = api.mailStatus.mock.calls.length;
+  await act(async () => finish({ connector: { id: 'obsolete-email' } }));
+  expect(api.mailStatus).toHaveBeenCalledTimes(reads);
+  expect(emailCard().getByLabelText('IMAP password')).toHaveValue('');
+  expect(emailCard().getByLabelText('SMTP password')).toHaveValue('');
+  fillEmailSetup();
+  view.unmount();
+  render(<ConnectorsView agentId="other" telegram={null} />);
+  await waitFor(() =>
+    expect(
+      emailCard().getByRole('button', { name: 'Connect Email' }),
+    ).toBeEnabled(),
+  );
+  expect(emailCard().getByLabelText('IMAP password')).toHaveValue('');
+  expect(emailCard().getByLabelText('SMTP password')).toHaveValue('');
+});
+
+it('reuses email inbox and immutable draft approval without an automatic send action', async () => {
+  api.mailStatus.mockImplementation((_id, provider) =>
+    Promise.resolve({
+      configured: true,
+      connector:
+        provider === 'email'
+          ? { ...connector, id: 'email-1', type: 'email' }
+          : null,
+    }),
+  );
+  api.mailMessages.mockResolvedValue([
+    {
+      id: 'm',
+      from: 'friend@example.com',
+      subject: 'Hello email',
+      preview: 'Preview',
+      receivedAt: 'Today',
+    },
+  ]);
+  api.mailDrafts.mockResolvedValue([{ ...draft, connectorId: 'email-1' }]);
+  api.approveMailDraft.mockResolvedValue({ ...draft, state: 'sent' });
+  render(<ConnectorsView agentId="main" telegram={null} />);
+  const card = emailCard();
+  expect(await card.findByText('Hello email')).toBeVisible();
+  expect(api.approveMailDraft).not.toHaveBeenCalled();
+  fireEvent.click(card.getByRole('button', { name: 'Send saved draft' }));
+  await waitFor(() =>
+    expect(api.approveMailDraft).toHaveBeenCalledWith(
+      'main',
+      'email',
+      'email-1',
+      'draft-1',
+    ),
+  );
+});
 
 it('fp02 suppresses all connector reads and actions while offline, including timer and manual refresh', async () => {
   vi.useFakeTimers();
@@ -105,7 +326,7 @@ it('fp02 reconnect discards stale mailbox reads before starting dependent inbox 
   view.rerender(
     <ConnectorsView agentId="main" telegram={null} online epoch={2} />,
   );
-  await waitFor(() => expect(api.mailStatus).toHaveBeenCalledTimes(4));
+  await waitFor(() => expect(api.mailStatus).toHaveBeenCalledTimes(6));
 });
 
 it('fp02 obsolete credential save never refetches or clears retained ordinary fields', async () => {
@@ -262,12 +483,18 @@ beforeEach(() => {
   api.mailMessages.mockResolvedValue([]);
   api.mailDrafts.mockResolvedValue([]);
 });
-it('shows all five services with honest OAuth setup state', async () => {
+it('shows mail services with honest OAuth setup state', async () => {
   render(
     <ConnectorsView agentId="main" telegram={<div>Telegram management</div>} />,
   );
   expect(screen.getByText('Telegram management')).toBeVisible();
-  for (const name of ['Google Calendar', 'Google Drive', 'Gmail', 'Outlook'])
+  for (const name of [
+    'Google Calendar',
+    'Google Drive',
+    'Email',
+    'Gmail',
+    'Outlook',
+  ])
     expect(screen.getByRole('heading', { name })).toBeVisible();
   await waitFor(() =>
     expect(screen.getAllByText('Setup required')).toHaveLength(5),
@@ -642,7 +869,7 @@ it('does not misreport a failed status request as missing OAuth setup', async ()
   api.mailStatus.mockRejectedValue(new Error('offline'));
   render(<ConnectorsView agentId="main" telegram={null} />);
   await waitFor(() =>
-    expect(screen.getAllByText('Status unavailable')).toHaveLength(3),
+    expect(screen.getAllByText('Status unavailable')).toHaveLength(4),
   );
   expect(screen.queryByText(/OAuth is not configured/)).not.toBeInTheDocument();
 });

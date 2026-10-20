@@ -73,6 +73,10 @@ impl DiscordManager {
                     .get(&key)
                     .cloned()
                     .expect("selected receipt");
+                let c = c
+                    .destination_for_room(&previous.room_id)
+                    .filter(|destination| c.channel_allowed(&destination.channel))
+                    .ok_or(DiscordManagerError::Conflict)?;
                 let mut next = previous.clone();
                 next.processing_state = DiscordProcessingState::Processing;
                 state.discord_inbound.insert(key.clone(), next.clone());
@@ -188,11 +192,35 @@ impl DiscordManager {
         key: String,
         run_id: String,
     ) -> Result<(), DiscordManagerError> {
+        let c = self.get(&agent, &id).await?;
+        let room = if c.bot_wide {
+            c.home_destination()
+                .ok_or(DiscordManagerError::InvalidInput)?
+                .room_id
+        } else {
+            c.room_id
+        };
+        self.send_from_owner_in_room_accepted(agent, id, room, text, key, run_id)
+            .await
+    }
+    pub(crate) async fn send_from_owner_in_room_accepted(
+        &self,
+        agent: String,
+        id: String,
+        room: String,
+        text: String,
+        key: String,
+        run_id: String,
+    ) -> Result<(), DiscordManagerError> {
         let manager = self.clone();
         self.owned(async move {
             let (c, epoch) = {
                 let _life = manager.lifecycle.lock().await;
-                let c = manager.get(&agent, &id).await?;
+                let root = manager.get(&agent, &id).await?;
+                let c = root
+                    .destination_for_room(&room)
+                    .filter(|destination| root.can_send_to_channel(&destination.channel))
+                    .ok_or(DiscordManagerError::InvalidInput)?;
                 let epoch = manager.epoch(&id);
                 (c, epoch)
             };
@@ -216,9 +244,10 @@ impl DiscordManager {
         {
             let state = self.state.read().await;
             if !self.authority_current(&c.id, epoch)
-                || !state.discord_connectors.get(&c.id).is_some_and(|current| {
-                    current.is_active() && current.credential_generation == c.credential_generation
-                })
+                || !state
+                    .discord_connectors
+                    .get(&c.id)
+                    .is_some_and(|current| current.matches_destination(&c))
             {
                 return Err(DiscordManagerError::Conflict);
             }
@@ -301,12 +330,7 @@ impl DiscordManager {
                 || !state
                     .discord_connectors
                     .get(&commit_c.id)
-                    .is_some_and(|current| {
-                        current.is_active()
-                            && current.credential_generation == commit_c.credential_generation
-                            && current.channel == commit_c.channel
-                            && current.agent_id == commit_c.agent_id
-                    })
+                    .is_some_and(|current| current.matches_destination(&commit_c))
             {
                 return Err(ApiError::service_unavailable(
                     "Discord authority changed during run",
@@ -367,6 +391,7 @@ impl DiscordManager {
             if let Some(old) = state.discord_outbound.get(&record.id) {
                 if old.text != record.text
                     || old.assistant_message_id != record.assistant_message_id
+                    || old.room_id != record.room_id
                 {
                     return Err(ApiError::conflict(
                         "Discord reply conflicts with durable output",

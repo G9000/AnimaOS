@@ -79,7 +79,11 @@ import { useHashRoute, type HashRoute } from './lib/hash-route';
 import { exportFileName, sessionKey } from './lib/session-groups';
 import { loadDraft, storeDraft } from './lib/drafts';
 import { safeIntegrationError } from './lib/telegram';
-import { discordCanReply, safeDiscordError } from './lib/discord';
+import {
+  discordCanReply,
+  discordHasRoom,
+  safeDiscordError,
+} from './lib/discord';
 import { useAttachmentSession } from './hooks/useAttachmentSession';
 import { useAttachments } from './hooks/useAttachments';
 import { recoveredDraft } from './lib/attachments';
@@ -741,8 +745,8 @@ export function ViewHarness() {
       : null;
   const activeDiscord =
     activeSession?.kind === 'discord'
-      ? (discordIntegrations.connectors.find(
-          (item) => item.roomId === activeSession.roomId,
+      ? (discordIntegrations.connectors.find((item) =>
+          discordHasRoom(item, activeSession.roomId),
         ) ?? null)
       : null;
   const discordReady =
@@ -1742,10 +1746,10 @@ export function ViewHarness() {
                     agent.workspaceRole === 'helper'
                   }
                   {...discordIntegrations}
-                  openConversation={(connector) =>
+                  openConversation={(connector, roomId) =>
                     commands.openTarget({
                       agentId: connector.agentId,
-                      sessionId: connector.roomId,
+                      sessionId: roomId ?? connector.roomId,
                     })
                   }
                 />
@@ -1775,6 +1779,20 @@ export function ViewHarness() {
               online={connection === 'online'}
               telegramConnectorId={
                 telegramConnector?.approvedChat ? telegramConnector.id : null
+              }
+              discordDestinations={
+                discordIntegrations.available
+                  ? discordIntegrations.connectors
+                      .filter(
+                        (connector) =>
+                          discordCanReply(connector) &&
+                          connector.settings?.homeChannelId,
+                      )
+                      .map((connector) => ({
+                        connectorId: connector.id,
+                        label: `${connector.bot.displayName ?? connector.bot.username ?? 'Discord bot'} · #${connector.conversations?.find((conversation) => conversation.channelId === connector.settings?.homeChannelId)?.name ?? connector.settings!.homeChannelId}`,
+                      }))
+                  : []
               }
               focusId={automationFocus}
               onFocusHandled={clearAutomationFocus}

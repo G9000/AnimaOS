@@ -50,6 +50,7 @@ import {
   type ProviderKeys,
   type CreateMemoryInput,
   type CreateDiscordConnectorInput,
+  type DiscordConnectorSettings,
   type ConnectDriveInput,
   type GoalInput,
   type GoalStatus,
@@ -77,6 +78,9 @@ export type {
   ProviderKeys,
   DiscordConnector,
   DiscordConnectorStatus,
+  DiscordConnectorSettings,
+  DiscordConversation,
+  DiscordBotCheck,
   CreateDiscordConnectorInput,
   DriveConnector,
   DriveStatus,
@@ -959,6 +963,20 @@ export const daemon = {
     setupClient.connectors.disconnectDrive(agentId, connectorId),
   discordConnectors: (agentId: string) =>
     setupClient.connectors.discordConnectors(agentId),
+  checkDiscordBot: (agentId: string, botToken: string) =>
+    setupClient.connectors.checkDiscordBot(agentId, botToken),
+  configureDiscordConnector: (
+    agentId: string,
+    connectorId: string,
+    settings: DiscordConnectorSettings,
+    approvedUserIds: string[],
+  ) =>
+    setupClient.connectors.configureDiscordConnector(
+      agentId,
+      connectorId,
+      settings,
+      approvedUserIds,
+    ),
   createDiscordConnector: (
     agentId: string,
     input: CreateDiscordConnectorInput,

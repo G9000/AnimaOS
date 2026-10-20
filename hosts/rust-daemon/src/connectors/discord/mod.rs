@@ -1,9 +1,10 @@
-//! Native selected-channel Discord runtime. Adapted behavior: see HERMES-NOTICE.
+//! Native Discord channel and thread runtime. Adapted behavior: see HERMES-NOTICE.
 pub(crate) mod client;
 pub(crate) mod credentials;
 mod delivery;
 pub(crate) mod gateway;
 mod inbound;
+mod interactions;
 mod lifecycle;
 pub(crate) mod model;
 mod processing;
@@ -31,7 +32,7 @@ use tokio::sync::{watch, Mutex, Notify};
 use tokio::task::JoinHandle;
 
 const MAX_LIVE_INBOUND: usize = 100;
-const MAX_OUTBOUND: usize = 100;
+pub(crate) const MAX_OUTBOUND: usize = 100;
 const MAX_TERMINAL_INBOUND: usize = 1000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DiscordRuntimeStatus {
@@ -147,6 +148,8 @@ pub(crate) struct DiscordManager {
     gateway: Option<Arc<dyn gateway::GatewayFactory>>,
     gateway_states: Arc<Mutex<HashMap<String, (u64, gateway::GatewayHealth)>>>,
     typing_workers: Arc<Mutex<HashMap<String, typing::TypingWorker>>>,
+    intake: Arc<Mutex<()>>,
+    discovered: Arc<Mutex<HashMap<String, Vec<(u64, String, String, Option<String>)>>>>,
     lifecycle: Arc<Mutex<()>>,
     transaction: Arc<Mutex<()>>,
     statuses: Arc<Mutex<HashMap<String, DiscordRuntimeStatus>>>,
@@ -171,6 +174,8 @@ impl Clone for DiscordManager {
             gateway: self.gateway.clone(),
             gateway_states: self.gateway_states.clone(),
             typing_workers: self.typing_workers.clone(),
+            intake: self.intake.clone(),
+            discovered: self.discovered.clone(),
             lifecycle: self.lifecycle.clone(),
             transaction: self.transaction.clone(),
             statuses: self.statuses.clone(),
@@ -204,6 +209,8 @@ impl DiscordManager {
             gateway: None,
             gateway_states: Arc::new(Mutex::new(HashMap::new())),
             typing_workers: Arc::new(Mutex::new(HashMap::new())),
+            intake: Arc::new(Mutex::new(())),
+            discovered: Arc::new(Mutex::new(HashMap::new())),
             lifecycle: Arc::new(Mutex::new(())),
             transaction,
             statuses: Arc::new(Mutex::new(HashMap::new())),
@@ -528,7 +535,7 @@ fn suppress_unknown_record(record: &mut DiscordOutboundRecord) -> bool {
     record.delivery_state = DiscordDeliveryState::Suppressed;
     true
 }
-fn outbound_for(
+pub(crate) fn outbound_for(
     connector: &DiscordConnectorRecord,
     reply_id: &str,
     reply: &str,
@@ -587,17 +594,77 @@ pub(crate) fn validate_snapshot(
             || !crate::sessions::is_valid_session_id(&c.room_id)
             || c.credential_generation == 0
             || DiscordSnowflake::parse(&c.bot.id).is_none()
-            || DiscordSnowflake::parse(&c.channel.id).is_none()
-            || DiscordSnowflake::parse(&c.channel.guild_id).is_none()
+            || (!c.bot_wide && !valid_channel(&c.channel))
+            || (c.bot_wide
+                && (!c.channel.id.is_empty()
+                    || c.settings.is_none()
+                    || c.channel.guild_id != c.guild_scope.clone().unwrap_or_default()))
+            || c.guild_scope
+                .as_ref()
+                .is_some_and(|id| DiscordSnowflake::parse(id).is_none())
+            || c.application_id
+                .as_ref()
+                .is_some_and(|id| DiscordSnowflake::parse(id).is_none())
             || DiscordSnowflake::cursor(&c.cursor).is_none()
-            || !valid_users(&c.approved_user_ids)
+            || !valid_ids(&c.approved_user_ids, 100)
+            || c.settings.as_ref().is_some_and(|s| !valid_settings(s))
+            || (c.approved_user_ids.is_empty()
+                && c.settings
+                    .as_ref()
+                    .is_none_or(|s| s.approved_role_ids.is_empty()))
             || (c.deleted_at_ms.is_some() && c.enabled)
             || (c.enabled && c.activated_at_ms.is_none())
             || (c.deleted_at_ms.is_none()
                 && (!agents.contains(c.agent_id.as_str())
-                    || !selections.insert((c.agent_id.as_str(), c.channel.id.as_str()))))
+                    || (!c.bot_wide
+                        && !selections.insert((c.agent_id.as_str(), c.channel.id.as_str())))
+                    || snapshot.discord_connectors.iter().any(|other| {
+                        other.id != c.id
+                            && other.deleted_at_ms.is_none()
+                            && other.agent_id == c.agent_id
+                            && other.bot.id == c.bot.id
+                            && (c.bot_wide || other.bot_wide)
+                    })))
         {
             return Err("invalid native Discord connector snapshot".into());
+        }
+        let mut rooms = HashSet::new();
+        let mut channels = HashSet::new();
+        if c.conversations.len() > 1000 || c.thread_starts.len() > 1000 {
+            return Err("invalid native Discord conversation bound".into());
+        }
+        for conversation in &c.conversations {
+            let root = !c.bot_wide
+                && conversation.channel.routing_eq(&c.channel)
+                && conversation.room_id == c.room_id;
+            if !valid_channel(&conversation.channel)
+                || !rooms.insert(&conversation.room_id)
+                || !channels.insert(&conversation.channel.id)
+                || (!root
+                    && conversation.room_id
+                        != format!("discord:{}:{}", c.id, conversation.channel.id))
+                || !crate::sessions::is_valid_session_id(&conversation.room_id)
+                || DiscordSnowflake::cursor(&conversation.cursor).is_none()
+                || c.guild_scope
+                    .as_ref()
+                    .is_some_and(|guild| guild != &conversation.channel.guild_id)
+            {
+                return Err("invalid native Discord conversation snapshot".into());
+            }
+        }
+        for (message, claim) in &c.thread_starts {
+            if DiscordSnowflake::parse(message).is_none()
+                || c.destination_for_channel(&claim.channel_id).is_none()
+                || claim.thread_channel_id.as_ref().is_some_and(|id| {
+                    !c.conversations.iter().any(|v| {
+                        v.channel.id == *id
+                            && v.channel.kind == DiscordChannelKind::GuildThread
+                            && v.channel.parent_channel_id.as_ref() == Some(&claim.channel_id)
+                    })
+                })
+            {
+                return Err("invalid native Discord thread claim".into());
+            }
         }
     }
     let mut intents = HashSet::new();
@@ -621,11 +688,12 @@ pub(crate) fn validate_snapshot(
             || DiscordSnowflake::parse(&r.message_id)
                 .map(|id| id.value())
                 .unwrap_or(u64::MAX)
-                > DiscordSnowflake::cursor(&c.cursor).unwrap_or(0)
+                > c.destination_for_channel(&r.channel_id).and_then(|v|DiscordSnowflake::cursor(&v.cursor)).unwrap_or(0)
             || r.agent_id != c.agent_id
-            || r.room_id != c.room_id
-            || r.channel_id != c.channel.id
-            || !c.approved_user_ids.contains(&r.sender.id)
+            || !c.destination_for_room(&r.room_id).is_some_and(|v|v.channel.id==r.channel_id || v.channel.parent_channel_id.as_ref()==Some(&r.channel_id))
+            // Authority was proven at admission. Reauthorizing historical senders
+            // against today's allowlist would break role receipts and user removal.
+            || DiscordSnowflake::parse(&r.sender.id).is_none()
             || r.sender.id == c.bot.id
             || (c.deleted_at_ms.is_some() && !r.processing_state.is_terminal())
             || r.run_idempotency_key != format!("discord:{}:message:{}", c.id, r.message_id)
@@ -644,7 +712,7 @@ pub(crate) fn validate_snapshot(
             || r.id != format!("discord:{}:reply:{}", c.id, r.assistant_message_id)
             || r.assistant_message_id.is_empty()
             || r.agent_id != c.agent_id
-            || r.room_id != c.room_id
+            || !c.owns_room(&r.room_id)
             || r.chunks.is_empty()
             || r.chunks.len() > 8
             || (c.deleted_at_ms.is_some() && !r.delivery_state.is_settled())
@@ -738,6 +806,32 @@ fn valid_users(users: &[String]) -> bool {
         && users.len() <= 16
         && users.iter().all(|id| DiscordSnowflake::parse(id).is_some())
         && users.iter().collect::<HashSet<_>>().len() == users.len()
+}
+
+fn valid_ids(ids: &[String], max: usize) -> bool {
+    ids.len() <= max
+        && ids.iter().all(|id| DiscordSnowflake::parse(id).is_some())
+        && ids.iter().collect::<HashSet<_>>().len() == ids.len()
+}
+fn valid_settings(settings: &DiscordSettings) -> bool {
+    valid_ids(&settings.allowed_channel_ids, 100)
+        && valid_ids(&settings.free_response_channel_ids, 100)
+        && valid_ids(&settings.approved_role_ids, 100)
+        && settings
+            .home_channel_id
+            .as_ref()
+            .is_none_or(|id| DiscordSnowflake::parse(id).is_some())
+}
+fn valid_channel(channel: &DiscordChannelMetadata) -> bool {
+    DiscordSnowflake::parse(&channel.id).is_some()
+        && DiscordSnowflake::parse(&channel.guild_id).is_some()
+        && match channel.kind {
+            DiscordChannelKind::GuildText => channel.parent_channel_id.is_none(),
+            DiscordChannelKind::GuildThread => channel
+                .parent_channel_id
+                .as_ref()
+                .is_some_and(|id| DiscordSnowflake::parse(id).is_some() && id != &channel.id),
+        }
 }
 
 /// Passive boundary for unrelated route tests/embedding: never contacts Discord.

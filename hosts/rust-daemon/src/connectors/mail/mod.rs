@@ -1,5 +1,10 @@
-//! Daemon-owned mail: only local immutable drafts; sending requires the owner HTTP boundary.
+//! Daemon-owned mail with immutable drafts and explicit owner-approved send policies.
 pub(crate) mod client;
+pub(crate) mod credentials;
+pub(crate) mod generic;
+#[cfg(test)]
+pub(crate) mod generic_tests;
+mod mailbox;
 #[cfg(test)]
 mod tests;
 use super::gcalendar::{
@@ -8,8 +13,10 @@ use super::gcalendar::{
 };
 use super::oauth_apps::{OAuthAppService, OAuthProvider, ResolvedOAuthApp};
 use crate::{agent_runs::AgentRunCoordinator, app::SharedDaemonState, state::DaemonState};
+use anima_service_adapters::email::EmailTransport;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use client::MailTransport;
+pub(crate) use generic::{GenericEmailSettings, GenericEmailSetup};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -25,12 +32,14 @@ use zeroize::Zeroizing;
 pub(crate) enum Provider {
     Gmail,
     Outlook,
+    Email,
 }
 impl Provider {
     pub(crate) fn parse(v: &str) -> Result<Self, MailError> {
         match v {
             "gmail" => Ok(Self::Gmail),
             "outlook" => Ok(Self::Outlook),
+            "email" => Ok(Self::Email),
             _ => Err(MailError::Invalid),
         }
     }
@@ -38,12 +47,14 @@ impl Provider {
         match self {
             Self::Gmail => "gmail",
             Self::Outlook => "outlook",
+            Self::Email => "email",
         }
     }
-    fn oauth_provider(self) -> OAuthProvider {
+    fn oauth_provider(self) -> Option<OAuthProvider> {
         match self {
-            Self::Gmail => OAuthProvider::Google,
-            Self::Outlook => OAuthProvider::Microsoft,
+            Self::Gmail => Some(OAuthProvider::Google),
+            Self::Outlook => Some(OAuthProvider::Microsoft),
+            Self::Email => None,
         }
     }
 }
@@ -60,6 +71,8 @@ pub(crate) struct MailConnector {
     pub(crate) updated_at_ms: u64,
     pub(crate) last_synced_at_ms: Option<u64>,
     pub(crate) error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) email: Option<GenericEmailSettings>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -77,6 +90,8 @@ pub(crate) struct MailRecord {
     pub(crate) deleted: bool,
     #[serde(default)]
     pub(crate) auth_generation: String,
+    #[serde(default)]
+    pub(crate) email: Option<mailbox::EmailMailboxState>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
@@ -188,7 +203,7 @@ impl OAuthConfig {
         }
     }
     pub(crate) fn scopes(&self) -> &'static str {
-        match self.provider{Provider::Gmail=>"https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send",Provider::Outlook=>"offline_access https://graph.microsoft.com/User.Read https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Mail.Send"}
+        match self.provider{Provider::Gmail=>"https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send",Provider::Outlook=>"offline_access https://graph.microsoft.com/User.Read https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Mail.Send",Provider::Email=>""}
     }
     pub(crate) fn token_url(&self) -> String {
         match self.provider {
@@ -197,6 +212,7 @@ impl OAuthConfig {
                 "https://login.microsoftonline.com/{}/oauth2/v2.0/token",
                 self.tenant
             ),
+            Provider::Email => String::new(),
         }
     }
     fn consent(&self, nonce: &str, verifier: &str) -> String {
@@ -206,6 +222,7 @@ impl OAuthConfig {
                 "https://login.microsoftonline.com/{}/oauth2/v2.0/authorize",
                 self.tenant
             ),
+            Provider::Email => unreachable!("generic email has no OAuth flow"),
         };
         let mut url = reqwest::Url::parse(&base).expect("constant OAuth URL");
         url.query_pairs_mut().extend_pairs([
@@ -237,7 +254,8 @@ struct Pending {
     config_revision: u64,
 }
 #[derive(Clone)]
-pub(crate) struct MailManager {
+pub(crate) struct MailManager(Arc<MailManagerInner>);
+pub(crate) struct MailManagerInner {
     state: Weak<RwLock<DaemonState>>,
     transactions: Arc<Mutex<()>>,
     credentials: Arc<dyn GoogleCredentialStore>,
@@ -245,8 +263,44 @@ pub(crate) struct MailManager {
     pub(crate) oauth_apps: OAuthAppService,
     pending: Arc<Mutex<HashMap<String, Pending>>>,
     locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    runs: AgentRunCoordinator,
+    email_transport: Arc<dyn EmailTransport>,
+    email_credentials: Arc<dyn credentials::EmailCredentialStore>,
+    closing: tokio_util::sync::CancellationToken,
+    worker: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+impl Drop for MailManagerInner {
+    fn drop(&mut self) {
+        self.closing.cancel();
+    }
+}
+impl std::ops::Deref for MailManager {
+    type Target = MailManagerInner;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+#[derive(Clone)]
+pub(crate) struct WeakMailManager(Weak<MailManagerInner>);
+impl WeakMailManager {
+    pub(crate) fn upgrade(&self) -> Option<MailManager> {
+        self.0.upgrade().map(MailManager)
+    }
 }
 impl MailManager {
+    pub(crate) fn weak(&self) -> WeakMailManager {
+        WeakMailManager(Arc::downgrade(&self.0))
+    }
+    pub(crate) fn request_shutdown(&self) {
+        self.closing.cancel();
+    }
+    pub(crate) async fn shutdown(&self) {
+        self.request_shutdown();
+        let worker = self.worker.lock().ok().and_then(|mut handle| handle.take());
+        if let Some(worker) = worker {
+            let _ = worker.await;
+        }
+    }
     pub(crate) fn new(
         state: &SharedDaemonState,
         runs: AgentRunCoordinator,
@@ -254,7 +308,7 @@ impl MailManager {
         transport: Arc<dyn MailTransport>,
         oauth_apps: OAuthAppService,
     ) -> Self {
-        Self {
+        Self(Arc::new(MailManagerInner {
             state: Arc::downgrade(state),
             transactions: runs.control_plane_transactions(),
             credentials,
@@ -262,7 +316,12 @@ impl MailManager {
             oauth_apps,
             pending: Arc::default(),
             locks: Arc::default(),
-        }
+            runs,
+            email_transport: Arc::new(anima_service_adapters::email::EmailClient::new()),
+            email_credentials: Arc::new(credentials::OsKeyringEmailCredentialStore::new()),
+            closing: tokio_util::sync::CancellationToken::new(),
+            worker: std::sync::Mutex::new(None),
+        }))
     }
     pub(crate) fn production(
         state: &SharedDaemonState,
@@ -278,8 +337,11 @@ impl MailManager {
         )
     }
     pub(crate) async fn configured(&self, p: Provider) -> Result<bool, MailError> {
+        let Some(provider) = p.oauth_provider() else {
+            return Ok(true);
+        };
         self.oauth_apps
-            .status(p.oauth_provider())
+            .status(provider)
             .await
             .map(|status| status.configured)
             .map_err(|_| MailError::Credential)
@@ -289,7 +351,7 @@ impl MailManager {
             return false;
         };
         let in_use = state.read().await.mail_records.values().any(|record| {
-            !record.deleted && record.connector.provider.oauth_provider() == provider
+            !record.deleted && record.connector.provider.oauth_provider() == Some(provider)
         });
         in_use
     }
@@ -314,10 +376,10 @@ impl MailManager {
         let old_records = s.mail_records.clone();
         let old_drafts = s.mail_drafts.clone();
         let old_tools = s
-            .mail_records
+            .agents
             .values()
-            .filter_map(|r| s.get_agent(&r.connector.agent_id))
-            .map(|a| (a.state.id, a.state.config.tools.unwrap_or_default()))
+            .map(|runtime| runtime.state())
+            .map(|state| (state.id, state.config.tools.unwrap_or_default()))
             .collect::<Vec<_>>();
         let result = match f(&mut s) {
             Ok(result) => result,
@@ -325,6 +387,11 @@ impl MailManager {
                 s.mail_records = old_records;
                 s.mail_drafts = old_drafts;
                 for (id, tools) in old_tools {
+                    if s.agents.get(&id).is_none_or(|runtime| {
+                        runtime.state().config.tools.unwrap_or_default() == tools
+                    }) {
+                        continue;
+                    }
                     let _ = s.update_agent(
                         &id,
                         anima_core::AgentConfigUpdate {
@@ -353,13 +420,25 @@ impl MailManager {
                 s.mail_drafts.remove(&id);
             }
         }
+        let tool_changes = old_tools
+            .into_iter()
+            .filter_map(|(id, previous)| {
+                let applied = s.agents.get(&id)?.state().config.tools.unwrap_or_default();
+                (applied != previous).then_some((id, previous, applied))
+            })
+            .collect::<Vec<_>>();
         let persist = s.control_plane_persist_request();
         drop(s);
         if persist.save().await.is_err() {
             let mut s = shared.write().await;
             s.mail_records = old_records;
             s.mail_drafts = old_drafts;
-            for (id, tools) in old_tools {
+            for (id, tools, applied) in tool_changes {
+                if s.agents.get(&id).is_none_or(|runtime| {
+                    runtime.state().config.tools.unwrap_or_default() != applied
+                }) {
+                    continue;
+                }
                 let _ = s.update_agent(
                     &id,
                     anima_core::AgentConfigUpdate {
@@ -408,7 +487,7 @@ impl MailManager {
     ) -> Result<(MailConnector, String), MailError> {
         let oauth_lease = self
             .oauth_apps
-            .locked_config(p.oauth_provider())
+            .locked_config(p.oauth_provider().ok_or(MailError::Invalid)?)
             .await
             .map_err(|_| MailError::Credential)?;
         let config = oauth_lease
@@ -433,6 +512,7 @@ impl MailManager {
             updated_at_ms: now,
             last_synced_at_ms: None,
             error: None,
+            email: None,
         };
         let generation = uuid::Uuid::new_v4().to_string();
         self.edit(|s| {
@@ -443,6 +523,7 @@ impl MailManager {
                     messages: vec![],
                     deleted: false,
                     auth_generation: generation.clone(),
+                    email: None,
                 },
             );
             Ok(())
@@ -479,7 +560,7 @@ impl MailManager {
     ) -> Result<MailConnector, MailError> {
         let oauth_lease = self
             .oauth_apps
-            .locked_config(p.oauth_provider())
+            .locked_config(p.oauth_provider().ok_or(MailError::Invalid)?)
             .await
             .map_err(|_| MailError::Credential)?;
         let config = oauth_lease
@@ -639,9 +720,12 @@ impl MailManager {
         p: Provider,
         refresh: bool,
     ) -> Result<Vec<MailMessage>, MailError> {
+        if p == Provider::Email {
+            return self.email_messages(agent, id, refresh).await;
+        }
         let oauth_lease = self
             .oauth_apps
-            .locked_config(p.oauth_provider())
+            .locked_config(p.oauth_provider().ok_or(MailError::Invalid)?)
             .await
             .map_err(|_| MailError::Credential)?;
         let config = oauth_lease
@@ -767,9 +851,14 @@ impl MailManager {
         draft_id: &str,
         approve: bool,
     ) -> Result<MailDraft, MailError> {
+        if p == Provider::Email {
+            return self
+                .resolve_email_owned(agent, id, draft_id, approve, None)
+                .await;
+        }
         let oauth_lease = self
             .oauth_apps
-            .locked_config(p.oauth_provider())
+            .locked_config(p.oauth_provider().ok_or(MailError::Invalid)?)
             .await
             .map_err(|_| MailError::Credential)?;
         let config = oauth_lease
@@ -857,11 +946,16 @@ impl MailManager {
         id: &str,
         p: Provider,
     ) -> Result<(), MailError> {
-        let _oauth_lease = self
-            .oauth_apps
-            .locked_config(p.oauth_provider())
-            .await
-            .map_err(|_| MailError::Credential)?;
+        let _oauth_lease = if let Some(provider) = p.oauth_provider() {
+            Some(
+                self.oauth_apps
+                    .locked_config(provider)
+                    .await
+                    .map_err(|_| MailError::Credential)?,
+            )
+        } else {
+            None
+        };
         let lock = self.lock(agent, p).await;
         let _g = lock.lock().await;
         self.edit(|s| {
@@ -887,22 +981,35 @@ impl MailManager {
         })
         .await?;
         self.pending.lock().await.retain(|_, v| v.id != id);
-        self.credentials
-            .delete(id)
-            .await
-            .map_err(|_| MailError::Credential)
+        if p == Provider::Email {
+            self.email_credentials
+                .delete(id)
+                .await
+                .map_err(|_| MailError::Credential)
+        } else {
+            self.credentials
+                .delete(id)
+                .await
+                .map_err(|_| MailError::Credential)
+        }
     }
     pub(crate) fn start(&self) {
-        let manager = self.clone();
-        tokio::spawn(async move {
-            // Router creation is synchronous and may encounter a busy state lock.
-            // Complete manager installation before background work in all cases.
-            if let Ok(state) = manager.shared() {
-                state.write().await.mail_manager = Some(manager.clone());
-            }
+        let mut worker = self.worker.lock().expect("mail worker lock");
+        if worker.is_some() || self.closing.is_cancelled() {
+            return;
+        }
+        let weak = self.weak();
+        let closing = self.closing.clone();
+        *worker = Some(tokio::spawn(async move {
             loop {
-                if manager.state.strong_count() == 0 {
+                let Some(manager) = weak.upgrade() else {
                     break;
+                };
+                if closing.is_cancelled() || manager.runs.is_draining() {
+                    break;
+                }
+                if let Ok(state) = manager.shared() {
+                    state.write().await.mail_manager = Some(manager.weak());
                 }
                 // Agent deletion shares this transaction gate. Reconcile only after
                 // deletion has either durably committed or rolled back.
@@ -942,9 +1049,22 @@ impl MailManager {
                     Err(_) => break,
                 };
                 for r in records {
+                    if closing.is_cancelled() || manager.runs.is_draining() {
+                        break;
+                    }
                     if r.deleted {
-                        let _ = manager.credentials.delete(&r.connector.id).await;
+                        if r.connector.provider == Provider::Email {
+                            let _ = manager.email_credentials.delete(&r.connector.id).await;
+                        } else {
+                            let _ = manager.credentials.delete(&r.connector.id).await;
+                        }
                     } else if r.connector.status == "active" {
+                        if r.connector.provider == Provider::Email {
+                            let _ = manager
+                                .poll_email_mailbox(&r.connector.agent_id, &r.connector.id)
+                                .await;
+                            continue;
+                        }
                         let _ = manager
                             .messages(
                                 &r.connector.agent_id,
@@ -955,9 +1075,10 @@ impl MailManager {
                             .await;
                     }
                 }
-                tokio::time::sleep(Duration::from_secs(120)).await;
+                drop(manager);
+                tokio::select! { _ = closing.cancelled() => break, _ = tokio::time::sleep(Duration::from_secs(120)) => {} }
             }
-        });
+        }));
     }
 }
 fn update_tools(s: &mut DaemonState, agent: &str, add: bool) -> Result<(), MailError> {

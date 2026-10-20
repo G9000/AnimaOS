@@ -728,6 +728,12 @@ describe('SessionView', () => {
     expect(props.onOpenWork).toHaveBeenCalled();
   });
 
+  it('directs email owner replies through draft review in Connectors', () => {
+    renderView({session: sessionFixture('email:connector:sender', {kind:'email',origin:'email',title:'Email',capabilities:readOnly})});
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.getByRole('note')).toHaveTextContent('Review and send email drafts in Connectors');
+  });
+
   it('shows the reply in progress, outcomes, and where the companion’s view begins', async () => {
     const user = userEvent.setup();
     const onCompact = vi.fn();

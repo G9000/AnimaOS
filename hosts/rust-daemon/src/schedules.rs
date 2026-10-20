@@ -10,6 +10,7 @@ use tokio::task::JoinHandle;
 
 use crate::agent_runs::{AgentRunCoordinator, AgentRunRequest, RunRoom};
 use crate::app::SharedDaemonState;
+use crate::connectors::discord::{outbound_for, DiscordConnectorRecord, DiscordOutboundRecord};
 use crate::connectors::runtime::{ConnectorManager, ConnectorRuntimeStatus};
 use crate::connectors::{OutboundDeliveryState, TelegramOutboundRecord};
 use crate::routes::ApiError;
@@ -808,11 +809,50 @@ async fn claim_due(
     Ok(claim.then_some(claimed))
 }
 
+enum ScheduledOutbound {
+    Telegram(TelegramOutboundRecord),
+    Discord(DiscordOutboundRecord),
+}
+
 async fn execute_claimed(inner: &Arc<SchedulerInner>, record: ScheduledPromptRecord, now: u64) {
-    let room = match &record.target {
+    let discord_connection = match &record.target {
+        ScheduleTarget::Connector { connector_id } => inner
+            .state
+            .read()
+            .await
+            .discord_connectors
+            .get(connector_id)
+            .cloned(),
+        ScheduleTarget::Workspace => None,
+    };
+    // Keep connection authority separate from the frozen concrete home destination.
+    let mut discord_destination: Option<(DiscordConnectorRecord, DiscordConnectorRecord)> = None;
+    let room = match (&record.target, discord_connection) {
         // Spec §9.2: a workspace automation runs in its own `schedule:<id>` session.
-        ScheduleTarget::Workspace => RunRoom::Stable(crate::sessions::schedule_room_id(&record.id)),
-        ScheduleTarget::Connector { connector_id } => {
+        (ScheduleTarget::Workspace, _) => {
+            RunRoom::Stable(crate::sessions::schedule_room_id(&record.id))
+        }
+        (ScheduleTarget::Connector { .. }, Some(connector)) => {
+            let home = (connector.is_active() && connector.agent_id == record.agent_id)
+                .then(|| connector.home_destination())
+                .flatten();
+            let Some(home) = home else {
+                let _ = record_outcome(
+                    inner,
+                    &record.id,
+                    ScheduleOutcomeStatus::Failed,
+                    Some("schedule_target_unavailable"),
+                    now,
+                    None,
+                )
+                .await;
+                return;
+            };
+            discord_destination = Some((connector, home));
+            // Scheduled prompts retain their own history; only their output goes home.
+            RunRoom::Stable(crate::sessions::schedule_room_id(&record.id))
+        }
+        (ScheduleTarget::Connector { connector_id }, None) => {
             let connector = {
                 let state = inner.state.read().await;
                 state
@@ -867,7 +907,7 @@ async fn execute_claimed(inner: &Arc<SchedulerInner>, record: ScheduledPromptRec
     };
     // What the commit hook did, so the rollback undoes exactly that.
     let recorded = Arc::new(std::sync::Mutex::new(
-        None::<(Option<OutcomeUndo>, Option<TelegramOutboundRecord>)>,
+        None::<(Option<OutcomeUndo>, Option<ScheduledOutbound>)>,
     ));
     let commit_recorded = Arc::clone(&recorded);
     let result = inner
@@ -880,9 +920,67 @@ async fn execute_claimed(inner: &Arc<SchedulerInner>, record: ScheduledPromptRec
                 if !state.schedules.contains_key(&schedule_id) {
                     return Err(ApiError::not_found());
                 }
+                if let Some((captured, home)) = &discord_destination {
+                    let current = state
+                        .discord_connectors
+                        .get(&captured.id)
+                        .filter(|current| {
+                            current.is_active() && current.agent_id == captured.agent_id
+                        })
+                        .ok_or_else(ApiError::not_found)?;
+                    if current.credential_generation != captured.credential_generation
+                        || current.configuration_revision != captured.configuration_revision
+                        || current.settings != captured.settings
+                        || current.approved_user_ids != captured.approved_user_ids
+                        || current.bot.id != captured.bot.id
+                        || !current.home_destination().is_some_and(|destination| {
+                            destination.room_id == home.room_id
+                                && destination.channel == home.channel
+                        })
+                    {
+                        return Err(ApiError::conflict(
+                            "Discord home authority changed during schedule",
+                        ));
+                    }
+                }
                 let mut outbound = None;
                 if status == ScheduleOutcomeStatus::Spoke {
-                    if let ScheduleTarget::Connector { connector_id } = &target {
+                    if let Some((_, home)) = &discord_destination {
+                        let (Some(reply_id), Some(reply)) =
+                            (outcome.reply_message_id.as_ref(), result.data.as_ref())
+                        else {
+                            return Err(ApiError::bad_request(
+                                "agent produced no assistant message",
+                            ));
+                        };
+                        if !is_silent_checkin_reply(&reply.text) {
+                            let item = outbound_for(home, reply_id, &reply.text, false);
+                            if let Some(previous) = state.discord_outbound.get(&item.id) {
+                                if previous.text != item.text || previous.room_id != item.room_id {
+                                    return Err(ApiError::conflict(
+                                        "Discord scheduled output changed",
+                                    ));
+                                }
+                            } else {
+                                if state
+                                    .discord_outbound
+                                    .values()
+                                    .filter(|item| {
+                                        item.connector_id == home.id
+                                            && !item.delivery_state.is_settled()
+                                    })
+                                    .count()
+                                    >= crate::connectors::discord::MAX_OUTBOUND
+                                {
+                                    return Err(ApiError::service_unavailable(
+                                        "Discord outbox capacity is exhausted",
+                                    ));
+                                }
+                                state.discord_outbound.insert(item.id.clone(), item.clone());
+                                outbound = Some(ScheduledOutbound::Discord(item));
+                            }
+                        }
+                    } else if let ScheduleTarget::Connector { connector_id } = &target {
                         let connector = state
                             .connectors
                             .get(connector_id)
@@ -916,7 +1014,7 @@ async fn execute_claimed(inner: &Arc<SchedulerInner>, record: ScheduledPromptRec
                                 .outbound
                                 .entry(item.id.clone())
                                 .or_insert_with(|| item.clone());
-                            outbound = Some(item);
+                            outbound = Some(ScheduledOutbound::Telegram(item));
                         }
                     }
                 }
@@ -939,8 +1037,17 @@ async fn execute_claimed(inner: &Arc<SchedulerInner>, record: ScheduledPromptRec
                 let done = recorded.lock().unwrap_or_else(|p| p.into_inner()).take();
                 if let Some((undo, outbound)) = done {
                     if let Some(outbound) = outbound {
-                        if state.outbound.get(&outbound.id) == Some(&outbound) {
-                            state.outbound.remove(&outbound.id);
+                        match outbound {
+                            ScheduledOutbound::Telegram(outbound) => {
+                                if state.outbound.get(&outbound.id) == Some(&outbound) {
+                                    state.outbound.remove(&outbound.id);
+                                }
+                            }
+                            ScheduledOutbound::Discord(outbound) => {
+                                if state.discord_outbound.get(&outbound.id) == Some(&outbound) {
+                                    state.discord_outbound.remove(&outbound.id);
+                                }
+                            }
                         }
                     }
                     if let Some(undo) = undo {
@@ -1115,13 +1222,22 @@ fn validate_target(
     enabled: bool,
 ) -> Result<(), ScheduleError> {
     if let ScheduleTarget::Connector { connector_id } = target {
-        let connector = state
-            .connectors
-            .get(connector_id)
-            .filter(|item| item.agent_id == agent_id && item.deleted_at_ms.is_none())
-            .ok_or(ScheduleError::TargetUnavailable)?;
-        if enabled && !connector.is_active() {
-            return Err(ScheduleError::TargetUnavailable);
+        if let Some(connector) = state.connectors.get(connector_id) {
+            if connector.agent_id != agent_id
+                || connector.deleted_at_ms.is_some()
+                || (enabled && !connector.is_active())
+            {
+                return Err(ScheduleError::TargetUnavailable);
+            }
+        } else {
+            let connector = state
+                .discord_connectors
+                .get(connector_id)
+                .filter(|item| item.agent_id == agent_id && item.deleted_at_ms.is_none())
+                .ok_or(ScheduleError::TargetUnavailable)?;
+            if enabled && (!connector.is_active() || connector.home_destination().is_none()) {
+                return Err(ScheduleError::TargetUnavailable);
+            }
         }
     }
     Ok(())
@@ -2216,6 +2332,8 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod discord_tests;
 #[cfg(test)]
 mod run_now_tests;
 #[cfg(test)]

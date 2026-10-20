@@ -52,7 +52,15 @@ fn fixture_connector() -> DiscordConnectorRecord {
             guild_id: "33".into(),
             name: None,
             kind: DiscordChannelKind::GuildText,
+            parent_channel_id: None,
         },
+        bot_wide: false,
+        guild_scope: None,
+        application_id: None,
+        settings: None,
+        configuration_revision: 0,
+        conversations: vec![],
+        thread_starts: Default::default(),
         approved_user_ids: vec!["44".into()],
         credential_generation: 1,
         cursor: "0".into(),
@@ -69,6 +77,11 @@ use std::sync::atomic::AtomicU64;
 use tokio::sync::{RwLock, Semaphore};
 #[derive(Default)]
 struct FakeTransport {
+    channels: StdMutex<HashMap<String, DiscordChannelMetadata>>,
+    channel_errors: StdMutex<VecDeque<DiscordTransportError>>,
+    member_roles: StdMutex<HashMap<String, Vec<String>>>,
+    thread_calls: AtomicUsize,
+    thread_error: StdMutex<Option<DiscordTransportError>>,
     sent_chunks: StdMutex<Vec<(String, String)>>,
     typing_calls: AtomicUsize,
     typing_inflight: AtomicUsize,
@@ -94,6 +107,56 @@ impl Default for SemaphoreHolder {
 }
 #[async_trait::async_trait]
 impl DiscordTransport for FakeTransport {
+    async fn check_application(
+        &self,
+        _: &DiscordBotToken,
+    ) -> Result<DiscordBotCheck, DiscordTransportError> {
+        Ok(DiscordBotCheck {
+            application_id: "11".into(),
+            bot: fixture_connector().bot,
+            owner_user_ids: vec!["44".into()],
+            message_content_enabled: true,
+            invite_url: client::invite_url("11"),
+        })
+    }
+    async fn member_roles(
+        &self,
+        _: &DiscordBotToken,
+        _: &str,
+        user: &str,
+    ) -> Result<Vec<String>, DiscordTransportError> {
+        Ok(self
+            .member_roles
+            .lock()
+            .unwrap()
+            .get(user)
+            .cloned()
+            .unwrap_or_default())
+    }
+    async fn create_thread(
+        &self,
+        _: &DiscordBotToken,
+        channel: &str,
+        message: &str,
+        _: &str,
+    ) -> Result<DiscordChannelMetadata, DiscordTransportError> {
+        self.thread_calls.fetch_add(1, Ordering::SeqCst);
+        if let Some(error) = self.thread_error.lock().unwrap().take() {
+            return Err(error);
+        }
+        let thread = DiscordChannelMetadata {
+            id: message.into(),
+            guild_id: "33".into(),
+            name: Some(format!("thread {message}")),
+            kind: DiscordChannelKind::GuildThread,
+            parent_channel_id: Some(channel.into()),
+        };
+        self.channels
+            .lock()
+            .unwrap()
+            .insert(message.into(), thread.clone());
+        Ok(thread)
+    }
     async fn send_typing(&self, _: &DiscordBotToken, _: &str) -> Result<(), DiscordTransportError> {
         struct InFlight<'a>(&'a AtomicUsize);
         impl Drop for InFlight<'_> {
@@ -125,6 +188,12 @@ impl DiscordTransport for FakeTransport {
         _: &DiscordBotToken,
         channel: &str,
     ) -> Result<DiscordChannelMetadata, DiscordTransportError> {
+        if let Some(error) = self.channel_errors.lock().unwrap().pop_front() {
+            return Err(error);
+        }
+        if let Some(channel) = self.channels.lock().unwrap().get(channel).cloned() {
+            return Ok(channel);
+        }
         Ok(DiscordChannelMetadata {
             id: channel.into(),
             ..fixture_connector().channel
@@ -1217,3 +1286,41 @@ mod multi_channel_tests;
 mod speaker_tests;
 #[path = "typing_tests.rs"]
 mod typing_tests;
+
+#[path = "interactions_tests.rs"]
+mod interactions_tests;
+
+#[tokio::test]
+async fn configured_mentions_gate_execution_without_granting_sender_authority() {
+    let (manager, _, mut c) = setup().await;
+    let mut encoded = serde_json::to_value(&c).unwrap();
+    encoded["settings"] = serde_json::json!({"requireMention":true,"autoThread":false});
+    c = serde_json::from_value(encoded).unwrap();
+    manager
+        .state
+        .write()
+        .await
+        .discord_connectors
+        .insert(c.id.clone(), c.clone());
+    let mut plain = incoming(&c, "101");
+    plain.text = "ordinary channel conversation".into();
+    let mut outsider = incoming(&c, "102");
+    outsider.sender.id = "99".into();
+    outsider.text = "<@11> please reply".into();
+    manager
+        .accept_batch(
+            c.id.clone(),
+            DiscordMessageBatch {
+                messages: vec![plain, outsider],
+                next_cursor: "102".into(),
+                boundary_proven: true,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        manager.state.read().await.discord_inbound.is_empty(),
+        "ordinary chatter and unauthorized mentions must not execute"
+    );
+    manager.shutdown().await;
+}

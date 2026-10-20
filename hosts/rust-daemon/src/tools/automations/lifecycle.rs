@@ -142,6 +142,10 @@ pub(crate) fn update_automation(
                         .telegram_target(&agent.id)
                         .await
                         .ok_or_else(|| TELEGRAM_NOT_READY.to_string())?,
+                    "discord" => service
+                        .discord_target(&agent.id)
+                        .await
+                        .ok_or_else(|| DISCORD_NOT_READY.to_string())?,
                     _ => return Err(TARGET_ARG_INVALID.into()),
                 });
             }
@@ -153,7 +157,10 @@ pub(crate) fn update_automation(
                 "Updated the automation \"{}\" ({}), {}. {}",
                 display_name(&saved),
                 saved.id,
-                describe(&saved, display_zone(&saved, context.owner_time_zone.effective())),
+                describe(
+                    &saved,
+                    display_zone(&saved, context.owner_time_zone.effective())
+                ),
                 if saved.enabled { "On." } else { "Paused." }
             ))
         }
@@ -194,7 +201,10 @@ pub(crate) fn resume_automation(
                 "Resumed the automation \"{}\" ({}), {}.",
                 display_name(&saved),
                 saved.id,
-                describe(&saved, display_zone(&saved, context.owner_time_zone.effective()))
+                describe(
+                    &saved,
+                    display_zone(&saved, context.owner_time_zone.effective())
+                )
             ))
         }
         .await;

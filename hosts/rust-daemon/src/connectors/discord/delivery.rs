@@ -47,6 +47,21 @@ impl DiscordManager {
         let Some(record) = record else {
             return Ok(false);
         };
+        // The durable outbox room selects a saved destination. Home changes never
+        // redirect an already-created reply to another channel.
+        let destination = {
+            let state = self.state.read().await;
+            let Some(current) = state.discord_connectors.get(&c.id) else {
+                return Ok(false);
+            };
+            let Some(destination) = current
+                .destination_for_room(&record.room_id)
+                .filter(|v| current.can_send_to_channel(&v.channel))
+            else {
+                return Ok(false);
+            };
+            destination
+        };
         if matches!(
             record.delivery_state,
             DiscordDeliveryState::Unknown | DiscordDeliveryState::Sending
@@ -99,10 +114,10 @@ impl DiscordManager {
         let _ = persist;
         // Effect fence is checked after durable Sending and immediately before dispatch.
         let result = if self.authority_current(&c.id, claim.epoch) {
-            let adapter = self.registry.discord(token, &c.channel.id);
+            let adapter = self.registry.discord(token, &destination.channel.id);
             adapter
                 .send(ConnectorSendRequest {
-                    destination: c.channel.id.clone(),
+                    destination: destination.channel.id.clone(),
                     text: sending.chunks[index].text.clone(),
                     attempt_id: sending.chunks[index].attempt_id.clone(),
                 })
@@ -137,7 +152,7 @@ impl DiscordManager {
             } else {
                 match result {
                     Ok(receipt)
-                        if receipt.channel_id == c.channel.id
+                        if receipt.channel_id == destination.channel.id
                             && DiscordSnowflake::parse(&receipt.message_id).is_some() =>
                     {
                         chunk.provider_message_id = Some(receipt.message_id);

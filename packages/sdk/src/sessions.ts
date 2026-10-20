@@ -8,6 +8,7 @@ export type SessionKind =
   | 'chat'
   | 'telegram'
   | 'discord'
+  | 'email'
   | 'checkin'
   | 'job'
   | 'helper';
@@ -16,6 +17,7 @@ export type SessionOrigin =
   | 'api'
   | 'telegram'
   | 'discord'
+  | 'email'
   | 'schedule'
   | 'job'
   | 'delegation'

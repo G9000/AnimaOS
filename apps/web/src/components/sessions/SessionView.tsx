@@ -167,6 +167,11 @@ export function sessionFooter(
         text: 'Job sessions are read-only. Follow the job in Work.',
         action: 'work',
       };
+    case 'email':
+      return {
+        kind: 'note',
+        text: 'Review and send email drafts in Connectors. Automatic replies follow this mailbox\'s sender policy.',
+      };
     case 'helper':
       return { kind: 'note', text: 'Helper sessions are read-only.' };
   }

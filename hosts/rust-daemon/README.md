@@ -274,6 +274,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/community-bundles/reviews`                                           |
 | `POST`   | `/api/agents/{agent_id}/community-bundles/{bundle_id}/update`                                |
 | `POST`   | `/api/agents/{agent_id}/connectors/discord`                                                  |
+| `POST`   | `/api/agents/{agent_id}/connectors/discord/check`                                            |
 | `POST`   | `/api/agents/{agent_id}/connectors/discord/{connector_id}/activate`                          |
 | `POST`   | `/api/agents/{agent_id}/connectors/discord/{connector_id}/outbound/suppress`                 |
 | `POST`   | `/api/agents/{agent_id}/connectors/discord/{connector_id}/restart`                           |
@@ -344,6 +345,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `PUT`    | `/api/agents/{agent_id}/approval-policy`                                                     |
 | `PUT`    | `/api/agents/{agent_id}/avatar`                                                              |
 | `PUT`    | `/api/agents/{agent_id}/connectors/discord/{connector_id}/credential`                        |
+| `PUT`    | `/api/agents/{agent_id}/connectors/discord/{connector_id}/settings`                          |
 | `PUT`    | `/api/agents/{agent_id}/connectors/{connector_id}/credential`                                |
 | `PUT`    | `/api/agents/{agent_id}/mcp-connections/{connection_id}/credential`                          |
 | `PUT`    | `/api/agents/{agent_id}/runs/{run_id}/browser-scope`                                         |
@@ -592,7 +594,7 @@ Refresh has a ten-second total bound, returns `409` while another refresh is act
 and reports metadata failure as unavailable/stale without changing saved agents.
 Catalog presence is metadata, not proof of model/tool acceptance. New selection is
 deliberate; existing/custom model strings and grants remain unchanged until Save.
-The registered OpenAPI inventory now contains 197 operations, including the three explicit owner-scoped voice operations.
+The registered OpenAPI inventory now contains 236 operations, including explicit owner-scoped voice operations and Discord bot checks and interaction settings.
 
 ### Agents
 
@@ -1221,9 +1223,11 @@ the console, while auth/transport failures retain their actual meaning. Browser
 voice requires no server speech endpoints. Focused Hermes provider-format reuse
 is credited with its MIT notice in
 [HERMES-NOTICE](../../packages/core-rust/crates/anima-model-adapters/HERMES-NOTICE).
-Selected-channel Discord REST chat is available through the native connector
-setup and durable session flow. See [Contributing connectors](CONNECTOR-CONTRIBUTING.md#selected-discord-channel)
-for activation, sender access, polling limits and uncertain-output review. Its
+Discord supports a verified bot invite, optional channel selection, mention and
+role settings, durable channel/thread conversations and an optional automation
+home channel. See [Discord conversations](../../docs/companion/discord.md) and
+[Contributing connectors](CONNECTOR-CONTRIBUTING.md#selected-discord-channel)
+for setup, access, recovery limits and uncertain-output review. Its
 focused upstream adaptation is credited in
 [Discord notice](src/connectors/discord/HERMES-NOTICE). Installable community
 modules remain a follow-up. Selected Drive filename search and Google Docs/plain

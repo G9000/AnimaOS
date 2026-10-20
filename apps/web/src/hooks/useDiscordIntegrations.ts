@@ -9,6 +9,8 @@ import {
   daemon,
   type DiscordConnector,
   type CreateDiscordConnectorInput,
+  type DiscordConnectorSettings,
+  type DiscordBotCheck,
 } from '../lib/daemon-api';
 import { safeDiscordError } from '../lib/discord';
 import { useConnectorLifetime } from './useConnectorLifetime';
@@ -191,6 +193,46 @@ export function useDiscordIntegrations(
     },
     [agentId, readStatus, scope.token, scope.isCurrent],
   );
+  const check = async (botToken: string): Promise<DiscordBotCheck | null> => {
+    if (
+      !scope.isCurrent(scope.token) ||
+      !agentId ||
+      activeAgent.current !== agentId ||
+      inFlight.current
+    )
+      return null;
+    const generation = lifetime.current;
+    const revision = ++mutation.current;
+    inFlight.current = true;
+    setBusy('check');
+    setError(null);
+    try {
+      const checked = await daemon.checkDiscordBot(agentId, botToken);
+      return scope.isCurrent(scope.token) &&
+        generation === lifetime.current &&
+        revision === mutation.current
+        ? checked
+        : null;
+    } catch (caught) {
+      if (
+        scope.isCurrent(scope.token) &&
+        generation === lifetime.current &&
+        revision === mutation.current
+      )
+        setError(safeDiscordError(caught));
+      return null;
+    } finally {
+      if (
+        scope.isCurrent(scope.token) &&
+        generation === lifetime.current &&
+        revision === mutation.current
+      ) {
+        inFlight.current = false;
+        setBusy(null);
+        await readStatus(true);
+      }
+    }
+  };
   return {
     connectors:
       owner === agentId && scope.isCurrent(scope.token) ? connectors : [],
@@ -199,6 +241,20 @@ export function useDiscordIntegrations(
     busy,
     error,
     refresh: () => readStatus(),
+    check,
+    configure: (
+      id: string,
+      settings: DiscordConnectorSettings,
+      approvedUserIds: string[],
+    ) =>
+      action('configure', () =>
+        daemon.configureDiscordConnector(
+          agentId!,
+          id,
+          settings,
+          approvedUserIds,
+        ),
+      ),
     create: (input: CreateDiscordConnectorInput) =>
       action('create', () => daemon.createDiscordConnector(agentId!, input)),
     activate: (id: string) =>

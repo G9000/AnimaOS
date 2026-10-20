@@ -98,6 +98,7 @@ async fn recoverable_parse_error_preserves_online_and_later_message_wakes_catch_
     .await
     .unwrap();
     tx.send(GatewaySignal::Message {
+        message_id: None,
         guild_id: Some(c.channel.guild_id.clone()),
         channel_id: c.channel.id.clone(),
     })
@@ -244,6 +245,7 @@ async fn gateway_wakes_are_selected_coalesced_and_retained_and_old_epochs_cannot
     .unwrap();
     within(wake.notified()).await;
     tx.send(GatewaySignal::Message {
+        message_id: None,
         guild_id: Some(c.channel.guild_id.clone()),
         channel_id: "999".into(),
     })
@@ -255,6 +257,7 @@ async fn gateway_wakes_are_selected_coalesced_and_retained_and_old_epochs_cannot
             .is_err()
     );
     tx.send(GatewaySignal::Message {
+        message_id: None,
         guild_id: Some(c.channel.guild_id.clone()),
         channel_id: c.channel.id.clone(),
     })

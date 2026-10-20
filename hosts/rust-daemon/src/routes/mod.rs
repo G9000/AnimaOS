@@ -177,7 +177,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         folder_picker::pick_folder,
         resume_workspace_entry,
         gdrive::status,gdrive::connect,gdrive::disconnect,gdrive::callback,
-        discord::list, discord::create, discord::activate, discord::replace, discord::set_enabled, discord::restart, discord::retry, discord::suppress, discord::delete,
+        discord::list, discord::create, discord::check, discord::configure, discord::activate, discord::replace, discord::set_enabled, discord::restart, discord::retry, discord::suppress, discord::delete,
         connectors::list_connectors,
         connectors::create_telegram_connector,
         connectors::replace_telegram_credential,
@@ -796,7 +796,7 @@ fn router_with_services_with_policies_and_integrations(
     supervisor: crate::system::SupervisorRelay,
 ) -> Router {
     if let Ok(mut guard) = state.try_write() {
-        guard.mail_manager = Some(mail.clone());
+        guard.mail_manager = Some(mail.weak());
         guard.drive_manager = Some(drive.weak());
     }
     let agent_runs = if agent_runs.mcp_manager().is_some() {
@@ -883,6 +883,14 @@ fn router_with_services_with_policies_and_integrations(
         .route(
             "/api/agents/{agent_id}/connectors/discord",
             get(discord::list).post(discord::create),
+        )
+        .route(
+            "/api/agents/{agent_id}/connectors/discord/check",
+            axum::routing::post(discord::check),
+        )
+        .route(
+            "/api/agents/{agent_id}/connectors/discord/{connector_id}/settings",
+            axum::routing::put(discord::configure),
         )
         .route(
             "/api/agents/{agent_id}/connectors/discord/{connector_id}",

@@ -1,10 +1,13 @@
-import { useLayoutEffect, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type {
   DiscordConnector,
   CreateDiscordConnectorInput,
+  DiscordConnectorSettings,
+  DiscordBotCheck,
 } from '../lib/daemon-api';
 import {
-  discordApprovedUsers,
+  discordIdList,
+  discordSettings,
   discordStatusLabel,
   discordWarning,
   isDiscordSnowflake,
@@ -22,6 +25,12 @@ interface DiscordSettingsProps {
   loading: boolean;
   available?: boolean;
   create: (input: CreateDiscordConnectorInput) => Promise<boolean>;
+  check: (token: string) => Promise<DiscordBotCheck | null>;
+  configure: (
+    id: string,
+    settings: DiscordConnectorSettings,
+    approvedUserIds: string[],
+  ) => Promise<boolean>;
   activate: (id: string) => Promise<boolean>;
   replace: (id: string, token: string) => Promise<boolean>;
   setEnabled: (id: string, enabled: boolean) => Promise<boolean>;
@@ -30,10 +39,145 @@ interface DiscordSettingsProps {
   suppress: (id: string) => Promise<boolean>;
   disconnect: (id: string) => Promise<boolean>;
   refresh: () => Promise<void>;
-  openConversation: (connector: DiscordConnector) => void;
+  openConversation: (connector: DiscordConnector, roomId?: string) => void;
 }
 const button =
   'rounded-lg border border-line px-3 py-1.5 text-xs text-ink-2 disabled:opacity-50';
+
+interface RulesDraft {
+  users: string;
+  roles: string;
+  allowed: string;
+  free: string;
+  home: string;
+  requireMention: boolean;
+  autoThread: boolean;
+  threadRequireMention: boolean;
+}
+function rulesDraft(connector?: DiscordConnector): RulesDraft {
+  const settings = discordSettings(connector);
+  return {
+    users: connector?.approvedUserIds.join(', ') ?? '',
+    roles: settings.approvedRoleIds.join(', '),
+    allowed: settings.allowedChannelIds.join(', '),
+    free: settings.freeResponseChannelIds.join(', '),
+    home: settings.homeChannelId ?? '',
+    requireMention: settings.requireMention,
+    autoThread: settings.autoThread,
+    threadRequireMention: settings.threadRequireMention,
+  };
+}
+function parseRules(draft: RulesDraft) {
+  const users = discordIdList(draft.users);
+  const roles = discordIdList(draft.roles);
+  const allowed = discordIdList(draft.allowed);
+  const free = discordIdList(draft.free);
+  if (
+    !users ||
+    !roles ||
+    !allowed ||
+    !free ||
+    (draft.home && !isDiscordSnowflake(draft.home))
+  )
+    return null;
+  return {
+    users,
+    settings: {
+      approvedRoleIds: roles,
+      allowedChannelIds: allowed,
+      freeResponseChannelIds: free,
+      homeChannelId: draft.home || null,
+      requireMention: draft.requireMention,
+      autoThread: draft.autoThread,
+      threadRequireMention: draft.threadRequireMention,
+    },
+  };
+}
+function DiscordRules({
+  draft,
+  setDraft,
+  disabled,
+  creating = false,
+}: {
+  draft: RulesDraft;
+  setDraft: (draft: RulesDraft) => void;
+  disabled: boolean;
+  creating?: boolean;
+}) {
+  const textField = (
+    key: 'users' | 'roles' | 'allowed' | 'free' | 'home',
+    label: string,
+  ) => (
+    <label className="block text-xs text-ink-3">
+      {label}
+      <input
+        className="field mt-1"
+        value={draft[key]}
+        disabled={disabled}
+        onChange={(e) => setDraft({ ...draft, [key]: e.target.value })}
+      />
+    </label>
+  );
+  const checkbox = (
+    key: 'requireMention' | 'autoThread' | 'threadRequireMention',
+    label: string,
+  ) => (
+    <label className="flex gap-2 text-xs text-ink-2">
+      <input
+        type="checkbox"
+        disabled={disabled}
+        checked={draft[key]}
+        onChange={(e) => setDraft({ ...draft, [key]: e.target.checked })}
+      />
+      {label}
+    </label>
+  );
+  return (
+    <div className="space-y-3">
+      <p className="text-xs font-semibold text-ink-2">
+        Who can talk to the bot
+      </p>
+      {textField('users', 'Approved user IDs')}
+      {textField('roles', 'Approved role IDs')}
+      <p className="text-xs text-ink-3">
+        {creating
+          ? 'Leave users empty to use the verified application owners. '
+          : ''}
+        Only approved users or members of approved roles can start a reply. A
+        mention does not grant access. Separate IDs with commas or spaces.
+      </p>
+      <p className="text-xs font-semibold text-ink-2">
+        When and where it replies
+      </p>
+      {checkbox('requireMention', 'Require a mention in channels')}
+      {checkbox('autoThread', 'Create a thread for mentions')}
+      {checkbox(
+        'threadRequireMention',
+        'Require mentions in participating threads',
+      )}
+      <p className="text-xs text-ink-3">
+        Follow-up messages in a participating thread continue naturally unless
+        mentions are required there.
+      </p>
+      {textField('allowed', 'Allowed channel IDs (optional)')}
+      <p className="text-xs text-ink-3">
+        Leave empty for channels the bot can access. Allowed parent channels
+        include their threads.
+      </p>
+      {textField('free', 'Channels that reply without a mention (optional)')}
+      {textField('home', 'Home channel ID (optional)')}
+      <p className="text-xs text-ink-3">
+        Home is the default destination for proactive messages. Replies stay in
+        their original channel or thread.
+      </p>
+      {!parseRules(draft) && (
+        <p role="alert" className="text-xs text-danger">
+          Use unique positive decimal Discord IDs without leading zeroes.
+        </p>
+      )}
+    </div>
+  );
+}
 
 function DiscordConnection({
   connector: c,
@@ -45,11 +189,15 @@ function DiscordConnection({
   const [replacing, setReplacing] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [draft, setDraft] = useState(() => rulesDraft(c));
+  const [editing, setEditing] = useState(false);
   useLayoutEffect(() => {
     setToken('');
     setReplacing(false);
     setReviewing(false);
     setDeleting(false);
+    setDraft(rulesDraft(c));
+    setEditing(false);
   }, [p.agentId, c.id, p.online, p.epoch]);
   useLayoutEffect(() => {
     if (c.unknownOutbound === 0) setReviewing(false);
@@ -67,8 +215,10 @@ function DiscordConnection({
     <article className="space-y-3 rounded-xl border border-line bg-white/[0.02] p-4">
       <div>
         <p className="text-sm font-semibold text-ink">
-          {c.bot.displayName ?? c.bot.username ?? 'Discord bot'} · #
-          {c.channel.name ?? c.channel.id}
+          {c.bot.displayName ?? c.bot.username ?? 'Discord bot'} ·{' '}
+          {c.channel
+            ? `#${c.channel.name ?? c.channel.id}`
+            : 'Discord bot connection'}
         </p>
         <p className="mt-1 text-xs text-ink-3">
           {p.available === false
@@ -77,14 +227,78 @@ function DiscordConnection({
         </p>
       </div>
       <p className="text-xs text-ink-3">
-        Server {c.channel.guildId} · Channel {c.channel.id}
-        <br />
+        {c.channel && (
+          <>
+            Server {c.channel.guildId} · Channel {c.channel.id}
+            <br />
+          </>
+        )}
         Approved users: {c.approvedUserIds.join(', ')}
       </p>
       <p className="text-xs text-ink-3">
-        Channel and approved users are fixed. Delete and recreate this
-        connection to change them.
+        Approved roles:{' '}
+        {discordSettings(c).approvedRoleIds.join(', ') || 'None'}
       </p>
+      <p className="text-xs text-ink-3">
+        {discordSettings(c).requireMention
+          ? 'Mention the bot to start a channel reply.'
+          : 'Replies without mentions in allowed channels.'}{' '}
+        {discordSettings(c).autoThread
+          ? 'Mentions open a thread.'
+          : 'Replies stay inline.'}
+      </p>
+      {c.inviteUrl && (
+        <a
+          className="text-xs underline"
+          href={c.inviteUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Add to Discord
+        </a>
+      )}
+      <details
+        open={editing}
+        onToggle={(e) => {
+          if (e.currentTarget.open && !editing) {
+            setDraft(rulesDraft(c));
+            setEditing(true);
+          }
+          if (!e.currentTarget.open) setEditing(false);
+        }}
+      >
+        <summary className="cursor-pointer text-xs text-ink-2">
+          Edit Discord rules
+        </summary>
+        {editing && (
+          <div className="mt-3 space-y-3">
+            <DiscordRules
+              draft={draft}
+              setDraft={setDraft}
+              disabled={Boolean(disabled)}
+            />
+            <button
+              type="button"
+              className={button}
+              disabled={
+                disabled ||
+                !parseRules(draft) ||
+                (!draft.users.trim() && !draft.roles.trim())
+              }
+              onClick={async () => {
+                const parsed = parseRules(draft);
+                if (
+                  parsed &&
+                  (await p.configure(c.id, parsed.settings, parsed.users))
+                )
+                  setEditing(false);
+              }}
+            >
+              Save Discord rules
+            </button>
+          </div>
+        )}
+      </details>
       {!c.enabled && (
         <p className="text-xs text-ink-2">
           First activation starts with new messages after activation. Earlier
@@ -177,14 +391,31 @@ function DiscordConnection({
         >
           Retry safe delivery
         </button>
-        <button
-          type="button"
-          disabled={disabled}
-          className={button}
-          onClick={() => p.openConversation(c)}
-        >
-          Open conversation
-        </button>
+        {c.channel && (
+          <button
+            type="button"
+            disabled={disabled}
+            className={button}
+            onClick={() => p.openConversation(c)}
+          >
+            Open conversation
+          </button>
+        )}
+        {c.conversations
+          ?.filter(
+            (conversation) => !c.channel || conversation.roomId !== c.roomId,
+          )
+          .map((conversation) => (
+            <button
+              key={conversation.roomId}
+              type="button"
+              className={button}
+              disabled={disabled}
+              onClick={() => p.openConversation(c, conversation.roomId)}
+            >
+              Open #{conversation.name ?? conversation.channelId}
+            </button>
+          ))}
         <button
           type="button"
           disabled={disabled}
@@ -246,48 +477,72 @@ export function DiscordSettings(p: DiscordSettingsProps) {
   const [token, setToken] = useState('');
   const [guild, setGuild] = useState('');
   const [channel, setChannel] = useState('');
-  const [users, setUsers] = useState('');
-  const [privateConfirmed, setPrivateConfirmed] = useState(false);
+  const [draft, setDraft] = useState(() => rulesDraft());
+  const [checked, setChecked] = useState<DiscordBotCheck | null>(null);
+  const [checking, setChecking] = useState(false);
+  const request = useRef(0);
   useLayoutEffect(() => {
-    setToken('');
     setGuild('');
     setChannel('');
-    setUsers('');
-    setPrivateConfirmed(false);
+    setDraft(rulesDraft());
   }, [p.agentId]);
   useLayoutEffect(() => {
+    request.current++;
     setToken('');
-    setPrivateConfirmed(false);
-  }, [p.online, p.epoch]);
-  const approved = discordApprovedUsers(users);
-  const disabled =
-    p.disabled || p.online === false || p.busy !== null || p.loading;
+    setChecked(null);
+    setChecking(false);
+    return () => {
+      request.current++;
+    };
+  }, [p.agentId, p.online, p.epoch]);
+  const disabled = Boolean(
+    p.disabled ||
+    p.online === false ||
+    p.busy !== null ||
+    p.loading ||
+    checking,
+  );
+  const tokenDisabled = Boolean(
+    p.disabled || p.online === false || (p.busy !== null && p.busy !== 'check'),
+  );
+  const parsed = parseRules(draft);
   const valid =
     token.trim() &&
-    isDiscordSnowflake(guild) &&
-    isDiscordSnowflake(channel) &&
-    approved !== null &&
-    privateConfirmed;
+    checked &&
+    parsed &&
+    ((!guild && !channel) ||
+      (isDiscordSnowflake(guild) && isDiscordSnowflake(channel)));
+  const check = async () => {
+    const revision = ++request.current;
+    setChecked(null);
+    setChecking(true);
+    try {
+      const result = await p.check(token.trim());
+      if (revision === request.current) setChecked(result);
+    } finally {
+      if (revision === request.current) setChecking(false);
+    }
+  };
   const create = () => {
+    if (!valid || !parsed) return;
     const secret = token.trim();
+    request.current++;
     setToken('');
-    if (valid && approved)
-      void p.create({
-        botToken: secret,
-        guildId: guild,
-        channelId: channel,
-        approvedUserIds: approved,
-        privateChannelConfirmed: true,
-      });
+    setChecked(null);
+    void p.create({
+      botToken: secret,
+      ...(channel ? { guildId: guild, channelId: channel } : {}),
+      approvedUserIds: parsed.users,
+      settings: parsed.settings,
+    });
   };
   return (
     <section className="space-y-3" aria-label="Discord connection setup">
       <SectionTitle>Discord</SectionTitle>
       <p className="text-xs leading-relaxed text-ink-2">
-        Connect this agent to multiple channels by adding a connection for each
-        channel. Replies stay in the channel where each message arrives. Each
-        connection has its own conversation; messages sent from that web
-        conversation also go to its selected channel.
+        Connect one bot and mention it in a server channel to start talking.
+        Replies stay in the channel or thread where each message arrives. Each
+        channel and thread keeps its own conversation history.
       </p>
       <p className="text-xs leading-relaxed text-ink-2">
         Create a bot in the{' '}
@@ -299,31 +554,23 @@ export function DiscordSettings(p: DiscordSettingsProps) {
         >
           Discord Developer Portal
         </a>
-        , install it in your server, enable Message Content intent (verified
-        apps may need approval), and grant View Channel, Read Message History,
-        and Send Messages for your selected guild text channel.
-      </p>
-      <p className="text-xs leading-relaxed text-ink-3">
-        Use a private, low-volume channel and exact approved sender IDs. Privacy
-        is your confirmation; Anima cannot verify who else can view it. Online
-        status follows the live Discord connection. Typing appears while the
-        assistant is working. Message events trigger catch-up, with periodic
-        history checks for recovery. Messages deleted before catch-up can be
-        missed; edits, delete events, reactions, threads, voice, and Discord
-        slash commands are unavailable. Stop runs from the web conversation.
+        , then check its token below to get an invitation. Enable Message
+        Content intent in the Bot settings. The bot needs View Channel, Read
+        Message History, and Send Messages, plus Create Public Threads and Send
+        Messages in Threads for automatic threads.
       </p>
       {p.connectors.map((c) => (
-        <DiscordConnection key={`${p.agentId}:${c.id}`} {...p} connector={c} />
+        <DiscordConnection key={p.agentId + ':' + c.id} {...p} connector={c} />
       ))}
       <details open={p.connectors.length === 0}>
         <summary className="cursor-pointer text-xs text-ink-2">
-          Add selected channel
+          Connect a Discord bot
         </summary>
         <div className="mt-3 space-y-3">
           <p className="text-xs text-ink-3">
-            Save disabled, then Activate to listen for new messages. The daemon
-            stores your token in the operating-system credential vault. Enable
-            Developer Mode in Discord to copy server, channel, and user IDs.
+            Check the bot, add it to Discord, then save disabled and Activate.
+            No channel ID is required. The daemon stores your token in the
+            operating-system credential vault.
           </p>
           <label className="block text-xs text-ink-3">
             Discord bot token
@@ -331,58 +578,107 @@ export function DiscordSettings(p: DiscordSettingsProps) {
               className="field mt-1"
               type="password"
               autoComplete="off"
-              disabled={disabled}
+              disabled={tokenDisabled}
               value={token}
-              onChange={(e) => setToken(e.target.value)}
+              onChange={(e) => {
+                request.current++;
+                setToken(e.target.value);
+                setChecked(null);
+                setChecking(false);
+              }}
             />
-          </label>
-          <label className="block text-xs text-ink-3">
-            Server ID
-            <input
-              className="field mt-1"
-              inputMode="numeric"
-              disabled={disabled}
-              value={guild}
-              onChange={(e) => setGuild(e.target.value)}
-            />
-          </label>
-          <label className="block text-xs text-ink-3">
-            Channel ID
-            <input
-              className="field mt-1"
-              inputMode="numeric"
-              disabled={disabled}
-              value={channel}
-              onChange={(e) => setChannel(e.target.value)}
-            />
-          </label>
-          <label className="block text-xs text-ink-3">
-            Approved user IDs
-            <input
-              className="field mt-1"
-              disabled={disabled}
-              value={users}
-              onChange={(e) => setUsers(e.target.value)}
-            />
-          </label>
-          <p className="text-xs text-ink-3">
-            Enter 1–16 unique positive decimal user IDs, separated by commas or
-            spaces. Leading zeroes are invalid.
-          </p>
-          <label className="flex gap-2 text-xs text-ink-2">
-            <input
-              type="checkbox"
-              disabled={disabled}
-              checked={privateConfirmed}
-              onChange={(e) => setPrivateConfirmed(e.target.checked)}
-            />
-            I confirm this selected channel is private and appropriate for my
-            assistant.
           </label>
           <button
             type="button"
+            className={button}
+            disabled={disabled || !token.trim()}
+            onClick={() => void check()}
+          >
+            {checking ? 'Checking bot…' : 'Check bot token'}
+          </button>
+          {checked && (
+            <div className="space-y-3 rounded-lg border border-line p-3">
+              <p className="text-xs text-ink-2">
+                Verified bot:{' '}
+                {checked.bot.displayName ??
+                  checked.bot.username ??
+                  checked.bot.id}
+              </p>
+              <a
+                className="text-xs underline"
+                href={checked.inviteUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Add to Discord
+              </a>
+              <p className="text-xs text-ink-3">
+                {checked.messageContentEnabled
+                  ? 'Message Content intent is enabled.'
+                  : 'Enable Message Content intent in Discord Developer Portal → Bot → Privileged Gateway Intents before activation.'}
+              </p>
+              <p className="text-xs text-ink-3">
+                Verified application owners:{' '}
+                {checked.ownerUserIds.join(', ') ||
+                  'None found; add approved users or roles below.'}
+              </p>
+              <details>
+                <summary className="cursor-pointer text-xs text-ink-2">
+                  Access and reply rules
+                </summary>
+                <div className="mt-3">
+                  <DiscordRules
+                    draft={draft}
+                    setDraft={setDraft}
+                    disabled={disabled}
+                    creating
+                  />
+                </div>
+              </details>
+            </div>
+          )}
+          <details>
+            <summary className="cursor-pointer text-xs text-ink-2">
+              Advanced: limit this connection to one channel
+            </summary>
+            <div className="mt-3 space-y-3">
+              <label className="block text-xs text-ink-3">
+                Server ID
+                <input
+                  className="field mt-1"
+                  disabled={disabled}
+                  value={guild}
+                  onChange={(e) => setGuild(e.target.value)}
+                />
+              </label>
+              <label className="block text-xs text-ink-3">
+                Channel ID
+                <input
+                  className="field mt-1"
+                  disabled={disabled}
+                  value={channel}
+                  onChange={(e) => setChannel(e.target.value)}
+                />
+              </label>
+              <p className="text-xs text-ink-3">
+                Both fields are optional. Use Discord Developer Mode to copy IDs
+                when setting a specific channel or rule.
+              </p>
+            </div>
+          </details>
+          <button
+            type="button"
             className={primaryBtnCls}
-            disabled={disabled || !valid}
+            disabled={
+              disabled ||
+              !valid ||
+              Boolean(
+                checked &&
+                !checked.ownerUserIds.length &&
+                !draft.users.trim() &&
+                !draft.roles.trim(),
+              )
+            }
             onClick={create}
           >
             Save Discord connection

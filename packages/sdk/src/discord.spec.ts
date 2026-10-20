@@ -5,6 +5,73 @@ import {
 } from './index.js';
 
 describe('Discord owner transport', () => {
+  it('checks a bot and saves bot-wide access and response rules without a selected channel', async () => {
+    const requests: { url: string; init?: RequestInit }[] = [];
+    const checked = {
+      applicationId: '1',
+      bot: { id: '2', username: 'helper', displayName: null },
+      ownerUserIds: ['3'],
+      messageContentEnabled: true,
+      inviteUrl: 'https://discord.com/oauth2/authorize?client_id=1',
+    };
+    const connector = {
+      id: 'c',
+      channel: null,
+      botWide: true,
+      conversations: [],
+    };
+    const api = createDaemonClient({
+      baseUrl: '',
+      fetch: async (url, init) => {
+        requests.push({ url: String(url), init });
+        return Response.json(
+          String(url).endsWith('/check') ? checked : { connector },
+        );
+      },
+    }).connectors;
+    expect(await api.checkDiscordBot('a /?', 'secret')).toEqual(checked);
+    const settings = {
+      allowedChannelIds: [],
+      freeResponseChannelIds: ['4'],
+      approvedRoleIds: ['5'],
+      homeChannelId: null,
+      requireMention: true,
+      autoThread: true,
+      threadRequireMention: false,
+    };
+    expect(
+      await api.createDiscordConnector('a /?', {
+        botToken: 'secret',
+        settings,
+      }),
+    ).toEqual(connector);
+    expect(
+      await api.configureDiscordConnector('a /?', 'c /?', settings, ['3']),
+    ).toEqual(connector);
+    expect(
+      requests.map((r) => [
+        r.url,
+        r.init?.method,
+        JSON.parse(r.init!.body as string),
+      ]),
+    ).toEqual([
+      [
+        '/api/agents/a%20%2F%3F/connectors/discord/check',
+        'POST',
+        { botToken: 'secret' },
+      ],
+      [
+        '/api/agents/a%20%2F%3F/connectors/discord',
+        'POST',
+        { botToken: 'secret', settings },
+      ],
+      [
+        '/api/agents/a%20%2F%3F/connectors/discord/c%20%2F%3F/settings',
+        'PUT',
+        { settings, approvedUserIds: ['3'] },
+      ],
+    ]);
+  });
   it('encodes every scope and keeps credentials and acknowledgement in bodies', async () => {
     const requests: { url: string; init?: RequestInit }[] = [];
     const connector = { id: 'c /?', type: 'discord' };

@@ -83,11 +83,10 @@ impl DiscordManager {
         let state = self.state.read().await;
         if self.is_closing()
             || !self.authority_current(&c.id, epoch)
-            || !state.discord_connectors.get(&c.id).is_some_and(|current| {
-                current.is_active()
-                    && current.credential_generation == c.credential_generation
-                    && current.channel == c.channel
-            })
+            || !state
+                .discord_connectors
+                .get(&c.id)
+                .is_some_and(|current| current.matches_destination(c))
         {
             return Activity::Stopped;
         }

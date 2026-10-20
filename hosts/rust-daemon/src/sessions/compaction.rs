@@ -70,7 +70,11 @@ pub(crate) fn compaction_input_chars(budget_tokens: u64) -> usize {
 
 fn speaker(message: &Message) -> &'static str {
     match message.role {
-        MessageRole::User if is_discord_message(message) => "Participant",
+        MessageRole::User
+            if is_discord_message(message) || message.room_id.starts_with("email:") =>
+        {
+            "Participant"
+        }
         MessageRole::User => "Owner",
         MessageRole::Assistant => "Companion",
         MessageRole::Tool => "Tool result",
@@ -179,6 +183,8 @@ pub(crate) fn compaction_request(
     let discord = dropped.iter().any(is_discord_message);
     let conversation = if discord {
         "a shared Discord channel conversation"
+    } else if dropped.iter().any(|m| m.room_id.starts_with("email:")) {
+        "an email conversation between an external participant and the companion; the participant is not the workspace owner"
     } else {
         "a conversation between an owner and their companion"
     };
@@ -540,6 +546,20 @@ mod tests {
             compaction_input_chars(1_000_000),
             COMPACTION_INPUT_MAX_CHARS
         );
+    }
+
+    #[test]
+    fn email_compaction_keeps_external_senders_distinct_from_the_owner() {
+        let mut inbound = message(
+            "email-message",
+            MessageRole::User,
+            "External email. Sender: alice@example.com",
+        );
+        inbound.room_id = "email:connector:sender-hash".into();
+        let request = compaction_request(None, &[inbound], 10_000);
+        assert!(request.system.contains("not the workspace owner"));
+        assert!(request.messages[0].content.text.contains("Participant:"));
+        assert!(!request.messages[0].content.text.contains("Owner:"));
     }
 
     /// The limits of spec §16 (and fix round 1's deadline), named once.

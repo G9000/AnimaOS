@@ -1,7 +1,7 @@
 import type { DaemonClient } from './client.js';
 
 export type ConnectorStatus = 'pairing' | 'active' | 'reauthRequired';
-export type MailProvider = 'gmail' | 'outlook';
+export type MailProvider = 'gmail' | 'outlook' | 'email';
 export type OAuthAppProvider = 'google' | 'microsoft';
 
 export interface DriveConnector {
@@ -38,6 +38,29 @@ export type DiscordConnectorStatus =
   | 'error'
   | 'degraded'
   | 'reconciling';
+export interface DiscordConnectorSettings {
+  allowedChannelIds: string[];
+  freeResponseChannelIds: string[];
+  approvedRoleIds: string[];
+  homeChannelId: string | null;
+  requireMention: boolean;
+  autoThread: boolean;
+  threadRequireMention: boolean;
+}
+export interface DiscordConversation {
+  channelId: string;
+  guildId: string;
+  parentChannelId: string | null;
+  name: string | null;
+  roomId: string;
+}
+export interface DiscordBotCheck {
+  applicationId: string;
+  bot: { id: string; username: string | null; displayName: string | null };
+  ownerUserIds: string[];
+  messageContentEnabled: boolean;
+  inviteUrl: string;
+}
 export interface DiscordConnector {
   id: string;
   agentId: string;
@@ -48,8 +71,12 @@ export interface DiscordConnector {
     id: string;
     guildId: string;
     name: string | null;
-    kind: 'guildText';
-  };
+    kind: 'guildText' | 'guildThread';
+  } | null;
+  settings?: DiscordConnectorSettings;
+  botWide?: boolean;
+  inviteUrl?: string;
+  conversations?: DiscordConversation[];
   approvedUserIds: string[];
   enabled: boolean;
   status: DiscordConnectorStatus;
@@ -63,11 +90,12 @@ export interface DiscordConnector {
 }
 export interface CreateDiscordConnectorInput {
   botToken: string;
-  guildId: string;
-  channelId: string;
-  approvedUserIds: string[];
-  /** The owner's confirmation, not provider verification of channel privacy. */
-  privateChannelConfirmed: true;
+  guildId?: string;
+  channelId?: string;
+  approvedUserIds?: string[];
+  settings?: DiscordConnectorSettings;
+  /** @deprecated Accepted for older selected-channel clients. */
+  privateChannelConfirmed?: boolean;
 }
 
 export interface OAuthAppStatus {
@@ -85,6 +113,34 @@ export interface ConfigureOAuthAppInput {
   tenant?: string;
 }
 
+export interface EmailEndpoint {
+  host: string;
+  port: number;
+  security: 'tls' | 'starttls';
+  username: string;
+}
+
+/** Nonsecret server settings returned by the daemon. */
+export interface GenericEmailSettings {
+  address: string;
+  imap: EmailEndpoint;
+  smtp: EmailEndpoint;
+  autoReply: {
+    enabled: boolean;
+    allowedSenders: string[];
+    authservId: string;
+  };
+}
+
+export interface ConnectGenericEmailInput extends GenericEmailSettings {
+  imapPassword: string;
+  smtpPassword: string;
+}
+
+export interface GenericEmailConnectResult {
+  connector: MailConnector;
+}
+
 export interface MailConnector {
   id: string;
   agentId: string;
@@ -95,6 +151,7 @@ export interface MailConnector {
   updatedAtMs: number;
   lastSyncedAtMs?: number | null;
   error?: string | null;
+  email?: GenericEmailSettings | null;
 }
 
 export interface MailMessage {
@@ -203,7 +260,25 @@ export class ConnectorsClient {
     }>(discordPath(agentId));
     return response.connectors;
   }
-  /** Saves a selected channel disabled; activate explicitly to start with new messages. */
+  checkDiscordBot(agentId: string, botToken: string): Promise<DiscordBotCheck> {
+    return this.client.requestJson(`${discordPath(agentId)}/check`, {
+      method: 'POST',
+      body: { botToken },
+    });
+  }
+  configureDiscordConnector(
+    agentId: string,
+    connectorId: string,
+    settings: DiscordConnectorSettings,
+    approvedUserIds: string[],
+  ): Promise<DiscordConnector> {
+    return this.discordMutation(
+      `${discordPath(agentId, connectorId)}/settings`,
+      'PUT',
+      { settings, approvedUserIds },
+    );
+  }
+  /** Saves a bot disabled; activate explicitly to start with new messages. */
   createDiscordConnector(
     agentId: string,
     input: CreateDiscordConnectorInput,
@@ -314,10 +389,21 @@ export class ConnectorsClient {
 
   connectMail(
     agentId: string,
-    provider: MailProvider,
+    provider: Exclude<MailProvider, 'email'>,
   ): Promise<MailConnectResult> {
     return this.client.requestJson(mailPath(agentId, provider), {
       method: 'POST',
+    });
+  }
+
+  /** Verify receiving and sending credentials without sending mail. Reconnect starts a fresh future-mail baseline. */
+  connectGenericEmail(
+    agentId: string,
+    input: ConnectGenericEmailInput,
+  ): Promise<GenericEmailConnectResult> {
+    return this.client.requestJson(mailPath(agentId, 'email'), {
+      method: 'POST',
+      body: input,
     });
   }
 

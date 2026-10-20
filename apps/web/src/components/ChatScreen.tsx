@@ -89,6 +89,7 @@ function messageFlag(message: ChatMessage): string | null {
 const SOURCE_LABELS: Record<string, string> = {
   telegram: 'Telegram',
   discord: 'Discord',
+  email: 'Email',
 };
 function messageSource(message: ChatMessage): string | null {
   if (message.role !== 'User') return null;

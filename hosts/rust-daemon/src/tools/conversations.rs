@@ -67,25 +67,25 @@ fn discovery_request(call: &ToolCall) -> Result<DiscoveryRequest, &'static str> 
         .filter(|value| *value >= 1)
         .ok_or("search_conversations limit must be an integer from 1 to 10")?
         as usize;
-    let kind =
-        match call.args.get("kind") {
-            None => None,
-            Some(DataValue::String(value)) => Some(match value.as_str() {
-                "chat" => SessionKind::Chat,
-                "telegram" => SessionKind::Telegram,
-                "discord" => SessionKind::Discord,
-                "checkin" => SessionKind::Checkin,
-                "job" => SessionKind::Job,
-                _ => return Err(
-                    "search_conversations kind must be chat, telegram, discord, checkin, or job",
-                ),
-            }),
-            Some(_) => {
-                return Err(
-                    "search_conversations kind must be chat, telegram, discord, checkin, or job",
-                )
-            }
-        };
+    let kind = match call.args.get("kind") {
+        None => None,
+        Some(DataValue::String(value)) => Some(match value.as_str() {
+            "chat" => SessionKind::Chat,
+            "telegram" => SessionKind::Telegram,
+            "discord" => SessionKind::Discord,
+            "email" => SessionKind::Email,
+            "checkin" => SessionKind::Checkin,
+            "job" => SessionKind::Job,
+            _ => return Err(
+                "search_conversations kind must be chat, telegram, discord, email, checkin, or job",
+            ),
+        }),
+        Some(_) => {
+            return Err(
+                "search_conversations kind must be chat, telegram, discord, email, checkin, or job",
+            )
+        }
+    };
     let after_ms = bounded_integer(call, "after_ms", 0, MAX_SAFE_INTEGER as u64)
         .filter(|_| call.args.contains_key("after_ms"));
     if call.args.contains_key("after_ms") && after_ms.is_none() {

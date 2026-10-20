@@ -15,6 +15,7 @@ export type RunSource =
   | 'api'
   | 'telegram'
   | 'discord'
+  | 'email'
   | 'schedule'
   | 'job'
   | 'delegation'

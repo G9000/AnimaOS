@@ -25,6 +25,7 @@ export interface AutomationsPageProps {
   online: boolean;
   /** The companion's Telegram connector with an approved chat, if any. */
   telegramConnectorId: string | null;
+  discordDestinations?: { connectorId: string; label: string }[];
   /** An automation to open in the editor ("Edit automation" in a check-in). */
   focusId?: string | null;
   onFocusHandled?: () => void;
@@ -39,6 +40,7 @@ export function AutomationsPage({
   version,
   online,
   telegramConnectorId,
+  discordDestinations = [],
   focusId = null,
   onFocusHandled,
   onOpenSession,
@@ -125,6 +127,7 @@ export function AutomationsPage({
             key={editing.automation?.id ?? 'new'}
             automation={editing.automation}
             telegramConnectorId={telegramConnectorId}
+            discordDestinations={discordDestinations}
             onSave={save}
             onCancel={() => setEditing(null)}
           />
@@ -178,7 +181,10 @@ export function AutomationsPage({
                         ` · Last: ${interrupted ? 'Needs review' : OUTCOME_LABELS[automation.lastOutcome.status]}`}
                       {automation.counters.consecutiveFailures > 0 &&
                         ` · ${automation.counters.consecutiveFailures} failed in a row`}
-                      {automation.target.type === 'connector' && ' · Telegram'}
+                      {automation.target.type === 'connector' &&
+                        (automation.target.connectorId === telegramConnectorId
+                          ? ' · Telegram'
+                          : ' · Connected channel')}
                     </p>
                     {automation.createdBy.kind === 'agent' && (
                       <p className="automation-note">{AGENT_CREATED_NOTE}</p>

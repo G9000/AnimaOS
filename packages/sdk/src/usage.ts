@@ -4,6 +4,7 @@ export type UsageSource =
   | 'chat'
   | 'telegram'
   | 'discord'
+  | 'email'
   | 'automation'
   | 'job'
   | 'helper'

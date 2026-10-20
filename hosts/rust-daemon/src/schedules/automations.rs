@@ -581,6 +581,23 @@ impl AutomationService {
             })
     }
 
+    /// Only an explicitly configured Discord home is a proactive destination.
+    pub(crate) async fn discord_target(&self, agent_id: &str) -> Option<ScheduleTarget> {
+        let state = self.state.read().await;
+        state
+            .discord_connectors
+            .values()
+            .filter(|connector| {
+                connector.agent_id == agent_id
+                    && connector.is_active()
+                    && connector.home_destination().is_some()
+            })
+            .min_by(|left, right| left.id.cmp(&right.id))
+            .map(|connector| ScheduleTarget::Connector {
+                connector_id: connector.id.clone(),
+            })
+    }
+
     /// The automation's latest fires, newest first: the control plane's
     /// unmirrored ones merged with the history store's (spec §9.1).
     pub(crate) async fn history(

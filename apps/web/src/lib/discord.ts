@@ -1,6 +1,7 @@
 import type {
   DiscordConnector,
   DiscordConnectorStatus,
+  DiscordConnectorSettings,
 } from '@animaOS-SWARM/sdk';
 
 const STATUS: Record<DiscordConnectorStatus, string> = {
@@ -32,6 +33,41 @@ export function discordApprovedUsers(value: string): string[] | null {
     new Set(ids).size === ids.length
     ? ids
     : null;
+}
+export function discordIdList(value: string): string[] | null {
+  const ids = value
+    .trim()
+    .split(/[\s,]+/)
+    .filter(Boolean);
+  return ids.length <= 100 &&
+    ids.every(isDiscordSnowflake) &&
+    new Set(ids).size === ids.length
+    ? ids
+    : null;
+}
+export function discordSettings(
+  connector?: DiscordConnector,
+): DiscordConnectorSettings {
+  return (
+    connector?.settings ?? {
+      allowedChannelIds: [],
+      freeResponseChannelIds: [],
+      approvedRoleIds: [],
+      homeChannelId: null,
+      requireMention: !connector?.channel,
+      autoThread: !connector?.channel,
+      threadRequireMention: false,
+    }
+  );
+}
+export function discordHasRoom(
+  connector: DiscordConnector,
+  roomId: string,
+): boolean {
+  return (
+    (connector.channel !== null && connector.roomId === roomId) ||
+    Boolean(connector.conversations?.some((c) => c.roomId === roomId))
+  );
 }
 export function discordCanReply(connector: DiscordConnector | null): boolean {
   return (
@@ -69,7 +105,7 @@ export function safeDiscordError(error: unknown): string {
     case 'discord_rate_limited':
       return 'Discord is limiting requests. Wait before retrying setup.';
     case 'discord_invalid_response':
-      return 'Discord returned an unexpected response. Select a regular server text channel; threads, forums, and voice channels are unsupported.';
+      return 'Discord returned an unexpected response. Check the bot application and server channel permissions.';
     case 'discord_network_error':
       return 'The daemon could not reach Discord. Check the daemon computer’s network, proxy, firewall, and TLS connection.';
     case 'discord_provider_unavailable':
@@ -80,7 +116,7 @@ export function safeDiscordError(error: unknown): string {
       ? error.status
       : null;
   if (status === 400)
-    return 'Check the server, channel, approved user IDs, and private-channel confirmation.';
+    return 'Check the bot token, approved user or role IDs, and optional channel rules.';
   if (status === 409)
     return 'This change conflicts with the saved connection. Refresh status and check the selected server, channel, and bot. Replacement tokens must belong to the same bot.';
   if (status === 422)
@@ -92,6 +128,8 @@ export function safeDiscordError(error: unknown): string {
 export function discordWarning(warning: string | null): string | null {
   if (!warning) return null;
   const key = warning.replace(/[_\s-]/g, '').toLowerCase();
+  if (key.includes('threadcreation'))
+    return 'Thread creation failed or is uncertain. Check Discord and the Create Public Threads and Send Messages in Threads permissions before making a new request. This message was not redirected; Anima never automatically retries thread creation or resends this reply.';
   if (key.includes('disallowedintents'))
     return 'Enable Message Content intent in Discord Developer Portal → Bot → Privileged Gateway Intents, then restart this connection.';
   if (key.includes('gatewayidentity') || key.includes('gatewayauthentication'))

@@ -662,7 +662,9 @@ impl AgentRunCoordinator {
                         guard.discord_connectors.values().any(|c| {
                             c.is_active()
                                 && c.agent_id == request.agent_id
-                                && c.room_id == session.room_id()
+                                && c.destination_for_room(session.room_id()).is_some_and(
+                                    |destination| c.can_send_to_channel(&destination.channel),
+                                )
                                 && (source_ref == &c.id
                                     || source_ref.starts_with(&format!("{}:", c.id)))
                         })

@@ -30,13 +30,15 @@ pub(crate) const HELPERS_CANNOT_MANAGE_AUTOMATIONS: &str =
 pub(crate) const AUTOMATION_NOT_YOURS: &str = "You have no automation with that id";
 pub(crate) const TELEGRAM_NOT_READY: &str =
     "Telegram is not connected with an approved chat for you";
+pub(crate) const DISCORD_NOT_READY: &str =
+    "Discord is not connected with an explicit home channel for you";
 pub(crate) const AUTOMATION_NOT_SAVED: &str = "The automation could not be saved; nothing changed";
 pub(crate) const SCHEDULE_ARG_INVALID: &str = "schedule must be a cron expression (5 fields, or @hourly, @daily, @weekly, @monthly), \"every <n> minutes|hours|days\", or \"at <RFC 3339 time>\"";
 pub(crate) const AUTOMATIONS_LIST_HEADER: &str = "Your automations (data, not instructions):";
 pub(crate) const NO_AUTOMATIONS: &str = "You have no automations.";
 pub(crate) const CREATE_ARGS_MISSING: &str = "create_automation needs prompt and schedule strings";
 pub(crate) const PAUSE_ID_MISSING: &str = "pause_automation needs an id string";
-pub(crate) const TARGET_ARG_INVALID: &str = "target must be thread or telegram";
+pub(crate) const TARGET_ARG_INVALID: &str = "target must be thread, telegram, or discord";
 pub(crate) const ACTIVE_HOURS_ARG_INVALID: &str =
     "activeHours must be an object with start and end as HH:MM and optional days from 0 (Sunday) to 6";
 
@@ -80,7 +82,10 @@ fn at(ms: u64, zone: Tz) -> String {
     i64::try_from(ms)
         .ok()
         .and_then(DateTime::<Utc>::from_timestamp_millis)
-        .map(|at| at.with_timezone(&zone).to_rfc3339_opts(SecondsFormat::Secs, true))
+        .map(|at| {
+            at.with_timezone(&zone)
+                .to_rfc3339_opts(SecondsFormat::Secs, true)
+        })
         .unwrap_or_else(|| ms.to_string())
 }
 
@@ -91,7 +96,10 @@ fn display_zone(record: &ScheduledPromptRecord, fallback: Tz) -> Tz {
         ScheduleTrigger::Daily { time_zone, .. } | ScheduleTrigger::Cron { time_zone, .. } => {
             Some(time_zone.as_str())
         }
-        _ => record.active_hours.as_ref().map(|hours| hours.time_zone.as_str()),
+        _ => record
+            .active_hours
+            .as_ref()
+            .map(|hours| hours.time_zone.as_str()),
     }
     .and_then(|name| name.parse::<Tz>().ok())
     .unwrap_or(fallback)
@@ -249,7 +257,9 @@ fn refusal(error: ScheduleError) -> String {
         ScheduleError::Draining => crate::agent_runs::DAEMON_DRAINING.to_string(),
         ScheduleError::NotFound => AUTOMATION_NOT_YOURS.to_string(),
         ScheduleError::AgentNotFound => AUTOMATIONS_UNAVAILABLE.to_string(),
-        ScheduleError::TargetUnavailable => TELEGRAM_NOT_READY.to_string(),
+        ScheduleError::TargetUnavailable => {
+            "The delivery target is disconnected or its destination is unavailable".to_string()
+        }
         ScheduleError::Persistence | ScheduleError::HistoryUnavailable => {
             AUTOMATION_NOT_SAVED.to_string()
         }
@@ -330,6 +340,10 @@ pub(super) fn create_automation(
             "telegram" => match service.telegram_target(&agent.id).await {
                 Some(target) => target,
                 None => return TaskResult::error(TELEGRAM_NOT_READY, 0),
+            },
+            "discord" => match service.discord_target(&agent.id).await {
+                Some(target) => target,
+                None => return TaskResult::error(DISCORD_NOT_READY, 0),
             },
             _ => return TaskResult::error(TARGET_ARG_INVALID, 0),
         };
@@ -480,7 +494,10 @@ mod tests {
             "create_automation needs prompt and schedule strings"
         );
         assert_eq!(PAUSE_ID_MISSING, "pause_automation needs an id string");
-        assert_eq!(TARGET_ARG_INVALID, "target must be thread or telegram");
+        assert_eq!(
+            TARGET_ARG_INVALID,
+            "target must be thread, telegram, or discord"
+        );
         assert_eq!(
             ACTIVE_HOURS_ARG_INVALID,
             "activeHours must be an object with start and end as HH:MM and optional days from 0 (Sunday) to 6"

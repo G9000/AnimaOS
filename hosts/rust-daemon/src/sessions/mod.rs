@@ -48,6 +48,7 @@ pub(crate) enum SessionKind {
     Chat,
     Telegram,
     Discord,
+    Email,
     Checkin,
     Job,
     Helper,
@@ -59,6 +60,7 @@ impl SessionKind {
             Self::Chat => "chat",
             Self::Telegram => "telegram",
             Self::Discord => "discord",
+            Self::Email => "email",
             Self::Checkin => "checkin",
             Self::Job => "job",
             Self::Helper => "helper",
@@ -70,6 +72,7 @@ impl SessionKind {
             "chat" => Some(Self::Chat),
             "telegram" => Some(Self::Telegram),
             "discord" => Some(Self::Discord),
+            "email" => Some(Self::Email),
             "checkin" => Some(Self::Checkin),
             "job" => Some(Self::Job),
             "helper" => Some(Self::Helper),
@@ -83,6 +86,7 @@ impl SessionKind {
         let (send, steer, rename, delete, compact) = match self {
             Self::Chat => (true, true, true, true, true),
             Self::Telegram | Self::Discord => (true, false, true, false, true),
+            Self::Email => (false, false, true, false, true),
             Self::Checkin => (true, true, true, !schedule_exists, true),
             Self::Job | Self::Helper => (false, false, false, false, false),
         };
@@ -107,6 +111,7 @@ pub(crate) enum SessionOrigin {
     Api,
     Telegram,
     Discord,
+    Email,
     Schedule,
     Job,
     Delegation,
@@ -122,6 +127,7 @@ impl SessionOrigin {
             Self::Api => "api",
             Self::Telegram => "telegram",
             Self::Discord => "discord",
+            Self::Email => "email",
             Self::Schedule => "schedule",
             Self::Job => "job",
             Self::Delegation => "delegation",
@@ -427,6 +433,9 @@ pub(crate) fn kind_for_room(
     source: Option<RunSource>,
     helper_agent: bool,
 ) -> (SessionKind, SessionOrigin) {
+    if room_id.starts_with("email:") {
+        return (SessionKind::Email, SessionOrigin::Email);
+    }
     if room_id.starts_with("discord:") {
         return (SessionKind::Discord, SessionOrigin::Discord);
     }
@@ -559,6 +568,7 @@ pub(crate) fn session_title(
             labelled("Discord", context.bot_username.map(str::to_string)),
             TitleSource::System,
         ),
+        SessionKind::Email => (labelled("Email", None), TitleSource::System),
         SessionKind::Telegram => (
             labelled(
                 "Telegram",

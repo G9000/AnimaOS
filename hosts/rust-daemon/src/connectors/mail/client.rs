@@ -140,6 +140,9 @@ impl MailTransport for MailClient {
         .await
     }
     async fn account(&self, p: Provider, access: &str) -> Result<String, MailError> {
+        if p == Provider::Email {
+            return Err(MailError::Invalid);
+        }
         let url = if p == Provider::Gmail {
             "https://gmail.googleapis.com/gmail/v1/users/me/profile"
         } else {
@@ -159,6 +162,7 @@ impl MailTransport for MailClient {
     }
     async fn inbox(&self, p: Provider, access: &str) -> Result<Vec<MailMessage>, MailError> {
         match p {
+            Provider::Email => Err(MailError::Invalid),
             Provider::Outlook => {
                 let v = self
                     .json(
@@ -229,6 +233,7 @@ impl MailTransport for MailClient {
     }
     async fn send(&self, p: Provider, access: &str, d: &MailDraft) -> Result<(), MailError> {
         let request=match p{
+ Provider::Email=>return Err(MailError::Invalid),
  Provider::Gmail=>{let mime=mime::serialize(&d.to, &d.subject, &d.body);self.http.post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send").json(&json!({"raw":URL_SAFE_NO_PAD.encode(mime)}))},
  Provider::Outlook=>self.http.post("https://graph.microsoft.com/v1.0/me/sendMail").json(&json!({"message":{"subject":d.subject,"body":{"contentType":"Text","content":d.body},"toRecipients":d.to.iter().map(|to|json!({"emailAddress":{"address":to}})).collect::<Vec<_>>()},"saveToSentItems":true}))};
         // A connection error, timeout or 5xx may occur after acceptance. Never retry a send.

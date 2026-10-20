@@ -1,7 +1,7 @@
 # Contributing connectors to AnimaOS
 
 M12 introduced the Rust transport contract and Telegram pilot. M13 adds native
-selected-channel Discord REST chat. Community connectors
+native Discord channel/thread chat. Community connectors
 are reviewed source contributions compiled into a host. They run with the host's
 OS privileges and require a rebuild. There is no downloadable connector installer,
 dynamic ABI, process/WASM loader, or connector sandbox.
@@ -107,32 +107,39 @@ Selected Drive read/search is the next bounded milestone.
 
 ## Selected Discord channel
 
-The owner configures one guild text channel per connection and a nonempty list of
-permitted user IDs. One agent can have multiple connections, including the same
-bot in different channels. Each connection keeps its own conversation, intake
-cursor, credentials, and delivery journal. Replies go only to the originating
-connection's selected channel; they are never broadcast to the agent's other
-channels. Owner messages sent from a Discord conversation in the web console
-also go to that conversation's selected channel. A second non-deleted connection
-for the same agent and channel is rejected, including while the first is disabled.
+The owner can connect a bot without selecting a channel. Setup checks its
+application and Message Content intent, resolves verified owner IDs when no users
+are entered, and generates an install link. Users and server roles authorize
+execution; mention rules determine which authorized messages request a reply.
+Channel restrictions are optional. Legacy selected-channel connections retain
+their existing history and inline response behavior until configured.
+
+Each discovered channel or thread has its own persisted conversation and intake
+cursor under the bot connection's generation-bound credential. Replies and web
+owner turns retain that conversation's destination. An optional home channel is
+used only for explicitly selected proactive delivery, such as an automation with
+a Discord connector target. Changing home does not redirect an existing outbox.
+See the [user setup guide](../../docs/companion/discord.md).
+
 Native Gateway connections share identify pacing by verified bot ID, including
 after token replacement; different bots keep independent login budgets.
-A bot's access to the channel does not establish its privacy; the owner
-checks channel permissions and confirms the selection. New records are saved
-disabled. First activation establishes a latest-message baseline, so earlier
-history is not dispatched. Later enable/restart preserves the saved cursor.
-The bot requires View Channel, Read Message History and Send Messages permissions.
+A bot's access to a channel does not establish its privacy. New records are saved
+disabled. First activation establishes the receive boundary; discovery retains
+the event that first selected a conversation. Later enable/restart preserves
+saved cursors. The bot requires View Channel, Read Message History and Send
+Messages, plus Create Public Threads and Send Messages in Threads for threading.
 Message Content intent restrictions also affect REST responses; configure the
 bot in the Discord Developer Portal. See the official [message resource](https://docs.discord.com/developers/resources/message)
 and [intent documentation](https://docs.discord.com/developers/events/gateway).
 
-The client polls the selected channel and proves a bounded backward catch-up
-window before the host atomically commits permitted receipts and its cursor.
+Gateway messages trigger channel discovery and catch-up. The client proves a
+bounded backward history window for each destination before the host atomically
+commits permitted receipts and its cursor.
 An unproven or oversized backlog pauses visibly. Sender IDs, message IDs and
 channel IDs are native decimal strings; they never become floating-point numbers
 or grant agent authority. Self, bot, webhook and unsupported messages do not run
-the agent. Channel/user selection changes require disconnecting and recreating
-the connector. Credentials remain private, generation-bound and independently
+the agent. Settings changes revoke captured work and preserve historical receipts.
+Credentials remain private, generation-bound and independently
 stored from Telegram.
 
 Each reply chunk has a durable send intent and receipt. Ambiguous/partial sends
@@ -144,12 +151,14 @@ durable exactly-once delivery. All mentions are disabled on outgoing messages.
 At most eight conservatively bounded chunks are sent, with an Anima truncation
 notice if needed; the complete reply remains in session history.
 
-REST polling has seconds of latency and cannot observe Gateway edits, deletions,
-reactions, threads, slash commands or voice. Messages deleted before polling can
-be missed. Stop is available through the web conversation controls. These limits
-are explicit; this is not a complete upstream Discord adapter port.
+Reconciliation has seconds of latency. Messages deleted before catch-up can be
+missed. Edit/delete events, reactions, slash commands and voice are unsupported.
+Stop is available through the web conversation controls. Threads participate in
+normal conversation routing.
 
-Snapshot version 12 adds native Discord journals. A version 11 JSON store is
+Snapshot version 22 adds conversation destinations and response policy, with an
+independent `.pre-discord-conversations.bak` backup for version 21 stores. The
+original version 12 added native Discord journals. A version 11 JSON store is
 backed up as `.pre-discord.bak` before upgrading; existing earlier backup suffixes
 remain unchanged. Older binaries refuse the newer snapshot, so rollback uses
 the pre-upgrade backup. Verification uses fake stores/transports and does not

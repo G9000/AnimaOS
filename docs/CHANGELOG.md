@@ -1,5 +1,9 @@
 # Documentation changelog
 
+## 2026-10-20 (reference cleanup)
+
+- Removed optional comparison branding and contribution prose from documentation, design text and source comments. Renamed component license files to generic third-party notices while retaining their copyright and full MIT terms.
+
 ## 2026-10-20 (legacy removal)
 
 - Removed the legacy TypeScript server (`apps/server`), the TypeScript core and its libraries (`packages/core-ts`, `swarm`, `tools`, `memory`, `mod-sdk`), the mod system, the agency generator, and the Elixir and Python placeholder hosts. The SDK, CLI and TUI are now thin clients of the Rust daemon.

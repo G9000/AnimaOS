@@ -42,7 +42,20 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 234, "complete registered operation count");
+    assert_eq!(actual.len(), 236, "complete registered operation count");
+    let discord_interaction_additions = [
+        ("POST", "/api/agents/{agent_id}/connectors/discord/check"),
+        (
+            "PUT",
+            "/api/agents/{agent_id}/connectors/discord/{connector_id}/settings",
+        ),
+    ];
+    for (method, path) in discord_interaction_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "Discord bot check and interaction settings must be registered"
+        );
+    }
     let message_search_additions = [("GET", "/api/agents/{agent_id}/message-search")];
     for (method, path) in message_search_additions {
         assert!(
@@ -245,6 +258,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                     && !main_chat_additions.contains(&(method.as_str(), path.as_str()))
                     && !core_memory_additions.contains(&(method.as_str(), path.as_str()))
                     && !memory_export_additions.contains(&(method.as_str(), path.as_str()))
+                    && !discord_interaction_additions.contains(&(method.as_str(), path.as_str()))
             })
             .count(),
         193,
@@ -289,6 +303,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                     && !main_chat_additions.contains(&(method.as_str(), path.as_str()))
                     && !core_memory_additions.contains(&(method.as_str(), path.as_str()))
                     && !memory_export_additions.contains(&(method.as_str(), path.as_str()))
+                    && !discord_interaction_additions.contains(&(method.as_str(), path.as_str()))
             )
             .count(),
         188,

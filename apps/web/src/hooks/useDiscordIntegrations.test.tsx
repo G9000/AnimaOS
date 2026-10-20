@@ -18,6 +18,8 @@ vi.mock('../lib/daemon-api', async () => {
       ...actual.daemon,
       discordConnectors: vi.fn(),
       createDiscordConnector: vi.fn(),
+      checkDiscordBot: vi.fn(),
+      configureDiscordConnector: vi.fn(),
       activateDiscordConnector: vi.fn(),
       suppressDiscordUnknownDelivery: vi.fn(),
       replaceDiscordCredential: vi.fn(),
@@ -29,6 +31,8 @@ vi.mock('../lib/daemon-api', async () => {
 beforeEach(() => {
   vi.mocked(daemon.discordConnectors).mockReset().mockResolvedValue([]);
   vi.mocked(daemon.createDiscordConnector).mockReset();
+  vi.mocked(daemon.checkDiscordBot).mockReset();
+  vi.mocked(daemon.configureDiscordConnector).mockReset();
   vi.mocked(daemon.activateDiscordConnector).mockReset();
   vi.mocked(daemon.suppressDiscordUnknownDelivery).mockReset();
   vi.mocked(daemon.replaceDiscordCredential).mockReset();
@@ -38,6 +42,60 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe('useDiscordIntegrations', () => {
+  it('fences bot checks across agent switches and saves policy through the mutation guard', async () => {
+    let finish!: (
+      value: Awaited<ReturnType<typeof daemon.checkDiscordBot>>,
+    ) => void;
+    vi.mocked(daemon.checkDiscordBot).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const { result, rerender } = renderHook(
+      ({ id }) => useDiscordIntegrations(id),
+      { initialProps: { id: 'agent-a' } },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    let checking!: ReturnType<typeof result.current.check>;
+    act(() => {
+      checking = result.current.check('secret');
+    });
+    rerender({ id: 'agent-b' });
+    await act(async () => {
+      finish({
+        applicationId: '1',
+        bot: { id: '2', username: 'bot', displayName: null },
+        ownerUserIds: ['3'],
+        messageContentEnabled: true,
+        inviteUrl: 'https://discord.com/oauth2/authorize?client_id=1',
+      });
+      expect(await checking).toBeNull();
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const settings = {
+      allowedChannelIds: [],
+      freeResponseChannelIds: [],
+      approvedRoleIds: ['4'],
+      homeChannelId: null,
+      requireMention: true,
+      autoThread: true,
+      threadRequireMention: false,
+    };
+    vi.mocked(daemon.configureDiscordConnector).mockResolvedValue(
+      discordFixture({ settings }),
+    );
+    await act(async () => {
+      expect(await result.current.configure('dc-1', settings, ['3'])).toBe(
+        true,
+      );
+    });
+    expect(daemon.configureDiscordConnector).toHaveBeenCalledWith(
+      'agent-b',
+      'dc-1',
+      settings,
+      ['3'],
+    );
+  });
   it('fp02 Discord suppresses offline reads and fences old epoch mutations', async () => {
     const { result, rerender } = renderHook(
       ({ online, epoch }) =>

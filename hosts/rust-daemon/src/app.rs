@@ -385,6 +385,7 @@ async fn serve_with_state_and_voice(
     let drive = runtime.drive.clone();
     let scheduler = runtime.scheduler.clone();
     let agent_runs = runtime.agent_runs.clone();
+    let mail = runtime.mail.clone();
     let jobs = runtime.jobs.clone();
     let history = runtime.history.clone();
     let skills = crate::skills::SkillScanner::new(runtime.agent_runs.skills());
@@ -428,6 +429,7 @@ async fn serve_with_state_and_voice(
             lifecycle::producer_first_shutdown(
                 async {
                     agent_runs.request_shutdown();
+                    mail.request_shutdown();
                     jobs.request_shutdown().await;
                     scheduler.request_shutdown().await;
                     skills.request_shutdown();
@@ -436,6 +438,7 @@ async fn serve_with_state_and_voice(
                 },
                 async {
                     agent_runs.shutdown().await;
+                    mail.shutdown().await;
                     let browser = browser_state.read().await.browser_service.clone();
                     if let Some(browser) = browser {
                         browser.shutdown().await;

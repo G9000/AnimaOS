@@ -1,10 +1,44 @@
 //! Owner-only native Discord routes; authorize before body/state/network access.
+#[cfg(test)]
+mod interaction_contract_tests {
+    use super::*;
+
+    #[test]
+    fn discord_bot_connection_does_not_require_a_selected_channel_or_privacy_checkbox() {
+        let parsed = serde_json::from_value::<DiscordCreateRequest>(serde_json::json!({
+            "botToken": "test.token"
+        }));
+        assert!(
+            parsed.is_ok(),
+            "a bot can be connected before selecting a home or conversation channel"
+        );
+    }
+
+    #[test]
+    fn discord_onboarding_and_settings_are_documented_owner_endpoints() {
+        use utoipa::OpenApi;
+        let document = serde_json::to_value(super::super::ApiDoc::openapi()).unwrap();
+        for (path, method) in [
+            ("/api/agents/{agent_id}/connectors/discord/check", "post"),
+            (
+                "/api/agents/{agent_id}/connectors/discord/{connector_id}/settings",
+                "put",
+            ),
+        ] {
+            assert!(
+                document["paths"][path][method].is_object(),
+                "missing {method} {path}"
+            );
+        }
+    }
+}
+
 use super::{contracts::*, http::json_response, AppState};
 use crate::connectors::discord::client::DiscordTransportError;
 use crate::connectors::discord::credentials::DiscordBotToken;
 use crate::connectors::discord::{
     DiscordConnectorRecord, DiscordDeliveryState, DiscordManagerError, DiscordRuntimeStatus,
-    DiscordSnowflake,
+    DiscordSettings,
 };
 use axum::extract::{Path, Request, State};
 use axum::http::{header, HeaderValue, StatusCode};
@@ -81,9 +115,10 @@ fn authorize(state: &AppState, request: &Request, read: bool) -> Result<(), Resp
     })
 }
 async fn body<T: DeserializeOwned>(state: &AppState, request: Request) -> Result<T, Response> {
-    let bytes = super::http::read_limited_body(request, state.config.max_request_bytes.min(8192))
-        .await
-        .map_err(no_store)?;
+    let bytes =
+        super::http::read_limited_body(request, state.config.max_request_bytes.min(16 * 1024))
+            .await
+            .map_err(no_store)?;
     serde_json::from_slice(&bytes).map_err(|_| {
         error(
             StatusCode::BAD_REQUEST,
@@ -133,12 +168,42 @@ async fn response(state: &AppState, c: &DiscordConnectorRecord) -> DiscordConnec
             username: c.bot.username.clone(),
             display_name: c.bot.display_name.clone(),
         },
-        channel: DiscordChannelResponse {
+        channel: (!c.bot_wide).then(|| DiscordChannelResponse {
             id: c.channel.id.clone(),
             guild_id: c.channel.guild_id.clone(),
             name: c.channel.name.clone(),
-            kind: "guildText".into(),
-        },
+            kind: match c.channel.kind {
+                crate::connectors::discord::DiscordChannelKind::GuildText => "guildText",
+                crate::connectors::discord::DiscordChannelKind::GuildThread => "guildThread",
+            }
+            .into(),
+        }),
+        bot_wide: c.bot_wide,
+        settings: c.settings.clone().unwrap_or_else(|| DiscordSettings {
+            require_mention: false,
+            auto_thread: false,
+            ..Default::default()
+        }),
+        invite_url: crate::connectors::discord::client::invite_url(
+            c.application_id.as_deref().unwrap_or(&c.bot.id),
+        ),
+        conversations: c
+            .conversations
+            .iter()
+            .filter(|conversation| {
+                daemon
+                    .sessions
+                    .get(&c.agent_id, &conversation.room_id)
+                    .is_some()
+            })
+            .map(|conversation| DiscordConversationResponse {
+                channel_id: conversation.channel.id.clone(),
+                guild_id: conversation.channel.guild_id.clone(),
+                parent_channel_id: conversation.channel.parent_channel_id.clone(),
+                name: conversation.channel.name.clone(),
+                room_id: conversation.room_id.clone(),
+            })
+            .collect(),
         approved_user_ids: c.approved_user_ids.clone(),
         enabled: c.enabled,
         status: match status {
@@ -221,18 +286,6 @@ pub(super) async fn create(
         Ok(v) => v,
         Err(e) => return e,
     };
-    if !input.private_channel_confirmed
-        || DiscordSnowflake::parse(&input.guild_id).is_none()
-        || DiscordSnowflake::parse(&input.channel_id).is_none()
-        || input.approved_user_ids.is_empty()
-        || input.approved_user_ids.len() > 16
-        || input
-            .approved_user_ids
-            .iter()
-            .any(|u| DiscordSnowflake::parse(u).is_none())
-    {
-        return manager_error(DiscordManagerError::InvalidInput);
-    }
     let token = match DiscordBotToken::parse(input.bot_token) {
         Ok(t) => t,
         Err(_) => return manager_error(DiscordManagerError::InvalidInput),
@@ -241,15 +294,82 @@ pub(super) async fn create(
         &state,
         state
             .discord
-            .create(
+            .create_with_settings(
                 agent,
                 token,
                 input.guild_id,
                 input.channel_id,
                 input.approved_user_ids,
+                input.settings.unwrap_or_default(),
             )
             .await,
         StatusCode::CREATED,
+    )
+    .await
+}
+
+#[utoipa::path(post,path="/api/agents/{agent_id}/connectors/discord/check",tag="connectors",params(("agent_id"=String,Path)),request_body=DiscordCredentialRequest,responses((status=200,body=DiscordBotCheckResponse),(status=400,body=ConnectorErrorBody),(status=403,body=ConnectorErrorBody),(status=404,body=ConnectorErrorBody),(status=422,body=ConnectorErrorBody),(status=502,body=ConnectorErrorBody),(status=503,body=ConnectorErrorBody)))]
+pub(super) async fn check(
+    State(state): State<AppState>,
+    Path(agent): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(e) = authorize(&state, &request, false) {
+        return e;
+    }
+    if state.daemon.read().await.get_agent(&agent).is_none() {
+        return manager_error(DiscordManagerError::NotFound);
+    }
+    let input: DiscordCredentialRequest = match body(&state, request).await {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let token = match DiscordBotToken::parse(input.bot_token) {
+        Ok(token) => token,
+        Err(_) => return manager_error(DiscordManagerError::InvalidInput),
+    };
+    match state.discord.check_bot(token).await {
+        Ok(check) => no_store(json_response(
+            StatusCode::OK,
+            &DiscordBotCheckResponse {
+                application_id: check.application_id,
+                bot: DiscordBotResponse {
+                    id: check.bot.id,
+                    username: check.bot.username,
+                    display_name: check.bot.display_name,
+                },
+                owner_user_ids: check.owner_user_ids,
+                message_content_enabled: check.message_content_enabled,
+                invite_url: check.invite_url,
+            },
+        )),
+        Err(e) => manager_error(e),
+    }
+}
+
+#[utoipa::path(put,path="/api/agents/{agent_id}/connectors/discord/{connector_id}/settings",tag="connectors",params(("agent_id"=String,Path),("connector_id"=String,Path)),request_body=DiscordSettingsRequest,responses((status=200,body=DiscordConnectorEnvelope),(status=400,body=ConnectorErrorBody),(status=403,body=ConnectorErrorBody),(status=404,body=ConnectorErrorBody),(status=409,body=ConnectorErrorBody),(status=422,body=ConnectorErrorBody),(status=502,body=ConnectorErrorBody),(status=503,body=ConnectorErrorBody)))]
+pub(super) async fn configure(
+    State(state): State<AppState>,
+    Path((agent, id)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(e) = authorize(&state, &request, false) {
+        return e;
+    }
+    if let Err(e) = state.discord.get(&agent, &id).await {
+        return manager_error(e);
+    }
+    let input: DiscordSettingsRequest = match body(&state, request).await {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    envelope(
+        &state,
+        state
+            .discord
+            .configure(agent, id, input.settings, input.approved_user_ids)
+            .await,
+        StatusCode::OK,
     )
     .await
 }
@@ -415,6 +535,42 @@ mod tests {
     use axum::body::{to_bytes, Body};
     use tower::ServiceExt;
     #[tokio::test]
+    async fn supported_discord_id_lists_fit_the_bounded_setup_body() {
+        let ids = (0..100)
+            .map(|n| (18_446_744_073_709_500_000_u64 + n).to_string())
+            .collect::<Vec<_>>();
+        let payload = serde_json::json!({
+            "botToken": "not a token",
+            "approvedUserIds": ids,
+            "settings": {
+                "allowedChannelIds": ids,
+                "freeResponseChannelIds": ids,
+                "approvedRoleIds": ids
+            }
+        })
+        .to_string();
+        assert!(payload.len() > 8192 && payload.len() < 16 * 1024);
+        let state = std::sync::Arc::new(tokio::sync::RwLock::new(crate::state::DaemonState::new()));
+        let app = crate::app::app_with_state(state, crate::app::DaemonConfig::default());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agents/missing/connectors/discord")
+                    .header("host", "127.0.0.1:8080")
+                    .header("origin", "http://localhost:4200")
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        // The malformed token is rejected before any provider call; the valid-sized
+        // settings body must reach validation instead of being rejected as too large.
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    }
+    #[tokio::test]
     async fn duplicate_channel_has_a_specific_safe_conflict_code() {
         let response = manager_error(DiscordManagerError::DuplicateChannel);
         assert_eq!(response.status(), StatusCode::CONFLICT);
@@ -494,6 +650,30 @@ mod tests {
                 "/api/agents/missing/connectors/discord",
                 "https://evil.example",
                 StatusCode::FORBIDDEN,
+            ),
+            (
+                "POST",
+                "/api/agents/missing/connectors/discord/check",
+                "https://evil.example",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "PUT",
+                "/api/agents/missing/connectors/discord/c/settings",
+                "https://evil.example",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "POST",
+                "/api/agents/missing/connectors/discord/check",
+                "http://localhost:4200",
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                "PUT",
+                "/api/agents/missing/connectors/discord/c/settings",
+                "http://localhost:4200",
+                StatusCode::NOT_FOUND,
             ),
             (
                 "GET",

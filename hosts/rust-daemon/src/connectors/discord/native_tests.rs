@@ -80,6 +80,86 @@ fn message(id: u64) -> serde_json::Value {
 }
 
 #[tokio::test]
+async fn native_discord_accepts_guild_threads_and_retains_parent_authority() {
+    let (client, _, task) = fixture(vec![json(serde_json::json!({
+        "id":"42","guild_id":"7","type":11,"parent_id":"41","name":"topic"
+    }))])
+    .await;
+    let channel = client
+        .get_channel(&DiscordBotToken::parse("thread-fixture").unwrap(), "42")
+        .await;
+    assert!(
+        channel.is_ok(),
+        "a Discord public thread is a valid conversation destination"
+    );
+    assert_eq!(
+        serde_json::to_value(channel.unwrap()).unwrap()["parentChannelId"],
+        "41"
+    );
+    task.abort();
+}
+
+#[tokio::test]
+async fn native_application_check_uses_verified_bot_and_only_accepted_team_owners() {
+    let (client, fixture, task) = fixture(vec![
+        json(
+            serde_json::json!({"id":"11","flags":1<<19,"bot":{"id":"11"},"team":{"members":[
+                {"membership_state":2,"user":{"id":"44"}},
+                {"membership_state":1,"user":{"id":"55"}},
+                {"membership_state":2,"user":{"id":"44"}}
+            ]}}),
+        ),
+        json(serde_json::json!({"id":"11","username":"fixture","bot":true})),
+    ])
+    .await;
+    let check = client
+        .check_application(&DiscordBotToken::parse("check-fixture").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(check.owner_user_ids, vec!["44"]);
+    assert_eq!(check.bot.id, "11");
+    assert!(check.message_content_enabled);
+    assert_eq!(check.invite_url,"https://discord.com/oauth2/authorize?client_id=11&scope=bot&permissions=309237713920&integration_type=0");
+    assert!(!serde_json::to_string(&check)
+        .unwrap()
+        .contains("check-fixture"));
+    assert_eq!(
+        fixture.calls.lock().unwrap()[0].0,
+        "/api/v10/applications/@me"
+    );
+    task.abort();
+}
+
+#[tokio::test]
+async fn native_role_lookup_verifies_member_identity_and_thread_posts_verify_parent() {
+    let (client, fixture, task) = fixture(vec![
+        json(serde_json::json!({"user":{"id":"44"},"roles":["77"]})),
+        json(serde_json::json!({"id":"101","guild_id":"33","type":11,"parent_id":"99"})),
+    ])
+    .await;
+    let token = DiscordBotToken::parse("role-thread-fixture").unwrap();
+    assert_eq!(
+        client.member_roles(&token, "33", "44").await.unwrap(),
+        vec!["77"]
+    );
+    assert_eq!(
+        client
+            .create_thread(&token, "22", "101", "topic")
+            .await
+            .unwrap_err(),
+        DiscordTransportError::Uncertain
+    );
+    let calls = fixture.calls.lock().unwrap();
+    assert_eq!(calls[0].0, "/api/v10/guilds/33/members/44");
+    assert_eq!(calls[1].0, "/api/v10/channels/22/messages/101/threads");
+    assert_eq!(
+        calls[1].2,
+        serde_json::json!({"name":"topic","auto_archive_duration":1440})
+    );
+    task.abort();
+}
+
+#[tokio::test]
 async fn discord_requests_identify_the_client_with_the_required_user_agent() {
     let (client, fixture, task) = fixture(vec![json(serde_json::json!({
         "id": "9", "username": "fixture", "bot": true

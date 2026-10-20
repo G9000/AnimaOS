@@ -36,6 +36,8 @@ export interface AutomationEditorProps {
   automation: Automation | null;
   /** The companion's Telegram connector with an approved chat, if any. */
   telegramConnectorId: string | null;
+  /** Ready Discord bots with an explicitly configured home channel. */
+  discordDestinations?: { connectorId: string; label: string }[];
   /** True when the daemon took it. */
   onSave: (draft: AutomationDraft) => Promise<boolean>;
   onCancel: () => void;
@@ -61,6 +63,7 @@ function zoneOf(automation: Automation | null): string {
 export function AutomationEditor({
   automation,
   telegramConnectorId,
+  discordDestinations = [],
   onSave,
   onCancel,
 }: AutomationEditorProps) {
@@ -79,8 +82,12 @@ export function AutomationEditor({
     automation?.activeHours?.days ?? EVERY_DAY,
   );
   const initialTarget =
-    automation?.target.type === 'connector' ? 'telegram' : 'workspace';
-  const [target, setTarget] = useState<'workspace' | 'telegram'>(initialTarget);
+    automation?.target.type === 'connector'
+      ? automation.target.connectorId === telegramConnectorId
+        ? 'telegram'
+        : `discord:${automation.target.connectorId}`
+      : 'workspace';
+  const [target, setTarget] = useState(initialTarget);
   const [preview, setPreview] = useState<Preview>(null);
   const [saving, setSaving] = useState(false);
 
@@ -147,11 +154,21 @@ export function AutomationEditor({
     !phraseProblem &&
     (trigger !== null ? previewed : keepsSchedule) &&
     (!hoursOn || days.length > 0) &&
-    !saving;
+    !saving &&
+    (Boolean(automation && target === initialTarget) ||
+      target === 'workspace' ||
+      (target === 'telegram' && Boolean(telegramConnectorId)) ||
+      discordDestinations.some(
+        (item) => `discord:${item.connectorId}` === target,
+      ));
 
   const pickedTarget = (): AutomationTarget | null => {
     if (automation && target === initialTarget) return null;
     if (target === 'workspace') return { type: 'workspace' };
+    const discord = discordDestinations.find(
+      (item) => `discord:${item.connectorId}` === target,
+    );
+    if (discord) return { type: 'connector', connectorId: discord.connectorId };
     return telegramConnectorId
       ? { type: 'connector', connectorId: telegramConnectorId }
       : null;
@@ -319,14 +336,28 @@ export function AutomationEditor({
         Runs in
         <select
           value={target}
-          onChange={(event) =>
-            setTarget(event.target.value as 'workspace' | 'telegram')
-          }
+          onChange={(event) => setTarget(event.target.value)}
         >
           <option value="workspace">Its own thread</option>
           <option value="telegram" disabled={!telegramConnectorId}>
             Telegram
           </option>
+          {discordDestinations.map((item) => (
+            <option
+              key={item.connectorId}
+              value={`discord:${item.connectorId}`}
+            >
+              Discord · {item.label}
+            </option>
+          ))}
+          {target.startsWith('discord:') &&
+            !discordDestinations.some(
+              (item) => `discord:${item.connectorId}` === target,
+            ) && (
+              <option value={target} disabled>
+                Saved connector (unavailable)
+              </option>
+            )}
         </select>
       </label>
       <div className="automation-actions">

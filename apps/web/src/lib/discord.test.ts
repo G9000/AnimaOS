@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   discordApprovedUsers,
   discordCanReply,
+  discordHasRoom,
+  discordIdList,
+  discordSettings,
   discordStatusLabel,
   discordWarning,
   isDiscordSnowflake,
@@ -10,6 +13,37 @@ import {
 import { discordFixture } from '../test/discord';
 
 describe('Discord selected authority and delivery state', () => {
+  it('maps native channel and thread histories while preserving legacy selected-channel sessions', () => {
+    const legacy = discordFixture();
+    const bot = discordFixture({
+      channel: null,
+      botWide: true,
+      conversations: [
+        {
+          channelId: '22',
+          guildId: '33',
+          parentChannelId: '11',
+          name: 'topic',
+          roomId: 'discord:dc-1:22',
+        },
+      ],
+    });
+    expect(discordHasRoom(legacy, legacy.roomId)).toBe(true);
+    expect(discordHasRoom(bot, 'discord:dc-1:22')).toBe(true);
+    expect(discordHasRoom(bot, 'discord:other:22')).toBe(false);
+    expect(discordIdList('')).toEqual([]);
+    expect(discordIdList('1,2')).toEqual(['1', '2']);
+    expect(discordIdList('1,1')).toBeNull();
+    expect(discordSettings(legacy)).toMatchObject({
+      autoThread: false,
+      requireMention: false,
+    });
+    expect(discordSettings(bot)).toMatchObject({
+      autoThread: true,
+      requireMention: true,
+      threadRequireMention: false,
+    });
+  });
   it('distinguishes gateway connection progress and missing intent from readiness', () => {
     expect(
       discordStatusLabel(
@@ -25,6 +59,16 @@ describe('Discord selected authority and delivery state', () => {
     expect(discordWarning('gatewayDisallowedIntents')).toContain(
       'Message Content',
     );
+  });
+  it('explains a failed or uncertain thread start without suggesting suppression or automatic retry', () => {
+    const warning = discordWarning(
+      'Thread creation failed or is uncertain; this message was not redirected and creation will not be retried.',
+    );
+    expect(warning).toContain('Create Public Threads');
+    expect(warning).toContain('new request');
+    expect(warning).toContain('not redirected');
+    expect(warning).toContain('never automatically retries');
+    expect(warning).not.toContain('suppress');
   });
   it('shows actionable allowlisted setup errors without displaying provider bodies', () => {
     for (const [code, status, expected] of [

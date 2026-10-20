@@ -16,7 +16,14 @@ impl DiscordManager {
                 .cloned()
                 .ok_or(DiscordManagerError::NotFound)?;
             let epoch = manager.epoch(&id);
-            manager.accept_batch_captured(&c, epoch, batch).await
+            let destination = batch
+                .messages
+                .first()
+                .and_then(|m| c.destination_for_channel(&m.channel_id))
+                .unwrap_or(c);
+            manager
+                .accept_batch_captured(&destination, epoch, batch)
+                .await
         })
         .await
     }
@@ -26,6 +33,7 @@ impl DiscordManager {
         epoch: u64,
         batch: DiscordMessageBatch,
     ) -> Result<(), DiscordManagerError> {
+        let _intake = self.intake.lock().await;
         if !batch.boundary_proven || batch.messages.len() > 1000 {
             return Err(DiscordManagerError::Conflict);
         }
@@ -35,7 +43,7 @@ impl DiscordManager {
         if high < lower {
             return Err(DiscordManagerError::Conflict);
         }
-        let mut unique = HashMap::new();
+        let mut unique = std::collections::BTreeMap::new();
         for message in &batch.messages {
             let id = DiscordSnowflake::parse(&message.id)
                 .ok_or(DiscordManagerError::Conflict)?
@@ -65,18 +73,43 @@ impl DiscordManager {
             {
                 return Err(DiscordManagerError::Conflict);
             }
-            if let Some(existing) = unique.insert(message.id.clone(), message) {
+            if let Some(existing) = unique.insert(id, message) {
                 if existing != message {
                     return Err(DiscordManagerError::Conflict);
                 }
             }
         }
+        let mut routed = HashMap::new();
+        for message in unique.values() {
+            if DiscordSnowflake::parse(&message.id)
+                .expect("validated")
+                .value()
+                <= lower
+            {
+                continue;
+            }
+            let current = self.get(&c.agent_id, &c.id).await?;
+            if !current.matches_destination(c) {
+                return Err(DiscordManagerError::Conflict);
+            }
+            let fresh = current
+                .destination_for_room(&c.room_id)
+                .ok_or(DiscordManagerError::Conflict)?;
+            if let Some(destination) = self.admitted_destination(&fresh, epoch, message).await? {
+                routed.insert(message.id.clone(), destination);
+            }
+        }
         let _txn = self.transaction.lock().await;
-        let (next, inserted, removed, persist, content_missing) = {
+        let (previous, next, inserted, removed, sessions, persist, content_missing) = {
             let mut state = self.state.write().await;
             if !self.authority_current(&c.id, epoch)
                 || !c.is_active()
-                || state.discord_connectors.get(&c.id) != Some(c)
+                || !state.discord_connectors.get(&c.id).is_some_and(|current| {
+                    current.matches_destination(c)
+                        && current
+                            .destination_for_room(&c.room_id)
+                            .is_some_and(|v| v.cursor == c.cursor)
+                })
                 || state
                     .discord_credential_intents
                     .keys()
@@ -93,24 +126,21 @@ impl DiscordManager {
                 if number <= lower {
                     continue;
                 }
-                if message.is_bot
-                    || message.sender.id == c.bot.id
-                    || message.webhook_id.is_some()
-                    || !c.approved_user_ids.contains(&message.sender.id)
-                    || !matches!(message.message_type, 0 | 19)
-                {
-                    continue;
-                }
                 if message.text.trim().is_empty() {
-                    content_missing = true;
+                    content_missing |= c.approved_user_ids.contains(&message.sender.id)
+                        && !message.is_bot
+                        && message.webhook_id.is_none();
                     continue;
                 }
+                let Some(destination) = routed.get(&message.id) else {
+                    continue;
+                };
                 let key = (c.id.clone(), message.id.clone());
                 let record = DiscordInboundRecord {
                     connector_id: c.id.clone(),
                     message_id: message.id.clone(),
                     agent_id: c.agent_id.clone(),
-                    room_id: c.room_id.clone(),
+                    room_id: destination.room_id.clone(),
                     sender: message.sender.clone(),
                     channel_id: c.channel.id.clone(),
                     text: message.text.clone(),
@@ -123,7 +153,8 @@ impl DiscordManager {
                     if !existing.processing_state.is_terminal()
                         && (existing.text != record.text
                             || existing.sender != record.sender
-                            || existing.channel_id != record.channel_id)
+                            || existing.channel_id != record.channel_id
+                            || existing.room_id != record.room_id)
                     {
                         return Err(DiscordManagerError::Conflict);
                     }
@@ -139,13 +170,49 @@ impl DiscordManager {
             if live + inserted.len() > MAX_LIVE_INBOUND {
                 return Err(DiscordManagerError::Backpressure);
             }
-            let mut next = c.clone();
-            next.cursor = batch.next_cursor;
+            let previous = state
+                .discord_connectors
+                .get(&c.id)
+                .expect("validated connector")
+                .clone();
+            let mut next = previous.clone();
+            if !next.bot_wide && next.room_id == c.room_id {
+                next.cursor = batch.next_cursor;
+            } else {
+                let conversation = next
+                    .conversations
+                    .iter_mut()
+                    .find(|v| v.room_id == c.room_id)
+                    .ok_or(DiscordManagerError::Conflict)?;
+                conversation.cursor = batch.next_cursor;
+            }
+            // A claim is only needed until the source cursor is durable. Remove
+            // it atomically with that cursor, so failed saves preserve no-retry evidence.
+            next.thread_starts.retain(|id, claim| {
+                claim.channel_id != c.channel.id
+                    || DiscordSnowflake::parse(id).is_none_or(|id| id.value() > high)
+            });
             next.updated_at_ms = now_ms();
+            state.discord_connectors.insert(c.id.clone(), next.clone());
+            let mut sessions = Vec::new();
             for (key, record) in &inserted {
                 state.discord_inbound.insert(key.clone(), record.clone());
+                if state.ensure_run_session(crate::state::RunSessionRequest {
+                    agent_id: &record.agent_id,
+                    room_id: &record.room_id,
+                    source: crate::runs::RunSource::Discord,
+                    system_followup_title: None,
+                    delegated_parent: None,
+                    peer_sender: None,
+                    parent: None,
+                    first_text: &record.text,
+                    now_ms: now_ms(),
+                }) {
+                    if let Some(session) = state.sessions.get(&record.agent_id, &record.room_id) {
+                        sessions.push(session.clone());
+                    }
+                }
             }
-            state.discord_connectors.insert(c.id.clone(), next.clone());
             let mut terminals = state
                 .discord_inbound
                 .iter()
@@ -161,9 +228,11 @@ impl DiscordManager {
                 }
             }
             (
+                previous,
                 next,
                 inserted,
                 removed,
+                sessions,
                 state.control_plane_persist_request(),
                 content_missing,
             )
@@ -171,7 +240,7 @@ impl DiscordManager {
         if persist.save().await.is_err() {
             let mut state = self.state.write().await;
             if state.discord_connectors.get(&c.id) == Some(&next) {
-                state.discord_connectors.insert(c.id.clone(), c.clone());
+                state.discord_connectors.insert(c.id.clone(), previous);
             }
             for (key, r) in inserted {
                 if state.discord_inbound.get(&key) == Some(&r) {
@@ -180,6 +249,11 @@ impl DiscordManager {
             }
             for (key, r) in removed {
                 state.discord_inbound.entry(key).or_insert(r);
+            }
+            for session in sessions {
+                if state.sessions.get(&session.agent_id, &session.id) == Some(&session) {
+                    state.sessions.remove(&session.agent_id, &session.id);
+                }
             }
             return Err(DiscordManagerError::Persistence);
         }

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { discordFixture } from '../test/discord';
@@ -12,6 +12,14 @@ function props() {
     error: null,
     loading: false,
     create: vi.fn(async () => false),
+    check: vi.fn(async () => ({
+      applicationId: '1',
+      bot: { id: '9', username: 'helper', displayName: null },
+      ownerUserIds: ['4'],
+      messageContentEnabled: true,
+      inviteUrl: 'https://discord.com/oauth2/authorize?client_id=1',
+    })),
+    configure: vi.fn(async () => true),
     activate: vi.fn(async () => true),
     replace: vi.fn(async () => false),
     setEnabled: vi.fn(async () => true),
@@ -51,10 +59,10 @@ describe('DiscordSettings', () => {
     }
     expect(
       screen.getByText(
-        /Replies stay in the channel where each message arrives/,
+        /Replies stay in the channel or thread where each message arrives/,
       ),
     ).toBeVisible();
-    expect(screen.getByText('Add selected channel')).toBeVisible();
+    expect(screen.getByText('Connect a Discord bot')).toBeVisible();
   });
   it('fp02 Discord clears unsubmitted secrets but retains selected IDs on reconnect', async () => {
     const user = userEvent.setup();
@@ -73,7 +81,7 @@ describe('DiscordSettings', () => {
     ).toBeDisabled();
   });
 
-  it('requires selected IDs and owner privacy confirmation, clears submitted token immediately', async () => {
+  it('validates a bot, offers an invite and saves without mandatory channel IDs or privacy confirmation', async () => {
     const user = userEvent.setup();
     const p = props();
     let finish!: (value: boolean) => void;
@@ -84,48 +92,53 @@ describe('DiscordSettings', () => {
         }),
     );
     render(<DiscordSettings {...p} />);
-    expect(screen.getByText(/enable Message Content intent/)).toBeVisible();
-    expect(
-      screen.getByText(/View Channel, Read Message History, and Send Messages/),
-    ).toBeVisible();
     const token = screen.getByLabelText('Discord bot token');
     expect(token).toHaveAttribute('type', 'password');
     await user.type(token, 'secret');
-    await user.type(screen.getByLabelText('Server ID'), '3');
-    await user.type(screen.getByLabelText('Channel ID'), '2');
-    const allowed = screen.getByLabelText('Approved user IDs');
-    await user.type(allowed, '04');
     expect(
       screen.getByRole('button', { name: 'Save Discord connection' }),
     ).toBeDisabled();
-    await user.clear(allowed);
-    await user.type(allowed, '4, 5');
+    await user.click(screen.getByRole('button', { name: 'Check bot token' }));
     expect(
-      screen.getByRole('button', { name: 'Save Discord connection' }),
-    ).toBeDisabled();
-    await user.click(screen.getByRole('checkbox'));
+      await screen.findByRole('link', { name: 'Add to Discord' }),
+    ).toHaveAttribute(
+      'href',
+      'https://discord.com/oauth2/authorize?client_id=1',
+    );
+    expect(screen.getByText(/Message Content intent is enabled/)).toBeVisible();
+    expect(
+      screen.queryByText(/I confirm this selected channel/),
+    ).not.toBeInTheDocument();
     await user.click(
       screen.getByRole('button', { name: 'Save Discord connection' }),
     );
     expect(p.create).toHaveBeenCalledWith({
       botToken: 'secret',
-      guildId: '3',
-      channelId: '2',
-      approvedUserIds: ['4', '5'],
-      privateChannelConfirmed: true,
+      approvedUserIds: [],
+      settings: {
+        allowedChannelIds: [],
+        freeResponseChannelIds: [],
+        approvedRoleIds: [],
+        homeChannelId: null,
+        requireMention: true,
+        autoThread: true,
+        threadRequireMention: false,
+      },
     });
     expect(token).toHaveValue('');
     finish(false);
   });
-  it('clears credentials and confirmations when switching agents and submitting replacement', async () => {
+  it('clears credentials and verification when switching agents and submitting replacement', async () => {
     const user = userEvent.setup();
     const p = props();
     const view = render(<DiscordSettings {...p} />);
     await user.type(screen.getByLabelText('Discord bot token'), 'secret');
-    await user.click(screen.getByRole('checkbox'));
+    await user.click(screen.getByRole('button', { name: 'Check bot token' }));
     view.rerender(<DiscordSettings {...p} agentId="agent-b" />);
     expect(screen.getByLabelText('Discord bot token')).toHaveValue('');
-    expect(screen.getByRole('checkbox')).not.toBeChecked();
+    expect(
+      screen.queryByRole('link', { name: 'Add to Discord' }),
+    ).not.toBeInTheDocument();
     view.rerender(<DiscordSettings {...p} connectors={[discordFixture()]} />);
     await user.click(screen.getByRole('button', { name: 'Replace token' }));
     await user.type(
@@ -139,6 +152,82 @@ describe('DiscordSettings', () => {
     expect(
       screen.queryByLabelText('Replacement Discord bot token'),
     ).not.toBeInTheDocument();
+  });
+  it('discards token checks after token edits and agent changes', async () => {
+    const user = userEvent.setup();
+    const p = props();
+    const checked = await p.check();
+    let finish!: (value: typeof checked) => void;
+    p.check.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const view = render(<DiscordSettings {...p} />);
+    await user.type(screen.getByLabelText('Discord bot token'), 'old-secret');
+    await user.click(screen.getByRole('button', { name: 'Check bot token' }));
+    await user.clear(screen.getByLabelText('Discord bot token'));
+    await user.type(screen.getByLabelText('Discord bot token'), 'new-secret');
+    await act(async () => {
+      finish(checked);
+    });
+    expect(
+      screen.queryByRole('link', { name: 'Add to Discord' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Save Discord connection' }),
+    ).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Check bot token' }));
+    view.rerender(<DiscordSettings {...p} agentId="agent-b" />);
+    await act(async () => {
+      finish(checked);
+    });
+    expect(
+      screen.queryByRole('link', { name: 'Add to Discord' }),
+    ).not.toBeInTheDocument();
+  });
+  it('edits bot access and response rules and opens distinct channel histories', async () => {
+    const user = userEvent.setup();
+    const p = props();
+    const c = discordFixture({
+      channel: null,
+      botWide: true,
+      conversations: [
+        {
+          channelId: '22',
+          guildId: '33',
+          parentChannelId: '11',
+          name: 'topic',
+          roomId: 'discord:dc-1:22',
+        },
+      ],
+    });
+    render(<DiscordSettings {...p} connectors={[c]} />);
+    await user.click(screen.getByRole('button', { name: 'Open #topic' }));
+    expect(p.openConversation).toHaveBeenCalledWith(c, 'discord:dc-1:22');
+    await user.click(screen.getByText('Edit Discord rules'));
+    await user.type(screen.getByLabelText('Approved role IDs'), '55');
+    await user.click(screen.getByLabelText('Create a thread for mentions'));
+    await user.type(screen.getByLabelText('Home channel ID (optional)'), '66');
+    await user.click(
+      screen.getByRole('button', { name: 'Save Discord rules' }),
+    );
+    await waitFor(() =>
+      expect(p.configure).toHaveBeenCalledWith(
+        'dc-1',
+        {
+          allowedChannelIds: [],
+          freeResponseChannelIds: [],
+          approvedRoleIds: ['55'],
+          homeChannelId: '66',
+          requireMention: true,
+          autoThread: false,
+          threadRequireMention: false,
+        },
+        ['4'],
+      ),
+    );
   });
   it('activates saved disabled setup and opens the native conversation', async () => {
     const user = userEvent.setup();

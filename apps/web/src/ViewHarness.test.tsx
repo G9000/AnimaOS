@@ -3986,40 +3986,67 @@ it('M43 never adds an old owner back when the canonical permission read settles 
   expect(screen.queryByDisplayValue('Alpha')).not.toBeInTheDocument();
 });
 
-it('opens a selected Discord conversation from Connectors and sends a native text run', async () => {
-  const user = userEvent.setup();
-  vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
-  vi.spyOn(daemon, 'listAgents').mockResolvedValue({
-    agents: [snapshot('agent-main', 'Nova', 1)],
-  });
-  mockProviders();
-  vi.mocked(daemon.discordConnectors).mockResolvedValue([
-    discordFixture({ agentId: 'agent-main', enabled: true, status: 'ready' }),
-  ]);
-  routes.sessions.push(
-    sessionFixture('discord:dc-1', {
-      kind: 'discord',
-      origin: 'discord',
-      title: 'Discord · private-chat',
-      lastActivityAtMs: Date.now(),
-    }),
-  );
-  window.history.replaceState(null, '', '/#/connectors');
-  render(<ViewHarness />);
-  await user.click(
-    await screen.findByRole('button', { name: 'Open conversation' }),
-  );
-  const input = await screen.findByPlaceholderText('Reply on Discord…');
-  await waitFor(() => expect(input).toBeEnabled());
-  await user.type(input, 'Hello Discord');
-  await user.click(screen.getByRole('button', { name: 'Send' }));
-  expect(daemon.startRun).toHaveBeenCalledWith(
-    'agent-main',
-    'discord:dc-1',
-    { text: 'Hello Discord', mode: 'queue', timeZone: expect.any(String) },
-    expect.any(String),
-  );
-});
+it.each([
+  { roomId: 'discord:dc-1', thread: false },
+  { roomId: 'discord:dc-1:22', thread: true },
+])(
+  'opens Discord conversation $roomId from Connectors and sends to its native session',
+  async ({ roomId, thread }) => {
+    const user = userEvent.setup();
+    vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+    vi.spyOn(daemon, 'listAgents').mockResolvedValue({
+      agents: [snapshot('agent-main', 'Nova', 1)],
+    });
+    mockProviders();
+    vi.mocked(daemon.discordConnectors).mockResolvedValue([
+      discordFixture({
+        agentId: 'agent-main',
+        enabled: true,
+        status: 'ready',
+        ...(thread
+          ? {
+              channel: null,
+              botWide: true,
+              conversations: [
+                {
+                  channelId: '22',
+                  guildId: '33',
+                  parentChannelId: '11',
+                  name: 'topic',
+                  roomId,
+                },
+              ],
+            }
+          : {}),
+      }),
+    ]);
+    routes.sessions.push(
+      sessionFixture(roomId, {
+        kind: 'discord',
+        origin: 'discord',
+        title: 'Discord · private-chat',
+        lastActivityAtMs: Date.now(),
+      }),
+    );
+    window.history.replaceState(null, '', '/#/connectors');
+    render(<ViewHarness />);
+    await user.click(
+      await screen.findByRole('button', {
+        name: thread ? 'Open #topic' : 'Open conversation',
+      }),
+    );
+    const input = await screen.findByPlaceholderText('Reply on Discord…');
+    await waitFor(() => expect(input).toBeEnabled());
+    await user.type(input, 'Hello Discord');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    expect(daemon.startRun).toHaveBeenCalledWith(
+      'agent-main',
+      roomId,
+      { text: 'Hello Discord', mode: 'queue', timeZone: expect.any(String) },
+      expect.any(String),
+    );
+  },
+);
 
 /** A Telegram session with its ready connector, opened in the harness. */
 async function openTelegramSession() {

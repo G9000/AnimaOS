@@ -341,9 +341,10 @@ attempt may still consume usage; the limit does not guarantee a billing ceiling.
 
 - Telegram: configure and pair through Connectors. The native daemon handles
   polling, delivery and recovery; no separate gateway is needed.
-- Discord: choose a text channel and permitted users, then explicitly activate.
-  Read the [Discord setup and recovery limits](../../hosts/rust-daemon/CONNECTOR-CONTRIBUTING.md#selected-discord-channel).
-  This is REST text polling, without Gateway voice or slash-command support.
+- Discord: check the bot token, open its invite link, configure permitted users
+  or roles, then activate. Channel restrictions and a home channel are optional;
+  mentions and threads keep separate conversations. Read the
+  [Discord setup and recovery limits](discord.md).
 - Gmail and Calendar: configure the Google OAuth app in Connectors → Google OAuth app, register the
   displayed callback URLs, then connect the account. Mail sends and Calendar
   writes follow their approval/recovery policies.
@@ -426,3 +427,10 @@ A save already submitted is not sent again automatically. The editor waits for t
 A logical swarm member keeps the same saved task list when the coordinator resets its runtime for another dispatch. Different swarm/member owners keep separate lists. A new swarm is a new owner; this does not restore a swarm after a daemon restart or import task files left by older ephemeral runtime IDs.
 
 Unread or malformed task files still block model writes until an explicit successful read and merge. Normal companion tasks keep their existing agent ownership and revision checks.
+
+## Generic email
+
+Connect a companion's IMAP/SMTP mailbox under **Connectors → Email** for inbox
+previews and owner-approved drafts, or explicitly enable replies to authenticated
+allowed senders. Setup sends no test email. See [generic email](email.md) for
+server settings, the authentication prerequisite and interrupted-send recovery.

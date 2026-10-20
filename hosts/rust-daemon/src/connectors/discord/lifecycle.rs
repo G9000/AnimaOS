@@ -24,11 +24,77 @@ impl DiscordManager {
         channel: String,
         users: Vec<String>,
     ) -> Result<DiscordConnectorRecord, DiscordManagerError> {
+        self.create_connection(agent, token, Some(guild), Some(channel), users, None, None)
+            .await
+    }
+    pub(crate) async fn check_bot(
+        &self,
+        token: DiscordBotToken,
+    ) -> Result<DiscordBotCheck, DiscordManagerError> {
+        self.ensure_open()?;
+        self.native()?
+            .check_application(&token)
+            .await
+            .map_err(|e| setup_error("check_application", e))
+    }
+    pub(crate) async fn create_with_settings(
+        &self,
+        agent: String,
+        token: DiscordBotToken,
+        guild: Option<String>,
+        channel: Option<String>,
+        users: Vec<String>,
+        settings: DiscordSettings,
+    ) -> Result<DiscordConnectorRecord, DiscordManagerError> {
+        let manager = self.clone();
+        self.owned(async move {
+            if !valid_settings(&settings) || !valid_ids(&users, 100) {
+                return Err(DiscordManagerError::InvalidInput);
+            }
+            let check = manager.check_bot(token.clone()).await?;
+            let users = if users.is_empty() {
+                check.owner_user_ids.clone()
+            } else {
+                users
+            };
+            if !valid_ids(&users, 100)
+                || (users.is_empty() && settings.approved_role_ids.is_empty())
+            {
+                return Err(DiscordManagerError::InvalidInput);
+            }
+            manager
+                .create_connection(
+                    agent,
+                    token,
+                    guild,
+                    channel,
+                    users,
+                    Some(settings),
+                    Some(check),
+                )
+                .await
+        })
+        .await
+    }
+    async fn create_connection(
+        &self,
+        agent: String,
+        token: DiscordBotToken,
+        guild: Option<String>,
+        channel: Option<String>,
+        users: Vec<String>,
+        settings: Option<DiscordSettings>,
+        check: Option<DiscordBotCheck>,
+    ) -> Result<DiscordConnectorRecord, DiscordManagerError> {
         let _lifecycle = self.lifecycle.lock().await;
         self.ensure_open()?;
-        if DiscordSnowflake::parse(&guild).is_none()
-            || DiscordSnowflake::parse(&channel).is_none()
-            || !valid_users(&users)
+        if guild
+            .as_ref()
+            .is_some_and(|id| DiscordSnowflake::parse(id).is_none())
+            || channel
+                .as_ref()
+                .is_some_and(|id| DiscordSnowflake::parse(id).is_none())
+            || (settings.is_none() && !valid_users(&users))
         {
             return Err(DiscordManagerError::InvalidInput);
         }
@@ -38,36 +104,74 @@ impl DiscordManager {
                 return Err(DiscordManagerError::NotFound);
             }
             if state.discord_connectors.values().any(|c| {
-                c.agent_id == agent && c.channel.id == channel && c.deleted_at_ms.is_none()
+                c.agent_id == agent
+                    && channel.as_ref().is_some_and(|id| &c.channel.id == id)
+                    && c.deleted_at_ms.is_none()
             }) {
                 return Err(DiscordManagerError::DuplicateChannel);
             }
         }
-        let adapter = self.registry.discord(&token, &channel);
-        let bot = adapter
-            .identify()
+        let bot = if let Some(check) = &check {
+            check.bot.clone()
+        } else {
+            self.native()?
+                .get_me(&token)
+                .await
+                .map_err(|e| setup_error("identify_bot", e))?
+        };
+        if self
+            .state
+            .read()
             .await
-            .map_err(|error| setup_error("identify_bot", error))?;
-        let metadata = self
-            .native()?
-            .get_channel(&token, &channel)
-            .await
-            .map_err(|error| setup_error("get_channel", error))?;
-        if metadata.id != channel || metadata.guild_id != guild {
-            return Err(DiscordManagerError::Conflict);
+            .discord_connectors
+            .values()
+            .any(|c| {
+                c.agent_id == agent
+                    && c.bot.id == bot.id
+                    && c.deleted_at_ms.is_none()
+                    && (channel.is_none() || c.bot_wide)
+            })
+        {
+            return Err(DiscordManagerError::DuplicateChannel);
         }
-        self.native()?
-            .latest_cursor(&token, &channel)
-            .await
-            .map_err(|error| setup_error("read_channel_history", error))?;
+        let metadata = if let Some(channel) = &channel {
+            let metadata = self
+                .native()?
+                .get_channel(&token, channel)
+                .await
+                .map_err(|e| setup_error("get_channel", e))?;
+            if metadata.id != *channel || guild.as_ref().is_some_and(|g| g != &metadata.guild_id) {
+                return Err(DiscordManagerError::Conflict);
+            }
+            self.native()?
+                .latest_cursor(&token, channel)
+                .await
+                .map_err(|e| setup_error("read_channel_history", e))?;
+            metadata
+        } else {
+            DiscordChannelMetadata {
+                id: String::new(),
+                guild_id: guild.clone().unwrap_or_default(),
+                name: None,
+                kind: DiscordChannelKind::GuildText,
+                parent_channel_id: None,
+            }
+        };
         let id = format!("discord-{}", uuid::Uuid::new_v4());
         let now = now_ms();
-        let record = DiscordConnectorRecord {
+        let mut record = DiscordConnectorRecord {
             id: id.clone(),
             agent_id: agent.clone(),
             room_id: format!("discord:{id}"),
             bot,
             channel: metadata,
+            bot_wide: channel.is_none(),
+            guild_scope: guild,
+            application_id: check.map(|c| c.application_id),
+            settings,
+            configuration_revision: 1,
+            conversations: vec![],
+            thread_starts: Default::default(),
             approved_user_ids: users,
             credential_generation: 1,
             cursor: "0".into(),
@@ -77,6 +181,7 @@ impl DiscordManager {
             created_at_ms: now,
             updated_at_ms: now,
         };
+        self.validate_destinations(&mut record, &token).await?;
         let intent = DiscordCredentialIntent {
             connector_id: id.clone(),
             generation: 1,
@@ -125,7 +230,7 @@ impl DiscordManager {
         enabled: bool,
     ) -> Result<(), DiscordManagerError> {
         let _txn = self.transaction.lock().await;
-        let (previous, next, persist) = {
+        let (previous, next, schedules, persist) = {
             let mut state = self.state.write().await;
             let previous = state
                 .discord_connectors
@@ -142,18 +247,31 @@ impl DiscordManager {
             state
                 .discord_credential_intents
                 .remove(&(record.id.clone(), intent.generation));
-            state.ensure_run_session(crate::state::RunSessionRequest {
-                agent_id: &record.agent_id,
-                room_id: &record.room_id,
-                source: crate::runs::RunSource::Discord,
-                system_followup_title: None,
-                delegated_parent: None,
-                peer_sender: None,
-                parent: None,
-                first_text: "",
-                now_ms: now_ms(),
-            });
-            (previous, next, state.control_plane_persist_request())
+            let mut schedules = Vec::new();
+            if !enabled {
+                for schedule in state.schedules.values_mut().filter(|s|matches!(&s.target,crate::schedules::ScheduleTarget::Connector{connector_id} if connector_id==&record.id)) {
+                    let before=schedule.clone();schedule.enabled=false;schedule.updated_at_ms=now_ms();schedules.push((before,schedule.clone()));
+                }
+            }
+            if !record.bot_wide {
+                state.ensure_run_session(crate::state::RunSessionRequest {
+                    agent_id: &record.agent_id,
+                    room_id: &record.room_id,
+                    source: crate::runs::RunSource::Discord,
+                    system_followup_title: None,
+                    delegated_parent: None,
+                    peer_sender: None,
+                    parent: None,
+                    first_text: "",
+                    now_ms: now_ms(),
+                });
+            }
+            (
+                previous,
+                next,
+                schedules,
+                state.control_plane_persist_request(),
+            )
         };
         if persist.save().await.is_err() {
             let mut state = self.state.write().await;
@@ -164,6 +282,11 @@ impl DiscordManager {
                 .discord_credential_intents
                 .entry((record.id.clone(), intent.generation))
                 .or_insert_with(|| intent.clone());
+            for (before, after) in schedules {
+                if state.schedules.get(&after.id) == Some(&after) {
+                    state.schedules.insert(before.id.clone(), before);
+                }
+            }
             return Err(DiscordManagerError::Persistence);
         }
         self.set_status(
@@ -214,30 +337,46 @@ impl DiscordManager {
             .identify()
             .await
             .map_err(transport_error)?;
-        let channel = self
-            .native()?
-            .get_channel(&token, &previous.channel.id)
-            .await
-            .map_err(transport_error)?;
-        if bot.id != previous.bot.id
-            || channel.id != previous.channel.id
-            || channel.guild_id != previous.channel.guild_id
-        {
-            return Err(DiscordManagerError::Conflict);
-        }
-        let latest = self
-            .native()?
-            .latest_cursor(&token, &previous.channel.id)
-            .await
-            .map_err(transport_error)?;
-        if DiscordSnowflake::cursor(&latest).is_none() {
+        if bot.id != previous.bot.id {
             return Err(DiscordManagerError::Conflict);
         }
         let mut next = previous.clone();
         if next.activated_at_ms.is_none() {
-            next.cursor = latest;
+            if !next.bot_wide {
+                let channel = self
+                    .native()?
+                    .get_channel(&token, &next.channel.id)
+                    .await
+                    .map_err(transport_error)?;
+                if !channel.routing_eq(&next.channel) {
+                    return Err(DiscordManagerError::Conflict);
+                }
+                next.channel.name = channel.name;
+                next.cursor = self
+                    .native()?
+                    .latest_cursor(&token, &next.channel.id)
+                    .await
+                    .map_err(transport_error)?;
+                if DiscordSnowflake::cursor(&next.cursor).is_none() {
+                    return Err(DiscordManagerError::Conflict);
+                }
+            }
+            for conversation in &mut next.conversations {
+                conversation.cursor = self
+                    .native()?
+                    .latest_cursor(&token, &conversation.channel.id)
+                    .await
+                    .map_err(transport_error)?;
+                if DiscordSnowflake::cursor(&conversation.cursor).is_none() {
+                    return Err(DiscordManagerError::Conflict);
+                }
+            }
             next.activated_at_ms = Some(now_ms());
         }
+        next.configuration_revision = next
+            .configuration_revision
+            .checked_add(1)
+            .ok_or(DiscordManagerError::Conflict)?;
         next.enabled = true;
         next.updated_at_ms = now_ms();
         self.replace_record(&previous, &next).await?;
@@ -245,7 +384,7 @@ impl DiscordManager {
         self.set_status(id, DiscordRuntimeStatus::Ready, None).await;
         Ok(next)
     }
-    async fn replace_record(
+    pub(super) async fn replace_record(
         &self,
         previous: &DiscordConnectorRecord,
         next: &DiscordConnectorRecord,
@@ -289,8 +428,14 @@ impl DiscordManager {
             let mut next = manager.get(&agent, &id).await?;
             let before = next.clone();
             next.enabled = false;
+            next.configuration_revision = next
+                .configuration_revision
+                .checked_add(1)
+                .ok_or(DiscordManagerError::Conflict)?;
             next.updated_at_ms = now_ms();
-            manager.replace_record(&before, &next).await?;
+            manager
+                .replace_configuration(&before, &next, false, true)
+                .await?;
             manager
                 .set_status(&id, DiscordRuntimeStatus::Disabled, None)
                 .await;
@@ -443,7 +588,7 @@ impl DiscordManager {
             }
             manager.stop_worker(&id).await;
             let _txn = manager.transaction.lock().await;
-            let (previous, next, intent, prior_intent, inbound, outbound, persist) = {
+            let (previous, next, intent, prior_intent, inbound, outbound, schedules, persist) = {
                 let mut state = manager.state.write().await;
                 if state.in_flight_runs(&agent) > 0 {
                     return Err(DiscordManagerError::Busy);
@@ -455,6 +600,7 @@ impl DiscordManager {
                     .ok_or(DiscordManagerError::NotFound)?;
                 let mut next = previous.clone();
                 next.enabled = false;
+                next.configuration_revision=next.configuration_revision.checked_add(1).ok_or(DiscordManagerError::Conflict)?;
                 next.deleted_at_ms = Some(now_ms());
                 next.updated_at_ms = now_ms();
                 state.discord_connectors.insert(id.clone(), next.clone());
@@ -494,6 +640,10 @@ impl DiscordManager {
                     r.delivery_state = DiscordDeliveryState::Suppressed;
                     outbound.push((before, r.clone()));
                 }
+                let mut schedules=Vec::new();
+                for schedule in state.schedules.values_mut().filter(|s|matches!(&s.target,crate::schedules::ScheduleTarget::Connector{connector_id} if connector_id==&id)) {
+                    let before=schedule.clone();schedule.enabled=false;schedule.updated_at_ms=now_ms();schedules.push((before,schedule.clone()));
+                }
                 (
                     previous,
                     next,
@@ -501,6 +651,7 @@ impl DiscordManager {
                     prior_intent,
                     inbound,
                     outbound,
+                    schedules,
                     state.control_plane_persist_request(),
                 )
             };
@@ -528,6 +679,7 @@ impl DiscordManager {
                         state.discord_outbound.insert(before.id.clone(), before);
                     }
                 }
+                for (before,after) in schedules {if state.schedules.get(&after.id)==Some(&after){state.schedules.insert(before.id.clone(),before);}}
                 return Err(DiscordManagerError::Persistence);
             }
             drop(_txn);
@@ -558,7 +710,7 @@ impl DiscordManager {
         })
         .await
     }
-    async fn stop_worker(&self, id: &str) {
+    pub(super) async fn stop_worker(&self, id: &str) {
         self.revoke(id);
         self.stop_typing_connector(id).await;
         let running = {
@@ -569,7 +721,10 @@ impl DiscordManager {
                 .into_iter()
                 .filter(|r| {
                     r.source == crate::runs::RunSource::Discord
-                        && r.session_id == format!("discord:{id}")
+                        && state
+                            .discord_connectors
+                            .get(id)
+                            .is_some_and(|c| c.owns_room(&r.session_id))
                 })
                 .map(|r| (r.agent_id.clone(), r.id.clone()))
                 .collect::<Vec<_>>()
@@ -584,7 +739,7 @@ impl DiscordManager {
         }
         self.drain(id).await;
     }
-    async fn start_worker(&self, c: DiscordConnectorRecord, token: DiscordBotToken) {
+    pub(super) async fn start_worker(&self, c: DiscordConnectorRecord, token: DiscordBotToken) {
         if self.is_closing() {
             return;
         }
@@ -618,7 +773,7 @@ impl DiscordManager {
                     manager.run_gateway(c, token, epoch, wake, stop).await;
                 })
             });
-            loop {
+            'worker: loop {
                 if *stopped.borrow() || *close.borrow() || !manager.authority_current(&id, epoch) {
                     break;
                 }
@@ -633,59 +788,75 @@ impl DiscordManager {
                     Some(c) if c.is_active() => c,
                     _ => break,
                 };
-                let adapter = manager.registry.discord(&token, &current.channel.id);
-                let poll = adapter.receive(ConnectorReceiveRequest {
-                    cursor: current.cursor.clone(),
-                });
-                let result = tokio::select! { biased; _=stopped.changed()=>break,_=close.changed()=>break,result=poll=>result };
-                match result {
-                    Ok(batch) => {
-                        manager
-                            .set_status(&id, DiscordRuntimeStatus::Ready, None)
-                            .await;
-                        if let Err(error) =
-                            manager.accept_batch_captured(&current, epoch, batch).await
-                        {
-                            if error == DiscordManagerError::Backpressure {
-                                manager.set_status(&id,DiscordRuntimeStatus::Degraded,Some("Inbound capacity is exhausted; messages have not been skipped.")).await;
-                            } else if error == DiscordManagerError::UnsupportedInput {
-                                manager.set_status(&id,DiscordRuntimeStatus::Degraded,Some("Discord input exceeded the supported bound; the cursor has not advanced.")).await;
-                            } else {
-                                manager.set_status(&id,DiscordRuntimeStatus::Error,Some("Discord scan admission failed; the cursor has not advanced.")).await;
-                            }
+                if current.settings.is_some() {
+                    if let Err(error) = manager.discover_channels(&current, epoch, &token).await {
+                        manager.set_status(&id,DiscordRuntimeStatus::Degraded,Some("Discord discovery could not complete; saved conversation cursors are retained.")).await;
+                        if error == DiscordManagerError::InvalidToken {
+                            break;
                         }
                     }
-                    Err(error) => {
-                        if matches!(
-                            error,
-                            DiscordTransportError::Authentication
-                                | DiscordTransportError::PermissionDenied
-                                | DiscordTransportError::HttpStatus { status: 404 }
-                        ) {
+                }
+                let latest = match manager.get(&current.agent_id, &id).await {
+                    Ok(c) => c,
+                    Err(_) => break,
+                };
+                for current in latest.destinations() {
+                    let adapter = manager.registry.discord(&token, &current.channel.id);
+                    let poll = adapter.receive(ConnectorReceiveRequest {
+                        cursor: current.cursor.clone(),
+                    });
+                    let result = tokio::select! { biased; _=stopped.changed()=>break 'worker,_=close.changed()=>break 'worker,result=poll=>result };
+                    match result {
+                        Ok(batch) => {
                             manager
-                                .paused
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .insert(id.clone());
-                            manager.revoke(&id);
-                            let status = if error == DiscordTransportError::Authentication {
-                                DiscordRuntimeStatus::CredentialRequired
+                                .set_status(&id, DiscordRuntimeStatus::Ready, None)
+                                .await;
+                            if let Err(error) =
+                                manager.accept_batch_captured(&current, epoch, batch).await
+                            {
+                                if error == DiscordManagerError::Backpressure {
+                                    manager.set_status(&id,DiscordRuntimeStatus::Degraded,Some("Inbound capacity is exhausted; messages have not been skipped.")).await;
+                                } else if error == DiscordManagerError::UnsupportedInput {
+                                    manager.set_status(&id,DiscordRuntimeStatus::Degraded,Some("Discord input exceeded the supported bound; the cursor has not advanced.")).await;
+                                } else {
+                                    manager.set_status(&id,DiscordRuntimeStatus::Error,Some("Discord scan admission failed; the cursor has not advanced.")).await;
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            if matches!(error, DiscordTransportError::Authentication)
+                                || (current.settings.is_none()
+                                    && matches!(
+                                        error,
+                                        DiscordTransportError::PermissionDenied
+                                            | DiscordTransportError::HttpStatus { status: 404 }
+                                    ))
+                            {
+                                manager
+                                    .paused
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .insert(id.clone());
+                                manager.revoke(&id);
+                                let status = if error == DiscordTransportError::Authentication {
+                                    DiscordRuntimeStatus::CredentialRequired
+                                } else {
+                                    DiscordRuntimeStatus::Error
+                                };
+                                manager
+                                    .set_status(&id, status, Some(error.category()))
+                                    .await;
+                                break 'worker;
+                            }
+                            let status = if error == DiscordTransportError::BacklogLimit {
+                                DiscordRuntimeStatus::Degraded
                             } else {
                                 DiscordRuntimeStatus::Error
                             };
                             manager
                                 .set_status(&id, status, Some(error.category()))
                                 .await;
-                            break;
                         }
-                        let status = if error == DiscordTransportError::BacklogLimit {
-                            DiscordRuntimeStatus::Degraded
-                        } else {
-                            DiscordRuntimeStatus::Error
-                        };
-                        manager
-                            .set_status(&id, status, Some(error.category()))
-                            .await;
                     }
                 }
                 // Runs and sends are owned to completion: cancellation stops producers, never drops a tool-bearing child.

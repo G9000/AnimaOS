@@ -15,6 +15,7 @@ import {
 } from '@animaOS-SWARM/sdk';
 import { primaryBtnCls } from './ui-bits';
 import { GoogleDriveCard } from './GoogleDriveCard';
+import { GenericEmailSettings } from './GenericEmailSettings';
 import { McpConnectionsPanel } from './mcp/McpConnectionsPanel';
 import { CommunityBundlesPanel } from './community-bundles/CommunityBundlesPanel';
 import { useConnectorLifetime } from '../hooks/useConnectorLifetime';
@@ -277,7 +278,8 @@ function MailCard({
   provider: MailProvider;
 }) {
   const context = useContext(ConnectorContext);
-  const name = provider === 'gmail' ? 'Gmail' : 'Outlook';
+  const name =
+    provider === 'email' ? 'Email' : provider === 'gmail' ? 'Gmail' : 'Outlook';
   const [consent, setConsent] = useState<string | null>(null);
   const [to, setTo] = useState(''),
     [subject, setSubject] = useState(''),
@@ -311,7 +313,7 @@ function MailCard({
     ? resource.error
       ? 'Status unavailable'
       : ''
-    : !resource.data.configured
+    : provider !== 'email' && !resource.data.configured
       ? 'Setup required'
       : !connection
         ? 'Not connected'
@@ -325,42 +327,104 @@ function MailCard({
       title={name}
       description="Read recent mail and prepare messages for your review."
     >
-      <ConnectionControls
-        name={name}
-        configured={resource.data?.configured ?? false}
-        connected={!!connection}
-        status={status}
-        account={connection?.accountLabel}
-        {...resource}
-        consent={consent}
-        provider={provider === 'gmail' ? 'google' : 'outlook'}
-        onConnect={() => {
-          setConsent(null);
-          void resource.run(async () => {
-            const result = await client.connectMail(agentId, provider);
-            const url = authorizationUrl(
-              result.consentUrl,
-              provider === 'gmail' ? 'google' : 'outlook',
+      {provider === 'email' ? (
+        <>
+          <div className="space-y-1 text-xs">
+            <p role="status" className="font-medium text-accent">
+              {resource.loading && !status ? 'Loading connection…' : status}
+            </p>
+            {connection?.accountLabel && (
+              <p className="break-all text-ink-2">{connection.accountLabel}</p>
+            )}
+            {connection?.email?.autoReply.enabled && (
+              <p className="text-ink-3">
+                Automatic replies enabled for{' '}
+                {connection.email.autoReply.allowedSenders.length} allowed
+                sender(s).
+              </p>
+            )}
+          </div>
+          <GenericEmailSettings
+            agentId={agentId}
+            online={context.online}
+            epoch={context.epoch}
+            connected={!!connection}
+            settings={connection?.email}
+            busy={resource.busy || resource.loading}
+            onConnect={(input) => {
+              void resource.run(() =>
+                client.connectGenericEmail(agentId, input),
+              );
+            }}
+          />
+          <div className="flex flex-wrap gap-2">
+            {connection && (
+              <button
+                className={button}
+                disabled={resource.busy}
+                onClick={() => {
+                  void resource.run(() =>
+                    client.disconnectMail(agentId, provider, connection.id),
+                  );
+                }}
+              >
+                Disconnect Email
+              </button>
+            )}
+            <button
+              className={button}
+              disabled={resource.busy || resource.loading}
+              aria-label="Refresh Email"
+              onClick={() => void resource.refresh(true, true)}
+            >
+              {resource.loading ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+          {resource.error && (
+            <p role="alert" className="text-xs text-danger">
+              {resource.error}
+            </p>
+          )}
+        </>
+      ) : (
+        <ConnectionControls
+          name={name}
+          configured={resource.data?.configured ?? false}
+          connected={!!connection}
+          status={status}
+          account={connection?.accountLabel}
+          {...resource}
+          consent={consent}
+          provider={provider === 'gmail' ? 'google' : 'outlook'}
+          onConnect={() => {
+            setConsent(null);
+            void resource.run(async () => {
+              const result = await client.connectMail(agentId, provider);
+              const url = authorizationUrl(
+                result.consentUrl,
+                provider === 'gmail' ? 'google' : 'outlook',
+              );
+              return url;
+            }, setConsent);
+          }}
+          onDisconnect={() => {
+            setConsent(null);
+            void resource.run(() =>
+              client.disconnectMail(agentId, provider, connection!.id),
             );
-            return url;
-          }, setConsent);
-        }}
-        onDisconnect={() => {
-          setConsent(null);
-          void resource.run(() =>
-            client.disconnectMail(agentId, provider, connection!.id),
-          );
-        }}
-        onRefresh={() => void resource.refresh(true, true)}
-      />
+          }}
+          onRefresh={() => void resource.refresh(true, true)}
+        />
+      )}
       {connection?.error && (
         <p role="alert" className="text-xs text-danger">
           {connection.error}
         </p>
       )}
       <p className="text-xs leading-relaxed text-ink-3">
-        Drafts stay in animaOS until you approve Send. Connecting an account
-        never sends mail.
+        {provider === 'email'
+          ? 'Manual drafts stay in animaOS until you approve Send. Automatic replies require the separate opt-in above.'
+          : 'Drafts stay in animaOS until you approve Send. Connecting an account never sends mail.'}
       </p>
       {connection && (
         <>
@@ -1046,6 +1110,11 @@ export function ConnectorsView({
               online={online}
               epoch={epoch}
               disabled={disabled}
+            />
+            <MailCard
+              key={`${agentId}:email`}
+              agentId={agentId}
+              provider="email"
             />
             <MailCard
               key={`${agentId}:gmail:${oauthGeneration.google}`}

@@ -257,7 +257,9 @@ pub(super) async fn start_session_run(
                             .find(|c| {
                                 c.is_active()
                                     && c.agent_id == agent_id
-                                    && c.room_id == record.room_id()
+                                    && c.destination_for_room(record.room_id()).is_some_and(
+                                        |destination| c.can_send_to_channel(&destination.channel),
+                                    )
                             })
                             .map(|c| c.id.clone());
                     }
@@ -300,11 +302,19 @@ pub(super) async fn start_session_run(
                 idempotency_key.clone(),
                 connector_id.clone(),
             );
+            let destination_room = room_id.clone();
             let start = QueuedRunStart::new(
                 move |run_id| -> BoxFuture<'static, Result<(), QueuedStartError>> {
                     Box::pin(async move {
                         match manager
-                            .send_from_owner_accepted(agent, connector, text, key, run_id)
+                            .send_from_owner_in_room_accepted(
+                                agent,
+                                connector,
+                                destination_room,
+                                text,
+                                key,
+                                run_id,
+                            )
                             .await
                         {
                             Ok(()) => Ok(()),

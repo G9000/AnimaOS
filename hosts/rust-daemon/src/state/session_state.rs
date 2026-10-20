@@ -156,11 +156,16 @@ impl DaemonState {
                 .and_then(|id| self.connectors.get(id))
                 .and_then(|connector| connector.bot.username.as_deref())
                 .or_else(|| {
-                    request
-                        .room_id
-                        .strip_prefix("discord:")
-                        .and_then(|id| self.discord_connectors.get(id))
-                        .and_then(|c| c.channel.name.as_deref())
+                    self.discord_connectors.values().find_map(|c| {
+                        if !c.bot_wide && c.room_id == request.room_id {
+                            c.channel.name.as_deref()
+                        } else {
+                            c.conversations
+                                .iter()
+                                .find(|conversation| conversation.room_id == request.room_id)
+                                .and_then(|conversation| conversation.channel.name.as_deref())
+                        }
+                    })
                 }),
             peer_sender_name: peer_sender_name.as_deref(),
         };

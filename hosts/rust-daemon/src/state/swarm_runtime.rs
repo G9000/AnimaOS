@@ -59,7 +59,7 @@ impl DaemonState {
             let process_manager = Arc::clone(&process_manager);
             let workspace_root = workspace_root.clone();
             let calendar = calendar.clone();
-            let mail = mail.clone();
+            let mail = mail.as_ref().and_then(|mail| mail.upgrade());
             let drive = drive.as_ref().and_then(|manager| manager.upgrade());
             let event_stream = event_stream.clone();
             let db = db.clone();

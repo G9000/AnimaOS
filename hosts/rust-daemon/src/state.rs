@@ -1699,7 +1699,7 @@ pub(crate) struct DaemonState {
     pub(crate) calendar_connectors: HashMap<String, GoogleCalendarConnectorRecord>,
     pub(crate) calendar_writes: HashMap<String, CalendarPendingWriteRecord>,
     calendar_manager: Option<CalendarManager>,
-    pub(crate) mail_manager: Option<crate::connectors::mail::MailManager>,
+    pub(crate) mail_manager: Option<crate::connectors::mail::WeakMailManager>,
     pub(crate) drive_records: HashMap<String, crate::connectors::drive::DriveRecord>,
     pub(crate) drive_manager: Option<crate::connectors::drive::WeakDriveManager>,
     pub(crate) mail_records: HashMap<String, crate::connectors::mail::MailRecord>,
@@ -3181,7 +3181,15 @@ impl DaemonState {
             let archived_connector = match &schedule.target {
                 ScheduleTarget::Connector { connector_id } => connectors
                     .get(connector_id)
-                    .is_some_and(|connector| !connector.is_active()),
+                    .map(|connector| !connector.is_active())
+                    .or_else(|| {
+                        snapshot
+                            .discord_connectors
+                            .iter()
+                            .find(|connector| &connector.id == connector_id)
+                            .map(|connector| !connector.is_active())
+                    })
+                    .unwrap_or(false),
                 ScheduleTarget::Workspace => false,
             };
             if !agent_ids.contains(&schedule.agent_id) && (schedule.enabled || !archived_connector)
@@ -3251,19 +3259,43 @@ impl DaemonState {
                 }
             }
             if let ScheduleTarget::Connector { connector_id } = &schedule.target {
-                let connector = connectors.get(connector_id).ok_or_else(|| {
+                let target = connectors
+                    .get(connector_id)
+                    .map(|connector| (connector.agent_id.as_str(), connector.is_active()))
+                    .or_else(|| {
+                        snapshot.discord_connectors.iter()
+                            .find(|connector| &connector.id == connector_id)
+                            .map(|connector| {
+                                // Replacement journals a disabled generation before the
+                                // credential store write. Preserve its schedule through a
+                                // crash; execution still requires an active connector.
+                                let replacing = !connector.enabled
+                                    && connector.deleted_at_ms.is_none()
+                                    && snapshot.discord_credential_intents.iter().any(|intent| {
+                                        intent.connector_id == connector.id
+                                            && intent.generation == connector.credential_generation
+                                            && intent.operation == crate::connectors::discord::DiscordCredentialOperation::Replace
+                                    });
+                                (
+                                    connector.agent_id.as_str(),
+                                    (connector.is_active() || replacing)
+                                        && connector.home_destination().is_some(),
+                                )
+                            })
+                    });
+                let (target_agent, target_available) = target.ok_or_else(|| {
                     format!(
                         "schedule '{}' references missing connector '{connector_id}'",
                         schedule.id
                     )
                 })?;
-                if connector.agent_id != schedule.agent_id {
+                if target_agent != schedule.agent_id {
                     return Err(format!(
                         "schedule '{}' conflicts with connector agent ownership",
                         schedule.id
                     ));
                 }
-                if schedule.enabled && !connector.is_active() {
+                if schedule.enabled && !target_available {
                     return Err(format!(
                         "schedule '{}' is enabled for archived connector '{connector_id}'",
                         schedule.id

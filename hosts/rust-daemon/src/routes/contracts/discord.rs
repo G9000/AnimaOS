@@ -1,13 +1,34 @@
+use crate::connectors::discord::DiscordSettings;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 #[derive(Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DiscordCreateRequest {
     pub(crate) bot_token: String,
-    pub(crate) guild_id: String,
-    pub(crate) channel_id: String,
+    pub(crate) guild_id: Option<String>,
+    pub(crate) channel_id: Option<String>,
+    #[serde(default)]
     pub(crate) approved_user_ids: Vec<String>,
-    pub(crate) private_channel_confirmed: bool,
+    /// Accepted for older clients. Channel privacy is no longer a setup prerequisite.
+    #[serde(default, rename = "privateChannelConfirmed")]
+    pub(crate) _private_channel_confirmed: Option<bool>,
+    #[serde(default)]
+    pub(crate) settings: Option<DiscordSettings>,
+}
+#[derive(Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DiscordSettingsRequest {
+    pub(crate) settings: DiscordSettings,
+    pub(crate) approved_user_ids: Vec<String>,
+}
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DiscordBotCheckResponse {
+    pub(crate) application_id: String,
+    pub(crate) bot: DiscordBotResponse,
+    pub(crate) owner_user_ids: Vec<String>,
+    pub(crate) message_content_enabled: bool,
+    pub(crate) invite_url: String,
 }
 #[derive(Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -41,6 +62,15 @@ pub(crate) struct DiscordChannelResponse {
 }
 #[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct DiscordConversationResponse {
+    pub(crate) channel_id: String,
+    pub(crate) guild_id: String,
+    pub(crate) parent_channel_id: Option<String>,
+    pub(crate) name: Option<String>,
+    pub(crate) room_id: String,
+}
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct DiscordConnectorResponse {
     pub(crate) id: String,
     pub(crate) agent_id: String,
@@ -48,7 +78,11 @@ pub(crate) struct DiscordConnectorResponse {
     pub(crate) kind: String,
     pub(crate) room_id: String,
     pub(crate) bot: DiscordBotResponse,
-    pub(crate) channel: DiscordChannelResponse,
+    pub(crate) channel: Option<DiscordChannelResponse>,
+    pub(crate) bot_wide: bool,
+    pub(crate) settings: DiscordSettings,
+    pub(crate) invite_url: String,
+    pub(crate) conversations: Vec<DiscordConversationResponse>,
     pub(crate) approved_user_ids: Vec<String>,
     pub(crate) enabled: bool,
     pub(crate) status: String,

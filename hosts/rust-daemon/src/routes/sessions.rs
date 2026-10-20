@@ -73,7 +73,9 @@ fn list_query(uri: &Uri) -> Result<SessionListQuery, ApiError> {
     let kind = match params.get("kind").map(String::as_str) {
         None | Some("") => None,
         Some(value) => Some(SessionKind::parse(value).ok_or_else(|| {
-            ApiError::bad_request_static("kind must be one of chat, telegram, checkin, job, helper")
+            ApiError::bad_request_static(
+                "kind must be one of chat, telegram, discord, email, checkin, job, helper",
+            )
         })?),
     };
     let q = params
@@ -217,7 +219,7 @@ pub(super) async fn search_session_messages(
 #[utoipa::path(get, path = "/api/agents/{agent_id}/sessions", tag = "sessions",
     params(
         ("agent_id" = String, Path),
-        ("kind" = Option<String>, Query, description = "chat, telegram, checkin, job, or helper"),
+        ("kind" = Option<String>, Query, description = "chat, telegram, discord, email, checkin, job, or helper"),
         ("archived" = Option<bool>, Query, description = "true lists only archived sessions (default false)"),
         ("q" = Option<String>, Query, description = "Search titles and message text (up to 200 characters)"),
         ("cursor" = Option<String>, Query, description = "nextCursor of the previous page"),

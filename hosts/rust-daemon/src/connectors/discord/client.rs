@@ -76,6 +76,29 @@ impl fmt::Display for DiscordTransportError {
 impl std::error::Error for DiscordTransportError {}
 #[async_trait]
 pub(crate) trait DiscordTransport: Send + Sync {
+    async fn check_application(
+        &self,
+        _token: &DiscordBotToken,
+    ) -> Result<DiscordBotCheck, DiscordTransportError> {
+        Err(DiscordTransportError::Configuration)
+    }
+    async fn member_roles(
+        &self,
+        _token: &DiscordBotToken,
+        _guild: &str,
+        _user: &str,
+    ) -> Result<Vec<String>, DiscordTransportError> {
+        Err(DiscordTransportError::PermissionDenied)
+    }
+    async fn create_thread(
+        &self,
+        _token: &DiscordBotToken,
+        _channel: &str,
+        _message: &str,
+        _name: &str,
+    ) -> Result<DiscordChannelMetadata, DiscordTransportError> {
+        Err(DiscordTransportError::Configuration)
+    }
     async fn send_typing(
         &self,
         _token: &DiscordBotToken,
@@ -369,6 +392,46 @@ struct WireChannel {
     name: Option<String>,
     #[serde(rename = "type")]
     kind: u64,
+    #[serde(default)]
+    parent_id: Option<String>,
+}
+impl WireChannel {
+    fn normalize(self) -> Result<DiscordChannelMetadata, DiscordTransportError> {
+        provider_id(&self.id)?;
+        provider_id(&self.guild_id)?;
+        let kind = match self.kind {
+            0 if self.parent_id.is_none() => DiscordChannelKind::GuildText,
+            // Text channels may have a category parent. It is not a conversation parent.
+            0 => DiscordChannelKind::GuildText,
+            10..=12
+                if self
+                    .parent_id
+                    .as_ref()
+                    .is_some_and(|id| provider_id(id).is_ok() && id != &self.id) =>
+            {
+                DiscordChannelKind::GuildThread
+            }
+            _ => return Err(DiscordTransportError::InvalidResponse),
+        };
+        let parent_channel_id = if kind == DiscordChannelKind::GuildThread {
+            self.parent_id
+        } else {
+            None
+        };
+        Ok(DiscordChannelMetadata {
+            id: self.id,
+            guild_id: self.guild_id,
+            name: metadata(self.name, 128)?,
+            kind,
+            parent_channel_id,
+        })
+    }
+}
+
+pub(crate) fn invite_url(application: &str) -> String {
+    // Only text conversations/history and public thread creation are exercised.
+    let permissions = (1u64 << 10) | (1u64 << 11) | (1u64 << 16) | (1u64 << 35) | (1u64 << 38);
+    format!("https://discord.com/oauth2/authorize?client_id={application}&scope=bot&permissions={permissions}&integration_type=0")
 }
 #[derive(Deserialize)]
 struct WireMessage {
@@ -422,6 +485,140 @@ impl WireMessage {
 }
 #[async_trait]
 impl DiscordTransport for DiscordClient {
+    async fn check_application(
+        &self,
+        token: &DiscordBotToken,
+    ) -> Result<DiscordBotCheck, DiscordTransportError> {
+        let value: serde_json::Value = self
+            .request(token, Method::GET, "applications/@me", None)
+            .await?;
+        let application_id = value
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or(DiscordTransportError::InvalidResponse)?;
+        provider_id(application_id)?;
+        let bot = self.get_me(token).await?;
+        if value
+            .get("bot")
+            .and_then(|v| v.get("id"))
+            .and_then(|v| v.as_str())
+            .is_some_and(|id| id != bot.id)
+        {
+            return Err(DiscordTransportError::InvalidResponse);
+        }
+        let mut owners = Vec::new();
+        if let Some(team) = value.get("team").filter(|v| !v.is_null()) {
+            let members = team
+                .get("members")
+                .and_then(|v| v.as_array())
+                .ok_or(DiscordTransportError::InvalidResponse)?;
+            if members.len() > 100 {
+                return Err(DiscordTransportError::InvalidResponse);
+            }
+            for member in members
+                .iter()
+                .filter(|m| m.get("membership_state").and_then(|v| v.as_u64()) == Some(2))
+            {
+                let id = member
+                    .get("user")
+                    .and_then(|v| v.get("id"))
+                    .and_then(|v| v.as_str())
+                    .ok_or(DiscordTransportError::InvalidResponse)?;
+                provider_id(id)?;
+                if !owners.iter().any(|v| v == id) {
+                    owners.push(id.to_owned());
+                }
+            }
+        } else if let Some(id) = value
+            .get("owner")
+            .and_then(|v| v.get("id"))
+            .and_then(|v| v.as_str())
+        {
+            provider_id(id)?;
+            owners.push(id.to_owned());
+        }
+        let flags = value.get("flags").and_then(|v| v.as_u64()).unwrap_or(0);
+        Ok(DiscordBotCheck {
+            application_id: application_id.into(),
+            bot,
+            owner_user_ids: owners,
+            message_content_enabled: flags & ((1 << 18) | (1 << 19)) != 0,
+            invite_url: invite_url(application_id),
+        })
+    }
+    async fn member_roles(
+        &self,
+        token: &DiscordBotToken,
+        guild: &str,
+        user: &str,
+    ) -> Result<Vec<String>, DiscordTransportError> {
+        validate_id(guild)?;
+        validate_id(user)?;
+        let member: serde_json::Value = self
+            .request(
+                token,
+                Method::GET,
+                &format!("guilds/{guild}/members/{user}"),
+                None,
+            )
+            .await?;
+        if member
+            .get("user")
+            .and_then(|v| v.get("id"))
+            .and_then(|v| v.as_str())
+            != Some(user)
+        {
+            return Err(DiscordTransportError::InvalidResponse);
+        }
+        let roles = member
+            .get("roles")
+            .and_then(|v| v.as_array())
+            .ok_or(DiscordTransportError::InvalidResponse)?;
+        if roles.len() > 250 {
+            return Err(DiscordTransportError::InvalidResponse);
+        }
+        roles
+            .iter()
+            .map(|v| {
+                let id = v.as_str().ok_or(DiscordTransportError::InvalidResponse)?;
+                provider_id(id)?;
+                Ok(id.to_owned())
+            })
+            .collect()
+    }
+    async fn create_thread(
+        &self,
+        token: &DiscordBotToken,
+        channel: &str,
+        message: &str,
+        name: &str,
+    ) -> Result<DiscordChannelMetadata, DiscordTransportError> {
+        validate_id(channel)?;
+        validate_id(message)?;
+        let name = name.trim().chars().take(80).collect::<String>();
+        let name = if name.is_empty() {
+            "Anima conversation".into()
+        } else {
+            name
+        };
+        let wire: WireChannel = self
+            .request(
+                token,
+                Method::POST,
+                &format!("channels/{channel}/messages/{message}/threads"),
+                Some(serde_json::json!({"name":name,"auto_archive_duration":1440})),
+            )
+            .await?;
+        let result = wire
+            .normalize()
+            .map_err(|_| DiscordTransportError::Uncertain)?;
+        if result.kind != DiscordChannelKind::GuildThread
+            || result.parent_channel_id.as_deref() != Some(channel)
+        {
+            return Err(DiscordTransportError::Uncertain);
+        }
+        Ok(result)
+    }
     async fn send_typing(
         &self,
         token: &DiscordBotToken,
@@ -460,17 +657,10 @@ impl DiscordTransport for DiscordClient {
         let wire: WireChannel = self
             .request(token, Method::GET, &format!("channels/{channel}"), None)
             .await?;
-        provider_id(&wire.id)?;
-        provider_id(&wire.guild_id)?;
-        if wire.id != channel || wire.kind != 0 {
+        if wire.id != channel {
             return Err(DiscordTransportError::InvalidResponse);
         }
-        Ok(DiscordChannelMetadata {
-            id: wire.id,
-            guild_id: wire.guild_id,
-            name: metadata(wire.name, 128)?,
-            kind: DiscordChannelKind::GuildText,
-        })
+        wire.normalize()
     }
     async fn latest_cursor(
         &self,

@@ -20,6 +20,7 @@ pub(crate) enum GatewaySignal {
     Message {
         guild_id: Option<String>,
         channel_id: String,
+        message_id: Option<String>,
     },
     Closed(Option<u16>),
     Reconnecting,
@@ -62,10 +63,11 @@ impl NativeGatewayFactory {
             .entry(bot_id.into())
             .or_default()
             .clone();
-        // No member, presence, DM, voice, role, or arbitrary command subscriptions.
+        // Guild metadata enables thread discovery; role checks use bounded REST
+        // membership lookups rather than a privileged member subscription.
         ConfigBuilder::new(
             token.expose().to_owned(),
-            Intents::GUILD_MESSAGES | Intents::MESSAGE_CONTENT,
+            Intents::GUILDS | Intents::GUILD_MESSAGES | Intents::MESSAGE_CONTENT,
         )
         .queue(queue)
         .presence(UpdatePresencePayload {
@@ -136,6 +138,7 @@ impl GatewaySession for NativeSession {
             Ok(Event::MessageCreate(event)) => Some(GatewaySignal::Message {
                 guild_id: event.guild_id.map(|id| id.to_string()),
                 channel_id: event.channel_id.to_string(),
+                message_id: Some(event.id.to_string()),
             }),
             Ok(Event::GatewayClose(frame)) => {
                 Some(GatewaySignal::Closed(frame.map(|frame| frame.code)))
@@ -246,10 +249,29 @@ impl DiscordManager {
                 Some(GatewaySignal::Message {
                     guild_id,
                     channel_id,
+                    message_id,
                 }) if ready
-                    && channel_id == c.channel.id
-                    && guild_id.as_deref() == Some(&c.channel.guild_id) =>
+                    && guild_id.as_ref().is_some_and(|guild| {
+                        DiscordSnowflake::parse(guild).is_some()
+                            && c.guild_scope.as_ref().is_none_or(|scope| scope == guild)
+                    })
+                    && DiscordSnowflake::parse(&channel_id).is_some()
+                    && (c.settings.is_some()
+                        || (channel_id == c.channel.id
+                            && guild_id.as_deref() == Some(&c.channel.guild_id))) =>
                 {
+                    if c.settings.is_some() {
+                        let mut discovered = self.discovered.lock().await;
+                        let queued = discovered.entry(c.id.clone()).or_default();
+                        let guild = guild_id.expect("checked guild");
+                        if queued.len() < 100
+                            && !queued.iter().any(|(at, g, id, _)| {
+                                *at == epoch && g == &guild && id == &channel_id
+                            })
+                        {
+                            queued.push((epoch, guild, channel_id, message_id));
+                        }
+                    }
                     // Retain one wake even during catch-up; the REST cursor proves the full boundary.
                     wake.notify_one();
                 }
