@@ -7,35 +7,32 @@ import { Aside, Steps } from '@astrojs/starlight/components';
 
 ## Pick the Right Entry Point
 
-Use the entry point that matches the scope of the change:
-
-- `bun dev` for the normal workspace loop. It defaults to the Rust host and starts the daemon plus the web and docs surfaces through `tools/workspace-dev`.
-- `bun dev --host rust` when you want the explicit host form.
-- `bun x nx run rust-daemon:dev` when you only need the daemon process.
-- `cargo run -p anima-daemon` when you want the raw host process without the Nx wrapper.
+- `bun dev` or `bun dev --host rust` for the normal workspace loop. `rust` is the only host key. It runs `tools/workspace-dev`, which starts the daemon on `127.0.0.1:8080` plus the web console, playground, public docs and contributor docs. If a daemon already answers on `http://127.0.0.1:8080/api/health`, it reuses it and starts only the other surfaces.
+- `bun x nx run rust-daemon:dev` (or `bun run daemon`) when you only need the daemon process. Both build through `tools/workspace-dev/src/rust-daemon-dev.ts`: `cargo build -p anima-daemon --bin anima-daemon`, optional macOS re-signing, then run the binary.
+- `cargo run -p anima-daemon` for the raw process without the Nx wrapper. It uses only the environment you give it.
 
 <Aside type="tip">
-  Use `bun dev --host rust` for UI-plus-host work. Use `bun x nx run rust-daemon:dev` when you are only changing the Axum host, persistence wiring, routes, or host-owned runtime behavior.
+  Use `bun dev --host rust` for UI-plus-host work. Use `bun x nx run rust-daemon:dev` when you are only changing routes, persistence wiring or runtime behavior.
 </Aside>
+
+## What `bun dev` Persists
+
+`bun dev` and `workspace-dev` set `ANIMAOS_RS_CONTROL_PLANE_FILE=~/.animaos-swarm/data/control-plane.json` for the daemon it starts, so agents, sessions, connectors, history (`history.sqlite`) and memory (`memory.sqlite`) survive restarts. Overrides: set your own `ANIMAOS_RS_CONTROL_PLANE_FILE`, use `ANIMAOS_RS_PERSISTENCE_MODE=postgres`, or set `ANIMAOS_DEV_EPHEMERAL=1` for a throwaway daemon. A daemon you start yourself (`cargo run`) is ephemeral unless you pass a file. Note that the default folder is the same one an installed `anima` uses; see [Persistence](/hosts/rust-daemon/persistence/#development-defaults).
+
+Telegram connectors in that store restart automatically once their credentials are in the OS credential store. Add or replace bot tokens through the console or the API; there is no shared token variable.
 
 ## Recommended Local Profile
 
-For local development, keep the setup simple first:
-
 ```bash
-ANIMAOS_RS_MEMORY_SQLITE_FILE=./data/runtime-memories.sqlite \
+ANIMAOS_RS_CONTROL_PLANE_FILE=./data/control-plane.json \
 ANIMAOS_RS_MEMORY_EMBEDDINGS=local \
 ANTHROPIC_API_KEY=sk-ant-... \
 cargo run -p anima-daemon
 ```
 
-That profile gives you:
+That gives you durable agents, history and memory in `./data` (`history.sqlite` and `memory.sqlite` are created beside the control-plane file), cheap deterministic hashed vectors (no model download), and no Postgres. Drop `ANIMAOS_RS_MEMORY_EMBEDDINGS=local` to get the default `fastembed` model, which downloads the model on first use and loads it in the background.
 
-- durable local memory snapshots in SQLite
-- cheap deterministic local embeddings
-- no Postgres dependency for day-to-day iteration
-
-If you need to exercise durable retry behavior or Postgres-backed host snapshots locally, switch to Postgres mode:
+To exercise Postgres snapshots, step logs and history tables locally:
 
 ```bash
 ANIMAOS_RS_PERSISTENCE_MODE=postgres \
@@ -46,16 +43,20 @@ cargo run -p anima-daemon
 
 ## Quick Verification
 
-After the daemon starts, verify the local loop immediately:
-
 ```bash
-curl http://127.0.0.1:8080/health
+curl http://127.0.0.1:8080/health   # {"status":"ok"}
 curl http://127.0.0.1:8080/ready
 ```
 
-Open `http://127.0.0.1:8080/docs` to inspect the live API surface.
+Open `http://127.0.0.1:8080/docs` for the live API reference.
 
-## Common Local Tasks
+## macOS Keychain Prompts
+
+The daemon stores the ChatGPT login and connector secrets in the login keychain. Debug builds are ad-hoc signed, so **Always Allow** is tied to one binary and every rebuild asks again. `rust-daemon:dev`, `rust-daemon:build` and `bun run daemon` re-sign the binary with a stable identity when `ANIMAOS_DEV_SIGNING_IDENTITY` is set (no effect off macOS or when unset; plain `cargo run` is never re-signed).
+
+One-time setup: in Keychain Access create a self-signed **Code Signing** certificate named `AnimaOS Dev Signing`, trust it for code signing, confirm `security find-identity -v -p codesigning` lists it, and export `ANIMAOS_DEV_SIGNING_IDENTITY="AnimaOS Dev Signing"` in your shell profile. After one **Always Allow** per existing secret, rebuilds stop prompting. `codesign -dvv target/debug/anima-daemon` should show `Identifier=dev.animaos.anima-daemon`. The full steps are in `hosts/rust-daemon/README.md`.
+
+## Common Tasks
 
 <Steps>
 
@@ -65,13 +66,21 @@ Open `http://127.0.0.1:8080/docs` to inspect the live API surface.
    bun x nx run rust-daemon:test --skipNxCache
    ```
 
-2. Rebuild contributor docs after docs edits.
+   This runs `core-rust:test` first, then `cargo test -p anima-daemon`.
+
+2. Check formatting.
+
+   ```bash
+   bun x nx run rust-daemon:lint --skipNxCache
+   ```
+
+3. Rebuild contributor docs after docs edits.
 
    ```bash
    bun x nx run @animaOS-SWARM/contributor-docs:build --skipNxCache
    ```
 
-3. Rebuild public docs if you changed user-facing docs.
+4. Rebuild public docs if you changed user-facing docs.
 
    ```bash
    bun x nx run @animaOS-SWARM/docs:build --skipNxCache
@@ -81,7 +90,7 @@ Open `http://127.0.0.1:8080/docs` to inspect the live API surface.
 
 ## Windows Note
 
-On Windows, a running daemon can keep `target/debug/anima-daemon.exe` locked. If that happens during validation, rerun the daemon test target with an isolated cargo target directory:
+A running daemon can keep `target/debug/anima-daemon.exe` locked. If that happens during validation, rerun the test target with an isolated target directory:
 
 ```bash
 CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache
@@ -89,7 +98,6 @@ CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:tes
 
 ## Scope Boundaries
 
-- Use this page for the local development loop.
-- Use [Environment](/hosts/rust-daemon/env/) for env var details.
-- Use [Staging Deployment](/hosts/rust-daemon/staging/) for container and online staging guidance.
-- Use [Operations](/hosts/rust-daemon/ops/) for readiness, metrics, and runtime debugging.
+- Use [Environment](/hosts/rust-daemon/env/) for variables and [Persistence](/hosts/rust-daemon/persistence/) for what is stored where.
+- Use [Staging Deployment](/hosts/rust-daemon/staging/) for container and online staging.
+- Use [Operations](/hosts/rust-daemon/ops/) for readiness, metrics and debugging.

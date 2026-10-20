@@ -1,59 +1,76 @@
 ---
 title: Recall Fusion
-description: How the four search signals are fused into ranked results
+description: How lexical, vector, relationship, temporal, recency and importance signals become one ranking
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
-<Aside type="caution" title="Work in Progress">
-  This contributor documentation is actively being written. Sections may be incomplete, reorganized, or expanded.
-</Aside>
-
-## Recall Fusion
-
-`MemoryManager::recall()` fuses all four signals into a single ranked list:
+`MemoryManager::recall` fuses several candidate sources into one ranked list. It returns a plain `Vec`, not a `Result`.
 
 ```rust
-pub fn recall(
-    &self,
-    query: &str,
-    options: &MemoryRecallOptions,
-) -> Result<Vec<MemoryRecallResult>, MemoryError>
+pub fn recall(&self, query: &str, opts: MemoryRecallOptions) -> Vec<MemoryRecallResult>;
+pub fn recall_with_vector_index(&self, query, opts, vector_index: Option<&dyn MemoryVectorIndex>) -> Vec<MemoryRecallResult>;
+pub fn recall_with_vector_index_filtered(&self, query, opts, vector_index, visible: impl Fn(&Memory) -> bool) -> Vec<MemoryRecallResult>;
 ```
 
-## Individual Scores
+The `_filtered` form takes a host `visible` predicate (ownership, hidden-text and similar rules). It is applied to every candidate source, so an ineligible memory cannot take a slot from an eligible one.
 
-Each result contains:
-- `lexical_score` — BM25 contribution (0..1)
-- `vector_score` — embedding similarity (0..1)
-- `relationship_score` — graph proximity (0..1)
-- `temporal_score` — time relevance (0..1)
-- `recency_score` — raw recency (timestamp-based)
-- `importance_score` — stored importance (0..1)
+## Candidate Sources
+
+| Source | Where candidates come from | Raw signal |
+|--------|----------------------------|-----------|
+| Lexical | BM25 search over the filtered set, up to `lexical_limit` (default `4 * limit`) | Score divided by the best score in this query, so 0 to 1 |
+| Vector | The supplied `MemoryVectorIndex` (`search_filtered`, up to `lexical_limit`); only finite positive hits are kept | Score divided by the best vector score in this query |
+| Recency | `get_recent_filtered` up to `recent_limit` (default `limit`) | `1 / rank`, the newest memory scoring 1.0 |
+| Relationship | Evidence memories of agent relationships selected by `entity_id` or the agent id, up to `relationship_limit` (default 20) | `min(strength * confidence, 1)` |
+| Temporal | Evidence of **active, currently valid** temporal facts about `entity_id`, up to `temporal_limit` (default `limit`), when the query looks like a fact question | The fact's `confidence` |
+| Importance | The memory's stored `importance` | 0 to 1 |
+
+A temporal fact is considered only if the query's terms overlap the fact's predicate or value, or overlap its subject **and** the query has fact intent (terms such as `current`, `favorite`, `prefer`, `status`, `remember`, or any in `temporal_intent_terms`). A fact with no evidence pointers falls back to scanning memories whose text mentions both its subject and its predicate or value (scored at 0.85 of the fact's confidence), but only while the store holds at most 5,000 memories.
 
 ## Final Score
 
 ```
-final_score = w_lexical * lexical_score
-            + w_vector * vector_score
-            + w_temporal * temporal_score
-            + w_relationship * relationship_score
-            + w_importance * importance_score
+vector_weight' = lexical_score > 0 ? w_vector * (1 - lexical_score) : w_vector
+
+score = w_lexical      * lexical_score
+      + vector_weight' * vector_score
+      + w_relationship * relationship_score
+      + w_temporal     * temporal_score
+      + w_recency      * recency_score
+      + w_importance   * importance_score
 ```
 
-Default weights: lexical=0.3, vector=0.3, temporal=0.2, relationship=0.1, importance=0.1.
+Default `MemoryRecallWeights`:
+
+| Signal | Weight |
+|--------|--------|
+| lexical | 0.55 |
+| vector | 0.15 |
+| relationship | 0.20 |
+| temporal | **0.00** |
+| recency | 0.05 |
+| importance | 0.05 |
+
+Temporal evidence is collected and reported, but contributes nothing to the score unless a caller passes `weights: Some(MemoryRecallWeights { temporal: .. , .. })`. Vector weight shrinks as an exact lexical match gets stronger, so a strong keyword hit is not drowned by a loosely related vector hit.
+
+Results are sorted by `score` descending (ties: newer `created_at`, then id) and truncated to `limit` (default 10). Each `MemoryRecallResult` carries the `memory`, the `score` and the six components (`lexical_score`, `vector_score`, `relationship_score`, `temporal_score`, `recency_score`, `importance_score`), each clamped to 0 to 1.
+
+## Context Selection
+
+`select_context(opts, visible)` and `select_context_with_vector_index(opts, vector_index, visible)` choose memories to put in an agent's prompt, with different rules from `recall`:
+
+- Eligible: the agent's own `Fact` and `Reflection` memories with no `world_id` or `session_id`, `Room`-scoped ones only for the current room, and whatever `visible` allows.
+- **Lexical first:** rank by how many distinct query terms (stop words removed, at most 32) a memory contains, then importance, then newest. Memories with zero overlap are skipped. Duplicates (same text after whitespace and case normalization) collapse to the best one.
+- **Then semantic:** spare slots, up to `limit`, are filled with eligible vector hits with positive finite scores that are not duplicates.
+
+## Weights Are Per Query
+
+`MemoryRecallOptions` is the tuning surface: `search` filters, `entity_id`, `agent_id`, the four limits, `temporal_intent_terms` and `weights`.
 
 ## Snapshot Boundary
 
-`MemoryManager::snapshot()` serializes the entire state. The host calls this on shutdown and `replace_snapshot()` on startup.
-
 ```rust
 pub fn snapshot(&self) -> MemoryManagerSnapshot;
-pub fn replace_snapshot(&mut self, snapshot: MemoryManagerSnapshot) -> Result<(), MemoryError>;
+pub fn replace_snapshot(&mut self, snapshot: MemoryManagerSnapshot);
 ```
 
-The snapshot includes all memories, entities, relationships, temporal facts, BM25 index state, and vector index state.
-
-<Aside type="note">
-  Snapshot serialization uses `serde` with a versioned schema. Future versions will support MessagePack for smaller snapshots.
-</Aside>
+The snapshot has the five record collections only. The BM25 index is rebuilt on `replace_snapshot`; vectors are the host's to restore. Serialization format and storage are the host's choice: the daemon persists through its memory store (see [Persistence](/hosts/rust-daemon/persistence/)).

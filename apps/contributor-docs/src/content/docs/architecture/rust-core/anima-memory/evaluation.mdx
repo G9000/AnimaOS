@@ -1,50 +1,73 @@
 ---
 title: Evaluation
-description: Memory evaluation decisions and the eval harness
+description: Pre-store evaluation decisions and the memory evaluation harness
 ---
-
-import { Aside } from '@astrojs/starlight/components';
-
-<Aside type="caution" title="Work in Progress">
-  This contributor documentation is actively being written. Sections may be incomplete, reorganized, or expanded.
-</Aside>
 
 ## Evaluation Decisions
 
-Before storing a memory, `evaluate()` returns a decision:
+Before storing a memory, `MemoryManager::evaluate_new_memory(&NewMemory, MemoryEvaluationOptions)` returns a `MemoryEvaluation`:
 
-| Decision | Meaning | Action |
-|----------|---------|--------|
-| `Store` | Save as a new memory | Insert into `memories` and BM25 index |
-| `Merge` | Combine with an existing duplicate | Update existing memory's content and importance |
-| `Ignore` | Too low quality or redundant | Drop the memory |
+```rust
+pub struct MemoryEvaluation {
+    pub decision: MemoryEvaluationDecision,   // Store | Merge | Ignore
+    pub reason: String,
+    pub score: f64,
+    pub suggested_importance: f64,
+    pub duplicate_memory_id: Option<String>,
+}
+```
 
-The evaluator considers:
-- Content length (too short = ignore)
-- Semantic similarity to existing memories (high = merge)
-- Explicit importance score (if provided)
-- Content quality heuristics (repetition, noise)
+| Decision | When | Effect of `add_evaluated` |
+|----------|------|---------------------------|
+| `Ignore` | The trimmed content is empty, or it is shorter than `min_content_chars` **and** its importance is below `min_importance` | Nothing is stored |
+| `Merge` | An existing memory has the same agent, type, scope, room, world and session and the same content after whitespace and case normalization | Nothing is stored; `duplicate_memory_id` names the existing record and `suggested_importance` is the larger of the two importances |
+| `Store` | Otherwise | Stored with `importance = suggested_importance` |
+
+`MemoryEvaluationOptions` defaults: `min_content_chars = 12`, `min_importance = 0.15`. Importance values must be between 0 and 1 (`MemoryError::InvalidImportance`).
+
+The `Store` score is `min(1, 0.6 * importance + type_weight + tag_weight + context_weight)`, where `type_weight` is 0.20 for `Fact` and `Reflection`, 0.15 for `TaskResult` and 0.12 for `Observation`; `tag_weight` is 0.10 when any tag is non-blank; `context_weight` is 0.10 when a room, world or session id is set. `suggested_importance` is `max(score, importance)` capped at 1. `Merge` carries a fixed score of 0.15.
+
+`add_evaluated` returns a `MemoryEvaluationOutcome` (`evaluation` plus the stored `memory`, if any). **A `Merge` does not update the existing memory**; it only reports it. The decision is deterministic and does no semantic comparison.
+
+The daemon exposes this as `POST /api/memories/evaluations` (evaluate only) and `POST /api/memories/evaluated` (evaluate and store). There is no per-reply memory evaluator in the agent loop; agents write memory through tools (`core_memory`, `memory_add`, ...) and conversation or task reviews.
 
 ## Evaluation Harness
 
-`eval_harness.rs` contains a suite of test cases for validating memory behavior:
+`eval_harness.rs` holds deterministic cases that guard memory behavior:
 
 ```rust
 pub fn baseline_memory_eval_cases() -> Vec<MemoryEvalCase>;
-pub fn run_memory_eval_cases(
-    manager: &MemoryManager,
-    cases: &[MemoryEvalCase],
-) -> MemoryEvalReport;
+pub fn run_memory_eval_cases(cases: &[MemoryEvalCase]) -> MemoryEvalReport;
+pub fn run_memory_eval_checks(..) -> ..;
 ```
 
-Each test case defines:
-- A set of seed memories
-- A query
-- Expected memory IDs in the top-N results
-- Minimum precision/recall thresholds
+A `MemoryEvalCase` seeds memories (and optionally relationships) and runs `MemoryEvalCheck`s:
 
-Run the harness with:
+| Check | Verifies |
+|-------|----------|
+| `EvaluateDecision` | A candidate evaluates to the expected `Store` / `Merge` / `Ignore` |
+| `RecallTopN`, `RecallExcludesTopN` | Expected content is (or is not) in the top N of a recall; can require a relationship score |
+| `VectorRecallTopN`, `VectorRecallExcludesTopN` | The same with seeded vector hits |
+| `Trace` | `trace_memory` returns the evidence, relationships and entities expected |
+| `Retention`, `RetentionDecay` | A retention policy removes, keeps and decays what it should |
+
+`MemoryEvalReport` exposes `passed()`, `total_checks()`, `passed_checks()` and `failure_messages()`. The daemon's `GET /api/memories/readiness` runs the baseline cases and reports the result next to the embedding status and external-provider status.
+
+## Commands
 
 ```bash
+# Baseline cases (fast, deterministic)
 bun x nx run core-rust:memory-eval --skipNxCache
+
+# LoCoMo smoke cases (feature "locomo-eval")
+bun x nx run core-rust:memory-locomo --skipNxCache
+
+# Download the LoCoMo dataset, then run the full retrieval benchmark
+bun x nx run core-rust:memory-locomo-fetch --skipNxCache
+bun x nx run core-rust:memory-locomo-dataset --skipNxCache
+
+# End-to-end agent benchmark with real model calls (expensive)
+bun x nx run rust-daemon:memory-locomo-agent --skipNxCache
 ```
+
+`memory-eval` runs the test `baseline_memory_eval_cases_pass`; `memory-locomo` runs `locomo_smoke_eval_cases_pass` with `--features locomo-eval`. Tunables and thresholds for the dataset and agent benchmarks are documented in `docs/testing.md`. The agent benchmark fails without real provider configuration; it never falls back to the deterministic model.

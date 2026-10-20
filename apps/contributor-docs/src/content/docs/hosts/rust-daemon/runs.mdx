@@ -1,0 +1,103 @@
+---
+title: Runs and Sessions
+description: Sessions, the run ledger, steer and stop, approvals, live events, jobs and automations in the Rust daemon
+---
+
+This is the daemon's conversation machinery. Behavior lives in `agent_runs.rs` and `agent_runs/` (the `AgentRunCoordinator`), `runs/ledger.rs`, `sessions/`, `approvals/`, `live/`, `jobs.rs` and `schedules.rs`. Exact per-route limits and error strings are in `hosts/rust-daemon/README.md`; the numbers below are the constants in source.
+
+## Sessions
+
+A session is one conversation room of one agent plus its record. Its id equals the room id (ids are up to 200 bytes of `A-Za-z0-9._:-`; legacy rooms map to a stable `legacy-room:<hash>` id).
+
+| Kind | Created by |
+|------|-----------|
+| `chat` | The owner, through `POST /api/agents/{id}/sessions` (60 per agent per minute) |
+| `telegram`, `discord` | A connector's dedicated thread |
+| `checkin` | A schedule (room `schedule:<id>`) |
+| `job` | A job's runs |
+| `helper` | A helper agent's delegated work |
+
+Titles are 1 to 120 characters; a new chat titled `New chat` takes its title from its first message, and the daemon generates AI titles for new chats (only the real daemon, never embedded or test constructors). `GET /api/agents/{id}/sessions/{sid}` also reports `contextUsage`, an estimate of the model-visible history plus the session summary against the context budget.
+
+### Hot tail, history and context
+
+Every committed message is mirrored to the [history store](/hosts/rust-daemon/persistence/#history-store). Every 10 minutes the daemon prunes mirrored messages from the control plane down to a **hot tail**: each session's newest 200 visible messages plus anything from the last 24 hours (never while a run in the session is active, never in ephemeral mode, and not while a Telegram delivery still needs the message). Agent snapshots show only the hot tail; session routes, search and export read the full history.
+
+Each run sends the model the session's newest whole turns that fit its context budget: the agent setting `contextBudgetTokens`, else 60% of the model's context window capped at 200,000 tokens, else 32,000, less `maxTokens` (default 4,096, at most half the budget) reserved for the reply. Estimates use a per-session calibration clamped to 0.5 to 2.0. When turns leave the model's view without a summary covering them, the run first **compacts** them with the agent's own model (no tools, at most 1,024 output tokens, temperature 0.2, summary at most 8 KiB, a 2-minute deadline) unless `autoCompact` is `false`; `POST .../compact` does it on demand. A failure leaves `compactionError` on the session and the run continues with trimmed context.
+
+## The Run Ledger
+
+Every message to an agent becomes a **run** in a durable ledger (`runs/ledger.rs`).
+
+| Aspect | Values |
+|--------|--------|
+| Status | `queued`, `running`, `awaiting_approval`, `completed`, `failed`, `cancelled`, `interrupted` |
+| Source | `web`, `api`, `telegram`, `discord`, `schedule`, `job`, `delegation`, `peer` |
+| Retention | Finished runs kept 24 hours, at most 50 per agent in the ledger, then read from the history store |
+| Limits | Input text 32 KiB, 10 attachments, 50 recorded steps, 50 recorded tool starts, 50 action receipts |
+
+`POST /api/agents/{id}/sessions/{sid}/runs` (with an `Idempotency-Key`) answers `202` with a `queued` run that starts once the session's earlier messages finish and an agent slot and a global permit are free. At most 8 messages may wait per agent (`MAX_QUEUED_RUNS_PER_AGENT`); the ninth gets `429`. Runs in the same room always execute in order; different rooms of one agent run concurrently up to `ANIMAOS_RS_MAX_RUNS_PER_AGENT`. Helpers always run one task at a time.
+
+A run's tool results are mirrored as **action receipts** (`actionReceipts` on run reads): intent is saved before a handler dispatches and the outcome before the result is returned, so after a crash a `started` receipt means "outcome unknown". Previews are capped at 2,048 bytes. Nothing is replayed automatically.
+
+### Isolation
+
+Concurrent rooms of one agent run on isolated copies of the runtime and merge back what each run added (`RuntimeRunDelta`, see [AgentRuntime](/architecture/rust-core/anima-core/agent-runtime/#concurrent-rooms)); a rejected or unsaveable result is rolled back with `run.failed` (`commit_rejected`, `commit_failed` or `agent_deleted`).
+
+## Steer and Stop
+
+**Steer.** `POST .../runs` with `"mode": "steer"` while the session has a running run adds the message to that run's `SteeringInbox`. The run reads it before its next model call (`run.steered`). A steer the run never reads becomes a queued message after the run ends, or an `interrupted` run (`queue_full_before_start`) if 8 are already waiting. After a restart each unread steer comes back as `interrupted` (`restart_before_start`). A retried key answers `200` with the run it joined.
+
+**Stop.** `POST /api/agents/{id}/runs/{run_id}/stop` answers `202`. A queued run is cancelled immediately. A running run records `stop.requestedAtMs` *before* the cancel signal is sent, then ends `cancelled` at its next checkpoint: before the next model call, while streaming (the request is dropped), or before the next tool batch. Tools already running finish except `bash`, whose direct child is killed; background processes keep running. Streamed text stays as a message marked `stopped`, never-run tool calls get `Cancelled before running (stopped by owner)`, helpers and delegations started by the run are stopped too, and unread steers become `interrupted` runs (`stopped_before_start`). A job attempt stopped this way moves the job to `needs_review`; a stopped schedule fire records `stopped` and the schedule stays enabled.
+
+## Live Events
+
+`GET /api/agents/{id}/events` is one SSE stream per agent covering the agent, its helpers and delegated sessions (`live/`). The first event is `stream.snapshot` (active runs, their current step text up to 64 KiB and tool cards, up to 50). Then:
+
+| Group | Events |
+|-------|--------|
+| Sessions | `session.created`, `session.updated`, `session.deleted` |
+| Runs | `run.queued`, `run.started`, `run.awaiting_approval`, `run.progress` (for example `phase: "compacting"`), `run.steered`, `run.completed`, `run.failed`, `run.cancelled`, `run.interrupted` |
+| Output | `step.delta` (flushed at least every 50 ms or 512 bytes), `message.created`, `tool.started`, `tool.finished`, `model.fallback` |
+| Approvals | `approval.requested`, `approval.resolved` |
+| Other | `skill.updated`, `automation.updated` |
+
+Every event has `type`, `agentId`, optional `sessionId` / `runId`, a per-stream `seq` (also the SSE `id`) and `at`. A stream that falls behind gets `stream.resync` with `missed`; there is no replay, so a reconnect starts from a new snapshot (`Last-Event-ID` is ignored). Keep-alive comments every 15 seconds; at most 16 open streams per agent (`429`). Browsers allow about 6 connections per origin over HTTP/1.1, so many open console tabs can starve other requests through the dev proxy.
+
+## Approvals
+
+Every native tool has a risk class (`approvals/policy.rs`):
+
+| Class | Tools (examples) |
+|-------|------------------|
+| read | `read_file`, `list_dir`, `glob`, `grep`, `read_document`, `memory_search`, `recent_memories`, `bg_list`, `bg_output`, `bg_wait`, `app_read`, `acp_read`, `load_skill`, `list_automations`, `drive_search`, `drive_read`, `calendar_list_events`, `mail_list_messages`, `search_conversations` |
+| write | `write_file`, `edit_file`, `multi_edit`, `todo_write`, `memory_add`, `core_memory`, `memory_update`, `memory_remove`, `memory_consolidate`, `propose_skill`, `create_automation`, `update_automation`, `delete_automation`, `mail_create_draft`, `calendar_*` writes, `acp_edit` |
+| exec | `bash`, `execute_code`, `bg_start`, `bg_stop`, `browser_*`, `app_start`, `app_send`, `app_stop`, `acp_start`, `acp_prompt`, `acp_cancel`, `acp_stop`, `acp_execute`, `acp_other`; **any tool the table does not name** |
+| network | `web_fetch`, `web_search`, `exa_search`, `acp_fetch` |
+| delegate | `delegate_to_agent`, `spawn_helper`, `spawn_helper_async`, `steer_helper`, `stop_helper`, `send_message`, `broadcast_message`, `trigger_automation` |
+
+Each agent has a policy (`write`, `exec`, `network`, `delegate`, each `allow`, `ask` or `deny`), rules and per-session allowances. Read-class tools never ask. The **autonomy** modes (`approvals/autonomy.rs`) are presets: **Free** (all four classes `allow`), **Strict** (`write`, `exec` and `delegate` ask; `network` allowed) and **Custom** (the owner's own class choices, and the mode of every agent saved before autonomy existed). In every mode a floor stays: destructive commands are blocked, the owner's deny patterns are blocked (at most 50, 200 characters each), and commands that are hard to undo still ask unless an owner rule covers them.
+
+Judging order (`evaluate` and `evaluate_with_floor`): for shell commands the autonomy floor comes first (a blocked command is denied; a hard-to-undo one asks unless a rule or allowance covers it, and still denies if the class is `deny`). Then a class set to `deny` denies, a matching rule or session allowance allows, a class set to `ask` asks, and everything else is allowed. Plans ask even where their class is allowed, unless covered (in Free mode they follow their class). Matchers: `command_prefix` (shell commands; any command containing a chaining, substitution or redirect operator never matches a prefix rule, and wrapper commands such as `sh`, `env`, `sudo`, `python` are not suggested as prefixes), `path_glob` (writes), `domain` (fetches) and `any`. A rule or allowance for a read-class tool is refused.
+
+A call that needs the owner waits up to 30 minutes (15 for a Telegram-started run) with its run `awaiting_approval`. Decisions (`allow_once`, `allow_session`, `allow_always`, `deny`) are saved before the call proceeds; at most 100 rules per agent and 50 allowances per session; a stale `revision` returns `409`. Helpers never wait: a call that would ask is denied. A restart expires every pending approval. Decided approvals move to the history store and stay readable for 30 days. A run, job or Telegram message that calls an asking tool holds its lane while it waits.
+
+Agent-file writes (`SOUL.md`, `AGENTS.md`, `.anima.md` and similar instruction files) need an exact owner decision even under reusable allow rules; see the README section "Standard Markdown agent files".
+
+## Jobs and Goals
+
+A **job** is a durable unit of delegated work (`jobs.rs`): `title`, `prompt`, a `requestKey` (idempotent create), status (`awaiting_approval`, `queued`, `running`, `pending_delegations`, `completed`, `failed`, `needs_review`, `cancelled`, `stopped` for an attempt), up to 3 attempts by default, optional required approval, and owner review of outputs (`accepted` or `changes_requested`). Up to 200 jobs are kept and 8 run at once. A **goal** groups jobs under an attempt budget (`active`, `paused`, `completed`) and reports consumed, reserved and remaining attempts and accepted outputs. Routes: `/api/agents/{id}/jobs...` (create, approve, cancel, retry, review) and `/api/goals...`. A job attempt that was uncertain when the daemon stopped goes to `needs_review`; retrying it needs `acknowledgeUncertain`.
+
+## Automations
+
+Prompts the daemon sends an agent on a trigger (`schedules.rs`, `schedules/`): `interval { intervalMs }`, `daily { hour, minute, timeZone }`, `cron { expression, timeZone }` (five fields, plus `@hourly`, `@daily` and friends), or `once { atMs }`. Times are wall clock in the IANA `timeZone`; `activeHours { start, end, days, timeZone }` keeps fires inside a window. Limits: 20 automations per agent, prompts up to 32 KiB, 8 scheduled jobs running at once, agent-created ones at least 5 minutes apart over their next 10 fires. Each occurrence is persisted before it runs and its outcome (`silent`, `spoke`, `failed`, `stopped`) is kept as a fire record mirrored to the history store. A claimed occurrence with no terminal outcome at startup disables that schedule (`schedule_run_interrupted`) for owner review. A check-in reply of exactly `CHECKIN_OK` means "nothing to say". `POST /api/schedules/preview` computes the next fire times so browsers never compute schedules.
+
+This is separate from the `anima-schedule` crate; see [anima-schedule](/architecture/rust-core/anima-schedule/).
+
+## Skills and Learning
+
+Skills are `<workspace>/skills/<slug>/SKILL.md` files pinned to the SHA-256 the owner approved; an edited file reads `changed` and is never loaded until re-approved. Agents propose skills as drafts; in Free mode approved changes are recorded in a ledger and can be reverted. Task reviews (2 per agent per day) and [conversation reviews](/architecture/rust-core/anima-memory/daemon-memory/#conversation-reviews) can propose memory edits and skill drafts. Routes: `/api/skills...`, `/api/skill-drafts...`, `/api/skill-ledger`, `/api/agents/{id}/learning-*`.
+
+## Shutdown and Restart
+
+See [Rust Daemon](/hosts/rust-daemon/#graceful-shutdown). After a restart: queued runs end `interrupted` (`restart_before_start`), runs that were going end `interrupted` (`restart_during_run`), pending approvals expire and the daemon never resumes a model call mid-turn. Draining (`POST /api/system/drain`) refuses new chat messages, legacy runs, peer messages, connector sends, swarm runs, jobs and goals with `503` while accepted runs finish; due automations and queued jobs stay due.

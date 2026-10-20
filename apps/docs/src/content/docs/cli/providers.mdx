@@ -1,20 +1,22 @@
 ---
 title: Providers & Environment
-description: Provider families, credentials, base URLs, and runtime environment for the CLI
+description: Provider names, credentials, base URLs, and runtime environment for the CLI
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-The CLI accepts the same main provider family across `create`, `launch`, `run`, and `chat`. `create` also supports `deterministic` for local generation without a remote provider.
+The CLI accepts the same provider names across `create`, `launch`, `run` and `chat`. `deterministic` is also accepted: it is a scripted, non-LLM provider built into the daemon for offline testing, and `create` falls back to it when no remote provider has credentials.
+
+The CLI only detects and forwards credentials. The daemon makes the model calls, and it has its own sources of keys (its environment, keys saved in the web console, a ChatGPT subscription), so a key does not have to come from the CLI at all.
 
 ## Provider Matrix
 
 | Provider | Accepted names | Key env vars | Base URL env var | Notes |
 |----------|----------------|--------------|------------------|-------|
-| OpenAI | `openai` | `OPENAI_API_KEY`, `OPENAI_KEY`, `OPENAI_TOKEN` | `OPENAI_BASE_URL` | Native OpenAI chat completions |
-| Anthropic | `anthropic` | `ANTHROPIC_API_KEY`, `ANTHROPIC_KEY`, `ANTHROPIC_TOKEN`, `CLAUDE_API_KEY` | `ANTHROPIC_BASE_URL` | Native Anthropic Messages API |
-| Google Gemini | `google`, `gemini` | `GOOGLE_API_KEY`, `GOOGLE_KEY`, `GOOGLE_AI_KEY`, `GEMINI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` | `GOOGLE_BASE_URL` | Native Google `generateContent` API |
-| Ollama | `ollama` | `OLLAMA_API_KEY` | `OLLAMA_BASE_URL` | Local inference via OpenAI-compatible HTTP shape |
+| OpenAI | `openai` | `OPENAI_API_KEY`, `OPENAI_KEY`, `OPENAI_TOKEN` | `OPENAI_BASE_URL` | Native chat completions |
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY`, `ANTHROPIC_KEY`, `ANTHROPIC_TOKEN`, `CLAUDE_API_KEY` | `ANTHROPIC_BASE_URL` | Native Messages API |
+| Google Gemini | `google`, `gemini` | `GOOGLE_API_KEY`, `GOOGLE_KEY`, `GOOGLE_AI_KEY`, `GEMINI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` | `GOOGLE_BASE_URL` | Native `generateContent` |
+| Ollama | `ollama` | `OLLAMA_API_KEY` (optional) | `OLLAMA_BASE_URL` | Local; OpenAI-compatible; no key required |
 | Groq | `groq` | `GROQ_API_KEY`, `GROQ_KEY`, `GROQ_TOKEN` | `GROQ_BASE_URL` | OpenAI-compatible |
 | xAI | `xai`, `grok` | `XAI_API_KEY`, `XAI_KEY`, `GROK_API_KEY` | `XAI_BASE_URL` | OpenAI-compatible |
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY`, `OPENROUTER_KEY`, `OPENROUTER_TOKEN` | `OPENROUTER_BASE_URL` | OpenAI-compatible |
@@ -23,22 +25,26 @@ The CLI accepts the same main provider family across `create`, `launch`, `run`, 
 | DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | `DEEPSEEK_BASE_URL` | OpenAI-compatible |
 | Fireworks | `fireworks` | `FIREWORKS_API_KEY` | `FIREWORKS_BASE_URL` | OpenAI-compatible |
 | Perplexity | `perplexity` | `PERPLEXITY_API_KEY` | `PERPLEXITY_BASE_URL` | OpenAI-compatible |
-| Moonshot | `moonshot`, `kimi` | `MOONSHOT_API_KEY`, `KIMI_API_KEY` | `MOONSHOT_BASE_URL` | OpenAI-compatible Moonshot/Kimi endpoint |
+| Moonshot | `moonshot`, `kimi` | `MOONSHOT_API_KEY`, `MOONSHOT_KEY`, `MOONSHOT_TOKEN`, `KIMI_API_KEY` | `MOONSHOT_BASE_URL`, `KIMI_BASE_URL` | OpenAI-compatible Moonshot/Kimi endpoint |
+
+When several variables are listed, the CLI uses the first one that is set and non-empty. Default endpoints are each provider's public API (for example `https://api.openai.com/v1`, and `http://127.0.0.1:11434/v1` for Ollama).
 
 ## Runtime Environment
 
-| Variable | Description |
-|----------|-------------|
-| `ANIMA_DAEMON_URL` | Override the daemon base URL for daemon-backed CLI commands |
-| Provider key env vars | Credentials used for daemon-backed execution |
-| Provider base URL env vars | Override provider endpoints such as `OPENAI_BASE_URL` or `OLLAMA_BASE_URL` |
-| `ANIMAOS_WORKSPACE_ROOT` | Workspace root used by the daemon's workspace tools |
+| Variable | Read by | Description |
+|----------|---------|-------------|
+| `ANIMA_DAEMON_URL` | CLI | Daemon base URL for daemon-backed commands (default `http://127.0.0.1:8080`) |
+| Provider key variables | CLI and daemon | Forwarded by the CLI on each request; also read by the daemon itself |
+| Provider base-URL variables | CLI and daemon | Override provider endpoints such as `OPENAI_BASE_URL` or `OLLAMA_BASE_URL` |
+| `ANIMAOS_WORKSPACE_ROOT` | Daemon | Initial workspace root for the daemon's file tools (a configured workspace replaces it) |
+| `ANIMAOS_USER_ID`, `ANIMAOS_USER_NAME` | CLI | Defaults for `animaos assistant chat` |
 
 ## Override Rules
 
-- `--api-key` overrides the environment for the current CLI invocation.
-- `create` falls back to `deterministic` when no remote provider is configured.
-- Daemon-backed commands forward provider settings into the host-backed run; changing keys does not require a daemon restart.
+- `--api-key` overrides the environment for one CLI invocation.
+- For `launch`, `--api-key` applies to the agency's provider only; an agent that sets a different `provider` in `anima.yaml` uses that provider's own environment variables or credentials stored by the daemon.
+- `create` falls back to `deterministic` when no remote provider is configured, and uses `--api-key` only to detect which provider is set up.
+- Daemon-backed commands forward the resolved key and base URL as the agent's `settings.apiKey` and `settings.baseUrl`, so changing keys does not need a daemon restart.
 
 ## Common Examples
 
@@ -47,15 +53,15 @@ The CLI accepts the same main provider family across `create`, `launch`, `run`, 
 OLLAMA_BASE_URL=http://127.0.0.1:11434/v1 \
 animaos run "Summarize the plan" -p ollama -m qwen2.5:7b
 
-# Staging daemon
-ANIMA_DAEMON_URL=https://staging.example.com \
+# A daemon on another port
+ANIMA_DAEMON_URL=http://127.0.0.1:8787 \
 OPENAI_API_KEY=sk-... \
 animaos agents list
 
-# Deterministic local workspace scaffolding
+# Offline scaffolding with the deterministic provider
 animaos create agent local-helper -d "Summarize notes" -p deterministic
 ```
 
 <Aside type="tip">
-  The clean default is simple: keep provider credentials in the environment, use `--api-key` only for temporary overrides, and use `ANIMA_DAEMON_URL` only when you intentionally want a different host target.
+  Keep provider credentials in the environment, use `--api-key` only for a temporary override, and use `ANIMA_DAEMON_URL` only when you intentionally target a different daemon. Credentials you connect in the web console (Settings, Model) are stored by the daemon and need no CLI flag at all.
 </Aside>

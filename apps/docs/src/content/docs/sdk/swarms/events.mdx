@@ -5,54 +5,74 @@ description: Subscribe to swarm SSE streams and work with live event payloads in
 
 import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
 
-The swarm stream is the live telemetry surface for multi-agent work. It is what powers dashboards, TUIs, observer tools, and progressive UI updates.
+The swarm stream is the live telemetry surface for multi-agent work. It powers the TUI behind `animaos launch` and is what you would build dashboards or observers on.
 
 <CardGrid>
   <Card title="Lifecycle">
-    Watch state transitions as the swarm moves from idle to running to completed or failed.
+    Watch the swarm move through `swarm:created`, `swarm:running` and `swarm:completed`.
   </Card>
   <Card title="Tooling">
-    Track tool invocations, arguments, outcomes, and durations as they happen.
+    Track tool invocations, arguments, outcomes and durations as they happen.
   </Card>
   <Card title="Usage">
-    Stream token usage and per-agent activity without polling snapshots.
+    Stream per-agent token usage without polling snapshots.
   </Card>
 </CardGrid>
 
 ## Subscribe to the Stream
 
 ```typescript
-const stream = client.swarms.subscribe('swarm-uuid-here');
+const stream = client.swarms.subscribe(swarmId);
 
-for await (const event of stream) {
-  console.log(event.event, event.data);
+for await (const { event, data } of stream) {
+  console.log(event, data);
 }
 ```
 
-## Event Families
+`subscribe(swarmId, init?)` returns an async generator of `DaemonEvent<SwarmStreamEventPayload>`: `event` is the SSE event name and `data` the parsed payload. It ends when the connection closes, and an unknown swarm id fails with a `404` `DaemonHttpError`. Reconnecting is up to you.
 
-The stream exposes a discriminated union of payload shapes:
+## Event Names
 
-| Payload | Description |
-|---------|-------------|
-| `SwarmEventPayload` | Swarm-level state update |
-| `SwarmMessagePayload` | Agent-to-agent message |
-| `SwarmAgentEventPayload` | Generic agent event |
-| `SwarmTaskFailedPayload` | Agent task failure |
-| `SwarmToolBeforePayload` | Tool invocation start |
-| `SwarmToolAfterPayload` | Tool invocation complete |
-| `SwarmAgentTokensPayload` | Token usage update |
+The daemon publishes these event names on a swarm's stream:
+
+| Event | Payload | Meaning |
+|-------|---------|---------|
+| `swarm:created`, `swarm:running`, `swarm:completed` | `SwarmEventPayload` | Swarm-level state update; `swarm:completed` also carries the final `result` |
+| `swarm:message` | `SwarmMessagePayload` | An agent-to-agent message |
+| `agent:terminated` | `SwarmAgentEventPayload` | An agent was terminated |
+| `task:started`, `task:completed` | `SwarmAgentEventPayload` | An agent's task began or finished |
+| `task:failed` | `SwarmTaskFailedPayload` | An agent's task failed |
+| `tool:before` | `SwarmToolBeforePayload` | Tool invocation starting |
+| `tool:after` | `SwarmToolAfterPayload` | Tool invocation finished |
+| `agent:tokens` | `SwarmAgentTokensPayload` | Token usage update |
+| `swarm:lagged` | `{ missed: number }` | The consumer fell behind the daemon's broadcast buffer and missed events; refetch state with `swarms.get()` |
+
+## Payload Shapes
+
+| Payload | Key fields |
+|---------|-----------|
+| `SwarmEventPayload` | `swarmId`, `state` (`SwarmState`), `result` (`DaemonTaskResult` or `null`) |
+| `SwarmMessagePayload` | `swarmId`, `message` |
+| `SwarmAgentEventPayload` | `agentId`, `agentName`, optional `eventId`, `timestampMs` |
+| `SwarmTaskFailedPayload` | the above plus `error` |
+| `SwarmToolBeforePayload` | the above plus `toolName`, `args` |
+| `SwarmToolAfterPayload` | the above plus `toolName`, `status`, `durationMs`, optional `result` |
+| `SwarmAgentTokensPayload` | the above plus `usage` (`TokenUsage`) |
 
 ## Monitor Tool Activity
 
 ```typescript
 for await (const { event, data } of client.swarms.subscribe(swarmId)) {
-  if ('toolName' in data && 'status' in data) {
+  if (event === 'tool:after' && 'toolName' in data && 'status' in data) {
     console.log(`[${data.agentName}] ${data.toolName}: ${data.status} (${data.durationMs}ms)`);
   }
 
-  if ('error' in data) {
+  if (event === 'task:failed' && 'error' in data) {
     console.error(`[${data.agentName}] FAILED: ${data.error}`);
+  }
+
+  if (event === 'swarm:lagged') {
+    console.warn('Missed events; refetch the swarm state');
   }
 }
 ```
@@ -72,14 +92,17 @@ const streamTask = (async () => {
 
 setTimeout(() => controller.abort(), 30_000);
 
-await streamTask;
+await streamTask.catch((error) => {
+  if (!(error instanceof Error && error.name === 'AbortError')) throw error;
+});
 ```
 
 <Aside type="tip">
-  Use snapshots for point-in-time state and SSE for live operator surfaces. The two complement each other; they are not interchangeable.
+  Use snapshots (`swarms.get()`) for point-in-time state and SSE for live surfaces. They complement each other. Subscribe before calling `swarms.run()` so the early events are not missed.
 </Aside>
 
 ## Where Next
 
 - [Swarms Overview](/sdk/swarms/) for configuration and run shapes.
-- [API Reference](/sdk/reference/) for detailed payload and type names.
+- [Sessions & Runs](/sdk/sessions/) for the per-agent event stream used by the web console.
+- [API Reference](/sdk/reference/) for payload and type names.

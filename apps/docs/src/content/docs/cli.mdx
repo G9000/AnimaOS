@@ -1,73 +1,47 @@
 ---
 title: CLI
-description: Command-line interface for running agents, launching agency workspaces, and controlling swarms
+description: The animaos command line for scaffolding an agent workspace and running agents and swarms on the daemon
 ---
 
-import { Aside, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
+import { Aside, Steps } from '@astrojs/starlight/components';
 
-The animaOS CLI (`animaos`) is the operator entrypoint for animaOS. It handles two different jobs:
+`animaos` is a thin command-line client of the Rust daemon. It does two kinds of work:
 
-- local single-agent workspace scaffolding through `create`
-- daemon-backed execution through `launch`, `run`, `chat`, and `agents`
+- local scaffolding of a single-agent workspace with `create`
+- daemon-backed execution with `launch`, `run`, `chat`, `agents` and `assistant`
 
-`launch` is the primary day-to-day workflow. It turns an agency workspace into a live daemon-backed session and can render the Ink TUI. `run` is the quick plain-text shortcut for one-off work. `chat` gives you a single interactive agent. `agents` inspects what the daemon is currently holding.
+The daemon does the thinking; the CLI creates agents or swarms over HTTP, sends a task and prints the result. Most day-to-day use of anima happens in the web console, so treat the CLI as the scripting and terminal surface.
 
 ## Mental Model
 
-Use the command that matches the job:
-
-- `animaos create` scaffolds a local single-agent workspace. It does not require the daemon.
-- `animaos launch` runs an existing `anima.yaml` workspace against the daemon. This is the main TUI flow.
-- `animaos run` is the fastest way to send one task to a temporary agent or swarm.
-- `animaos chat` opens an interactive single-agent REPL backed by the daemon.
-- `animaos agents` lets you inspect daemon-backed agents already registered in the host.
+- `animaos create` scaffolds a local single-agent workspace (`anima.yaml` plus profile files). It does not need the daemon.
+- `animaos launch` runs an `anima.yaml` workspace as a swarm on the daemon. With no `--no-tui` it opens the [TUI](/tui/).
+- `animaos run` sends one task to a temporary agent or swarm and prints plain text.
+- `animaos chat` opens a plain-text REPL with a new daemon agent.
+- `animaos agents` lists and shows the agents the daemon holds.
+- `animaos assistant` chats with an existing agent by name (see the caution below).
 
 ## Installation
 
-<Tabs>
-  <TabItem label="bun">
-    ```bash
-    bun add -g @animaOS-SWARM/cli
-    ```
-  </TabItem>
-  <TabItem label="npm">
-    ```bash
-    npm install -g @animaOS-SWARM/cli
-    ```
-  </TabItem>
-  <TabItem label="pnpm">
-    ```bash
-    pnpm add -g @animaOS-SWARM/cli
-    ```
-  </TabItem>
-  <TabItem label="yarn">
-    ```bash
-    yarn global add @animaOS-SWARM/cli
-    ```
-  </TabItem>
-  <TabItem label="npx">
-    ```bash
-    npx @animaOS-SWARM/cli --help
-    ```
-  </TabItem>
-</Tabs>
-
-If you are working inside this monorepo, prefer the repo-local build:
+`@animaOS-SWARM/cli` is a private workspace package; it is not published to npm. Build it from the repository and run it through the root script:
 
 ```bash
+bun install --frozen-lockfile
 bun run build:cli-sdk
 bun run animaos --help
 ```
 
+`bun run animaos` runs `node packages/cli/dist/index.js`, the package's `animaos` binary. Examples on this site write `animaos ...`; in the repository, use `bun run animaos ...`.
+
 <Aside type="note">
-  `create` is local and does not require the daemon. `launch`, `run`, `chat`, and `agents` talk to the daemon over HTTP, so make sure a host is running before using them.
+  `create` is local. `launch`, `run`, `chat`, `agents` and `assistant` talk to the daemon over HTTP, so a daemon must be running first (`bun run daemon`, or the installed `anima` program). The CLI sends no credentials, so it works against a daemon that has no `ANIMAOS_RS_API_KEY` set.
 </Aside>
 
 ## In This Section
 
-- [Agency Workflow](/cli/workspaces/) covers `create`, workspace layout, `launch`, and seed memories.
-- [Daemon Commands](/cli/daemon/) covers `run`, `chat`, `agents`, and daemon-targeted CLI usage.
-- [Providers & Environment](/cli/providers/) covers provider families, credentials, base URL overrides, and CLI runtime env vars.
+- [Agency Workflow](/cli/workspaces/) covers `create`, the `anima.yaml` format, seed memories, `launch` and history files.
+- [Daemon Commands](/cli/daemon/) covers `run`, `chat`, `agents`, `assistant` and targeting a daemon.
+- [Providers & Environment](/cli/providers/) covers provider names, credentials and environment variables.
 
 ## Fast Path
 
@@ -99,7 +73,7 @@ bun run animaos --help
 
 ### `animaos create`
 
-Scaffold a single-agent workspace directory. This is a local filesystem workflow, not a daemon workflow.
+Scaffold a single-agent workspace directory. This is a local filesystem workflow.
 
 ```bash
 # Interactive mode: prompts for the agent name and description
@@ -110,24 +84,24 @@ animaos create agent medicine-helper \
   -d "Research medical literature and summarize risks clearly"
 ```
 
-`create` makes no model call. It writes the workspace files from a template and records the provider in `anima.yaml`: the one you pass with `-p`, otherwise the first remote provider with credentials configured, otherwise `deterministic`. Multi-agent agencies are not generated; write `anima.yaml` by hand for those and run them with `animaos launch`.
+`create` makes no model call. It writes the workspace from a template and records the provider in `anima.yaml`: the one you pass with `-p`, otherwise the first remote provider that has credentials in your environment, otherwise `deterministic`. Multi-agent agencies are not generated; write `anima.yaml` by hand for those (see [Agency Workflow](/cli/workspaces/#animayaml)) and run them with `animaos launch`. `animaos create agency` is refused with that message.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--kind` | — | `agent`; equivalent to `animaos create agent ...` |
-| `-p, --provider` | `auto` | Provider recorded in the workspace. Supports `deterministic`, `openai`, `anthropic`, `google`/`gemini`, `ollama`, `groq`, `xai`/`grok`, `openrouter`, `mistral`, `together`, `deepseek`, `fireworks`, `perplexity`, `moonshot`/`kimi` |
+| `--kind` | | `agent`; equivalent to `animaos create agent ...` |
+| `-p, --provider` | auto | Provider recorded in the workspace (see [Providers](/cli/providers/)); an unknown name is an error |
 | `-m, --model` | `gpt-4o-mini` | Model recorded in the workspace |
-| `-d, --description` | — | What the agent is supposed to do |
-| `--system` | — | Custom system prompt for the agent |
-| `--api-key` | — | API key, used only to detect which provider is configured |
+| `-d, --description` | | What the agent should do (prompted when omitted) |
+| `--system` | | Custom system prompt for the agent |
+| `--api-key` | | API key, used only to detect which provider is configured |
 
-The created directory is designed for human editing:
+The directory name is the agent name, lowercased and kebab-cased. It contains:
 
 ```text
 medicine-helper/
-├── anima.yaml        # Config used by launch
+├── anima.yaml        # config used by launch
 ├── org-chart.mmd     # Mermaid org chart
-├── README.md         # Mission, values, and roster
+├── README.md         # mission, values, roster
 └── agents/
     └── medicine-helper/
         ├── profile.md
@@ -137,129 +111,103 @@ medicine-helper/
 
 ### `animaos launch`
 
-Launch an agency workspace from its `anima.yaml`. This is the primary operator workflow and the main entrypoint for the TUI.
+Run a workspace's `anima.yaml` as a swarm on the daemon.
 
 ```bash
 cd content-team
 
-# TUI one-shot task
-animaos launch "Write an article about Rust macros"
-
-# TUI interactive session
-animaos launch
-
-# Plain-text one-shot task
-animaos launch --no-tui "Write an article about Rust macros"
-
-# Plain-text interactive session
-animaos launch --no-tui
+animaos launch                                    # TUI, interactive
+animaos launch "Write an article about Rust macros"   # TUI, one task
+animaos launch --no-tui "Write an article about Rust macros"   # plain text, one task
+animaos launch --no-tui                           # plain-text prompt
 ```
-
-During launch, the CLI can read `agents/<slug>/memory/seed.json` files and post those memories into the daemon before work begins.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--api-key` | — | API key override for the daemon-backed run |
-| `--no-tui` | — | Disable the Ink TUI and use plain text instead |
+| `-d, --dir <dir>` | `.` | Directory containing `anima.yaml` |
+| `--api-key <key>` | | API key for the agency's provider, for this run |
+| `--no-tui` | | Plain text instead of the Ink TUI |
 
-Plain-text interactive launch supports:
+Without `anima.yaml` in the directory, `launch` fails with `No anima.yaml found ... Run "animaos create" first`. Before sending a task it checks `GET /health` and warns when the daemon is unreachable.
 
-| Command | Description |
-|---------|-------------|
-| `exit` | Quit the session |
-| `/help` | Show the available commands |
+Plain-text interactive launch prompts with `task >` and supports:
+
+| Input | Description |
+|-------|-------------|
+| `exit` (or an empty line) | Quit |
+| `/help` | Show the commands |
 | `/health` | Recheck daemon connectivity |
 
 ### `animaos run`
 
-Run a temporary single agent or a temporary swarm for one task. This is the fastest CLI path when you do not want to create a local agency workspace first.
+Run a temporary agent, or a temporary swarm with `-s`, for one task.
 
 ```bash
 # Single agent
 animaos run "Summarize the Rust book" -m gpt-4o-mini
 
-# Swarm with supervisor strategy
+# Swarm with a manager and one worker
 animaos run "Build a landing page" -s supervisor -m gpt-4o
 ```
-
-<Aside type="caution">
-  `run` is plain-text today. The command keeps a `--no-tui` flag for interface consistency, but daemon-backed `run` currently falls back to plain text instead of rendering the TUI.
-</Aside>
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-m, --model` | `gpt-4o-mini` | Model to use |
-| `-p, --provider` | `openai` | Provider family for the daemon-backed run |
-| `-n, --name` | `task-agent` | Agent name for single-agent mode |
-| `-s, --strategy` | — | Swarm strategy: `supervisor`, `dynamic`, or `round-robin` |
-| `--api-key` | — | API key override |
-| `--no-tui` | — | Force plain-text output |
+| `-p, --provider` | `openai` | Provider |
+| `-n, --name` | `task-agent` | Agent name (single-agent mode) |
+| `-s, --strategy` | | `supervisor`, `dynamic` or `round-robin`; switches to swarm mode |
+| `--api-key` | | API key override |
+| `--no-tui` | | Skips the "TUI not available" note; `run` is always plain text |
+
+Output is the result, then `Duration: ...ms | Tokens: ...`. A failed task prints the error and exits with code 1. Each `run` registers a new agent (or swarm) in the daemon; it is not removed afterwards.
+
+<Aside type="caution">
+  `run` is always plain text. Without `--no-tui` it first prints a note that TUI mode is not available for daemon-backed runs, then continues in plain text; pass `--no-tui` to skip the note.
+</Aside>
 
 ### `animaos chat`
 
-Start a daemon-backed interactive REPL with one agent.
-
 ```bash
-animaos chat -m claude-3-5-sonnet -p anthropic
+animaos chat -m claude-sonnet-4-5 -p anthropic
 ```
 
-Type messages at the `you >` prompt. Type `exit` to quit.
+Creates a daemon agent and opens a REPL with a `you >` prompt. Type `exit` (or an empty line) to quit. Options: `-p, --provider` (default `openai`), `-m, --model` (default `gpt-4o-mini`), `-n, --name` (default `task-agent`) and `--api-key`. Each message is a blocking `agents.run()` call, and the agent stays registered after you exit.
 
 ### `animaos agents`
 
-Inspect daemon-backed agents that are currently registered in the host.
-
 ```bash
-# List all agents
-animaos agents list
-
-# Show details for a specific agent by name or id
-animaos agents show researcher
+animaos agents list                  # every agent the daemon holds
+animaos agents show researcher       # by name or id
 ```
 
-This is useful when you want to check what the daemon currently holds after runs, launches, or host restarts.
+`list` prints each agent's name, id, status, model and message and event counts. `show` adds token usage and the last task's status.
 
-## Provider Support
+### `animaos assistant`
 
-The CLI accepts the same main provider family across `create`, `launch`, `run`, and `chat`.
+```bash
+animaos assistant                    # same as: animaos assistant chat
+animaos assistant chat -n assistant --user-name "Sam"
+```
 
-| Provider | Accepted names | Key env vars | Base URL env var | Notes |
-|----------|----------------|--------------|------------------|-------|
-| OpenAI | `openai` | `OPENAI_API_KEY`, `OPENAI_KEY`, `OPENAI_TOKEN` | `OPENAI_BASE_URL` | Native OpenAI chat completions |
-| Anthropic | `anthropic` | `ANTHROPIC_API_KEY`, `ANTHROPIC_KEY`, `ANTHROPIC_TOKEN`, `CLAUDE_API_KEY` | `ANTHROPIC_BASE_URL` | Native Anthropic Messages API |
-| Google Gemini | `google`, `gemini` | `GOOGLE_API_KEY`, `GOOGLE_KEY`, `GOOGLE_AI_KEY`, `GEMINI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` | `GOOGLE_BASE_URL` | Native Google `generateContent` API |
-| Ollama | `ollama` | `OLLAMA_API_KEY` | `OLLAMA_BASE_URL` | Local inference via OpenAI-compatible HTTP shape |
-| Groq | `groq` | `GROQ_API_KEY`, `GROQ_KEY`, `GROQ_TOKEN` | `GROQ_BASE_URL` | OpenAI-compatible |
-| xAI | `xai`, `grok` | `XAI_API_KEY`, `XAI_KEY`, `GROK_API_KEY` | `XAI_BASE_URL` | OpenAI-compatible |
-| OpenRouter | `openrouter` | `OPENROUTER_API_KEY`, `OPENROUTER_KEY`, `OPENROUTER_TOKEN` | `OPENROUTER_BASE_URL` | OpenAI-compatible |
-| Mistral | `mistral` | `MISTRAL_API_KEY`, `MISTRAL_KEY`, `MISTRAL_TOKEN` | `MISTRAL_BASE_URL` | OpenAI-compatible |
-| Together | `together` | `TOGETHER_API_KEY`, `TOGETHER_KEY`, `TOGETHER_TOKEN` | `TOGETHER_BASE_URL` | OpenAI-compatible |
-| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | `DEEPSEEK_BASE_URL` | OpenAI-compatible |
-| Fireworks | `fireworks` | `FIREWORKS_API_KEY` | `FIREWORKS_BASE_URL` | OpenAI-compatible |
-| Perplexity | `perplexity` | `PERPLEXITY_API_KEY` | `PERPLEXITY_BASE_URL` | OpenAI-compatible |
-| Moonshot | `moonshot`, `kimi` | `MOONSHOT_API_KEY`, `KIMI_API_KEY` | `MOONSHOT_BASE_URL` | OpenAI-compatible Moonshot/Kimi endpoint |
+`assistant chat` is a REPL against an agent that already exists on the daemon, found by name (`-n, --name`, default `assistant`). It sends your `userId` and `userName` in each message's metadata (`--user-id` and `--user-name`, falling back to `ANIMAOS_USER_ID`, `ANIMAOS_USER_NAME` and the operating-system user name).
 
-Notes:
-
-- `--api-key` overrides the environment for the current invocation.
-- `create` falls back to `deterministic` when no remote provider is configured.
-- Daemon-backed commands forward provider settings into host-backed runs; switching keys does not require a daemon restart.
+<Aside type="caution">
+  The command's error text and `animaos assistant inbox` refer to an assistant mode and an `/api/assistant/outbox` route that the current Rust daemon does not serve. Expect `inbox` to fail with an HTTP error. For ongoing conversations with your agents, use the web console or the [Sessions & Runs](/sdk/sessions/) API.
+</Aside>
 
 ## Environment
 
 | Variable | Description |
 |----------|-------------|
-| `ANIMA_DAEMON_URL` | Override the daemon base URL for CLI commands. Defaults to `http://127.0.0.1:8080`. |
-| Provider key env vars | Credentials used for generation or daemon-backed execution. See the provider table above. |
-| Provider base URL env vars | Override provider endpoints such as `OPENAI_BASE_URL`, `OLLAMA_BASE_URL`, or `OPENROUTER_BASE_URL`. |
-| `ANIMAOS_WORKSPACE_ROOT` | Workspace root used by the daemon's workspace tools. |
+| `ANIMA_DAEMON_URL` | Daemon base URL for every daemon-backed command. Default `http://127.0.0.1:8080`; an installed `anima` program serves on `http://127.0.0.1:8787` |
+| Provider key and base-URL variables | Used to detect and forward credentials. See [Providers & Environment](/cli/providers/) |
+| `ANIMAOS_USER_ID`, `ANIMAOS_USER_NAME` | Defaults for `assistant chat` |
+
+The daemon has its own settings (port, workspace root, persistence) that the CLI does not read; see the [daemon README](https://github.com/G9000/animaOS-SWARM/blob/main/hosts/rust-daemon/README.md#environment-variables).
 
 ## Good Defaults
 
-- Use `create` when you want a durable human-editable workspace.
-- Use `launch` when you want the best operator experience and the TUI.
-- Use `run` when you only need a quick one-off answer.
-- Use `chat` when you want an agent REPL without creating a workspace first.
-- Use `agents` when you are debugging daemon-held state.
-
-If you want the focused details instead of the full overview, jump to the CLI subsections in the sidebar.
+- Use `create` and `launch` for a durable, human-editable workspace and the TUI.
+- Use `run` for a one-off answer.
+- Use `chat` for a quick agent REPL without a workspace.
+- Use `agents` to see what the daemon holds after runs and restarts.

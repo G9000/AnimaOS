@@ -1,0 +1,133 @@
+---
+title: Usage, Logs & Status
+description: Read what the daemon costs, what it is doing, and whether it is healthy
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+These are the owner's view of the daemon. Each one needs local-owner authorization (`Authorization: Bearer <ANIMA_LOCAL_ADMIN_TOKEN>` from a script; see [Authentication](/sdk/client/#authentication)), and every response is `Cache-Control: no-store`.
+
+| Accessor | Answers |
+|----------|---------|
+| `client.usage` | What each model call used and cost |
+| `client.logs` | The daemon's recent log lines, with a live stream |
+| `client.status` | One health snapshot: readiness, storage, providers, connectors, runs, limits |
+| `client.system` | The installed `anima` supervisor's state and lifecycle actions |
+
+## Usage
+
+Every model call is one usage record: run steps, plus titles, compaction, and profile and agency generation. Calls are priced when recorded, from a built-in price table or an owner override. Money is micro-USD integers (1,000,000 is one dollar).
+
+```typescript
+const summary = await client.usage.summary({ groupBy: 'model' });
+
+console.log(summary.totals.calls, summary.totals.totalTokens);
+console.log('USD', summary.totals.costMicros / 1_000_000);
+for (const group of summary.groups) {
+  console.log(group.key, group.totals.totalTokens);
+}
+```
+
+| Method | Returns | Notes |
+|--------|---------|-------|
+| `summary(query?)` | `UsageSummary` | `from` and `to` (epoch ms; default the last 30 days, at most 366 days apart), `agentId`, `sessionId`, `groupBy` (`day`, `model`, `source` or `session`; the session grouping is the top 20) and `tzOffsetMinutes` (-840 to 840, used to cut days) |
+| `records(query?)` | `UsageRecordsPage` | One record per call, newest first; `limit` 1 to `MAX_USAGE_RECORDS_LIMIT` (200, default 50) and `cursor` from `nextCursor` |
+| `exportCsv(query?)` | `string` | The range as CSV text, oldest first; refused past 100,000 calls, so choose a shorter range |
+| `pricing()` | `Pricing` | `{ overrides, tableDate }` |
+| `setPricing(overrides)` | `Pricing` | Replaces every override |
+
+`UsageTotals` has `calls`, the token counts (`promptTokens`, `completionTokens`, `cachedPromptTokens`, `reasoningTokens`, `totalTokens`), `costMicros` (the sum of priced calls), `unpricedCalls` and `subscriptionCalls`. `summary.truncated` is true when the range held more rows than the daemon sums (the scan stops at 200,000). A record's `pricingSource` is `table`, `override`, `free` (local providers), `subscription` (ChatGPT subscription calls have no cost) or `unknown`, and its `source` says where the call came from (`chat`, `telegram`, `discord`, `automation`, `job`, `helper`, `api`, `title`, `compaction`, `profile`, `agency` or `approval`).
+
+```typescript
+await client.usage.setPricing([
+  {
+    provider: 'openai',
+    model: 'gpt-4o-mini',                // a lowercase prefix; the longest match wins
+    inputMicrosPerMtok: 150_000,         // micro-USD per million tokens (illustrative values)
+    outputMicrosPerMtok: 600_000,
+    cachedInputMicrosPerMtok: null,
+  },
+]);
+```
+
+At most `MAX_PRICING_OVERRIDES` (100) overrides, each provider and model pair once. New prices apply to calls recorded afterwards; stored rows keep their price.
+
+## Logs
+
+The daemon keeps its last 2,000 log lines (each cut to 4 KiB) in memory. Lines are redacted at capture: API keys, `Authorization` and `Bearer` values, OAuth and Telegram tokens and JWTs become `[redacted]`. Redaction is pattern-based, so treat `RUST_LOG=debug` with care. Lines can still hold text a model or provider wrote: show them as text.
+
+```typescript
+const page = await client.logs.list({ level: 'warn', q: 'telegram', limit: 100 });
+for (const line of page.lines) {
+  console.log(new Date(line.at).toISOString(), line.level, line.target, line.message);
+}
+
+const controller = new AbortController();
+for await (const event of client.logs.stream({ level: 'info', after: page.newestSeq, signal: controller.signal })) {
+  if (event.kind === 'line') console.log(event.line.message);
+  if (event.kind === 'resync') {
+    // The stream fell behind: refetch the list after your newest seq.
+  }
+}
+```
+
+`list({ level?, q?, after?, limit? })` returns `{ lines, newestSeq }`, oldest first. `level` is the lowest level shown (`error`, `warn`, `info`, `debug`, `trace`; exported as `LOG_LEVELS`); `q` is case-insensitive text in the message or target (at most 200 characters); `limit` is 1 to `MAX_LOGS_LIMIT` (1,000, default 200). Each line is `{ seq, at, level, target, message }`, with `seq` rising by one per line. `stream()` ends when the connection closes, and the daemon allows at most 8 log streams at once (`429` beyond that).
+
+## Status
+
+```typescript
+import { StatusTooOldError } from '@animaOS-SWARM/sdk';
+
+try {
+  const status = await client.status.get();
+  console.log(status.version, status.readiness.status, status.uptimeSeconds);
+  console.log(status.runs.running, status.approvals.pending, status.automations.failing);
+} catch (error) {
+  if (error instanceof StatusTooOldError) console.warn(error.message); // the daemon has no /api/status
+  else throw error;
+}
+```
+
+`DaemonStatus` is one snapshot:
+
+| Field | Holds |
+|-------|-------|
+| `version`, `buildRevision`, `startedAtMs`, `nowMs`, `uptimeSeconds` | Build and uptime |
+| `readiness` | `{ status: 'ready' \| 'not_ready', issues }` |
+| `storage` | Persistence mode, control plane and durability, and the history store's health (`healthy`, `pendingFlush`, `usageQueued`, redacted `lastError`, `flushErrors`) |
+| `providers` | Each provider's `configured` flag, never a key |
+| `connectors` | At most 50 entries: `type`, `status`, `enabled`; never a credential |
+| `automations` | `total`, `enabled`, `failing`, `failuresTotal` |
+| `approvals` | `{ pending }` |
+| `runs` | `running`, `queued` and counts by status (the ledger prunes old finished runs, so these are not lifetime totals) |
+| `events`, `logs` | Open stream subscribers and lag; buffered lines and newest seq |
+| `limits` | `maxRequestBytes`, `maxConcurrentRuns`, `maxRunsPerAgent`, `queuedRunsPerAgent`, `maxBackgroundProcesses`, `logBufferLines`, `eventBuffer` |
+
+For unauthenticated checks, the daemon serves `GET /health`, `GET /ready` and a counts-only Prometheus `GET /metrics` with no agent names, ids, prompts or costs. `/docs` serves an interactive API reference and `/openapi.json` the OpenAPI document.
+
+## System (the installed Anima app)
+
+When the daemon runs under the packaged `anima` supervisor, `client.system` reads its status and starts lifecycle actions.
+
+```typescript
+const system = await client.system.status();
+if (system.supervised === false) {
+  console.log('Running without the Anima app, version', system.version);
+} else {
+  console.log(system.state.kind, system.serverUrl, system.update.available);
+}
+```
+
+Without a supervisor, `status()` returns `{ supervised: false, version }`. Under one, it returns the supervisor's status: `state` (tagged by `kind`: `starting`, `running`, `draining`, `stopping`, `stopped`, `crashed` or `updating`), `serverUrl`, `workspace`, `autostart`, `connectors`, a pending action and `update` (`available`, `lastError`).
+
+`action(action, { force? })` runs `start`, `stop`, `restart`, `quit`, `update`, `check-update` or `cancel`; `force` skips waiting for running work. Actions answer `409` outside the supervisor. They are guarded more strictly than other owner routes: a script needs the admin bearer token, and a browser needs a console session opened from the tray's Open Console or `anima`, because any local process can send an `Origin` header.
+
+<Aside type="caution">
+  Stop, restart, quit and update first drain the daemon so no running agent work is cut off. While draining, new chat messages, jobs, swarm runs and similar are refused with `503` and the message `Anima is restarting; send the message again in a moment`. `force` skips the wait.
+</Aside>
+
+## Where Next
+
+- [Client Basics](/sdk/client/) for owner authentication.
+- [Jobs & Automations](/sdk/automations/) for what the `automations` counters track.
+- [API Reference](/sdk/reference/) for every type.

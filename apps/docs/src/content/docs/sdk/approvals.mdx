@@ -1,0 +1,96 @@
+---
+title: Approvals
+description: Review tool calls that wait on the owner, set an agent's approval policy, and manage always-allow rules
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+An agent's tool calls are judged by its **approval policy** before they run. A call the policy sends to the owner waits as an **approval**, and its run shows `awaiting_approval` until you decide. This is how the web console's Needs-you inbox works, and `client.approvals` exposes the same operations.
+
+<Aside type="caution">
+  Every approval route is an owner route: scripts need `Authorization: Bearer <ANIMA_LOCAL_ADMIN_TOKEN>` (see [Authentication](/sdk/client/#authentication)). Decide approvals only from an owner-facing surface, never from an agent's own tool allowlist.
+</Aside>
+
+## Policy
+
+Tools belong to a risk class. `read` tools never ask. The policy sets an action for the other four classes:
+
+| Class | Covers | Default |
+|-------|--------|---------|
+| `write` | Changing files and saved state | `allow` |
+| `exec` | Running commands and background processes | `ask` |
+| `network` | Outbound requests | `allow` |
+| `delegate` | Bringing in helpers or other agents | `allow` |
+
+Each action is `allow`, `ask` or `deny`. The SDK exports `DEFAULT_APPROVAL_POLICY` and `POLICY_CLASSES`.
+
+```typescript
+const policy = await client.approvals.policy(agentId);
+
+await client.approvals.setPolicy(agentId, { ...policy, exec: 'ask', network: 'ask' });
+```
+
+`setPolicy()` replaces the whole policy (all four classes) and returns it; it answers `409` for a helper, whose policy is its companion's. The console's per-agent autonomy modes (Free, Strict, Custom) sit on top of this policy and are set through `GET` and `PUT /api/agents/{agent_id}/autonomy`, which the SDK has no helper for (use `client.requestJson`); editing the class policy directly gives a Custom mode. Blocked commands and protected-action checks apply regardless.
+
+## Review and Decide
+
+```typescript
+const { approvals } = await client.approvals.list({ status: 'pending', agentId });
+
+for (const approval of approvals) {
+  console.log(approval.tool, approval.class, approval.arguments, approval.expiresAtMs);
+}
+
+const decided = await client.approvals.decide(approvals[0].id, {
+  decision: 'allow_once',
+  revision: approvals[0].revision,
+});
+```
+
+`list({ status, agentId?, cursor?, limit? })` returns `{ approvals, nextCursor }`. `pending` lists approvals waiting for the owner, oldest first. `decided` lists approvals from the last 30 days that were since decided, newest first, paged with `cursor` and `limit` (1 to 100, default 50).
+
+An `Approval` carries `tool`, `class`, `arguments` (the call's arguments as JSON text, at most 16 KiB, with `argumentsTruncated`), `suggestedMatcher`, `matcherKinds`, `createdAtMs`, `expiresAtMs`, `status` (`pending`, `allowed`, `denied`, `stopped` or `expired`), `revision` and `resolution`. The model wrote the arguments, so show them as text, never as markup.
+
+| `decision` | Effect |
+|------------|--------|
+| `allow_once` | Let this call run |
+| `allow_session` | Also allow matching calls for the rest of the session (at most 50 allowances per session) |
+| `allow_always` | Create a rule that allows matching calls (at most 100 rules per agent) |
+| `deny` | Refuse; the model is told `Denied by owner: <note>` |
+
+`decide(approvalId, { decision, revision, note?, matcher? })` needs the `revision` you read; a stale one is a `409` (`This approval changed; reload it and decide again`). `note` is at most `MAX_APPROVAL_NOTE_CHARS` (1,000) characters, and a denial's note reaches the model. `matcher` (`{ kind, value }`) applies to `allow_session` and `allow_always`; the approval's `suggestedMatcher` is used when it is absent. Repeating the same decision returns the approval unchanged, and deciding one already resolved another way (timeout, Stop or restart) is a `409`.
+
+### Timing
+
+A call that needs the owner waits up to 30 minutes (15 for a run started from Telegram). A timeout settles it as a denial noted `Approval timed out`. A daemon restart expires every pending approval. Helpers never wait: a call that would ask is denied. The `approval.requested` and `approval.resolved` [events](/sdk/sessions/#stream) announce changes; `isApprovalEvent()` narrows them.
+
+<Aside type="note">
+  Runs that nobody is watching also wait. With the default `exec: ask`, check-ins, jobs, Telegram and API runs that call `bash` wait for a decision, holding that automation or chat. For unattended shell work, set that agent's `exec` to `allow` or add a narrow rule.
+</Aside>
+
+## Rules
+
+Rules are standing allowances for one tool.
+
+```typescript
+const { rules, tools } = await client.approvals.rules(agentId);
+
+const rule = await client.approvals.addRule(agentId, {
+  tool: 'bash',
+  matcher: { kind: 'command_prefix', value: 'git status' },
+});
+
+await client.approvals.removeRule(agentId, rule.id);
+```
+
+`rules()` returns the agent's rules (oldest first) and every tool a rule can cover with its `class` and `matcherKinds`. Matcher kinds are `command_prefix`, `path_glob`, `domain` and `any` (an empty `value`). A command-prefix rule never covers a command containing a shell operator, and a path rule never covers an absolute path or one with `..`.
+
+<Aside type="caution">
+  Keep `exec` rules narrow. A rule for a shell, interpreter, HTTP client, package runner or `git`, or an `any` exec rule, lets the agent act as you on this machine, including through the loopback API. Workspace writes are allowed by default, so a file the agent can edit (`.git/config`, `package.json`) can turn a "safe" prefix rule into arbitrary code.
+</Aside>
+
+## Where Next
+
+- [Sessions & Runs](/sdk/sessions/) for the runs that wait on approvals.
+- [Jobs & Automations](/sdk/automations/) for unattended work and its approval behavior.
+- [Tools](/sdk/agents/tools/) for what an agent can call.

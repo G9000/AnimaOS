@@ -9,16 +9,16 @@ This page covers the write-side and maintenance-side memory APIs.
 
 <CardGrid>
   <Card title="Evaluate">
-    Score candidate memory before storing it, merging it, or ignoring it.
+    Score a candidate memory before storing, merging or ignoring it.
   </Card>
   <Card title="Trace">
-    Inspect linked entities and relationships around one stored memory.
+    Inspect the entities and relationships around one stored memory.
   </Card>
   <Card title="Retain">
-    Apply cleanup and decay rules so the memory graph does not drift into noise.
+    Apply decay and cleanup rules so the memory graph does not fill with noise.
   </Card>
   <Card title="Readiness">
-    Check embeddings, vector counts, and evaluation health before relying on recall.
+    Check embeddings, vector counts and evaluation self-tests before relying on recall.
   </Card>
 </CardGrid>
 
@@ -26,23 +26,23 @@ This page covers the write-side and maintenance-side memory APIs.
 
 ```typescript
 const evaluation = await client.memories.evaluate({
-  agentId: 'agent-1',
+  agentId: 'AGENT_ID',
   agentName: 'researcher',
   type: 'fact',
   content: 'Something happened',
   importance: 0.5,
 });
 
-console.log(evaluation.decision, evaluation.reason);
+console.log(evaluation.decision, evaluation.reason, evaluation.score);
 ```
 
-Use this when your app wants to preview the memory decision without storing anything yet.
+`evaluate()` takes the same fields as `create()` plus optional `minContentChars` and `minImportance`, and stores nothing. It returns a `MemoryEvaluation`: `decision` (`store`, `merge` or `ignore`), `reason`, `score`, `suggestedImportance` and `duplicateMemoryId` for a merge.
 
 ## Evaluate and Store
 
 ```typescript
 const outcome = await client.memories.addEvaluated({
-  agentId: 'agent-1',
+  agentId: 'AGENT_ID',
   agentName: 'researcher',
   type: 'fact',
   content: 'User prefers concise release notes',
@@ -55,25 +55,18 @@ const outcome = await client.memories.addEvaluated({
 console.log(outcome.evaluation.decision, outcome.memory?.id);
 ```
 
+The outcome holds the `evaluation` and the stored `memory`, which is `null` unless the decision was `store`; duplicate or low-value candidates add no new record.
+
 ## Evidence Trace
 
 ```typescript
-const trace = await client.memories.trace('memory-uuid-here');
+const trace = await client.memories.trace('MEMORY_ID');
 
 console.log(trace.memory.content);
 console.log(trace.relationships.length, trace.entities.length);
 ```
 
-Use this when the app needs to explain why a memory matters and what it connects to.
-
-## Maintenance Loop
-
-The durable pattern is straightforward:
-
-1. evaluate or write candidate memory
-2. inspect trace when you need explainability
-3. monitor readiness when operating the subsystem
-4. run retention to keep long-lived state useful
+The trace returns the memory, the relationships that cite it and the entities involved. Use it when the app needs to explain why a memory matters.
 
 ## Retention and Cleanup
 
@@ -85,49 +78,112 @@ const report = await client.memories.applyRetention({
   decayHalfLifeMillis: 24 * 60 * 60 * 1000,
 });
 
-console.log(report.removedMemoryIds.length);
+console.log(report.decayedMemories.length, report.removedMemoryIds.length);
 ```
+
+All four fields are optional.
+
+| Field | Description |
+|-------|-------------|
+| `maxAgeMillis` | Remove memories older than this |
+| `minImportance` | Remove memories below this importance |
+| `maxMemories` | Keep at most this many |
+| `decayHalfLifeMillis` | Half-life for importance decay |
+
+The report has `decayedMemories` (`memoryId`, `previousImportance`, `newImportance`), `removedMemoryIds` and `removedRelationshipIds`.
 
 ## Readiness
 
 ```typescript
 const ready = await client.memories.readiness();
+
 console.log(ready.passed, ready.embeddings.vectorCount);
 console.log(ready.embeddings.status, ready.embeddings.done, ready.embeddings.total);
 console.log(ready.externalProvider?.status);
+console.log(ready.evaluation.passedChecks, '/', ready.evaluation.totalChecks);
 ```
 
-This is the operational check for the memory subsystem: embeddings, vector counts, and evaluation self-tests. `embeddings.status` says where the search model stands (`downloading`, `rebuilding` with `done` of `total`, `ready`, `fallback` with a `reason`, or `off`), and `externalProvider` reports the external memory provider (`none` by default).
+### `MemoryReadiness`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `passed` | `boolean` | Overall status |
+| `embeddings` | `MemoryEmbeddingStatus` | Embedding engine status |
+| `externalProvider` | `ExternalMemoryProviderStatus` (optional) | The external memory provider beside the local store (`none` by default); absent from older daemons |
+| `evaluation` | `MemoryEvalReport` | Baseline eval harness result: `passed`, `totalChecks`, `passedChecks`, `failureMessages`, `cases` |
+
+### `MemoryEmbeddingStatus`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | `boolean` | Whether embeddings are active |
+| `provider`, `model` | `string` | Embedding provider and model |
+| `dimension` | `number` | Vector size |
+| `vectorCount` | `number` | Vectors stored |
+| `persisted` | `boolean` | Whether vectors are persisted |
+| `storageFile` | `string \| null` | Vector store file, when any |
+| `status` | `MemoryEmbeddingLoadStatus` | `downloading`, `rebuilding`, `ready`, `fallback` or `off`; the search model loads in the background after boot |
+| `done`, `total` | `number` | Memories with a vector from the active embedder, out of those to embed (`rebuilding` shows progress) |
+| `reason` | `string` (optional) | Why search fell back to basic search; only with `fallback` |
+
+`ExternalMemoryProviderStatus` is `{ id, status: 'ready' | 'unavailable', reason? }`. Only `none` is built in today.
 
 ## Entities and Relationships
+
+Entities and relationships form an explicit graph that recall uses for relationship scoring.
 
 ```typescript
 const entity = await client.memories.createEntity({
   kind: 'user',
   id: 'user-42',
   name: 'Alice',
+  aliases: ['al', 'ali'],
+  summary: 'A power user who prefers CLI tools.',
 });
 
 const relationship = await client.memories.createRelationship({
-  sourceAgentId: 'agent-a',
   sourceKind: 'agent',
-  targetAgentId: 'agent-b',
+  sourceAgentId: 'agent-a',
+  sourceAgentName: 'researcher',
   targetKind: 'agent',
+  targetAgentId: 'agent-b',
+  targetAgentName: 'writer',
   relationshipType: 'collaborator',
   strength: 0.9,
   confidence: 0.85,
 });
 
-console.log(entity.id, relationship.relationshipType);
+const entities = await client.memories.entities({ kind: 'user', limit: 50 });
+const relationships = await client.memories.relationships({
+  agentId: 'agent-a',
+  relationshipType: 'collaborator',
+  minStrength: 0.5,
+  limit: 10,
+});
+
+console.log(entity.id, relationship.relationshipType, entities.length, relationships.length);
 ```
 
-These APIs let your app build explicit graph structure instead of inferring everything from plain text alone.
+`createEntity` and `createRelationship` create or update. Entity `kind` and relationship `sourceKind` and `targetKind` are one of `agent`, `user`, `system` or `external` (relationship kinds default to `agent`).
+
+### `NewAgentRelationshipInput`
+
+Required: `sourceAgentId`, `sourceAgentName`, `targetAgentId`, `targetAgentName`, `relationshipType`. Optional: `sourceKind`, `targetKind`, `summary`, `strength`, `confidence`, `evidenceMemoryIds`, `tags`, `roomId`, `worldId`, `sessionId`.
+
+### `AgentRelationshipOptions`
+
+Filters for `relationships()`: `agentId`, `entityId`, `sourceKind`, `sourceAgentId`, `targetKind`, `targetAgentId`, `relationshipType`, `roomId`, `worldId`, `sessionId`, `minStrength`, `minConfidence`, `limit`.
+
+### `MemoryEntity`
+
+`kind`, `id`, `name`, `aliases`, `summary` (`string | null`), `createdAt`, `updatedAt`. `entities()` filters by `entityId`, `kind`, `name`, `alias` and `limit`.
 
 <Aside type="note">
-  Retrieval and write-side operations complement each other. `search()` and `recall()` find useful memory. Evaluation, retention, entities, and relationships keep that memory graph healthy over time.
+  Retrieval and write-side operations complement each other. `search()` and `recall()` find memory; evaluation, retention, entities and relationships keep that memory healthy. Deleting entities and editing individual records is covered in [Core Memory & Export](/sdk/memories/core/).
 </Aside>
 
 ## Where Next
 
 - [Search & Recall](/sdk/memories/recall/) for the read-side retrieval flow.
+- [Core Memory & Export](/sdk/memories/core/) for owner edits, facts and export.
 - [API Reference](/sdk/reference/) for full type signatures.

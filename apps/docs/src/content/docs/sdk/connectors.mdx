@@ -1,24 +1,40 @@
 ---
 title: Connectors
-description: Connect the personal daemon to Telegram, Google Calendar, Gmail and Outlook
+description: Connect an agent to Telegram, Discord, Gmail, Outlook, Google Calendar and Google Drive
 ---
 
-The web console's **Connectors** tab manages connections for the main agent. The Rust daemon owns OAuth tokens, polling and approvals; the SDK exposes the HTTP contracts. Telegram conversation history remains in its own tab.
+import { Aside } from '@astrojs/starlight/components';
+
+Connectors link an agent to outside services. The web console's **Connectors** page manages them for an agent, and the Rust daemon owns OAuth tokens, bot credentials, polling and approvals. The daemon embeds the Telegram and Discord runtimes: restored connectors restart with the daemon, and no separate gateway process is needed.
+
+| Connector | In the SDK |
+|-----------|------------|
+| Gmail and Outlook | `client.connectors` mail methods (status, connect, inbox, local drafts, owner approval) |
+| Google Calendar | `client.connectors` calendar methods (status, connect, write approvals) |
+| Google Drive | `driveStatus`, `connectDrive`, `disconnectDrive` (selected files only) |
+| Discord | `client.connectors` Discord methods (selected private channel) |
+| Telegram | No helper; use the console, or the daemon routes through `client.requestJson` (below) |
+| OAuth apps (Google, Microsoft) | `oauthAppStatus`, `configureOauthApp`, `removeOauthApp` |
+
+Connector routes are owner routes. From a script, send `Authorization: Bearer <ANIMA_LOCAL_ADMIN_TOKEN>` (see [Authentication](/sdk/client/#authentication)).
 
 ## Connect an account
 
 For normal setup, use the web console. You do not need to edit code, set environment variables or restart the daemon.
 
 1. Open **Connectors** and find **OAuth app setup**.
-2. Register the provider application and its redirect URIs:
-   - **Google:** In Google Cloud Console, enable the Gmail API and Google Calendar API. In **Google Auth Platform**, complete **Branding** (the OAuth consent-screen details) and choose the app's **Audience**. If you choose **External** and leave the app in **Testing**, add the Gmail or Google Workspace account you will connect under **Audience > Test users**. A Google Workspace administrator may also need to allow the app or its requested Gmail and Calendar scopes for organization-managed accounts. Then open **Clients**, create a **Web application** OAuth client, and add both values below under **Authorized redirect URIs**. They must match exactly, including `http`, host, port, path and the absence of a trailing slash.
+2. Register the provider application and its redirect URIs. The setup card shows the exact callback URLs for your daemon; they must match what you register, including `http`, host, port, path and the absence of a trailing slash.
+   - **Google:** In Google Cloud Console, enable the Gmail API and Google Calendar API (and the Drive API if you connect Drive). In **Google Auth Platform**, complete **Branding** (the OAuth consent-screen details) and choose the app's **Audience**. If you choose **External** and leave the app in **Testing**, add the Gmail or Google Workspace account you will connect under **Audience > Test users**. A Google Workspace administrator may also need to allow the app or its requested scopes for organization-managed accounts. Then open **Clients**, create a **Web application** OAuth client, and add the callbacks under **Authorized redirect URIs**. By default they are:
      - `http://127.0.0.1:8080/api/connectors/mail/gmail/callback`
      - `http://127.0.0.1:8080/api/connectors/gcalendar/callback`
-   - **Microsoft:** In the Microsoft Entra admin center, open **Entra ID > App registrations > New registration**, choose the supported account type for the accounts you intend to connect, and register the app. Open **Authentication > Add a platform > Web** and add this exact redirect URI: `http://127.0.0.1:8080/api/connectors/mail/outlook/callback`. Then open **Certificates & secrets > Client secrets > New client secret** and copy the secret's **Value** when it is created.
-3. Paste the provider's client ID and client secret into its setup card. The Google configuration is shared by Gmail and Google Calendar. The Microsoft configuration enables Outlook; its tenant defaults to `common` so personal and organizational Microsoft accounts can use the shared authorization endpoint.
-4. Select **Save Google OAuth app** or **Save Microsoft OAuth app**. After the provider reports **Configured**, select **Connect** on Gmail, Google Calendar or Outlook and complete the provider consent flow.
+     - `http://127.0.0.1:8080/api/connectors/gdrive/callback`
+   - **Microsoft:** In the Microsoft Entra admin center, open **Entra ID > App registrations > New registration**, choose the supported account type for the accounts you intend to connect, and register the app. Open **Authentication > Add a platform > Web** and add the Outlook callback, by default `http://127.0.0.1:8080/api/connectors/mail/outlook/callback`. Then open **Certificates & secrets > Client secrets > New client secret** and copy the secret's **Value** when it is created.
+3. Paste the provider's client ID and client secret into its setup card. The Google configuration is shared by Gmail, Google Calendar and Drive. The Microsoft configuration enables Outlook; its tenant defaults to `common` so personal and organizational Microsoft accounts can use the shared authorization endpoint.
+4. Select **Save Google OAuth app** or **Save Microsoft OAuth app**. After the provider reports **Configured**, select **Connect** on Gmail, Google Calendar, Drive or Outlook and complete the provider consent flow.
 
-OAuth application credentials and account tokens are stored in the operating system credential vault. Secrets and tokens are never returned by the daemon; the UI receives only redacted configuration status. To replace or remove a Google configuration, first disconnect every dependent Gmail and Google Calendar account. To replace or remove a Microsoft configuration, first disconnect every dependent Outlook account.
+The callback base is `ANIMA_PUBLIC_BASE_URL` when set (a canonical HTTPS origin; loopback HTTP is allowed for local testing) and `http://127.0.0.1:8080` otherwise. Register the URLs the card displays rather than assuming a port; an installed `anima` program serves on a different port by default.
+
+OAuth application credentials and account tokens are stored in the operating system credential vault. Secrets and tokens are never returned by the daemon; the UI receives only redacted configuration status. To replace or remove a Google configuration, first disconnect every dependent Gmail, Google Calendar and Drive account. To replace or remove a Microsoft configuration, first disconnect every dependent Outlook account.
 
 Gmail and Outlook expose recent inbox messages and local plain-text drafts. Drafts remain in animaOS until the owner reviews the saved recipients, subject and body and selects **Send**. Agents can read and create drafts; they cannot call the approval operation. An uncertain send is marked **unknown** and is not automatically retried. Check Sent mail before composing a replacement.
 
@@ -28,14 +44,14 @@ Environment variables remain available for backward-compatible daemon deployment
 
 | Provider | Environment variables |
 | --- | --- |
-| Google (shared by Gmail and Google Calendar) | `ANIMA_GOOGLE_CLIENT_ID`, `ANIMA_GOOGLE_CLIENT_SECRET` |
+| Google (shared by Gmail, Google Calendar and Drive) | `ANIMA_GOOGLE_CLIENT_ID`, `ANIMA_GOOGLE_CLIENT_SECRET` |
 | Microsoft (Outlook) | `ANIMA_MICROSOFT_CLIENT_ID`, `ANIMA_MICROSOFT_CLIENT_SECRET`; optional `ANIMA_MICROSOFT_TENANT` (defaults to `common`) |
 
 For restart recovery, configure `ANIMAOS_RS_CONTROL_PLANE_FILE` to a durable local JSON path (or use the daemon's Postgres persistence). This stores connector metadata and drafts alongside agent state. Without a persistent control plane, the default development session is ephemeral even though OAuth tokens remain in the operating system vault.
 
-Mail requests delegated inbox-reading and sending permissions. The daemon enforces approval before any send. Gmail uses `gmail.readonly` and `gmail.send`; Microsoft uses `offline_access`, `User.Read`, `Mail.Read` and `Mail.Send`. No provider draft write permission is needed because drafts are local. See [Google Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes) and [Microsoft delegated permissions](https://learn.microsoft.com/en-us/graph/permissions-reference).
+Mail requests delegated inbox-reading and sending permissions. The daemon enforces approval before any send. Gmail uses `gmail.readonly` and `gmail.send`; Microsoft uses `offline_access`, `User.Read`, `Mail.Read` and `Mail.Send`. Calendar uses `calendar.events`, and Drive uses `drive.readonly`. No provider draft write permission is needed because mail drafts are local. See [Google Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes) and [Microsoft delegated permissions](https://learn.microsoft.com/en-us/graph/permissions-reference).
 
-## SDK
+## Mail and calendar from the SDK
 
 ```typescript
 import { createDaemonClient } from '@animaOS-SWARM/sdk';
@@ -56,6 +72,56 @@ if (status.connector?.status === 'active') {
 }
 ```
 
-Use `connectCalendar`, `calendarStatus`, `calendarWrites`, `approveCalendarWrite` and `rejectCalendarWrite` for calendar management. Mail provides equivalent connection methods plus `mailMessages`, `mailDrafts`, `createMailDraft`, `approveMailDraft` and `rejectMailDraft`. Approval methods belong in an owner-facing UI, never the agent tool allowlist.
+Mail: `mailStatus`, `connectMail`, `disconnectMail`, `mailMessages`, `mailDrafts`, `createMailDraft`, `approveMailDraft` and `rejectMailDraft`, each taking the agent id and a provider (`gmail` or `outlook`). Calendar: `calendarStatus`, `connectCalendar`, `disconnectCalendar`, `calendarWrites`, `approveCalendarWrite` and `rejectCalendarWrite`. `connectMail`, `connectCalendar` and `connectDrive` return a `consentUrl` for the owner to open. Approval methods belong in an owner-facing UI, never an agent tool allowlist.
 
-For non-browser clients, supply the daemon's configured API and local-owner authentication through the SDK fetch option. Reads from the local web console use same-origin browser metadata; OAuth callbacks use single-use state rather than an API-key header.
+For non-browser clients, supply the owner token (and `ANIMAOS_RS_API_KEY`, when set) through the SDK `fetch` option. OAuth callbacks use single-use state rather than an API-key header.
+
+## Drive
+
+```typescript
+const { consentUrl } = await client.connectors.connectDrive(agentId, {
+  selectedFileIds: ['FILE_ID'],
+});
+// Send the owner to consentUrl, then check:
+const drive = await client.connectors.driveStatus(agentId);
+```
+
+Drive is bound to the files the owner selects. Google's `drive.readonly` consent is broader than that selection; Anima enforces the selected-file limit itself. `disconnectDrive` revokes this agent's local authority and does not revoke Google's grant.
+
+## Discord
+
+A Discord connector watches one selected private guild channel. The SDK saves it disabled, and you activate it explicitly so it starts with new messages.
+
+```typescript
+const connector = await client.connectors.createDiscordConnector(agentId, {
+  botToken: process.env.DISCORD_BOT_TOKEN!,
+  guildId: 'GUILD_ID',
+  channelId: 'CHANNEL_ID',
+  approvedUserIds: ['USER_ID'],
+  privateChannelConfirmed: true,
+});
+
+await client.connectors.activateDiscordConnector(agentId, connector.id);
+```
+
+Other methods: `discordConnectors`, `replaceDiscordCredential`, `setDiscordEnabled`, `restartDiscordConnector`, `retryDiscordDelivery`, `suppressDiscordUnknownDelivery` and `deleteDiscordConnector`. `privateChannelConfirmed` is your confirmation that the channel is private, not something Discord verifies. `retryDiscordDelivery` retries only pending or failed output; uncertain sends are never resent, and `suppressDiscordUnknownDelivery` should be called only after the owner checks Discord. Each Discord channel keeps its own conversation thread.
+
+## Telegram
+
+The console connects a Telegram bot with its token and pairs it with a private chat. Paired private-chat messages join the agent's main conversation (tagged as via Telegram) and replies to them go back to Telegram; Telegram groups keep their own threads. The SDK has no Telegram helper, but the routes exist on the daemon:
+
+```typescript
+// Create (body: { botToken }); one Telegram connector per agent
+const { connector } = await client.requestJson<{ connector: { id: string } }>(
+  `/api/agents/${agentId}/connectors/telegram`,
+  { method: 'POST', body: { botToken: process.env.TELEGRAM_BOT_TOKEN } },
+);
+
+const list = await client.requestJson(`/api/agents/${agentId}/connectors`);
+```
+
+Related routes: `PUT .../connectors/{connectorId}/credential`, `POST .../connectors/{connectorId}/pairings/{chatId}/approve`, `POST .../connectors/{connectorId}/restart` and `DELETE .../connectors/{connectorId}`. A bot token can be connected to only one daemon at a time; a second copy shows `This bot is already connected somewhere else.` The daemon's `/docs` page documents every request and response.
+
+<Aside type="caution">
+  Treat bot tokens and OAuth secrets as credentials: keep them out of logs, analytics and agent-visible messages.
+</Aside>

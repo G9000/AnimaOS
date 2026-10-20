@@ -1,0 +1,102 @@
+---
+title: Model Adapters
+description: anima-model-adapters, the provider catalog, streaming, key sources, pricing table and speech adapters
+---
+
+`anima-model-adapters` holds every HTTP integration with a model provider. It depends on `anima-core` (the `ModelAdapter` trait) and `anima-service-adapters` (speech and transcription contracts) and uses `reqwest` with rustls. It owns the provider catalog and request/response mapping; it does not own credentials storage, key rotation policy, fallbacks or approvals, which belong to the host.
+
+## Module Map
+
+| File | Role |
+|------|------|
+| `catalog.rs` | The static provider catalog (`provider_definitions()`) |
+| `adapter.rs` | `ProviderModelAdapter`: routes a call by provider kind, builds requests, retries, streams |
+| `anthropic.rs`, `google.rs`, `openai_compatible.rs`, `ollama.rs` | Request-body builders and response parsers per API shape |
+| `stream.rs` | SSE / NDJSON stream consumers; `DeterministicModelAdapter` for tests and demos |
+| `chatgpt.rs`, `chatgpt/` | `ChatGptResponsesAdapter` (subscription inference) and the model-metadata adapter |
+| `models.rs` | Built-in model table: context windows, max output, vision, pricing |
+| `attachments.rs` | Image gating and request-only hydration helpers |
+| `speech.rs`, `transcription.rs` | `OpenAiSpeechAdapter`, `OpenAiTranscriptionAdapter` |
+| `transport.rs` | Bounded HTTP client, retry-after parsing |
+| `common.rs` | Shared tool-call and schema conversion |
+
+## Provider Catalog
+
+`provider_definitions()` returns the fourteen built-in providers. Each `ProviderDefinition` has an `id`, label, aliases, whether a key is required, the API-key and base-URL environment variable names (first set wins) and the default base URL.
+
+| Id | Aliases | Kind | Key required | Default base URL |
+|----|---------|------|--------------|------------------|
+| `openai` | | OpenAI-compatible | yes | `https://api.openai.com/v1` |
+| `anthropic` | | Anthropic Messages | yes | `https://api.anthropic.com` |
+| `google` | `gemini` | Gemini `generateContent` | yes | `https://generativelanguage.googleapis.com` |
+| `ollama` | | OpenAI-compatible, plus a native NDJSON path | no | `http://127.0.0.1:11434/v1` |
+| `groq` | | OpenAI-compatible | yes | `https://api.groq.com/openai/v1` |
+| `xai` | `grok` | OpenAI-compatible | yes | `https://api.x.ai/v1` |
+| `openrouter` | | OpenAI-compatible | yes | `https://openrouter.ai/api/v1` |
+| `mistral` | | OpenAI-compatible | yes | `https://api.mistral.ai/v1` |
+| `together` | | OpenAI-compatible | yes | `https://api.together.xyz/v1` |
+| `deepseek` | | OpenAI-compatible | yes | `https://api.deepseek.com/v1` |
+| `fireworks` | | OpenAI-compatible | yes | `https://api.fireworks.ai/inference/v1` |
+| `perplexity` | | OpenAI-compatible | yes | `https://api.perplexity.ai` |
+| `moonshot` | `kimi` | OpenAI-compatible | yes | `https://api.moonshot.ai/v1` |
+| `vllm` | | OpenAI-compatible | no | `http://127.0.0.1:8000/v1` |
+
+The host-level `chatgpt` provider (described below) is routable too but is not in the catalog. Environment variable names per provider, for example `OPENAI_API_KEY` / `OPENAI_KEY` / `OPENAI_TOKEN` and `OPENAI_BASE_URL`, are in `catalog.rs`; the daemon exposes them through `provider_env_key_names()`.
+
+Anything not `anthropic` or `google` is treated as OpenAI-compatible. Adding an OpenAI-compatible provider is one `ProviderDefinition` entry.
+
+## ProviderModelAdapter
+
+```rust
+let adapter = ProviderModelAdapter::new(ProviderAdapterConfig {
+    providers: BTreeMap::from([("anthropic".into(), ProviderCredential { api_key, base_url })]),
+    key_source: None,
+});
+```
+
+- Implements `ModelAdapter`. `generate` returns one response; `stream` forwards text deltas and provider-reported usage as `ModelStreamFrame`s and ends with a `Final` frame.
+- The default HTTP client has a 15-second connect timeout and a 300-second whole-request timeout (including streamed bodies). `with_client` accepts an injected client that keeps its own policy.
+- A streamed request that gets a 429 or 5xx answer is retried **once**; a second failure is reported with an `After one retry:` prefix. Setting `settings.max_retries = 0` on the agent disables the retry. Errors carry `(retry after Ns)` when the response had a `retry-after` or rate-limit reset header.
+- `stream_options.include_usage` is sent to OpenAI and DeepSeek only at their default base URL, and always to vLLM and Ollama. At OpenAI's default endpoint `max_tokens` becomes `max_completion_tokens`, and `temperature` is omitted for reasoning models (`o1*`, `o3*`, `o4*`, `gpt-5*` except `-chat`).
+- Keys come from `ProviderCredential.api_key`, or from a `KeySource` when set (see below). A missing key returns a message naming the environment variable.
+- Image attachments are only sent to models for which `model_supports_images(provider, model)` is true; other models get a text reference. See [Runs and Sessions](/hosts/rust-daemon/runs/) for the daemon's attachment limits.
+
+### KeySource
+
+```rust
+pub trait KeySource: Send + Sync {
+    fn pick(&self, provider: &str) -> Option<(String, String)>;           // (key id, key)
+    fn report(&self, provider: &str, key_id: &str, failure: Option<&ModelFailure>);
+    fn holds_keys(&self, provider: &str) -> bool { false }
+    fn pick_untried(&self, provider: &str, tried: &[String]) -> Option<(String, String)>;
+    fn resting(&self, provider: &str) -> Option<KeysResting>;
+}
+```
+
+The adapter asks for a key per attempt and reports the outcome. A failure that blames the key (`classify_model_error`: rate limit, billing, auth) makes it pick another key within the same call. When every key rests, it returns an error that names the cause and when a key is ready again. The daemon's pool (`provider_keys`) implements this trait with strategies `fill_first`, `round_robin`, `random`, `least_used`.
+
+## ChatGPT Subscription
+
+`ChatGptResponsesAdapter::new(access_token, account_id)` talks to the ChatGPT backend Responses endpoint (`https://chatgpt.com/backend-api/codex/responses`) with redirects disabled and the same bounded timeouts. It never falls back to API billing. OAuth storage, refresh and account selection belong to the host (`hosts/rust-daemon/src/chatgpt_auth*`). `ChatGptModelsAdapter` fetches the account's model catalog metadata. The daemon routes the provider id `chatgpt` to it.
+
+## Pricing and Model Table
+
+`models.rs` is a static table (`PRICING_TABLE_DATE`, currently `2026-09-23`) of `ModelInfo` rows: provider, lowercase model-id prefix (the longest match wins), `context_window`, `max_output`, `vision` and `ModelPricing` in micro-USD per million tokens (input, output, optional cached input). Helpers: `model_table()`, `model_info(provider, model)`, `price_usage`, `estimate_cost_micros` (returns `Priced`, `Free` for `ollama` and `vllm`, `Subscription`, or `Unknown`) and `canonical_provider_id`. The daemon uses it for context budgets (60% of the window, capped at 200,000 tokens) and usage pricing, with owner overrides layered on top.
+
+## Speech and Transcription
+
+`OpenAiTranscriptionAdapter` (`/v1/audio/transcriptions`) and `OpenAiSpeechAdapter` (`/v1/audio/speech`) implement the `TranscriptionPort` and `SpeechPort` contracts from `anima-service-adapters`. Both bound the number of outgoing bodies, honor a `CancelSignal` and use an OpenAI Platform API key only. The daemon enables them with `ANIMAOS_STT_ENABLED` and `ANIMAOS_TTS_ENABLED`.
+
+## DeterministicModelAdapter
+
+A fixed-text adapter (provider id `deterministic`) for tests and demos. The daemon has a separate in-process deterministic adapter used by its test and embedding constructors; the real daemon never uses either unless an agent selects the `deterministic` / `test` provider.
+
+## Adding a Provider
+
+1. OpenAI-compatible endpoint: add a `ProviderDefinition` to `PROVIDERS` in `catalog.rs`, with its environment variable names and a default base URL; add a pricing row in `models.rs` if you want cost and context data. Add a catalog test in `src/tests.rs`.
+2. Different wire format: add an `Anthropic`-style kind in `provider_kind`, a body builder and parser module, and a stream consumer in `stream.rs`.
+3. Host side: nothing else is needed for routing; the daemon builds its provider config from `provider_definitions()`. Credential storage, rotation and fallbacks are daemon concerns. For key pools and fallbacks see [Persistence](/hosts/rust-daemon/persistence/).
+
+Hermes provider-format reuse is credited in `HERMES-NOTICE` in the crate directory.
+
+Tests are mock-server based (`axum` dev-dependency); no real provider is called. Run `cargo test -p anima-model-adapters`.

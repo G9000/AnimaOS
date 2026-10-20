@@ -1,76 +1,70 @@
 ---
 title: Search Pipeline
-description: BM25, vector, temporal, and relationship search stages
+description: BM25 keyword search, text analysis, query expansion and the vector index
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+Recall is built from several candidate sources (see [Recall Fusion](/architecture/rust-core/anima-memory/recall/)). This page covers the pieces under them: the BM25 index, the text analyzer, query expansion and the vector index.
 
-<Aside type="caution" title="Work in Progress">
-  This contributor documentation is actively being written. Sections may be incomplete, reorganized, or expanded.
-</Aside>
+## Keyword Search
 
-`MemoryManager::recall()` runs a four-stage pipeline:
+`MemoryManager::search(query, MemorySearchOptions)` runs the BM25 index and returns `MemorySearchResult`s (a memory plus its BM25 `score`). Filters in `MemorySearchOptions` are exact matches on `agent_id`, `agent_name`, `memory_type`, `scope`, `room_id`, `world_id` and `session_id`, plus `min_importance` and `limit` (default 10). Filtering happens before the top-k cut, so an ineligible memory never consumes a result slot. `search_filtered` adds a host `visible` predicate. `get_recent` returns newest first (default limit 20) with the same context filters.
 
-| Stage | Algorithm | Signal | Weight |
-|-------|-----------|--------|--------|
-| Lexical | BM25 | Keyword relevance | `lexical_weight` |
-| Vector | Cosine similarity | Semantic meaning | `vector_weight` |
-| Temporal | Time-decay scoring | Recent events | `temporal_weight` |
-| Relationship | Graph proximity | Connected entities | `relationship_weight` |
+### What is indexed
 
-## Stage 1: Lexical (BM25)
+`build_index_text` joins the memory content, its type name, its scope name, the agent name, the room, world and session ids and every tag. A search for a tag or an agent name therefore matches.
 
-The BM25 index is built over all memory content at insertion time. Queries are tokenized using the same analyzer, then scored with the classic BM25 formula:
+### BM25
 
 ```
-score = Σ IDF(q_i) * (f(q_i) * (k1 + 1)) / (f(q_i) + k1 * (1 - b + b * |D| / avgdl))
+score(q, d) = sum over query terms t of  IDF(t) * tf * (k1 + 1) / (tf + k1 * (1 - b + b * |d| / avgdl))
+IDF(t)      = ln(1 + (N - df + 0.5) / (df + 0.5))
 ```
 
-Parameters: `k1 = 1.2`, `b = 0.75` (tunable via `MemoryRecallOptions`).
+Defaults: `k1 = 1.5`, `b = 0.75` (`BM25::new(k1, b)` takes others). The index keeps per-document term frequencies, document frequencies and the average document length, and updates them on `add_document` / `remove_document`. `BM25` is also usable on its own.
 
-## Stage 2: Vector (Cosine Similarity)
+## Text Analysis
 
-Memories with embeddings are stored in an `InMemoryVectorIndex`. The query embedding is compared against all memory embeddings using cosine similarity:
+`TextAnalyzer` has one profile today, `TextAnalysisProfile::Unicode`, constructed as `TextAnalyzer::multilingual()` or `unicode()` and used by default. Tokenization:
 
-```
-similarity = (A · B) / (||A|| * ||B||)
-```
+- Lowercases alphanumeric runs and splits on everything else.
+- Drops single-character words.
+- Treats CJK ranges (Hiragana/Katakana `U+3040..30FF`, CJK extension A and unified ideographs, Hangul syllables) as runs and emits every **character plus every adjacent pair** as terms.
 
-The vector index uses a flat brute-force search (exact, not approximate). At typical memory counts (< 100k), brute force is faster than HNSW indexing overhead.
+There is no stop-word removal and no stemming. Arabic scriptio continua, Thai dictionary segmentation and Indic grapheme/word-boundary handling are not implemented. The daemon reads `ANIMAOS_RS_MEMORY_TEXT_ANALYZER` (values `multilingual`, `unicode`, `default` or empty all select this profile; unknown values warn and fall back).
 
-## Stage 3: Temporal (Time Decay)
-
-Memories are scored by recency using exponential decay:
-
-```
-temporal_score = importance * e^(-λ * age_seconds)
-```
-
-Where `λ` is the decay constant (tunable). Recent memories with high importance score highest.
-
-## Stage 4: Relationship (Graph Proximity)
-
-The relationship graph connects agents, users, and external entities. Memories associated with entities near the query entity (within N hops) receive a relationship boost.
-
-## Text Analysis Profiles
-
-| Profile | Tokenizer | Stop Words | Stemming |
-|---------|-----------|------------|----------|
-| `default` | Unicode word boundaries | English | Porter |
-| `multilingual` | Unicode + CJK | None | None |
-| `code` | Whitespace + symbols | None | None |
-
-The `multilingual` profile is recommended for agents that operate in multiple languages.
+Separately, **automatic context selection** (`select_context`) uses its own small English stop-word list to extract up to 32 query terms from the first 512 characters of the query. Non-English and short terms survive.
 
 ## Query Expansion
 
-The BM25 module supports query expansion rules:
+`QueryExpander` is a list of `QueryExpansionRule`s, each a name plus a function pointer that may append terms to the tokenized query through a `QueryExpansionContext` (`has_term`, `has_terms`, `push_terms`). The default expander is empty, so core search stays domain-neutral. Rules are code, not data:
 
 ```rust
-pub struct QueryExpansionRule {
-    pub pattern: String,
-    pub expansions: Vec<String>,
+fn rule(context: &mut QueryExpansionContext<'_>) {
+    if context.has_terms(&["neural", "network"]) {
+        context.push_terms(&["deep", "learning"]);
+    }
 }
+let expander = QueryExpander::with_rules([QueryExpansionRule::new("ml", rule)]);
+let manager = MemoryManager::with_query_expander(expander);
 ```
 
-Example: the pattern "neural network" expands to ["neural network", "NN", "deep learning", "ANN"].
+With the `locomo-eval` feature, `locomo_query_expander()` is a benchmark-specific expander. The daemon selects it only when `ANIMAOS_RS_MEMORY_QUERY_EXPANDER=locomo` (or `locomo-benchmark`); `none`, `off`, `disabled` or empty mean no expansion.
+
+## Vector Index
+
+Vector similarity is injected, not built in. The trait:
+
+```rust
+pub trait MemoryVectorIndex {
+    fn search(&self, query: &str, limit: usize) -> Vec<VectorMemoryHit>;
+    fn search_filtered(&self, query: &str, limit: usize,
+                       eligible: &dyn Fn(&str) -> bool) -> Vec<VectorMemoryHit>; // has a default
+}
+pub struct VectorMemoryHit { pub memory_id: String, pub score: f64 }
+```
+
+An index that supports filtering should apply `eligible` before choosing its top-k. The default `search_filtered` only filters the old bounded `search` result, so it cannot backfill eligible matches outside that pool.
+
+`InMemoryVectorIndex<E: MemoryTextEmbedder>` is the crate's reference implementation. It stores L2-normalized `f32` vectors, rejects empty, non-finite, zero-magnitude and mismatched-dimension embeddings (`MemoryVectorError`), and scores by dot product (cosine similarity of normalized vectors), keeping only positive scores, sorted by score then memory id. It is an exact brute-force scan. `upsert_embedding`, `upsert_text`, `remove`, `clear` and `search_embedding(_filtered)` are the operations.
+
+The daemon's `MemoryEmbeddingRuntime` wraps an `InMemoryVectorIndex` whose `MemoryTextEmbedder` is fastembed, the hashed local embedder, or an OpenAI-compatible endpoint, and implements `MemoryVectorIndex` on top (vectors are persisted separately). See [Memory in the Daemon](/architecture/rust-core/anima-memory/daemon-memory/).

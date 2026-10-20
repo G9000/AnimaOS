@@ -3,13 +3,13 @@ title: Swarms
 description: Multi-agent coordination with the animaOS SDK
 ---
 
-import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
 
-A **swarm** is a coordinated group of agents that collaborate on a shared task. The swarm runtime manages turn-taking, message passing, and result synthesis according to a configurable strategy.
+A **swarm** is a manager plus workers that collaborate on a shared task. The daemon's swarm coordinator runs them according to a strategy and streams what happens over SSE. Swarms are what `animaos run -s ...` and `animaos launch` use under the hood.
 
 ## In This Section
 
-- [Event Streaming](/sdk/swarms/events/) covers the SSE stream, event payload shapes, monitoring patterns, and cancellation.
+- [Event Streaming](/sdk/swarms/events/) covers the SSE stream, event names, payload shapes, monitoring and cancellation.
 
 ## Swarm Configuration
 
@@ -46,155 +46,101 @@ const contentTeam = await client.swarms.create(
     ],
   })
 );
+
+console.log(contentTeam.id); // `create()` returns the SwarmState
 ```
 
 ### `SwarmConfig` fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `strategy` | `SwarmStrategy` | ✅ | Coordination strategy (see below) |
-| `manager` | `AgentConfig` | ✅ | Lead agent that orchestrates the swarm |
-| `workers` | `AgentConfig[]` | ✅ | Agents that execute subtasks |
-| `maxTurns` | `number` | — | Maximum conversation turns before termination |
+| `strategy` | `SwarmStrategy` | yes | Coordination strategy (below) |
+| `manager` | `AgentConfig` | yes | Lead agent |
+| `workers` | `AgentConfig[]` | yes | Agents that execute subtasks |
+| `maxTurns` | `number` | no | Strategy-specific turn cap (below); defaults to the number of workers plus one |
+| `maxParallelDelegations` | `number` | no | Concurrent delegations the `supervisor` strategy allows; defaults to the number of workers (at least 1) |
+| `maxConcurrentAgents` | `number` | no | Cap on agents the swarm admits at once; spawning beyond it fails with `Max concurrent agents (N) reached` |
+| `tokenBudget` | `number` | no | Per-run observed token budget shared by manager and workers; `0` blocks all runs, omitted means unlimited |
+
+`tokenBudget` is checked before each model request, so a request already in flight can overshoot it. It is not a hard billing cap.
 
 ### `SwarmStrategy`
 
-| Value | Behavior |
-|-------|----------|
-| `round-robin` | Each worker takes a turn in sequence |
-| `supervisor` | Manager delegates and reviews each step |
-| `dynamic` | Manager dynamically assigns tasks based on context |
+| Value | Behavior | What `maxTurns` limits |
+|-------|----------|------------------------|
+| `round-robin` | Agents take turns in rotation | Total rotations executed |
+| `supervisor` | The manager delegates to workers with tool calls | Delegations the manager may issue |
+| `dynamic` | The manager picks which agent speaks next | Speaker choices the manager may make |
 
 <Aside type="note">
-  The `manager` and `worker` agents are created automatically by the daemon when the swarm is created. You do not need to call `client.agents.create()` for them separately.
+  The daemon creates the manager and worker agents from the config when the swarm is created. You do not call `client.agents.create()` for them.
 </Aside>
 
 ## Run a Swarm
 
 ```typescript
-const run = await client.swarms.run('swarm-uuid-here', {
+const run = await client.swarms.run(contentTeam.id, {
   text: 'Write a comprehensive article about renewable energy',
 });
 
 if (run.result.status === 'success') {
-  console.log('Result:', (run.result.data as { text: string }).text);
+  console.log('Result:', run.result.data?.text);
 }
 
 console.log('Tokens used:', run.swarm.tokenUsage.totalTokens);
 console.log('Status:', run.swarm.status);
 ```
 
+`swarms.run()` blocks until the swarm finishes. Runs of one swarm are serialized, and the daemon answers `503` when its global run limit (`ANIMAOS_RS_MAX_CONCURRENT_RUNS`, default 8) is exhausted. If the HTTP response times out or the client disconnects, an admitted swarm run still completes inside the daemon.
+
 ### Retrying a swarm run safely
 
-When the Rust daemon is configured with step persistence, a retried swarm run can reuse completed tool work from the original attempt. Send one stable retry key in request metadata for the logical swarm task, then repeat that same value if the client retries after a timeout or interrupted response.
+With durable step persistence, a retried swarm run can reuse completed tool work. Send one stable retry key in the request metadata and repeat it when retrying the same logical task.
 
 ```typescript
-const run = await client.swarms.run('swarm-uuid-here', {
+await client.swarms.run(contentTeam.id, {
   text: 'Coordinate the release checklist',
-  metadata: {
-    retryKey: 'release-checklist-2026-05-05',
-  },
+  metadata: { retryKey: 'release-checklist-2026-05-05' },
 });
 ```
 
-The coordinator scopes that root key for manager and worker turns, and each agent derives deterministic tool-step keys from the scoped retry key plus the tool payload. Reuse only happens when the retried request repeats the same `retryKey` or `idempotencyKey`; fresh swarm runs should omit the key or use a new value.
+The coordinator scopes that key for manager and worker turns, and each agent derives deterministic tool-step keys from it. Fresh runs should omit the key or use a new one.
 
 <Aside type="note">
-  This protects completed tool steps during explicit retries. With `ANIMAOS_RS_CONTROL_PLANE_FILE` or Postgres mode, the Rust daemon also restores swarm registrations and latest snapshots after process restart, but interrupted in-flight runs are marked failed and should be retried intentionally.
+  With `ANIMAOS_RS_CONTROL_PLANE_FILE` or Postgres mode, the daemon restores swarm registrations and latest snapshots after a restart. Interrupted in-flight runs are reported as failed and should be retried intentionally.
 </Aside>
 
-### `SwarmRunResponse<T>`
+### `SwarmRunResponse`
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `swarm` | `SwarmState` | Final swarm state after execution |
-| `result` | `TaskResult<T>` | Synthesized result from the swarm |
+| `result` | `DaemonTaskResult<{ text: string }>` | Synthesized result: `status`, `data`, `error`, `durationMs` |
 
 ### `SwarmState`
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | `string` | Swarm identifier |
-| `status` | `string` | Current swarm status |
-| `agentIds` | `string[]` | IDs of all agents in the swarm |
+| `id` | `UUID` | Swarm identifier |
+| `status` | `'idle' \| 'running' \| 'completed' \| 'failed'` | Current status |
+| `agentIds` | `string[]` | IDs of every agent in the swarm |
+| `messages` | `AgentMessage[]` | Agent-to-agent messages (`id`, `from`, `to`, `content`, `timestamp`) |
+| `results` | `TaskResult[]` | Results collected so far |
 | `tokenUsage` | `TokenUsage` | Cumulative token consumption |
-| `createdAt` | `number` | Unix timestamp (ms) |
-
-## Subscribe to Events (SSE)
-
-Swarms emit a rich stream of events during execution. You can subscribe to these events in real-time using Server-Sent Events.
-
-```typescript
-const stream = client.swarms.subscribe('swarm-uuid-here');
-
-for await (const event of stream) {
-  // event.event is the SSE event name
-  // event.data is the parsed payload
-  console.log('Event type:', event.event);
-  console.log('Payload:', event.data);
-}
-```
-
-### Event payload types
-
-The `event.data` field is a discriminated union of several payload shapes:
-
-| Payload | Discriminator | Description |
-|---------|---------------|-------------|
-| `SwarmEventPayload` | `swarmId` + `state` | Swarm state update |
-| `SwarmMessagePayload` | `swarmId` + `message` | Agent-to-agent message |
-| `SwarmAgentEventPayload` | `agentId` + `agentName` | Generic agent event |
-| `SwarmTaskFailedPayload` | `agentId` + `error` | Agent task failure |
-| `SwarmToolBeforePayload` | `agentId` + `toolName` + `args` | Tool invocation start |
-| `SwarmToolAfterPayload` | `agentId` + `toolName` + `status` | Tool invocation complete |
-| `SwarmAgentTokensPayload` | `agentId` + `usage` | Token usage update |
-
-### Example: monitoring tool usage
-
-```typescript
-for await (const { event, data } of client.swarms.subscribe(swarmId)) {
-  if ('toolName' in data && 'status' in data) {
-    console.log(`[${data.agentName}] ${data.toolName}: ${data.status} (${data.durationMs}ms)`);
-  }
-
-  if ('error' in data) {
-    console.error(`[${data.agentName}] FAILED: ${data.error}`);
-  }
-
-  if ('usage' in data) {
-    console.log(`[${data.agentName}] tokens: ${data.usage.totalTokens}`);
-  }
-}
-```
-
-### Example: streaming with abort
-
-```typescript
-const controller = new AbortController();
-
-// Start streaming
-const streamTask = (async () => {
-  for await (const event of client.swarms.subscribe(swarmId, {
-    signal: controller.signal,
-  })) {
-    console.log(event.event, event.data);
-  }
-})();
-
-// Cancel after 30 seconds
-setTimeout(() => controller.abort(), 30_000);
-
-await streamTask;
-```
+| `startedAt`, `completedAt` | `number` (optional) | Unix timestamps (ms) |
 
 ## Get Swarm State
 
 ```typescript
-const state = await client.swarms.get('swarm-uuid-here');
-console.log('Status:', state.status);
-console.log('Agents:', state.agentIds);
-console.log('Tokens:', state.tokenUsage.totalTokens);
+const state = await client.swarms.get(contentTeam.id);
+console.log(state.status, state.agentIds, state.tokenUsage.totalTokens);
 ```
+
+The daemon also lists swarms with `GET /api/swarms`; the SDK has no helper for it, so use `client.requestJson('/api/swarms')`.
+
+## Live Events
+
+`client.swarms.subscribe(swarmId, { signal })` yields the swarm's SSE events. Event names, payload shapes and monitoring patterns are on [Event Streaming](/sdk/swarms/events/).
 
 ## Full Example: Content Pipeline
 
@@ -226,29 +172,29 @@ const pipeline = await client.swarms.create(
         model: 'gpt-4o',
         system: 'Write engaging, accurate content based on approved research.',
       }),
-      agent({
-        name: 'fact-checker',
-        provider: 'openai',
-        model: 'gpt-4o-mini',
-        system: 'Verify factual claims. Flag anything uncertain.',
-      }),
     ],
   })
 );
 
-// Stream all events
-const stream = client.swarms.subscribe(pipeline.state.id);
-const runPromise = client.swarms.run(pipeline.state.id, {
-  text: 'Write a 500-word blog post about the James Webb Space Telescope',
+// Subscribe first, then run, so no early events are missed.
+const controller = new AbortController();
+const watcher = (async () => {
+  for await (const { event, data } of client.swarms.subscribe(pipeline.id, {
+    signal: controller.signal,
+  })) {
+    if (typeof data === 'object' && data !== null && 'agentName' in data) {
+      console.log(`[${data.agentName}] ${event}`);
+    }
+  }
+})().catch((error) => {
+  if (!(error instanceof Error && error.name === 'AbortError')) throw error;
 });
 
-// Process events in parallel with the run
-for await (const { event, data } of stream) {
-  if ('agentName' in data) {
-    console.log(`[${data.agentName}] ${event}`);
-  }
-}
+const result = await client.swarms.run(pipeline.id, {
+  text: 'Write a 500-word blog post about the James Webb Space Telescope',
+});
+controller.abort();
+await watcher;
 
-const result = await runPromise;
 console.log('Final article:', result.result.data?.text);
 ```

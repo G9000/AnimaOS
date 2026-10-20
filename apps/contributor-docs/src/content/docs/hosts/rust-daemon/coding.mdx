@@ -1,0 +1,71 @@
+---
+title: Coding Apps and Helpers
+description: Background commands, terminal app sessions, ACP coding agents, helper agents with worktrees, code execution and conversation import in the Rust daemon
+---
+
+An agent uses the computer through general tools plus know-how (skills); no app has a built-in integration. This page maps those tools to their source and states the guarantees and gaps. Libraries: `anima-process`, `anima-acp`, `anima-worktree` ([Supporting Crates](/architecture/rust-core/supporting-crates/)). Daemon code: `tools/process.rs` and `tools/process/`, `agent_runs/worktrees.rs`, `agent_runs/async_helpers.rs`, `coding_apps.rs`, `coding_keys.rs`, `foreign_sessions/`, `tool_rpc/`, `filesystem_checkpoints/`. Per-feature limits are in `hosts/rust-daemon/README.md` ("Using apps", "Autonomous runtime").
+
+## Approvals
+
+`bash`, `bg_start`, `bg_stop`, `app_start`, `app_send`, `app_stop`, `acp_start`, `acp_prompt`, `acp_cancel`, `acp_stop` and `execute_code` are **exec** class. With the daemon default (`exec: ask`) each waits for the owner. A command-prefix rule such as "allow `claude`" covers `bash`, `bg_start`, `app_start` and `acp_start`. Picking **Operate** in settings or onboarding also sets `exec: allow`. Read tools (`bg_list`, `bg_output`, `bg_wait`, `app_read`, `app_list`, `acp_read`, `acp_list`) never ask. See [Runs and Sessions](/hosts/rust-daemon/runs/#approvals).
+
+A rule for an HTTP client, interpreter, shell, package runner or git lets the agent act as the owner on the machine, including changing its own approval policy through the loopback API. Keep exec rules narrow.
+
+## Background Commands
+
+`bg_start` runs a command under process custody (`anima_process::Custody`) with a shell allowlist environment plus `PAGER=cat` and `GIT_PAGER=cat`. At most `ANIMAOS_RS_MAX_BACKGROUND_PROCESSES` (default 8) run at once. `bg_wait` blocks until a job exits, prints a pattern, or times out (at most 120 seconds). A job that ends on its own wakes the agent in the conversation that started it, unless the agent already saw the exit or stopped it. `notify_on` (up to 4 texts or `/regex/`) wakes it once per pattern when a new output line matches while the job keeps running.
+
+## App Sessions
+
+`app_start` opens a program on a real terminal (ConPTY on Windows, a PTY elsewhere, 120 by 40 by default). `app_send` types text and named keys (multi-line text goes in as one bracketed paste when the app asks for it); `app_read` returns the visible screen and new output and can wait for text or for output to settle; `app_stop` ends the app and its tree. Limits: 1 MiB transcript (2,000 lines), 2,000 lines of scrollback, 16 KiB per read.
+
+## ACP Coding Agents
+
+`acp_start` runs any Agent Client Protocol agent (`npx -y @agentclientprotocol/claude-agent-acp`, `codex-acp`, `opencode acp`, `gemini --acp`); `acp_prompt`, `acp_read`, `acp_cancel` and `acp_stop` drive it. Its permission requests become ordinary approvals with their own tool names, judged by the same policy and rules:
+
+| ACP request | Approval tool | Class |
+|-------------|---------------|-------|
+| edit, delete, move | `acp_edit` | write |
+| run a command | `acp_execute` | exec |
+| fetch | `acp_fetch` | network |
+| anything else | `acp_other` | exec |
+
+Reads never ask and Anima never answers "allow always" on the owner's behalf. When an agent offers session modes, Anima switches it to its asking mode (`default` for Claude Code) so it asks before editing. File reads and writes by the agent are confined to the session folder. An agent that needs a sign-in reports it (`AuthRequired`); Anima never signs in for the owner.
+
+## Sessions and Keys
+
+At most 4 app and coding-agent sessions per agent, both kinds together (`MAX_LIVE_PER_AGENT`). They outlive a run, stop after 30 minutes idle and die with the daemon. The chat shows each as a live card with Stop (and Cancel turn for coding agents); routes `POST /api/agents/{id}/app-sessions/{sid}/stop` and `acp-sessions/{sid}/stop|cancel`.
+
+Coding apps use their own sign-in by default. Per agent, the owner may pass through `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` or `OPENROUTER_API_KEY` (`GET` / `PUT /api/agents/{id}/coding-keys`). The values come from the daemon's own environment and never pass through the model; off by default. The owner's choices are saved with the approval policies, which agents cannot write.
+
+`GET /api/coding-apps` reports which of Claude Code, Codex, OpenCode and Gemini CLI are on `PATH` and start, with the know-how bundle for each (`bundles/coding-agents/<app>/manifest.json`, compiled into the daemon). Installing a bundle still goes through the community-bundle review.
+
+## Containment
+
+| Platform | Background commands | App sessions |
+|----------|---------------------|--------------|
+| Windows | Job Object: every descendant is contained | ConPTY children cannot join a Job Object without `unsafe`; Stop runs `taskkill /T /F`, and a descendant whose parent already exited is missed |
+| Linux with delegated cgroup v2 | cgroup leaf: every descendant is contained | same |
+| macOS, Linux without delegation | process group: a descendant that calls `setsid` escapes | same |
+
+## Helpers and Worktrees
+
+An agent can delegate to **helpers**: `spawn_helper` (synchronous) and `spawn_helper_async` with `list_helper_runs`, `steer_helper`, `stop_helper`. Helpers answer to their companion's policy and rules but never wait for approval (a call that would ask is denied). Four starts or helpers are shared between synchronous and asynchronous delegation. Async assignments have at most eight tool turns, two minutes of execution and eight accepted steers; a launch returns a saved run handle, and the parent must inspect the settled result before claiming completion. A restart closes uncertain helper work for review instead of replaying it, and stop does not undo completed effects.
+
+`worktree: true` (and an optional workspace-relative `repo`, default `.`) gives the helper its own git worktree at `<repo top level>/.worktrees/anima-helper-<id>` on branch `anima-helper/<id>` from the current `HEAD` (`anima-worktree`). Its file tools work there; agent files, memory and attachments keep the global workspace; the shared task-list tools are removed. Helpers cannot run git; the daemon makes every git call itself with hooks, fsmonitor, filters, pagers, credential helpers and global config disabled and a 30-second limit. Outside a git repository with at least one commit the spawn is refused; it never falls back to the shared checkout. When the helper's run ends the daemon inspects the worktree: untouched worktrees and branches are removed, others are kept and the parent receives a `worktree` object (path, branch, base commit, changed files, diff stat, how to review, merge or remove). At startup it sweeps clean helper worktrees with no unmerged commits.
+
+## Code Execution
+
+`execute_code` runs a Python program through a bridge (`tool_rpc/`). It is off unless `ANIMAOS_RS_TOOL_RPC_PYTHON_PATH` points at an existing absolute Python 3.10+ interpreter (Windows profile today; no PATH discovery, no installation) and the agent has both `execute_code` and `bash` plus any native tools the program needs. Programs import their captured tool intersection from `anima_tools`; every native call keeps its own validation, approval and durable receipt. Each execution starts fresh; four physical cells are shared by the host, one per agent and session, with a 5-minute maximum. Helpers, recursion, browser and MCP calls and background-process tools are excluded. This is approved arbitrary local execution with the owner's OS access, not a sandbox. Portable bounds are in `anima-core::tool_rpc` (64 KiB of code, 50 calls).
+
+## Native-File Recovery (Windows)
+
+With `ANIMAOS_RS_CHECKPOINT_ROOT` set (an absolute private directory outside the workspace), `write_file`, `edit_file` and `multi_edit` save an exact preimage before changing one ordinary file and return a `filesystemCheckpointId`; `checkpoint_list` and `checkpoint_restore` (granted separately) recover it. One checkpoint covers one native action, not a turn or a shell command. Limits: 10 MiB per file, 64 MiB capture content, 500 MiB store, 20 records per namespace; no automatic pruning. Missing or corrupt evidence reports `Filesystem checkpoint RecoveryRequired` and stops further native effects in that run. On other platforms setting the variable fails startup.
+
+## Importing Claude Code and Codex Conversations
+
+`GET /api/foreign-sessions?source=claude-code|codex` lists logs newest first (50 per page), `.../{handle}/preview` shows the newest 40 messages, and `POST /api/agents/{id}/foreign-sessions/{handle}/import` turns one into an ordinary chat (`origin: "import"`, titled `Imported · <title>`). Sources: Claude Code `$CLAUDE_CONFIG_DIR/projects/*/*.jsonl` (else `~/.claude/projects`), Codex `$CODEX_HOME/sessions/**/rollout-*.jsonl` (else `~/.codex/sessions`). Logs are only read; a handle is the SHA-256 of the resolved path, so paths are never accepted or returned. Text and tool-call names are imported; tool results, thinking and injected wrappers are dropped; private keys and known secret shapes are redacted. Logs over 32 MiB are refused; at most 2,000 messages (the newest) are imported, each cut to 16 KiB. Re-importing the same conversation returns the existing session (`alreadyImported: true`). All three routes are owner-only.
+
+## Browser Tools
+
+Four separately granted browser tools (`browser_navigate`, `browser_observe`, `browser_act`, `browser_transfer`) run through a host-owned Playwright worker (`packages/core-rust/browser-worker/worker.mjs`) under immutable startup policies from `ANIMAOS_RS_BROWSER_CONFIG_FILE`. Scopes are admission data from `anima-service-adapters::browser`, bounded to a 120-second scope, and stoppable per run (`.../runs/{rid}/browser-scope/stop`). The initial boundary is narrower than general browsing; see `docs/companion/browser-work.md`.

@@ -1,0 +1,48 @@
+---
+title: anima-schedule
+description: The pure tick-driven scheduler crate, and how it relates to the daemon's automations
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`anima-schedule` is a host-agnostic scheduling library for proactive agents. It is a single file (`src/lib.rs`, about 700 lines including tests) with a `serde` / `serde_json` dependency only: no async runtime, no clock access, no I/O except an explicit JSON file loader. A host owns the event loop and passes the current time in.
+
+<Aside type="caution" title="Not what the daemon runs">
+  `hosts/rust-daemon` lists `anima-schedule` in its `Cargo.toml` but no source file imports it (`grep anima_schedule` over `hosts/` finds nothing in code). The daemon's automations (cron, daily with IANA time zones, interval, one-time, active hours, fire history) are implemented in `hosts/rust-daemon/src/schedules/` with their own `ScheduleTrigger` type. Do not extend this crate expecting daemon behavior to change.
+</Aside>
+
+## API
+
+```rust
+pub enum ScheduleTrigger {
+    Every   { interval_secs: u64 },
+    DailyAt { hour: u8, minute: u8, tz_offset_minutes: i32 },
+}
+
+pub struct ScheduledJob {
+    pub name: String,
+    pub agent_name: String,
+    pub prompt: String,
+    pub trigger: ScheduleTrigger,
+    pub enabled: bool,          // default true when deserialized
+}
+
+let mut scheduler = Scheduler::new(jobs)?;     // validates
+let due = scheduler.due_jobs(now_ms);          // jobs due now; marks them fired
+let wait = scheduler.next_due_in_ms(now_ms);   // sleep hint; None when nothing is enabled
+let jobs = load_jobs_file(path)?;              // bare array or { "jobs": [...] }
+```
+
+JSON uses camelCase and a `type` tag, for example `{ "type": "every", "intervalSecs": 3600 }` or `{ "type": "dailyAt", "hour": 9, "minute": 30, "tzOffsetMinutes": -300 }`. A job is `{ "name", "agentName", "prompt", "trigger", "enabled" }`.
+
+## Semantics
+
+- `Scheduler::new` rejects an empty `name`, `agent_name` or `prompt`, duplicate names, `Every` with `interval_secs == 0`, and `DailyAt` with `hour >= 24`, `minute >= 60` or `|tz_offset_minutes| > 840` (14 hours).
+- `Every`: due when `now - last_fired >= interval`. A job that has never fired is due on the first tick.
+- `DailyAt`: due when the local time (UTC plus the fixed offset) has reached `hour:minute` and the job has not already fired for that local calendar day. A fixed offset means no daylight-saving handling.
+- `due_jobs` records every returned job as fired at `now_ms`; state lives in memory only, so a restarted host re-fires `Every` jobs immediately.
+- Disabled jobs are skipped.
+
+## When to Use It
+
+Use it when embedding a simple interval or daily trigger in a program that does not need cron, IANA zones, persistence or run history. For the daemon's behavior, read [Runs and Sessions](/hosts/rust-daemon/runs/) (automations, jobs and goals).

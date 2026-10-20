@@ -1,0 +1,188 @@
+---
+title: Sessions & Runs
+description: Conversations, accepted runs, steering and stopping, and the live event stream
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+This is the model the web console uses. An agent has **sessions** (conversations). You send a message to a session and the daemon accepts it as a **run** that executes in the background; progress arrives on the agent's **event stream**. Unlike the blocking `client.agents.run()`, a run survives a dropped connection, and you can steer or stop it.
+
+| Accessor | Purpose |
+|----------|---------|
+| `client.sessions` | List, create, read, rename, archive, delete, compact, export and search conversations |
+| `client.runs` | Start a run in a session, read it, stop it, list a session's runs |
+| `client.events` | The agent's live SSE stream |
+| `client.attachments` | Upload and download session files |
+
+<Aside type="caution">
+  Every route here is an owner route. A script has to send `Authorization: Bearer <ANIMA_LOCAL_ADMIN_TOKEN>`; see [Authentication](/sdk/client/#authentication).
+</Aside>
+
+## Sessions
+
+```typescript
+const main = await client.sessions.main(agentId); // the durable main web conversation
+const chat = await client.sessions.create(agentId, { title: 'Release planning' });
+
+const page = await client.sessions.list(agentId, { limit: 20, includeHelpers: false });
+for (const session of page.sessions) {
+  console.log(session.id, session.title, session.kind, session.activeRuns, session.unread);
+}
+// page.nextCursor is the cursor for the next page, or null
+```
+
+| Method | Returns | Notes |
+|--------|---------|-------|
+| `main(agentId)` | `Session` | Resolves the agent's main web conversation (a `POST`; it creates or adopts one if needed) |
+| `list(agentId, options?)` | `SessionPage` | `kind`, `archived`, `q`, `cursor`, `limit` (1 to 200, default 50), `includeHelpers` (default `true`). Newest activity first |
+| `get(agentId, sessionId)` | `Session` | A single read also carries `usage` and `contextUsage` |
+| `create(agentId, { title? })` | `Session` | Rejected with `429` beyond 60 per minute per agent |
+| `update(agentId, sessionId, patch)` | `Session` | `title`, `archived`, `lastReadAtMs` |
+| `remove(agentId, sessionId)` | `void` | `409` while a run in it is active; memories are kept |
+| `messages(agentId, sessionId, options?)` | `SessionMessagePage` | `before`, `anchor`, `limit`, `includeHidden`; messages oldest to newest, plus `nextBefore` |
+| `searchMessages(agentId, { q, limit? })` | `SessionMessageSearchPage` | `{ results, hasMore }` of matching messages across sessions |
+| `exportMarkdown(agentId, sessionId)` | `string` | Full transcript as Markdown |
+| `compact(agentId, sessionId)` | `Session` | Starts compaction; the summary arrives later as `session.updated` |
+
+`Session.kind` is `chat`, `telegram`, `discord`, `checkin`, `job` or `helper`. Each session also reports `capabilities` (which of `send`, `steer`, `stop`, `rename`, `archive`, `delete`, `compact` and `export` apply to its kind), `messageCount`, `preview`, `pendingApprovals`, an optional `summary` and, when older turns were dropped from model context, `contextTrimmed`. `list()` and `main()` throw `DaemonTooOldError` when the daemon predates sessions.
+
+Session history is complete in the daemon's history store; the `messages` and `messageCount` on an `AgentSnapshot` cover only recent messages.
+
+## Start a Run
+
+```typescript
+const { run } = await client.runs.start(
+  agentId,
+  chat.id,
+  { text: 'Draft the release notes for v1.2' },
+  { idempotencyKey: crypto.randomUUID() },
+);
+
+console.log(run.id, run.status); // usually 'queued'
+```
+
+`start(agentId, sessionId, input, { idempotencyKey, signal? })` returns `{ run, steer? }` as soon as the message is accepted.
+
+| `StartRunInput` field | Description |
+|-----------------------|-------------|
+| `text` | Message text (up to 32 KiB); may be empty only with attachments |
+| `attachmentIds` | Up to 10 ids from `client.attachments.upload()` |
+| `skill` | Slug of an enabled, active [skill](/sdk/extensions/#skills) whose instructions join this run |
+| `mode` | `queue` (default) or `steer` (below) |
+| `browserSelection` | Explicit owner opt-in for scoped browser work |
+| `timeZone` | The sender's IANA time zone, kept as the owner's |
+
+The `idempotencyKey` is required (1 to 128 visible ASCII characters). Sending the same key again within 24 hours returns the original run and creates nothing; reusing it for a different message is a `409`. Keep one key per logical message and reuse it when you retry.
+
+A queued run waits behind the session's earlier messages. A companion holds at most eight waiting messages; beyond that the daemon answers `429`.
+
+## Follow a Run
+
+### Poll
+
+```typescript
+import { isTerminalRunStatus } from '@animaOS-SWARM/sdk';
+
+let current = run;
+while (!isTerminalRunStatus(current.status)) {
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  current = await client.runs.get(agentId, run.id);
+}
+
+if (current.status === 'completed' && current.replyMessageId) {
+  const { messages } = await client.sessions.messages(agentId, chat.id, { limit: 10 });
+  console.log(messages.find((message) => message.id === current.replyMessageId)?.text);
+}
+```
+
+`RunStatus` is `queued`, `running`, `awaiting_approval`, `completed`, `failed`, `cancelled` or `interrupted`; the last four are terminal. A run in `awaiting_approval` is waiting for an [approval](/sdk/approvals/) and is not terminal, so a poller should surface it.
+
+### Stream
+
+```typescript
+import { isRunLifecycleEvent, isTerminalRunStatus } from '@animaOS-SWARM/sdk';
+
+const controller = new AbortController();
+
+for await (const event of client.events.stream(agentId, { signal: controller.signal })) {
+  if (event.type === 'step.delta' && event.runId === run.id) {
+    process.stdout.write(event.text);
+  }
+  if (isRunLifecycleEvent(event) && event.run.id === run.id && isTerminalRunStatus(event.run.status)) {
+    break;
+  }
+}
+```
+
+`client.events.stream(agentId, { signal? })` yields typed `AgentEvent` objects for the agent, its helpers and sessions delegated from it. Behavior to design around:
+
+- The first event is `stream.snapshot`: the active runs with their current step text (up to 64 KiB) and tool cards, plus pending approvals.
+- There is no replay. A reconnect starts from a fresh snapshot, and `Last-Event-ID` is ignored.
+- A consumer that falls behind receives `stream.resync` (with `missed`) and keeps going; refetch state when you see it.
+- Each agent allows 16 open streams; more are refused with `429`.
+
+| Event `type` | Meaning |
+|--------------|---------|
+| `stream.snapshot`, `stream.resync` | Stream start state; missed events |
+| `session.created`, `session.updated`, `session.deleted` | Session changes |
+| `run.queued`, `run.started`, `run.awaiting_approval`, `run.completed`, `run.failed`, `run.cancelled`, `run.interrupted` | Run lifecycle (carry the `run`) |
+| `run.progress` | A phase such as `compacting` |
+| `run.steered` | A steering message was read by the run |
+| `step.delta` | Streamed text (`stepId`, `offset`, `text`) |
+| `message.created` | A message was saved (`messageId`, `role`) |
+| `tool.started`, `tool.finished` | Tool activity with bounded previews |
+| `model.fallback` | A fallback model answered instead of the primary |
+| `approval.requested`, `approval.resolved` | Approval changes (carry the `approval`) |
+| `skill.updated`, `automation.updated` | Skills or automations changed; read them again |
+
+Helpers `isRunLifecycleEvent`, `isApprovalEvent`, `isSkillEvent` and `isAutomationEvent` narrow the union. Every event has `agentId`, optional `sessionId` and `runId`, a per-stream `seq` and a timestamp `at`.
+
+## Steer and Stop
+
+```typescript
+// Join the session's active run before its next model call
+const steered = await client.runs.start(
+  agentId,
+  chat.id,
+  { text: 'Also cover the migration notes', mode: 'steer' },
+  { idempotencyKey: crypto.randomUUID() },
+);
+console.log(steered.steer?.status); // 'pending' when it joined a running run
+
+// Stop a run
+const stopped = await client.runs.stop(agentId, run.id);
+```
+
+`mode: 'steer'` joins the running run and returns that run with `steer: { status: 'pending' }`. With no active run to join, the message is queued like any other. A steer the run never reads becomes a queued message after the run ends.
+
+`runs.stop()` cancels a queued run at once, and ends a running one at its next checkpoint. Stopping again, or stopping a finished run, changes nothing. Tools already running finish, except that a `bash` command is killed; background processes keep running, and completed effects are not undone.
+
+## Runs
+
+```typescript
+const recent = await client.runs.listForSession(agentId, chat.id, { limit: 10 }); // newest first
+```
+
+A `Run` has `id`, `agentId`, `sessionId`, `source` (`web`, `api`, `telegram`, `discord`, `schedule`, `job`, `delegation` or `peer`), `status`, `input`, timestamps, `error`, `usage`, `model`, `provider`, `steps`, `parentRunId`, `replyMessageId` and, when recorded, `actionReceipts`. Action receipts are bounded records of each tool call (`started`, `succeeded` or `failed`); `started` means the outcome is unknown, so inspect effects before retrying work after an interruption.
+
+## Attachments
+
+```typescript
+const { attachment } = await client.attachments.upload(agentId, chat.id, file, 'notes.txt');
+await client.runs.start(
+  agentId,
+  chat.id,
+  { text: 'Summarize this', attachmentIds: [attachment.id] },
+  { idempotencyKey: crypto.randomUUID() },
+);
+
+const bytes = await client.attachments.download(agentId, attachment.id);
+```
+
+Uploads are saved in the agent's configured workspace, so configure a workspace first. Limits include 10 MiB per image, 1 MiB per text file and 25 MiB per PDF or Office document. See [Workspace & Capabilities](/sdk/workspace/).
+
+## Where Next
+
+- [Approvals](/sdk/approvals/) for runs that wait on the owner.
+- [Jobs & Automations](/sdk/automations/) for work that runs without you sending a message.
+- [API Reference](/sdk/reference/) for every type.

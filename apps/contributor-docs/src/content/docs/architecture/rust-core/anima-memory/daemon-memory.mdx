@@ -1,0 +1,79 @@
+---
+title: Memory in the Daemon
+description: Core memory, stores, embeddings, conversation reviews, memory tools and export as the daemon builds them on anima-memory
+---
+
+`anima-memory` is a pure library. Everything that makes memory durable, semantic or owner-visible is built by `hosts/rust-daemon` on top of it. This page maps those pieces to their source. Environment variables are listed in [Environment](/hosts/rust-daemon/env/); routes are in [HTTP API](/hosts/rust-daemon/api/).
+
+## Core Memory
+
+Each agent has two small always-on blocks shown at the top of every run's context (`src/core_memory/`):
+
+| Block | Route / tool name | Label | Budget |
+|-------|-------------------|-------|--------|
+| `user` | `user` | About you (the owner's profile) | 1,500 characters |
+| `notes` | `notes` | Agent notes (what the agent learned about its work) | 2,500 characters |
+
+One entry is at most 500 characters. Budgets count characters, not bytes. An entry is an ordinary **private `Fact`** in the memory store tagged `core:user` or `core:notes`, with importance 0.9, so history, export, retention protection and threat scanning apply to it. A block pushed over budget by older data renders until the budget is reached and ends with `- … N more not shown`.
+
+- **Tool:** `core_memory { action: add | replace | remove, block: user | notes, text?, old_text? }`. `old_text` is a unique substring of one entry, matched with whitespace collapsed. A full block refuses `add`; an exact duplicate is a no-op; text the threat scanner flags is refused.
+- **Owner routes** (local owner, `no-store`): `GET /api/agents/{agent_id}/core-memory`, `POST .../core-memory/{block}`, `PATCH .../core-memory/{block}/{entry_id}`, `DELETE .../core-memory/{block}/{entry_id}`. Same budgets; flagged text is saved with `warnings`. Generic memory routes refuse to edit a core entry or add a core tag.
+- **Flagged entries** render as `[entry hidden: flagged <ids>]` in context and in `memory_search` / `recent_memories`, which still show their id.
+- **File copy:** after every change and once at boot the daemon writes read-only `USER.md` and `MEMORY.md` under `<workspace>/.animaos-swarm/agent-profiles/<hex agent id>/`. Edits to them are overwritten, and agent writes to them are refused.
+- All edits share one `apply_edit` path (`CoreEdit` variants add / replace / remove by text or by entry id) and one commit path (`core_memory/commit.rs`) that persists the store and reindexes.
+- Old memory-view pins migrate into core memory once at boot (`core_memory/migration.rs`); pins no longer exist.
+
+## Conversation Reviews
+
+Every 10 owner messages per agent (`CONVERSATION_EVERY` in `learning/records.rs`), when learning is on for the agent, the daemon reviews the recent conversation (`learning/conversation.rs`). Counted turns are completed, top-level runs the owner started from web, API or an owner-only Telegram or Discord chat on the agent itself; check-ins, silent replies, helpers, delegations, peers and swarm traffic do not count. A review may propose up to 5 core-memory edits plus lessons:
+
+- **Free** autonomy: edits apply at once through the `core_memory` rules, each with Undo.
+- **Strict**: edits wait on the review card for the owner.
+- An edit that breaks a rule shows as failed with the reason.
+- Limits: 8 conversation reviews per agent per 24 hours (`CONVERSATION_DAILY_LIMIT`); task reviews keep 2 per day (`DAILY_LIMIT`).
+- The external memory provider's turn sync uses the same "owner turn" filter.
+
+## Stores and Persistence
+
+The daemon owns one `MemoryManager` (built from `ANIMAOS_RS_MEMORY_TEXT_ANALYZER` and `ANIMAOS_RS_MEMORY_QUERY_EXPANDER`) and autosaves it after mutating routes, tools, reviews and retention runs. Store choice (`app/persistence.rs`, `memory_store_choice`):
+
+1. `ANIMAOS_RS_MEMORY_FILE` (JSON) or `ANIMAOS_RS_MEMORY_SQLITE_FILE`: explicit file. Setting both is a startup error.
+2. Otherwise Postgres mode: the `host_snapshots` table.
+3. Otherwise, when `ANIMAOS_RS_CONTROL_PLANE_FILE` is set: `memory.sqlite` in the same directory.
+4. Otherwise memory-only.
+
+Retention runs (`POST /api/memories/retention`) call `apply_retention_protecting`, which skips core entries.
+
+## Embeddings
+
+`src/memory_embeddings.rs` wraps an `InMemoryVectorIndex` in `MemoryEmbeddingRuntime` and implements `MemoryVectorIndex` on it. Modes (`ANIMAOS_RS_MEMORY_EMBEDDINGS`):
+
+| Mode | Embedder | Defaults |
+|------|----------|----------|
+| `fastembed` (default) | Local ONNX model in process | `intfloat/multilingual-e5-small`, 384 dimensions; query and passage prefixes |
+| `local` | Deterministic hashed vectors (`local-semantic-v1`) | 96 dimensions, minimum 24 |
+| `ollama` | OpenAI-compatible `/embeddings` | `nomic-embed-text`, 768, `http://127.0.0.1:11434/v1` |
+| `openai`, `openai-compatible` | OpenAI-compatible `/embeddings` | `text-embedding-3-small`, 1536, `https://api.openai.com/v1` |
+| `disabled` | none | |
+
+`fastembed` loads in the background: the daemon starts serving on hashed vectors, downloads and loads the model, then rebuilds vectors in batches of 32 without holding the memory lock. Status is one of `downloading`, `rebuilding`, `ready`, `fallback` (the model failed to load; hashed vectors stay until restart) or `off`, reported by `GET /api/memories/readiness` with `done` / `total`. Hashed and model vectors never mix; keyword search covers memories not yet rebuilt. An embedded or deterministic daemon (library use) skips the download and keeps basic search. Vectors persist in `memory_embeddings` tables (same SQLite file, or `ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE`).
+
+## Automatic Context
+
+Before a run, the `recent_memories` provider (`components/providers.rs`) selects up to six of the agent's own `Fact` and `Reflection` memories: lexical matches first, spare slots filled with eligible semantic matches (`select_context_with_vector_index`). Context is frozen for the run and bounded by 800 characters per excerpt and 4,800 in total. Two process-wide worker slots and a five-second deadline bound the blocking lookup; a late or unavailable lookup falls back to the lexical result. Saved-from-chat facts and review lessons reach this context.
+
+## Memory Tools
+
+Native tools an agent can call (an agent only gets the tools in its configuration; `memory_remove` and `memory_consolidate` are never granted by default): `memory_search`, `recent_memories`, `memory_add` (an exact duplicate default-scope fact returns the existing record), `memory_update`, `memory_remove` (hard-removes one own active Fact; needs `id` and the full `expected_content`; the console checkbox is **Allow removing saved facts**), `memory_consolidate` (two to eight source facts with exact `expected_content`; summary Fact plus archived sources; **Allow consolidating saved facts**), and `core_memory`. Risk classes: reads for search and recent; writes for the rest (see [Runs and Sessions](/hosts/rust-daemon/runs/)).
+
+## Export
+
+`GET /api/memories/export?format=json|md&agentId=...` (`routes/memory_export.rs`) is owner-only, `no-store` and sent as an attachment named `animaos-memory-<agent or all>-<date>.<ext>`. It lists, per agent, `core` (by block), non-core `memories` newest first, `entities`, `relationships` and `temporalFacts`; an all-agents export adds `unattributed` records so nothing is left out. Embedding vectors never leave the store. JSON carries `version: 1` and `exportedAt`.
+
+## External Provider
+
+`ANIMAOS_RS_MEMORY_PROVIDER` selects an `ExternalMemoryProvider` (`src/memory_provider.rs`). Only `none` is registered; an unknown id stops boot and lists the known ids. Calls are best effort, bounded (10 seconds for background `sync_turn` and `on_memory_write`), and logged by provider id and error only.
+
+## Owner Edits
+
+`PATCH` / `DELETE /api/memories/{id}`, `GET` / `PATCH` / `DELETE /api/memories/facts...` and `DELETE /api/memories/entities/{id}?kind=` are owner-only and map to `update_memory`, `delete_memory`, temporal fact supersession and `delete_entity`. A failed save restores the previous state and answers `503`; a save that reached the store with uncertain durability keeps the change and still answers `503`.

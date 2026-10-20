@@ -1,0 +1,119 @@
+---
+title: Workspace & Capabilities
+description: The agent workspace, its files, agent instruction files, daemon capabilities, and opt-in voice
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The **workspace** is the folder on the daemon's machine that agents work in: file tools, uploads, skills, saved profile files and `anima.yaml` all live under it. These clients configure and read it, and report what the daemon can do.
+
+| Accessor | Purpose |
+|----------|---------|
+| `client.workspace` | Workspace config, bootstrap, resume and file browsing |
+| `client.agentFiles` | Which instruction files a run would load (metadata only) |
+| `client.capabilities()` | Registered tool handlers, persistence labels and planned extensions |
+| `client.attachments`, `client.voice`, `client.speech` | Uploads, and opt-in audio transcription and speech output |
+
+<Aside type="note">
+  The daemon operates on one workspace root. It comes from `ANIMAOS_WORKSPACE_ROOT` as the initial default (falling back to the daemon's working directory), and a configured workspace replaces it. The packaged `anima` program sets it from `anima setup`.
+</Aside>
+
+## Workspace Config
+
+```typescript
+const current = await client.workspace.get();
+// { configured, workspace: { rootPath, companyName, mission, values, hasAvatar } | null, defaultRoot }
+
+const checked = await client.workspace.validate({
+  rootPath: '/home/me/anima-workspace',
+  companyName: 'Home',
+  mission: 'Keep my projects moving.',
+});
+console.log(checked.rootPathExists);
+
+await client.workspace.put({
+  rootPath: '/home/me/anima-workspace',
+  companyName: 'Home',
+  mission: 'Keep my projects moving.',
+  values: ['Be direct', 'Ask before deleting'],
+});
+```
+
+| Method | Purpose |
+|--------|---------|
+| `get()` | The configured workspace, or `configured: false` plus the `defaultRoot` |
+| `put(config)` | Save the workspace (`rootPath`, `companyName`, `mission`, optional `values`) |
+| `validate(config)` | Same body with `validateOnly`; reports `rootPathExists` without saving |
+| `inspect(rootPath)` | Whether the folder holds an Anima `anima.yaml`, with a preview of its orchestrator and workers |
+| `resume(rootPath)` | Bring back the agents saved in that folder's `anima.yaml` |
+| `bootstrap({ workspace, agent, workers? })` | Create the workspace and its first agent (and optional workers) in one call |
+| `pickFolder()` | Open a native folder picker on the daemon's machine (`rootPath` is `null` if cancelled) |
+
+An existing folder can be used as a workspace: setup keeps its files and adds `anima.yaml`. If the folder already has one, `inspect()` reports it and `resume()` restores its saved agents.
+
+## Browse Files
+
+```typescript
+const { files, truncated } = await client.workspace.listFiles();
+const preview = await client.workspace.readFile(files[0].path);
+console.log(preview.content, preview.truncated);
+
+const blob = await client.workspace.downloadFile('reports/weekly.md');
+```
+
+`listFiles()` returns up to 200 entries (`path`, `name`, `sizeBytes`, `modifiedAtMs`) from the workspace, with `truncated` when the listing was cut short by its entry or depth limits. `readFile(path)` returns at most the first 128 KiB as text, with `truncated` set when it was cut. Both need a configured workspace (`409` otherwise). Hidden entries and excluded files are not listed.
+
+`downloadFile(path)` fetches the current file's raw bytes (up to 1 MiB) as a `Blob`; the SDK also bounds the body itself. It refuses symlinks and non-regular files, and the console offers it for `.txt`, `.md` and `.csv` files.
+
+## Instruction Files
+
+Place `SOUL.md` in the workspace root to define the lead agent's identity, and `ANIMA.md` (or `.anima.md`), `AGENTS.md` or `CLAUDE.md` for project instructions. Files are UTF-8, size-bounded and screened for suspicious instructions; they cannot override owner permissions. Priority and limits are in [the daemon README](https://github.com/G9000/animaOS-SWARM/blob/main/hosts/rust-daemon/README.md#standard-markdown-agent-files).
+
+`client.agentFiles.preview(agentId)` reports what would load, without file contents:
+
+```typescript
+const preview = await client.agentFiles.preview(agentId);
+
+console.log(preview.availability, preview.estimatedTokens);
+for (const entry of preview.entries) {
+  console.log(entry.relativePath, entry.kind, entry.state, entry.rawByteCount);
+}
+```
+
+Entries have a `kind` (`soul`, `anima`, `agents`, `claude` or `cursor`), a `state` (`loaded`, `truncated`, `shadowed`, `blocked`, `missing` and others), counts, a `digest` and any `threatIds`. The preview describes the current files, which can differ from an active run's snapshot.
+
+## Capabilities
+
+```typescript
+const capabilities = await client.capabilities();
+
+console.log(capabilities.persistence); // { controlPlane, memory, executionJournal }
+for (const tool of capabilities.tools) {
+  console.log(tool.category, tool.name, tool.requirements);
+}
+for (const extension of capabilities.extensions) {
+  console.log(extension.id, extension.status); // 'planned' | 'partial'
+}
+console.log(capabilities.limitations);
+```
+
+`DaemonCapabilities` has `schemaVersion: 1`, `tools`, `persistence`, `extensions` and `limitations`. It describes registered handlers and configuration labels only. A registered tool is not a permission grant or a connection check, and `persistence` names the configured backends rather than proving a successful storage probe. The extensions list marks areas such as voice, document processing and community bundles as `partial`, and camera, smart home and external coding agents as `planned`.
+
+## Attachments and Documents
+
+`client.attachments.upload(agentId, sessionId, file, name)` saves a file into the workspace and returns its `UploadedAttachment` (`id`, `name`, `mime`, `size`, `kind`, `path`, `createdAtMs`); pass the id in `attachmentIds` when you [start a run](/sdk/sessions/#attachments). Limits include 10 MiB per image, 1 MiB per text file and 25 MiB per PDF or Office document. Uploading never triggers transcription or extraction. An agent can read an existing workspace PDF, DOCX or XLSX only if the owner grants the `read_document` tool.
+
+## Voice and Speech
+
+Both are opt-in, owner-triggered and server-configured; chat never invokes them automatically.
+
+- **Transcription** needs `ANIMAOS_STT_ENABLED=true` and a server OpenAI Platform API key. `client.voice.capabilities(agentId, sessionId)` reports `available` and a `reason`; `client.voice.transcribe(agentId, sessionId, { operationId, attachmentId, provider: 'openai', consent: true })` returns an editable draft text (`operationId` is a UUID v4); `voice.cancel()` acknowledges local cancellation.
+- **Speech output** needs `ANIMAOS_TTS_ENABLED=true` with the same key. `client.speech.capabilities()` reports limits (2,048 characters in, WAV out); `client.speech.generate(agentId, sessionId, { operationId, messageId, text, consent: true })` returns a WAV `Blob`; `speech.cancel()` cancels.
+
+ChatGPT subscription credentials are excluded from both. See `docs/companion/voice.md` and `docs/companion/speech-output.md` in the repository for details and limits.
+
+## Where Next
+
+- [Sessions & Runs](/sdk/sessions/) for sending files and messages.
+- [Agents](/sdk/agents/) and [Tools](/sdk/agents/tools/) for granting tools.
+- [API Reference](/sdk/reference/) for every type.

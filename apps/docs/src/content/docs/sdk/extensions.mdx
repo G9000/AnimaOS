@@ -1,0 +1,156 @@
+---
+title: MCP, Skills & Learning
+description: Reviewed MCP tools, owner-approved skills, community bundles, and learning reviews
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+These clients extend what an agent can do, and each one keeps the owner in the loop: nothing is installed, started or granted without an explicit, reviewed step. All routes are owner routes, so scripts need `Authorization: Bearer <ANIMA_LOCAL_ADMIN_TOKEN>` (see [Authentication](/sdk/client/#authentication)).
+
+| Area | Accessor | What it is |
+|------|----------|------------|
+| MCP connections | `client.mcp` | External tool servers, reviewed tool by tool |
+| Skills | `client.skills` | Owner-approved instructions in `SKILL.md` files |
+| Community bundles | `client.communityBundles` | Reviewed packages of MCP connections and skills |
+| Learning | `client.learning` | Reviews that propose lessons and core-memory edits |
+
+## MCP
+
+An agent can use reviewed MCP tools from a Streamable HTTP server or a local process. Saving, listing or restoring a connection starts nothing; discovery and review make no tool calls and grant no authority. Every external tool uses the Exec approval class, and helpers inherit no MCP grants.
+
+The flow is: create, enable, connect (which discovers tools), review one exact tool descriptor, then grant its alias.
+
+```typescript
+let connection = await client.mcp.create(agentId, {
+  label: 'Docs server',
+  endpoint: 'https://mcp.example.com/mcp',
+});
+
+connection = await client.mcp.update(agentId, connection.id, {
+  expectedVersion: connection.version,
+  enabled: true,
+});
+connection = await client.mcp.connect(agentId, connection.id, {
+  expectedVersion: connection.version,
+});
+
+const candidate = connection.candidates[0];
+connection = await client.mcp.review(agentId, connection.id, {
+  expectedVersion: connection.version,
+  discoveryId: connection.discoveryId!,
+  descriptorDigest: candidate.descriptorDigest,
+});
+
+const reviewed = connection.reviewedTools[0];
+const outcome = await client.mcp.setGrant(agentId, connection.id, reviewed.alias, {
+  expectedVersion: connection.version,
+  descriptorDigest: reviewed.descriptorDigest,
+  granted: true,
+});
+console.log(outcome.toolNames);
+```
+
+| Method | Purpose |
+|--------|---------|
+| `list(agentId)`, `get(agentId, id)` | Saved configuration and runtime state |
+| `create(agentId, input)` | Save a disabled connection: `label` plus exactly one of `endpoint` or `stdio: { executable, args }` |
+| `update(agentId, id, input)` | `expectedVersion` plus `label`, `enabled` or an HTTP `endpoint`; local-process launch cannot be edited |
+| `connect`, `discover`, `disconnect` | Start the transport and discover tools, refresh discovery, or retire the transport (reviewed metadata and grants stay) |
+| `review(agentId, id, { expectedVersion, discoveryId, descriptorDigest })` | Save one exact tool descriptor; this grants nothing |
+| `setGrant(agentId, id, alias, { expectedVersion, descriptorDigest, granted })` | Grant or revoke one reviewed alias on the agent's tools |
+| `saveBearerCredential`, `clearBearerCredential` | Static Bearer token for an HTTPS connection, stored in the OS credential vault |
+| `remove(agentId, id, { expectedVersion })` | Delete the connection and its aliases from the grants |
+
+Every mutation carries the connection's current `expectedVersion`; a stale one is rejected. A connection's `state` is `disconnected`, `connecting`, `needs_review`, `ready`, `degraded` or `stopping`. Endpoints must be HTTPS or literal loopback HTTP, with no user info, query string or fragment; OAuth, arbitrary headers, shell command strings and environment settings are not supported. `hasBearerCredential` only says a credential reference is saved, not that the vault or the server accepts it. A changed remote schema yields a new, ungranted alias, so a server cannot widen its tools silently. See `docs/companion/mcp.md` in the repository for platform limits on local processes.
+
+## Skills
+
+A skill is `<workspace>/skills/<slug>/SKILL.md`: YAML front matter with a `name` (1 to 64 characters) and `description` (1 to 300 characters) on one line each, then a Markdown body of up to 32 KiB. Skill routes answer `409 Skills need a configured workspace` until a workspace exists. The registry pins each skill to the SHA-256 of the file the owner approved: a file edited afterwards reads `changed` and is never loaded until it is approved again. Skill status is `active`, `changed`, `missing` or `invalid`, and only `active` skills load.
+
+```typescript
+const skill = await client.skills.save('release-notes', {
+  name: 'Release notes',
+  description: 'Draft release notes from merged pull requests.',
+  body: '# Release notes\n\nGroup changes by area. Keep entries to one line.',
+});
+
+console.log(skill.status, skill.approvedHash);
+
+// Use it for one run
+await client.runs.start(agentId, sessionId, { text: 'Draft v1.2 notes', skill: 'release-notes' }, { idempotencyKey: crypto.randomUUID() });
+```
+
+| Method | Purpose |
+|--------|---------|
+| `list()`, `get(slug)` | Skills (the daemon rescans the folder first); `get` also returns what the file holds now |
+| `save(slug, input)` | Create or replace a skill's content, which approves it |
+| `setEnabled(slug, enabled)` | Switch a skill |
+| `approve(slug, hash)` | Approve a changed skill's current file, reviewed as `hash` |
+| `remove(slug)` | Move the skill folder to the workspace trash |
+| `drafts({ status })` | Pending or decided drafts (agents propose drafts with `propose_skill`) |
+| `approveDraft(id, { body?, hash? })`, `rejectDraft(id)` | Decide a draft; a file draft needs the reviewed `hash` |
+| `importFile(blob, { filename?, slug? })` | Import a `SKILL.md` as a pending draft |
+
+An agent with the `load_skill` tool sees an index of up to 50 enabled, active skills. Approved instructions are instructions: review a draft before approving it. A `SKILL.md` an agent wrote with `write_file` is only a draft until you approve its exact hash. The SDK exports the limits `MAX_SKILL_BODY_BYTES`, `MAX_SKILL_NAME_CHARS`, `MAX_SKILL_DESCRIPTION_CHARS` and `SKILL_SLUG_PATTERN`. Skill changes are announced as `skill.updated` on the [event stream](/sdk/sessions/#stream); `isSkillEvent()` narrows it.
+
+## Community Bundles
+
+A bundle packages MCP connections and skills behind one reviewed manifest. Installing a bundle is metadata and content state: it never grants a tool or starts a process.
+
+```typescript
+const review = await client.communityBundles.review(agentId, {
+  manifestText,           // the bundle manifest JSON text
+  programBindings: {},    // maps local-process component refs to installed programs
+});
+
+// Inspect review.components, review.permissions and review.compatibility first.
+const bundle = await client.communityBundles.install(agentId, {
+  reviewId: review.id,
+  reviewDigest: review.reviewDigest,
+});
+```
+
+Methods: `list`, `get`, `review`, `install`, `update`, `setEnabled` and `remove`. An update review needs both `bundleId` and `expectedBundleVersion`. Enable, disable and remove carry the bundle's `expectedVersion` and `reviewedComponentStateDigest`. Components are `mcpHttp`, `mcpStdio` or `skill`; the owner still approves skills and grants MCP tools separately.
+
+## Learning Reviews
+
+The daemon can review finished work and propose lessons. Generated advice is unverified: acknowledging a proposal records your decision, and does not save a fact, edit a skill or run the suggestion.
+
+```typescript
+const policy = await client.learning.policy(agentId);
+await client.learning.setPolicy(agentId, { autoEnabled: true });
+
+const review = await client.learning.requestReview(agentId, runId);
+const reviews = await client.learning.listReviews(agentId);
+
+for (const proposal of reviews[0].proposals) {
+  if (proposal.decision === 'pending') {
+    await client.learning.decideProposal(agentId, reviews[0].id, proposal.id, {
+      decision: 'acknowledged',
+      expectedVersion: proposal.decisionVersion,
+    });
+  }
+}
+```
+
+| Method | Purpose |
+|--------|---------|
+| `policy(agentId)`, `setPolicy(agentId, { autoEnabled })` | Read the policy; switch automatic task reviews |
+| `requestReview(agentId, runId)` | Review one completed run |
+| `listReviews(agentId)`, `getReview(agentId, reviewId)` | Review records with `state`, `evidenceBrief`, `usage` and `proposals` |
+| `decideProposal(agentId, reviewId, proposalId, { decision, expectedVersion })` | `acknowledged` or `dismissed` |
+| `undoLesson(agentId, reviewId, proposalId, { expectedVersion })` | Forget a kept lesson, or reverse an applied core-memory edit |
+| `cancelReview(agentId, reviewId)` | Cancel a pending review |
+| `createSkillDraft(agentId, reviewId, proposalId, input)` | Turn a lesson into a pending skill draft |
+
+Conversation reviews run every 10 owner messages per agent when learning is on, and may propose up to 5 [core-memory](/sdk/memories/core/) edits plus lessons (`proposal.coreEdit` marks an edit). In Free mode the edits apply at once, each with Undo; in Strict mode they wait for the owner. Conversation reviews are limited to 8 per agent per 24 hours. Policy fields such as `dailyLimit`, `remaining` and `nextAvailableAtMs` report the current budget.
+
+<Aside type="note">
+  A learning review is a model call, and its usage is recorded. A timeout or cancellation can still incur provider charges; the deadline is not a hard billing cap.
+</Aside>
+
+## Where Next
+
+- [Approvals](/sdk/approvals/) for the Exec approval every external tool call passes through.
+- [Core Memory & Export](/sdk/memories/core/) for what conversation reviews edit.
+- [API Reference](/sdk/reference/) for every type.

@@ -1,0 +1,77 @@
+---
+title: Persistence
+description: The daemon's control plane, history store, memory store, key pool and credential storage, plus upgrades and rollback
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The daemon keeps durable state in four places, chosen independently at startup (`app/persistence.rs`, `configure_persistence`):
+
+| Store | What it holds | Backends | Source |
+|-------|---------------|----------|--------|
+| **Control plane** | Agents and their runtime snapshots, swarms, sessions (hot tail), the run ledger, approval policies and rules, skills registry and drafts, automations, jobs and goals, connector records (never secrets), workspace settings, pricing overrides, side-task model, MCP and bundle records, learning state | JSON file, or Postgres `host_snapshots` row `control_plane` | `control_plane_store.rs` |
+| **History store** | Full message transcripts, finished runs, usage rows, decided approvals, automation fire records, attachment metadata | SQLite, Postgres `history_*` tables, or in memory | `history/` |
+| **Memory store** | The `MemoryManager` snapshot (memories, entities, relationships, temporal facts) and, separately, embedding vectors | JSON file, SQLite, or Postgres `host_snapshots` row `memory` | `memory_store.rs`, `memory_embeddings.rs` |
+| **Step log** | Tool-step records that let a retried request reuse completed tool results | Postgres `step_log` only | `postgres.rs` |
+
+Two more things are durable but are not "stores": the **provider key pool** file and **credentials** in the OS credential store. Everything else (live runtimes, SSE streams, PTY and ACP sessions, MCP connections, browser scopes, pending approvals) is process memory and is gone after a restart.
+
+## Persistence Modes
+
+`ANIMAOS_RS_PERSISTENCE_MODE`:
+
+- `memory` (default): no Postgres. The control plane is **ephemeral** unless `ANIMAOS_RS_CONTROL_PLANE_FILE` is set. Despite the name, file stores are still honored in this mode: the VPS package runs in `memory` mode with explicit files under `/state`.
+- `postgres`: requires `DATABASE_URL`; connects, runs the embedded migrations in `migrations/` (`step_log` and `host_snapshots`; relaxed step-index uniqueness; `history_*` tables) and **refuses to start** if any step fails. Postgres becomes the default home of the control plane and the memory snapshot, unless an explicit file variable is set.
+
+`/ready` reports `controlPlaneDurability` (`ephemeral`, `json`, `postgres`) and `database` (`configured`, `disabled`, `missing`).
+
+## Control Plane
+
+`CONTROL_PLANE_STORE_VERSION` is currently **21** (`control_plane_store.rs`). The snapshot is versioned JSON written atomically (temporary file plus rename for JSON, a transaction for Postgres). On load:
+
+- A snapshot **newer** than the running daemon is refused (`unsupported control plane store version`).
+- An **older** snapshot is upgraded. Before saving the new version the daemon writes a backup. In JSON mode this is `<control-plane-file>.pre-<feature>.bak` (for example `.pre-sessions.bak`, `.pre-approvals.bak`, `.pre-discord.bak`, `.pre-drive.bak`; the suffix constants sit at the top of the file). In Postgres mode it is the `control_plane.backup.<old version>` row of `host_snapshots`. If the backup cannot be written the daemon refuses to boot and leaves the snapshot untouched. An existing earlier backup is never overwritten by a later upgrade.
+- Anything that was `running` when the process died is restored as failed or interrupted; a model turn is never resumed mid-way.
+
+### Restore consistency
+
+A rollback is a set of stores, not one file. The control-plane backup is only a component: restoring it alone while leaving a newer history store can resurrect rows later. For a rollback, stop the daemon and restore the matching generation of control plane, history, memory, workspace and uploads, and the credential store together, with the recorded binaries and (in the VPS package) the original keyring password. Changes made since the backup are lost. Do not edit snapshot versions by hand, and do not apply old per-milestone SQL notes from the README to a current store. `deploy/vps/README.md` has the full backup and restore procedure.
+
+## History Store
+
+Every committed message and every terminal run is written through an **outbox** to the history store (`history/outbox.rs`), which a `HistoryWorker` flushes in the background and on shutdown, and which prunes the control plane's hot tail every 10 minutes (`sessions/pruning.rs`). The store is append-oriented and row-based, so session reads, message search, exports and old runs do not depend on the control plane keeping everything.
+
+| Choice | When |
+|--------|------|
+| SQLite at `ANIMAOS_RS_HISTORY_SQLITE_FILE` | explicit |
+| SQLite at `history.sqlite` beside the control-plane file | a control-plane file is set and no explicit path |
+| Postgres tables `history_messages`, `history_runs`, `history_usage`, `history_approvals`, `history_schedule_runs`, `history_attachments` | Postgres control plane and no explicit SQLite file |
+| In memory, 100,000 rows per table (`EPHEMERAL_HISTORY_MAX_ROWS`) | otherwise; nothing is pruned from the control plane |
+
+A history file that cannot be opened refuses boot before the control-plane snapshot is touched. `/api/status` reports the store's health, queue size, the last (redacted) error and a flush-error count; `/ready` reports `not_ready` while it is failing. Search tokenizes at most 8 words per query and indexes at most 64 KiB of text per message (the full record is never truncated). The Postgres history tables need **Postgres 12 or newer** because `history_messages.search` is a generated column; rolling back across the history migration (`20260923000000_history_store.sql`) also needs its `_sqlx_migrations` row removed and the `history_*` tables moved aside, since sqlx refuses to start with a missing applied migration.
+
+Deleting sessions or agents records a durable **history deletion** that is replayed at boot, so a crash between the control-plane save and the history delete does not resurrect data.
+
+## Memory Store and Embeddings
+
+Choice and defaults are in [Memory in the Daemon](/architecture/rust-core/anima-memory/daemon-memory/#stores-and-persistence) and [Environment](/hosts/rust-daemon/env/#persistence): explicit JSON or SQLite file, else Postgres, else `memory.sqlite` beside the control-plane file, else memory-only. Writes autosave after memory routes, tools, reviews and retention runs. Vectors go to `memory_embeddings` tables in the same SQLite file (or `ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE`); in Postgres staging they are process-local and rebuilt from the snapshot on boot.
+
+## Provider Key Pool
+
+`provider_keys/` holds a pool of API keys per provider with rotation: a key that fails for a key-specific reason (rate limit, overload, billing, auth) rests and the call moves to the next ready key. The rest is the provider's own retry time for rate limits and overload; an hour for billing; 5 minutes for a rejected key; 60 seconds for any other failure on the only usable key; otherwise an hour; never more than 24 hours. The environment key is always key `env`, listed first, and is never written to the file. Keys are returned masked. Selection strategies: `fill_first` (default), `round_robin`, `random`, `least_used`. The file is `ANIMAOS_RS_PROVIDER_KEYS_FILE`, else `provider-keys.json` beside the control-plane file, else keys last until restart (`persisted: false`). An unreadable or unsupported file is left untouched and the daemon runs on environment keys with a warning.
+
+## Credentials
+
+Secrets never enter the control plane, history, logs or model-visible text. They live in the OS credential store through the `keyring` crate (`keychain.rs`): Telegram and Discord bot tokens, Google and Microsoft connector tokens and OAuth app secrets, MCP credentials, and the ChatGPT subscription login (a single item on macOS and Linux; chunked on Windows because Credential Manager caps each secret at 2,560 bytes). `ANIMAOS_RS_KEYCHAIN_NAMESPACE` prefixes service names so an installed copy and a development copy never share or overwrite items. Debug builds on macOS are ad-hoc signed, so keychain "Always Allow" resets on every rebuild unless you sign with a stable identity (see [Local Development](/hosts/rust-daemon/local/)).
+
+## Development Defaults
+
+`bun dev` sets `ANIMAOS_RS_CONTROL_PLANE_FILE` to `~/.animaos-swarm/data/control-plane.json` (so `history.sqlite` and `memory.sqlite` land beside it) unless you set your own path, run Postgres mode, or set `ANIMAOS_DEV_EPHEMERAL=1`. This is `tools/workspace-dev/src/hosts.ts`.
+
+<Aside type="caution" title="Same folder as the installed program">
+  The packaged `anima` program keeps its data in `~/.animaos-swarm/data/` too, with the same file names. The dev loop and an installed copy therefore point at the same default files unless you override the path. They use different credential namespaces and ports, but not different data folders. Set `ANIMAOS_RS_CONTROL_PLANE_FILE` (and a matching `ANIMAOS_RS_PROVIDER_KEYS_FILE` if you add keys) to a project-local path, or `ANIMAOS_DEV_EPHEMERAL=1`, when you do not want to touch an installed copy's data.
+</Aside>
+
+## Postgres Staging Notes
+
+Postgres mode stores the control plane and memory snapshot in `host_snapshots`, step logs in `step_log` and history in `history_*`. Run **one** daemon replica: vectors are process-local and several daemons would each hold their own run state and workers. See [Staging Deployment](/hosts/rust-daemon/staging/).

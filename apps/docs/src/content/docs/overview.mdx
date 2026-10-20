@@ -1,115 +1,144 @@
 ---
 title: Overview
-description: What is animaOS, how it works, and what you can build with it.
+description: What animaOS is, how its pieces fit together, and where the SDK, CLI and TUI fit in.
 ---
 
 import { Card, CardGrid, Aside } from '@astrojs/starlight/components';
 
-**animaOS** is a host-agnostic agent runtime designed for building, deploying, and operating autonomous AI agents at scale. It separates the core intelligence engine from host-specific concerns like HTTP, databases, and filesystems — so your agent logic stays pure, testable, and portable across any environment.
+**animaOS** is an agentic operating system: persistent AI agents, memory, tools and automations in one personal workspace. It runs on your computer or your own server, on top of your existing operating system. You choose the models, connect the tools, and decide how independently your agents work.
 
-At its heart, animaOS is three things:
+You talk to your agent (anima) in the web console or through a connected chat app. You give it work, let it bring in helpers, and follow its plans, actions and results in one place. Its context carries across conversations through saved memory and reusable skills.
 
-1. **A runtime engine** that manages agent lifecycles, executes tools, handles LLM provider calls, and maintains state.
-2. **A memory system** with hybrid recall — combining BM25 lexical search, vector semantic search, temporal reasoning, and relationship graphs.
-3. **A swarm coordinator** that orchestrates multi-agent collaboration with configurable strategies.
+This site documents the developer surfaces: the **TypeScript SDK**, the **`animaos` CLI** and the **terminal UI**. All three are thin clients of one process, the **Rust daemon**, which owns agents, memory, schedules, connectors and execution.
 
-Whether you're building a single research assistant or a fleet of cooperating agents, animaOS gives you the primitives to do it without vendor lock-in.
-
-## Philosophy
+## What you can do with it
 
 <CardGrid>
-  <Card title="Host-Agnostic Core" icon="seti:rust">
-    The Rust core knows nothing about HTTP, databases, or filesystems. It operates on pure data structures and snapshots. Hosts provide the "reality" — the core provides the behavior.
+  <Card title="Keep persistent agents" icon="seti:rust">
+    Each agent has its own main conversation, memory, tools and approval policy. Registered agents, sessions and schedules survive restarts when persistence is configured.
   </Card>
-  <Card title="Composable by Design" icon="seti:typescript">
-    Agents are configured, not coded. Tools, memory, and model settings snap together like LEGO. Reuse agent configs across projects without rewriting boilerplate.
+  <Card title="Remember and recall" icon="seti:db">
+    Facts, preferences and always-on core memory, searched with BM25 plus embeddings, relationships and temporal facts. Owners can review, correct, export and delete what is kept.
   </Card>
-  <Card title="Memory-First" icon="seti:db">
-    Agents remember. The memory system isn't an afterthought — it's a first-class citizen with search, recall, evaluation, retention, and relationship tracking built in.
+  <Card title="Delegate and coordinate" icon="seti:typescript">
+    Agents bring in helpers, and swarms run a manager with workers under supervisor, round-robin or dynamic strategies.
+  </Card>
+  <Card title="Run work unattended" icon="seti:terminal">
+    Jobs, goals and automations (interval, daily, cron and one-time triggers) run inside the daemon while the console is closed. Approvals decide what an unattended run may do.
+  </Card>
+  <Card title="Meet it where you are" icon="seti:html">
+    The web console, Telegram, Discord, Gmail, Outlook, Google Calendar and Google Drive. Voice transcription and speech output are opt-in.
+  </Card>
+  <Card title="Stay in control" icon="seti:docker">
+    Allow, ask or deny per risk class, always-allow rules, reviewed MCP tools and skills, usage and cost records, and logs.
   </Card>
 </CardGrid>
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Your Application                       │
-│              (SDK, CLI, or custom integration)              │
-├─────────────────────────────────────────────────────────────┤
-│                        Host Layer                           │
-│  ┌─────────────┐                                            │
-│  │ Rust Daemon │                                            │
-│  │ (ready)     │                                            │
-│  └─────────────┘                                            │
-├─────────────────────────────────────────────────────────────┤
-│                      Core Runtime                           │
-│  ┌──────────┐  ┌──────────────┐  ┌───────────────────────┐  │
-│  │anima-core│  │ anima-memory │  │   anima-swarm         │  │
-│  │- agent   │  │ - BM25       │  │   - coordinator       │  │
-│  │  runtime │  │ - vectors    │  │   - message bus       │  │
-│  │- events  │  │ - temporal   │  │   - strategies        │  │
-│  │- tools   │  │ - relations  │  │                       │  │
-│  └──────────┘  └──────────────┘  └───────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
+```text
+ web console   SDK (TypeScript)   CLI (animaos)   TUI (animaos launch)   Telegram / Discord
+      \              |                 |                  |                    /
+       \_____________|_________________|__________________|___________________/
+                                       |  HTTP + SSE
+                         +-------------v--------------+
+                         |   Rust daemon (anima-daemon)|   :8080 in development
+                         |   Axum host, owner auth,    |   :8787 when installed
+                         |   connectors, persistence   |
+                         +-------------+--------------+
+                                       |
+        anima-core | anima-memory | anima-swarm | anima-schedule | anima-harness
+                                       |
+                              model providers (OpenAI, Anthropic,
+                              Google, Ollama, OpenRouter, and more)
 ```
 
-The **core** is where all the intelligence lives. It has zero I/O dependencies — no HTTP framework, no database driver, no filesystem access. This makes it trivial to test, embed in other applications, or port to new environments.
-
-The **host** wraps the core and exposes it over a runtime boundary. The production-ready Rust host provides an Axum HTTP/SSE server. Other hosts can implement the same HTTP/SSE contract.
+The reusable runtime lives in the Rust workspace under `packages/core-rust` and stays independent of any host. The daemon (`hosts/rust-daemon`) wraps it and exposes HTTP and server-sent events. The SDK, CLI and TUI never run agent code themselves; they call the daemon.
 
 <Aside type="note">
-  With Postgres-backed daemon persistence enabled, tool steps are written durably and can be reused on an explicit retry. Reuse is request-keyed, not prompt-keyed: callers must repeat the same `retryKey` or `idempotencyKey` in request metadata for a retried run to reuse completed tool results.
+  The Rust daemon is the only supported host today. Earlier TypeScript runtime packages, the mod system and the agency generator have been removed. `animaos create` scaffolds a single agent workspace, and `bun dev --host` accepts only `rust`.
 </Aside>
 
-## Key Concepts
+## Ways to run it
+
+| | Packaged `anima` | From the repository |
+|---|------------------|---------------------|
+| What it is | An installable program that wraps the daemon, embeds the web console, and adds a tray icon, supervisor and self-updater | The development workflow |
+| Start | `anima setup`, then `anima` | `bun dev --host rust` |
+| API and console | Port `8787` (control port `8788`) | Daemon on `8080`, web console on `4200` |
+| Data | `~/.animaos-swarm/` | Its own development data |
+
+The packaged program's commands include `anima`, `anima setup`, `anima status`, `anima start`, `anima stop`, `anima restart`, `anima quit`, `anima logs`, `anima update` and `anima config`. It is a separate copy from a development daemon; the two never share data or credentials. See the [packaged Anima guide](https://github.com/G9000/animaOS-SWARM/blob/main/apps/contributor-docs/src/content/docs/packaged-anima.md) for install, updates and limits.
+
+For development, run from the repository root:
+
+```bash
+bun install --frozen-lockfile
+bun x nx run @animaOS-SWARM/sdk:build
+bun dev --host rust
+```
+
+Then open `http://localhost:4200`, create your companion, select its workspace and connect a model provider. `bun run daemon` starts the daemon alone.
+
+## Key concepts
 
 ### Agents
 
-An agent is an autonomous LLM-powered runtime with a configuration, state, and optional tools. You define what it knows, how it behaves, and what it can do — the runtime handles the rest.
+An agent is a persistent runtime registered with the daemon: a model and provider, a system prompt and character fields, tools, settings, memory, and a main conversation. You grant tools per agent, and an approval policy gates what they can do.
 
-- **Configuration** — name, model, provider, system prompt, personality traits
-- **Tools** — daemon-registered tools the agent can invoke, referenced by name or JSON descriptor (web fetch, memory search)
-- **State** — runtime status, message history, token usage
+[Learn more about Agents](/sdk/agents/)
 
-[Learn more about Agents →](/sdk/agents/)
+### Sessions and runs
+
+Conversations are **sessions**. Sending a message creates a **run** that executes in the background; you follow it on a live event stream, and can steer or stop it. This is the model the web console uses.
+
+[Learn more about Sessions & Runs](/sdk/sessions/)
 
 ### Swarms
 
-A swarm is a coordinated group of agents that collaborate on a shared task. The swarm runtime manages turn-taking, message passing, and result synthesis.
+A swarm is a manager and workers coordinated by a strategy: `supervisor`, `round-robin` or `dynamic`. The daemon streams their messages, tool calls and token usage.
 
-- **Strategies** — `round-robin`, `supervisor`, or `dynamic` delegation
-- **Manager** — the lead agent that orchestrates the group
-- **Workers** — agents that execute subtasks and report back
-- **Events** — real-time SSE stream of everything happening inside the swarm
+[Learn more about Swarms](/sdk/swarms/)
 
-[Learn more about Swarms →](/sdk/swarms/)
+### Memory
 
-### Memories
+Agents keep facts, observations, task results and reflections, plus two always-on core blocks (About you and Agent notes). Retrieval fuses keyword matching, embeddings, relationships, temporal facts, recency and importance. Memory can be exported as JSON or Markdown.
 
-The memory system gives agents long-term recall through a hybrid retrieval pipeline.
+[Learn more about Memories](/sdk/memories/)
 
-- **Search** — BM25 + vector similarity for finding relevant memories
-- **Recall** — fuses lexical, vector, relationship, temporal, recency, and importance signals
-- **Evaluation** — automatic deduplication and quality scoring before storage
-- **Retention** — configurable decay and cleanup to prevent unbounded growth
-- **Relationships** — graph connections between agents, users, and entities
+### Approvals, jobs and automations
 
-[Learn more about Memories →](/sdk/memories/)
+Tool calls are classed as read, write, exec, network or delegate; by default only exec asks. Jobs and automations let agents work without a chat message, and an unattended run that needs a decision waits for the owner.
 
-## Getting Started in 60 Seconds
+[Learn more about Approvals](/sdk/approvals/) and [Jobs & Automations](/sdk/automations/)
+
+### Persistence and durability
+
+By default the daemon runs ephemeral. Configure a control-plane file (or Postgres), history and a memory store to keep agents, conversations and memories across restarts; the packaged program does this for you. A restart marks interrupted runs for review instead of replaying them.
+
+## Clients
+
+| Client | Use it for | Docs |
+|--------|-----------|------|
+| TypeScript SDK | Programmatic access to every daemon route | [SDK Quick Start](/sdk/quickstart/) |
+| `animaos` CLI | Scaffold an agent workspace, run an agent or swarm, chat, inspect agents | [CLI](/cli/) |
+| TUI | Watch a swarm work from an `anima.yaml` workspace, with history and retry | [TUI](/tui/) |
+
+## Getting started in 60 seconds
 
 ```bash
-# 1. Start the daemon
+# 1. Start the daemon (from the repository root)
 bun run daemon
 
-# 2. Set your provider key
+# 2. Give it a model (or connect one in the web console)
 export OPENAI_API_KEY="sk-..."
 
-# 3. Create and run an agent
-npx -y @animaOS-SWARM/sdk-cli agent create --name helper --model gpt-4o-mini
+# 3. Build the CLI and run one task
+bun run build:cli-sdk
+bun run animaos run "Say hello" -m gpt-4o-mini
 ```
 
-Or use the TypeScript SDK for full programmatic control:
+Or use the TypeScript SDK for full control:
 
 ```typescript
 import { agent, createDaemonClient } from '@animaOS-SWARM/sdk';
@@ -131,3 +160,7 @@ const result = await client.agents.run(helper.state.id, {
 
 console.log(result.result.data?.text);
 ```
+
+<Aside type="caution">
+  AnimaOS is under active development. Connector and tool capabilities have setup and scope limits, browser work is scoped, and interrupted work may need review after a restart. The daemon README and the capabilities endpoint describe current limits.
+</Aside>

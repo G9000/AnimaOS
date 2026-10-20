@@ -5,154 +5,146 @@ description: How the animaOS monorepo is organized
 
 import { Aside } from '@astrojs/starlight/components';
 
-<Aside type="caution" title="Work in Progress">
-  This contributor documentation is actively being written. Sections may be incomplete, reorganized, or expanded.
-</Aside>
-
-The animaOS monorepo uses **Nx** for task orchestration and **Bun** for package management. All projects are auto-discovered via `project.json` files.
+The animaOS monorepo uses **Nx** for task orchestration, **Bun** for package management and one **Cargo workspace** (the root `Cargo.toml`) for every Rust crate. Nx discovers projects through `project.json` and `package.json` files.
 
 ## Directory Layout
 
 ```
-animaos-kit/
+animaOS-SWARM/
 ├── apps/
-│   ├── docs/               # Public user-facing docs (Astro + Starlight)
-│   ├── contributor-docs/   # Contributor docs (this site)
+│   ├── web/                # Web console (React, thin client of the daemon)
+│   ├── web-e2e/            # Playwright journeys for the console
 │   ├── playground/         # Interactive playground
-│   ├── web/                # Web UI
-│   └── web-e2e/            # Web end-to-end tests
+│   ├── docs/               # Public docs (Astro + Starlight)
+│   └── contributor-docs/   # This site
 ├── hosts/
-│   └── rust-daemon/        # Production Rust host
+│   ├── rust-daemon/        # anima-daemon: the Axum HTTP/SSE host
+│   └── anima/              # anima: installable supervisor, tray, updater
 ├── packages/
-│   ├── core-rust/          # Rust engine crates
-│   │   ├── crates/
-│   │   │   ├── anima-core/
-│   │   │   ├── anima-memory/
-│   │   │   └── anima-swarm/
-│   ├── sdk/                # TypeScript SDK (daemon client)
-│   ├── cli/                # Command-line interface
-│   ├── tui/                # Ink terminal UI
-│   └── ui/                 # Shared React UI components
+│   ├── core-rust/
+│   │   ├── crates/         # 11 Rust crates (below)
+│   │   ├── acceptance/     # Node oracle tests for coding/provider/research tasks
+│   │   └── browser-worker/ # Playwright worker used by the daemon's browser tools
+│   ├── sdk/                # @animaOS-SWARM/sdk, daemon client
+│   ├── cli/                # @animaOS-SWARM/cli, the `animaos` command
+│   ├── tui/                # @animaOS-SWARM/tui, Ink terminal UI
+│   └── ui/                 # Shared React UI primitives
 ├── tools/
-│   └── workspace-dev/      # Dev launcher
-├── nx.json                 # Nx workspace config
-├── package.json            # Root workspace manifest
-└── Cargo.toml             # Rust workspace manifest
+│   ├── workspace-dev/      # Dev launcher (bun dev)
+│   ├── memory-eval/        # LoCoMo download and benchmark scripts
+│   └── release/            # Release signing script and release docs
+├── bundles/coding-agents/  # Skill bundles that teach agents to drive coding CLIs
+├── deploy/vps/             # Compose + Caddy package for a one-owner VPS
+├── docs/                   # Longer design notes (companion guides, plans, specs)
+├── nx.json
+├── package.json
+├── Cargo.toml              # Rust workspace manifest
+└── dist-workspace.toml     # cargo-dist release config (only `anima` ships)
 ```
 
-## Dependency Graph
+To see the Nx project names: `bun x nx show projects`. They are `core-rust`, `rust-daemon`, `anima`, `workspace-dev`, `@animaOS-SWARM/{sdk,cli,tui,ui,web,web-e2e,playground,docs,contributor-docs}`.
+
+## Rust Workspace
+
+Workspace members: the eleven crates below, `hosts/rust-daemon` (package `anima-daemon`) and `hosts/anima` (package `anima`). The workspace forbids `unsafe_code`.
+
+| Crate | Responsibility | Depends on |
+|-------|----------------|------------|
+| `anima-core` | Agent loop, traits, durable engine, policy and capability contracts. No I/O. | none (workspace-internal) |
+| `anima-memory` | Memory store, BM25, recall fusion, temporal facts, external-provider plug-in point. No I/O. | `anima-core` |
+| `anima-swarm` | Swarm coordinator, strategies, message bus | `anima-core`, `anima-memory` |
+| `anima-schedule` | Pure tick-driven job scheduler | none |
+| `anima-service-adapters` | Contracts and validation for browser, connectors, bundles, speech, documents | `anima-core` |
+| `anima-document-content` | DOCX/PDF/XLSX text extraction from bytes | `anima-service-adapters` |
+| `anima-model-adapters` | Provider catalog and HTTP adapters, pricing table, speech/transcription | `anima-core`, `anima-service-adapters` |
+| `anima-harness` | Embeddable builder: provider + tools + agent loop | `anima-core`, `anima-model-adapters` |
+| `anima-process` | Process custody and PTY app sessions | none |
+| `anima-acp` | Agent Client Protocol client | `anima-process` |
+| `anima-worktree` | Git worktree isolation for helper agents | none |
+
+Details are under [Rust Core](/architecture/rust-core/).
+
+## Dependency Shape
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                  TypeScript surfaces                         │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────────────┐ │
-│  │   SDK   │  │   CLI   │  │   TUI   │  │ Web / Playground│ │
-│  └────┬────┘  └────┬────┘  └────┬────┘  └────────┬────────┘ │
-│       └────────────┴────────────┴────────────────┘          │
-│                    thin clients over HTTP / SSE              │
-└─────────────────────────────┬───────────────────────────────┘
-                              │  127.0.0.1:8080
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                        Host                                  │
-│  ┌─────────────────┐                                         │
-│  │  rust-daemon    │                                         │
-│  └────────┬────────┘                                         │
-│           ▼                                                  │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │                    core-rust                         │    │
-│  │  ┌───────────┐  ┌───────────┐  ┌─────────────────┐  │    │
-│  │  │anima-core │  │anima-memory│  │  anima-swarm    │  │    │
-│  │  │  runtime  │  │  memory   │  │  coordination   │  │    │
-│  │  └───────────┘  └───────────┘  └─────────────────┘  │    │
-│  └─────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
+ sdk ◀── cli ──▶ tui         web   playground        thin clients
+   └──────┬───────┴───────────┘
+          │  HTTP / SSE
+          ▼
+   hosts/anima  ──wraps──▶  hosts/rust-daemon (anima-daemon)
+                               │
+                               ▼
+        anima-core, anima-memory, anima-swarm, anima-model-adapters,
+        anima-service-adapters, anima-document-content, anima-process,
+        anima-acp, anima-worktree, anima-schedule
 ```
+
+`rust-daemon` declares all of the crates except `anima-harness` as dependencies. (`anima-schedule` is declared but not imported: the daemon's automations engine lives in `hosts/rust-daemon/src/schedules/`. See [anima-schedule](/architecture/rust-core/anima-schedule/).)
 
 ## Package Details
 
 ### `packages/core-rust/`
 
-Reusable Rust engine crates. These have **no I/O dependencies** — no HTTP clients, no database drivers, no filesystem access. They operate on pure data structures and trait interfaces.
+Reusable Rust crates plus two non-crate helpers: `acceptance/` (Node oracle tests behind the `coding-*`, `provider-task-*` and `research-*` Nx targets) and `browser-worker/` (the Playwright worker `worker.mjs`). Nx targets on `core-rust`:
 
-| Crate | What it does | Key exports |
-|-------|-------------|-------------|
-| `anima-core` | Agent execution loop, trait interfaces, runtime primitives | `AgentRuntime`, `ModelAdapter`, `Provider`, `Evaluator`, `DatabaseAdapter`, `EngineEvent` |
-| `anima-memory` | BM25-backed memory storage, vector search, temporal reasoning | `MemoryManager`, `BM25`, `MemoryRecallResult`, `MemoryEvaluationDecision` |
-| `anima-swarm` | Multi-agent coordination strategies | `SwarmCoordinator`, `MessageBus`, `SwarmStrategy` |
+| Target | What it does |
+|--------|--------------|
+| `build`, `test`, `lint` | Cargo build / test / `cargo fmt --check` for all eleven crates |
+| `memory-eval` | Baseline memory evaluation cases |
+| `memory-locomo`, `memory-locomo-fetch`, `memory-locomo-dataset` | LoCoMo smoke, download and dataset benchmarks |
+| `browser-worker-test`, `coding-*-test`, `provider-task-acceptance-test`, `research-acceptance-test` | Node test oracles |
 
-See [Rust Core](/architecture/rust-core/) for details.
-
-### `packages/sdk/`, `packages/cli/`, `packages/tui/`
+### `packages/sdk/`, `packages/cli/`, `packages/tui/`, `packages/ui/`
 
 The TypeScript surfaces are thin clients of the Rust daemon. They own no execution engine.
 
-- `sdk` — daemon HTTP/SSE clients, the SDK's own type exports (`Content`, `TaskResult`, `AgentConfig`, `SwarmConfig`, ...), the `agent()` and `swarm()` config helpers, and daemon-health helpers
-- `cli` — the `animaos` command (`create`, `launch`, `run`, `chat`, `agents`)
-- `tui` — the Ink terminal UI, including `EventBus`/`IEventBus`
+- `sdk`: daemon HTTP/SSE clients (agents, sessions, runs, approvals, memories, connectors, automations, skills, logs, and more) and daemon-health helpers.
+- `cli`: the `animaos` command with `run`, `chat`, `create`, `launch`, `agents` and `assistant`.
+- `tui`: the Ink terminal UI, including `EventBus` / `IEventBus`.
+- `ui`: shared React UI primitives used by the web console and playground.
 
 ### `hosts/rust-daemon/`
 
-The production-ready Rust host. It wraps the core crates in an Axum HTTP/SSE server, providing:
-- Provider adapters (OpenAI, Anthropic, Ollama, etc.)
-- Memory snapshots (JSON + optional SQLite)
-- Optional Postgres step-log durability plus explicit retry-key tool-step reuse
-- SSE streaming for swarm events
-- Prometheus metrics, readiness probes, OpenAPI docs
+The Rust host. See [Rust Daemon](/hosts/rust-daemon/).
 
-See [Rust Daemon](/hosts/rust-daemon/) for details.
+### `hosts/anima/`
+
+The installable supervisor wrapper (`anima` binary, Nx project `anima`). It depends on `anima-daemon` as a library and embeds the built web console in release builds. See [Packaged Anima](/packaged-anima/).
 
 ### `tools/workspace-dev/`
 
-Manages the dev environment. It reads `nx.json` and starts the selected host plus any dependent processes (web UI, docs, playground).
+Runs the dev environment. `bun dev` is `nx run workspace-dev:dev`; it starts the selected host plus the browser and docs surfaces.
 
 ```bash
-# Start the Rust host + web UI + docs
 bun dev --host rust
-
 ```
 
-`rust` is the only supported host key.
+`rust` is the only accepted host key (`HOST_KEYS` in `tools/workspace-dev/src/hosts.ts`). Host selection, ports and the dev data location live in that file and nowhere else.
 
 <Aside type="note">
-  Hosts are intentionally separate from packages. If code is intended to be reused by multiple hosts, it belongs under `packages/`, not `hosts/`.
+  Hosts are intentionally separate from packages. If code could be reused by another host, it belongs under `packages/`, not `hosts/`.
 </Aside>
 
-## Nx Project Discovery
-
-Nx discovers projects by scanning for `project.json` files. To see all projects:
+## Nx Basics
 
 ```bash
-bun x nx show projects
+bun x nx show projects                 # list projects
+bun x nx show project rust-daemon      # targets of one project
+bun x nx graph                         # dependency graph
 ```
 
-To see a project's targets:
-
-```bash
-bun x nx show project @animaOS-SWARM/docs
-```
-
-To see the dependency graph:
-
-```bash
-bun x nx graph
-```
+Prefer `bun x nx run <project>:<target>` over calling cargo or vitest directly when an Nx target exists.
 
 ## Adding a New Package
 
-1. Create the directory under `packages/` or `hosts/`
-2. Add a `project.json` with `name`, `sourceRoot`, and `targets`
-3. Nx will auto-discover it on the next command
-
-See the existing `project.json` files in `apps/docs/` and `hosts/rust-daemon/` for examples.
+1. Create the directory under `packages/` or `hosts/`.
+2. Add a `project.json` (or a `package.json` for a TypeScript package) with its targets.
+3. Nx picks it up on the next command. Rust crates also need a `members` entry in the root `Cargo.toml`, and, if they should be built and tested with the core, an entry in the `-p` lists of the `core-rust` `build`, `test` and `lint` targets in `packages/core-rust/project.json`.
 
 ## Build Order
 
-Nx handles build order via the dependency graph. Key relationships:
+Nx handles build order through the dependency graph:
 
-- `@animaOS-SWARM/cli` depends on `@animaOS-SWARM/sdk` and `@animaOS-SWARM/tui`
-- `@animaOS-SWARM/tui` depends on `@animaOS-SWARM/sdk`
-- `rust-daemon` depends on `anima-core`, `anima-memory`, `anima-swarm`
-- `workspace-dev` depends on all app projects
-
-When you run `bun x nx build @animaOS-SWARM/cli`, Nx automatically builds `@animaOS-SWARM/sdk` and `@animaOS-SWARM/tui` first.
+- `rust-daemon:build` and `rust-daemon:test` first run `core-rust:build` / `core-rust:test`.
+- `@animaOS-SWARM/cli` depends on `@animaOS-SWARM/sdk` and `@animaOS-SWARM/tui`; `tui` depends on `sdk`.
+- `workspace-dev` starts the apps; it does not build them first.

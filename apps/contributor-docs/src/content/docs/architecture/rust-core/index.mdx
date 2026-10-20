@@ -1,104 +1,55 @@
 ---
 title: Rust Core
-description: Host-agnostic runtime engine — agents, memory, and swarm coordination in pure Rust
+description: The reusable Rust crates behind the animaOS daemon
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+`packages/core-rust` holds the reusable Rust crates. The governing rule is **core defines behavior, hosts provide reality**. `anima-core` has no HTTP client, database driver or async runtime, and `anima-memory`, `anima-swarm` and `anima-schedule` add no I/O of their own. A host (today `hosts/rust-daemon`) supplies the real world: provider calls, persistence, credentials, connectors.
 
-<Aside type="caution" title="Work in Progress">
-  This contributor documentation is actively being written. Sections may be incomplete, reorganized, or expanded.
-</Aside>
+The crates live under `packages/core-rust/crates/` and build in the root Cargo workspace. From the repo root:
 
-The Rust core is the heart of animaOS. It lives in `packages/core-rust/crates/` and follows a single rule: **core defines behavior, hosts provide reality**.
-
-This means the core has zero I/O dependencies — no HTTP clients, no database drivers, no filesystem access. It operates on pure data structures and trait interfaces. A host (like the Rust Daemon) wraps the core and provides the "real world": network calls to LLM providers, persistence to disk, and HTTP APIs.
-
-## Crate Structure
-
-```
-packages/core-rust/
-├── Cargo.toml              # Workspace manifest
-└── crates/
-    ├── anima-core/
-    │   ├── src/
-    │   │   ├── lib.rs        # Public exports
-    │   │   ├── agent.rs      # AgentConfig, AgentState, AgentStatus
-    │   │   ├── components.rs # Provider, Evaluator traits
-    │   │   ├── events.rs     # EngineEvent, EventType
-    │   │   ├── model.rs      # ModelAdapter, ModelGenerateRequest
-    │   │   ├── persistence.rs # DatabaseAdapter, Step
-    │   │   ├── primitives.rs # Content, Message, TaskResult
-    │   │   └── runtime.rs    # AgentRuntime, AgentRuntimeSnapshot
-    │   └── Cargo.toml
-    ├── anima-memory/
-    │   ├── src/
-    │   │   ├── lib.rs        # Public exports
-    │   │   ├── bm25.rs       # BM25 index, TextAnalyzer
-    │   │   ├── memory_manager.rs # MemoryManager, recall, evaluate
-    │   │   ├── vector_index.rs   # InMemoryVectorIndex
-    │   │   └── eval_harness.rs   # Memory eval test cases
-    │   └── Cargo.toml
-    └── anima-swarm/
-        ├── src/
-        │   ├── lib.rs        # Public exports
-        │   ├── coordinator.rs # SwarmCoordinator
-        │   ├── message_bus.rs # MessageBus
-        │   ├── strategies.rs  # Supervisor, RoundRobin, Dynamic
-        │   └── types.rs       # SwarmConfig, SwarmState
-        └── Cargo.toml
+```bash
+bun x nx run core-rust:build
+bun x nx run core-rust:test
 ```
 
-## Public API Surface
+## Crates
 
-### `anima-core`
+| Crate | What it is | I/O |
+|-------|-----------|-----|
+| [`anima-core`](/architecture/rust-core/anima-core/) | `AgentRuntime` task loop, `ModelAdapter` / `Provider` / `Evaluator` / `DatabaseAdapter` traits, events, context-window selection, plus a portable durable engine with capability, policy and execution-store contracts | None |
+| [`anima-memory`](/architecture/rust-core/anima-memory/) | `MemoryManager`: BM25 index, recall fusion, entities, relationships, temporal facts, owner edits, retention, eval harness, external-provider plug-in point | None |
+| [`anima-swarm`](/architecture/rust-core/anima-swarm/) | `SwarmCoordinator`, `MessageBus`, supervisor / round-robin / dynamic strategies | None |
+| [`anima-schedule`](/architecture/rust-core/anima-schedule/) | Pure tick-driven `Scheduler` for interval and daily jobs | None (one JSON file loader) |
+| [`anima-model-adapters`](/architecture/rust-core/model-adapters/) | Provider catalog and HTTP adapters, ChatGPT subscription adapter, pricing table, speech and transcription | HTTP |
+| [`anima-harness`](/architecture/rust-core/anima-harness/) | Builder API that composes the agent loop with the provider catalog and your tools | HTTP (through adapters) |
+| [Supporting crates](/architecture/rust-core/supporting-crates/) | `anima-service-adapters` (contracts), `anima-document-content` (DOCX/PDF/XLSX text), `anima-process` (process custody, PTY sessions), `anima-acp` (ACP client), `anima-worktree` (git worktrees) | Mixed |
 
-| Module | Key Types |
-|--------|-----------|
-| `agent` | `AgentConfig`, `AgentSettings`, `AgentState`, `AgentStatus`, `TokenUsage` |
-| `components` | `Evaluator`, `EvaluatorResult`, `Provider`, `ProviderResult` |
-| `events` | `EngineEvent`, `EventType` |
-| `model` | `ModelAdapter`, `ModelGenerateRequest`, `ModelGenerateResponse`, `ToolCall` |
-| `persistence` | `DatabaseAdapter`, `PersistenceError`, `Step`, `StepStatus` |
-| `primitives` | `AgentId`, `Content`, `Message`, `TaskResult`, `Attachment` |
-| `runtime` | `AgentRuntime`, `AgentRuntimeSnapshot` |
+## Dependencies Between Crates
 
-### `anima-memory`
+```
+anima-core ◀── anima-memory ◀── anima-swarm
+    ▲   ▲
+    │   └── anima-service-adapters ◀── anima-document-content
+    │             ▲
+    └── anima-model-adapters ◀── anima-harness
+anima-process ◀── anima-acp          anima-worktree        anima-schedule
+```
 
-| Module | Key Types |
-|--------|-----------|
-| `bm25` | `BM25`, `TextAnalyzer`, `TextAnalysisProfile`, `QueryExpander` |
-| `memory_manager` | `MemoryManager`, `Memory`, `MemoryRecallResult`, `MemoryEvaluationDecision` |
-| `vector_index` | `InMemoryVectorIndex`, `MemoryTextEmbedder`, `MemoryVectorError` |
-| `eval_harness` | `MemoryEvalCase`, `MemoryEvalReport`, `baseline_memory_eval_cases` |
+Arrows point at the dependency: `anima-swarm` depends on `anima-core` and `anima-memory`; `anima-model-adapters` depends on `anima-core` and `anima-service-adapters`; `anima-process`, `anima-worktree` and `anima-schedule` do not depend on other animaOS crates (except `anima-acp` on `anima-process`).
 
-### `anima-swarm`
+## Two Execution Paths in `anima-core`
 
-| Module | Key Types |
-|--------|-----------|
-| `coordinator` | `SwarmCoordinator` |
-| `message_bus` | `MessageBus` |
-| `strategies` | `SwarmStrategy`, `StrategyFn`, `StrategyContext` |
-| `types` | `SwarmConfig`, `SwarmState`, `SwarmStatus`, `AgentMessage` |
-
-## Architecture
-
-**Host Layer** — Axum HTTP server, provider adapters, memory snapshot I/O
-
-**Rust Core** — Three crates with zero I/O dependencies:
-
-| Crate | Key Types |
-|-------|-----------|
-| `anima-core` | `AgentRuntime`, `AgentRuntimeSnapshot`, `ModelAdapter` (trait), `Provider` (trait), `Evaluator` (trait), `EngineEvent` |
-| `anima-memory` | `MemoryManager`, `BM25`, vector search, temporal KG, relationship graph |
-| `anima-swarm` | `SwarmCoordinator`, `MessageBus`, strategies (supervisor, round-robin, dynamic) |
+1. **`AgentRuntime`**, the loop the daemon uses today. It runs a task in a room, streams model output through a `RunObserver`, executes tools through a host-supplied closure, runs evaluators, and records events. See [AgentRuntime](/architecture/rust-core/anima-core/agent-runtime/).
+2. **`DurableAgentEngine`**, a portable engine over an `ExecutionStore`, `CapabilityRegistry` and `PolicyEngine` with leases, approvals, pause/resume and recovery records. It is covered by core tests and by an integration test in `anima-model-adapters`; the daemon does not use it. See [Durable Engine](/architecture/rust-core/anima-core/durable-engine/).
 
 ## Design Rules
 
-1. **Zero I/O** — Core crates never open sockets, files, or database connections
-2. **Trait boundaries** — All external concerns are abstracted behind traits (`ModelAdapter`, `DatabaseAdapter`)
-3. **Host-owned snapshots** — `anima-memory` supports `snapshot()` / `replace_snapshot()`, and `anima-core` exposes `AgentRuntimeSnapshot` for inspection. The Rust daemon can restore registered agents and swarms from a JSON or Postgres host snapshot store, while full mid-turn resume remains host orchestration work
-4. **Pure algorithms** — BM25, cosine similarity, and temporal scoring are implemented from scratch with no external ML dependencies
+1. **No I/O in `anima-core`.** It never opens sockets, files or database connections. Do not add an HTTP framework, DB driver or runtime-specific dependency.
+2. **Trait boundaries.** External concerns are traits: `ModelAdapter`, `DatabaseAdapter`, `Provider`, `Evaluator`, `MemoryVectorIndex`, `ExternalMemoryProvider`, `ExecutionStore`.
+3. **Host-owned persistence.** `AgentRuntime::snapshot()` / `from_snapshot()` and `MemoryManager::snapshot()` / `replace_snapshot()` return plain data; the host decides where it is stored and what is restored. No crate resumes a model call mid-turn.
+4. **Reusable code lives in `packages/`.** If another host could use it, it does not belong in `hosts/rust-daemon`.
+5. **Small, deterministic algorithms.** BM25, cosine similarity and recall fusion are implemented in `anima-memory` with no ML dependency; real embeddings are supplied by the host through `MemoryVectorIndex`.
 
-<Aside type="note">
-  Because the core has no filesystem access, the host is responsible for reading/writing snapshot bytes and deciding what, if anything, gets restored on startup. This makes the core trivial to test and embed in any environment.
-</Aside>
+## Where Things Went
+
+Anything that talks to a provider over HTTP is in `anima-model-adapters`, not in `anima-core` or in the daemon. The daemon's `RuntimeModelAdapter` routes a call to the right adapter; its provider key pool (`KeySource`) and `FallbackModelAdapter` add key rotation and per-agent fallback models. See [Model Adapters](/architecture/rust-core/model-adapters/).

@@ -1,73 +1,88 @@
 ---
 title: Commands & States
-description: Slash commands, keyboard flow, and operator states in the animaOS TUI
+description: Slash commands, keys, and daemon states in the animaOS TUI
 ---
 
 import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
 
-The TUI is designed as an operator surface, not just a live log window. That means its commands and state transitions matter.
+In an interactive `animaos launch` session you type tasks and slash commands in the input bar. Anything that does not start with `/` is sent as a task. The commands available change with the view and with daemon state.
 
 <CardGrid>
   <Card title="Healthy">
-    Task submission is enabled and the TUI streams swarm events, tools, and results live.
+    Tasks are accepted, and the TUI streams swarm events, tools and results live.
   </Card>
-  <Card title="Daemon Down">
-    The session falls back to command-only behavior so `/health` and `/help` still work.
+  <Card title="Daemon down">
+    Tasks are paused, and commands such as `/health` and `/help` keep working.
   </Card>
   <Card title="Recovered">
-    The TUI reports recovery explicitly so you know task submission can resume.
+    The TUI says so explicitly, and tasks work again.
   </Card>
 </CardGrid>
 
-
 ## Slash Commands
+
+In the swarm view:
 
 | Command | Description |
 |---------|-------------|
-| `/help` | Show the available command surface |
-| `/health` | Recheck daemon connectivity and report healthy, recovered, or unavailable state |
-| `/history` | Open the saved run history view |
-| `/retry` | Retry the most recent task or resumed run when retry is available |
-| `/clear` | Clear the current result/history surface |
-| `/back` | Return from history or resumed-run views |
+| `/agents` | Browse and edit the agent profiles from `anima.yaml` |
+| `/history` | Browse past runs |
+| `/resume [label]` | Browse saved runs, or open one by label (prefix and partial matches work; it suggests close ones) |
+| `/rename <label>` | Name the current (or most recent) saved run |
+| `/delete <label>` | Delete a saved run by exact label; repeat the command to confirm |
+| `/undo` | Restore the last deleted saved run |
+| `/undo-drop` | Discard the oldest queued undo; repeat to confirm |
+| `/undo-status` | Show the deleted-run undo queue |
+| `/trace` | Inspect the messages and tool activity of the last run |
+| `/result` | Open the full last result |
+| `/status` | Show session state: phase, task, agents, daemon, message and tool counts, history size |
+| `/health` | Recheck daemon connectivity and report healthy, recovered or unavailable |
+| `/retry` | Rerun the last task (hidden while the daemon is down) |
+| `/help` | List the commands available right now |
+| `/clear` | Clear the session and delete the saved history file |
+| `/exit` (or `/quit`) | Leave the TUI |
 
-## Keyboard Flow
+In a result view, `/back` returns to the swarm view, and `/delete` and `/rename` act on the open run. While the daemon is down, a result view offers `/health` and `/help` instead of `/retry`. An unknown command shows `Unknown command: /name. Type /help for commands.`
 
-| Key | Action |
-|-----|--------|
-| `Enter` | Submit the current task or command |
-| `Tab` | Cycle between visible panels |
-| `Ctrl+C` | Quit the TUI |
+Saved-run labels are a name you give with `/rename`. `/resume`, `/rename` and `/delete` complete labels with Tab.
+
+## Keys
+
+| Key | Where | Action |
+|-----|-------|--------|
+| `Enter` | Input bar | Submit the task or command (or pick the highlighted command) |
+| `Tab` | Input bar | Complete the highlighted slash command or saved-run label |
+| `↑` / `↓` | Input bar | Move through command suggestions; otherwise recall earlier inputs (up to 100) |
+| `Ctrl+R` | Input bar | Search earlier inputs; press again for the next match, Esc to restore your draft |
+| `Ctrl+O` | Swarm view, between tasks | Open saved runs to resume |
+| `Ctrl+N`, `Ctrl+P`, `Ctrl+Y` | After a `/resume` with several matches | Move through the matches and open the selected one |
+| `s` | While a task is running | Show status |
+| `Ctrl+C` | Anywhere | Quit |
+
+Browsers inside the TUI (History, Trace, Agents) share a few keys: `↑` and `↓` to move, `/` to search, `n` and `N` for the next and previous match, `Esc` to clear a search, and `q` (or `Esc`) to go back.
 
 ## Operator States
 
 ### Healthy daemon
 
-Normal task submission is enabled. The TUI streams swarm events, tool traces, token updates, and final results as they arrive.
+Task submission is enabled. The TUI streams events, tool traces, token updates and final results as they arrive.
 
 ### Daemon unavailable
 
-The TUI switches into command-only behavior:
+When a health check fails (at launch, or about every 5 seconds while the TUI is open):
 
-- task submission is blocked
-- health checks still work
-- help remains available
-- the UI tells you to use `/health` or `/help`
-
-That makes the terminal session recoverable instead of forcing you to restart everything.
+- a warning appears above the panels, and the status bar shows `daemon: down`
+- the input bar reads `daemon down - tasks paused; use /health or /help`, and plain tasks are refused
+- `/health` and `/help` still work, as do the browsing commands (`/history`, `/trace`, `/result`, `/agents`)
 
 ### Recovery
 
-When the daemon comes back, the TUI reports recovery explicitly so you know the host is reachable again.
+When the daemon answers again, the TUI shows a recovery message and re-enables tasks. `/health` forces a recheck at any time.
 
-## Why This Matters
+### Missed events
 
-This command surface is what makes the TUI usable during real local development:
-
-- health checks without leaving the session
-- graceful behavior during temporary host failure
-- retry and history access without reconstructing context manually
+If the daemon reports that the TUI's stream fell behind, the status bar shows a `gaps` count. Rerun the task if you need a complete trace.
 
 <Aside type="tip">
-  If you only need one plain-text answer, use `animaos run`. If you want an operator session with recovery, history, and live telemetry, use `animaos launch`.
+  For one plain-text answer, use `animaos run`. Use `animaos launch` for a session with history, retry, live telemetry and recovery.
 </Aside>

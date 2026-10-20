@@ -1,0 +1,134 @@
+---
+title: Jobs & Automations
+description: Queue background jobs, track goals, and schedule recurring prompts with the SDK
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Three SDK areas run work without you sending a chat message. All of them are owner routes, so scripts need `Authorization: Bearer <ANIMA_LOCAL_ADMIN_TOKEN>` (see [Authentication](/sdk/client/#authentication)), and they run inside the daemon, so the daemon must stay running for the work to continue.
+
+| Area | Accessor | What it is |
+|------|----------|------------|
+| Jobs | `client.agents.jobs()` and related methods | A one-off prompt queued for an agent, with attempts and review |
+| Goals | `client.goals` | A bounded objective that groups jobs under an attempt budget |
+| Automations | `client.automations` | A prompt the daemon sends an agent on a trigger |
+
+## Jobs
+
+```typescript
+const job = await client.agents.createJob(agentId, {
+  title: 'Summarize open issues',
+  prompt: 'Read the issue tracker export in the workspace and summarize the top five problems.',
+  requestKey: 'issues-summary-2026-10-20',
+  maxAttempts: 2,
+  requiresApproval: true,
+});
+
+console.log(job.id, job.status); // 'awaiting_approval'
+
+await client.agents.approveJob(agentId, job.id, { revision: job.revision });
+```
+
+`createJob(agentId, input)` explicitly queues execution. Durable jobs need daemon control-plane persistence (`ANIMAOS_RS_CONTROL_PLANE_FILE` or Postgres); without it the daemon answers `409`. Admission is refused while the daemon drains.
+
+| `AgentJobInput` field | Description |
+|-----------------------|-------------|
+| `title` | Required, up to 160 characters |
+| `prompt` | Required, up to 32 KiB |
+| `requestKey` | Required, up to 128 bytes. Retain it when retrying an uncertain create with identical input |
+| `maxAttempts` | 1 to 3 (default 3) |
+| `requiresApproval` | Hold the job in `awaiting_approval` until the owner approves it |
+| `goalId` | Attach the job to a goal |
+
+| Method | Purpose |
+|--------|---------|
+| `jobs(agentId)` | List the agent's jobs |
+| `createJob(agentId, input)` | Create and queue a job |
+| `approveJob(agentId, jobId, { revision })` | Release a job waiting for approval |
+| `cancelJob(agentId, jobId, { revision })` | Cancel a job |
+| `retryJob(agentId, jobId, { revision, acknowledgeUncertain })` | Retry a failed, uncertain or changes-requested job below its attempt limit |
+| `reviewJob(agentId, jobId, { revision, decision, note?, ... })` | Accept a result or request changes (`accepted` or `changes_requested`) |
+
+Every mutation takes the job's current `revision`; a stale one is rejected. Statuses are `awaiting_approval`, `queued`, `running`, `pending_delegations` (waiting on helpers), `completed`, `failed`, `needs_review` and `cancelled`. A job has `attempt`, `maxAttempts`, an `attempts` history with each attempt's `result`, `error` and `review`, and `pendingDelegations` or `finalOutput` when helpers were involved.
+
+A stopped or restart-interrupted attempt becomes `needs_review` because effects may already have happened. Retrying one requires `acknowledgeUncertain: true`. When you review a delegated final output, send `finalOutputGeneration` and `finalOutputSha256` from the job together.
+
+The daemon keeps at most 200 jobs, runs at most 8 at once, and shares the global run limit.
+
+## Goals
+
+```typescript
+const goal = await client.goals.create({
+  title: 'Weekly report',
+  objective: 'Produce a weekly summary of merged pull requests.',
+  requestKey: 'weekly-report-v1',
+  maxAttempts: 6,
+});
+
+const jobs = await client.goals.jobs(goal.id);
+await client.goals.setStatus(goal.id, { revision: goal.revision, status: 'paused' });
+```
+
+A goal has a title (up to 160 characters), an objective (up to 32 KiB) and a `maxAttempts` budget of 1 to 100 shared by its jobs. A `GoalView` reports `status` (`active`, `paused` or `completed`), `consumedAttempts`, `reservedAttempts`, `remainingAttempts`, `jobCount` and `acceptedOutputs`. Methods: `list()`, `create(input)`, `setStatus(id, { revision, status })` and `jobs(id)`. The daemon keeps at most 50 goals.
+
+## Automations
+
+An automation is a prompt the daemon sends its agent on a trigger. Each one runs in its own thread unless it targets a connector.
+
+```typescript
+const automation = await client.automations.create(agentId, {
+  name: 'Morning digest',
+  prompt: 'Summarize anything that needs my attention today.',
+  trigger: { type: 'daily', hour: 8, minute: 30, timeZone: 'Europe/Berlin' },
+  activeHours: { start: '07:00', end: '22:00', days: [1, 2, 3, 4, 5], timeZone: 'Europe/Berlin' },
+});
+
+console.log(automation.id, new Date(automation.nextDueAtMs));
+```
+
+### Triggers
+
+| `trigger.type` | Fields | Notes |
+|----------------|--------|-------|
+| `interval` | `intervalMs` | Whole seconds |
+| `daily` | `hour`, `minute`, `timeZone` | Wall-clock time in an IANA zone |
+| `cron` | `expression`, `timeZone` | Five fields, or `@hourly`, `@daily`, `@midnight`, `@weekly`, `@monthly`, `@yearly`, `@annually`; `L`, `W`, `#` and `?` are refused |
+| `once` | `atMs` | Fires once, then turns itself off |
+
+A time a daylight-saving jump skips does not fire that day, and a repeated time fires once. `activeHours` (`start` and `end` as `HH:MM`, `days` as 0 for Sunday to 6, `timeZone`) keeps fires inside a window; an `end` before `start` runs overnight, and a `once` automation takes none. `target` is `{ type: 'workspace' }` (the default, its own thread) or `{ type: 'connector', connectorId }`.
+
+### Methods
+
+| Method | Notes |
+|--------|-------|
+| `list(agentId)` | Oldest first |
+| `create(agentId, input)` | `prompt` and `trigger` required; `name` (1 to 80 characters, taken from the prompt when absent), `target`, `activeHours` and `enabled` optional |
+| `createHeartbeat(agentId, { timeZone, prompt?, name?, target? })` | The heartbeat preset: every 30 minutes from 08:00 to 22:00 in `timeZone`. Any other field replaces the preset's |
+| `update(agentId, id, patch)` | `prompt`, `trigger`, `target`, `enabled`, `name`; `activeHours: null` clears them. Turning a past `once` automation back on needs a new `atMs` |
+| `remove(agentId, id)` | Delete. Fire records stay until the agent is deleted |
+| `runNow(agentId, id)` | Fire it now; its due time and switch stay, and the occurrence is recorded as manual |
+| `history(agentId, id, { limit? })` | Latest occurrences, newest first, at most 50 |
+| `preview({ trigger, activeHours? })` | The next fire times the daemon computes: three, or one for `once` |
+
+An `Automation` reports `enabled`, `nextDueAtMs`, `lastFiredAtMs`, `lastOutcome`, `running`, `counters` (`runs`, `failures`, `consecutiveFailures`), `createdBy` (the owner, or an agent's tool call) and `preset`. A history entry has an `outcome` of `silent`, `spoke`, `failed` or `stopped`. The SDK exports the limits `MAX_AUTOMATIONS_PER_AGENT` (20), `MAX_AUTOMATION_HISTORY` (50), `MAX_AUTOMATION_NAME_CHARS` (80) and `AUTOMATION_PREVIEW_RUNS` (3).
+
+```typescript
+const nextRuns = await client.automations.preview({
+  trigger: { type: 'cron', expression: '0 9 * * MON', timeZone: 'America/New_York' },
+});
+console.log(nextRuns.map((ms) => new Date(ms).toISOString()));
+```
+
+An agent holding the `create_automation` tool can schedule its own future runs; those show `createdBy.kind === 'agent'`, count toward the 20-per-agent limit, and must be at least 5 minutes apart over their next 10 fires. Changes are announced as `automation.updated` on the [event stream](/sdk/sessions/#stream); `isAutomationEvent()` narrows it.
+
+<Aside type="note">
+  Each occurrence is saved before it runs. If the daemon restarts mid-run, it disables that schedule and records `schedule_run_interrupted`; review what the agent did before re-enabling it. Uncertain external actions are never replayed automatically. With the default approval policy, an unattended run that calls `bash` waits for an [approval](/sdk/approvals/).
+</Aside>
+
+`client.agents.schedules()`, `createSchedule()`, `updateSchedule()` and `removeSchedule()` call the same routes with a narrower type (interval and daily triggers only). Prefer `client.automations`.
+
+## Where Next
+
+- [Approvals](/sdk/approvals/) for how unattended runs wait on the owner.
+- [Sessions & Runs](/sdk/sessions/) for the runs these produce.
+- [Usage, Logs & Status](/sdk/observability/) for the failing-automation count in daemon status.

@@ -5,19 +5,15 @@ description: How to develop in the animaOS monorepo
 
 import { Aside, Steps } from '@astrojs/starlight/components';
 
-<Aside type="caution" title="Work in Progress">
-  This contributor documentation is actively being written. Sections may be incomplete, reorganized, or expanded.
-</Aside>
-
 <Aside type="tip" title="Want the End-to-End Path?">
-  Use [Local Playbook](/workflow/playbook/) if you want the shortest step-by-step path for running the whole repo locally. This page is the broader workspace reference.
+  Use [Local Playbook](/workflow/playbook/) for the shortest step-by-step path to running the whole repo locally. This page is the broader workspace reference. The repository's `AGENTS.md` states the rules and verification commands this page expands on.
 </Aside>
 
 ## Prerequisites
 
-- [Bun](https://bun.sh) (latest)
+- [Bun](https://bun.sh) (the repo pins `bun@1.3.8` in `package.json`; CI uses the same)
 - [Rust](https://rustup.rs) (stable)
-- [cargo-nextest](https://nexte.st) (optional but recommended)
+- [cargo-nextest](https://nexte.st) (optional)
 - [Git](https://git-scm.com)
 
 ## First Setup
@@ -31,13 +27,13 @@ import { Aside, Steps } from '@astrojs/starlight/components';
    cd animaOS-SWARM
    ```
 
-2. Install Node dependencies
+2. Install JavaScript dependencies
 
    ```bash
    bun install
    ```
 
-3. Verify Rust toolchain
+3. Verify the Rust toolchain
 
    ```bash
    cargo --version
@@ -54,198 +50,133 @@ import { Aside, Steps } from '@astrojs/starlight/components';
 
 ## Running the Dev Environment
 
-The workspace dev launcher (`tools/workspace-dev`) starts the selected host plus the main browser and docs surfaces. `bun dev` defaults to the `rust` host, so `bun dev` and `bun dev --host rust` are equivalent for the normal workflow.
+`bun dev` is `nx run workspace-dev:dev`. The launcher (`tools/workspace-dev`) starts the selected host plus the browser and docs surfaces. The only host key is `rust`, and it is the default, so `bun dev` and `bun dev --host rust` are the same.
 
 ```bash
-# Start Rust host + web UI + docs + contributor docs + playground
-bun dev
-
-# Equivalent explicit form
+# Rust daemon + web console + playground + public docs + contributor docs
 bun dev --host rust
 
-# Start only the Rust daemon
-bun x nx run rust-daemon:dev
+# Only the Rust daemon (build, optional macOS re-sign, run)
+bun x nx run rust-daemon:dev      # same as: bun run daemon
 
-# Start only the public docs site
+# One surface at a time
+bun x nx run @animaOS-SWARM/web:serve
+bun x nx run @animaOS-SWARM/playground:serve
 bun x nx run @animaOS-SWARM/docs:dev
-
-# Start only the contributor docs site
 bun x nx run @animaOS-SWARM/contributor-docs:dev
 ```
 
-`rust` is the only supported host key.
+If a daemon already answers on `http://127.0.0.1:8080/api/health`, `bun dev` reuses it and starts only the other four processes. An unknown host key (`--host elixir`, `--host python`) fails with `Unknown host`: those placeholders were removed.
+
+### Dev Data Persists
+
+The daemon `bun dev` starts is given `ANIMAOS_RS_CONTROL_PLANE_FILE=~/.animaos-swarm/data/control-plane.json`, so agents, connectors, history and memory survive restarts (`history.sqlite` and `memory.sqlite` sit beside it). Your own control-plane path or Postgres mode wins, and `ANIMAOS_DEV_EPHEMERAL=1` opts out. This folder is the same one an installed `anima` uses; see [Persistence](/hosts/rust-daemon/persistence/#development-defaults).
 
 ### Port Map
 
-| Service | Port | Description |
-|---------|------|-------------|
-| Rust daemon | `8080` | HTTP API + SSE |
-| Web UI | `4200` | React web app |
-| Playground | `4201` | Interactive playground |
-| Public docs | `4321` | User-facing docs |
-| Contributor docs | `4322` | This site |
+| Service | Port | Notes |
+|---------|------|-------|
+| Rust daemon | `8080` | HTTP API and SSE (`bun dev`). The installed `anima` uses `8787` |
+| Web console | `4200` | Vite; proxies the daemon (`UI_BACKEND_ORIGIN`) |
+| Playground | `4201` | Vite |
+| Public docs | `4321` | Astro default |
+| Contributor docs | `4322` | This site (`server.port` in `astro.config.mjs`) |
 
-<Aside type="tip">
-  The contributor docs run on port `4322` by default, so they won't conflict with the public docs on `4321`.
-</Aside>
+The daemon treats `http://localhost:4200`, `http://127.0.0.1:4200`, `4201` as the browser origins allowed to act as the local owner; change them with `ANIMA_ALLOWED_UI_ORIGINS`.
 
 ## IDE Setup
 
-### VS Code
+The repo recommends (in `.vscode/extensions.json`) the Nx Console, Prettier and Playwright extensions. For Rust add `rust-lang.rust-analyzer`; for docs, `astro-build.astro-vscode`.
 
-Recommended extensions:
-- `rust-lang.rust-analyzer` — Rust language server
-- `dbaeumer.vscode-eslint` — TypeScript linting
-- `esbenp.prettier-vscode` — Code formatting
-- `astro-build.astro-vscode` — Astro/MDX support
-
-Workspace settings in `.vscode/settings.json`:
-
-```json
-{
-  "rust-analyzer.cargo.features": "all",
-  "editor.formatOnSave": true,
-  "editor.defaultFormatter": "esbenp.prettier-vscode"
-}
-```
-
-### Rust-Analyzer
-
-The Rust workspace is in `packages/core-rust/`. Rust-Analyzer should auto-detect the `Cargo.toml`. If not, add this to `.vscode/settings.json`:
-
-```json
-{
-  "rust-analyzer.linkedProjects": [
-    "packages/core-rust/Cargo.toml",
-    "hosts/rust-daemon/Cargo.toml"
-  ]
-}
-```
+rust-analyzer needs no configuration: the Cargo workspace is the root `Cargo.toml`, and it discovers every crate and both hosts. There is no `packages/core-rust/Cargo.toml`.
 
 ## Nx Commands
 
-Always prefer `bun x nx` over direct tool commands when an Nx target exists.
+Prefer `bun x nx ...` over calling tools directly when a target exists. Check `bun x nx show projects --json` before assuming a project or target name. Never guess flags; run the command with `--help`.
 
 ### Rust
 
 ```bash
-# Build the Rust daemon
+# Daemon: build (debug), test (runs core-rust:test first), format check
 bun x nx run rust-daemon:build
-
-# Run Rust daemon tests
 bun x nx run rust-daemon:test --skipNxCache
+bun x nx run rust-daemon:lint
 
-# Run all Rust core tests
-cargo test --workspace
+# Core crates only
+bun x nx run core-rust:test
+bun x nx run core-rust:lint
 
-# Run with nextest
-cargo nextest run --workspace
+# Packaged program
+bun x nx run anima:test
+
+# Plain cargo, one crate
+cargo check -p anima-core
+cargo test -p anima-memory
 ```
 
 ### TypeScript
 
 ```bash
-# Build a package
 bun x nx build @animaOS-SWARM/sdk
+bun x nx test @animaOS-SWARM/sdk
+bun x nx typecheck @animaOS-SWARM/web
+bun x nx test workspace-dev --runInBand --skipNxCache
 
-# Test a package
-bun x nx test @animaOS-SWARM/tui
-
-# Type check
-bun x nx typecheck @animaOS-SWARM/sdk
-
-# Lint
-bun x nx lint @animaOS-SWARM/cli
-
-# Run all TypeScript tests
-bun x nx run-many -t test
+# Everything
+bun run build
+bun run test
+bun run typecheck
+bun run lint          # oxlint over packages/*/src and apps/*/src
 ```
 
 ### Docs
 
 ```bash
-# Build public docs
 bun x nx run @animaOS-SWARM/docs:build --skipNxCache
-
-# Build contributor docs
 bun x nx run @animaOS-SWARM/contributor-docs:build --skipNxCache
 ```
+
+### Affected
+
+```bash
+bun run affected:build     # nx affected -t build
+bun run affected:test      # nx affected -t test
+```
+
+(`nx affected:test` is the old command form; use `nx affected -t test`.)
 
 ## Project Discovery
 
 ```bash
-# List all projects
 bun x nx show projects
-
-# Show project details
-bun x nx show project @animaOS-SWARM/docs
-
-# Show project graph
+bun x nx show project rust-daemon
 bun x nx graph
-
-# Show affected projects (compared to main)
-bun x nx show projects --affected
 ```
 
 ## Adding a New Package
 
-1. Create the directory under `packages/` or `hosts/`
-2. Add a `project.json` with `name`, `sourceRoot`, and `targets`
-3. Nx will auto-discover it on the next command
-
-Example `project.json`:
-
-```json
-{
-  "name": "@animaOS-SWARM/my-package",
-  "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "packages/my-package/src",
-  "projectType": "library",
-  "targets": {
-    "build": {
-      "executor": "nx:run-commands",
-      "options": { "command": "tsc -p packages/my-package/tsconfig.json" }
-    },
-    "test": {
-      "executor": "nx:run-commands",
-      "options": { "command": "vitest run packages/my-package" }
-    }
-  }
-}
-```
+See [Monorepo Structure](/architecture/monorepo/#adding-a-new-package). TypeScript packages follow the existing `package.json` plus `tsconfig.lib.json` pattern (see `packages/sdk`); Nx infers `build`, `typecheck` and `test` targets from them. Rust crates are Cargo workspace members and also need their `-p` entry in `packages/core-rust/project.json`.
 
 ## Git Workflow
 
-- Main branch: `main`
-- Feature branches: `feature/description`
-- Run affected tests before pushing:
-  ```bash
-  bun x nx affected:test
-  ```
+- Branch from `main`; open an issue first for large changes.
+- Run the verification commands for the area you changed before pushing (see [Testing](/workflow/testing/)).
+- CI runs `nx format:check` against `main`, then `bun x nx run-many -t lint test build typecheck e2e-ci`. Run `bun x nx format:write` for formatting fixes on TypeScript and docs.
 
 ## Debugging
 
 ### Rust
 
-Use `rust-lldb` or `rust-gdb`:
-
 ```bash
-cargo build -p rust-daemon
+RUST_LOG=debug bun x nx run rust-daemon:dev
+RUST_LOG=anima_daemon=debug,tower_http=debug cargo run -p anima-daemon
+
+cargo build -p anima-daemon
 rust-lldb target/debug/anima-daemon
 ```
 
-Set breakpoints in the source and run.
+The log tail is also served at `GET /api/logs` and in the console. See [Operations](/hosts/rust-daemon/ops/).
 
 ### TypeScript
 
-Use the VS Code debugger with the built-in Node/Bun launch config:
-
-```json
-{
-  "type": "node",
-  "request": "launch",
-  "name": "Debug CLI",
-  "runtimeExecutable": "bun",
-  "args": ["x", "nx", "run", "@animaOS-SWARM/cli:dev"]
-}
-```
+Use the VS Code JavaScript debugger on Vite (`apps/web`, `apps/playground`) or attach to Vitest (`bun x nx test <project>`). The CLI runs from its build: `bun run build:cli-sdk`, then `bun run animaos <command>` (a script for `node packages/cli/dist/index.js`).

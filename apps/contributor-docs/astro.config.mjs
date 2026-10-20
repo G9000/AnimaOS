@@ -33,7 +33,7 @@ export default defineConfig({
     starlight({
       title: 'animaOS Contributors',
       description: 'Contributor documentation for the animaOS monorepo',
-      logo: { src: './src/assets/logo.png', replacesTitle: false },
+      logo: { src: './src/assets/anima-mark.svg', replacesTitle: false },
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/G9000/animaOS-SWARM' },
       ],
@@ -55,18 +55,24 @@ export default defineConfig({
             { label: 'AgentRuntime', link: '/architecture/rust-core/anima-core/agent-runtime/' },
             { label: 'Traits', link: '/architecture/rust-core/anima-core/traits/' },
             { label: 'Events', link: '/architecture/rust-core/anima-core/events/' },
+            { label: 'Durable Engine', link: '/architecture/rust-core/anima-core/durable-engine/' },
           ]},
           { label: 'anima-memory', collapsed: false, items: [
             { label: 'Overview', link: '/architecture/rust-core/anima-memory/' },
             { label: 'Search Pipeline', link: '/architecture/rust-core/anima-memory/search/' },
             { label: 'Recall Fusion', link: '/architecture/rust-core/anima-memory/recall/' },
             { label: 'Evaluation', link: '/architecture/rust-core/anima-memory/evaluation/' },
+            { label: 'Memory in the Daemon', link: '/architecture/rust-core/anima-memory/daemon-memory/' },
           ]},
           { label: 'anima-swarm', collapsed: false, items: [
             { label: 'Overview', link: '/architecture/rust-core/anima-swarm/' },
             { label: 'Strategies', link: '/architecture/rust-core/anima-swarm/strategies/' },
             { label: 'Message Bus', link: '/architecture/rust-core/anima-swarm/message-bus/' },
           ]},
+          { label: 'Model Adapters', link: '/architecture/rust-core/model-adapters/' },
+          { label: 'anima-harness', link: '/architecture/rust-core/anima-harness/' },
+          { label: 'anima-schedule', link: '/architecture/rust-core/anima-schedule/' },
+          { label: 'Supporting Crates', link: '/architecture/rust-core/supporting-crates/' },
           { label: 'Building & Extending', link: '/architecture/rust-core/building/' },
         ]},
         { label: 'Rust Daemon', collapsed: false, items: [
@@ -75,6 +81,10 @@ export default defineConfig({
           { label: 'Environment', link: '/hosts/rust-daemon/env/' },
           { label: 'Staging Deployment', link: '/hosts/rust-daemon/staging/' },
           { label: 'HTTP API', link: '/hosts/rust-daemon/api/' },
+          { label: 'Runs and Sessions', link: '/hosts/rust-daemon/runs/' },
+          { label: 'Persistence', link: '/hosts/rust-daemon/persistence/' },
+          { label: 'Connectors', link: '/hosts/rust-daemon/connectors/' },
+          { label: 'Coding Apps and Helpers', link: '/hosts/rust-daemon/coding/' },
           { label: 'Operations', link: '/hosts/rust-daemon/ops/' },
         ]},
         { label: 'Packaged Anima', link: '/packaged-anima/' },
@@ -85,7 +95,7 @@ export default defineConfig({
         ]},
       ],
       customCss: ['./src/styles/custom.css'],
-      favicon: '/favicon.png',
+      favicon: '/favicon.svg',
     }),
   ],
 });
