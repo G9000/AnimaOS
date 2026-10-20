@@ -26,16 +26,16 @@ The TUI sits behind `animaos launch`. It is designed for agency workspaces that 
    bun run daemon
    ```
 
-2. Create an agency workspace if you do not already have one.
+2. Create a workspace if you do not already have one (or write an agency `anima.yaml` by hand).
 
    ```bash
-   animaos create agency content-team --seed
+   animaos create agent content-writer -d "Research topics and write articles"
    ```
 
 3. Launch the workspace in the TUI.
 
    ```bash
-   cd content-team
+   cd content-writer
    animaos launch
    ```
 
@@ -43,7 +43,7 @@ The TUI sits behind `animaos launch`. It is designed for agency workspaces that 
 
 ```bash
 # Launch an agency in the TUI
-cd content-team
+cd content-writer
 animaos launch
 
 # One-shot task inside the TUI session

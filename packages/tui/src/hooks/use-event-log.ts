@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type { IEventBus, Event } from '@animaOS-SWARM/core';
+import type { IEventBus, Event } from '../event-bus.js';
 import type {
   AgentEntry,
   AgentDisplayStatus,

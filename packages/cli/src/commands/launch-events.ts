@@ -1,4 +1,5 @@
-import type { IEventBus, TaskResult } from '@animaOS-SWARM/core';
+import type { TaskResult } from '@animaOS-SWARM/sdk';
+import type { IEventBus } from '@animaOS-SWARM/tui';
 import type {
   DaemonEvent,
   SwarmAgentEventPayload,

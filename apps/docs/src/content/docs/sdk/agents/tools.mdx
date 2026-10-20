@@ -1,104 +1,102 @@
 ---
-title: Actions & Plugins
-description: Typed actions, plugin bundles, and agent capability composition in the SDK
+title: Tools
+description: Registering daemon tools on an agent by name or JSON descriptor
 ---
 
 import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
 
-Actions and plugins are the main composition surface for agent capabilities in the SDK.
+Tools are executed by the Rust daemon. The SDK does not run tool code: it only tells the daemon which tools an agent may use, by name or by JSON descriptor.
 
 <CardGrid>
-  <Card title="Action">
-    Use `action()` when you want one focused tool with a typed input and output contract.
+  <Card title="By name">
+    Pass the name of a tool the daemon has already registered, for example `'memory_search'`.
   </Card>
-  <Card title="Plugin">
-    Use `plugin()` when the capability should travel as a reusable bundle.
+  <Card title="By descriptor">
+    Pass `{ name, description, parameters, examples }` to describe the tool the model should see.
   </Card>
   <Card title="Registration">
-    Attach tools and plugins to the agent config before you register the agent with the daemon.
+    Set `tools` on the agent config before you register the agent with the daemon.
   </Card>
 </CardGrid>
 
-## Actions
+## `AgentToolInput`
 
-An action is a typed tool the model can invoke.
+Each entry in `AgentConfig.tools` is an `AgentToolInput`:
 
 ```typescript
-import { action } from '@animaOS-SWARM/sdk';
-
-const memorySearch = action({
-  name: 'memory_search',
-  description: 'Search stored memories by keyword',
-  parametersSchema: {
-    query: { type: 'string', description: 'Search query' },
-    limit: { type: 'number', description: 'Maximum matches to return' },
-  },
-  handler: async (_runtime, _message, args) => {
-    const query = typeof args.query === 'string' ? args.query : '';
-    return {
-      status: 'success',
-      data: { text: `Search requested for: ${query}` },
-      durationMs: 0,
+type AgentToolInput =
+  | string
+  | {
+      name: string;
+      description?: string;
+      parameters?: Record<string, unknown>;
+      examples?: DaemonToolDescriptor['examples'];
     };
-  },
-});
 ```
 
-The key fields are:
+- A plain string is the name of a tool registered in the daemon.
+- An object supplies the name plus an optional description, JSON Schema `parameters`, and few-shot `examples` for the model.
 
-- `name`
-- `description`
-- `parametersSchema`
-- `handler`
-- optional `validate`
-- optional `examples`
+## Discover Registered Tools
 
-## Register Actions on an Agent
+Ask the daemon which native tool handlers it has before you reference them:
 
 ```typescript
+import { createDaemonClient } from '@animaOS-SWARM/sdk';
+
+const client = createDaemonClient();
+const capabilities = await client.capabilities();
+
+for (const tool of capabilities.tools) {
+  console.log(`${tool.category}: ${tool.name} - ${tool.description}`);
+}
+```
+
+<Aside type="note">
+  A registered handler is not a connection check or a permission grant. It only shows what the daemon can execute.
+</Aside>
+
+## Register Tools on an Agent
+
+```typescript
+import { agent, createDaemonClient } from '@animaOS-SWARM/sdk';
+
+const client = createDaemonClient();
+
 const researcher = await client.agents.create(
   agent({
     name: 'researcher',
     provider: 'openai',
     model: 'gpt-4o-mini',
     system: 'Use tools when needed.',
-    tools: [memorySearch],
+    tools: [
+      'memory_search',
+      {
+        name: 'web_fetch',
+        description: 'Fetch and summarize a URL',
+        parameters: {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: 'URL to fetch' },
+          },
+          required: ['url'],
+        },
+      },
+    ],
   })
 );
 ```
 
-## Plugins
-
-A plugin groups actions, providers, and evaluators into a reusable module.
-
-```typescript
-import { plugin } from '@animaOS-SWARM/sdk';
-
-const researchPlugin = plugin({
-  name: 'research',
-  description: 'Web search and memory tools for research agents',
-  actions: [memorySearch],
-  providers: [],
-  evaluators: [],
-});
-```
-
-Plugins are the cleaner choice when the capability set should travel as one unit across multiple agents.
+You can change an agent's tools later with `AgentUpdateInput.tools`.
 
 ## Practical Capability Split
 
-- choose `action()` for one narrow capability owned by one integration
-- choose `plugin()` when several agents should share the same capability pack
-- keep runtime-heavy behavior in the host instead of pushing orchestration into the SDK caller
-
-## When to Use What
-
-- use a single `action()` when the capability is narrow and local
-- use `plugin()` when the capability is a reusable bundle
-- use plain config when no custom behavior is needed
+- use a tool name when the daemon already registers the capability you need
+- use a descriptor when you want to control the description or schema the model sees
+- keep runtime-heavy behavior in the daemon instead of pushing orchestration into the SDK caller
 
 <Aside type="tip">
-  The SDK gives you typed composition. The actual runtime execution still happens inside the host, not inside the SDK package.
+  The SDK gives you typed configuration. The actual runtime execution happens inside the daemon, not inside the SDK package.
 </Aside>
 
 ## Where Next

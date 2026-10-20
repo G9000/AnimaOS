@@ -1,4 +1,4 @@
-import type { AgentSettings, TaskResult } from '@animaOS-SWARM/core';
+import type { AgentSettings, TaskResult } from '@animaOS-SWARM/sdk';
 import type { DaemonTaskResult } from '@animaOS-SWARM/sdk';
 import {
   PROVIDER_HELP_TEXT,

@@ -2,7 +2,7 @@
 
 Public TypeScript client for the animaOS Rust daemon.
 
-This package exports `createDaemonClient`, `AgentsClient`, `ConnectorsClient`, `MemoriesClient`, `SwarmsClient`, and the `agent()`, `action()`, `plugin()`, and `swarm()` helpers. It talks to the daemon over HTTP and SSE and does not embed the execution runtime.
+This package exports `createDaemonClient`, `AgentsClient`, `ConnectorsClient`, `MemoriesClient`, `SwarmsClient`, and the `agent()` and `swarm()` helpers. It also exports the shared TypeScript types (`AgentConfig`, `Content`, `TaskResult`, `SwarmConfig`, memory types) and the daemon-health helpers. It talks to the daemon over HTTP and SSE and does not embed the execution runtime.
 
 Current SDK coverage includes:
 

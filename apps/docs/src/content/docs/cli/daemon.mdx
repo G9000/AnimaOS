@@ -14,7 +14,6 @@ These commands talk directly to the daemon instead of generating local workspace
 | `run` | You want one quick result right now | Creates a temporary agent or swarm and prints plain text |
 | `chat` | You want an interactive single-agent REPL | Creates one daemon-backed agent and keeps the conversation open |
 | `agents` | You want to inspect daemon-held agents | Useful for debugging or checking host state |
-| `mod` | You want to enable, disable, or list mods | Workspace/operator configuration surface |
 
 ## `animaos run`
 
@@ -49,7 +48,7 @@ animaos chat -m claude-3-5-sonnet -p anthropic
 
 `chat` creates a daemon-backed agent and opens a terminal REPL with the `you >` prompt. Type `exit` to quit.
 
-This is the right choice when you want iterative back-and-forth without generating a whole agency workspace.
+This is the right choice when you want iterative back-and-forth without creating a workspace.
 
 ## `animaos agents`
 
@@ -62,16 +61,6 @@ animaos agents show researcher
 ```
 
 Use this when you want to inspect host state after launches, retries, or debugging sessions.
-
-## `animaos mod`
-
-```bash
-animaos mod enable my-mod
-animaos mod disable my-mod
-animaos mod list
-```
-
-The mod surface is the operational side of the CLI rather than the runtime side.
 
 ## Targeting a Different Daemon
 

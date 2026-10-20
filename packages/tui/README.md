@@ -17,8 +17,7 @@ Current TUI coverage includes:
 ```tsx
 import React from 'react';
 import { render } from 'ink';
-import { EventBus } from '@animaOS-SWARM/core';
-import { App } from '@animaOS-SWARM/tui';
+import { App, EventBus } from '@animaOS-SWARM/tui';
 
 const eventBus = new EventBus();
 

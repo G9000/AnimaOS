@@ -1,6 +1,7 @@
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { IEventBus, TaskResult } from '@animaOS-SWARM/core';
+import type { TaskResult } from '@animaOS-SWARM/sdk';
+import type { IEventBus } from './event-bus.js';
 
 vi.mock('./hooks/use-event-log.js', () => ({
   useEventLog: vi.fn(),

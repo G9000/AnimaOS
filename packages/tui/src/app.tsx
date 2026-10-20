@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
-import { type IEventBus, type TaskResult } from '@animaOS-SWARM/core';
+import type { TaskResult } from '@animaOS-SWARM/sdk';
+import type { IEventBus } from './event-bus.js';
 import { useDaemonState } from './hooks/use-daemon-state.js';
 import { useEventLog } from './hooks/use-event-log.js';
 import { Header } from './components/header.js';

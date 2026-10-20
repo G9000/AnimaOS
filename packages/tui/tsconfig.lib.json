@@ -12,10 +12,7 @@
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "references": [
     {
-      "path": "../swarm/tsconfig.lib.json"
-    },
-    {
-      "path": "../core-ts/tsconfig.lib.json"
+      "path": "../sdk/tsconfig.lib.json"
     }
   ],
   "exclude": [

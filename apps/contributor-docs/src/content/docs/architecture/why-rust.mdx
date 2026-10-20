@@ -9,7 +9,7 @@ import { Aside } from '@astrojs/starlight/components';
   This contributor documentation is actively being written. Sections may be incomplete, reorganized, or expanded.
 </Aside>
 
-animaOS is a host-agnostic agent runtime. The TypeScript ecosystem (`packages/core-ts`, `packages/sdk`, `packages/cli`) handles user-facing surfaces, but the execution engine — the part that actually runs agents, searches memories, and coordinates swarms — is written in Rust.
+animaOS is a host-agnostic agent runtime. The TypeScript ecosystem (`packages/sdk`, `packages/cli`, `packages/tui`) handles user-facing surfaces, but the execution engine — the part that actually runs agents, searches memories, and coordinates swarms — is written in Rust.
 
 Here is why.
 
@@ -99,7 +99,7 @@ let bytes = serde_json::to_vec(&manager.snapshot())?;
 // ... host writes bytes to disk ...
 ```
 
-The core has **no filesystem access** — it produces a byte vector and hands it to the host. This boundary is clean because Rust's type system makes I/O effects explicit. The host (Rust daemon, future Elixir host, etc.) decides how to persist.
+The core has **no filesystem access** — it produces a byte vector and hands it to the host. This boundary is clean because Rust's type system makes I/O effects explicit. The host (today, the Rust daemon) decides how to persist.
 
 ### Snapshot Format
 
@@ -148,7 +148,7 @@ Rust is not the right tool for everything in animaOS. We intentionally keep Type
 | SDK | TypeScript | DX, tree-shaking, familiar async patterns |
 | CLI | TypeScript | Ink-based TUI, rapid iteration on commands |
 | Web UI | TypeScript | React ecosystem, SSR frameworks |
-| Core types | TypeScript | Shared contracts between SDK, CLI, and UI |
+| Client types | TypeScript | The SDK owns the request/response types shared by CLI, TUI, and UI |
 | Runtime engine | Rust | Performance, safety, snapshot fidelity |
 
 <Aside type="tip">

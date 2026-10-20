@@ -8,7 +8,7 @@ import type {
   MemoryType,
   NewAgentRelationshipInput,
   RelationshipEndpointKind,
-} from '@animaOS-SWARM/memory';
+} from './memory-types.js';
 
 import type { DaemonClient } from './client.js';
 

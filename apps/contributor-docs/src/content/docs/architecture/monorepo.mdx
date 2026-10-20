@@ -18,21 +18,21 @@ animaos-kit/
 ├── apps/
 │   ├── docs/               # Public user-facing docs (Astro + Starlight)
 │   ├── contributor-docs/   # Contributor docs (this site)
-│   └── web/                # Web UI
+│   ├── playground/         # Interactive playground
+│   ├── web/                # Web UI
+│   └── web-e2e/            # Web end-to-end tests
 ├── hosts/
-│   ├── rust-daemon/        # Production Rust host
-│   ├── elixir-phoenix/     # Placeholder
-│   └── python-service/     # Placeholder
+│   └── rust-daemon/        # Production Rust host
 ├── packages/
 │   ├── core-rust/          # Rust engine crates
 │   │   ├── crates/
 │   │   │   ├── anima-core/
 │   │   │   ├── anima-memory/
 │   │   │   └── anima-swarm/
-│   ├── core-ts/            # TypeScript contracts
-│   ├── sdk/                # TypeScript SDK
+│   ├── sdk/                # TypeScript SDK (daemon client)
 │   ├── cli/                # Command-line interface
-│   └── ...                 # Other shared packages
+│   ├── tui/                # Ink terminal UI
+│   └── ui/                 # Shared React UI components
 ├── tools/
 │   └── workspace-dev/      # Dev launcher
 ├── nx.json                 # Nx workspace config
@@ -44,33 +44,25 @@ animaos-kit/
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        Surfaces                              │
+│                  TypeScript surfaces                         │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────────────┐ │
-│  │   SDK   │  │   CLI   │  │   TUI   │  │      Web        │ │
+│  │   SDK   │  │   CLI   │  │   TUI   │  │ Web / Playground│ │
 │  └────┬────┘  └────┬────┘  └────┬────┘  └────────┬────────┘ │
-│       │            │            │                 │          │
-│       └────────────┴────────────┘                 │          │
-│                    │                              │          │
-│                    ▼                              ▼          │
-│           ┌─────────────────┐          ┌─────────────────┐   │
-│           │   core-ts       │          │   core-ts       │   │
-│           │   (contracts)   │          │   (contracts)   │   │
-│           └─────────────────┘          └─────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-                              │
+│       └────────────┴────────────┴────────────────┘          │
+│                    thin clients over HTTP / SSE              │
+└─────────────────────────────┬───────────────────────────────┘
+                              │  127.0.0.1:8080
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                        Hosts                                 │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐  │
-│  │  rust-daemon    │  │ elixir-phoenix  │  │ python-svc  │  │
-│  │   (ready)       │  │  (placeholder)  │  │(placeholder)│  │
-│  └────────┬────────┘  └─────────────────┘  └─────────────┘  │
-│           │                                                  │
+│                        Host                                  │
+│  ┌─────────────────┐                                         │
+│  │  rust-daemon    │                                         │
+│  └────────┬────────┘                                         │
 │           ▼                                                  │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │                    core-rust                         │    │
 │  │  ┌───────────┐  ┌───────────┐  ┌─────────────────┐  │    │
-│  │  │anim a-core │  │anim-memory│  │  anima-swarm    │  │    │
+│  │  │anima-core │  │anima-memory│  │  anima-swarm    │  │    │
 │  │  │  runtime  │  │  memory   │  │  coordination   │  │    │
 │  │  └───────────┘  └───────────┘  └─────────────────┘  │    │
 │  └─────────────────────────────────────────────────────┘    │
@@ -91,18 +83,13 @@ Reusable Rust engine crates. These have **no I/O dependencies** — no HTTP clie
 
 See [Rust Core](/architecture/rust-core/) for details.
 
-### `packages/core-ts/`
+### `packages/sdk/`, `packages/cli/`, `packages/tui/`
 
-Shared TypeScript contracts used by the SDK, CLI, TUI, and any TypeScript host. Contains **no runtime dependencies** on HTTP frameworks or databases.
+The TypeScript surfaces are thin clients of the Rust daemon. They own no execution engine.
 
-Key modules:
-- `types/` — Agent, component, model, plugin, event types
-- `runtime/` — `AgentRuntime`, `EventBus`
-- `adapters/` — OpenAI, Anthropic, Ollama model adapters
-- `helpers/` — Typed identity functions (`agent()`, `action()`, `plugin()`)
-- `daemon-health/` — Daemon warning transition helpers
-
-See [TypeScript Core](/architecture/typescript-core/) for details.
+- `sdk` — daemon HTTP/SSE clients, the SDK's own type exports (`Content`, `TaskResult`, `AgentConfig`, `SwarmConfig`, ...), the `agent()` and `swarm()` config helpers, and daemon-health helpers
+- `cli` — the `animaos` command (`create`, `launch`, `run`, `chat`, `agents`)
+- `tui` — the Ink terminal UI, including `EventBus`/`IEventBus`
 
 ### `hosts/rust-daemon/`
 
@@ -123,11 +110,9 @@ Manages the dev environment. It reads `nx.json` and starts the selected host plu
 # Start the Rust host + web UI + docs
 bun dev --host rust
 
-# Start a different host (when implemented)
-bun dev --host elixir
 ```
 
-The supported host keys are `rust`, `elixir`, and `python`. Only `rust` is production-ready today.
+`rust` is the only supported host key.
 
 <Aside type="note">
   Hosts are intentionally separate from packages. If code is intended to be reused by multiple hosts, it belongs under `packages/`, not `hosts/`.
@@ -165,9 +150,9 @@ See the existing `project.json` files in `apps/docs/` and `hosts/rust-daemon/` f
 
 Nx handles build order via the dependency graph. Key relationships:
 
-- `@animaOS-SWARM/sdk` depends on `@animaOS-SWARM/core`
-- `@animaOS-SWARM/cli` depends on `@animaOS-SWARM/sdk`
+- `@animaOS-SWARM/cli` depends on `@animaOS-SWARM/sdk` and `@animaOS-SWARM/tui`
+- `@animaOS-SWARM/tui` depends on `@animaOS-SWARM/sdk`
 - `rust-daemon` depends on `anima-core`, `anima-memory`, `anima-swarm`
 - `workspace-dev` depends on all app projects
 
-When you run `bun x nx build @animaOS-SWARM/sdk`, Nx automatically builds `@animaOS-SWARM/core` first.
+When you run `bun x nx build @animaOS-SWARM/cli`, Nx automatically builds `@animaOS-SWARM/sdk` and `@animaOS-SWARM/tui` first.

@@ -56,7 +56,7 @@ export default defineConfig({
               items: [
                 { label: 'Overview', link: '/sdk/agents/' },
                 { label: 'Lifecycle & Retry', link: '/sdk/agents/lifecycle/' },
-                { label: 'Actions & Plugins', link: '/sdk/agents/tools/' },
+                { label: 'Tools', link: '/sdk/agents/tools/' },
               ],
             },
             {

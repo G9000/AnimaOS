@@ -1,13 +1,13 @@
 ---
 title: CLI
-description: Command-line interface for running agents, managing agencies, and controlling swarms
+description: Command-line interface for running agents, launching agency workspaces, and controlling swarms
 ---
 
 import { Aside, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 
 The animaOS CLI (`animaos`) is the operator entrypoint for animaOS. It handles two different jobs:
 
-- local workspace generation through `create`
+- local single-agent workspace scaffolding through `create`
 - daemon-backed execution through `launch`, `run`, `chat`, and `agents`
 
 `launch` is the primary day-to-day workflow. It turns an agency workspace into a live daemon-backed session and can render the Ink TUI. `run` is the quick plain-text shortcut for one-off work. `chat` gives you a single interactive agent. `agents` inspects what the daemon is currently holding.
@@ -16,7 +16,7 @@ The animaOS CLI (`animaos`) is the operator entrypoint for animaOS. It handles t
 
 Use the command that matches the job:
 
-- `animaos create` builds a local agent or agency workspace. It does not require the daemon.
+- `animaos create` scaffolds a local single-agent workspace. It does not require the daemon.
 - `animaos launch` runs an existing `anima.yaml` workspace against the daemon. This is the main TUI flow.
 - `animaos run` is the fastest way to send one task to a temporary agent or swarm.
 - `animaos chat` opens an interactive single-agent REPL backed by the daemon.
@@ -65,8 +65,8 @@ bun run animaos --help
 
 ## In This Section
 
-- [Agency Workflow](/cli/workspaces/) covers `create`, generated workspaces, `launch`, and seed memories.
-- [Daemon Commands](/cli/daemon/) covers `run`, `chat`, `agents`, `mod`, and daemon-targeted CLI usage.
+- [Agency Workflow](/cli/workspaces/) covers `create`, workspace layout, `launch`, and seed memories.
+- [Daemon Commands](/cli/daemon/) covers `run`, `chat`, `agents`, and daemon-targeted CLI usage.
 - [Providers & Environment](/cli/providers/) covers provider families, credentials, base URL overrides, and CLI runtime env vars.
 
 ## Fast Path
@@ -79,19 +79,17 @@ bun run animaos --help
    bun run daemon
    ```
 
-2. Generate an agency workspace.
+2. Scaffold an agent workspace.
 
    ```bash
-   animaos create agency content-team \
-     -d "Research topics and write high-quality articles" \
-     -s 5 \
-     --seed
+   animaos create agent content-writer \
+     -d "Research topics and write high-quality articles"
    ```
 
 3. Launch that workspace in the TUI.
 
    ```bash
-   cd content-team
+   cd content-writer
    animaos launch
    ```
 
@@ -101,54 +99,37 @@ bun run animaos --help
 
 ### `animaos create`
 
-Create a single agent workspace or a full agency directory. This is a local filesystem workflow, not a daemon workflow.
+Scaffold a single-agent workspace directory. This is a local filesystem workflow, not a daemon workflow.
 
 ```bash
-# Interactive mode: choose agent or agency
+# Interactive mode: prompts for the agent name and description
 animaos create
 
 # Single-agent workspace
 animaos create agent medicine-helper \
   -d "Research medical literature and summarize risks clearly"
-
-# Full agency workspace
-animaos create agency content-team \
-  -d "Research topics and write high-quality articles" \
-  -s 5 \
-  --seed
-
-# Legacy shorthand still creates an agency
-animaos create content-team --yes
 ```
 
-`create` uses configured remote provider credentials when they are available and falls back to a deterministic local scaffolder when no provider key is present.
+`create` makes no model call. It writes the workspace files from a template and records the provider in `anima.yaml`: the one you pass with `-p`, otherwise the first remote provider with credentials configured, otherwise `deterministic`. Multi-agent agencies are not generated; write `anima.yaml` by hand for those and run them with `animaos launch`.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--kind` | — | `agent` or `agency`; equivalent to `animaos create agent ...` |
-| `-p, --provider` | `auto` | Generation provider. Supports `deterministic`, `openai`, `anthropic`, `google`/`gemini`, `ollama`, `groq`, `xai`/`grok`, `openrouter`, `mistral`, `together`, `deepseek`, `fireworks`, `perplexity`, `moonshot`/`kimi` |
-| `-m, --model` | `gpt-4o-mini` | Model for generation |
-| `--models` | — | Comma-separated model pool for generated agents |
-| `-d, --description` | — | What the agent or agency is supposed to do |
-| `-s, --size` | `4` | Agency team size (2-10) |
-| `--system` | — | System prompt for single-agent mode |
-| `--seed` | — | Generate starter memories for each agent |
-| `-y, --yes` | — | Accept the generated team without confirmation |
+| `--kind` | — | `agent`; equivalent to `animaos create agent ...` |
+| `-p, --provider` | `auto` | Provider recorded in the workspace. Supports `deterministic`, `openai`, `anthropic`, `google`/`gemini`, `ollama`, `groq`, `xai`/`grok`, `openrouter`, `mistral`, `together`, `deepseek`, `fireworks`, `perplexity`, `moonshot`/`kimi` |
+| `-m, --model` | `gpt-4o-mini` | Model recorded in the workspace |
+| `-d, --description` | — | What the agent is supposed to do |
+| `--system` | — | Custom system prompt for the agent |
+| `--api-key` | — | API key, used only to detect which provider is configured |
 
-The generated directory is designed for human editing:
+The created directory is designed for human editing:
 
 ```text
-content-team/
-├── anima.yaml        # Team config used by launch
+medicine-helper/
+├── anima.yaml        # Config used by launch
 ├── org-chart.mmd     # Mermaid org chart
 ├── README.md         # Mission, values, and roster
 └── agents/
-    ├── orchestrator/
-    │   ├── profile.md
-    │   ├── assets/
-    │   └── memory/
-    │       └── seed.json
-    └── worker-1/
+    └── medicine-helper/
         ├── profile.md
         ├── assets/
         └── memory/
@@ -238,16 +219,6 @@ animaos agents show researcher
 
 This is useful when you want to check what the daemon currently holds after runs, launches, or host restarts.
 
-### `animaos mod`
-
-Enable, disable, or list mods.
-
-```bash
-animaos mod enable my-mod
-animaos mod disable my-mod
-animaos mod list
-```
-
 ## Provider Support
 
 The CLI accepts the same main provider family across `create`, `launch`, `run`, and `chat`.
@@ -271,7 +242,7 @@ The CLI accepts the same main provider family across `create`, `launch`, `run`, 
 Notes:
 
 - `--api-key` overrides the environment for the current invocation.
-- `create` can also run with `deterministic` when you do not want a remote provider.
+- `create` falls back to `deterministic` when no remote provider is configured.
 - Daemon-backed commands forward provider settings into host-backed runs; switching keys does not require a daemon restart.
 
 ## Environment
@@ -281,7 +252,7 @@ Notes:
 | `ANIMA_DAEMON_URL` | Override the daemon base URL for CLI commands. Defaults to `http://127.0.0.1:8080`. |
 | Provider key env vars | Credentials used for generation or daemon-backed execution. See the provider table above. |
 | Provider base URL env vars | Override provider endpoints such as `OPENAI_BASE_URL`, `OLLAMA_BASE_URL`, or `OPENROUTER_BASE_URL`. |
-| `ANIMAOS_WORKSPACE_ROOT` | Workspace root used by mod configuration and workspace-aware tooling. |
+| `ANIMAOS_WORKSPACE_ROOT` | Workspace root used by the daemon's workspace tools. |
 
 ## Good Defaults
 

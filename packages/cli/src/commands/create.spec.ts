@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { REMOTE_PROVIDER_IDS, providerKeyEnvNames } from '../provider-config.js';
 import {
   buildSingleAgentConfig,
-  getCreateGenerationCredentialIssue,
   getCreateProviderIssue,
   resolveCreateProvider,
   resolveCreateTarget,
@@ -33,25 +32,28 @@ describe('create command flow helpers', () => {
     }
   });
 
-  it('keeps the legacy shorthand as agency creation', () => {
-    expect(resolveCreateTarget('content-team', undefined, undefined)).toEqual({
-      kind: 'agency',
-      nameArg: 'content-team',
-      needsKindPrompt: false,
-    });
-  });
-
-  it('routes explicit agent and agency subflows', () => {
+  it('routes the explicit agent subflow', () => {
     expect(resolveCreateTarget('agent', 'helper', undefined)).toEqual({
       kind: 'agent',
       nameArg: 'helper',
-      needsKindPrompt: false,
     });
-    expect(resolveCreateTarget('agency', 'lab', undefined)).toEqual({
-      kind: 'agency',
-      nameArg: 'lab',
-      needsKindPrompt: false,
+    expect(resolveCreateTarget('helper', undefined, 'agent')).toEqual({
+      kind: 'agent',
+      nameArg: 'helper',
     });
+    expect(resolveCreateTarget(undefined, undefined, undefined)).toEqual({
+      kind: 'agent',
+    });
+  });
+
+  it('points removed agency creation and unknown kinds at the agent flow', () => {
+    expect(resolveCreateTarget('agency', 'lab', undefined).error).toContain(
+      'Agency generation was removed'
+    );
+    expect(resolveCreateTarget('content-team', undefined, undefined).error).toContain(
+      'Unknown create kind'
+    );
+    expect(resolveCreateTarget('agent', 'x', 'nope').error).toContain('Unknown create kind');
   });
 
   it('falls back to deterministic scaffolding when no provider is configured', () => {
@@ -62,11 +64,6 @@ describe('create command flow helpers', () => {
     process.env.OPENAI_API_KEY = 'test-key';
 
     expect(resolveCreateProvider(undefined)).toBe('openai');
-  });
-
-  it('reports missing credentials before remote agency generation', () => {
-    expect(getCreateGenerationCredentialIssue('openai')).toContain('OPENAI_API_KEY');
-    expect(getCreateGenerationCredentialIssue('deterministic')).toBeUndefined();
   });
 
   it('reports explicit unknown providers before falling back to auto mode', () => {

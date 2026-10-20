@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
+import { REMOTE_PROVIDER_IDS, providerKeyEnvNames } from '../provider-config.js';
 
 const mockDaemonClient = {
   agents: {
@@ -51,10 +52,17 @@ describe('CLI daemon-backed command cutover', () => {
     mockDaemonClient.swarms.create.mockReset();
     mockDaemonClient.swarms.run.mockReset();
     process.exitCode = undefined;
+    // Developer shells and .env files often export real provider keys.
+    for (const provider of REMOTE_PROVIDER_IDS) {
+      for (const envName of providerKeyEnvNames(provider)) {
+        vi.stubEnv(envName, '');
+      }
+    }
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     process.exitCode = undefined;
   });
 

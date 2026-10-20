@@ -8,7 +8,7 @@ AnimaOS brings persistent AI agents, memory, tools, and automations into one per
 
 Talk to anima in the web console or through a connected chat app. Give it work to do, let it bring in helpers, and follow its plans, actions, and results in the same place. Its context carries across conversations through saved memory and reusable skills.
 
-This repository contains the system: a reusable Rust agent runtime, the daemon that hosts it, a TypeScript SDK, and the web console.
+This repository contains the system: a reusable Rust agent runtime, the daemon that hosts it, a TypeScript SDK, CLI and terminal UI, and the web console.
 
 ## What you can do
 
@@ -62,18 +62,16 @@ Reusable engine code lives in `packages/`; runnable backend processes live in `h
 | Path | What lives there |
 | --- | --- |
 | `packages/core-rust` | The reusable Rust runtime: `anima-core`, `anima-memory`, `anima-swarm`, `anima-schedule`, `anima-harness`, model adapters, and document support. The core stays independent of backend hosts. |
-| `hosts/rust-daemon` | `anima-daemon`, the runnable Axum host. It exposes HTTP and SSE, and embeds the Telegram and Discord connectors. `hosts/elixir-phoenix` and `hosts/python-service` are placeholders. |
-| `packages/sdk` | The public TypeScript client for the daemon. |
-| `packages/core-ts` | The shared TypeScript core used by the SDK, CLI, TUI and UI. Execution behaviour lives in Rust. |
-| `packages/*` | Other libraries: `cli`, `tui`, `ui`, `memory`, `swarm`, `tools`, `mod-sdk`. |
+| `hosts/rust-daemon` | `anima-daemon`, the runnable Axum host. It exposes HTTP and SSE, and embeds the Telegram and Discord connectors. |
+| `packages/sdk` | The public TypeScript client for the daemon. It owns the shared TypeScript types. |
+| `packages/cli`, `packages/tui`, `packages/ui` | The `animaos` command line, its terminal UI, and shared web components. All are thin clients of the daemon. |
 | `apps/web` | The companion web console (React and Vite). |
 | `apps/playground`, `apps/docs`, `apps/contributor-docs` | The playground and the two Astro documentation sites. |
-| `apps/server` | The legacy local TypeScript server, kept during the restructuring. |
 | `tools/workspace-dev` | The `bun dev` launcher, which picks the host and starts the browser apps. |
 | `deploy/vps` | Docker Compose, Caddy and the daemon image for a one-owner server. |
 | `design/` | The pen.dev design file and the orb shader. |
 
-More detail: [Rust daemon architecture](docs/rust-daemon-architecture.md), [swarm architecture](docs/swarm-architecture.md), [package maturity](docs/package-maturity-scorecard.md).
+More detail: [Rust daemon architecture](docs/rust-daemon-architecture.md), [swarm architecture](docs/swarm-architecture.md).
 
 Workspace and npm package names still use `animaOS-SWARM` / `@animaOS-SWARM`; use those names in the commands below.
 

@@ -38,12 +38,6 @@ export function buildWorkspaceDevPlan(
 ): WorkspaceDevPlan {
   const host = getHostDefinition(hostName);
 
-  if (host.status !== 'ready') {
-    throw new Error(
-      `Host '${host.key}' is registered as a placeholder and is not implemented yet.`
-    );
-  }
-
   const processes: ManagedProcessDefinition[] = [];
 
   if (!options.reuseExistingHost) {

@@ -10,7 +10,7 @@ An **agent** in animaOS is an autonomous LLM-powered runtime with a configuratio
 ## In This Section
 
 - [Lifecycle & Retry](/sdk/agents/lifecycle/) covers create, run, inspect, recent-memory reads, and safe retry keys.
-- [Actions & Plugins](/sdk/agents/tools/) covers typed actions, plugin bundles, and registration patterns.
+- [Tools](/sdk/agents/tools/) covers registering daemon tools by name or descriptor.
 
 ## Agent Configuration
 
@@ -54,8 +54,8 @@ const config = agent({
 | `topics` | `string[]` | — | Conversation topics the agent focuses on |
 | `adjectives` | `string[]` | — | Personality descriptors |
 | `style` | `string` | — | Response style guidance |
-| `tools` | `Action[]` | — | Tools the agent can invoke (see [Actions](#actions)) |
-| `plugins` | `Plugin[]` | — | Bundled actions, providers, and evaluators |
+| `tools` | `AgentToolInput[]` | — | Daemon tool names or JSON descriptors the agent can invoke (see [Tools](#tools)) |
+| `plugins` | `DaemonPluginDescriptor[]` | — | Plugin descriptors (`name`, `description`) attached to the agent |
 | `settings` | `AgentSettings` | — | Model hyperparameters (see below) |
 
 ### `AgentSettings`
@@ -196,43 +196,9 @@ const run = await client.agents.run('agent-uuid-here', {
 | `agent` | `AgentSnapshot` | Updated agent snapshot after the run |
 | `result` | `TaskResult<Content>` | Task execution result |
 
-## Actions
+## Tools
 
-Actions are the primary extension point for agent capabilities. Each action is a typed tool the LLM can invoke.
-
-```typescript
-import { action } from '@animaOS-SWARM/sdk';
-
-const memorySearch = action({
-  name: 'memory_search',
-  description: 'Search stored memories by keyword',
-  parametersSchema: {
-    query: { type: 'string', description: 'Search query' },
-    limit: { type: 'number', description: 'Maximum matches to return' },
-  },
-  handler: async (_runtime, _message, args) => {
-    const query = typeof args.query === 'string' ? args.query : '';
-    return {
-      status: 'success',
-      data: { text: `Search requested for: ${query}` },
-      durationMs: 0,
-    };
-  },
-});
-```
-
-### `Action` interface
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | `string` | ✅ | Unique action identifier |
-| `description` | `string` | ✅ | LLM-visible description |
-| `parametersSchema` | `Record<string, unknown>` | ✅ | JSON Schema parameters |
-| `handler` | `(runtime, message, args) => Promise<TaskResult>` | ✅ | Execution logic |
-| `validate` | `(runtime, message) => Promise<boolean>` | — | Availability check |
-| `examples` | `ActionExample[]` | — | Few-shot examples for the LLM |
-
-### Registering actions on an agent
+Tools are executed by the Rust daemon. Each entry in `tools` is an `AgentToolInput`: either the name of a tool the daemon has registered, or a JSON descriptor.
 
 ```typescript
 const myAgent = await client.agents.create(
@@ -241,45 +207,30 @@ const myAgent = await client.agents.create(
     provider: 'openai',
     model: 'gpt-4o-mini',
     system: 'You are a research assistant.',
-    tools: [memorySearch, webFetch, todoCreate],
+    tools: [
+      'memory_search',
+      {
+        name: 'web_fetch',
+        description: 'Fetch and summarize a URL',
+        parameters: {
+          type: 'object',
+          properties: { url: { type: 'string', description: 'URL to fetch' } },
+          required: ['url'],
+        },
+      },
+    ],
   })
 );
 ```
 
-<Aside type="tip">
-  For complex agents, bundle related actions into a [Plugin](/sdk/reference/#plugin) instead of listing them individually.
-</Aside>
+### `AgentToolInput`
 
-## Plugins
+| Form | Description |
+|------|-------------|
+| `string` | Name of a daemon-registered tool |
+| `{ name, description?, parameters?, examples? }` | Descriptor with the name, LLM-visible description, JSON Schema `parameters`, and few-shot `examples` |
 
-A `Plugin` groups actions, providers, and evaluators into a reusable module.
-
-```typescript
-import { plugin } from '@animaOS-SWARM/sdk';
-
-const researchPlugin = plugin({
-  name: 'research',
-  description: 'Web search and memory tools for research agents',
-  actions: [memorySearch, webFetch],
-  providers: [currentTimeProvider],
-  evaluators: [citationEvaluator],
-  init: async (runtime) => {
-    console.log('Plugin initialized for', runtime.agentId);
-  },
-});
-```
-
-### `Plugin` interface
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | `string` | Plugin identifier |
-| `description` | `string` | Human-readable description |
-| `actions` | `Action[]` | Tools provided by the plugin |
-| `providers` | `Provider[]` | Dynamic context providers |
-| `evaluators` | `Evaluator[]` | Post-response evaluators |
-| `init` | `(runtime) => Promise<void>` | Lifecycle hook on registration |
-| `cleanup` | `(runtime) => Promise<void>` | Lifecycle hook on shutdown |
+Use `client.capabilities()` to list the native tool handlers the daemon exposes. See [Tools](/sdk/agents/tools/) for details.
 
 ## Recent Memories
 
@@ -312,32 +263,9 @@ for (const memory of memories) {
 ## Full Example: Research Agent with Tools
 
 ```typescript
-import { agent, action, plugin, createDaemonClient } from '@animaOS-SWARM/sdk';
+import { agent, createDaemonClient } from '@animaOS-SWARM/sdk';
 
 const client = createDaemonClient();
-
-const webFetch = action({
-  name: 'web_fetch',
-  description: 'Fetch and summarize a URL',
-  parametersSchema: {
-    url: { type: 'string', description: 'URL to fetch' },
-  },
-  handler: async (_runtime, _message, args) => {
-    const url = String(args.url);
-    // ... fetch and summarize logic
-    return {
-      status: 'success',
-      data: { text: `Summary of ${url}` },
-      durationMs: 1200,
-    };
-  },
-});
-
-const researchPlugin = plugin({
-  name: 'research',
-  description: 'Web research tools',
-  actions: [webFetch],
-});
 
 const researcher = await client.agents.create(
   agent({
@@ -345,7 +273,7 @@ const researcher = await client.agents.create(
     provider: 'openai',
     model: 'gpt-4o',
     system: 'You are a thorough research assistant. Use tools to verify facts.',
-    plugins: [researchPlugin],
+    tools: ['memory_search', 'web_fetch'],
     settings: { temperature: 0.3, maxTokens: 4096 },
   })
 );

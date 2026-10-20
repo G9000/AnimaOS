@@ -1,4 +1,4 @@
-import type { AgentStatus, Attachment, TokenUsage } from '@animaOS-SWARM/core';
+import type { AgentStatus, Attachment, TokenUsage } from './types.js';
 
 import type { ModelChoice } from './provider-keys.js';
 

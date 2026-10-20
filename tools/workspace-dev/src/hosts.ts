@@ -1,16 +1,14 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-export const HOST_KEYS = ['rust', 'elixir', 'python'] as const;
+export const HOST_KEYS = ['rust'] as const;
 
 export type HostKey = (typeof HOST_KEYS)[number];
-export type HostStatus = 'ready' | 'placeholder';
 
 export interface HostDefinition {
   key: HostKey;
   projectName: string;
   baseUrl: string;
-  status: HostStatus;
   env: Record<string, string>;
 }
 
@@ -19,25 +17,10 @@ const HOSTS: Record<HostKey, HostDefinition> = {
     key: 'rust',
     projectName: 'rust-daemon',
     baseUrl: 'http://127.0.0.1:8080',
-    status: 'ready',
     env: {
       ANIMAOS_RS_HOST: '127.0.0.1',
       ANIMAOS_RS_PORT: '8080',
     },
-  },
-  elixir: {
-    key: 'elixir',
-    projectName: 'elixir-phoenix',
-    baseUrl: 'http://127.0.0.1:4100',
-    status: 'placeholder',
-    env: {},
-  },
-  python: {
-    key: 'python',
-    projectName: 'python-service',
-    baseUrl: 'http://127.0.0.1:4201',
-    status: 'placeholder',
-    env: {},
   },
 };
 
@@ -78,7 +61,7 @@ export function hostProcessEnv(
     env.ANIMAOS_RS_PERSISTENCE_MODE?.toLowerCase() === 'postgres' ||
     env[DEV_EPHEMERAL_ENV] === '1';
 
-  if (host.key !== 'rust' || keepsOwnStore) {
+  if (keepsOwnStore) {
     return host.env;
   }
 

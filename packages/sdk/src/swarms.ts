@@ -1,12 +1,45 @@
-import type { Content, TokenUsage } from '@animaOS-SWARM/core';
-import type {
-  AgentMessage,
-  SwarmConfig,
-  SwarmState,
-} from '@animaOS-SWARM/swarm';
-
 import type { DaemonClient, DaemonEvent } from './client.js';
 import type { DaemonTaskResult } from './daemon-types.js';
+import type {
+  AgentConfig,
+  Content,
+  TaskResult,
+  TokenUsage,
+  UUID,
+} from './types.js';
+
+export type SwarmStrategy = 'supervisor' | 'dynamic' | 'round-robin';
+
+export type SwarmStatus = 'idle' | 'running' | 'completed' | 'failed';
+
+export interface SwarmConfig {
+  strategy: SwarmStrategy;
+  manager: AgentConfig;
+  workers: AgentConfig[];
+  maxConcurrentAgents?: number;
+  maxParallelDelegations?: number;
+  maxTurns?: number;
+  tokenBudget?: number;
+}
+
+export interface AgentMessage {
+  id: string;
+  from: string;
+  to: string | 'broadcast';
+  content: Content;
+  timestamp: number;
+}
+
+export interface SwarmState {
+  id: UUID;
+  status: SwarmStatus;
+  agentIds: string[];
+  messages: AgentMessage[];
+  results: TaskResult[];
+  tokenUsage: TokenUsage;
+  startedAt?: number;
+  completedAt?: number;
+}
 
 export interface SwarmRunResponse<
   T = { text: string; [key: string]: unknown },

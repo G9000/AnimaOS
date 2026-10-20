@@ -4,25 +4,10 @@
   "files": [],
   "references": [
     {
-      "path": "./packages/core-ts"
-    },
-    {
-      "path": "./packages/swarm"
-    },
-    {
-      "path": "./packages/tools"
-    },
-    {
-      "path": "./packages/memory"
-    },
-    {
       "path": "./packages/sdk"
     },
     {
       "path": "./packages/cli"
-    },
-    {
-      "path": "./apps/server"
     },
     {
       "path": "./apps/web-e2e"
@@ -34,13 +19,7 @@
       "path": "./packages/tui"
     },
     {
-      "path": "./packages/mod-sdk"
-    },
-    {
       "path": "./tools/workspace-dev"
-    },
-    {
-      "path": "./mods/crypto-trader"
     },
     {
       "path": "./packages/ui"
