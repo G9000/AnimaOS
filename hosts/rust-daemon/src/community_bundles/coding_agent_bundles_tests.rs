@@ -1,6 +1,6 @@
 //! The shipped coding-agent bundles under `bundles/coding-agents/`: each
-//! manifest inlines its SKILL.md byte for byte, passes the manifest validator
-//! against this host, and its skill passes the daemon's SKILL.md parser.
+//! manifest inlines its SKILL.md apart from checkout newline conversion,
+//! passes this host's manifest validator and the daemon's SKILL.md parser.
 use anima_service_adapters::community_bundles::{
     parse_manifest, validate_manifest, ManifestComponent,
 };
@@ -86,8 +86,11 @@ fn coding_agent_bundles_validate_and_inline_their_skill_files() {
         let [ManifestComponent::Skill { skill_file, .. }] = manifest.components.as_slice() else {
             panic!("{}: expected exactly one skill component", bundle.id);
         };
+        // Git can convert source newlines on checkout; every other byte,
+        // including whitespace and the trailing newline, must still match.
         assert_eq!(
-            skill_file, bundle.skill,
+            skill_file.replace("\r\n", "\n"),
+            bundle.skill.replace("\r\n", "\n"),
             "{}: manifest is stale; run `node bundles/coding-agents/build.mjs`",
             bundle.id
         );

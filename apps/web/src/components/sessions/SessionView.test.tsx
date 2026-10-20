@@ -76,6 +76,7 @@ function renderView(overrides: Partial<SessionViewProps> = {}) {
 beforeEach(() => {
   // The header reads the session's usage; most tests have none.
   vi.spyOn(daemon, 'getSession').mockResolvedValue(sessionFixture('room-7'));
+  vi.spyOn(daemon.interactions, 'list').mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -83,6 +84,49 @@ afterEach(() => {
 });
 
 describe('SessionView', () => {
+  it('answers a side question while the active task continues without sending or stopping it', async () => {
+    const ask = vi
+      .spyOn(daemon.interactions, 'sideQuestion')
+      .mockResolvedValue({
+        answer: 'The report covers three sources.',
+        snapshotThroughMessageId: null,
+        snapshotAtMs: 1,
+      });
+    const send = vi.fn();
+    const stop = vi.fn();
+    const session = sessionFixture('chat:side');
+    renderView({
+      session,
+      composer: {
+        draft: '/btw What does the report cover?',
+        setDraft: vi.fn(),
+        sending: false,
+        disabled: false,
+        offline: false,
+        onSend: send,
+        onStop: stop,
+        runActive: true,
+        error: null,
+        onDismissError: vi.fn(),
+      },
+    });
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Ask side question' }),
+    );
+    await waitFor(() =>
+      expect(ask).toHaveBeenCalledWith(
+        session.agentId,
+        session.id,
+        'What does the report cover?',
+        expect.anything(),
+      ),
+    );
+    expect(
+      await screen.findByText('The report covers three sources.'),
+    ).toBeInTheDocument();
+    expect(send).not.toHaveBeenCalled();
+    expect(stop).not.toHaveBeenCalled();
+  });
   it('refreshes the context estimate while historical messages and visible runs stay fixed', async () => {
     const initialContext = {
       estimatedTokens: 800,
@@ -226,8 +270,16 @@ describe('SessionView', () => {
     });
     expect(meter).toHaveAttribute('max', '1000');
     expect(meter).toHaveAttribute('value', '820');
-    expect(screen.getByText(/getting long · 82% of Nova’s working memory/)).toBeVisible();
-    for (const excluded of ['instructions', 'tool schemas', 'files', 'draft', 'reply'])
+    expect(
+      screen.getByText(/getting long · 82% of Nova’s working memory/),
+    ).toBeVisible();
+    for (const excluded of [
+      'instructions',
+      'tool schemas',
+      'files',
+      'draft',
+      'reply',
+    ])
       expect(meter).toHaveAttribute('title', expect.stringContaining(excluded));
 
     view.rerender({
@@ -729,9 +781,18 @@ describe('SessionView', () => {
   });
 
   it('directs email owner replies through draft review in Connectors', () => {
-    renderView({session: sessionFixture('email:connector:sender', {kind:'email',origin:'email',title:'Email',capabilities:readOnly})});
+    renderView({
+      session: sessionFixture('email:connector:sender', {
+        kind: 'email',
+        origin: 'email',
+        title: 'Email',
+        capabilities: readOnly,
+      }),
+    });
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-    expect(screen.getByRole('note')).toHaveTextContent('Review and send email drafts in Connectors');
+    expect(screen.getByRole('note')).toHaveTextContent(
+      'Review and send email drafts in Connectors',
+    );
   });
 
   it('shows the reply in progress, outcomes, and where the companion’s view begins', async () => {

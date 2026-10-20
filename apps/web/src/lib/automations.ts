@@ -86,6 +86,8 @@ export function describeTrigger(trigger: AutomationTrigger): string {
       return `cron ${trigger.expression} (${trigger.timeZone})`;
     case 'once':
       return `once, ${formatWhenIn(trigger.atMs, localTimeZone())}`;
+    case 'event':
+      return `when ${trigger.topic} occurs`;
   }
 }
 

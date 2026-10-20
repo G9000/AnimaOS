@@ -21,6 +21,9 @@ impl AgentRunCoordinator {
     /// run's isolated runtime (spec §8.3). Neither ever fails the run: a
     /// skill that cannot be loaded is logged and noted for the model.
     pub(super) async fn apply_skills(&self, runtime: &mut AgentRuntime, content: &Content) {
+        if let Some(guidance) = anima_core::learn::learn_guidance(&content.text) {
+            runtime.register_provider(Arc::new(SkillContextProvider::learn(guidance.into())));
+        }
         let skills = self.skills();
         // An agent without `load_skill` could not load a listed skill.
         if runtime.config().allows_tool("load_skill") {

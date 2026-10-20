@@ -17,6 +17,7 @@ const COMMON_TOOLS = [
   'search_conversations',
   'load_skill',
   'list_automations',
+  'clarify',
 ];
 
 const OBSERVE_TOOLS = [

@@ -1666,6 +1666,8 @@ pub(crate) struct DaemonState {
     pub(crate) goals: HashMap<String, crate::jobs::GoalRecord>,
     pub(crate) runs: crate::runs::RunLedger,
     pub(crate) learning: crate::learning::LearningRegistry,
+    pub(crate) clarifications: crate::clarifications::ClarificationRegistry,
+    pub(crate) automation_events: crate::schedules::event::EventRegistry,
     /// One actual learning transport worker, shared across coordinators.
     pub(crate) learning_slots: Arc<tokio::sync::Semaphore>,
     pub(crate) sessions: crate::sessions::SessionRegistry,
@@ -2289,6 +2291,8 @@ impl DaemonState {
             goals: HashMap::new(),
             runs: crate::runs::RunLedger::default(),
             learning: crate::learning::LearningRegistry::default(),
+            clarifications: crate::clarifications::ClarificationRegistry::default(),
+            automation_events: crate::schedules::event::EventRegistry::default(),
             learning_slots: Arc::new(tokio::sync::Semaphore::new(1)),
             sessions: crate::sessions::SessionRegistry::default(),
             approvals: crate::approvals::ApprovalRegistry::default(),
@@ -2564,8 +2568,13 @@ impl DaemonState {
         snapshot.skills = skills.skills;
         snapshot.skill_drafts = skills.drafts;
         snapshot.schedule_fires = self.schedule_fires.snapshot();
+        snapshot.clarifications = self.clarifications.snapshot();
+        snapshot.automation_events = self.automation_events.snapshot();
         snapshot.pricing_overrides = self.pricing_overrides.clone();
-        snapshot.owner_time_zone = self.owner_time_zone.get().map(|zone| zone.name().to_string());
+        snapshot.owner_time_zone = self
+            .owner_time_zone
+            .get()
+            .map(|zone| zone.name().to_string());
         snapshot.side_model = self.side_model.clone();
         let learning = self.learning.snapshot();
         snapshot.learning_reviews = learning.reviews;
@@ -2784,6 +2793,22 @@ impl DaemonState {
             anima_core::primitives::now_millis(),
             &origin_pins,
         );
+        self.clarifications = crate::clarifications::ClarificationRegistry::restored(
+            snapshot.clarifications,
+            &self.live_agent_ids(),
+        );
+        let sessions = &self.sessions;
+        let runs = &self.runs;
+        self.clarifications.retain(|r| {
+            sessions.contains(&r.agent_id, &r.session_id)
+                && runs
+                    .get(&r.run_id)
+                    .is_some_and(|run| run.agent_id == r.agent_id && run.session_id == r.session_id)
+        });
+        self.automation_events = crate::schedules::event::EventRegistry::restore(
+            snapshot.automation_events,
+            &self.schedules,
+        )?;
         self.learning = crate::learning::LearningRegistry::restored(
             crate::learning::LearningSnapshot {
                 reviews: snapshot.learning_reviews,
@@ -2911,6 +2936,16 @@ impl DaemonState {
         }
 
         crate::jobs::validate_goals(&snapshot.goals, &snapshot.jobs)?;
+        crate::clarifications::ClarificationRegistry::validate(&snapshot.clarifications)?;
+        crate::schedules::event::EventRegistry::restore(
+            snapshot.automation_events.clone(),
+            &snapshot
+                .schedules
+                .iter()
+                .cloned()
+                .map(|s| (s.id.clone(), s))
+                .collect(),
+        )?;
         crate::learning::LearningRegistry::validate(&crate::learning::LearningSnapshot {
             reviews: snapshot.learning_reviews.clone(),
             policies: snapshot.learning_policies.clone(),

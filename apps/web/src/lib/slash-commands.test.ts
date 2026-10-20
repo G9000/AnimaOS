@@ -31,6 +31,13 @@ describe('parseSlashCommand', () => {
 });
 
 describe('SLASH_COMMANDS', () => {
+  it('offers learn as a normal source-gathering turn and reserves its name', () => {
+    expect(parseSlashCommand('/learn docs/api.md focus on errors')).toEqual({
+      command: expect.objectContaining({ name: 'learn', turn: true }),
+      argument: 'docs/api.md focus on errors',
+    });
+    expect(skillSlashCommands([skillFixture('learn')])).toEqual([]);
+  });
   it('/new remains a compatibility command for returning to the main chat', () => {
     expect(parseSlashCommand('/new')?.command.description).toBe(
       'Return to the main chat',

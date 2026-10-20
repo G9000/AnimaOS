@@ -2773,10 +2773,9 @@ it('offers a message still retrying when the page reloads before it is answered 
   mockProviders();
   vi.mocked(daemon.startRun).mockReturnValue(new Promise(() => {}));
   const first = render(<ViewHarness />);
-  await user.type(
-    await screen.findByPlaceholderText('Message Alpha…'),
-    'Still on its way',
-  );
+  const firstInput = await screen.findByPlaceholderText('Message Alpha…');
+  await waitFor(() => expect(firstInput).toBeEnabled());
+  await user.type(firstInput, 'Still on its way');
   await user.click(screen.getByRole('button', { name: 'Send' }));
   await waitFor(() => expect(daemon.startRun).toHaveBeenCalledTimes(1));
   first.unmount();
@@ -2787,6 +2786,9 @@ it('offers a message still retrying when the page reloads before it is answered 
   );
   expect(screen.getByPlaceholderText('Message Alpha…')).toHaveValue(
     'Still on its way',
+  );
+  await waitFor(() =>
+    expect(screen.getByPlaceholderText('Message Alpha…')).toBeEnabled(),
   );
   // The restored key is reused: sending it again joins, not doubles.
   await user.click(screen.getByRole('button', { name: 'Send' }));

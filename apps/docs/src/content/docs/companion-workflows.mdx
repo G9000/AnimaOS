@@ -1,0 +1,84 @@
+---
+title: Companion workflows
+description: Recover work, ask questions, learn procedures, and automate native tools
+---
+
+## Continue interrupted work
+
+An interrupted or failed owner task offers **Review interrupted work** below its recorded actions. Inspect those actions, especially any unknown outcome, acknowledge the review, then choose **Continue remaining work**. Anima starts a linked attempt in the same chat using current permissions and the original attachments and skill selection. It checks saved progress before acting; the original run and its action evidence stay available.
+
+Repeated clicks return the same saved continuation, including after restart. Each chain allows at most three continuations. Work that was explicitly stopped, connector tasks, helpers and background jobs use their existing controls instead. Ordinary run-history retention still applies; unanswered questions keep their source available for recovery.
+
+If a send or other external effect is uncertain, check the destination before authorizing continuation. A successful tool receipt alone cannot establish that the entire task succeeded. Anima never automatically replays an interrupted task.
+
+## Ask while Anima works
+
+Use `/btw <question>` in an existing web chat, or type it and choose **Ask side question**. The answer appears separately while the main task continues. It uses a bounded snapshot of the conversation, the active owner request and recorded progress; it does not use tools, change the main task or add a new task to its queue. The snapshot can be incomplete, and the side answer is not saved into the main transcript.
+
+## Answer a question from Anima
+
+Anima can show a question card with choices, multiple selections where requested, and a free-text answer. Choose **Submit answers** to save your response and let the waiting task continue. Answering grants no additional tool permissions.
+
+Pending questions survive daemon restart. Submit the saved answers, then use the interrupted task's recovery review to continue; saving an answer after restart does not replay the old task. Owner stop cancels pending questions. Structured question cards are currently supported in ordinary web chats; connector and helper runs cannot open an unanswerable card.
+
+## Completion and loop protection
+
+Anima reviews settled file reads, checks and saved tasks before finishing. Repeated identical failures eventually lead to a final explanation with tools disabled. Repeated successful polling remains possible. Long runaway text is cut off and marked incomplete; text streamed before detection can remain visible. These checks help expose unfinished work; they are not a proof that every requested outcome is correct.
+
+## Existing workspace data
+
+The new durable state format is version 23. On first upgrade, the daemon preserves the exact version-22 file as `.pre-companion-interaction.bak`; older backups remain separate. No reset or data deletion is needed. Keep your configured persistent store and workspace path across restart.
+
+## Learn a reusable procedure
+
+Send `/learn <workflow or source>` in a chat. Include every source and constraint, for example:
+
+```text
+/learn docs/deployment.md and the workflow we just finished. Focus on rollback; skip production credentials.
+```
+
+Bare `/learn` uses the current conversation. This starts an ordinary task with the agent's current file, web and skill permissions. It gathers the sources and uses `propose_skill`; Strict and Custom leave a draft for review, while Free can activate it through the existing skill controls and keep an undo entry. The chat and Skills page show the actual result. Skills currently use one bounded `SKILL.md`; a multi-file book or document ingestion engine is not included.
+
+## React to an event
+
+Choose **Run when an event arrives** in the automation editor, or create a trigger through an already owner-authorized SDK client:
+
+```ts
+const automation = await client.automations.create(agentId, {
+  name: 'Review changed files',
+  prompt:
+    'Review the changed file in the event payload and explain what needs attention.',
+  trigger: { type: 'event', topic: 'files.changed' },
+});
+
+await client.automations.emitEvent(agentId, {
+  eventId: 'file-revision-42',
+  topic: 'files.changed',
+  payload: { path: 'notes.txt' },
+});
+```
+
+The owner endpoint is `POST /api/agents/{agentId}/automation-events`. It uses the same local owner authorization as automation changes: an approved local browser origin, or the configured local admin bearer token for a local adapter. It does not expose a public unauthenticated webhook. A file-change or webhook adapter can publish through this endpoint; Anima does not start a filesystem watcher.
+
+Committed ordinary task outcomes, including reviewed recovery attempts, publish `task.completed` and `task.failed` for the task's agent. Pre-admission and start refusals, interrupted or cancelled work, schedules, helpers and other system followups do not publish these events. This prevents an automation from triggering itself through its own completion. Event payloads are source data; they do not grant tools, permissions or instructions. Existing active hours, approval rules, delivery targets and run history apply. Companion-created event automations run at least five minutes apart.
+
+Reuse an `eventId` for retries of the same event. A different payload under a retained ID returns `409`. The daemon saves accepted occurrences before execution and retains their identities for the lifetime of the schedule. It admits at most 64 pending occurrences and 256 retained occurrences across live automations; new events return `429` when capacity is full, while exact retries remain duplicates. Deleting an automation releases its retained identities. Payloads must be JSON objects of at most 8 KiB, with bounded nesting. Native outcomes that cannot fit are logged and do not fail the original task. An interrupted claimed occurrence requires review and is not automatically replayed after restart.
+
+## Chain native tools in a Python program
+
+On Windows, explicitly select an installed Python 3.10 or newer interpreter before starting the daemon. Set `ANIMAOS_RS_TOOL_RPC_PYTHON_PATH` to its absolute executable path in that launch environment; restart the daemon after changing it. Anima does not discover an interpreter from personal profiles or install one automatically.
+
+In the agent's access settings, choose shell access and enable **Allow programmatic tool chains**. This separately grants `execute_code`; each native tool also needs its own grant. The settings show whether the interpreter is configured. Configuration is not an execution health check.
+
+The agent can then send a complete Python program to `execute_code`:
+
+```python
+from anima_tools import read_file, write_file
+
+first = read_file(file_path="first.txt")
+second = read_file(file_path="second.txt")
+write_file(file_path="combined.txt", content=first + "\n" + second)
+print("combined.txt was written")
+```
+
+Each call starts fresh; variables do not persist between programs. The generated `anima_tools` module includes only the currently granted subset of `web_search`, `web_fetch`, `read_file`, `write_file`, `glob`, `grep`, `edit_file`, `multi_edit` and `bash`. Native keyword arguments are unchanged. The outer program requires execution approval, and native calls keep their own approvals and durable receipts. Local Python has the operating-system access of the daemon user. Cancellation, a five-minute deadline and owned process cleanup remain enforced; uncertain effects require review.

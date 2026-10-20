@@ -86,6 +86,34 @@ afterEach(() => {
 });
 
 describe('useSessionCommands', () => {
+  it('sends learn and its complete source requirements as an ordinary queued turn', () => {
+    const { result, options } = setup({
+      draft: '/learn docs/api.md focus on errors',
+    });
+    act(() => result.current.send());
+    expect(options.queueSend).toHaveBeenCalledWith(
+      options.session,
+      CHAT_KEY,
+      '/learn docs/api.md focus on errors',
+      expect.any(String),
+      'queue',
+    );
+    expect(options.showCommands).not.toHaveBeenCalled();
+  });
+  it('queues learn rather than steering an existing task', () => {
+    const { result, options } = setup({
+      draft: '/learn',
+      activeRun: runFixture('active', { status: 'running' }),
+    });
+    act(() => result.current.steer());
+    expect(options.queueSend).toHaveBeenCalledWith(
+      options.session,
+      CHAT_KEY,
+      '/learn',
+      expect.any(String),
+      'queue',
+    );
+  });
   it('replays an unchanged recovered raw API input before trimming or interpreting its slash command', () => {
     const text = ' \n /help raw request \t ';
     const { result, options, rerender } = setup({

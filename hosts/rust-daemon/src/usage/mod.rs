@@ -41,6 +41,7 @@ pub(crate) enum UsageSource {
     Agency,
     /// The autonomy smart check judging a risky command.
     Approval,
+    SideQuestion,
 }
 
 impl UsageSource {
@@ -59,6 +60,7 @@ impl UsageSource {
             Self::Profile => "profile",
             Self::Agency => "agency",
             Self::Approval => "approval",
+            Self::SideQuestion => "side_question",
         }
     }
 }

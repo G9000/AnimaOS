@@ -415,6 +415,7 @@ fn registry_rejects_duplicate_registration() {
 fn registry_defines_every_registered_tool_schema() {
     let registry = ToolRegistry::new();
     let expectations = [
+        ("clarify", &["questions"][..], &[][..]),
         ("execute_code", &["code"][..], &["reset"][..]),
         ("list_workspace_agents", &[][..], &[][..]),
         ("delegate_to_agent", &["agent_id", "task"][..], &[][..]),

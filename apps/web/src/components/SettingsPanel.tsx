@@ -3,6 +3,7 @@ import {
   ACCESS_PROFILES,
   BROWSER_TOOL_ACCESS,
   isBrowserTool,
+  PROGRAMMATIC_TOOL_ACCESS,
   deriveAccessProfile,
   toolNamesForProfile,
   type AccessProfile,
@@ -10,6 +11,7 @@ import {
 import type { AgentDetail } from '../lib/types';
 import {
   MODEL_SUGGESTIONS,
+  daemon,
   type AgentUpdateInput,
   type DaemonProvider,
 } from '../lib/daemon-api';
@@ -119,6 +121,7 @@ export function SettingsPanel({
   const hasDocumentRead = agent.toolNames.includes('read_document');
   const hasWebSearch = agent.toolNames.includes('web_search');
   const hasWebFetch = agent.toolNames.includes('web_fetch');
+  const hasToolChains = agent.toolNames.includes('execute_code');
   const derivedAccess = deriveAccessProfile(
     agent.toolNames.filter(
       (tool) =>
@@ -128,7 +131,8 @@ export function SettingsPanel({
         tool !== 'read_conversation_window' &&
         tool !== 'read_document' &&
         tool !== 'web_search' &&
-        tool !== 'web_fetch',
+        tool !== 'web_fetch' &&
+        tool !== 'execute_code',
     ),
   );
 
@@ -155,11 +159,31 @@ export function SettingsPanel({
   const [allowDocumentRead, setAllowDocumentRead] = useState(hasDocumentRead);
   const [allowWebSearch, setAllowWebSearch] = useState(hasWebSearch);
   const [allowWebFetch, setAllowWebFetch] = useState(hasWebFetch);
+  const [allowToolChains, setAllowToolChains] = useState(hasToolChains);
+  const [toolChainStatus, setToolChainStatus] = useState('loading');
   const [savedFlash, setSavedFlash] = useState(false);
   const saveErrorRef = useRef<HTMLDivElement>(null);
   const resetErrorRef = useRef<HTMLDivElement>(null);
   const controlsDisabled = saving || resetting;
   const shows = (section: SettingsSection) => sections.includes(section);
+  useEffect(() => {
+    if (!sections.includes('access')) return;
+    let active = true;
+    daemon
+      .capabilities()
+      .then((capabilities) => {
+        if (active)
+          setToolChainStatus(
+            capabilities.programmaticTools?.status ?? 'unknown',
+          );
+      })
+      .catch(() => {
+        if (active) setToolChainStatus('unknown');
+      });
+    return () => {
+      active = false;
+    };
+  }, [sections]);
 
   // Re-seed after an accepted agent update or a main-agent transition. Tool
   // order alone is not a config change and must not clobber an in-progress draft.
@@ -183,6 +207,7 @@ export function SettingsPanel({
     setAllowDocumentRead(hasDocumentRead);
     setAllowWebSearch(hasWebSearch);
     setAllowWebFetch(hasWebFetch);
+    setAllowToolChains(hasToolChains);
   }, [
     agent.id,
     agent.name,
@@ -196,6 +221,7 @@ export function SettingsPanel({
     hasDocumentRead,
     hasWebSearch,
     hasWebFetch,
+    hasToolChains,
     derivedAccess,
   ]);
 
@@ -227,7 +253,8 @@ export function SettingsPanel({
     allowConversationRead !== hasConversationRead ||
     allowDocumentRead !== hasDocumentRead ||
     allowWebSearch !== hasWebSearch ||
-    allowWebFetch !== hasWebFetch;
+    allowWebFetch !== hasWebFetch ||
+    allowToolChains !== hasToolChains;
   const dirty =
     name.trim() !== agent.name ||
     provider !== agent.provider ||
@@ -256,7 +283,8 @@ export function SettingsPanel({
           (tool !== 'read_conversation_window' || allowConversationRead) &&
           (tool !== 'read_document' || allowDocumentRead) &&
           (tool !== 'web_search' || allowWebSearch) &&
-          (tool !== 'web_fetch' || allowWebFetch),
+          (tool !== 'web_fetch' || allowWebFetch) &&
+          (tool !== 'execute_code' || allowToolChains),
       );
       if (allowMemoryRemove && !patch.tools.includes('memory_remove')) {
         patch.tools.push('memory_remove');
@@ -282,6 +310,9 @@ export function SettingsPanel({
       if (allowWebFetch && !patch.tools.includes('web_fetch')) {
         patch.tools.push('web_fetch');
       }
+      if (allowToolChains && !patch.tools.includes('execute_code')) {
+        patch.tools.push('execute_code');
+      }
       patch.tools.push(
         ...BROWSER_TOOL_ACCESS.filter(({ name }) =>
           browserGrants.includes(name),
@@ -297,6 +328,21 @@ export function SettingsPanel({
   };
 
   const abilities = [
+    {
+      id: 'tool-chains',
+      label: PROGRAMMATIC_TOOL_ACCESS.label,
+      checked: allowToolChains,
+      setChecked: setAllowToolChains,
+      disabled:
+        toolChainStatus === 'unsupported' ||
+        agent.workspaceRole === 'helper' ||
+        !(
+          accessDirty && accessSelection
+            ? toolNamesForProfile(accessSelection)
+            : agent.toolNames
+        ).includes(PROGRAMMATIC_TOOL_ACCESS.requires),
+      help: `${toolChainStatus === 'configured' ? 'One-shot Python is configured; each execution still verifies setup.' : toolChainStatus === 'unsupported' ? 'This host platform is not supported yet.' : toolChainStatus === 'unconfigured' ? 'Python is not configured.' : 'Interpreter configuration has not been confirmed.'} Set ANIMAOS_RS_TOOL_RPC_PYTHON_PATH to an absolute Python interpreter path and restart the daemon. Requires shell access. Python has this computer user’s operating-system access; native calls retain their approvals and receipts.`,
+    },
     {
       id: 'web-search',
       label: 'Allow web search',
@@ -618,6 +664,7 @@ export function SettingsPanel({
                         setAllowDocumentRead(false);
                         setAllowWebSearch(false);
                         setAllowWebFetch(false);
+                        setAllowToolChains(false);
                         setBrowserGrants([]);
                       }}
                     />

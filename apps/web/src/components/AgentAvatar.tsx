@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 export function refreshAgentAvatar(id: string) {
   window.dispatchEvent(new CustomEvent('agent-avatar-changed', { detail: id }));
@@ -8,10 +8,12 @@ export function AgentAvatar({
   id,
   name,
   size = 28,
+  fallback = null,
 }: {
   id: string;
   name: string;
   size?: number;
+  fallback?: ReactNode;
 }) {
   const [revision, setRevision] = useState(0);
   const [failed, setFailed] = useState(false);
@@ -34,7 +36,7 @@ export function AgentAvatar({
       title={failed ? name : undefined}
     >
       {/* No uploaded image: the default orb (styled) stands in for the agent. */}
-      {failed ? null : (
+      {failed ? fallback : (
         <img
           key={`${id}:${revision}`}
           src={`/api/agents/${encodeURIComponent(id)}/avatar?v=${revision}`}

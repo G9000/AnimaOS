@@ -68,6 +68,21 @@ export interface HelperCompletionOrigin {
   launchParentRunId: string;
 }
 
+export interface RunRecoverySummary {
+  sourceRunId: string;
+  fingerprint: string;
+  eligible: boolean;
+  reviewRequired: boolean;
+  unknownActionCount: number;
+  remainingAttempts: number;
+  continuationRunId: string | null;
+}
+
+export interface ContinueRecoveryInput {
+  fingerprint: string;
+  reviewed?: boolean;
+}
+
 /** A ledger run (spec §4.1). */
 export interface Run {
   id: string;
@@ -100,6 +115,13 @@ export interface Run {
   model: string;
   provider: string | null;
   parentRunId: string | null;
+  recovery?: {
+    fingerprint: string;
+    continuationRunId: string;
+    reviewedAtMs: number;
+  };
+  recoveryOf?: string;
+  recoveryAttempt?: number;
   /** The committed final reply once the run completed. */
   replyMessageId: string | null;
   /** Native action witnesses, absent on runs saved before receipt support. */
@@ -145,6 +167,31 @@ export function isTerminalRunStatus(status: RunStatus): boolean {
 
 export class RunsClient {
   constructor(private readonly client: DaemonClient) {}
+
+  /** Inspect immutable source evidence before authorizing one linked continuation. */
+  recovery(
+    agentId: string,
+    runId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<RunRecoverySummary> {
+    return this.client.requestJson<RunRecoverySummary>(
+      `${runPath(agentId, runId)}/recovery`,
+      { signal: options.signal },
+    );
+  }
+
+  /** Exact repeats return the saved continuation. Current grants apply to the new run. */
+  async continueRecovery(
+    agentId: string,
+    runId: string,
+    input: ContinueRecoveryInput,
+  ): Promise<Run> {
+    const response = await this.client.requestJson<{ run: Run }>(
+      `${runPath(agentId, runId)}/recovery`,
+      { method: 'POST', body: input },
+    );
+    return response.run;
+  }
 
   /** Accepts a message into a session (spec §4.2). The same key within 24
    *  hours returns the original run and creates nothing. */

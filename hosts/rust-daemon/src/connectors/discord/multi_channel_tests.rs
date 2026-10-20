@@ -30,12 +30,15 @@ async fn one_agent_can_create_three_distinct_channel_connections_and_restore_the
     assert!(!third.enabled);
 
     let snapshot = manager.state.read().await.control_plane_snapshot();
+    // Credential finalization may update the saved timestamp after create's
+    // returned record. Restore must preserve the exact saved records.
+    let expected = snapshot.discord_connectors.clone();
     let mut restored = DaemonState::new();
     restored.restore_control_plane_snapshot(snapshot).unwrap();
     assert_eq!(restored.discord_connectors.len(), 3);
-    assert_eq!(restored.discord_connectors[&first.id], first);
-    assert_eq!(restored.discord_connectors[&second.id], second);
-    assert_eq!(restored.discord_connectors[&third.id], third);
+    for connector in expected {
+        assert_eq!(restored.discord_connectors[&connector.id], connector);
+    }
     manager.shutdown().await;
 }
 

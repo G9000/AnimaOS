@@ -265,6 +265,12 @@ pub(crate) struct RunRecord {
     #[serde(default)]
     pub(crate) parent_run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) recovery: Option<super::recovery::RecoveryRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) recovery_of: Option<String>,
+    #[serde(default)]
+    pub(crate) recovery_attempt: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) async_helper: Option<super::AsyncHelper>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) helper_completion: Option<super::HelperCompletion>,
@@ -340,6 +346,9 @@ impl RunRecord {
             model: start.model,
             provider: start.provider,
             parent_run_id: start.parent_run_id,
+            recovery: None,
+            recovery_of: None,
+            recovery_attempt: 0,
             async_helper: None,
             helper_completion: None,
             reply_message_id: None,
@@ -1007,6 +1016,34 @@ impl RunLedger {
         let mut ids = HashSet::new();
         for record in records {
             super::validate_receipts(&record.action_receipts)?;
+            if record.recovery_attempt > super::recovery::MAX_RECOVERY_ATTEMPTS
+                || (record.recovery_attempt == 0) != record.recovery_of.is_none()
+                || record.recovery_of.as_ref() == Some(&record.id)
+            {
+                return Err("Invalid recovery attempt lineage".into());
+            }
+            if let Some(recovery) = &record.recovery {
+                let child = records
+                    .iter()
+                    .find(|r| r.id == recovery.continuation_run_id);
+                if !super::delegation_origin::valid_digest(&recovery.fingerprint)
+                    || recovery.reviewed_at_ms == 0
+                    || recovery.continuation_run_id.trim().is_empty()
+                    || recovery.continuation_run_id == record.id
+                    || record.recovery_attempt >= super::recovery::MAX_RECOVERY_ATTEMPTS
+                    // Historical children may leave under ordinary retention.
+                    // Their absence cannot reopen recovery admission, which
+                    // still fails closed when the saved child is no longer held.
+                    || child.is_some_and(|child| {
+                        child.agent_id != record.agent_id
+                            || child.session_id != record.session_id
+                            || child.recovery_of.as_deref() != Some(record.id.as_str())
+                            || child.recovery_attempt != record.recovery_attempt.saturating_add(1)
+                    })
+                {
+                    return Err("Invalid saved recovery continuation".into());
+                }
+            }
             if record.id.trim().is_empty() || !ids.insert(record.id.as_str()) {
                 return Err(format!(
                     "duplicate or empty run id in snapshot: {}",
@@ -1461,6 +1498,92 @@ mod tests {
         ledger.prune(now);
 
         assert!(ledger.get(&holding.id).is_some());
+    }
+
+    #[test]
+    fn recovery_history_stays_loadable_when_retention_removes_its_continuation() {
+        let now = 10 * TERMINAL_RUN_RETENTION_MS;
+        let live = HashSet::from(["agent-a".to_string()]);
+        // Both ordinary unmirrored retention and an explicit source pin may
+        // outlive a fully mirrored continuation. Neither pins the whole chain.
+        for pin_source in [false, true] {
+            let mut source = finished("agent-a", now - 2 * TERMINAL_RUN_RETENTION_MS);
+            source.status = RunStatus::Interrupted;
+            source.mirrored = pin_source;
+            let mut child = mirrored("agent-a", now - TERMINAL_RUN_RETENTION_MS - 1);
+            child.recovery_of = Some(source.id.clone());
+            child.recovery_attempt = 1;
+            source.recovery = Some(crate::runs::recovery::RecoveryRecord {
+                fingerprint: crate::runs::recovery::summary(&source).fingerprint,
+                continuation_run_id: child.id.clone(),
+                reviewed_at_ms: child.created_at_ms,
+            });
+            assert!(RunLedger::validate(&[source.clone(), child.clone()]).is_ok());
+            let pins = if pin_source {
+                HashSet::from([source.id.clone()])
+            } else {
+                HashSet::new()
+            };
+            let mut ledger = RunLedger::default();
+            ledger.insert(source.clone());
+            ledger.insert(child.clone());
+            ledger.prune_with_pins(now, &pins);
+            assert!(ledger.get(&source.id).is_some());
+            assert!(
+                ledger.get(&child.id).is_none(),
+                "historical children retain ordinary bounds"
+            );
+            let saved = ledger.snapshot_records(&live);
+            assert!(
+                RunLedger::validate(&saved).is_ok(),
+                "a retained historical source must remain loadable"
+            );
+            let encoded = serde_json::to_vec(&saved).unwrap();
+            let restored = RunLedger::restored_with_pins(
+                serde_json::from_slice(&encoded).unwrap(),
+                &live,
+                now,
+                &pins,
+            );
+            assert_eq!(restored.get(&source.id).unwrap().recovery, source.recovery);
+            assert!(restored.get(&child.id).is_none());
+            assert!(RunLedger::validate(&restored.snapshot_records(&live)).is_ok());
+        }
+    }
+
+    #[test]
+    fn recovery_history_rejects_invalid_references_and_present_foreign_or_reset_children() {
+        let mut source = finished("agent-a", 10);
+        source.status = RunStatus::Interrupted;
+        let mut child = finished("agent-a", 20);
+        child.recovery_of = Some(source.id.clone());
+        child.recovery_attempt = 1;
+        source.recovery = Some(crate::runs::recovery::RecoveryRecord {
+            fingerprint: crate::runs::recovery::summary(&source).fingerprint,
+            continuation_run_id: child.id.clone(),
+            reviewed_at_ms: 15,
+        });
+        assert!(RunLedger::validate(&[source.clone()]).is_ok());
+        assert!(RunLedger::validate(&[source.clone(), child.clone()]).is_ok());
+        child.agent_id = "foreign".into();
+        assert!(RunLedger::validate(&[source.clone(), child.clone()]).is_err());
+        child.agent_id = source.agent_id.clone();
+        child.session_id = "chat:foreign".into();
+        assert!(RunLedger::validate(&[source.clone(), child.clone()]).is_err());
+        child.session_id = source.session_id.clone();
+        child.recovery_of = None;
+        child.recovery_attempt = 0;
+        assert!(RunLedger::validate(&[source.clone(), child]).is_err());
+        for id in [String::new(), "  ".into(), source.id.clone()] {
+            let mut invalid = source.clone();
+            invalid.recovery.as_mut().unwrap().continuation_run_id = id;
+            assert!(RunLedger::validate(&[invalid]).is_err());
+        }
+        let mut invalid = source.clone();
+        invalid.recovery.as_mut().unwrap().fingerprint.clear();
+        assert!(RunLedger::validate(&[invalid]).is_err());
+        source.recovery.as_mut().unwrap().reviewed_at_ms = 0;
+        assert!(RunLedger::validate(&[source]).is_err());
     }
 
     #[test]

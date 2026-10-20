@@ -12,6 +12,7 @@ export type SlashCommandName =
   | 'model'
   | 'compact'
   | 'usage'
+  | 'learn'
   | 'help';
 
 export interface SlashCommand {
@@ -24,6 +25,8 @@ export interface SlashCommand {
   placeholder?: string;
   /** Set on `/<skill-slug>`: the message is sent with this skill. */
   skill?: string;
+  /** A built-in instruction handled by the daemon as an ordinary task. */
+  turn?: boolean;
 }
 
 /** A skill's description in the menu, at most this many characters. */
@@ -55,6 +58,12 @@ export const SLASH_COMMANDS: readonly (SlashCommand & {
   {
     name: 'compact',
     description: 'Summarize earlier messages to make room',
+  },
+  {
+    name: 'learn',
+    description: 'Turn a workflow or source into a reusable skill',
+    placeholder: '<workflow or source>',
+    turn: true,
   },
   { name: 'usage', description: 'Show usage for this chat and today' },
   { name: 'help', description: 'Show every command' },

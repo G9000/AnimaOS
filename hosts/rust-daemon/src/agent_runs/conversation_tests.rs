@@ -489,7 +489,7 @@ async fn conversation_tools_reject_unknown_fields_and_oversized_windows() {
                 ("query", DataValue::String("lisbon".into())),
                 ("kind", DataValue::String("helper".into())),
             ]),
-            "search_conversations kind must be chat, telegram, discord, checkin, or job",
+            "search_conversations kind must be chat, telegram, discord, email, checkin, or job",
         ),
         (
             search_call(&[

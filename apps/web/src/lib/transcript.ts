@@ -378,8 +378,12 @@ const WRITTEN_INPUT: ReadonlySet<Run['source']> = new Set([
   'discord',
 ]);
 
-export function hasWrittenInput(run: Pick<Run, 'source'>): boolean {
-  return WRITTEN_INPUT.has(run.source);
+export const RECOVERY_WORK_NOTICE = 'Continuing reviewed work';
+
+export function hasWrittenInput(
+  run: Pick<Run, 'source' | 'recoveryOf'>,
+): boolean {
+  return !run.recoveryOf && WRITTEN_INPUT.has(run.source);
 }
 
 /** The daemon's own note after a calendar write is applied: an `api` run
@@ -402,8 +406,9 @@ const TELEGRAM_INBOUND_REF = /:[+-]?\d+$/;
  * not offered.
  */
 export function isOwnerWritten(
-  run: Pick<Run, 'source' | 'sourceRef'>,
+  run: Pick<Run, 'source' | 'sourceRef' | 'recoveryOf'>,
 ): boolean {
+  if (run.recoveryOf) return false;
   switch (run.source) {
     case 'web':
       return true;
@@ -456,6 +461,8 @@ function messageItem(
   delegatedBy: string | null,
 ): TranscriptItem {
   const metadata = metadataOf(message);
+  if (message.role === 'User' && stringField(metadata, 'recoveryOf'))
+    return { kind: 'model-note', key: message.id, text: RECOVERY_WORK_NOTICE };
   if (message.role === 'Assistant' && metadata.revised === true)
     return { kind: 'revised', key: message.id, message };
   if (message.role === 'User' && delegatedBy)
@@ -800,7 +807,30 @@ export function placeRuns(
   const { lastOfRun, lastOfStep, stoppedRuns, startedAtMs } = history;
   const oldestLoaded = history.oldestLoadedMs;
   const olderHistory = input.olderHistory ?? true;
-  const items = [...history.items];
+  // Older saved messages may predate durable origin metadata. Use an exact
+  // trusted run link while that record remains available, never input text or
+  // owner-selectable request-key prefixes.
+  const recoveries = (input.runs ?? []).filter((live) => live.run.recoveryOf);
+  const recoveryIds = new Set(recoveries.map((live) => live.run.id));
+  const recoveryRequests = new Set(
+    recoveries.flatMap((live) =>
+      live.run.idempotencyKey ? [live.run.idempotencyKey] : [],
+    ),
+  );
+  const items = history.items.map((item): TranscriptItem => {
+    if (item.kind !== 'message' || item.message.role !== 'User') return item;
+    const metadata = metadataOf(item.message);
+    if (metadata.steer === true) return item;
+    const runId = messageRunId(item.message);
+    const requestId = stringField(metadata, 'clientRequestId');
+    const recovered =
+      runId !== null
+        ? recoveryIds.has(runId)
+        : requestId !== null && recoveryRequests.has(requestId);
+    return recovered
+      ? { kind: 'model-note', key: item.key, text: RECOVERY_WORK_NOTICE }
+      : item;
+  });
   /** The item a run created at `at` goes after. */
   const anchorFor = (at: number): number => {
     const next = startedAtMs.findIndex(

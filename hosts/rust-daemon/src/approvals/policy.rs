@@ -12,6 +12,7 @@ use super::{
 /// Tools that only read (spec §7.1). `load_skill` and `list_automations`
 /// arrive in M5 and M6.
 const READ_TOOLS: &[&str] = &[
+    "clarify",
     "read_file",
     "checkpoint_list",
     "read_document",

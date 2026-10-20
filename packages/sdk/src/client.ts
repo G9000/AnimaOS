@@ -11,6 +11,7 @@ import { ConnectorsClient } from './connectors.js';
 import { MemoriesClient } from './memories.js';
 import { SwarmsClient } from './swarms.js';
 import { SessionsClient } from './sessions.js';
+import { InteractionsClient } from './interactions.js';
 import { RunsClient } from './runs.js';
 import { LearningClient } from './learning.js';
 import { McpClient } from './mcp.js';
@@ -92,6 +93,7 @@ export class DaemonClient {
   readonly memories: MemoriesClient;
   readonly swarms: SwarmsClient;
   readonly sessions: SessionsClient;
+  readonly interactions: InteractionsClient;
   readonly runs: RunsClient;
   readonly learning: LearningClient;
   readonly mcp: McpClient;
@@ -131,6 +133,7 @@ export class DaemonClient {
     this.memories = new MemoriesClient(this);
     this.swarms = new SwarmsClient(this);
     this.sessions = new SessionsClient(this);
+    this.interactions = new InteractionsClient(this);
     this.runs = new RunsClient(this);
     this.learning = new LearningClient(this);
     this.mcp = new McpClient(this);

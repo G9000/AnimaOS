@@ -1894,6 +1894,113 @@ fn exact_failure_round(id: &str) -> ModelGenerateResponse {
 }
 
 #[test]
+fn autonomy_six_exact_failures_force_one_existing_tools_disabled_wrapup() {
+    let model = BudgetBoundaryModel::new(
+        (0..6)
+            .map(|index| Ok(exact_failure_round(&format!("failure-{index}"))))
+            .chain([Ok(budget_reply(
+                ModelStopReason::End,
+                "The tool remains unavailable; work is unfinished.",
+                false,
+            ))])
+            .collect(),
+    );
+    let mut runtime = AgentRuntime::new(budget_config(20), model.clone());
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    let result =
+        block_on(
+            runtime.run_with_context_and_tools(Vec::new(), text("Read input"), |_, _, _| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async { crate::TaskResult::<Content>::error("exact unavailable", 0) }
+            }),
+        );
+    assert_eq!(result.status, TaskStatus::Success);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 6);
+    let requests = model.requests.lock().unwrap();
+    assert_eq!(requests.len(), 7);
+    assert_eq!(requests[6].0.tools, Some(Vec::new()));
+    assert!(requests[6].1.system.contains("Six consecutive"));
+    assert_eq!(
+        runtime
+            .messages()
+            .iter()
+            .filter(|message| message.role == MessageRole::Tool)
+            .count(),
+        6
+    );
+}
+
+#[test]
+fn autonomy_a_new_owner_steer_resets_the_exact_failure_limit() {
+    let model = BudgetBoundaryModel::new(
+        (0..7)
+            .map(|index| Ok(exact_failure_round(&format!("failure-{index}"))))
+            .chain([Ok(budget_reply(
+                ModelStopReason::End,
+                "New instructions received.",
+                false,
+            ))])
+            .collect(),
+    );
+    let mut runtime = AgentRuntime::new(budget_config(20), model.clone());
+    let control = super::RunControl::new();
+    runtime.set_run_control(control.clone());
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    let result =
+        block_on(
+            runtime.run_with_context_and_tools(Vec::new(), text("Read input"), |_, _, _| {
+                let count = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                if count == 6 {
+                    control
+                        .steering
+                        .push(text("The input was repaired; inspect it again."))
+                        .unwrap();
+                }
+                async { crate::TaskResult::<Content>::error("exact unavailable", 0) }
+            }),
+        );
+    assert_eq!(result.status, TaskStatus::Success);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 7);
+    let requests = model.requests.lock().unwrap();
+    assert!(requests[6]
+        .0
+        .tools
+        .as_ref()
+        .is_some_and(|tools| !tools.is_empty()));
+    assert!(requests[6]
+        .1
+        .messages
+        .iter()
+        .any(|message| message.content.text.contains("input was repaired")));
+}
+
+#[test]
+fn autonomy_successful_polling_keeps_tools_available_beyond_the_failure_limit() {
+    let model = BudgetBoundaryModel::new(
+        (0..8)
+            .map(|index| Ok(exact_failure_round(&format!("poll-{index}"))))
+            .chain([Ok(budget_reply(
+                ModelStopReason::End,
+                "Polling finished.",
+                false,
+            ))])
+            .collect(),
+    );
+    let mut runtime = AgentRuntime::new(budget_config(20), model.clone());
+    let result = block_on(runtime.run_with_context_and_tools(
+        Vec::new(),
+        text("Wait for the task"),
+        |_, _, _| async { crate::TaskResult::success(text("still running"), 0) },
+    ));
+    assert_eq!(result.status, TaskStatus::Success);
+    let requests = model.requests.lock().unwrap();
+    assert_eq!(requests.len(), 9);
+    assert!(requests
+        .iter()
+        .all(|(config, _)| config.tools.as_ref().is_some_and(|tools| !tools.is_empty())));
+}
+
+#[test]
 fn exact_failure_warning_appears_once_on_the_existing_next_request_without_changing_results() {
     let model = BudgetBoundaryModel::new(vec![
         Ok(exact_failure_round("attempt-1")),

@@ -6,6 +6,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
+use super::repetition_guard::{RunawayStreamWatch, REPETITION_ERROR, REPETITION_INTERRUPTED};
+use super::{CancelSignal, CancelWait};
 use crate::agent::TokenUsage;
 use crate::model::{ModelGenerateResponse, ModelStreamFrame, ModelStreamSink, ToolCall};
 use crate::primitives::{Content, LockRecover, TaskResult, TaskStatus};
@@ -108,6 +110,8 @@ pub(crate) struct StepSink {
     response: Mutex<Option<ModelGenerateResponse>>,
     usage: Mutex<Option<TokenUsage>>,
     served: Mutex<Option<ServedBy>>,
+    repetition_watch: Mutex<RunawayStreamWatch>,
+    repetition_signal: CancelSignal,
 }
 
 /// The fallback model that answered a call, as its adapter reported it.
@@ -126,12 +130,25 @@ impl StepSink {
             response: Mutex::new(None),
             usage: Mutex::new(None),
             served: Mutex::new(None),
+            repetition_watch: Mutex::new(RunawayStreamWatch::default()),
+            repetition_signal: CancelSignal::new(),
         }
     }
 
     /// Everything the call streamed so far.
     pub(crate) fn streamed_text(&self) -> String {
+        if self.repetition_detected() {
+            return REPETITION_INTERRUPTED.to_string();
+        }
         self.text.lock_recover().clone()
+    }
+
+    pub(crate) fn repetition_detected(&self) -> bool {
+        self.repetition_signal.is_cancelled()
+    }
+
+    pub(crate) fn repetition_cancelled(&self) -> CancelWait {
+        self.repetition_signal.cancelled()
     }
 
     /// The latest provider-reported usage of a call that has not finished;
@@ -156,10 +173,18 @@ impl StepSink {
 #[async_trait]
 impl ModelStreamSink for StepSink {
     async fn emit(&self, frame: ModelStreamFrame) -> Result<(), String> {
+        if self.repetition_detected() {
+            return Err(REPETITION_ERROR.to_string());
+        }
         match frame {
             ModelStreamFrame::TextDelta(text) => {
                 if text.is_empty() {
                     return Ok(());
+                }
+                if self.repetition_watch.lock_recover().feed(&text) {
+                    self.text.lock_recover().clear();
+                    self.repetition_signal.cancel();
+                    return Err(REPETITION_ERROR.to_string());
                 }
                 self.text.lock_recover().push_str(&text);
                 if let Some(observer) = &self.observer {

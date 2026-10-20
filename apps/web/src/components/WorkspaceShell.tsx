@@ -10,6 +10,7 @@ import type { HashPage, HashRoute, Navigate } from '../lib/hash-route';
 import type { AgentDetail } from '../lib/types';
 import { AgentPresence } from './AgentPresence';
 import { AgentSwitcher } from './AgentSwitcher';
+import { AgentsView } from './AgentsView';
 import { HaloBackdrop } from './halo/HaloBackdrop';
 import {
   presenceMode,
@@ -31,9 +32,11 @@ import {
   ClockIcon,
   GearIcon,
   HeartIcon,
+  HistoryIcon,
   InboxIcon,
   LogIcon,
   PulseIcon,
+  SearchIcon,
   ShieldIcon,
   SparkIcon,
   XIcon,
@@ -44,6 +47,8 @@ import { onOpenInbox } from '../lib/inbox-events';
 /** Pages this release renders; the other hash pages open the conversation
  *  until their milestones build them. */
 export const AVAILABLE_PAGES = [
+  'agents',
+  'new-agent',
   'profile',
   'model',
   'runtime',
@@ -411,6 +416,7 @@ export function WorkspaceShell({
   onPickPrompt,
   onNewChat,
   onSelectAgent,
+  newAgent = null,
   searchMessages,
   onOpenMessage,
   inbox = null,
@@ -464,6 +470,8 @@ export function WorkspaceShell({
   onOpenMessage?: (hit: SessionMessageSearchHit) => void;
   /** Switches the conversation to another companion. */
   onSelectAgent?: (agentId: string) => void;
+  /** Existing companion setup, opened by the agent dropdown. */
+  newAgent?: ReactNode;
   /** The "Needs you" inbox: how many things wait, and its panel. */
   inbox?: {
     count: number;
@@ -610,7 +618,7 @@ export function WorkspaceShell({
       : []),
   ];
 
-  const pageLabel = page
+  const pageLabel = page === 'agents' ? 'Manage agents' : page === 'new-agent' ? 'New agent' : page
     ? (DESTINATIONS.find((item) => item.page === page)?.label ?? null)
     : null;
 
@@ -636,10 +644,10 @@ export function WorkspaceShell({
                   online={connection === 'online'}
                   status={statusText}
                   busy={presence !== 'calm'}
+                  locked={locked}
                   onSelect={onSelectAgent}
-                  onOpenSettings={() =>
-                    navigate({ kind: 'page', page: 'profile' })
-                  }
+                  onNewAgent={() => navigate({ kind: 'page', page: 'new-agent' })}
+                  onManageAgents={() => navigate({ kind: 'page', page: 'agents' })}
                 />
                 {sideThread && (
                   <>
@@ -696,7 +704,7 @@ export function WorkspaceShell({
                     aria-haspopup="dialog"
                     onClick={() => setDrawerOpen(true)}
                   >
-                    <ClockIcon size={14} />
+                    <HistoryIcon size={14} />
                     <span className="scenic-hide-narrow" aria-hidden>
                       History
                     </span>
@@ -708,7 +716,7 @@ export function WorkspaceShell({
                   onClick={() => setCommandsOpen(true)}
                   aria-label="Open command menu"
                 >
-                  <span aria-hidden>⌕</span>
+                  <SearchIcon size={14} />
                   <span className="studio-command-trigger-label">Search</span>
                   <kbd>Ctrl K</kbd>
                 </button>
@@ -720,7 +728,7 @@ export function WorkspaceShell({
                   aria-label="Settings"
                   title={`Settings for ${mainAgent.name}`}
                 >
-                  <GearIcon size={15} />
+                  <GearIcon size={14} />
                 </button>
               </div>
             </div>
@@ -774,7 +782,18 @@ export function WorkspaceShell({
                       </button>
                     </div>
                     <div className="settings-window-page">
-                      {page === 'profile' ? (
+                      {page === 'new-agent' ? (
+                        newAgent
+                      ) : page === 'agents' ? (
+                        <AgentsView
+                          agents={agents}
+                          mainAgent={mainAgent}
+                          onSelectAgent={(id) => {
+                            onSelectAgent?.(id);
+                            openConversation();
+                          }}
+                        />
+                      ) : page === 'profile' ? (
                         profile
                       ) : page === 'model' ? (
                         model

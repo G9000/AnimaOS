@@ -42,6 +42,10 @@ use failure_guard::{
     EXACT_FAILURE_HINT, REPEATED_SUCCESS_HINT, REPEATED_TOOL_CYCLE_HINT,
 };
 
+#[path = "runtime/repetition_guard.rs"]
+mod repetition_guard;
+use repetition_guard::{is_runaway, REPETITION_ERROR, REPETITION_INTERRUPTED};
+
 #[path = "runtime/control.rs"]
 mod control;
 pub use control::{
@@ -62,6 +66,7 @@ const MAX_EVALUATOR_RETRIES: usize = 2;
 const BUDGET_WRAPUP_METADATA_KEY: &str = "budgetWrapup";
 const UNCONFIGURED_TOOL_REFUSAL: &str = "This tool is not configured for this agent. Continue only with configured tools, or explain the limitation.";
 const BUDGET_WRAPUP_GUIDANCE: &str = "Tool-round budget exhausted. No more tools are available. Give one final answer using the actual settled tool results: state confirmed completed work, remaining work and limitations honestly. Do not claim unfinished actions completed.";
+const FAILURE_WRAPUP_GUIDANCE: &str = "Six consecutive fresh calls with the same tool, arguments and exact error have failed. No more tools are available in this run. Give one final answer using the settled results: explain the blocker and unfinished work honestly. Do not claim that failed calls had no effects, or repeat uncertain actions.";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AgentRuntimeSnapshot {
@@ -506,14 +511,25 @@ impl AgentRuntime {
                 return self.finish_stopped(start);
             }
             // Steering joins before each model call (spec §4.7).
+            let before_steer = conversation.len();
             self.drain_steering(&room_id, &mut conversation);
+            if conversation.len() != before_steer {
+                exact_failures.reset();
+                failure_hint_pending = false;
+                successful_results.reset();
+                success_hint_pending = false;
+                successful_cycle.reset_history();
+                cycle_hint_pending = false;
+            }
             if self.stop_requested() {
                 return self.finish_stopped(start);
             }
             // The already-next call is the sole wrap-up attempt. Every
             // wrap-up rejection below is terminal, including evaluator Retry.
             let budget_wrapup = iterations >= max_tool_iterations;
-            let call_config = budget_wrapup.then(|| {
+            let failure_wrapup = exact_failures.exhausted();
+            let wrapup = budget_wrapup || failure_wrapup;
+            let call_config = wrapup.then(|| {
                 let mut config = self.state.config.clone();
                 config.tools = Some(Vec::new());
                 config
@@ -539,6 +555,9 @@ impl AgentRuntime {
             if budget_wrapup {
                 system.push_str("\n\n");
                 system.push_str(BUDGET_WRAPUP_GUIDANCE);
+            } else if failure_wrapup {
+                system.push_str("\n\n");
+                system.push_str(FAILURE_WRAPUP_GUIDANCE);
             }
             if failure_hint_pending {
                 system.push_str("\n\n");
@@ -586,14 +605,20 @@ impl AgentRuntime {
                     &request,
                     &sink,
                 );
+                let guarded_call = Box::pin(async {
+                    match select(call, sink.repetition_cancelled()).await {
+                        Either::Left((outcome, _)) => outcome,
+                        Either::Right(((), _)) => Err(REPETITION_ERROR.to_string()),
+                    }
+                });
                 match cancel {
                     // Stop checkpoint while streaming: dropping the call drops
                     // the in-flight request (spec §4.6).
-                    Some(cancel) => match select(call, cancel.cancelled()).await {
+                    Some(cancel) => match select(guarded_call, cancel.cancelled()).await {
                         Either::Left((streamed, _)) => Some(streamed),
                         Either::Right(((), _)) => None,
                     },
-                    None => Some(call.await),
+                    None => Some(guarded_call.await),
                 }
             };
             let partial = sink.streamed_text();
@@ -610,6 +635,7 @@ impl AgentRuntime {
                 return self.finish_stopped(start);
             };
             let outcome = match streamed {
+                _ if sink.repetition_detected() => Err(REPETITION_ERROR.to_string()),
                 Ok(()) => sink
                     .take_response()
                     .ok_or_else(|| MODEL_STREAM_WITHOUT_FINAL.to_string()),
@@ -622,6 +648,7 @@ impl AgentRuntime {
                     // a provider cannot claim that an earlier answer wrapped up.
                     if let Some(metadata) = response.content.metadata.as_mut() {
                         metadata.remove(BUDGET_WRAPUP_METADATA_KEY);
+                        metadata.remove("noProgressWrapup");
                     }
                     self.apply_token_usage(&response.usage);
                     if let Some(served) = sink.take_served() {
@@ -637,18 +664,41 @@ impl AgentRuntime {
                         usage: response.usage.clone(),
                     });
 
-                    if budget_wrapup {
+                    if is_runaway(&response.content.text) {
+                        return self.fail_step(
+                            &room_id,
+                            &step_id,
+                            REPETITION_INTERRUPTED,
+                            INCOMPLETE_METADATA_KEY,
+                            REPETITION_ERROR,
+                            start,
+                        );
+                    }
+
+                    if wrapup {
                         let rejection = if response.stop_reason == ModelStopReason::ToolCall
                             || response
                                 .tool_calls
                                 .as_ref()
                                 .is_some_and(|calls| !calls.is_empty())
                         {
-                            Some("tool iteration limit exceeded")
+                            Some(if budget_wrapup {
+                                "tool iteration limit exceeded"
+                            } else {
+                                "exact failure limit exceeded"
+                            })
                         } else if response.stop_reason == ModelStopReason::MaxTokens {
-                            Some("budget wrap-up was truncated")
+                            Some(if budget_wrapup {
+                                "budget wrap-up was truncated"
+                            } else {
+                                "failure wrap-up was truncated"
+                            })
                         } else if response.content.text.trim().is_empty() {
-                            Some("budget wrap-up returned empty text")
+                            Some(if budget_wrapup {
+                                "budget wrap-up returned empty text"
+                            } else {
+                                "failure wrap-up returned empty text"
+                            })
                         } else {
                             None
                         };
@@ -670,7 +720,7 @@ impl AgentRuntime {
                             successful_results.reset();
                             successful_cycle.reset_history();
                             let evaluation = match self
-                                .run_evaluators(&user_message, &response.content, !budget_wrapup)
+                                .run_evaluators(&user_message, &response.content, !wrapup)
                                 .await
                             {
                                 Ok(decision) => decision,
@@ -698,6 +748,16 @@ impl AgentRuntime {
                                                 DataValue::Bool(true),
                                             );
                                     }
+                                    if failure_wrapup {
+                                        response
+                                            .content
+                                            .metadata
+                                            .get_or_insert_with(BTreeMap::new)
+                                            .insert(
+                                                "noProgressWrapup".into(),
+                                                DataValue::Bool(true),
+                                            );
+                                    }
                                     let duration_ms = now_millis().saturating_sub(start);
                                     let message_id = self.mark_completed_in_room(
                                         room_id.clone(),
@@ -715,7 +775,7 @@ impl AgentRuntime {
                                     });
                                 }
                                 EvaluatorDecision::Retry { feedback } => {
-                                    if budget_wrapup || evaluator_retries >= MAX_EVALUATOR_RETRIES {
+                                    if wrapup || evaluator_retries >= MAX_EVALUATOR_RETRIES {
                                         return self.fail_step(
                                             &room_id,
                                             &step_id,

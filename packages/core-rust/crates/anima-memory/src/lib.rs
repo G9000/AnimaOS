@@ -15,14 +15,14 @@ pub use core_port::{
     core_memory_to_legacy, legacy_memory_to_core, legacy_new_memory_to_core,
     memory_manager_port_unavailable, LegacyBridgeError, LegacyBridgeErrorCode, LegacyMemoryContext,
 };
-pub use external_provider::{
-    ExternalMemoryError, ExternalMemoryProvider, MemoryWriteAction, MemoryWriteEvent,
-    NoExternalMemory, ProviderStatus, RecallRequest, RecalledItem, TurnRecord,
-};
 pub use eval_harness::{
     baseline_memory_eval_cases, run_memory_eval_cases, run_memory_eval_checks, MemoryEvalCase,
     MemoryEvalCaseResult, MemoryEvalCheck, MemoryEvalCheckResult, MemoryEvalRelationshipSeed,
     MemoryEvalReport, MemoryEvalVectorHitSeed,
+};
+pub use external_provider::{
+    ExternalMemoryError, ExternalMemoryProvider, MemoryWriteAction, MemoryWriteEvent,
+    NoExternalMemory, ProviderStatus, RecallRequest, RecalledItem, TurnRecord,
 };
 #[cfg(feature = "locomo-eval")]
 pub use locomo_eval::{

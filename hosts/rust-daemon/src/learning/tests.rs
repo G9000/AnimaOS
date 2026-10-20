@@ -566,7 +566,10 @@ fn an_owner_turn_sent_from_the_console_into_a_shared_thread_counts() {
             counts_as_owner_turn(&run, &agent, Some(message), Some("hello"), false)
         };
         assert!(counts(&tagged(thread)), "{run_source:?} console turn");
-        assert!(!counts(&tagged(inbound)), "{run_source:?} shared-chat message");
+        assert!(
+            !counts(&tagged(inbound)),
+            "{run_source:?} shared-chat message"
+        );
         assert!(!counts(&owner_message(false)), "{run_source:?} untagged");
     }
 }

@@ -45,7 +45,9 @@ export function AutomationNoticeCard({
         ? ` · ${describeActiveHours(automation.activeHours)}`
         : '') +
       (automation.enabled
-        ? ` · next ${formatWhenIn(automation.nextDueAtMs, automationTimeZone(automation))}`
+        ? automation.trigger.type === 'event'
+          ? ' · waiting for event'
+          : ` · next ${formatWhenIn(automation.nextDueAtMs, automationTimeZone(automation))}`
         : ' · paused'),
   ).text;
   return (

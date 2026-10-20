@@ -4,6 +4,7 @@ mod app;
 mod approvals;
 mod attachments;
 mod browser;
+mod clarifications;
 mod clock;
 mod coding_apps;
 mod coding_keys;

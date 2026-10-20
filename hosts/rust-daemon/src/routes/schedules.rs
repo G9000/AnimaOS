@@ -331,7 +331,7 @@ pub(super) async fn import_legacy_schedules(
     ))
 }
 
-fn schedule_error(error: ScheduleError) -> AxumResponse {
+pub(super) fn schedule_error(error: ScheduleError) -> AxumResponse {
     match error {
         ScheduleError::AgentNotFound | ScheduleError::NotFound => error_response(
             StatusCode::NOT_FOUND,
@@ -377,7 +377,7 @@ fn invalid(message: &str) -> AxumResponse {
     error_response(StatusCode::BAD_REQUEST, "schedule_invalid", message)
 }
 
-fn local_owner_error(rejection: LocalOwnerRejection) -> AxumResponse {
+pub(super) fn local_owner_error(rejection: LocalOwnerRejection) -> AxumResponse {
     match rejection {
         LocalOwnerRejection::LocalAdminRequired => error_response(
             StatusCode::FORBIDDEN,

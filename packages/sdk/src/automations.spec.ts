@@ -63,6 +63,24 @@ const run: AutomationRun = {
 };
 
 describe('automations client', () => {
+  it('submits an owner event with a stable event id and bounded source payload', async () => {
+    const { automations, requests } = transport(() =>
+      Response.json({ accepted: 1, duplicate: 0 }),
+    );
+    expect(
+      await automations.emitEvent('agent/a', {
+        eventId: 'file-7',
+        topic: 'files.changed',
+        payload: { path: 'report.txt' },
+      }),
+    ).toEqual({ accepted: 1, duplicate: 0 });
+    expect(requests[0].url).toBe('/api/agents/agent%2Fa/automation-events');
+    expect(JSON.parse(String(requests[0].init?.body))).toEqual({
+      eventId: 'file-7',
+      topic: 'files.changed',
+      payload: { path: 'report.txt' },
+    });
+  });
   it('lists, creates, edits, runs, and deletes with encoded ids', async () => {
     const { automations, requests } = transport((url, init) => {
       if (init?.method === 'DELETE') return Response.json({ deleted: true });

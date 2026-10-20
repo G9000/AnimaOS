@@ -568,9 +568,11 @@ impl Worktrees {
             if !is_helper {
                 continue;
             }
+            // Report the canonical identity returned by `create`, while Git
+            // operations still name the exact registered path from its list.
             let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
             if entry.locked || live.contains(&canonical) || !path.is_dir() {
-                report.kept.push(path);
+                report.kept.push(canonical);
                 continue;
             }
             match self.sweepable(&path, &head, entry.head.as_deref()) {
@@ -582,17 +584,17 @@ impl Worktrees {
                         .unwrap_or_default()
                         .to_string();
                     match self.remove(&repo_root, &path, &branch) {
-                        Ok(()) => report.removed.push(path),
+                        Ok(()) => report.removed.push(canonical),
                         Err(error) => {
                             report.errors.push(error.to_string());
-                            report.kept.push(path);
+                            report.kept.push(canonical);
                         }
                     }
                 }
-                Ok(false) => report.kept.push(path),
+                Ok(false) => report.kept.push(canonical),
                 Err(error) => {
                     report.errors.push(error.to_string());
-                    report.kept.push(path);
+                    report.kept.push(canonical);
                 }
             }
         }

@@ -27,6 +27,15 @@ pub(crate) struct ToolRpcService {
     cells: Arc<CellLeases>,
 }
 impl ToolRpcService {
+    pub(crate) fn configuration_status(&self) -> &'static str {
+        if !cfg!(windows) {
+            "unsupported"
+        } else if self.config.interpreter.is_none() {
+            "unconfigured"
+        } else {
+            "configured"
+        }
+    }
     pub(crate) fn new(config: ToolRpcConfig) -> Arc<Self> {
         Arc::new(Self {
             config,

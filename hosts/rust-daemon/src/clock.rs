@@ -21,11 +21,14 @@ pub(crate) fn host_time_zone() -> Tz {
 }
 
 fn resolve_time_zone(tz_env: Option<&str>, system: Option<&str>) -> Tz {
-    [tz_env.map(|zone| zone.trim().trim_start_matches(':')), system]
-        .into_iter()
-        .flatten()
-        .find_map(|zone| zone.trim().parse::<Tz>().ok())
-        .unwrap_or(Tz::UTC)
+    [
+        tz_env.map(|zone| zone.trim().trim_start_matches(':')),
+        system,
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|zone| zone.trim().parse::<Tz>().ok())
+    .unwrap_or(Tz::UTC)
 }
 
 /// The owner's IANA time zone as last reported by their web console; one
@@ -35,12 +38,18 @@ pub(crate) struct OwnerTimeZone(Arc<RwLock<Option<Tz>>>);
 
 impl OwnerTimeZone {
     pub(crate) fn get(&self) -> Option<Tz> {
-        *self.0.read().unwrap_or_else(|poisoned| poisoned.into_inner())
+        *self
+            .0
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Records `zone`; true when it differs from the one held.
     pub(crate) fn set(&self, zone: Option<Tz>) -> bool {
-        let mut held = self.0.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut held = self
+            .0
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let changed = *held != zone;
         *held = zone;
         changed

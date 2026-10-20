@@ -3,6 +3,13 @@ import type { AgentDetail } from './types';
 export type AccessProfile = 'observe' | 'collaborate' | 'operate';
 export type DerivedAccessProfile = AccessProfile | 'custom';
 
+/** Kept separate from presets because arbitrary Python needs an explicit grant. */
+export const PROGRAMMATIC_TOOL_ACCESS = {
+  name: 'execute_code',
+  label: 'Allow programmatic tool chains',
+  requires: 'bash',
+} as const;
+
 export const BROWSER_TOOL_ACCESS = [
   { name: 'browser_navigate', label: 'Allow browser navigation' },
   { name: 'browser_observe', label: 'Allow browser observation' },
@@ -23,6 +30,7 @@ const COMMON_TOOLS = [
   'search_conversations',
   'load_skill',
   'list_automations',
+  'clarify',
 ] as const;
 
 const OBSERVE_TOOLS = [
@@ -83,8 +91,7 @@ export const ACCESS_PROFILES = {
   },
   operate: {
     label: 'Operate',
-    summary:
-      'Edits files, runs commands and uses any app on this computer.',
+    summary: 'Edits files, runs commands and uses any app on this computer.',
     risk: 'Can run shell commands, background work and apps such as coding agents. Rules still apply.',
     tools: OPERATE_TOOLS,
   },

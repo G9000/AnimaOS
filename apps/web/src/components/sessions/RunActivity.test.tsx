@@ -28,6 +28,30 @@ const step: ToolStep = {
   helper: null,
 };
 
+it.each(['queued', 'running'] as const)(
+  'shows a short recovery notice for %s work without rendering the internal input as a user bubble',
+  (status) => {
+    const internal = 'Host recovery evidence: private quoted action details';
+    const live = emptyLiveRun(
+      runFixture('recovery-child', {
+        status,
+        recoveryOf: 'original',
+        recoveryAttempt: 1,
+        input: { text: internal, attachmentIds: [] },
+      }),
+    );
+    render(
+      <RunActivity
+        live={live}
+        agentName="Nova"
+        renderMessage={renderMessage}
+      />,
+    );
+    expect(screen.getByText('Continuing reviewed work')).toBeVisible();
+    expect(screen.queryByText(internal)).toBeNull();
+  },
+);
+
 describe('RunActivity', () => {
   it('shows honest reference-only chips for queued attachment-only inputs before history arrives', () => {
     const run = runFixture('attachment-only', {
@@ -434,6 +458,20 @@ describe('ToolBlock', () => {
 });
 
 describe('RunOutcomeCard', () => {
+  it('offers reviewed recovery for a continuation without generic resend controls', () => {
+    const run = runFixture('continuation', {
+      status: 'interrupted',
+      source: 'web',
+      recoveryOf: 'original',
+      recoveryAttempt: 1,
+    });
+    render(<RunOutcomeCard run={run} onSendAgain={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Send again' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Review interrupted work' }),
+    ).toBeVisible();
+  });
   it('shows recorded actions on interrupted, failed, and stopped outcomes', () => {
     const receipt = {
       toolCallId: 'call_write',

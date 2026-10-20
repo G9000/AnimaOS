@@ -2,7 +2,10 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type { AgentDetail } from '../lib/types';
 import { companionAgents } from '../lib/active-agent';
 import { AgentAvatar } from './AgentAvatar';
-import { ChevronIcon, GearIcon } from './icons';
+import { HaloOrb } from './halo/HaloOrb';
+import { ChevronIcon, GearIcon, PlusIcon } from './icons';
+
+const AVATAR_ACCENTS = ['#E94DAB', '#4FD1C5', '#F2B44B'];
 
 /** The header names who you are talking with: avatar, name, and what it is
  *  doing. With more than one companion it opens a list to switch. */
@@ -13,23 +16,31 @@ export function AgentSwitcher({
   status,
   busy,
   onSelect,
-  onOpenSettings,
+  onNewAgent,
+  onManageAgents,
+  locked = false,
 }: {
   agent: AgentDetail;
   agents: readonly AgentDetail[];
   online: boolean;
   /** What the agent is doing now, from its presence. */
   status: string;
-  /** The agent is doing something, so its dot pulses. */
+  /** The agent is doing something. */
   busy: boolean;
   onSelect?: (agentId: string) => void;
-  onOpenSettings: () => void;
+  onNewAgent: () => void;
+  onManageAgents: () => void;
+  locked?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const menuId = useId();
   const companions = companionAgents(agents);
+  const accentFor = (id: string) => {
+    const index = Math.max(0, companions.findIndex((item) => item.id === id));
+    return AVATAR_ACCENTS[index % AVATAR_ACCENTS.length];
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -68,7 +79,14 @@ export function AgentSwitcher({
         aria-controls={open ? menuId : undefined}
         onClick={() => setOpen((value) => !value)}
       >
-        <AgentAvatar id={agent.id} name={agent.name} size={30} />
+        <AgentAvatar
+          id={agent.id}
+          name={agent.name}
+          size={32}
+          fallback={
+            <HaloOrb accent={accentFor(agent.id)} energy={0.6} className="agent-switch-orb" />
+          }
+        />
         <span className="agent-switch-text">
           <span className="agent-switch-name">
             <span className="scenic-wordmark" title={agent.name}>
@@ -80,7 +98,6 @@ export function AgentSwitcher({
             className={`companion-status ${online ? 'is-online' : 'is-offline'}${busy ? ' is-busy' : ''}`}
             role="status"
           >
-            <i aria-hidden />
             {status}
           </span>
         </span>
@@ -97,6 +114,14 @@ export function AgentSwitcher({
           </p>
           {companions.map((item) => {
             const active = item.id === agent.id;
+            const rowStatus = !online ? 'Offline' : active ? status
+              : item.status === 'Running' ? 'Working'
+                : item.status === 'Failed' ? 'Needs attention'
+                  : item.status === 'Terminated' ? 'Stopped' : 'Ready';
+            const state = !online ? 'offline'
+              : rowStatus === 'Waiting for your OK' || rowStatus === 'Needs attention' ? 'attention'
+                : (active ? busy : item.status === 'Running') ? 'working' : 'ready';
+            const description = rowStatus === 'Ready' ? item.bio?.trim() : null;
             return (
               <button
                 key={item.id}
@@ -106,31 +131,31 @@ export function AgentSwitcher({
                 className="agent-switch-item"
                 onClick={() => choose(item.id)}
               >
-                <AgentAvatar id={item.id} name={item.name} size={28} />
+                <AgentAvatar
+                  id={item.id}
+                  name={item.name}
+                  size={30}
+                  fallback={<HaloOrb accent={accentFor(item.id)} energy={0.5} className="agent-switch-orb" />}
+                />
                 <span className="agent-switch-text">
                   <span className="agent-switch-item-name">{item.name}</span>
                   <span className="agent-switch-item-status">
-                    {!online
-                      ? 'Offline'
-                      : active
-                        ? status
-                        : item.status === 'Running'
-                          ? 'Working'
-                          : 'Ready'}
+                    <i className="agent-switch-status-dot" data-state={state} aria-hidden />
+                    <span>{rowStatus}{description ? ` · ${description}` : ''}</span>
                   </span>
                 </span>
                 {active && (
                   <svg
                     className="agent-switch-check"
-                    width={14}
-                    height={14}
+                    width={15}
+                    height={15}
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
                     strokeWidth={2}
                     aria-hidden
                   >
-                    <path d="m5 12 5 5 9-10" />
+                    <path d="m20 6-11 11-5-5" />
                   </svg>
                 )}
               </button>
@@ -141,13 +166,27 @@ export function AgentSwitcher({
             type="button"
             role="menuitem"
             className="agent-switch-item is-action"
+            disabled={locked}
             onClick={() => {
               setOpen(false);
-              onOpenSettings();
+              onNewAgent();
+            }}
+          >
+            <PlusIcon size={14} />
+            <span>New agent</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="agent-switch-item is-action"
+            disabled={locked}
+            onClick={() => {
+              setOpen(false);
+              onManageAgents();
             }}
           >
             <GearIcon size={14} />
-            <span>{agent.name} settings</span>
+            <span>Manage agents</span>
           </button>
         </div>
       )}

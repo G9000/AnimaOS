@@ -51,8 +51,64 @@ const providers: DaemonProvider[] = [
 // The model page also lists API keys and the side-task model; keep these
 // tests independent of those owner reads.
 beforeEach(() => {
+  vi.spyOn(daemon, 'capabilities').mockResolvedValue({
+    schemaVersion: 1,
+    tools: [],
+    persistence: {
+      controlPlane: 'json',
+      memory: 'ephemeral',
+      executionJournal: false,
+    },
+    extensions: [],
+    limitations: [],
+    programmaticTools: {
+      status: 'configured',
+      mode: 'one_shot',
+      interpreterEnvironment: 'ANIMAOS_RS_TOOL_RPC_PYTHON_PATH',
+    },
+  });
   vi.spyOn(daemon, 'providerKeys').mockResolvedValue({ providers: [] });
   vi.spyOn(daemon, 'sideModel').mockResolvedValue(null);
+});
+
+it('grants programmatic chains separately while preserving current custom permissions', async () => {
+  const current = agent({ toolNames: ['read_file', 'bash', 'legacy_custom'] });
+  const saveSettings = vi.fn(async () => true);
+  renderPanel(current, { sections: ['access'], saveSettings });
+  const toggle = await screen.findByLabelText('Allow programmatic tool chains');
+  fireEvent.click(toggle);
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  await waitFor(() =>
+    expect(saveSettings).toHaveBeenCalledWith({
+      tools: [...current.toolNames, 'execute_code'],
+    }),
+  );
+  expect(screen.getByText(/ANIMAOS_RS_TOOL_RPC_PYTHON_PATH/)).toBeVisible();
+});
+it('keeps tool chains unavailable without the existing shell grant', async () => {
+  vi.mocked(daemon.capabilities).mockResolvedValue({
+    schemaVersion: 1,
+    tools: [],
+    persistence: {
+      controlPlane: 'json',
+      memory: 'ephemeral',
+      executionJournal: false,
+    },
+    extensions: [],
+    limitations: [],
+    programmaticTools: {
+      status: 'unconfigured',
+      mode: 'one_shot',
+      interpreterEnvironment: 'ANIMAOS_RS_TOOL_RPC_PYTHON_PATH',
+    },
+  });
+  renderPanel(agent({ toolNames: ['read_file'] }), { sections: ['access'] });
+  expect(
+    screen.getByLabelText('Allow programmatic tool chains'),
+  ).toBeDisabled();
+  await waitFor(() =>
+    expect(screen.getByText(/Python is not configured/)).toBeVisible(),
+  );
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -907,7 +963,9 @@ describe('SettingsPanel access', () => {
 
     view.rerender(<SettingsPanel {...view.props} sections={['profile']} />);
     expect(screen.getByRole('textbox', { name: 'Name' })).toBeVisible();
-    expect(screen.getByRole('textbox', { name: 'System prompt' })).toBeVisible();
+    expect(
+      screen.getByRole('textbox', { name: 'System prompt' }),
+    ).toBeVisible();
     expect(screen.getByRole('button', { name: 'Reset' })).toBeVisible();
     expect(screen.queryByRole('combobox', { name: 'Provider' })).toBeNull();
   });
@@ -1142,8 +1200,6 @@ describe('SettingsPanel access', () => {
     }
     expect(screen.getByText('Resetting agent…', { exact: true })).toBeVisible();
   });
-
-
 });
 
 it('M43 keeps native, dormant external and custom permissions during unrelated saves and optional toggles', async () => {

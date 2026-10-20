@@ -55689,7 +55689,10 @@
                         {
                           "type": "ellipse",
                           "id": "ZdCeE",
+                          "x": 0,
+                          "y": 5,
                           "name": "Dot",
+                          "enabled": false,
                           "fill": "#5BD69A",
                           "width": 6,
                           "height": 6
@@ -71824,14 +71827,6 @@
                           "alignItems": "center",
                           "children": [
                             {
-                              "type": "ellipse",
-                              "id": "pgaWb",
-                              "name": "Dot",
-                              "fill": "#5BD69A",
-                              "width": 6,
-                              "height": 6
-                            },
-                            {
                               "type": "text",
                               "id": "VTVSg",
                               "name": "Text",
@@ -72022,14 +72017,6 @@
                           "alignItems": "center",
                           "children": [
                             {
-                              "type": "ellipse",
-                              "id": "mXADe",
-                              "name": "Dot",
-                              "fill": "#5BD69A",
-                              "width": 6,
-                              "height": 6
-                            },
-                            {
                               "type": "text",
                               "id": "Runyz",
                               "name": "Text",
@@ -72219,14 +72206,6 @@
                           "gap": 6,
                           "alignItems": "center",
                           "children": [
-                            {
-                              "type": "ellipse",
-                              "id": "i60Q5",
-                              "name": "Dot",
-                              "fill": "#5BD69A",
-                              "width": 6,
-                              "height": 6
-                            },
                             {
                               "type": "text",
                               "id": "GUcb9",

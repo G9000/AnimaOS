@@ -39,6 +39,9 @@ import type { NativeVoiceScope } from '../voice/NativeTranscription';
 import { NativeSpeech } from '../voice/NativeSpeech';
 import { SessionSkillDrafts } from '../learning/SessionSkillDrafts';
 import { ContextNote, SessionContinuity } from './SessionContinuity';
+import { useSessionInteractions } from '../../hooks/useSessionInteractions';
+import { ClarificationCard, SideQuestionCard } from './InteractionCards';
+import { daemon } from '../../lib/daemon-api';
 
 export interface SessionComposerState {
   draft: string;
@@ -170,7 +173,7 @@ export function sessionFooter(
     case 'email':
       return {
         kind: 'note',
-        text: 'Review and send email drafts in Connectors. Automatic replies follow this mailbox\'s sender policy.',
+        text: "Review and send email drafts in Connectors. Automatic replies follow this mailbox's sender policy.",
       };
     case 'helper':
       return { kind: 'note', text: 'Helper sessions are read-only.' };
@@ -332,6 +335,31 @@ export function SessionView({
   const saveAgentName =
     saveAgentId === agent.id ? agent.name : GENERIC_SAVE_AGENT_NAME;
   const sessionId = session?.id ?? null;
+  const interactions = useSessionInteractions({
+    agentId: session?.agentId ?? null,
+    sessionId,
+    client: daemon.interactions,
+    enabled:
+      Boolean(daemon.interactions) &&
+      session?.kind === 'chat' &&
+      !composer.offline &&
+      !missing,
+    refreshKey: `${messages.length}:${runs.length}`,
+  });
+  const sendWithSideQuestion = (override?: string) => {
+    const text = override ?? composer.draft;
+    if (session?.kind === 'chat' && /^\s*\/btw(?:\s|$)/.test(text)) {
+      const question = text.trimStart().slice(4).trim();
+      if (!question) {
+        composer.setDraft('/btw ');
+        return;
+      }
+      void interactions.ask(question);
+      composer.setDraft('');
+      return;
+    }
+    composer.onSend(override);
+  };
   const voiceKey =
     composer.conversationKey ??
     `${session?.agentId ?? agent.id}\u0000${sessionId ?? 'home'}`;
@@ -546,6 +574,38 @@ export function SessionView({
           {readAloud.error}
         </p>
       )}
+      {session?.kind === 'chat' && (
+        <div className="space-y-3 px-4" aria-label="Conversation questions">
+          {interactions.clarifications.map((request) => (
+            <ClarificationCard
+              key={request.id}
+              request={request}
+              onAnswer={interactions.answer}
+            />
+          ))}
+          {interactions.sideQuestions.map((question) => (
+            <SideQuestionCard
+              key={question.id}
+              question={question.question}
+              pending={question.pending}
+              answer={question.answer}
+              error={question.error}
+            />
+          ))}
+          {interactions.error && (
+            <p role="status">
+              Questions unavailable: {interactions.error}{' '}
+              <button
+                type="button"
+                className={ghostBtnCls}
+                onClick={interactions.refresh}
+              >
+                Retry questions
+              </button>
+            </p>
+          )}
+        </div>
+      )}
       {footer.kind !== 'composer' && (
         <div className="session-tools">{sessionTools}</div>
       )}
@@ -570,14 +630,24 @@ export function SessionView({
           sending={composer.sending}
           disabled={composer.disabled}
           offline={composer.offline}
-          onSend={composer.onSend}
+          onSend={sendWithSideQuestion}
           error={composer.error}
           onDismissError={composer.onDismissError}
           recovery={composer.recovery}
           commands={
             session?.kind === 'discord'
               ? composer.commands?.filter((command) => !command.skill)
-              : composer.commands
+              : session?.kind === 'chat'
+                ? [
+                    ...(composer.commands ?? []),
+                    {
+                      name: 'btw',
+                      description: 'Ask a side question while work continues',
+                      needs: 'a question',
+                      placeholder: '<question>',
+                    },
+                  ]
+                : composer.commands
           }
           runActive={composer.runActive}
           onStop={composer.onStop}
@@ -593,7 +663,22 @@ export function SessionView({
             session?.kind === 'discord' ? undefined : composer.attachments
           }
           savedAttachmentCount={composer.savedAttachmentCount}
-          tools={sessionTools}
+          tools={
+            <>
+              {sessionTools}
+              {session?.kind === 'chat' &&
+                /^\s*\/btw\s+\S/.test(composer.draft) && (
+                  <button
+                    type="button"
+                    className={ghostBtnCls}
+                    disabled={composer.offline || composer.disabled}
+                    onClick={() => sendWithSideQuestion()}
+                  >
+                    Ask side question
+                  </button>
+                )}
+            </>
+          }
         />
       ) : (
         <div className="session-footer-note" role="note">

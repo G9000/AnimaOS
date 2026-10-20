@@ -347,8 +347,16 @@ async fn the_senders_time_zone_becomes_the_owners_and_an_unknown_one_is_ignored(
     assert_eq!(owner.get(), None);
 
     for (key, zone, expected) in [
-        ("zone-1", "America/New_York", Some(chrono_tz::Tz::America__New_York)),
-        ("zone-2", "Mars/Olympus_Mons", Some(chrono_tz::Tz::America__New_York)),
+        (
+            "zone-1",
+            "America/New_York",
+            Some(chrono_tz::Tz::America__New_York),
+        ),
+        (
+            "zone-2",
+            "Mars/Olympus_Mons",
+            Some(chrono_tz::Tz::America__New_York),
+        ),
     ] {
         let response = app
             .clone()

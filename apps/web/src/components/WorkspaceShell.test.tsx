@@ -272,6 +272,46 @@ describe('WorkspaceShell', () => {
     expect(screen.queryByText('Sessions list')).not.toBeInTheDocument();
   });
 
+  it('opens agent creation and management from the dropdown footer', async () => {
+    const user = userEvent.setup();
+    render(<Shell newAgent={<div>New agent setup</div>} />);
+    await user.click(screen.getByRole('button', { name: 'Nova, switch agent' }));
+    await user.click(screen.getByRole('menuitem', { name: 'New agent' }));
+    expect(screen.getByText('New agent setup')).toBeVisible();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Nova, switch agent' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Manage agents' }));
+    expect(screen.getByRole('heading', { name: 'Team' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Chat with Nova' })).toBeVisible();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('shows real agent descriptions and uses shader fallbacks in the dropdown', async () => {
+    const user = userEvent.setup();
+    const main = agent('nova', 'Nova', 1);
+    const view = render(
+      <Shell mainAgent={main} agents={[
+        main,
+        agent('scout', 'Scout', 2, { bio: 'Research and news' }),
+      ]} />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Nova, switch agent' }));
+    const scout = screen.getByRole('menuitemradio', { name: /Scout/ });
+    expect(scout).toHaveTextContent('Ready · Research and news');
+    for (const img of view.container.querySelectorAll('.agent-switch-menu img'))
+      fireEvent.error(img);
+    expect(scout.querySelector('.halo-orb')).not.toBeNull();
+    expect(view.container.querySelectorAll('.agent-switch-menu .agent-switch-status-dot')).toHaveLength(2);
+  });
+
+  it('keeps agent footer actions disabled while settings are saving', async () => {
+    render(<Shell locked />);
+    await userEvent.click(screen.getByRole('button', { name: 'Nova, switch agent' }));
+    expect(screen.getByRole('menuitem', { name: 'New agent' })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: 'Manage agents' })).toBeDisabled();
+  });
+
   it('opens commands with Control K, filters actions and navigates with Enter', async () => {
     const user = userEvent.setup();
     render(<Shell connectors={<div>Manage connections</div>} />);

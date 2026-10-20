@@ -13,7 +13,8 @@ export type UsageSource =
   | 'compaction'
   | 'profile'
   | 'agency'
-  | 'approval';
+  | 'approval'
+  | 'side_question';
 export type PricingSource =
   | 'table'
   | 'override'

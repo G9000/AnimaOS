@@ -4,6 +4,7 @@ mod agent_files;
 mod agents;
 mod approvals;
 mod attachments;
+mod automation_events;
 mod autonomy;
 mod browser;
 #[cfg(test)]
@@ -24,6 +25,7 @@ mod gdrive;
 mod goals;
 mod health;
 mod http;
+mod interactions;
 mod jobs;
 mod learning_reviews;
 mod logs;
@@ -39,6 +41,7 @@ pub(crate) use multipart::MAX_FORM_HEADER_BYTES;
 mod oauth_apps;
 mod profile;
 mod provider_keys;
+mod run_recovery;
 mod runs;
 mod schedules;
 mod sessions;
@@ -107,6 +110,9 @@ use crate::runtime_model::provider_summaries_with_pool;
 #[derive(OpenApi)]
 #[openapi(
     paths(
+        interactions::side_question, interactions::list, interactions::answer,
+        run_recovery::get, run_recovery::continue_run,
+        automation_events::emit_event,
         api_health_entry,
         capabilities_entry,
         browser::get,browser::save,browser::stop,browser::list,browser::policies,
@@ -1003,6 +1009,9 @@ fn router_with_services_with_policies_and_integrations(
             "/api/agents/{agent_id}/sessions/{session_id}/runs",
             get(runs::list_session_runs).post(runs::start_session_run),
         )
+        .route("/api/agents/{agent_id}/sessions/{session_id}/side-question", axum::routing::post(interactions::side_question))
+        .route("/api/agents/{agent_id}/sessions/{session_id}/clarifications", get(interactions::list))
+        .route("/api/agents/{agent_id}/sessions/{session_id}/clarifications/{request_id}/answer", axum::routing::post(interactions::answer))
         .route(
             "/api/agents/{agent_id}/sessions/{session_id}/attachments",
             axum::routing::post(attachments::upload),
@@ -1047,6 +1056,14 @@ fn router_with_services_with_policies_and_integrations(
         .route(
             "/api/agents/{agent_id}/runs/{run_id}/stop",
             axum::routing::post(runs::stop_run),
+        )
+        .route(
+            "/api/agents/{agent_id}/runs/{run_id}/recovery",
+            get(run_recovery::get).post(run_recovery::continue_run),
+        )
+        .route(
+            "/api/agents/{agent_id}/automation-events",
+            axum::routing::post(automation_events::emit_event),
         )
         .route("/api/approvals", get(approvals::list_approvals))
         .route(

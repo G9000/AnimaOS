@@ -236,7 +236,7 @@ export function useSessionCommands(
       const skill =
         (exactReplay ? current.resend?.skill : parsed?.command.skill) ??
         (restored ? current.resend?.skill : undefined);
-      if (command && !skill && current.chatKey) {
+      if (command && !command.command.turn && !skill && current.chatKey) {
         const key = current.chatKey;
         if (attachmentIds.length) {
           current.updateChat(key, { error: ATTACHMENT_ERRORS.localCommand });
@@ -289,7 +289,11 @@ export function useSessionCommands(
       });
       // A skill message never steers (the daemon refuses it).
       const sendMode =
-        mode === 'steer' && !skill && activeRun && session.capabilities.steer
+        mode === 'steer' &&
+        !parsed?.command.turn &&
+        !skill &&
+        activeRun &&
+        session.capabilities.steer
           ? 'steer'
           : 'queue';
       if (attached)

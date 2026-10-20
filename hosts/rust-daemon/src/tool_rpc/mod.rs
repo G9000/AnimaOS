@@ -9,7 +9,7 @@ mod worker;
 pub(crate) use broker::{
     Broker, BrokerCredentials, BrokerDisposition, BrokerError, BrokerReply, RpcGrantFence,
 };
-pub(crate) use config::ToolRpcConfig;
+pub(crate) use config::{ToolRpcConfig, PYTHON_PATH_ENV};
 pub(crate) use service::{reviewable_arguments, ToolRpcService};
 
 #[cfg(test)]

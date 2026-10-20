@@ -198,11 +198,13 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/memories/recent`                                                     |
 | `GET`    | `/api/agents/{agent_id}/runs/{run_id}`                                                       |
 | `GET`    | `/api/agents/{agent_id}/runs/{run_id}/browser-scope`                                         |
+| `GET`    | `/api/agents/{agent_id}/runs/{run_id}/recovery`                                              |
 | `GET`    | `/api/agents/{agent_id}/schedules`                                                           |
 | `GET`    | `/api/agents/{agent_id}/schedules/{schedule_id}/history`                                     |
 | `GET`    | `/api/agents/{agent_id}/message-search`                                                      |
 | `GET`    | `/api/agents/{agent_id}/sessions`                                                            |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}`                                               |
+| `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/clarifications`                                |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/export`                                        |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/messages`                                      |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/runs`                                          |
@@ -270,6 +272,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents`                                                                                |
 | `POST`   | `/api/agents/generate-profile`                                                               |
 | `POST`   | `/api/agents/{agent_id}/approval-rules`                                                      |
+| `POST`   | `/api/agents/{agent_id}/automation-events`                                                  |
 | `POST`   | `/api/agents/{agent_id}/community-bundles`                                                   |
 | `POST`   | `/api/agents/{agent_id}/community-bundles/reviews`                                           |
 | `POST`   | `/api/agents/{agent_id}/community-bundles/{bundle_id}/update`                                |
@@ -310,14 +313,17 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/run`                                                                 |
 | `POST`   | `/api/agents/{agent_id}/runs/{run_id}/browser-scope/stop`                                    |
 | `POST`   | `/api/agents/{agent_id}/runs/{run_id}/learning-review`                                       |
+| `POST`   | `/api/agents/{agent_id}/runs/{run_id}/recovery`                                              |
 | `POST`   | `/api/agents/{agent_id}/runs/{run_id}/stop`                                                  |
 | `POST`   | `/api/agents/{agent_id}/schedules`                                                           |
 | `POST`   | `/api/agents/{agent_id}/schedules/import`                                                    |
 | `POST`   | `/api/agents/{agent_id}/schedules/{schedule_id}/run`                                         |
 | `POST`   | `/api/agents/{agent_id}/sessions`                                                            |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/attachments`                                   |
+| `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/clarifications/{request_id}/answer`            |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/compact`                                       |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/runs`                                          |
+| `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/side-question`                                 |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/voice/speech`                                  |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/voice/transcriptions`                          |
 | `POST`   | `/api/approvals/{approval_id}/decision`                                                      |
@@ -594,7 +600,7 @@ Refresh has a ten-second total bound, returns `409` while another refresh is act
 and reports metadata failure as unavailable/stale without changing saved agents.
 Catalog presence is metadata, not proof of model/tool acceptance. New selection is
 deliberate; existing/custom model strings and grants remain unchanged until Save.
-The registered OpenAPI inventory now contains 236 operations, including explicit owner-scoped voice operations and Discord bot checks and interaction settings.
+The registered OpenAPI inventory now contains 242 operations, including explicit owner-scoped voice operations, Discord bot checks and interaction settings, reviewed recovery, saved clarifications, side questions and automation event ingress.
 
 ### Agents
 

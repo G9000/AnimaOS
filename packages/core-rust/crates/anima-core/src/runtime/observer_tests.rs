@@ -248,6 +248,147 @@ fn runtime_with(adapter: Arc<dyn ModelAdapter>, tools: &[&str]) -> (AgentRuntime
     (runtime, frames)
 }
 
+struct RepetitionModel {
+    reply: String,
+    streaming: bool,
+    keep_stream_open: bool,
+}
+
+#[async_trait]
+impl ModelAdapter for RepetitionModel {
+    fn provider(&self) -> &str {
+        "repetition-regression"
+    }
+
+    async fn generate(
+        &self,
+        _: &AgentConfig,
+        _: &ModelGenerateRequest,
+    ) -> Result<ModelGenerateResponse, String> {
+        Ok(ModelGenerateResponse {
+            content: text(&self.reply),
+            tool_calls: None,
+            usage: usage(3, 7),
+            stop_reason: ModelStopReason::End,
+        })
+    }
+
+    async fn stream(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        sink: &dyn ModelStreamSink,
+    ) -> Result<(), String> {
+        if self.streaming {
+            sink.emit(ModelStreamFrame::Usage(usage(3, 5))).await?;
+            // An adapter may swallow sink errors; runtime cancellation must
+            // still drop an open request instead of waiting for another delta.
+            let _ = sink
+                .emit(ModelStreamFrame::TextDelta(self.reply.clone()))
+                .await;
+            if self.keep_stream_open {
+                futures::future::pending::<()>().await;
+            }
+        }
+        let _ = sink
+            .emit(ModelStreamFrame::Final(
+                self.generate(config, request).await?,
+            ))
+            .await;
+        Ok(())
+    }
+}
+
+#[test]
+fn autonomy_completed_runaway_repetition_fails_without_persisting_looped_bytes() {
+    let reply = "This response has become stuck repeating the same long paragraph. ".repeat(400);
+    let (mut runtime, _) = runtime_with(
+        Arc::new(RepetitionModel {
+            reply,
+            streaming: false,
+            keep_stream_open: false,
+        }),
+        &[],
+    );
+    let result = block_on(runtime.run(text("Answer the question")));
+    assert_eq!(result.status, TaskStatus::Error);
+    assert!(result.error.unwrap().contains("repetition"));
+    let snapshot = serde_json::to_string(&runtime.snapshot()).unwrap();
+    assert!(!snapshot.contains("This response has become stuck"));
+    assert!(snapshot.contains("reply degenerated"));
+    assert_eq!(runtime.state().token_usage.total_tokens, 10);
+}
+
+#[test]
+fn autonomy_streamed_runaway_repetition_fails_and_keeps_reported_usage() {
+    let reply = "This response has become stuck repeating the same long paragraph. ".repeat(400);
+    let (mut runtime, frames) = runtime_with(
+        Arc::new(RepetitionModel {
+            reply,
+            streaming: true,
+            keep_stream_open: false,
+        }),
+        &[],
+    );
+    let result = block_on(runtime.run(text("Answer the question")));
+    assert_eq!(result.status, TaskStatus::Error);
+    assert_eq!(runtime.state().token_usage.total_tokens, 8);
+    assert!(frames.take().iter().all(|frame| !matches!(frame,
+        RunFrame::TextDelta { text, .. } if text.contains("This response has become stuck"))));
+    assert!(runtime
+        .messages()
+        .last()
+        .unwrap()
+        .content
+        .text
+        .contains("reply degenerated"));
+}
+
+#[test]
+fn autonomy_runaway_stream_is_dropped_when_the_adapter_ignores_the_sink_error() {
+    use std::future::Future;
+    let (mut runtime, _) = runtime_with(
+        Arc::new(RepetitionModel {
+            reply: "A synthetic sentence repeats without answering the original question. "
+                .repeat(400),
+            streaming: true,
+            keep_stream_open: true,
+        }),
+        &[],
+    );
+    let mut run = Box::pin(runtime.run(text("Answer the question")));
+    let waker = futures::task::noop_waker();
+    let mut context = std::task::Context::from_waker(&waker);
+    assert!(
+        matches!(run.as_mut().poll(&mut context), std::task::Poll::Ready(result)
+        if result.status == TaskStatus::Error && result.error.as_deref().unwrap().contains("repetition"))
+    );
+}
+
+#[test]
+fn autonomy_repetition_keeps_short_requested_repeats_and_distinct_batch_rows() {
+    let rows: String = (0..400)
+        .map(|index| format!("INSERT INTO synthetic_records (long_shared_column_name, status) VALUES ({index}, 'pending');\n"))
+        .collect();
+    for reply in [
+        "Repeat this requested sentence. ".repeat(50),
+        rows,
+        "🦀 多言語の繰り返し。".repeat(50),
+    ] {
+        let (mut runtime, _) = runtime_with(
+            Arc::new(RepetitionModel {
+                reply: reply.clone(),
+                streaming: true,
+                keep_stream_open: false,
+            }),
+            &[],
+        );
+        let result = block_on(runtime.run(text("Produce the requested data")));
+        assert_eq!(result.status, TaskStatus::Success);
+        assert_eq!(result.data.unwrap().text, reply);
+    }
+}
+
 fn metadata<'a>(message: &'a Message, key: &str) -> Option<&'a DataValue> {
     message.content.metadata.as_ref()?.get(key)
 }

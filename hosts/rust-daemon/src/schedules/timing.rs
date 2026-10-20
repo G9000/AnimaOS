@@ -193,6 +193,11 @@ pub(crate) fn normalized_active_hours(hours: ActiveHours) -> Result<ActiveHours,
 /// creation, update, and restore.
 pub(crate) fn validate_stored_trigger(trigger: &ScheduleTrigger) -> Result<(), String> {
     match trigger {
+        ScheduleTrigger::Event { topic } => {
+            if !super::event::valid_topic(topic) {
+                return Err("Event topic is invalid".into());
+            }
+        }
         ScheduleTrigger::Interval { interval_ms } => {
             if *interval_ms == 0 || interval_ms % 1_000 != 0 {
                 return Err(INTERVAL_INVALID.into());
@@ -243,7 +248,9 @@ pub(crate) fn normalized_trigger(trigger: ScheduleTrigger) -> ScheduleTrigger {
             expression,
             time_zone: time_zone.trim().to_string(),
         },
-        other @ (ScheduleTrigger::Interval { .. } | ScheduleTrigger::Once { .. }) => other,
+        other @ (ScheduleTrigger::Interval { .. }
+        | ScheduleTrigger::Once { .. }
+        | ScheduleTrigger::Event { .. }) => other,
     }
 }
 
@@ -284,6 +291,7 @@ fn next_daily_after(hour: u8, minute: u8, time_zone: &str, after_ms: u64) -> Res
 /// `floor_ms` (at most `after_ms` in effect) is a cron's wall-clock floor.
 fn raw_next(trigger: &ScheduleTrigger, after_ms: u64, floor_ms: u64) -> Result<u64, String> {
     match trigger {
+        ScheduleTrigger::Event { .. } => Ok(u64::MAX),
         ScheduleTrigger::Interval { interval_ms } => after_ms
             .checked_add(*interval_ms)
             .ok_or_else(|| TIMING_OVERFLOW.to_string()),
@@ -332,6 +340,7 @@ fn next_fire_after_floor(
         return raw_next(trigger, from_ms, floor_ms);
     };
     match trigger {
+        ScheduleTrigger::Event { .. } => Ok(u64::MAX),
         ScheduleTrigger::Once { .. } => Err(ACTIVE_HOURS_NOT_FOR_ONCE.into()),
         ScheduleTrigger::Interval { .. } => window
             .next_open(raw_next(trigger, from_ms, floor_ms)?)
@@ -366,6 +375,7 @@ pub(crate) fn next_fire_after_claim(
 ) -> Result<u64, String> {
     validate_stored_trigger(trigger)?;
     match trigger {
+        ScheduleTrigger::Event { .. } => Ok(u64::MAX),
         ScheduleTrigger::Interval { interval_ms } => {
             let steps = now_ms.saturating_sub(previous_due) / interval_ms + 1;
             let stepped = interval_ms
@@ -397,6 +407,10 @@ pub(crate) fn upcoming_fires(
     from_ms: u64,
     count: usize,
 ) -> Result<Vec<u64>, String> {
+    if matches!(trigger, ScheduleTrigger::Event { .. }) {
+        validate_stored_trigger(trigger)?;
+        return Ok(Vec::new());
+    }
     let mut fires = Vec::with_capacity(count);
     if count == 0 {
         return Ok(fires);

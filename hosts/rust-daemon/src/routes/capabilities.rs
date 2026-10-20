@@ -12,6 +12,15 @@ pub(super) struct CapabilityInventory {
     persistence: PersistenceInventory,
     extensions: Vec<PlannedExtension>,
     limitations: Vec<&'static str>,
+    programmatic_tools: ProgrammaticToolsInventory,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct ProgrammaticToolsInventory {
+    status: &'static str,
+    mode: &'static str,
+    interpreter_environment: &'static str,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -56,6 +65,10 @@ pub(super) fn inventory(state: &DaemonState) -> CapabilityInventory {
         .collect();
     CapabilityInventory {
         schema_version: 1,
+        programmatic_tools: ProgrammaticToolsInventory {
+            status: state.tool_rpc_service.configuration_status(), mode: "one_shot",
+            interpreter_environment: crate::tool_rpc::PYTHON_PATH_ENV,
+        },
         tools,
         persistence: PersistenceInventory {
             control_plane: state.control_plane_durability(),
@@ -84,6 +97,7 @@ pub(super) fn inventory(state: &DaemonState) -> CapabilityInventory {
 
 fn metadata(name: &str) -> (&'static str, Vec<&'static str>) {
     match name {
+        "execute_code" => ("terminal", vec!["Windows, an explicitly configured absolute Python interpreter (ANIMAOS_RS_TOOL_RPC_PYTHON_PATH), both execute_code and bash grants, and current Exec approval. One-shot local Python has the operating-system access of the daemon user; native calls retain separate grants and receipts."]),
         "browser_navigate"|"browser_observe"|"browser_act"|"browser_transfer"=>("browser",vec!["An owner-selected installed policy and live ordinary chat scope, explicit native tool grants and Exec approval. No helper access or restored browser session."]),
         "read_file" | "write_file" | "edit_file" | "multi_edit" | "list_dir" | "glob" | "grep" =>
             ("workspace", vec!["Workspace access and an explicit tool grant."]),

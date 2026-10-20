@@ -203,6 +203,12 @@ pub(crate) async fn accepted_content(
                     && guard.sessions.get(agent_id, &run.session_id).is_some()
             })
             .ok_or_else(ApiError::not_found)?;
+        // Persist origin with the message: the bounded run ledger may expire
+        // before its transcript. Only the accepted record can establish it.
+        metadata.remove("recoveryOf");
+        if let Some(source_id) = &run.recovery_of {
+            metadata.insert("recoveryOf".into(), DataValue::String(source_id.clone()));
+        }
         if let Some(key) = &run.idempotency_key {
             metadata.insert(
                 CLIENT_REQUEST_ID_METADATA_KEY.into(),
@@ -225,4 +231,87 @@ pub(crate) async fn accepted_content(
         );
     }
     Ok(attachment_content(&input.text, &rows, Some(metadata)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent_runs::test_support::{add_chat, coordinator_with, ScriptedModel};
+    use crate::history::HistoryMessage;
+    use crate::runs::{RunRecord, RunSource, RunStart};
+    use anima_core::{Message, MessageRole};
+
+    #[tokio::test]
+    async fn recovery_origin_is_host_stamped_and_survives_run_retention() {
+        let (coordinator, agent) = coordinator_with(ScriptedModel::new(vec![])).await;
+        let session_id = "chat:recovery-origin";
+        add_chat(&coordinator, &agent, session_id).await;
+        for recovery_of in [None, Some("original")] {
+            let mut run = RunRecord::queued(
+                RunStart {
+                    agent_id: agent.clone(),
+                    session_id: session_id.into(),
+                    source: RunSource::Web,
+                    source_ref: None,
+                    idempotency_key: Some(format!("origin:{recovery_of:?}")),
+                    text: "Host recovery evidence".into(),
+                    model: "test".into(),
+                    provider: None,
+                    parent_run_id: None,
+                },
+                1,
+            );
+            run.recovery_of = recovery_of.map(str::to_owned);
+            coordinator.state.write().await.runs.insert(run.clone());
+            let content = accepted_content(
+                &coordinator.state,
+                &agent,
+                session_id,
+                &run.id,
+                BTreeMap::from([("recoveryOf".into(), DataValue::String("forged".into()))]),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                content
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.get("recoveryOf")),
+                recovery_of.map(|id| DataValue::String(id.into())).as_ref(),
+                "caller metadata cannot establish recovery origin"
+            );
+            let message_id = format!("message:{}", run.id);
+            let store = coordinator.state.read().await.history.store();
+            store
+                .upsert_messages(&[HistoryMessage {
+                    agent_id: agent.clone(),
+                    session_id: session_id.into(),
+                    hidden: false,
+                    message: Message {
+                        id: message_id.clone(),
+                        agent_id: agent.clone(),
+                        room_id: session_id.into(),
+                        role: MessageRole::User,
+                        content: content.clone(),
+                        created_at_ms: 1,
+                    },
+                }])
+                .await
+                .unwrap();
+            run.finish(RunStatus::Completed, None, 2);
+            run.mirrored = true;
+            {
+                let mut state = coordinator.state.write().await;
+                state.runs.insert(run.clone());
+                state.runs.prune(2 * 24 * 60 * 60 * 1_000);
+                assert!(state.runs.get(&run.id).is_none());
+            }
+            let saved = store
+                .get_message(&agent, session_id, &message_id)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(saved.message.content, content);
+        }
+    }
 }

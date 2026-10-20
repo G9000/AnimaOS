@@ -298,9 +298,7 @@ export interface ConnectorMessage {
   createdAtMs: number;
 }
 
-export type ScheduleTrigger =
-  | { type: 'interval'; intervalMs: number }
-  | { type: 'daily'; hour: number; minute: number; timeZone: string };
+export type ScheduleTrigger = AutomationTrigger;
 export type ScheduleTarget =
   | { type: 'workspace' }
   | { type: 'connector'; connectorId: string };
@@ -565,6 +563,8 @@ export interface WorkspaceResumeResponse {
 }
 
 export const daemon = {
+  runs: setupClient.runs,
+  interactions: setupClient.interactions,
   voice: setupClient.voice,
   speech: setupClient.speech,
   browserScopes: setupClient.browserScopes,

@@ -6,6 +6,7 @@ import {
   type TelegramConnector,
 } from '../lib/daemon-api';
 import { primaryBtnCls } from './ui-bits';
+import { describeTrigger } from '../lib/automations';
 
 interface TasksContext {
   agentId: string;
@@ -617,12 +618,11 @@ export function AgentProactiveView({
           </p>
           <p className="text-xs text-ink-3">
             {schedule.enabled
-              ? `Next run: ${new Date(schedule.nextDueAtMs).toLocaleString()}`
+              ? schedule.trigger.type === 'event'
+                ? 'Waiting for event'
+                : `Next run: ${new Date(schedule.nextDueAtMs).toLocaleString()}`
               : 'Paused'}{' '}
-            ·{' '}
-            {schedule.trigger.type === 'interval'
-              ? `Every ${schedule.trigger.intervalMs / 60000} minutes`
-              : `Daily ${schedule.trigger.hour}:${String(schedule.trigger.minute).padStart(2, '0')} ${schedule.trigger.timeZone}`}
+            · {describeTrigger(schedule.trigger)}
           </p>
           {schedule.lastOutcome && (
             <p className="text-xs text-ink-3">

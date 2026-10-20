@@ -23,12 +23,16 @@ use crate::state::DaemonState;
 
 pub(crate) mod action_receipts;
 mod approvals;
+mod clarifications;
+mod side_questions;
+pub(crate) use side_questions::SideQuestionAnswer;
 mod async_helpers;
 pub(crate) mod attachments;
 mod automations;
 mod compact;
 mod conversations;
 mod queue;
+mod recovery;
 mod shutdown;
 mod skills;
 mod stop;
@@ -2289,6 +2293,7 @@ impl AgentRunCoordinator {
             change_set,
             finished,
             counted_turn,
+            previous_automation_events,
             memory,
             memory_embeddings,
             memory_store,
@@ -2392,11 +2397,18 @@ impl AgentRunCoordinator {
                     )
                 })
                 .map(|_| guard.learning.count_turn(&agent_id, &run_id));
+            let previous_automation_events = guard.automation_events.clone();
+            if let Some(record) = &finished {
+                if let Err(error) = crate::schedules::event::enqueue_native(&mut guard, record) {
+                    tracing::warn!(run_id = %record.id, ?error, "Task outcome could not enter the automation event queue");
+                }
+            }
             (
                 snapshot,
                 change_set,
                 finished,
                 counted_turn,
+                previous_automation_events,
                 guard.memory_handle(),
                 guard.memory_embeddings_handle(),
                 guard.memory_store_config(),
@@ -2408,6 +2420,7 @@ impl AgentRunCoordinator {
         let turn_counted = counted_turn.is_some();
         if let Err(error) = persist_request.save().await {
             let mut guard = self.state.write().await;
+            guard.automation_events = previous_automation_events;
             if let Some(counted) = counted_turn {
                 guard.learning.uncount_turn(counted);
             }
@@ -2896,19 +2909,19 @@ mod completion_tests;
 #[cfg(test)]
 mod context_tests;
 #[cfg(test)]
+mod conversation_review_tests;
+#[cfg(test)]
 mod conversation_tests;
 #[cfg(test)]
 mod core_memory_tests;
 #[cfg(test)]
 mod fallback_tests;
 #[cfg(test)]
-mod conversation_review_tests;
-#[cfg(test)]
 mod learning_tests;
 #[cfg(test)]
-mod memory_provider_tests;
-#[cfg(test)]
 mod live_tests;
+#[cfg(test)]
+mod memory_provider_tests;
 #[cfg(test)]
 mod provider_request_tests;
 #[cfg(test)]

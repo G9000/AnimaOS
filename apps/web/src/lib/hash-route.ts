@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 
 /** The pages of spec §15.1; later milestones build the ones this release hides. */
 export const HASH_PAGES = [
+  'agents',
+  'new-agent',
   'profile',
   'model',
   'runtime',

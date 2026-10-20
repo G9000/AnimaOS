@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { daemon } from '../lib/daemon-api';
+import { describeTrigger } from '../lib/automations';
 import type { AgentDetail } from '../lib/types';
 import { AgentRunsView } from './AgentRuns';
 import { WorkspaceGoals } from './WorkspaceGoals';
@@ -93,14 +94,14 @@ async function loadEntries(
     content: item.prompt,
     detail: [
       item.enabled ? 'Enabled' : 'Paused',
-      item.trigger.type === 'interval'
-        ? `Every ${item.trigger.intervalMs / 60_000} minutes`
-        : `Daily at ${String(item.trigger.hour).padStart(2, '0')}:${String(item.trigger.minute).padStart(2, '0')} (${item.trigger.timeZone})`,
+      describeTrigger(item.trigger),
       item.target.type === 'workspace'
         ? 'Workspace'
         : `Connector: ${item.target.connectorId}`,
       item.enabled
-        ? `Next: ${new Date(item.nextDueAtMs).toLocaleString()}`
+        ? item.trigger.type === 'event'
+          ? 'Waiting for event'
+          : `Next: ${new Date(item.nextDueAtMs).toLocaleString()}`
         : '',
       item.lastOutcome
         ? `Last run: ${item.lastOutcome.status}${item.lastOutcome.errorCode ? ` (${item.lastOutcome.errorCode})` : ''}`
@@ -108,7 +109,8 @@ async function loadEntries(
     ]
       .filter(Boolean)
       .join(' · '),
-    timestamp: item.nextDueAtMs,
+    timestamp:
+      item.trigger.type === 'event' ? item.createdAtMs : item.nextDueAtMs,
   }));
 }
 

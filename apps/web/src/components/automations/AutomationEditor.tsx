@@ -70,6 +70,12 @@ export function AutomationEditor({
   const [name, setName] = useState(automation?.name ?? '');
   const [prompt, setPrompt] = useState(automation?.prompt ?? '');
   const [cronMode, setCronMode] = useState(automation?.trigger.type === 'cron');
+  const [eventMode, setEventMode] = useState(
+    automation?.trigger.type === 'event',
+  );
+  const [eventTopic, setEventTopic] = useState(
+    automation?.trigger.type === 'event' ? automation.trigger.topic : '',
+  );
   const [phrase, setPhrase] = useState('');
   const [expression, setExpression] = useState(
     automation?.trigger.type === 'cron' ? automation.trigger.expression : '',
@@ -92,18 +98,24 @@ export function AutomationEditor({
   const [saving, setSaving] = useState(false);
 
   const trigger = useMemo<AutomationTrigger | null>(() => {
+    if (eventMode)
+      return /^[a-z][a-z0-9._-]{0,79}$/.test(eventTopic)
+        ? { type: 'event', topic: eventTopic }
+        : null;
     if (cronMode)
       return expression.trim()
         ? { type: 'cron', expression: expression.trim(), timeZone }
         : null;
     if (!phrase.trim()) return null;
     return parseSchedule(phrase, { nowMs: Date.now(), timeZone });
-  }, [cronMode, expression, phrase, timeZone]);
-  const phraseProblem = !cronMode && phrase.trim() !== '' && trigger === null;
+  }, [eventMode, eventTopic, cronMode, expression, phrase, timeZone]);
+  const phraseProblem =
+    !eventMode && !cronMode && phrase.trim() !== '' && trigger === null;
   const activeHours: ActiveHours | null = hoursOn
     ? { start, end, days: [...days].sort((a, b) => a - b), timeZone }
     : null;
-  const shown = trigger ?? (cronMode ? null : (automation?.trigger ?? null));
+  const shown =
+    trigger ?? (cronMode || eventMode ? null : (automation?.trigger ?? null));
   const previewKey = JSON.stringify([
     phraseProblem ? null : shown,
     activeHours,
@@ -145,7 +157,8 @@ export function AutomationEditor({
   const hiddenNote = invisibleNote(
     revealInvisible(name).count + revealInvisible(prompt).count,
   );
-  const keepsSchedule = automation !== null && !cronMode && trigger === null;
+  const keepsSchedule =
+    automation !== null && !eventMode && !cronMode && trigger === null;
   // A new schedule is saved only once the daemon has shown its next runs.
   const previewed =
     preview !== null && preview.key === previewKey && 'runs' in preview;
@@ -231,7 +244,32 @@ export function AutomationEditor({
       )}
       <fieldset className="automation-fieldset">
         <legend>Schedule</legend>
-        {cronMode ? (
+        <label className="automation-check">
+          <input
+            type="checkbox"
+            checked={eventMode}
+            onChange={(event) => setEventMode(event.target.checked)}
+          />
+          Run when an event arrives
+        </label>
+        {eventMode ? (
+          <>
+            <label className="automation-field">
+              Event topic
+              <input
+                value={eventTopic}
+                placeholder="files.changed"
+                maxLength={80}
+                onChange={(event) => setEventTopic(event.target.value)}
+              />
+            </label>
+            <p className="automation-help">
+              Waits for an authenticated event with this topic. Native outcomes
+              use task.completed or task.failed. File-change adapters can
+              publish events; filesystem watching is not built in.
+            </p>
+          </>
+        ) : cronMode ? (
           <label className="automation-field">
             Cron expression
             <input
@@ -254,14 +292,16 @@ export function AutomationEditor({
             />
           </label>
         )}
-        <label className="automation-check">
-          <input
-            type="checkbox"
-            checked={cronMode}
-            onChange={(event) => setCronMode(event.target.checked)}
-          />
-          Use a cron expression
-        </label>
+        {!eventMode && (
+          <label className="automation-check">
+            <input
+              type="checkbox"
+              checked={cronMode}
+              onChange={(event) => setCronMode(event.target.checked)}
+            />
+            Use a cron expression
+          </label>
+        )}
         <label className="automation-field">
           Time zone
           <input
@@ -274,7 +314,7 @@ export function AutomationEditor({
             {PHRASE_NOT_UNDERSTOOD}
           </p>
         )}
-        {preview && 'runs' in preview && (
+        {!eventMode && preview && 'runs' in preview && (
           <section className="automation-preview" aria-label="Next runs">
             <ul>
               {preview.runs.map((run) => (

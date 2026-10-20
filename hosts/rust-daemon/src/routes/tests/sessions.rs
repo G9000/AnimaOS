@@ -780,7 +780,7 @@ async fn session_routes_list_one_session_and_page_its_messages() {
         (
             format!("/api/agents/{agent}/sessions?kind=bogus"),
             StatusCode::BAD_REQUEST,
-            "kind must be one of chat, telegram, checkin, job, helper",
+            "kind must be one of chat, telegram, discord, email, checkin, job, helper",
         ),
         (
             format!("/api/agents/{agent}/sessions?archived=maybe"),

@@ -590,7 +590,10 @@ async fn console_turns_into_a_connector_thread_count_and_shared_chat_messages_do
         request.source_ref = Some(source_ref.into());
         request.content.metadata = Some(BTreeMap::from([
             ("source".to_string(), DataValue::String(origin.into())),
-            ("connectorId".to_string(), DataValue::String("conn-1".into())),
+            (
+                "connectorId".to_string(),
+                DataValue::String("conn-1".into()),
+            ),
         ]));
         request
     };
@@ -607,7 +610,12 @@ async fn console_turns_into_a_connector_thread_count_and_shared_chat_messages_do
         assert_eq!(fixture.count().await, before + 1, "{source:?} console turn");
         fixture
             .coordinator
-            .run(turn(source, inbound, "conn-1:42", &format!("{inbound} message")))
+            .run(turn(
+                source,
+                inbound,
+                "conn-1:42",
+                &format!("{inbound} message"),
+            ))
             .await
             .unwrap();
         assert_eq!(fixture.count().await, before + 1, "{source:?} shared chat");

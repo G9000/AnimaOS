@@ -65,6 +65,13 @@ pub(crate) struct SkillContextProvider {
 }
 
 impl SkillContextProvider {
+    pub(crate) fn learn(text: String) -> Self {
+        Self {
+            name: "learn",
+            description: "Owner-requested reusable skill authoring",
+            text,
+        }
+    }
     pub(crate) fn index(text: String) -> Self {
         Self {
             name: SKILLS_INDEX_PROVIDER,

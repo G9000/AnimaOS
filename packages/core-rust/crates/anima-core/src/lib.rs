@@ -23,6 +23,8 @@ pub use external_tools::{
     ExternalToolError, ExternalToolResult,
 };
 pub mod filesystem_checkpoints;
+pub mod interaction;
+pub mod learn;
 pub mod memory;
 pub mod model;
 pub mod model_error;

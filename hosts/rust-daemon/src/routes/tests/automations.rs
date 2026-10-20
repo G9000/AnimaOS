@@ -12,6 +12,55 @@ use crate::schedules::{
 
 const OWNER_ORIGIN: &str = "http://localhost:4200";
 
+#[tokio::test]
+async fn event_ingress_uses_owner_auth_and_duplicate_keys_do_not_repeat_occurrences() {
+    let (state, agent) = daemon_with(DaemonState::new());
+    let app = router(state, DaemonConfig::default());
+    let created = send(&app, "POST", &format!("/api/agents/{agent}/schedules"), Some(json!({"prompt":"Handle file events", "trigger":{"type":"event","topic":"files.changed"}}))).await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let uri = format!("/api/agents/{agent}/automation-events");
+    let body = json!({"eventId":"file-1","topic":"files.changed","payload":{"path":"notes.txt"}});
+    assert_eq!(
+        app.clone()
+            .oneshot(request(
+                "POST",
+                &uri,
+                "https://untrusted.example",
+                Some(body.clone())
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    let first = send(&app, "POST", &uri, Some(body.clone())).await;
+    assert_eq!(first.status(), StatusCode::ACCEPTED);
+    assert_eq!(json_body(first).await, json!({"accepted":1,"duplicate":0}));
+    assert_eq!(
+        json_body(send(&app, "POST", &uri, Some(body)).await).await,
+        json!({"accepted":0,"duplicate":1})
+    );
+    let changed = send(
+        &app,
+        "POST",
+        &uri,
+        Some(json!({"eventId":"file-1","topic":"files.changed","payload":{"path":"other.txt"}})),
+    )
+    .await;
+    assert_eq!(changed.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        send(
+            &app,
+            "POST",
+            "/api/agents/foreign/automation-events",
+            Some(json!({"eventId":"x","topic":"files.changed"}))
+        )
+        .await
+        .status(),
+        StatusCode::NOT_FOUND
+    );
+}
+
 fn request(method: &str, uri: &str, origin: &str, body: Option<Value>) -> Request<Body> {
     let builder = Request::builder()
         .method(method)

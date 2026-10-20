@@ -175,7 +175,9 @@ export function AutomationsPage({
                     </p>
                     <p className="automation-meta">
                       {automation.enabled
-                        ? `Next run ${formatWhen(automation.nextDueAtMs)}`
+                        ? automation.trigger.type === 'event'
+                          ? 'Waiting for event'
+                          : `Next run ${formatWhen(automation.nextDueAtMs)}`
                         : 'Paused'}
                       {automation.lastOutcome &&
                         ` · Last: ${interrupted ? 'Needs review' : OUTCOME_LABELS[automation.lastOutcome.status]}`}

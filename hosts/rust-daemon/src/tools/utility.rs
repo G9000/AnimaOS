@@ -13,7 +13,10 @@ pub(super) fn execute_get_current_time(
     Box::pin(async move {
         TaskResult::success(
             Content {
-                text: crate::clock::local_time_text(Utc::now(), context.owner_time_zone.effective()),
+                text: crate::clock::local_time_text(
+                    Utc::now(),
+                    context.owner_time_zone.effective(),
+                ),
                 attachments: None,
                 metadata: None,
             },

@@ -67,6 +67,8 @@ describe('hash routes', () => {
       { kind: 'home' },
       { kind: 'session', sessionId: 'chat:abc' },
       { kind: 'page', page: 'connectors' },
+      { kind: 'page', page: 'agents' },
+      { kind: 'page', page: 'new-agent' },
     ];
     for (const route of routes) {
       expect(parseHashRoute(formatHashRoute(route))).toEqual(route);

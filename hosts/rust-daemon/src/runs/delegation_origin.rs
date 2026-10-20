@@ -426,6 +426,28 @@ pub(crate) fn origin_pins(
             }
         }
     }
+    // A saved question must keep its interrupted source available for an answer
+    // and reviewed continuation, even after ordinary terminal-history retention.
+    for question in &snapshot.clarifications {
+        if question.status == crate::clarifications::ClarificationStatus::Cancelled {
+            continue;
+        }
+        if let Some(source) = snapshot.runs.iter().find(|run| {
+            run.id == question.run_id
+                && run.agent_id == question.agent_id
+                && run.session_id == question.session_id
+        }) {
+            if source.recovery.is_none()
+                && source.stop.is_none()
+                && !matches!(
+                    source.status,
+                    crate::runs::RunStatus::Completed | crate::runs::RunStatus::Cancelled
+                )
+            {
+                pins.insert(source.id.clone());
+            }
+        }
+    }
     pins
 }
 

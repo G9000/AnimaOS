@@ -55,6 +55,12 @@ export type {
 } from './workspace.js';
 export { ConnectorsClient } from './connectors.js';
 export { DaemonTooOldError, SessionsClient } from './sessions.js';
+export { InteractionsClient } from './interactions.js';
+export type {
+  ClarificationChoice, ClarificationQuestion, ClarificationAnswer,
+  ClarificationResponse, ClarificationRequest, ClarificationAnswerInput,
+  SideQuestionAnswer,
+} from './interactions.js';
 export type {
   Session,
   SessionCapabilities,
@@ -88,6 +94,7 @@ export type {
   SessionUpdateInput,
 } from './sessions.js';
 export { RunsClient, isTerminalRunStatus } from './runs.js';
+export type { RunRecoverySummary, ContinueRecoveryInput } from './runs.js';
 export type {
   AsyncHelperSummary,
   HelperCompletionDisposition,

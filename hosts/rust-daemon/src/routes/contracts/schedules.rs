@@ -9,6 +9,9 @@ use crate::schedules::{
 #[derive(Clone, Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", tag = "type", deny_unknown_fields)]
 pub(crate) enum ScheduleTriggerRequest {
+    Event {
+        topic: String,
+    },
     Interval {
         #[serde(rename = "intervalMs")]
         interval_ms: u64,
@@ -33,6 +36,7 @@ pub(crate) enum ScheduleTriggerRequest {
 impl From<ScheduleTriggerRequest> for ScheduleTrigger {
     fn from(value: ScheduleTriggerRequest) -> Self {
         match value {
+            ScheduleTriggerRequest::Event { topic } => Self::Event { topic },
             ScheduleTriggerRequest::Interval { interval_ms } => Self::Interval { interval_ms },
             ScheduleTriggerRequest::Daily {
                 hour,
@@ -189,6 +193,9 @@ pub(crate) struct LegacyScheduleItemRequest {
 #[derive(Clone, Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub(crate) enum ScheduleTriggerResponse {
+    Event {
+        topic: String,
+    },
     Interval {
         #[serde(rename = "intervalMs")]
         interval_ms: u64,
@@ -298,6 +305,7 @@ impl From<ScheduledPromptRecord> for ScheduleResponse {
         let name = display_name(&value);
         let running = is_running(&value);
         let trigger = match value.trigger {
+            ScheduleTrigger::Event { topic } => ScheduleTriggerResponse::Event { topic },
             ScheduleTrigger::Interval { interval_ms } => {
                 ScheduleTriggerResponse::Interval { interval_ms }
             }

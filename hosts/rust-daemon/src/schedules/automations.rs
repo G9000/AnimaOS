@@ -499,6 +499,45 @@ pub(crate) struct AutomationService {
 }
 
 impl AutomationService {
+    pub(crate) async fn emit_owner_event(
+        &self,
+        agent_id: String,
+        event_id: String,
+        topic: String,
+        payload: serde_json::Value,
+        now_ms: u64,
+    ) -> Result<super::event::EventAdmission, ScheduleError> {
+        if event_id.is_empty() || event_id.len() > 120 {
+            return Err(ScheduleError::Invalid(
+                "eventId must contain 1 to 120 characters",
+            ));
+        }
+        self.locked(move |service| async move {
+            let (admission, previous, persist) = {
+                let mut state = service.state.write().await;
+                if state.get_agent(&agent_id).is_none() {
+                    return Err(ScheduleError::AgentNotFound);
+                }
+                let previous = state.automation_events.clone();
+                let schedules = state.schedules.clone();
+                let admission = state.automation_events.enqueue(
+                    &schedules,
+                    &agent_id,
+                    &format!("owner:{event_id}"),
+                    &topic,
+                    payload,
+                    now_ms,
+                )?;
+                (admission, previous, state.control_plane_persist_request())
+            };
+            if persist.save().await.is_err() {
+                service.state.write().await.automation_events = previous;
+                return Err(ScheduleError::Persistence);
+            }
+            Ok(admission)
+        })
+        .await
+    }
     pub(crate) fn new(state: SharedDaemonState, transactions: Arc<Mutex<()>>) -> Self {
         Self {
             state,
@@ -837,7 +876,7 @@ impl AutomationService {
         }
         let (agent_id, schedule_id) = (agent_id.to_string(), schedule_id.to_string());
         self.locked(move |service| async move {
-            let (updated, previous, persist) = {
+            let (updated, previous, previous_events, persist) = {
                 let mut state = service.state.write().await;
                 if let Some(authority) = &authority {
                     authority.validate(&state, &agent_id)?;
@@ -885,16 +924,22 @@ impl AutomationService {
                 updated.updated_at_ms = now_ms
                     .max(updated.created_at_ms)
                     .max(previous.updated_at_ms);
+                let previous_events = state.automation_events.clone();
+                if updated.trigger != previous.trigger {
+                    state.automation_events.discard_pending(&schedule_id);
+                }
                 state.schedules.insert(schedule_id.clone(), updated.clone());
-                (updated, previous, state.control_plane_persist_request())
+                (
+                    updated,
+                    previous,
+                    previous_events,
+                    state.control_plane_persist_request(),
+                )
             };
             if persist.save().await.is_err() {
-                service
-                    .state
-                    .write()
-                    .await
-                    .schedules
-                    .insert(schedule_id, previous);
+                let mut state = service.state.write().await;
+                state.schedules.insert(schedule_id, previous);
+                state.automation_events = previous_events;
                 return Err(ScheduleError::Persistence);
             }
             service.state.read().await.publish_automation_updated(
@@ -1008,7 +1053,7 @@ impl AutomationService {
     ) -> Result<(), ScheduleError> {
         let (agent_id, schedule_id) = (agent_id.to_string(), schedule_id.to_string());
         self.locked(move |service| async move {
-            let (removed, persist) = {
+            let (removed, previous_events, persist) = {
                 let mut state = service.state.write().await;
                 if let Some(authority) = &authority {
                     authority.validate(&state, &agent_id)?;
@@ -1021,15 +1066,18 @@ impl AutomationService {
                     return Err(ScheduleError::NotFound);
                 }
                 let removed = state.schedules.remove(&schedule_id).expect("checked");
-                (removed, state.control_plane_persist_request())
+                let previous_events = state.automation_events.clone();
+                state.automation_events.remove_schedule(&schedule_id);
+                (
+                    removed,
+                    previous_events,
+                    state.control_plane_persist_request(),
+                )
             };
             if persist.save().await.is_err() {
-                service
-                    .state
-                    .write()
-                    .await
-                    .schedules
-                    .insert(schedule_id, removed);
+                let mut state = service.state.write().await;
+                state.schedules.insert(schedule_id, removed);
+                state.automation_events = previous_events;
                 return Err(ScheduleError::Persistence);
             }
             service

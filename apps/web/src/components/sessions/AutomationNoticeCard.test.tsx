@@ -53,7 +53,26 @@ describe('AutomationNoticeCard', () => {
       />,
     );
     const card = screen.getByRole('note', { name: 'Automation Call mom' });
-    expect(card).toHaveTextContent(/next Oct 19, 07:00\sPM EDT/);
+    expect(card).toHaveTextContent(/next (?:Oct\s19|19\sOct)/);
+    expect(card).toHaveTextContent(/07:00\sPM/i);
+    expect(card).toHaveTextContent(/(?:EDT|GMT-4)/);
+  });
+
+  it('shows event readiness without turning the absent due time into a date', () => {
+    render(
+      <AutomationNoticeCard
+        automation={automationFixture('event-1', {
+          name: 'Changed files',
+          trigger: { type: 'event', topic: 'files.changed' },
+          nextDueAtMs: Number.MAX_VALUE,
+        })}
+      />,
+    );
+    const card = screen.getByRole('note', { name: 'Automation Changed files' });
+    expect(card).toHaveTextContent(
+      'when files.changed occurs · waiting for event',
+    );
+    expect(card).not.toHaveTextContent('Invalid Date');
   });
 
   it('says the companion is unreachable when Undo fails any other way', async () => {

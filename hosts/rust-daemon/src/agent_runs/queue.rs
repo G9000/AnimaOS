@@ -481,9 +481,13 @@ impl AgentRunCoordinator {
         start: QueuedRunStart,
     ) -> Result<AcceptedRun, ApiError> {
         let coordinator = self.clone();
-        tokio::spawn(async move { coordinator.accept_run_owned(request, start, None).await })
-            .await
-            .map_err(|_| ApiError::service_unavailable("Run acceptance worker stopped"))?
+        tokio::spawn(async move {
+            coordinator
+                .accept_run_owned(request, start, None, None)
+                .await
+        })
+        .await
+        .map_err(|_| ApiError::service_unavailable("Run acceptance worker stopped"))?
     }
 
     pub(crate) async fn accept_browser_run(
@@ -495,21 +499,27 @@ impl AgentRunCoordinator {
         let coordinator = self.clone();
         tokio::spawn(async move {
             coordinator
-                .accept_run_owned(request, start, Some(prepared))
+                .accept_run_owned(request, start, Some(prepared), None)
                 .await
         })
         .await
         .map_err(|_| ApiError::service_unavailable("Run acceptance worker stopped"))?
     }
 
-    async fn accept_run_owned(
+    pub(super) async fn accept_run_owned(
         &self,
         request: AcceptRun,
         mut start: QueuedRunStart,
         browser: Option<crate::browser::PreparedBrowserSelection>,
+        recovery: Option<super::recovery::RecoveryAdmission>,
     ) -> Result<AcceptedRun, ApiError> {
         let transaction = self.control_plane_transaction().await;
         let now_ms = now_millis();
+        if let Some(admission) = &recovery {
+            if let Some(answer) = admission.validate(&*self.state.read().await, &request)? {
+                return Ok(answer);
+            }
+        }
         // Resolve exact retries first. No state/std guard crosses scoped history
         // or sequential bounded file validation; the owned transaction stays held.
         let (store, root) = {
@@ -612,7 +622,7 @@ impl AgentRunCoordinator {
             })?;
             super::attachments::validate_available(root, attachments.clone()).await?;
         }
-        let (record, previous_title, persist) = {
+        let (record, previous_title, previous_recovery_mirrored, persist) = {
             let mut guard = self.state.write().await;
             let Some(runtime) = guard.agents.get(&request.agent_id) else {
                 return Err(ApiError::not_found());
@@ -731,6 +741,29 @@ impl AgentRunCoordinator {
             );
             record.input.skill = request.skill.clone();
             record.input.attachment_ids = request.attachment_ids.clone();
+            let previous_recovery_mirrored = recovery.as_ref().and_then(|admission| {
+                guard
+                    .runs
+                    .get(&admission.source_run_id)
+                    .map(|source| source.mirrored)
+            });
+            if let Some(admission) = &recovery {
+                let source = guard
+                    .runs
+                    .get_mut(&admission.source_run_id)
+                    .ok_or_else(ApiError::not_found)?;
+                record.recovery_of = Some(source.id.clone());
+                record.recovery_attempt = source.recovery_attempt.saturating_add(1);
+                // This input is a host-authored quotation of prior evidence,
+                // not a new owner statement for memory or resend purposes.
+                record.system_followup = Some(true);
+                source.recovery = Some(crate::runs::recovery::RecoveryRecord {
+                    fingerprint: admission.fingerprint.clone(),
+                    continuation_run_id: record.id.clone(),
+                    reviewed_at_ms: now_ms,
+                });
+                source.mirrored = false;
+            }
             // A new chat shows its first message's title from the moment it is
             // accepted, and keeps it if the run fails (M2 T17 Minor 14).
             let previous_title = retitle
@@ -746,12 +779,27 @@ impl AgentRunCoordinator {
             (
                 record,
                 previous_title,
+                previous_recovery_mirrored,
                 guard.control_plane_persist_request(),
             )
         };
         if let Err(error) = persist.save().await {
             let mut guard = self.state.write().await;
             guard.runs.remove(&record.id);
+            if let Some(admission) = &recovery {
+                if let Some(source) = guard.runs.get_mut(&admission.source_run_id) {
+                    if source
+                        .recovery
+                        .as_ref()
+                        .is_some_and(|r| r.continuation_run_id == record.id)
+                    {
+                        source.recovery = None;
+                        if let Some(mirrored) = previous_recovery_mirrored {
+                            source.mirrored = mirrored;
+                        }
+                    }
+                }
+            }
             let mut title_reverted = false;
             if let Some(title) = previous_title {
                 if let Some(session) = guard.sessions.get_mut(&record.agent_id, &record.session_id)

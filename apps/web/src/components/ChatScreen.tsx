@@ -872,7 +872,7 @@ export function Composer({
   /** Runs a command that needs nothing more; completes one that does, and
    *  a skill, which takes the request after its name (spec §15.3). */
   const pick = (command: SlashCommand, complete = false) => {
-    const takesText = Boolean(command.needs || command.skill);
+    const takesText = Boolean(command.needs || command.skill || command.turn);
     if (takesText || complete) {
       setDraft(`/${command.name}${takesText ? ' ' : ''}`);
       taRef.current?.focus();

@@ -24,6 +24,37 @@ const NULL_DEVICE: &str = "/dev/null";
 /// Bytes kept from one stream of one git call; the rest is drained unread.
 pub(crate) const MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
 
+/// Windows canonical paths use the extended namespace, which Git for Windows
+/// cannot persist in a linked worktree's metadata. Convert only complete path
+/// arguments at the CLI boundary; internal canonical paths remain unchanged.
+fn cli_argument(argument: &OsStr) -> OsString {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        use std::path::{Component, Prefix};
+
+        match Path::new(argument).components().next() {
+            Some(Component::Prefix(prefix)) => match prefix.kind() {
+                Prefix::VerbatimDisk(_) => {
+                    return OsString::from_wide(
+                        &argument.encode_wide().skip(4).collect::<Vec<_>>(),
+                    );
+                }
+                Prefix::VerbatimUNC(_, _) => {
+                    let mut native = OsString::from(r"\\");
+                    native.push(OsString::from_wide(
+                        &argument.encode_wide().skip(8).collect::<Vec<_>>(),
+                    ));
+                    return native;
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    argument.to_os_string()
+}
+
 /// Fixed configuration pins applied to every call.
 fn pinned_config() -> Vec<String> {
     [
@@ -124,7 +155,7 @@ impl Git {
         for pair in pinned_config().iter().chain(extra_config) {
             command.arg("-c").arg(pair);
         }
-        command.args(args);
+        command.args(args.iter().map(|argument| cli_argument(argument)));
         command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -300,4 +331,82 @@ pub(crate) fn bounded(text: &str, max: usize) -> String {
         end -= 1;
     }
     text[..end].to_string()
+}
+
+#[cfg(all(test, windows))]
+mod windows_path_tests {
+    use super::*;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+    fn arguments(args: &[&OsStr]) -> Vec<OsString> {
+        Git {
+            timeout: Duration::from_secs(1),
+        }
+        .command(Path::new("C:\\synthetic-repo"), &[], args)
+        .get_args()
+        .map(OsStr::to_os_string)
+        .collect()
+    }
+
+    #[test]
+    fn windows_git_argv_converts_verbatim_drive_paths_without_changing_internal_paths() {
+        let internal = Path::new(r"\\?\C:\synthetic repo\資料\.worktrees\helper");
+        let argv = arguments(&[
+            OsStr::new("worktree"),
+            OsStr::new("add"),
+            internal.as_os_str(),
+        ]);
+        assert_eq!(
+            argv.last().unwrap(),
+            OsStr::new(r"C:\synthetic repo\資料\.worktrees\helper")
+        );
+        assert_eq!(
+            internal,
+            Path::new(r"\\?\C:\synthetic repo\資料\.worktrees\helper")
+        );
+    }
+
+    #[test]
+    fn windows_git_argv_preserves_unc_authority_and_non_unicode_code_units() {
+        for (raw, expected) in [
+            (
+                r"\\?\UNC\server\share\synthetic repo\",
+                r"\\server\share\synthetic repo\",
+            ),
+            (r"\\?\D:\synthetic repo\", r"D:\synthetic repo\"),
+        ] {
+            let mut raw: Vec<u16> = OsStr::new(raw).encode_wide().collect();
+            raw.extend([0xD800, u16::from(b'x')]);
+            let mut expected: Vec<u16> = OsStr::new(expected).encode_wide().collect();
+            expected.extend([0xD800, u16::from(b'x')]);
+            let raw = OsString::from_wide(&raw);
+            let argv = arguments(&[raw.as_os_str()]);
+            assert_eq!(
+                argv.last().unwrap().encode_wide().collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn windows_git_argv_keeps_options_normal_paths_and_other_namespaces_unchanged() {
+        let args: Vec<&OsStr> = [
+            "--quiet",
+            "--",
+            r"relative\file",
+            r"C:\ordinary repo\file",
+            r"\\server\share\file",
+            r"--output=\\?\C:\file",
+            r"\\.\pipe\synthetic",
+            r"\\?\Volume{synthetic}\file",
+        ]
+        .iter()
+        .map(OsStr::new)
+        .collect();
+        let argv = arguments(&args);
+        assert_eq!(&argv[argv.len() - args.len()..], args.as_slice());
+        assert!(argv
+            .windows(2)
+            .any(|pair| pair == [OsStr::new("-c"), OsStr::new("core.hooksPath=NUL")]));
+    }
 }

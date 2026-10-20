@@ -8,6 +8,7 @@ import {
   delegatedTaskText,
   formatElapsed,
   isAcceptedBudgetWrapupMessage,
+  isOwnerWritten,
   liveToolSteps,
   mergeSessionRuns,
   placeRuns,
@@ -16,6 +17,107 @@ import {
 } from './transcript';
 import type { ChatMessage } from './types';
 import { runFixture } from '../test/live';
+
+it('never treats a host-generated recovery prompt as owner-authored resend input', () => {
+  const source = runFixture('source', { source: 'web' });
+  const child = runFixture('continuation', {
+    source: 'web',
+    recoveryOf: source.id,
+    recoveryAttempt: 1,
+  });
+  expect(isOwnerWritten(source)).toBe(true);
+  expect(isOwnerWritten(child)).toBe(false);
+});
+
+it('replaces only a linked persisted recovery input with a short system notice', () => {
+  const internal = 'Host recovery evidence: private quoted action details';
+  const recovery = runFixture('recovery-child', {
+    status: 'completed',
+    recoveryOf: 'original',
+    recoveryAttempt: 1,
+    idempotencyKey: 'recovery:original',
+    input: { text: internal, attachmentIds: [] },
+  });
+  for (const metadata of [
+    { runId: recovery.id },
+    { clientRequestId: recovery.idempotencyKey },
+  ]) {
+    const saved = message('saved-recovery', 'User', internal, metadata);
+    const owner = message('real-owner', 'User', internal, {
+      clientRequestId: 'owner-message',
+    });
+    const items = buildTranscript({
+      messages: [saved, owner],
+      runs: [emptyLiveRun(recovery)],
+    });
+    expect(items).toContainEqual({
+      kind: 'model-note',
+      key: saved.id,
+      text: 'Continuing reviewed work',
+    });
+    expect(
+      items.some(
+        (item) => item.kind === 'message' && item.message.id === saved.id,
+      ),
+    ).toBe(false);
+    expect(
+      items.some(
+        (item) =>
+          item.kind === 'message' &&
+          item.message.id === owner.id &&
+          item.message.content.text === internal,
+      ),
+    ).toBe(true);
+    expect(saved.content.text).toBe(internal);
+  }
+});
+
+it('keeps the saved recovery notice after the run ledger expires', () => {
+  const saved = message('saved-recovery', 'User', 'Host recovery evidence', {
+    recoveryOf: 'original',
+  });
+  const assistant = message('reply', 'Assistant', 'An ordinary reply', {
+    recoveryOf: 'original',
+  });
+  const items = buildTranscript({ messages: [saved, assistant], runs: [] });
+  expect(items).toContainEqual({
+    kind: 'model-note',
+    key: saved.id,
+    text: 'Continuing reviewed work',
+  });
+  expect(items).toContainEqual({
+    kind: 'message',
+    key: assistant.id,
+    message: assistant,
+  });
+  expect(saved.content.text).toBe('Host recovery evidence');
+});
+
+it('keeps genuine owner steers visible during a recovery attempt', () => {
+  const recovery = runFixture('recovery-child', { recoveryOf: 'original' });
+  const saved = message('saved-recovery', 'User', 'Host recovery evidence', {
+    runId: recovery.id,
+  });
+  const steer = message('owner-steer', 'User', 'Use the updated details', {
+    runId: recovery.id,
+    steer: true,
+    clientRequestId: 'owner-steer-key',
+  });
+  const items = buildTranscript({
+    messages: [saved, steer],
+    runs: [emptyLiveRun(recovery)],
+  });
+  expect(items).toContainEqual({
+    kind: 'model-note',
+    key: saved.id,
+    text: 'Continuing reviewed work',
+  });
+  expect(items).toContainEqual({
+    kind: 'message',
+    key: steer.id,
+    message: steer,
+  });
+});
 
 function message(
   id: string,

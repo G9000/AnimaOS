@@ -26,6 +26,9 @@ export default defineConfig({
   site,
   srcDir: './src',
   outDir: './dist',
+  vite: {
+    ssr: { external: ['satteri'] },
+  },
   integrations: [
     starlight({
       title: 'animaOS',

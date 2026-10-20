@@ -195,13 +195,23 @@
                       "document",
                       "add-document",
                       "setting",
+                      "link",
+                      "link-alt",
                       "external",
                       "download",
                       "cloud-download",
                       "moon",
                       "sun",
+                      "clock",
                       "laptop",
+                      "desktop",
+                      "mobile-android",
+                      "window",
+                      "database",
+                      "server",
+                      "code-branch",
                       "open-book",
+                      "notes",
                       "information",
                       "magnifier",
                       "forward-slash",
@@ -210,20 +220,26 @@
                       "warning",
                       "approve-check-circle",
                       "approve-check",
+                      "question-circle",
+                      "question",
                       "rocket",
                       "star",
                       "puzzle",
                       "list-format",
+                      "analytics",
                       "random",
+                      "padlock",
                       "comment",
                       "comment-alt",
                       "heart",
                       "github",
                       "gitlab",
                       "bitbucket",
+                      "forgejo",
                       "codePen",
                       "farcaster",
                       "discord",
+                      "fluxer",
                       "gitter",
                       "twitter",
                       "x.com",
@@ -238,6 +254,7 @@
                       "instagram",
                       "stackOverflow",
                       "telegram",
+                      "whatsApp",
                       "rss",
                       "facebook",
                       "email",
@@ -254,7 +271,10 @@
                       "zulip",
                       "pinterest",
                       "tiktok",
+                      "goodreads",
+                      "hypothesis",
                       "astro",
+                      "solidjs",
                       "alpine",
                       "pnpm",
                       "biome",
@@ -284,6 +304,7 @@
                       "figma",
                       "sketch",
                       "npm",
+                      "npmx",
                       "sourcehut",
                       "substack",
                       "chrome",
@@ -303,6 +324,7 @@
                       "seti:cpp",
                       "seti:clojure",
                       "seti:coldfusion",
+                      "seti:coffee",
                       "seti:config",
                       "seti:crystal",
                       "seti:crystal_embedded",
@@ -439,6 +461,7 @@
                   },
                   {
                     "type": "string",
+                    "format": "starts_with",
                     "pattern": "^<svg.*"
                   }
                 ]
@@ -449,16 +472,10 @@
                   "type": "string"
                 },
                 "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "boolean"
-                    }
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
                   ]
                 }
               }

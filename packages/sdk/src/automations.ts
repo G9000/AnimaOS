@@ -7,7 +7,8 @@ export type AutomationTrigger =
   | { type: 'interval'; intervalMs: number }
   | { type: 'daily'; hour: number; minute: number; timeZone: string }
   | { type: 'cron'; expression: string; timeZone: string }
-  | { type: 'once'; atMs: number };
+  | { type: 'once'; atMs: number }
+  | { type: 'event'; topic: string };
 
 /** When it may fire: `HH:MM` wall times, days 0 (Sunday) to 6. An `end`
  *  before `start` runs overnight from the day it starts. */
@@ -160,6 +161,24 @@ const PATCH_KEYS = [
 
 export class AutomationsClient {
   constructor(private readonly client: DaemonClient) {}
+
+  /** Publish an owner-authenticated event. Reuse eventId for exact retries. */
+  async emitEvent(
+    agentId: string,
+    input: {
+      eventId: string;
+      topic: string;
+      payload?: Record<string, unknown>;
+    },
+  ): Promise<{ accepted: number; duplicate: number }> {
+    return this.client.requestJson(
+      `/api/agents/${encodeURIComponent(agentId)}/automation-events`,
+      {
+        method: 'POST',
+        body: only(input, ['eventId', 'topic', 'payload'] as const),
+      },
+    );
+  }
 
   /** The agent's automations, oldest first. */
   async list(

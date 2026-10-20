@@ -2807,19 +2807,22 @@ mod tests {
 
     #[test]
     fn model_cache_dir_without_a_store_is_the_per_user_cache() {
-        let home = PathBuf::from("/home/owner");
-        let user = |macos, xdg: Option<&str>| UserCacheEnv {
+        let fixture = tempfile::tempdir().unwrap();
+        let home = fixture.path().join("owner");
+        let xdg = fixture.path().join("xdg");
+        assert!(xdg.is_absolute());
+        let user = |macos, xdg: Option<&PathBuf>| UserCacheEnv {
             macos,
             home: Some(home.clone()),
-            xdg_cache_home: xdg.map(PathBuf::from),
+            xdg_cache_home: xdg.cloned(),
         };
         assert_eq!(
-            model_cache_dir(None, None, &user(true, Some("/xdg"))),
+            model_cache_dir(None, None, &user(true, Some(&xdg))),
             Some(home.join("Library/Caches/animaos/models"))
         );
         assert_eq!(
-            model_cache_dir(None, None, &user(false, Some("/xdg"))),
-            Some(PathBuf::from("/xdg/animaos/models"))
+            model_cache_dir(None, None, &user(false, Some(&xdg))),
+            Some(xdg.join("animaos/models"))
         );
         assert_eq!(
             model_cache_dir(None, None, &user(false, None)),
@@ -2827,7 +2830,7 @@ mod tests {
         );
         // A relative XDG_CACHE_HOME is ignored, as the XDG spec says.
         assert_eq!(
-            model_cache_dir(None, None, &user(false, Some("relative"))),
+            model_cache_dir(None, None, &user(false, Some(&PathBuf::from("relative")))),
             Some(home.join(".cache/animaos/models"))
         );
         // The store-adjacent dir, then the explicit setting, win.

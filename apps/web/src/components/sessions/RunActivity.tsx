@@ -6,6 +6,7 @@ import {
   formatElapsed,
   hasWrittenInput,
   liveToolSteps,
+  RECOVERY_WORK_NOTICE,
   type PendingBubble,
   type ToolStep,
   type TranscriptActions,
@@ -86,8 +87,7 @@ function sessionSnapshots(steps: readonly ToolStep[]): SessionSnapshot[] {
       parsed.kind === 'acp_session' && known?.session.kind === 'acp_session'
         ? mergeAcpSnapshots(known.session, parsed)
         : parsed;
-    const typed =
-      (known?.typed ?? 0) + (step.name === 'app_send' ? 1 : 0);
+    const typed = (known?.typed ?? 0) + (step.name === 'app_send' ? 1 : 0);
     byId.set(key, { session, index, typed });
   });
   // A later call on the same session that is still running (a prompt the
@@ -283,19 +283,21 @@ export function RunActivity({
       ? (run.finishedAtMs ?? run.startedAtMs)
       : null,
   );
-  const input = hasWrittenInput(run)
-    ? renderMessage({
-        id: `${run.id}:input`,
-        role: 'User',
-        content: {
-          text: run.input.text,
-          ...(attachments.length
-            ? { attachments: attachments.map(messageAttachment) }
-            : {}),
-        },
-        created_at_ms: run.createdAtMs,
-      })
-    : null;
+  const input = run.recoveryOf ? (
+    <p className="model-note">{RECOVERY_WORK_NOTICE}</p>
+  ) : hasWrittenInput(run) ? (
+    renderMessage({
+      id: `${run.id}:input`,
+      role: 'User',
+      content: {
+        text: run.input.text,
+        ...(attachments.length
+          ? { attachments: attachments.map(messageAttachment) }
+          : {}),
+      },
+      created_at_ms: run.createdAtMs,
+    })
+  ) : null;
 
   if (run.status === 'queued') {
     return (

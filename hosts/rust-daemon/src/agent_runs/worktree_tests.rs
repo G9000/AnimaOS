@@ -376,6 +376,10 @@ async fn an_async_worktree_assignment_saves_its_report_with_the_helper_run() {
 
 #[test]
 fn run_root_only_trusts_helper_worktree_roots() {
+    let fixture = tempfile::tempdir().unwrap();
+    let repo_root = fixture.path().join("repo");
+    let worktree_path = repo_root.join(".worktrees").join("anima-helper-abc12345");
+    assert!(worktree_path.is_absolute());
     let parent = anima_core::AgentState {
         id: "lead".into(),
         name: "Lead".into(),
@@ -387,12 +391,12 @@ fn run_root_only_trusts_helper_worktree_roots() {
     let worktree = super::worktrees::HelperWorktree {
         worktree: anima_worktree::Worktree {
             name: "abc12345".into(),
-            repo_root: PathBuf::from("/repo"),
-            path: PathBuf::from("/repo/.worktrees/anima-helper-abc12345"),
+            repo_root,
+            path: worktree_path.clone(),
             branch: "anima-helper/abc12345".into(),
             base_commit: "0123abcd".into(),
         },
-        root: PathBuf::from("/repo/.worktrees/anima-helper-abc12345/sub"),
+        root: worktree_path.join("sub"),
         display_path: ".worktrees/anima-helper-abc12345".into(),
         report: None,
     };
@@ -414,8 +418,8 @@ fn run_root_only_trusts_helper_worktree_roots() {
         .extend(super::worktrees::config_entries(&worktree));
     assert_eq!(super::worktrees::run_root(&lead), None);
     let mut forged = worktree.clone();
-    forged.worktree.path = PathBuf::from("/etc");
-    forged.root = PathBuf::from("/etc");
+    forged.worktree.path = fixture.path().join("outside");
+    forged.root = forged.worktree.path.clone();
     assert_eq!(
         super::worktrees::run_root(&super::helper_config_in(
             &parent,

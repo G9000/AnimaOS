@@ -591,4 +591,3 @@ mod tests {
         assert!(lex("echo 'open").unclosed);
     }
 }
-

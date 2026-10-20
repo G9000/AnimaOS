@@ -155,6 +155,10 @@ pub(super) struct ExactFailureStreak {
 }
 
 impl ExactFailureStreak {
+    pub(super) fn exhausted(&self) -> bool {
+        self.count >= 6
+    }
+
     pub(super) fn reset(&mut self) {
         *self = Self::default();
     }
@@ -170,7 +174,7 @@ impl ExactFailureStreak {
             return false;
         };
         if self.signature == Some(signature) {
-            self.count = self.count.saturating_add(1).min(3);
+            self.count = self.count.saturating_add(1).min(6);
         } else {
             self.signature = Some(signature);
             self.count = 1;

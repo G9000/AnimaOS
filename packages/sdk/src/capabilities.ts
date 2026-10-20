@@ -17,6 +17,12 @@ export interface DaemonCapabilityTool {
 
 export interface DaemonCapabilities {
   schemaVersion: 1;
+  /** Configuration inventory only; execution still validates interpreter/process custody. */
+  programmaticTools?: {
+    status: 'configured' | 'unconfigured' | 'unsupported';
+    mode: 'one_shot';
+    interpreterEnvironment: string;
+  };
   tools: DaemonCapabilityTool[];
   persistence: {
     /** Configured storage backend, not a successful storage health probe. */

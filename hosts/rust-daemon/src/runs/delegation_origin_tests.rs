@@ -212,7 +212,7 @@ fn fp05_origin_contract_legacy_records_keep_absent_async_fields() {
 #[test]
 fn fp05_origin_runtime_v21_reserves_distinct_origin_backup_without_retargeting_older_backups() {
     use crate::control_plane_store::{pre_upgrade_backup_path, CONTROL_PLANE_STORE_VERSION};
-    assert_eq!(CONTROL_PLANE_STORE_VERSION, 22);
+    assert_eq!(CONTROL_PLANE_STORE_VERSION, 23);
     let path = std::path::Path::new("control-plane.json");
     assert_eq!(
         pre_upgrade_backup_path(path, 20),

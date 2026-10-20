@@ -1,6 +1,7 @@
 import type { Run } from '@animaOS-SWARM/sdk';
 
 import { isOwnerWritten } from '../../lib/transcript';
+import { RunRecovery } from './RunRecovery';
 
 /** Why an interrupted run did not reply: a restart in the web's words,
  *  otherwise the daemon's own reason, such as a stop or a full queue that
@@ -71,6 +72,17 @@ export function RunOutcomeCard({
 }) {
   // Only a message the owner wrote is theirs to send again.
   const sendAgain = isOwnerWritten(run) ? onSendAgain : undefined;
+  const recovery =
+    onSendAgain &&
+    (sendAgain || run.recoveryOf) &&
+    run.recoveryAttempt !== undefined &&
+    ['web', 'api'].includes(run.source) ? (
+      <RunRecovery
+        agentId={run.agentId}
+        runId={run.id}
+        continuationRunId={run.recovery?.continuationRunId}
+      />
+    ) : null;
   if (run.status === 'cancelled')
     return (
       <div className="run-outcome" data-outcome="stopped">
@@ -87,7 +99,8 @@ export function RunOutcomeCard({
             : 'This reply failed.'}
         </p>
         {actionReceipts(run)}
-        {sendAgain && (
+        {recovery}
+        {sendAgain && !recovery && (
           <button
             type="button"
             className="studio-tool-button"
@@ -109,7 +122,8 @@ export function RunOutcomeCard({
         </p>
       )}
       {actionReceipts(run)}
-      {sendAgain && (
+      {recovery}
+      {sendAgain && !recovery && (
         <button
           type="button"
           className="studio-tool-button"

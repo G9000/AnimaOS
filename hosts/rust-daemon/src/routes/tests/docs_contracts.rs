@@ -42,7 +42,30 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 236, "complete registered operation count");
+    assert_eq!(actual.len(), 242, "complete registered operation count");
+    let durable_work_additions = [
+        ("GET", "/api/agents/{agent_id}/runs/{run_id}/recovery"),
+        ("POST", "/api/agents/{agent_id}/runs/{run_id}/recovery"),
+        (
+            "GET",
+            "/api/agents/{agent_id}/sessions/{session_id}/clarifications",
+        ),
+        (
+            "POST",
+            "/api/agents/{agent_id}/sessions/{session_id}/clarifications/{request_id}/answer",
+        ),
+        (
+            "POST",
+            "/api/agents/{agent_id}/sessions/{session_id}/side-question",
+        ),
+        ("POST", "/api/agents/{agent_id}/automation-events"),
+    ];
+    for (method, path) in durable_work_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "recovery, clarification, side question and automation event operations must be registered"
+        );
+    }
     let discord_interaction_additions = [
         ("POST", "/api/agents/{agent_id}/connectors/discord/check"),
         (
@@ -259,6 +282,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                     && !core_memory_additions.contains(&(method.as_str(), path.as_str()))
                     && !memory_export_additions.contains(&(method.as_str(), path.as_str()))
                     && !discord_interaction_additions.contains(&(method.as_str(), path.as_str()))
+                    && !durable_work_additions.contains(&(method.as_str(), path.as_str()))
             })
             .count(),
         193,
@@ -304,6 +328,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                     && !core_memory_additions.contains(&(method.as_str(), path.as_str()))
                     && !memory_export_additions.contains(&(method.as_str(), path.as_str()))
                     && !discord_interaction_additions.contains(&(method.as_str(), path.as_str()))
+                    && !durable_work_additions.contains(&(method.as_str(), path.as_str()))
             )
             .count(),
         188,
@@ -335,6 +360,7 @@ fn owner_console_path(path: &str) -> bool {
                 "/sessions",
                 "/message-search",
                 "/events",
+                "/automation-events",
                 "/runs",
                 "/approvals",
                 "/approval-policy",

@@ -93,7 +93,8 @@ impl CompletionReview {
             } => {
                 state.revision = state.revision.saturating_add(1);
                 // Evidence remains bounded even for a long-running caller.
-                if path.len() > 4096 || state.unread.len() >= 64 {
+                if path.len() > 4096 || (state.unread.len() >= 64 && !state.unread.contains(&path))
+                {
                     state.overflow = true;
                 } else {
                     state.unread.insert(path);
@@ -227,6 +228,19 @@ mod tests {
         let feedback = review.take_feedback().unwrap();
         assert!(feedback.contains("read-back"));
         assert!(feedback.contains("command"));
+    }
+
+    #[test]
+    fn autonomy_completion_reediting_a_tracked_path_at_capacity_does_not_create_a_false_gap() {
+        let review = CompletionReview::default();
+        for index in 0..64 {
+            edit(&review, &format!("report-{index}.txt"), false);
+        }
+        edit(&review, "report-0.txt", false);
+        for index in 0..64 {
+            read(&review, &format!("report-{index}.txt"));
+        }
+        assert!(review.take_feedback().is_none());
     }
 
     #[test]

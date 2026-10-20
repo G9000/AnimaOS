@@ -31,6 +31,11 @@ pub(crate) struct ToolGrantSet {
 /// Grant sets in the order they shipped.
 pub(crate) const TOOL_GRANTS: &[ToolGrantSet] = &[
     ToolGrantSet {
+        id: "companion-structured-input",
+        read_class: &["clarify"],
+        write_class: &[],
+    },
+    ToolGrantSet {
         id: "m3-search-conversations",
         read_class: &["search_conversations"],
         write_class: &[],
@@ -1280,6 +1285,7 @@ mod tests {
             names(&companion_id),
             [
                 "calculate",
+                "clarify",
                 "search_conversations",
                 "load_skill",
                 "list_automations"
@@ -1321,6 +1327,7 @@ mod tests {
             names(&reader_id),
             [
                 "read_file",
+                "clarify",
                 "search_conversations",
                 "load_skill",
                 "list_automations"
@@ -1330,6 +1337,7 @@ mod tests {
             names(&writer_id),
             [
                 "write_file",
+                "clarify",
                 "search_conversations",
                 "load_skill",
                 "propose_skill",

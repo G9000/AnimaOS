@@ -152,6 +152,11 @@ pub(crate) struct RunResponse {
     pub(crate) model: String,
     pub(crate) provider: Option<String>,
     pub(crate) parent_run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) recovery: Option<crate::runs::recovery::RecoveryRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) recovery_of: Option<String>,
+    pub(crate) recovery_attempt: u8,
     /// The committed final reply, once the run completed.
     pub(crate) reply_message_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -202,6 +207,9 @@ impl From<&RunRecord> for RunResponse {
             model: record.model.clone(),
             provider: record.provider.clone(),
             parent_run_id: record.parent_run_id.clone(),
+            recovery: record.recovery.clone(),
+            recovery_of: record.recovery_of.clone(),
+            recovery_attempt: record.recovery_attempt,
             reply_message_id: record.reply_message_id.clone(),
             async_helper: record
                 .async_helper

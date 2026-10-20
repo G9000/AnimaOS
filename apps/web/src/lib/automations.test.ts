@@ -53,12 +53,20 @@ describe('automation labels', () => {
         },
       }),
     ).toBe('Asia/Singapore');
-    expect(
-      formatWhenIn(Date.UTC(2026, 9, 19, 23, 0), 'America/New_York'),
-    ).toMatch(/Oct 19, 07:00\sPM EDT/);
+    const shown = formatWhenIn(
+      Date.UTC(2026, 9, 19, 23, 0),
+      'America/New_York',
+    );
+    // Windows ICU uses day-first dates and GMT offsets for this locale.
+    expect(shown).toMatch(/(?:Oct\s19|19\sOct)/);
+    expect(shown).toMatch(/07:00\sPM/i);
+    expect(shown).toMatch(/(?:EDT|GMT-4)$/);
   });
 
   it('describes triggers and active hours in words', () => {
+    expect(describeTrigger({ type: 'event', topic: 'files.changed' })).toBe(
+      'when files.changed occurs',
+    );
     expect(describeTrigger({ type: 'interval', intervalMs: 1_800_000 })).toBe(
       'every 30 min',
     );

@@ -30,10 +30,12 @@ use crate::schedules::ScheduledPromptRecord;
 /// lineage (M45); 20 adds typed async helper/completion lineage and saved
 /// execution bounds (FP05); 21 adds bounded pending-origin/final-output evidence
 /// on exact source attempts; 22 adds Discord conversation destinations, response
-/// policy and durable thread-creation claims. Runtime transport sessions/processes are never persisted. Older
+/// policy and durable thread-creation claims; 23 adds durable clarification,
+/// recovery lineage and event occurrences. Runtime transport sessions/processes are never persisted. Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 22;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 23;
+pub(crate) const PRE_COMPANION_INTERACTION_BACKUP_SUFFIX: &str = ".pre-companion-interaction.bak";
 pub(crate) const ASYNC_ORIGIN_BATCHES_STORE_VERSION: u32 = 21;
 pub(crate) const PRE_DISCORD_CONVERSATIONS_BACKUP_SUFFIX: &str = ".pre-discord-conversations.bak";
 pub(crate) const ASYNC_HELPERS_STORE_VERSION: u32 = 20;
@@ -178,6 +180,10 @@ pub(crate) struct ControlPlaneSnapshot {
     pub(crate) learning_reviews: Vec<crate::learning::LearningReviewRecord>,
     #[serde(default)]
     pub(crate) learning_policies: Vec<crate::learning::LearningPolicy>,
+    #[serde(default)]
+    pub(crate) clarifications: Vec<crate::clarifications::ClarificationRequest>,
+    #[serde(default)]
+    pub(crate) automation_events: Vec<crate::schedules::event::EventOccurrence>,
     /// Owner messages counted toward each agent's next conversation review.
     #[serde(default)]
     pub(crate) conversation_counts: std::collections::BTreeMap<String, u32>,
@@ -461,7 +467,11 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
         } else if loaded_version < ASYNC_ORIGIN_BATCHES_STORE_VERSION {
             PRE_ASYNC_ORIGIN_BATCHES_BACKUP_SUFFIX
         } else {
-            PRE_DISCORD_CONVERSATIONS_BACKUP_SUFFIX
+            if loaded_version < 22 {
+                PRE_DISCORD_CONVERSATIONS_BACKUP_SUFFIX
+            } else {
+                PRE_COMPANION_INTERACTION_BACKUP_SUFFIX
+            }
         });
         path.with_file_name(name)
     }
@@ -711,6 +721,8 @@ impl ControlPlaneSnapshot {
             side_model: None,
             learning_reviews: vec![],
             learning_policies: vec![],
+            clarifications: vec![],
+            automation_events: vec![],
             conversation_counts: Default::default(),
             conversation_turns: Default::default(),
             legacy_pins: vec![],
@@ -1003,7 +1015,7 @@ mod tests {
 
     #[test]
     fn the_version_constants() {
-        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 22);
+        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 23);
         assert_eq!(super::USAGE_STORE_VERSION, 10);
         assert_eq!(super::PRE_ATTACHMENTS_BACKUP_SUFFIX, ".pre-attachments.bak");
         assert_eq!(super::postgres_backup_key(10), "control_plane.backup.10");
@@ -1121,7 +1133,45 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .version,
-            22
+            super::CONTROL_PLANE_STORE_VERSION
+        );
+    }
+
+    #[tokio::test]
+    async fn companion_upgrade_keeps_exact_version_twenty_two_backup() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("control-plane.json");
+        let original = "{\n  \"version\": 22, \"agents\": [], \"swarms\": []\n}\n";
+        std::fs::write(&path, original).unwrap();
+        let previous_backup = super::pre_upgrade_backup_path(&path, 21);
+        std::fs::write(&previous_backup, "previous backup").unwrap();
+        let config = super::ControlPlaneStoreConfig::Json(path.clone());
+        let mut snapshot = super::load_control_plane_snapshot(&config)
+            .await
+            .unwrap()
+            .unwrap();
+        let backup = super::pre_upgrade_backup_path(&path, 22);
+        assert_ne!(backup, previous_backup);
+        assert!(backup
+            .to_string_lossy()
+            .ends_with(super::PRE_COMPANION_INTERACTION_BACKUP_SUFFIX));
+        super::write_pre_upgrade_backup(&config, 22).await.unwrap();
+        snapshot.version = super::CONTROL_PLANE_STORE_VERSION;
+        super::save_control_plane_snapshot(Some(&config), &snapshot)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(backup).unwrap(), original);
+        assert_eq!(
+            std::fs::read_to_string(previous_backup).unwrap(),
+            "previous backup"
+        );
+        assert_eq!(
+            super::load_control_plane_snapshot(&config)
+                .await
+                .unwrap()
+                .unwrap()
+                .version,
+            23
         );
     }
 
@@ -1352,7 +1402,7 @@ mod discord_upgrade_tests {
         assert!(loaded.discord_connectors.is_empty());
         assert!(loaded.discord_inbound.is_empty());
         assert!(loaded.discord_outbound.is_empty());
-        assert_eq!(CONTROL_PLANE_STORE_VERSION, 22);
+        assert_eq!(CONTROL_PLANE_STORE_VERSION, 23);
         write_pre_upgrade_backup(&config, 11).await.unwrap();
         assert_eq!(
             std::fs::read_to_string(pre_discord_backup_path(&path)).unwrap(),
@@ -1508,7 +1558,7 @@ mod learning_snapshot_tests {
             std::fs::read_to_string(&old_backup).unwrap(),
             "older backup"
         );
-        assert_eq!(CONTROL_PLANE_STORE_VERSION, 22);
+        assert_eq!(CONTROL_PLANE_STORE_VERSION, 23);
         std::fs::remove_file(backup).unwrap();
         std::fs::remove_file(old_backup).unwrap();
         std::fs::remove_file(path).unwrap();

@@ -146,7 +146,11 @@ export function WorkspaceDashboard({
   const completed =
     snapshot?.tasks.filter((task) => task.status === 'completed') ?? [];
   const running = agents.filter((agent) => agent.status === 'Running');
-  const goal = mission?.trim().split(/\n\s*\n/)[0].replace(/^Goal\s*\n/i, '').trim();
+  const goal = mission
+    ?.trim()
+    .split(/\n\s*\n/)[0]
+    .replace(/^Goal\s*\n/i, '')
+    .trim();
   const nextStep = !online
     ? 'Reconnect to see what your agency needs next.'
     : failed.length || scheduleErrors.length
@@ -174,15 +178,21 @@ export function WorkspaceDashboard({
             >
               Overview
             </h2>
-            <p className="mt-3 text-xs font-semibold uppercase tracking-widest text-ink-3">Your goal</p>
+            <p className="mt-3 text-xs font-semibold uppercase tracking-widest text-ink-3">
+              Your goal
+            </p>
             <p className="mt-2 break-words font-display text-lg leading-relaxed text-ink-2 sm:text-xl">
               {goal ||
                 'A clear view of your team, your work, and what comes next.'}
             </p>
             {mission && mission.trim() !== goal && (
               <details className="mt-3 text-sm text-ink-3">
-                <summary className="cursor-pointer">Read workspace brief</summary>
-                <p className="mt-3 whitespace-pre-wrap break-words leading-relaxed">{mission}</p>
+                <summary className="cursor-pointer">
+                  Read workspace brief
+                </summary>
+                <p className="mt-3 whitespace-pre-wrap break-words leading-relaxed">
+                  {mission}
+                </p>
               </details>
             )}
           </div>
@@ -206,17 +216,47 @@ export function WorkspaceDashboard({
           </div>
         </div>
 
-        <dl aria-label="Workplace at a glance" className="grid grid-cols-2 overflow-hidden rounded-2xl border border-line bg-surface sm:grid-cols-4">
+        <dl
+          aria-label="Workplace at a glance"
+          className="grid grid-cols-2 overflow-hidden rounded-2xl border border-line bg-surface sm:grid-cols-4"
+        >
           {[
-            ['Team members', String(agents.length), 'People responsible for your work'],
-            ['Working now', online ? String(running.length) : 'Unavailable', 'Live agent runs'],
-            ['Open tasks', !online || tasksIncomplete ? 'Unavailable' : String(tasks.length), 'Owned tasks to move forward'],
-            ['Enabled routines', !online || schedulesIncomplete ? 'Unavailable' : String(upcoming.length), 'Run while the daemon is active'],
+            [
+              'Team members',
+              String(agents.length),
+              'People responsible for your work',
+            ],
+            [
+              'Working now',
+              online ? String(running.length) : 'Unavailable',
+              'Live agent runs',
+            ],
+            [
+              'Open tasks',
+              !online || tasksIncomplete ? 'Unavailable' : String(tasks.length),
+              'Owned tasks to move forward',
+            ],
+            [
+              'Enabled routines',
+              !online || schedulesIncomplete
+                ? 'Unavailable'
+                : String(upcoming.length),
+              'Run while the daemon is active',
+            ],
           ].map(([label, value, description]) => (
-            <div key={label} className="min-w-0 border-b border-line p-4 odd:border-r sm:border-b-0 sm:border-r sm:last:border-r-0 sm:p-5">
+            <div
+              key={label}
+              className="min-w-0 border-b border-line p-4 odd:border-r sm:border-b-0 sm:border-r sm:last:border-r-0 sm:p-5"
+            >
               <dt className="text-xs font-medium text-ink-3">{label}</dt>
-              <dd className={`mt-2 font-display font-semibold ${value === 'Unavailable' ? 'text-base text-ink-3' : 'text-2xl'}`}>{value}</dd>
-              <p className="mt-1 text-xs leading-relaxed text-ink-3">{description}</p>
+              <dd
+                className={`mt-2 font-display font-semibold ${value === 'Unavailable' ? 'text-base text-ink-3' : 'text-2xl'}`}
+              >
+                {value}
+              </dd>
+              <p className="mt-1 text-xs leading-relaxed text-ink-3">
+                {description}
+              </p>
             </div>
           ))}
         </dl>
@@ -275,22 +315,58 @@ export function WorkspaceDashboard({
           )}
         </section>
 
-        <div className="grid gap-3 sm:grid-cols-3" aria-label="Explore your workplace">
-          <button className={`${panel} text-left transition hover:border-accent/40`} onClick={() => onOpenWork('Tasks')}>
-            <span className="text-xs font-medium text-accent">01 / Organize</span>
-            <span className="mt-2 block font-semibold">Give your next outcome an owner →</span>
-            <span className="mt-2 block text-sm leading-relaxed text-ink-3">Manage each agent’s tasks and choose which routines should run.</span>
+        <div
+          className="grid gap-3 sm:grid-cols-3"
+          aria-label="Explore your workplace"
+        >
+          <button
+            className={`${panel} text-left transition hover:border-accent/40`}
+            onClick={() => onOpenWork('Tasks')}
+          >
+            <span className="text-xs font-medium text-accent">
+              01 / Organize
+            </span>
+            <span className="mt-2 block font-semibold">
+              Give your next outcome an owner →
+            </span>
+            <span className="mt-2 block text-sm leading-relaxed text-ink-3">
+              Manage each agent’s tasks and choose which routines should run.
+            </span>
           </button>
-          {onOpenFiles && <button className={`${panel} text-left transition hover:border-accent/40`} onClick={onOpenFiles}>
-            <span className="text-xs font-medium text-accent">02 / Review</span>
-            <span className="mt-2 block font-semibold">Find the work in your folder →</span>
-            <span className="mt-2 block text-sm leading-relaxed text-ink-3">Read saved briefs, drafts, and code alongside your team’s conversations.</span>
-          </button>}
-          {onOpenCapabilities && <button className={`${panel} text-left transition hover:border-accent/40`} onClick={onOpenCapabilities}>
-            <span className="text-xs font-medium text-accent">03 / Equip</span>
-            <span className="mt-2 block font-semibold">Explore what your team can use →</span>
-            <span className="mt-2 block text-sm leading-relaxed text-ink-3">Inspect registered tools, access requirements, and what persists.</span>
-          </button>}
+          {onOpenFiles && (
+            <button
+              className={`${panel} text-left transition hover:border-accent/40`}
+              onClick={onOpenFiles}
+            >
+              <span className="text-xs font-medium text-accent">
+                02 / Review
+              </span>
+              <span className="mt-2 block font-semibold">
+                Find the work in your folder →
+              </span>
+              <span className="mt-2 block text-sm leading-relaxed text-ink-3">
+                Read saved briefs, drafts, and code alongside your team’s
+                conversations.
+              </span>
+            </button>
+          )}
+          {onOpenCapabilities && (
+            <button
+              className={`${panel} text-left transition hover:border-accent/40`}
+              onClick={onOpenCapabilities}
+            >
+              <span className="text-xs font-medium text-accent">
+                03 / Equip
+              </span>
+              <span className="mt-2 block font-semibold">
+                Explore what your team can use →
+              </span>
+              <span className="mt-2 block text-sm leading-relaxed text-ink-3">
+                Inspect registered tools, access requirements, and what
+                persists.
+              </span>
+            </button>
+          )}
         </div>
 
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
@@ -457,7 +533,9 @@ export function WorkspaceDashboard({
                       <p className="break-words text-sm">{schedule.prompt}</p>
                       <p className="mt-1 text-xs text-ink-3">
                         {owner(schedule.agentId)} ·{' '}
-                        {new Date(schedule.nextDueAtMs).toLocaleString()}
+                        {schedule.trigger.type === 'event'
+                          ? 'Waiting for event'
+                          : new Date(schedule.nextDueAtMs).toLocaleString()}
                       </p>
                     </li>
                   ))}
@@ -494,13 +572,18 @@ export function WorkspaceDashboard({
                     {agent.name}
                   </span>
                   <span className="mt-1 block line-clamp-3 text-xs leading-relaxed text-ink-2">
-                    {agent.bio?.trim() || (agent.id === manager?.id
-                      ? 'Coordinates priorities and keeps the team moving.'
-                      : 'Open the agent’s profile to review its responsibilities.')}
+                    {agent.bio?.trim() ||
+                      (agent.id === manager?.id
+                        ? 'Coordinates priorities and keeps the team moving.'
+                        : 'Open the agent’s profile to review its responsibilities.')}
                   </span>
                   {online && agent.status === 'Running' && (
                     <span className="mt-2 block text-xs text-accent">
-                      {tasks.find((task) => task.agentId === agent.id && task.status === 'in_progress')?.activeForm || 'Working now'}
+                      {tasks.find(
+                        (task) =>
+                          task.agentId === agent.id &&
+                          task.status === 'in_progress',
+                      )?.activeForm || 'Working now'}
                     </span>
                   )}
                   <span className="block text-xs text-ink-3">

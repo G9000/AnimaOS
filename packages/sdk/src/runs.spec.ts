@@ -29,17 +29,81 @@ const run = {
 };
 
 describe('runs client', () => {
+  it('reads scoped recovery evidence and submits its exact reviewed fingerprint', async () => {
+    const evidence = {
+      sourceRunId: 'run/a',
+      fingerprint: 'a'.repeat(64),
+      eligible: true,
+      reviewRequired: true,
+      unknownActionCount: 1,
+      remainingAttempts: 3,
+      continuationRunId: null,
+    };
+    const { runs, requests } = transport((_url, init) =>
+      Response.json(init?.method === 'POST' ? { run } : evidence),
+    );
+    expect(await runs.recovery('agent/a', 'run/a')).toEqual(evidence);
+    expect(
+      await runs.continueRecovery('agent/a', 'run/a', {
+        fingerprint: evidence.fingerprint,
+        reviewed: true,
+      }),
+    ).toEqual(run);
+    expect(requests[0].url).toContain(
+      '/api/agents/agent%2Fa/runs/run%2Fa/recovery',
+    );
+    expect(JSON.parse(String(requests[1].init?.body))).toEqual({
+      fingerprint: evidence.fingerprint,
+      reviewed: true,
+    });
+  });
   it('preserves optional async summaries and completion origins through owner reads', async () => {
-    const asyncHelper = { ownerAgentId: 'owner', ownerSessionId: 'chat:owner', parentRunId: 'launch', completion: { state: 'awaiting_parent', reservedRunId: 'completion' }, pendingSteerCount: 1, archiveUnconsumedCount: 2 };
-    const helperCompletion = { helperRunId: 'child', launchParentRunId: 'launch' };
-    const { runs } = transport((url) => Response.json(url.includes('?') ? { runs: [{ ...run, asyncHelper }, { ...run, id: 'completion', helperCompletion }] } : { run }));
-    const listed = await runs.listForSession('owner', 'chat:owner', { limit: 2 });
-    expect(listed).toEqual([{ ...run, asyncHelper }, { ...run, id: 'completion', helperCompletion }]);
+    const asyncHelper = {
+      ownerAgentId: 'owner',
+      ownerSessionId: 'chat:owner',
+      parentRunId: 'launch',
+      completion: { state: 'awaiting_parent', reservedRunId: 'completion' },
+      pendingSteerCount: 1,
+      archiveUnconsumedCount: 2,
+    };
+    const helperCompletion = {
+      helperRunId: 'child',
+      launchParentRunId: 'launch',
+    };
+    const { runs } = transport((url) =>
+      Response.json(
+        url.includes('?')
+          ? {
+              runs: [
+                { ...run, asyncHelper },
+                { ...run, id: 'completion', helperCompletion },
+              ],
+            }
+          : { run },
+      ),
+    );
+    const listed = await runs.listForSession('owner', 'chat:owner', {
+      limit: 2,
+    });
+    expect(listed).toEqual([
+      { ...run, asyncHelper },
+      { ...run, id: 'completion', helperCompletion },
+    ]);
     expect(await runs.get('owner', 'legacy')).not.toHaveProperty('asyncHelper');
-    expect(await runs.get('owner', 'legacy')).not.toHaveProperty('helperCompletion');
-    expectTypeOf<Extract<keyof StartRunInput, 'asyncHelper' | 'helperCompletion' | 'parentRunId' | 'ownerAgentId'>>().toEqualTypeOf<never>();
+    expect(await runs.get('owner', 'legacy')).not.toHaveProperty(
+      'helperCompletion',
+    );
+    expectTypeOf<
+      Extract<
+        keyof StartRunInput,
+        'asyncHelper' | 'helperCompletion' | 'parentRunId' | 'ownerAgentId'
+      >
+    >().toEqualTypeOf<never>();
     // Legacy payloads remain assignable after new response-only fields are added.
-    expectTypeOf<Pick<Run, 'id' | 'source'>>().toEqualTypeOf<{ id: string; source: Run['source'] }>();
+    expectTypeOf<Pick<Run, 'id' | 'source'>>().toEqualTypeOf<{
+      id: string;
+      source: Run['source'];
+    }>();
   });
   it('retains ordered attachment IDs unchanged in accepted run input', async () => {
     const { runs, requests } = transport(() =>

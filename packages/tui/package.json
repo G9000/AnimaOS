@@ -20,12 +20,12 @@
   },
   "dependencies": {
     "ink": "^6.8.0",
-    "react": "^19.0.0",
+    "react": "^19.3.1",
     "@animaOS-SWARM/sdk": "workspace:*",
     "tslib": "^2.3.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
-    "typescript": "~5.9.2"
+    "typescript": "^6.0.2"
   }
 }

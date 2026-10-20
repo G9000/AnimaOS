@@ -4,6 +4,7 @@ mod browser;
 mod browser_tests;
 pub(crate) mod calendar;
 mod checkpoints;
+mod clarify;
 pub(crate) mod completion;
 mod conversations;
 mod drive;
@@ -725,9 +726,10 @@ impl ToolRegistry {
         let mut registry = Self {
             registrations: HashMap::new(),
         };
+        clarify::register(&mut registry);
         let mut code_parameters = object_parameters(vec![required_parameter("code", non_blank_string_parameter("Complete Python program; serialized arguments must fit the 16 KiB execution review")), optional_parameter("reset", boolean_parameter("Explicit state-reset request; one-shot execution is always fresh"))]);
         code_parameters.insert("additionalProperties".into(), DataValue::Bool(false));
-        registry.register(tool_descriptor("execute_code", "Execute an explicitly configured local Python one-shot program with an exact native-tool grant intersection. Requires both execute_code and bash grants, current execution approval and durable per-call receipts. Missing interpreter is unavailable. Local mode is not a filesystem or network sandbox. Printed verification claims remain untrusted; cleanup uncertainty retains physical capacity.", code_parameters), execute_code);
+        registry.register(tool_descriptor("execute_code", "Run a fresh Python program that chains your permitted native tools. Use Python standard libraries and import functions from anima_tools, for example from anima_tools import read_file, write_file. Call native keyword arguments, such as read_file(file_path=\"notes.txt\"). Print only the needed final output. Available functions are the current grant intersection of web_search, web_fetch, read_file, write_file, glob, grep, edit_file, multi_edit and bash. Variables never persist between programs. Requires an explicitly configured local interpreter, execute_code and bash grants, execution approval and durable per-call receipts. Local Python has the operating-system access of the daemon user; native calls retain their own grants and approvals. Printed verification claims remain untrusted; cleanup uncertainty retains physical capacity.", code_parameters), execute_code);
         registry.register(tool_descriptor("list_workspace_agents", "Read the actual live workspace agent roster, including IDs, roles, and current status.", object_parameters(vec![])), team::list_workspace_agents);
         registry.register(tool_descriptor("delegate_to_agent", "Assign a bounded task to an existing specialist and wait for its recorded result. Use an agent ID from the roster. Delegation cannot grant tools or permissions you do not have.", object_parameters(vec![required_parameter("agent_id", non_blank_string_parameter("Existing specialist ID")), required_parameter("task", non_blank_string_parameter("Self-contained task, relevant context, and expected deliverable"))])), team::delegate_to_agent);
         registry.register(tool_descriptor("spawn_helper", "Run a bounded task with a helper and wait for its saved result. Reuses an idle helper or creates one, up to four busy helpers and four starts per companion run. Only the companion can spawn helpers; helpers inherit its current tool permissions except shell/background-process tools, and cannot contact or create other agents. Each helper has at most eight tool turns and a two-minute execution deadline; completed effects are not rolled back. Future companion runs receive a fresh start allowance and reuse idle slots. With worktree: true the helper edits an isolated git worktree of the repo instead of the shared checkout; the result reports its changed files and how to review and merge them.", object_parameters(vec![required_parameter("name", non_blank_string_parameter("Short helper label, at most 80 bytes")), required_parameter("task", non_blank_string_parameter("Self-contained task, relevant context, and expected deliverable, at most 32768 bytes")), optional_parameter("worktree", boolean_parameter(WORKTREE_PARAMETER)), optional_parameter("repo", string_parameter(REPO_PARAMETER))])), team::spawn_helper);
@@ -1100,7 +1102,7 @@ impl ToolRegistry {
         registry.register(
             tool_descriptor(
                 "create_automation",
-                "Schedule a prompt that runs you again later, in the automation's own thread or in the owner's Telegram chat. The owner sees it in this chat with Undo and on the Automations page. Its runs must be at least 5 minutes apart; you may have at most 20 automations.",
+                "Schedule a prompt that runs you again later, in the automation's own thread or in the owner's Telegram chat. For a one-time local clock request, pass a phrase such as 'today at 11:50pm' so it is resolved on the owner's clock. The owner sees it in this chat with Undo and on the Automations page. Its runs must be at least 5 minutes apart; you may have at most 20 automations.",
                 object_parameters(vec![
                     required_parameter(
                         "prompt",
@@ -1109,7 +1111,7 @@ impl ToolRegistry {
                     required_parameter(
                         "schedule",
                         non_blank_string_parameter(
-                            "A 5-field cron expression or @hourly, @daily, @weekly, @monthly; \"every <n> minutes|hours|days\"; or \"at <RFC 3339 time>\" for one run",
+                            "A 5-field cron expression or @hourly, @daily, @weekly, @monthly; \"every <n> minutes|hours|days\"; \"today at 11:50pm\", \"tomorrow at 15:00\", or \"at 11:50pm\" for one run in timeZone (the owner's zone when absent); \"at <RFC 3339 time>\" also works; or \"on <event.topic>\" such as on task.completed",
                         ),
                     ),
                     optional_parameter(
@@ -1118,7 +1120,7 @@ impl ToolRegistry {
                     ),
                     optional_parameter(
                         "timeZone",
-                        string_parameter("IANA time zone for a cron schedule and active hours, such as Europe/London; the owner's time zone when absent"),
+                        string_parameter("IANA time zone for cron schedules, local one-time clock phrases, and active hours, such as Europe/London; the owner's time zone when absent"),
                     ),
                     optional_parameter(
                         "target",
@@ -1173,7 +1175,7 @@ impl ToolRegistry {
                 required_parameter("id", non_blank_string_parameter("Your automation id from list_automations")),
                 optional_parameter("name", non_blank_string_parameter("New display name")),
                 optional_parameter("prompt", non_blank_string_parameter("New scheduled task prompt")),
-                optional_parameter("schedule", non_blank_string_parameter("Cron, every <n> minutes|hours|days, or at <RFC3339>")),
+                optional_parameter("schedule", non_blank_string_parameter("Cron, every <n> minutes|hours|days, local phrases like today at 11:50pm, at <RFC3339>, or on <event.topic>")),
                 optional_parameter("timeZone", non_blank_string_parameter("IANA time zone for schedule or activeHours")),
                 optional_parameter("activeHours", object_parameter(vec![
                     required_parameter("start", non_blank_string_parameter("HH:MM start")),

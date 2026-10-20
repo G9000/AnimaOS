@@ -1593,6 +1593,19 @@ export function ViewHarness() {
           }
           onOpenMessage={openMessage}
           onSelectAgent={selectAgent}
+          newAgent={
+            <CompanionSetup
+              providers={providers}
+              providersError={providersError}
+              retryProviders={retryProviders}
+              onCreated={(snapshot) => {
+                acceptAgentSnapshot(snapshot);
+                selectAgent(snapshot.state.id);
+                navigate({ kind: 'home' });
+                void refreshWorkspace();
+              }}
+            />
+          }
           onOpenReport={agent ? () => setReportOpen(true) : undefined}
           inbox={
             agent
