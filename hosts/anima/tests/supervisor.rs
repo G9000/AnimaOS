@@ -38,6 +38,11 @@ fn anima_command(home: &Path, args: &[&str]) -> Command {
     command
         .env("HOME", home)
         .env("USERPROFILE", home)
+        .env("ANIMA_HOME", home)
+        .env("ANIMA_NO_OPEN", "1")
+        .env("ANIMA_NO_DIALOG", "1")
+        .env("RUST_LOG", "anima_daemon=info")
+        .env("ANIMAOS_RS_MEMORY_EMBEDDINGS", "disabled")
         .env("ANIMAOS_RS_KEYCHAIN_NAMESPACE", "test")
         .stdin(Stdio::null());
     command

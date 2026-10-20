@@ -1,15 +1,13 @@
 //! `anima` with no subcommand: starts Anima if needed and opens the console.
 
-use std::io;
+use std::io::{self, IsTerminal};
 use std::process::ExitCode;
 
 use super::lifecycle::ensure_running;
 
 pub fn open() -> io::Result<ExitCode> {
-    let (paths, cfg) = super::load()?;
-    if let Some(code) = super::refuse_unless_set_up(&cfg) {
-        return Ok(code);
-    }
+    let (paths, _) = super::load()?;
+    let cfg = super::first_launch::prepare(&paths)?;
     #[cfg(windows)]
     if launched_from_explorer() {
         return relaunch_detached();
@@ -20,6 +18,9 @@ pub fn open() -> io::Result<ExitCode> {
     let url = console_url(&server_url, admin_token.as_deref().map(str::trim));
     // The address without its launch code, which is a secret.
     println!("Opening {server_url}/");
+    if std::env::var_os("ANIMA_NO_OPEN").is_some_and(|value| value == "1") {
+        return Ok(ExitCode::SUCCESS);
+    }
     ::open::that(&url).map_err(|error| {
         io::Error::new(
             error.kind(),
@@ -27,6 +28,25 @@ pub fn open() -> io::Result<ExitCode> {
         )
     })?;
     Ok(ExitCode::SUCCESS)
+}
+
+/// Explorer/Finder/menu launches have nowhere useful to print an error.
+pub fn report_startup_error(error: &io::Error) {
+    if std::env::var_os("ANIMA_NO_DIALOG").is_some_and(|value| value == "1") {
+        return;
+    }
+    let desktop = !io::stderr().is_terminal();
+    #[cfg(windows)]
+    let desktop = desktop || launched_from_explorer();
+    if desktop {
+        rfd::MessageDialog::new()
+            .set_title("Anima could not start")
+            .set_description(format!(
+                "{error}\n\nYour saved workspace has not been reset."
+            ))
+            .set_level(rfd::MessageLevel::Error)
+            .show();
+    }
 }
 
 /// The console's address, with a one-time launch code when there is an

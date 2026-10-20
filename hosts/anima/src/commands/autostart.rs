@@ -23,6 +23,14 @@ pub fn autostart(on_off: OnOff) -> io::Result<ExitCode> {
 /// Turns start at login on or off, and records it in `config.toml`. The
 /// tray's "Start at login" does the same.
 pub fn apply(paths: &AnimaPaths, on: bool) -> io::Result<()> {
+    if std::env::var_os("ANIMA_HOME").is_some()
+        && !std::env::var_os(autostart::DRY_RUN_ENV).is_some_and(|value| value == "1")
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Start at login cannot be changed for an alternate ANIMA_HOME profile. Launch this profile explicitly instead.",
+        ));
+    }
     let mut cfg = Config::load(&paths.config_file)?;
     let platform = autostart::platform(paths);
     // The system first: a failure leaves the config as it was.
@@ -37,7 +45,7 @@ pub fn apply(paths: &AnimaPaths, on: bool) -> io::Result<()> {
 
 /// This executable, with links resolved so a login does not depend on one.
 fn current_exe() -> io::Result<std::path::PathBuf> {
-    let exe = std::env::current_exe()?;
+    let exe = crate::paths::launcher_executable()?;
     let exe = exe.canonicalize().unwrap_or(exe);
     Ok(without_verbatim_prefix(exe))
 }

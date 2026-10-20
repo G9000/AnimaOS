@@ -1,0 +1,150 @@
+name: Native installers
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: false
+        type: string
+        default: ''
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/native-installers.yml'
+      - 'tools/release/**'
+      - 'hosts/anima/**'
+      - 'hosts/rust-daemon/**'
+      - 'packages/core-rust/**'
+      - 'apps/web/**'
+      - 'packages/sdk/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'bun.lock'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            runner: windows-2022
+          - name: linux-x64
+            runner: ubuntu-22.04
+          - name: macos-arm64
+            runner: macos-14
+          - name: macos-x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+      CARGO_PACKAGER_SIGN_PRIVATE_KEY: ''
+      CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: native-installers-${{ matrix.name }}
+      - name: Install Linux build and package dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libdbus-1-dev libssl-dev patchelf file
+      - name: Install JavaScript dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Check installer lifecycle and configurations
+        run: bun x nx run anima:package-check --skipNxCache
+      - name: Install pinned packaging CLI
+        run: cargo install cargo-packager --version 0.11.8 --locked --root target/tools
+      - name: Build native packages
+        run: bun x nx run anima:package --skipNxCache
+      - name: Verify native first launch and runtime lifecycle
+        run: bun x nx run anima:test --skipNxCache --args="--release --locked --features native-install --test first_launch"
+      - name: Inspect Linux package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          dpkg-deb --info target/native-installers/*.deb
+          dpkg-deb --contents target/native-installers/*.deb
+          ./target/release/anima --version
+      - name: Inspect macOS bundle
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' target/native-installers/Anima.app/Contents/Info.plist
+          target/native-installers/Anima.app/Contents/MacOS/anima --version
+          hdiutil imageinfo target/native-installers/*.dmg
+          tar -czf "target/native-installers/Anima-${{ matrix.name }}.app.tar.gz" -C target/native-installers Anima.app
+      - name: Inspect Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem target/native-installers -Filter '*setup.exe')
+          if ($installers.Count -ne 1) { throw 'Expected exactly one Windows setup executable' }
+          if ($installers[0].Length -lt 100000) { throw 'Windows installer is unexpectedly small' }
+          ./target/release/anima.exe --version
+      - name: Exercise isolated Windows installer regressions
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tools/release/test-windows-installer.ps1
+      - name: Upload packages for manual native acceptance
+        uses: actions/upload-artifact@v4
+        with:
+          name: anima-native-${{ matrix.name }}
+          path: |
+            target/native-installers/*-setup.exe
+            target/native-installers/*.deb
+            target/native-installers/*.AppImage
+            target/native-installers/*.dmg
+            target/native-installers/*.app.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Upload native packages to the announced release
+    if: ${{ inputs.plan != '' }}
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - name: Check the announcement tag against the workspace version
+        id: release
+        env:
+          DIST_PLAN: ${{ inputs.plan }}
+        run: bun tools/release/check-release-plan.mjs
+      - name: Download only native packages from this workflow run
+        uses: actions/download-artifact@v4
+        with:
+          pattern: anima-native-*
+          path: native-assets
+          merge-multiple: true
+      - name: Upload packages to the existing GitHub Release
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
+        shell: bash
+        run: |
+          shopt -s nullglob
+          assets=(native-assets/*-setup.exe native-assets/*.deb native-assets/*.AppImage native-assets/*.dmg native-assets/*.app.tar.gz)
+          [ "${#assets[@]}" -eq 7 ] || { echo 'Expected seven native artifacts from all four successful build hosts' >&2; exit 1; }
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber

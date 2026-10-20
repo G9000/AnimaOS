@@ -141,7 +141,14 @@ impl Supervisor {
         listener.set_nonblocking(true)?;
         // Only the supervisor holding the port finishes an update.
         let mut update = UpdateStatus::default();
-        let handoff = match handoff::on_start(&paths, env!("CARGO_PKG_VERSION")) {
+        let outcome = if cfg!(feature = "native-install") {
+            // A portable installation may have left rollback state in the
+            // retained profile. It must never replace a package-owned binary.
+            handoff::HandoffOutcome::Nothing
+        } else {
+            handoff::on_start(&paths, env!("CARGO_PKG_VERSION"))
+        };
+        let handoff = match outcome {
             handoff::HandoffOutcome::Nothing => None,
             handoff::HandoffOutcome::AwaitHealth(pending) => Some(pending),
             handoff::HandoffOutcome::RolledBack { last_error } => {
@@ -237,7 +244,7 @@ impl Supervisor {
             }
         });
         let lifecycle = Lifecycle {
-            exe: std::env::current_exe()?,
+            exe: crate::paths::launcher_executable()?,
             control_url: format!("http://127.0.0.1:{}", self.cfg.control_port),
             log: self.log,
             paths: self.paths,
@@ -355,6 +362,7 @@ fn bind_control_port(paths: &AnimaPaths, port: u16) -> io::Result<Option<std::ne
             Ok(listener) => return Ok(Some(listener)),
             Err(error) if error.kind() == io::ErrorKind::AddrInUse => {
                 let waiting = cfg!(windows)
+                    && !cfg!(feature = "native-install")
                     && handoff::under_way(paths)
                     && std::time::Instant::now() < deadline;
                 if !waiting {

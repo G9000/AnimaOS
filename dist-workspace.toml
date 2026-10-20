@@ -33,7 +33,7 @@ install-success-msg = "Run 'anima setup' to finish installing Anima."
 github-build-setup = "../build-setup.yml"
 # Sign the macOS binary with the CODESIGN_* secrets
 macos-sign = true
-# Sign each archive with minisign once the release is published
-post-announce-jobs = ["./sign-release"]
-# The signing job uploads the .minisig files to the release
-github-custom-job-permissions = { "sign-release" = { contents = "write" } }
+# Sign portable archives and build/upload native installers after announcement
+post-announce-jobs = ["./sign-release", "./native-installers"]
+# These custom jobs upload only artifacts built by this workflow run
+github-custom-job-permissions = { "sign-release" = { contents = "write" }, "native-installers" = { contents = "write", actions = "read" } }

@@ -4,6 +4,38 @@
   "root": "hosts/anima",
   "projectType": "application",
   "targets": {
+    "build-native": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "parallel": false,
+        "commands": [
+          { "command": "bun x nx run @animaOS-SWARM/sdk:build", "forwardAllArgs": false },
+          { "command": "bun x nx run @animaOS-SWARM/web:build", "forwardAllArgs": false },
+          { "command": "cargo build --release --locked -p anima --features native-install", "forwardAllArgs": false }
+        ]
+      }
+    },
+    "package": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": ["build-native"],
+      "options": { "cwd": ".", "command": "bun tools/release/package.mjs" }
+    },
+    "package-check": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{workspaceRoot}/tools/release/**/*", "{workspaceRoot}/Cargo.toml"],
+      "options": {
+        "cwd": ".",
+        "parallel": false,
+        "commands": [
+          "bun tools/release/package.mjs --check",
+          "bun test tools/release/package.test.mjs"
+        ]
+      }
+    },
     "build": {
       "executor": "nx:run-commands",
       "options": {

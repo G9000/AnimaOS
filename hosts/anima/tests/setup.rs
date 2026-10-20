@@ -2,6 +2,8 @@
 //! `config.toml` sets free ports. Autostart and the browser are switched off,
 //! so nothing outside the temporary folder is touched.
 
+mod common;
+
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
@@ -85,6 +87,9 @@ impl Home {
         command
             .env("HOME", self.dir.path())
             .env("USERPROFILE", self.dir.path())
+            .env("ANIMA_HOME", self.dir.path())
+            .env("ANIMA_NO_OPEN", "1")
+            .env("ANIMA_NO_DIALOG", "1")
             .env("ANIMAOS_RS_KEYCHAIN_NAMESPACE", "test")
             .env("ANIMA_NO_TRAY", "1")
             .env("ANIMA_SETUP_NO_AUTOSTART", "1")
@@ -105,7 +110,7 @@ impl Home {
         for (key, value) in env {
             command.env(key, value);
         }
-        command.output().unwrap()
+        common::output(&mut command, self.dir.path()).unwrap()
     }
 
     fn token(&self, name: &str) -> Option<String> {

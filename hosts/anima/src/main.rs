@@ -37,6 +37,17 @@ fn main() -> ExitCode {
     }
 
     match Cli::parse().command {
+        Some(Command::BuildInfo) => {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "bundledUi": cfg!(feature = "bundled-ui"),
+                    "nativeInstall": cfg!(feature = "native-install"),
+                })
+            );
+            ExitCode::SUCCESS
+        }
         Some(Command::Run) => report(commands::run::run()),
         Some(Command::Supervise {
             background,
@@ -45,7 +56,13 @@ fn main() -> ExitCode {
             tray::wanted(no_tray, background),
             background,
         )),
-        None => report_code(commands::open::open()),
+        None => match commands::open::open() {
+            Ok(code) => code,
+            Err(error) => {
+                commands::open::report_startup_error(&error);
+                report_code(Err(error))
+            }
+        },
         Some(Command::Status) => report_code(commands::status::status()),
         Some(Command::Start) => report_code(commands::lifecycle::start()),
         Some(Command::Stop { now }) => report_action(Action::Stop, now),

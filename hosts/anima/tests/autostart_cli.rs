@@ -9,6 +9,7 @@ fn anima(home: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_anima"))
         .args(args)
         .env("HOME", home)
+        .env("ANIMA_HOME", home)
         .env("ANIMA_AUTOSTART_DRY_RUN", "1")
         .output()
         .unwrap()

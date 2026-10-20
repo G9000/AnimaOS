@@ -336,3 +336,15 @@ jobs:
     secrets: inherit
     permissions:
       "contents": "write"
+
+  custom-native-installers:
+    needs:
+      - plan
+      - announce
+    uses: ./.github/workflows/native-installers.yml
+    with:
+      plan: ${{ needs.plan.outputs.val }}
+    secrets: inherit
+    permissions:
+      "actions": "read"
+      "contents": "write"

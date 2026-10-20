@@ -31,6 +31,9 @@ pub enum ConfigAction {
 #[derive(Debug, PartialEq, Eq, Subcommand)]
 #[command(rename_all = "kebab-case")]
 pub enum Command {
+    /// Machine-readable packaging capabilities; never opens a profile.
+    #[command(hide = true)]
+    BuildInfo,
     /// Run the server in the foreground.
     Run,
     /// Run the supervisor (tray, server lifecycle).

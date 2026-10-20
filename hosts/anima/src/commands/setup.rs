@@ -241,7 +241,11 @@ fn default_workspace(home: &Path) -> PathBuf {
 
 /// The folder as the person typed it, made absolute, created if it is
 /// missing, and checked against the workspace rules.
-fn prepare_workspace(answer: &str, home: &Path, paths: &AnimaPaths) -> Result<PathBuf, String> {
+pub(super) fn prepare_workspace(
+    answer: &str,
+    home: &Path,
+    paths: &AnimaPaths,
+) -> Result<PathBuf, String> {
     let answer = answer.trim();
     if answer.is_empty() {
         return Err("Enter a folder".to_string());

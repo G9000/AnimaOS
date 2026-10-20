@@ -134,7 +134,7 @@ fn launch_supervisor(paths: &AnimaPaths) -> io::Result<Option<Child>> {
             return Ok(None);
         }
     }
-    let mut command = Command::new(std::env::current_exe()?);
+    let mut command = Command::new(crate::paths::launcher_executable()?);
     command
         .args(["supervise", "--background"])
         // Not the folder this command ran in: nothing inherits it.

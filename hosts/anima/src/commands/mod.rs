@@ -6,6 +6,7 @@ use crate::paths::AnimaPaths;
 
 pub mod autostart;
 pub mod config_cmd;
+mod first_launch;
 pub mod lifecycle;
 pub mod logs;
 pub mod open;

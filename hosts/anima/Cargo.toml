@@ -12,6 +12,8 @@ path = "src/main.rs"
 
 [features]
 bundled-ui = ["dep:rust-embed"]
+# Native installers own the whole installation; never replace only its executable.
+native-install = ["bundled-ui"]
 
 [dependencies]
 anima-daemon = { path = "../rust-daemon" }
@@ -25,6 +27,7 @@ minisign-verify = "0.2"
 open = "5"
 process-wrap = { version = "=10.0.1", default-features = false, features = ["tokio1", "creation-flags", "job-object", "kill-on-drop", "process-group"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+rfd = "0.17.2"
 rust-embed = { version = "8", features = ["mime-guess"], optional = true }
 self-replace = "1"
 semver = "1"

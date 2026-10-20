@@ -351,11 +351,34 @@ fn placeholder_key_disables_updates() {
         .unwrap();
     let outcome = runtime
         .block_on(async { check(&http_client().unwrap(), REPO, &version("0.1.0"), MAC).await });
-    assert!(matches!(outcome, Err(UpdateError::NotConfigured)));
+    if cfg!(feature = "native-install") {
+        assert!(matches!(outcome, Err(UpdateError::ManagedInstallation)));
+    } else {
+        assert!(matches!(outcome, Err(UpdateError::NotConfigured)));
+    }
     assert_eq!(
         UpdateError::NotConfigured.to_string(),
         "Updates are not configured for this build"
     );
+}
+
+#[cfg(feature = "native-install")]
+#[tokio::test]
+async fn native_install_check_requires_a_matching_installer_before_network_or_release_key() {
+    let error = check(
+        &http_client().unwrap(),
+        "unused/repository",
+        &version("0.1.0"),
+        MAC,
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(error, UpdateError::ManagedInstallation));
+    assert_eq!(
+        error.to_string(),
+        "This installation is managed by an installer. Download and install the matching Anima package from https://github.com/G9000/animaOS-SWARM/releases"
+    );
+    assert!(error.is_permanent());
 }
 
 // --- extract_binary ------------------------------------------------------------------

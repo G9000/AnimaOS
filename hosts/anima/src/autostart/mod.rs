@@ -1,10 +1,13 @@
-//! Start at login: a LaunchAgent on macOS, an HKCU Run value on Windows.
+//! Start at login: XDG autostart on Linux, a macOS LaunchAgent, or Windows HKCU Run.
 
 use std::io;
 use std::path::Path;
 
 use crate::paths::AnimaPaths;
 
+#[cfg(any(target_os = "linux", test))]
+#[cfg_attr(all(test, not(target_os = "linux")), allow(dead_code))]
+pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
 #[cfg(windows)]
@@ -43,15 +46,20 @@ pub fn platform(_paths: &AnimaPaths) -> Box<dyn Autostart> {
     })
 }
 
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(target_os = "linux")]
+pub fn platform(paths: &AnimaPaths) -> Box<dyn Autostart> {
+    Box::new(linux::LinuxAutostart::for_paths(paths))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 pub fn platform(_paths: &AnimaPaths) -> Box<dyn Autostart> {
     Box::new(Unsupported)
 }
 
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 struct Unsupported;
 
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 impl Autostart for Unsupported {
     fn enable(&self, _exe: &Path) -> io::Result<()> {
         Err(unsupported())
@@ -64,7 +72,7 @@ impl Autostart for Unsupported {
     }
 }
 
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn unsupported() -> io::Error {
     io::Error::new(
         io::ErrorKind::Unsupported,

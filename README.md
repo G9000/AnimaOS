@@ -38,7 +38,16 @@ AnimaOS is under active development. Tool and connector capabilities have specif
 
 The [VPS deployment package](deploy/vps/README.md) targets one trusted owner. Public deployment, real account integrations, and microphone behavior still have manual acceptance checks; see the guide for the current verification boundary.
 
-## Quick start
+## Install the desktop application
+
+Native packages are built for Windows x64 (setup EXE), Linux x64 (Debian and
+AppImage), and macOS Apple Silicon and Intel (app and DMG). Open **Anima** after
+installation to start browser onboarding; terminal setup is not required.
+See the [installation guide](docs/companion/installing.md) for platform steps,
+updates, and the current validation and signing status. Build packages from source
+with the [release guide](tools/release/README.md#native-desktop-installers).
+
+## Development quick start
 
 Install Bun and the Rust toolchain, then run from the repository root:
 

@@ -92,12 +92,20 @@ mod tests {
         let env = server_env(&Config::default(), &paths, &BTreeMap::new());
         assert_eq!(env["ANIMAOS_RS_HOST"], "127.0.0.1");
         assert_eq!(env["ANIMAOS_RS_PORT"], "8787");
-        assert!(env["ANIMAOS_RS_CONTROL_PLANE_FILE"].ends_with("data/control-plane.json"));
-        assert!(env["ANIMAOS_RS_HISTORY_SQLITE_FILE"].ends_with("data/history.sqlite"));
-        assert!(env["ANIMAOS_RS_PROVIDER_KEYS_FILE"].ends_with("data/provider-keys.json"));
-        assert!(env["ANIMAOS_RS_MEMORY_SQLITE_FILE"].ends_with("data/memory.sqlite"));
-        assert!(env["ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE"].ends_with("data/embeddings.sqlite"));
-        assert!(env["ANIMAOS_RS_MEMORY_EMBEDDINGS_CACHE_DIR"].ends_with("data/embeddings-cache"));
+        for (variable, file) in [
+            ("ANIMAOS_RS_CONTROL_PLANE_FILE", "control-plane.json"),
+            ("ANIMAOS_RS_HISTORY_SQLITE_FILE", "history.sqlite"),
+            ("ANIMAOS_RS_PROVIDER_KEYS_FILE", "provider-keys.json"),
+            ("ANIMAOS_RS_MEMORY_SQLITE_FILE", "memory.sqlite"),
+            (
+                "ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE",
+                "embeddings.sqlite",
+            ),
+            ("ANIMAOS_RS_MEMORY_EMBEDDINGS_CACHE_DIR", "embeddings-cache"),
+        ] {
+            assert!(std::path::Path::new(&env[variable])
+                .ends_with(std::path::Path::new("data").join(file)));
+        }
         assert_eq!(env["ANIMAOS_RS_KEYCHAIN_NAMESPACE"], "installed");
         assert_eq!(env["ANIMA_PUBLIC_BASE_URL"], "http://127.0.0.1:8787");
         assert_eq!(

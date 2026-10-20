@@ -89,6 +89,7 @@ dependencies = [
  "plist",
  "process-wrap",
  "reqwest",
+ "rfd",
  "rust-embed",
  "self-replace",
  "semver",

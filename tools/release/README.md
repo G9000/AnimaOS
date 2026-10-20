@@ -1,5 +1,113 @@
 # Releasing Anima
 
+## Native desktop installers
+
+`tools/release/package.mjs` packages the Rust `anima` host and embedded browser
+console using [cargo-packager 0.11.8](https://docs.rs/cargo-packager/0.11.8/cargo_packager/).
+The app identity is `dev.animaos.anima`, and the displayed product is **Anima**.
+
+| Native build host | Outputs under `target/native-installers/` |
+| --- | --- |
+| Windows x64 | `anima_<version>_x64-setup.exe`, a per-user NSIS wizard |
+| Linux x64 | Debian package and AppImage |
+| macOS Apple Silicon | `Anima.app` and an arm64 DMG |
+| macOS Intel | `Anima.app` and an x64 DMG |
+
+Build the console and native binary before packaging. The `native-install` feature
+is required: it embeds the console and prevents the raw-binary updater from
+replacing package-owned files. No-argument launches prepare first-run settings.
+
+```sh
+bun install --frozen-lockfile --ignore-scripts
+cargo install cargo-packager --version 0.11.8 --locked --root target/tools
+bun x nx run anima:package-check --skipNxCache
+bun x nx run anima:package --skipNxCache
+```
+
+The script packages `target/release/anima` (`anima.exe` on Windows). Optional
+`--binary <path>` and `--output <path>` arguments support isolated build artifacts.
+Relative paths resolve from the repository root. It writes the generated JSON
+configuration and code-drawn ring icons under `target/native-packager/`, without
+adding JavaScript dependencies. Tool discovery uses `CARGO_PACKAGER_BIN`, then
+`target/tools/bin/cargo-packager`, then `PATH`, and rejects other CLI versions.
+`--check` only reads the configuration/template; it does not require a binary,
+installed CLI, network access, or changes to user configuration.
+`anima:package` builds the console and release binary through `anima:build-native`
+before packaging. For an already-built binary, run `bun tools/release/package.mjs`
+directly. The script runs the binary's state-free `build-info` command and refuses
+a version mismatch or a binary without both `bundled-ui` and `native-install`.
+
+Native prerequisites:
+
+- All hosts need Rust, Bun, the normal native compiler toolchain, and network
+  access on the first packaging run. The packager downloads its platform tools
+  into the operating system's cache directory.
+- Windows x64 needs the MSVC C++ build tools. cargo-packager downloads its pinned
+  NSIS toolset automatically. Installation needs no administrator permission.
+- Linux x64 builds target the Ubuntu 22.04/glibc baseline in CI. Build/package
+  tooling includes `build-essential`, `pkg-config`, `libdbus-1-dev`, `libssl-dev`,
+  `patchelf`, and `file`. A graphical desktop and browser are needed to open the
+  console. The Debian package declares glibc 2.35+, `libgcc-s1`, and `xdg-utils`.
+  The AppImage is a portable executable; desktop integration is optional
+  and is not performed by Debian installation scripts.
+- macOS packages must be built on the corresponding macOS architecture. Xcode
+  command-line tools provide the native toolchain and `hdiutil` for the DMG.
+
+The Windows wizard can launch Anima after installation. Linux application-menu
+entries and the macOS application launch the same no-argument entry point. On a
+fresh launch the app prepares its safe local workspace and opens the existing web
+onboarding; provider credentials and login startup remain choices in the app.
+Linux currently runs without a tray icon.
+
+Close Anima normally and wait for work to finish before upgrading or uninstalling.
+The custom Windows template **aborts with exit code 3** while any `anima.exe` is
+running; silent and passive installs cannot terminate it. It never deletes
+`~/.animaos-swarm`, an `ANIMA_HOME` override, credentials, or the chosen workspace.
+Uninstall removes the Windows login entry only when its complete command points to
+the executable being removed. Another installation's entry is preserved. For macOS
+or Linux, turn off **Start at login** before removing the app/package, since deleting
+a `.app` or portable AppImage does not run per-user uninstall hooks.
+
+Upgrade native installations with the same package format. `anima update` is
+disabled in `native-install` builds; the signed archive updater below belongs to
+portable builds. Native package installation does not provide automatic rollback;
+preserve personal data when installing a previous compatible version. Windows
+installers refuse version downgrades by default.
+The version guard runs before maintenance or file writes, including silent mode;
+a rejected downgrade exits with code 4. Installer-driven upgrades retain an enabled
+matching login preference and update its executable path if the install directory
+changes, without replacing a different installation's startup registration.
+
+On Windows, `./tools/release/test-windows-installer.ps1` compiles an isolated fixture
+with unique executable/product/registration names. It exercises silent downgrade
+refusal, upgrade startup retention across a changed directory and an old-uninstaller
+deletion, and genuine uninstall cleanup/data preservation. It does not use the real
+Anima registry keys. Generated fixture files remain below `target/installer-regression/`.
+
+`.github/workflows/native-installers.yml` independently builds on Windows x64,
+Linux x64, macOS arm64, and macOS x64. It checks package metadata and uploads artifacts
+for acceptance testing. Each host also runs the isolated first-launch/runtime
+regressions. Pull-request and manual runs only produce workflow artifacts.
+When cargo-dist calls it with a release `plan` after announcing a tag, a separate
+publish job waits for every matrix build, checks the tag against the workspace
+version, and uploads this run's native artifacts to the existing release. Only that
+job receives `GH_TOKEN` with `contents: write` and `actions: read`; build jobs have
+read-only permissions and no signing keys. The workflow never creates a release. Its
+successful jobs are build evidence, not interactive installation or provider
+acceptance. The local Windows installer must be exercised separately for first
+launch, repeat launch, reinstallation, busy-process refusal, and uninstall/data
+preservation. Linux/macOS behavior requires native-host acceptance too.
+The macOS app is uploaded inside a tar archive to retain executable permissions;
+the DMG also preserves its bundle. A downloaded AppImage may need `chmod +x`.
+
+These build artifacts are unsigned. Public macOS distribution needs Developer ID
+signing and notarization; Windows distribution should add trusted Authenticode
+signing. No signing-key setup is performed by this workflow.
+Keep native packaging changes out of cargo-dist's generated `release.yml`; the
+existing archive release pipeline below remains independent.
+
+## Existing portable archive release
+
 Pushing a tag such as `v0.2.0` publishes a GitHub Release of the packaged `anima`
 binary for macOS on Apple Silicon (`aarch64-apple-darwin`) and Windows x64
 (`x86_64-pc-windows-msvc`). Only `hosts/anima` ships; `anima-daemon` and the rest of

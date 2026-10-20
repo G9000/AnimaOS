@@ -5,6 +5,8 @@
 //! compiled into this binary. Until a real key is committed, [`check`] reports
 //! [`UpdateError::NotConfigured`] and callers show "Updates are not configured for
 //! this build".
+//! Native installer builds instead require a matching installer upgrade, keeping
+//! package metadata and the installed application bundle together.
 
 pub mod handoff;
 mod install;
@@ -33,6 +35,8 @@ pub use verify::{
 
 #[derive(Debug)]
 pub enum UpdateError {
+    /// Replacing one executable would bypass the installer and its metadata.
+    ManagedInstallation,
     /// This build carries no usable release key, so no update can be trusted.
     NotConfigured,
     /// No releases are published for the platform this binary was built for.
@@ -62,6 +66,9 @@ pub enum UpdateError {
 impl fmt::Display for UpdateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ManagedInstallation => f.write_str(
+                "This installation is managed by an installer. Download and install the matching Anima package from https://github.com/G9000/animaOS-SWARM/releases",
+            ),
             Self::NotConfigured => f.write_str("Updates are not configured for this build"),
             Self::Unsupported => f.write_str("Updates are not published for this platform"),
             Self::Http(message) => write!(f, "Could not reach the update server: {message}"),
@@ -86,7 +93,10 @@ impl std::error::Error for UpdateError {}
 impl UpdateError {
     /// Asking again won't change the answer (until another build is installed).
     pub fn is_permanent(&self) -> bool {
-        matches!(self, Self::NotConfigured | Self::Unsupported)
+        matches!(
+            self,
+            Self::ManagedInstallation | Self::NotConfigured | Self::Unsupported
+        )
     }
 }
 

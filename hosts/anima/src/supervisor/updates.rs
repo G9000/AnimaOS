@@ -63,6 +63,9 @@ impl Updater {
 }
 
 async fn find_release() -> Result<Option<ReleaseInfo>, UpdateError> {
+    if cfg!(feature = "native-install") {
+        return Err(UpdateError::ManagedInstallation);
+    }
     // An unconfigured build says so on every platform.
     if !update::release_key_configured() {
         return Err(UpdateError::NotConfigured);
@@ -99,10 +102,12 @@ fn record(
 
 /// Checks at start and then every [`CHECK_INTERVAL`] while `[updates] check`
 /// is on in `config_file`, and whenever `now` asks. A check that can never
-/// succeed in this build (no release key, no releases for this platform) ends
+/// succeed in this build (installer managed, no key, or unsupported platform) ends
 /// the schedule; asking still answers.
 pub async fn run_checks(updater: Updater, config_file: PathBuf, mut now: mpsc::Receiver<()>) {
-    let mut due = Some(Instant::now());
+    // Installer-managed upgrades are normal, not an automatic-check error.
+    // Explicit requests still receive the matching-package instructions.
+    let mut due = (!cfg!(feature = "native-install")).then(Instant::now);
     loop {
         let periodic = async move {
             match due {
@@ -170,6 +175,18 @@ async fn fetch(updater: &Updater, stage: &impl Fn(String)) -> Result<Prepared, S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "native-install")]
+    #[tokio::test]
+    async fn native_install_supervisor_requires_installer_before_portable_prechecks() {
+        let error = find_release().await.unwrap_err();
+        assert!(matches!(error, UpdateError::ManagedInstallation));
+        assert_eq!(
+            error.to_string(),
+            "This installation is managed by an installer. Download and install the matching Anima package from https://github.com/G9000/animaOS-SWARM/releases"
+        );
+        assert!(error.is_permanent());
+    }
 
     fn release(version: &str) -> ReleaseInfo {
         ReleaseInfo {

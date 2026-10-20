@@ -1,6 +1,8 @@
 //! The `anima` client commands against a real supervisor, in a temporary HOME
 //! whose `config.toml` sets free ports.
 
+mod common;
+
 use std::io::{BufRead, BufReader};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -34,6 +36,9 @@ fn anima_command(home: &Path, args: &[&str]) -> Command {
     command
         .env("HOME", home)
         .env("USERPROFILE", home)
+        .env("ANIMA_HOME", home)
+        .env("ANIMA_NO_OPEN", "1")
+        .env("ANIMA_NO_DIALOG", "1")
         .env("ANIMAOS_RS_KEYCHAIN_NAMESPACE", "test")
         // A supervisor `anima start` spawns shows no tray icon.
         .env("ANIMA_NO_TRAY", "1")
@@ -101,7 +106,7 @@ impl Home {
     }
 
     fn anima(&self, args: &[&str]) -> Output {
-        anima_command(self.dir.path(), args).output().unwrap()
+        common::output(&mut anima_command(self.dir.path(), args), self.dir.path()).unwrap()
     }
 
     /// Starts `anima supervise --no-tray` and waits until the server runs.
@@ -302,9 +307,9 @@ fn start_command_spawns_a_supervisor_when_none_runs() {
 }
 
 #[test]
-fn start_and_open_refuse_before_setup() {
+fn explicit_start_refuses_before_setup() {
     let home = Home::not_set_up();
-    for args in [&["start"][..], &[][..]] {
+    for args in [&["start"][..]] {
         let output = home.anima(args);
         assert_eq!(output.status.code(), Some(2), "{args:?}");
         assert_eq!(
@@ -518,16 +523,23 @@ fn logs_follow_prints_new_lines() {
 // while the committed release key is the placeholder) --------------------------
 
 #[test]
-fn update_in_an_unconfigured_build_keeps_the_server_running() {
-    if !include_str!("../release-key.pub").contains("PLACEHOLDER") {
+fn unavailable_update_keeps_the_server_running() {
+    if !cfg!(feature = "native-install")
+        && !include_str!("../release-key.pub").contains("PLACEHOLDER")
+    {
         return;
     }
+    let expected = if cfg!(feature = "native-install") {
+        "This installation is managed by an installer"
+    } else {
+        "Updates are not configured for this build"
+    };
     let mut home = Home::new();
     home.start_supervisor();
     let output = home.anima(&["update"]);
     assert_eq!(output.status.code(), Some(1), "{}", text(&output.stdout));
     assert!(
-        text(&output.stderr).contains("Updates are not configured for this build"),
+        text(&output.stderr).contains(expected),
         "{}",
         text(&output.stderr)
     );
@@ -535,10 +547,10 @@ fn update_in_an_unconfigured_build_keeps_the_server_running() {
     let status = home.status().unwrap();
     assert_eq!(status["state"]["kind"], "running");
     assert_eq!(status["pending"], Value::Null);
-    assert_eq!(
-        status["update"]["lastError"],
-        "Updates are not configured for this build"
-    );
+    assert!(status["update"]["lastError"]
+        .as_str()
+        .unwrap()
+        .contains(expected));
     assert!(!refuses_connections(home.server_port));
 }
 
@@ -554,6 +566,15 @@ fn a_pending_update_for_this_version_is_confirmed_once_running() {
     )
     .unwrap();
     home.start_supervisor();
+    if cfg!(feature = "native-install") {
+        thread::sleep(Duration::from_millis(300));
+        assert!(
+            pending.exists(),
+            "a native install consumed a portable update marker"
+        );
+        assert_eq!(home.status().unwrap()["update"]["lastError"], Value::Null);
+        return;
+    }
     let deadline = Instant::now() + Duration::from_secs(10);
     while pending.exists() && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(100));
@@ -574,6 +595,14 @@ fn a_rolled_back_update_is_reported() {
     )
     .unwrap();
     home.start_supervisor();
+    if cfg!(feature = "native-install") {
+        assert_eq!(home.status().unwrap()["update"]["lastError"], Value::Null);
+        assert!(
+            failed.exists(),
+            "the portable failure marker should remain untouched"
+        );
+        return;
+    }
     assert_eq!(
         home.status().unwrap()["update"]["lastError"],
         "Update to v9.9.9 failed to start; rolled back"

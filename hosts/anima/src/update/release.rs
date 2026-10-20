@@ -116,6 +116,7 @@ pub fn select_release(api_json: &str, current: &Version, target: &str) -> Option
 }
 
 /// Ask GitHub for the latest release of `repo`. Returns
+/// [`UpdateError::ManagedInstallation`] for native installer builds, or
 /// [`UpdateError::NotConfigured`] without any request when this build has no
 /// release key; callers show "Updates are not configured for this build".
 pub async fn check(
@@ -124,6 +125,9 @@ pub async fn check(
     current: &Version,
     target: &str,
 ) -> Result<Option<ReleaseInfo>, UpdateError> {
+    if cfg!(feature = "native-install") {
+        return Err(UpdateError::ManagedInstallation);
+    }
     if !super::release_key_configured() {
         return Err(UpdateError::NotConfigured);
     }
