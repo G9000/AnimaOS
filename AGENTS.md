@@ -46,7 +46,8 @@ Shared guidance for GPT-6 Astra and GPT-5.6 coding agents, adapted from the offi
 # Verification
 
 - For Rust host/core changes, run `bun x nx run rust-daemon:test --skipNxCache`.
-- On Windows, if a running daemon locks `target/debug/anima-daemon.exe`, rerun Rust host validation with `CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache`.
+- Cargo outputs are isolated under `target/cargo`; use `bun run rust:cache:status` to check their size and `bun run rust:cache:clean` to remove only those outputs.
+- On Windows, if a running daemon locks `target/cargo/debug/anima-daemon.exe`, rerun Rust host validation with `CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache`.
 - For dev launcher changes, run `bun x nx test workspace-dev --runInBand --skipNxCache`.
 - For Astro docs changes, run the relevant build target: `bun x nx run @animaOS-SWARM/docs:build --skipNxCache` or `bun x nx run @animaOS-SWARM/contributor-docs:build --skipNxCache`.
 - For TypeScript package changes, use the relevant Nx `test`, `build`, or `typecheck` target.

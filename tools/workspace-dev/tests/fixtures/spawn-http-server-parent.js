@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 const workspaceRoot = process.argv[2];
 const port = process.argv[3];
-const targetDir = resolve(workspaceRoot, 'target', 'workspace-dev-fixture');
+const targetDir = resolve(workspaceRoot, 'target', 'cargo', 'workspace-dev-fixture');
 
 spawn('bun', ['x', 'nx', 'run', 'rust-daemon:dev'], {
   cwd: workspaceRoot,

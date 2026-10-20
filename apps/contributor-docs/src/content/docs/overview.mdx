@@ -101,4 +101,4 @@ The repo previously carried a TypeScript runtime, a mod system, an agency genera
 
 ## Code Review
 
-CI (`.github/workflows/ci.yml`) runs `nx format:check` against `main`, then `bun x nx run-many -t lint test build typecheck e2e-ci`. For Rust changes, run `bun x nx run rust-daemon:test --skipNxCache` locally first. On Windows, if a running daemon locks the binary, use `CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache`.
+CI (`.github/workflows/ci.yml`) runs `nx format:check` against `main`, then `bun x nx run-many -t lint test build typecheck e2e-ci`. For Rust changes, run `bun x nx run rust-daemon:test --skipNxCache` locally first. On Windows, if a running daemon locks the binary, use `CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache`.

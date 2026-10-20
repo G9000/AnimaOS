@@ -245,7 +245,7 @@ test('m70_actual_owner_files_preview_and_browser_report_save', async ({
     expect(Object.keys(images).sort()).toEqual(['browser', 'daemon', 'node']);
     const fixedImages = {
       node: process.execPath,
-      daemon: join(ROOT, 'target/debug/anima-daemon.exe'),
+      daemon: join(ROOT, 'target/cargo/debug/anima-daemon.exe'),
       browser: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
     };
     for (const name of ['node', 'daemon', 'browser'] as const) {

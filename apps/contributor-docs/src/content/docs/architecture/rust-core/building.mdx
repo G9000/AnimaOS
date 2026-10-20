@@ -30,7 +30,7 @@ cargo test -p anima-swarm
 cargo test --workspace
 ```
 
-`core-rust:build` builds `anima-core`, `anima-service-adapters`, `anima-model-adapters`, `anima-memory`, `anima-schedule`, `anima-swarm`, `anima-harness`, `anima-document-content`, `anima-process`, `anima-acp` and `anima-worktree` into `target/core-rust/build`. `core-rust:test` uses `target/core-rust/test`. Adding a crate means updating the `-p` lists in `packages/core-rust/project.json` as well as the root `Cargo.toml` `members`.
+`core-rust:build` and `core-rust:test` share the workspace Cargo cache under `target/cargo`, avoiding duplicate dependency builds. They build `anima-core`, `anima-service-adapters`, `anima-model-adapters`, `anima-memory`, `anima-schedule`, `anima-swarm`, `anima-harness`, `anima-document-content`, `anima-process`, `anima-acp` and `anima-worktree`. Adding a crate means updating the `-p` lists in `packages/core-rust/project.json` as well as the root `Cargo.toml` `members`.
 
 ### Workspace Facts
 

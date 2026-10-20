@@ -28,6 +28,21 @@ sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "migrate", "m
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
+# Keep local/test builds useful for backtraces without storing full dependency
+# symbols or incremental test state in the build cache.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.test]
+debug = "line-tables-only"
+incremental = false
+
+[profile.test.package."*"]
+debug = false
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"

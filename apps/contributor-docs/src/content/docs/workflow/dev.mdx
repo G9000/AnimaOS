@@ -172,7 +172,7 @@ RUST_LOG=debug bun x nx run rust-daemon:dev
 RUST_LOG=anima_daemon=debug,tower_http=debug cargo run -p anima-daemon
 
 cargo build -p anima-daemon
-rust-lldb target/debug/anima-daemon
+rust-lldb target/cargo/debug/anima-daemon
 ```
 
 The log tail is also served at `GET /api/logs` and in the console. See [Operations](/hosts/rust-daemon/ops/).

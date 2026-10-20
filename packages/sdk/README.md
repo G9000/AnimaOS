@@ -101,7 +101,7 @@ Run `bun run build:cli-sdk` to build the SDK and CLI together, or `bun x nx buil
 
 Run `bun x nx test @animaOS-SWARM/sdk`.
 
-Integration tests build the Rust daemon with a separate compilation deadline, then run its binary on a temporary local port and workspace. They use an isolated environment and a local model stub; no developer credentials or persisted workspace data are inherited. `CARGO_TARGET_DIR` can select a build directory (otherwise `target/sdk-daemon-integration`).
+Integration tests build the Rust daemon with a separate compilation deadline, then run its binary on a temporary local port and workspace. They use an isolated environment and a local model stub; no developer credentials or persisted workspace data are inherited. `CARGO_TARGET_DIR` can select a build directory (otherwise `target/cargo/sdk-daemon-integration`).
 
 ## Wire contracts
 

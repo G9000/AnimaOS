@@ -15,6 +15,8 @@
     "lint": "oxlint --config .oxlintrc.json packages/*/src apps/*/src",
     "lint:fix": "oxlint --fix --config .oxlintrc.json packages/*/src apps/*/src",
     "projects": "bun x nx show projects",
+    "rust:cache:status": "bun tools/workspace-dev/scripts/rust-cache.ts status",
+    "rust:cache:clean": "bun tools/workspace-dev/scripts/rust-cache.ts clean",
     "test": "bun x nx run-many -t test",
     "typecheck": "bun x nx run-many -t typecheck",
     "web": "bun x nx dev @animaOS-SWARM/web",

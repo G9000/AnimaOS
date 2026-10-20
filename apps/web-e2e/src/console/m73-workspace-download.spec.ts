@@ -247,7 +247,7 @@ test('m73_actual_owner_files_preview_and_browser_report_save', async ({
     expect(Object.keys(images).sort()).toEqual(['browser', 'daemon', 'node']);
     const fixedImages = {
       node: process.execPath,
-      daemon: join(ROOT, 'target/debug/anima-daemon.exe'),
+      daemon: join(ROOT, 'target/cargo/debug/anima-daemon.exe'),
       browser:
         'C:/Users/leoca/AppData/Local/ms-playwright/chromium_headless_shell-1217/chrome-headless-shell-win64/chrome-headless-shell.exe',
     };

@@ -811,13 +811,16 @@ mod tests {
         let path = std::env::var_os("ANIMA_MCP_STDIO_FIXTURE_EXE")
             .map(PathBuf::from)
             .unwrap_or_else(|| {
-                Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../target/debug/examples")
-                    .join(if cfg!(windows) {
-                        "mcp_stdio_peer.exe"
-                    } else {
-                        "mcp_stdio_peer"
-                    })
+                let harness = std::env::current_exe().expect("test executable path");
+                let profile = harness
+                    .parent()
+                    .and_then(Path::parent)
+                    .expect("Cargo test executable is inside the profile directory");
+                profile.join("examples").join(if cfg!(windows) {
+                    "mcp_stdio_peer.exe"
+                } else {
+                    "mcp_stdio_peer"
+                })
             });
         path.canonicalize()
             .expect("root must build the native mcp_stdio_peer example before stdio tests")

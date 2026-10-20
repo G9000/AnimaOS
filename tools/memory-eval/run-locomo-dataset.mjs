@@ -17,7 +17,7 @@ const cargoArgs = [
   '--manifest-path',
   'Cargo.toml',
   '--target-dir',
-  'target/core-rust/memory-locomo-dataset',
+  'target/cargo',
   '-p',
   'anima-memory',
   '--features',

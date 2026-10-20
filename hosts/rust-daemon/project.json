@@ -48,7 +48,7 @@
       ],
       "options": {
         "cwd": ".",
-        "command": "cargo test -p anima-daemon"
+        "command": "cargo build -p anima-daemon --example mcp_stdio_peer && cargo test -p anima-daemon"
       },
       "inputs": [
         "default",

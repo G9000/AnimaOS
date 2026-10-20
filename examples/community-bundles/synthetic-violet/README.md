@@ -23,7 +23,7 @@ $env:CARGO_BUILD_JOBS='1'
 bun --no-env-file x nx run rust-daemon:build --excludeTaskDependencies --skipNxCache --args='--example mcp_stdio_peer'
 ```
 
-The resulting executable is `target/debug/examples/mcp_stdio_peer.exe`. This build
+The resulting executable is `target/cargo/debug/examples/mcp_stdio_peer.exe`. This build
 command is operator preparation and never runs from review or installation. Bind
 the program reference `synthetic-peer` to the actual prebuilt absolute executable
 path in Community bundles. For this checkout the binding is:

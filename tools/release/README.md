@@ -24,7 +24,7 @@ bun x nx run anima:package-check --skipNxCache
 bun x nx run anima:package --skipNxCache
 ```
 
-The script packages `target/release/anima` (`anima.exe` on Windows). Optional
+The script packages `target/cargo/release/anima` (`anima.exe` on Windows). Optional
 `--binary <path>` and `--output <path>` arguments support isolated build artifacts.
 Relative paths resolve from the repository root. It writes the generated JSON
 configuration and code-drawn ring icons under `target/native-packager/`, without

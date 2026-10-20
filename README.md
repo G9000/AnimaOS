@@ -1,4 +1,4 @@
-![AnimaOS banner](docs/images/animaos-banner.png)
+![AnimaOS: I'm at your command.](docs/images/animaos-banner.png)
 
 # AnimaOS
 

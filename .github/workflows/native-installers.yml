@@ -79,7 +79,7 @@ jobs:
         run: |
           dpkg-deb --info target/native-installers/*.deb
           dpkg-deb --contents target/native-installers/*.deb
-          ./target/release/anima --version
+          ./target/cargo/release/anima --version
       - name: Inspect macOS bundle
         if: runner.os == 'macOS'
         shell: bash
@@ -95,7 +95,7 @@ jobs:
           $installers = @(Get-ChildItem target/native-installers -Filter '*setup.exe')
           if ($installers.Count -ne 1) { throw 'Expected exactly one Windows setup executable' }
           if ($installers[0].Length -lt 100000) { throw 'Windows installer is unexpectedly small' }
-          ./target/release/anima.exe --version
+          ./target/cargo/release/anima.exe --version
       - name: Exercise isolated Windows installer regressions
         if: runner.os == 'Windows'
         shell: pwsh

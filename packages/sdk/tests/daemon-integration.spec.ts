@@ -23,6 +23,7 @@ const daemonManifestPath = resolve(workspaceRoot, 'Cargo.toml');
 const daemonTargetDir = resolve(
   workspaceRoot,
   'target',
+  'cargo',
   'sdk-daemon-integration',
 );
 const buildDaemon = promisify(execFile);

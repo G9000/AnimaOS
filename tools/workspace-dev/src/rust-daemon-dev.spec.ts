@@ -23,13 +23,13 @@ describe('rust daemon dev signing', () => {
   });
 
   it('re-signs with a fixed identifier so the designated requirement is stable', () => {
-    expect(codesignArgs('AnimaOS Dev Signing', '/repo/target/debug/anima-daemon')).toEqual([
+    expect(codesignArgs('AnimaOS Dev Signing', '/repo/target/cargo/debug/anima-daemon')).toEqual([
       '--force',
       '--sign',
       'AnimaOS Dev Signing',
       '--identifier',
       DAEMON_SIGNING_IDENTIFIER,
-      '/repo/target/debug/anima-daemon',
+      '/repo/target/cargo/debug/anima-daemon',
     ]);
   });
 

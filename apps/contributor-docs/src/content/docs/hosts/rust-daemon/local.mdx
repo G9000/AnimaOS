@@ -54,7 +54,7 @@ Open `http://127.0.0.1:8080/docs` for the live API reference.
 
 The daemon stores the ChatGPT login and connector secrets in the login keychain. Debug builds are ad-hoc signed, so **Always Allow** is tied to one binary and every rebuild asks again. `rust-daemon:dev`, `rust-daemon:build` and `bun run daemon` re-sign the binary with a stable identity when `ANIMAOS_DEV_SIGNING_IDENTITY` is set (no effect off macOS or when unset; plain `cargo run` is never re-signed).
 
-One-time setup: in Keychain Access create a self-signed **Code Signing** certificate named `AnimaOS Dev Signing`, trust it for code signing, confirm `security find-identity -v -p codesigning` lists it, and export `ANIMAOS_DEV_SIGNING_IDENTITY="AnimaOS Dev Signing"` in your shell profile. After one **Always Allow** per existing secret, rebuilds stop prompting. `codesign -dvv target/debug/anima-daemon` should show `Identifier=dev.animaos.anima-daemon`. The full steps are in `hosts/rust-daemon/README.md`.
+One-time setup: in Keychain Access create a self-signed **Code Signing** certificate named `AnimaOS Dev Signing`, trust it for code signing, confirm `security find-identity -v -p codesigning` lists it, and export `ANIMAOS_DEV_SIGNING_IDENTITY="AnimaOS Dev Signing"` in your shell profile. After one **Always Allow** per existing secret, rebuilds stop prompting. `codesign -dvv target/cargo/debug/anima-daemon` should show `Identifier=dev.animaos.anima-daemon`. The full steps are in `hosts/rust-daemon/README.md`.
 
 ## Common Tasks
 
@@ -90,10 +90,10 @@ One-time setup: in Keychain Access create a self-signed **Code Signing** certifi
 
 ## Windows Note
 
-A running daemon can keep `target/debug/anima-daemon.exe` locked. If that happens during validation, rerun the test target with an isolated target directory:
+A running daemon can keep `target/cargo/debug/anima-daemon.exe` locked. If that happens during validation, rerun the test target with an isolated target directory:
 
 ```bash
-CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache
+CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache
 ```
 
 ## Scope Boundaries

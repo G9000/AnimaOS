@@ -2,6 +2,8 @@
 
 Run commands from the repository root. The workspace package manager is Bun, so Nx commands should be prefixed with `bun x`.
 
+Rust build artifacts are kept under `target/cargo`. Check their size with `bun run rust:cache:status`; it warns above 64 GiB. `bun run rust:cache:clean` clears only that Cargo cache directory, leaving other files under `target/` alone.
+
 ## Memory validation
 
 Fast deterministic memory regression gate:
@@ -13,7 +15,7 @@ NX_TUI=false bun x nx run core-rust:memory-eval --skipNxCache
 Focused temporal fact/relationship CRUD and supersession checks:
 
 ```bash
-cargo test --manifest-path Cargo.toml --target-dir target/core-rust/memory-temporal -p anima-memory temporal -- --nocapture
+cargo test --manifest-path Cargo.toml -p anima-memory temporal -- --nocapture
 ```
 
 LOCOMO-style long-memory smoke benchmark:
@@ -142,7 +144,7 @@ NX_TUI=false bun x nx run core-rust:test --skipNxCache
 Core memory portability check without optional features:
 
 ```bash
-CARGO_TARGET_DIR=target/validation-memory-no-default cargo test -p anima-memory --no-default-features
+CARGO_TARGET_DIR=target/cargo/validation-memory-no-default cargo test -p anima-memory --no-default-features
 ```
 
 ## Daemon and SDK validation
@@ -150,7 +152,7 @@ CARGO_TARGET_DIR=target/validation-memory-no-default cargo test -p anima-memory 
 Rust daemon tests. The isolated target directory avoids Windows file-lock issues when a daemon binary is already running:
 
 ```bash
-CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon NX_TUI=false bun x nx run rust-daemon:test --skipNxCache
+CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon NX_TUI=false bun x nx run rust-daemon:test --skipNxCache
 ```
 
 TypeScript SDK tests:
@@ -200,7 +202,7 @@ Git Bash accepts inline environment variables like `NX_TUI=false command`. In Po
 ```powershell
 $env:NX_TUI="false"
 $env:CI="1"
-$env:CARGO_TARGET_DIR="target/validation-rust-daemon"
+$env:CARGO_TARGET_DIR="target/cargo/validation-rust-daemon"
 bun x nx run rust-daemon:test --skipNxCache
 ```
 

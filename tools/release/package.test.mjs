@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import * as packaging from './package.mjs';
 const { configuration, generateAssets } = packaging;
@@ -113,4 +113,13 @@ describe('native package configuration', () => {
       rmSync(directory, { recursive: true });
     }
   });
+});
+
+test('native package defaults use the release output from the shared Cargo configuration', () => {
+  const cargoConfig = readFileSync(new URL('../../.cargo/config.toml', import.meta.url), 'utf8');
+  const target = cargoConfig.match(/target-dir\s*=\s*"([^"]+)"/)?.[1];
+  expect(target).toBeDefined();
+  for (const platform of ['win32', 'linux', 'darwin']) {
+    expect(packaging.defaultBinaryPath(platform)).toBe(resolve(packaging.ROOT, target, 'release', platform === 'win32' ? 'anima.exe' : 'anima'));
+  }
 });

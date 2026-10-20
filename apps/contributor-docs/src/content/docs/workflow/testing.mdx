@@ -7,6 +7,8 @@ import { Aside } from '@astrojs/starlight/components';
 
 Run commands from the repo root. Prefer the Nx targets; they run the same cargo and vitest commands CI uses. `AGENTS.md` lists the required verification per area, and a change is not done until those commands pass in the current tree. Prefix with `NX_TUI=false` for quieter output, and add `--skipNxCache` when you need a real re-run.
 
+Rust outputs share `target/cargo`. Run `bun run rust:cache:status` to check the cache; it warns above 64 GiB. Run `bun run rust:cache:clean` to remove only Cargo outputs, preserving files outside that directory.
+
 ## What to Run
 
 | You changed | Command |
@@ -22,7 +24,7 @@ Run commands from the repo root. Prefer the Nx targets; they run the same cargo 
 ## Rust Core
 
 ```bash
-# All eleven core crates (cargo test -p ... with target dir target/core-rust/test)
+# All eleven core crates (Cargo outputs are in target/cargo)
 bun x nx run core-rust:test
 
 # One crate, or one module
@@ -59,7 +61,7 @@ NX_TUI=false bun x nx run core-rust:memory-locomo-dataset --skipNxCache
 NX_TUI=false bun x nx run rust-daemon:memory-locomo-agent --skipNxCache
 ```
 
-Thresholds and tunables (`LOCOMO_*` variables, `ANIMAOS_RS_MEMORY_QUERY_EXPANDER=locomo`) are documented in `docs/testing.md`. The dataset targets compile `anima-memory` with `locomo-eval`. The agent benchmark fails without real providers; it never falls back to the deterministic model. A no-default-features portability check: `CARGO_TARGET_DIR=target/validation-memory-no-default cargo test -p anima-memory --no-default-features`.
+Thresholds and tunables (`LOCOMO_*` variables, `ANIMAOS_RS_MEMORY_QUERY_EXPANDER=locomo`) are documented in `docs/testing.md`. The dataset targets compile `anima-memory` with `locomo-eval`. The agent benchmark fails without real providers; it never falls back to the deterministic model. A no-default-features portability check: `CARGO_TARGET_DIR=target/cargo/validation-memory-no-default cargo test -p anima-memory --no-default-features`.
 
 ### Node oracles and the browser worker
 
@@ -100,12 +102,12 @@ bun x nx run rust-daemon:test --skipNxCache
 # Format check
 bun x nx run rust-daemon:lint --skipNxCache
 
-# Windows, when a running daemon locks target/debug/anima-daemon.exe
-CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache
+# Windows, when a running daemon locks target/cargo/debug/anima-daemon.exe
+CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache
 ```
 
 <Aside type="note">
-  The Windows workaround uses a separate target directory so the running binary and the test binary do not conflict. In PowerShell set `$env:CI="1"` and `$env:CARGO_TARGET_DIR="target/validation-rust-daemon"` first (and clear them afterwards).
+The Windows workaround uses a separate target directory so the running binary and the test binary do not conflict. In PowerShell set `$env:CI="1"` and `$env:CARGO_TARGET_DIR="target/cargo/validation-rust-daemon"` first (and clear them afterwards).
 </Aside>
 
 Daemon tests live in `hosts/rust-daemon/tests/` (HTTP-level: `agent_api`, `connector_api`, `memory_api`, `schedule_api`, `swarm_api`, `workspace_api`, `health`, `document_worker`, `step_log_integration`) and in `*_tests.rs` files beside the modules. They build routers in process, use deterministic model adapters, fake connector transports and credential stores, temporary stores and random ports, and never call real providers, open real accounts or start containers. Connector tests follow `CONNECTOR-CONTRIBUTING.md`: injected fakes and deterministic barriers, no real services, no reading user profiles or secrets. `step_log_integration` is `#[ignore]`d because it needs a `DATABASE_URL`-backed Postgres; run it deliberately with `cargo test -p anima-daemon --test step_log_integration -- --ignored`.

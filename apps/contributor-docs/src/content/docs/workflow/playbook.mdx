@@ -194,11 +194,11 @@ Do not call work complete until the relevant commands pass in the current tree.
 
 ## Windows Notes
 
-- A running daemon can keep `target/debug/anima-daemon.exe` locked.
+- A running daemon can keep `target/cargo/debug/anima-daemon.exe` locked.
 - If Rust validation hits that lock, rerun with an isolated target directory:
 
 ```bash
-CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache
+CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache
 ```
 
 ## Related Pages

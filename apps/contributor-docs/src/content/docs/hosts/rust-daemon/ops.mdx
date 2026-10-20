@@ -82,7 +82,7 @@ bun x nx run rust-daemon:build --skipNxCache
 cargo build --release -p anima-daemon
 ```
 
-The Nx `build` target runs `tools/workspace-dev/src/rust-daemon-dev.ts --build-only`, which builds `anima-daemon` in the **debug** profile (after `core-rust:build`) and re-signs it on macOS when `ANIMAOS_DEV_SIGNING_IDENTITY` is set. The release binary is `target/release/anima-daemon` (`.exe` on Windows). The packaged `anima` binary is built by `cargo build -p anima` (`bun x nx run anima:build`) or by the release pipeline.
+The Nx `build` target runs `tools/workspace-dev/src/rust-daemon-dev.ts --build-only`, which builds `anima-daemon` in the **debug** profile (after `core-rust:build`) and re-signs it on macOS when `ANIMAOS_DEV_SIGNING_IDENTITY` is set. The release binary is `target/cargo/release/anima-daemon` (`.exe` on Windows). The packaged `anima` binary is built by `cargo build -p anima` (`bun x nx run anima:build`) or by the release pipeline.
 
 Cross-compilation needs the target toolchain and its native dependencies (the daemon links SQLite, ONNX Runtime through `fastembed` and the platform credential APIs); only `aarch64-apple-darwin` and `x86_64-pc-windows-msvc` are built and tested for releases.
 
@@ -93,7 +93,7 @@ bun x nx run rust-daemon:test --skipNxCache
 bun x nx run rust-daemon:lint --skipNxCache
 
 # Windows, when a running daemon locks the binary
-CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache
+CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache
 ```
 
 Daemon tests build routers in process (`tests/*.rs` and unit tests beside modules) with deterministic model adapters, fake transports and vaults, temporary stores and random ports. They do not call real providers or start containers. `tests/document_worker.rs` and the stdio MCP fixture start small helper binaries built from the same crate's examples.
@@ -105,7 +105,7 @@ RUST_LOG=debug cargo run -p anima-daemon
 RUST_LOG=anima_daemon=debug,tower_http=debug cargo run -p anima-daemon
 
 cargo build -p anima-daemon
-rust-lldb target/debug/anima-daemon
+rust-lldb target/cargo/debug/anima-daemon
 ```
 
 Inspect stores with the daemon stopped:

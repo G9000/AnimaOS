@@ -1087,7 +1087,7 @@ Choose **Always Allow**. The daemon then asks once for each existing secret,
 because those items still trust only the old ad-hoc build. Choose **Always
 Allow** for each, or disconnect and reconnect the account so the signed build
 recreates the items. After that, rebuilds and restarts should not prompt again.
-`codesign -dvv target/debug/anima-daemon` shows `Identifier=dev.animaos.anima-daemon`
+`codesign -dvv target/cargo/debug/anima-daemon` shows `Identifier=dev.animaos.anima-daemon`
 and `Authority=AnimaOS Dev Signing` when signing worked.
 
 On macOS and Linux the ChatGPT login is a single keychain item
@@ -1105,10 +1105,10 @@ ANTHROPIC_API_KEY=sk-ant-... \
 cargo run -p anima-daemon
 ```
 
-On Windows, if a running daemon keeps `target/debug/anima-daemon.exe` locked during validation, rerun tests with an isolated cargo target dir:
+On Windows, if a running daemon keeps `target/cargo/debug/anima-daemon.exe` locked during validation, rerun tests with an isolated cargo target dir:
 
 ```bash
-CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache
+CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache
 ```
 
 Contributor-focused local workflow docs live in `apps/contributor-docs/src/content/docs/hosts/rust-daemon/local.mdx`.

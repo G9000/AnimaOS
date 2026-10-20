@@ -73,7 +73,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": ".",
-        "command": "cargo build --manifest-path Cargo.toml --target-dir target/core-rust/build -p anima-core -p anima-service-adapters -p anima-model-adapters -p anima-memory -p anima-schedule -p anima-swarm -p anima-harness -p anima-document-content -p anima-process -p anima-acp -p anima-worktree"
+        "command": "cargo build --manifest-path Cargo.toml -p anima-core -p anima-service-adapters -p anima-model-adapters -p anima-memory -p anima-schedule -p anima-swarm -p anima-harness -p anima-document-content -p anima-process -p anima-acp -p anima-worktree"
       },
       "inputs": [
         "default",
@@ -86,7 +86,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": ".",
-        "command": "cargo test --manifest-path Cargo.toml --target-dir target/core-rust/test -p anima-core -p anima-service-adapters -p anima-model-adapters -p anima-memory -p anima-schedule -p anima-swarm -p anima-harness -p anima-document-content -p anima-process -p anima-acp -p anima-worktree"
+        "command": "cargo test --manifest-path Cargo.toml -p anima-core -p anima-service-adapters -p anima-model-adapters -p anima-memory -p anima-schedule -p anima-swarm -p anima-harness -p anima-document-content -p anima-process -p anima-acp -p anima-worktree"
       },
       "inputs": [
         "default",
@@ -99,7 +99,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": ".",
-        "command": "cargo test --manifest-path Cargo.toml --target-dir target/core-rust/memory-eval -p anima-memory baseline_memory_eval_cases_pass"
+        "command": "cargo test --manifest-path Cargo.toml -p anima-memory baseline_memory_eval_cases_pass"
       },
       "inputs": [
         "default",
@@ -112,7 +112,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": ".",
-        "command": "cargo test --manifest-path Cargo.toml --target-dir target/core-rust/memory-locomo -p anima-memory locomo_smoke_eval_cases_pass --features locomo-eval"
+        "command": "cargo test --manifest-path Cargo.toml -p anima-memory locomo_smoke_eval_cases_pass --features locomo-eval"
       },
       "inputs": [
         "default",

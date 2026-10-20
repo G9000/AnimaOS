@@ -7,7 +7,7 @@ function repoPath(...segments: string[]) {
 }
 
 describe('repo layout', () => {
-  it('has no legacy TypeScript runtime or placeholder hosts', () => {
+  it('has no legacy TypeScript runtime or placeholder host sources', () => {
     for (const legacy of [
       ['packages', 'core-ts'],
       ['packages', 'core'],
@@ -15,7 +15,10 @@ describe('repo layout', () => {
       ['hosts', 'elixir-phoenix'],
       ['hosts', 'python-service'],
     ]) {
-      expect(existsSync(repoPath(...legacy))).toBe(false);
+      // Old ignored build output can remain without restoring a source project.
+      for (const source of ['package.json', 'project.json', 'src']) {
+        expect(existsSync(repoPath(...legacy, source))).toBe(false);
+      }
     }
   });
 

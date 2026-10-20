@@ -164,9 +164,13 @@ function tool() {
   return command;
 }
 
+export function defaultBinaryPath(platform = process.platform) {
+  return resolve(ROOT, 'target/cargo/release', platform === 'win32' ? 'anima.exe' : 'anima');
+}
+
 export function main(args = process.argv.slice(2)) {
   let check = false;
-  let binary = resolve(ROOT, 'target/release', process.platform === 'win32' ? 'anima.exe' : 'anima');
+  let binary = defaultBinaryPath();
   let output = join(ROOT, 'target/native-installers');
   for (let index = 0; index < args.length; index++) {
     if (args[index] === '--check') check = true;
