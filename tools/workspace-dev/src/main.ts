@@ -1,4 +1,9 @@
-import { getHostDefinition, type HostDefinition, type HostKey } from './hosts.js';
+import {
+  getHostDefinition,
+  hostProcessEnv,
+  type HostDefinition,
+  type HostKey,
+} from './hosts.js';
 import {
   runManagedProcesses,
   type ManagedProcessDefinition,
@@ -11,6 +16,8 @@ export interface WorkspaceDevPlan {
 
 export interface WorkspaceDevPlanOptions {
   reuseExistingHost?: boolean;
+  env?: NodeJS.ProcessEnv;
+  homeDir?: string;
 }
 
 export function parseHostArg(argv: string[]): HostKey {
@@ -44,7 +51,7 @@ export function buildWorkspaceDevPlan(
       name: host.projectName,
       command: 'bun',
       args: ['x', 'nx', 'run', `${host.projectName}:dev`],
-      env: host.env,
+      env: hostProcessEnv(host, options.env, options.homeDir),
     });
   }
 

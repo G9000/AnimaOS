@@ -1,6 +1,20 @@
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
-import { HOST_KEYS, getHostDefinition, isHostKey } from './hosts.js';
+import {
+  HOST_KEYS,
+  getHostDefinition,
+  hostProcessEnv,
+  isHostKey,
+} from './hosts.js';
+
+const DEV_CONTROL_PLANE = join(
+  '/home/dev',
+  '.animaos-swarm',
+  'data',
+  'control-plane.json'
+);
 
 describe('workspace-dev host registry', () => {
   it('recognizes the supported host keys', () => {
@@ -40,5 +54,48 @@ describe('workspace-dev host registry', () => {
     expect(() => getHostDefinition('go')).toThrowError(
       "Unknown host 'go'. Expected one of: rust, elixir, python."
     );
+  });
+
+  describe('rust daemon persistence', () => {
+    const rust = getHostDefinition('rust');
+
+    it('persists to ~/.animaos-swarm/data by default', () => {
+      expect(hostProcessEnv(rust, {}, '/home/dev')).toEqual({
+        ANIMAOS_RS_HOST: '127.0.0.1',
+        ANIMAOS_RS_PORT: '8080',
+        ANIMAOS_RS_CONTROL_PLANE_FILE: DEV_CONTROL_PLANE,
+      });
+    });
+
+    it('leaves a control-plane file from the shell in charge', () => {
+      expect(
+        hostProcessEnv(
+          rust,
+          { ANIMAOS_RS_CONTROL_PLANE_FILE: '/elsewhere/cp.json' },
+          '/home/dev'
+        )
+      ).toEqual(rust.env);
+    });
+
+    it('lets Postgres mode keep the control plane in Postgres', () => {
+      expect(
+        hostProcessEnv(
+          rust,
+          { ANIMAOS_RS_PERSISTENCE_MODE: 'Postgres' },
+          '/home/dev'
+        )
+      ).toEqual(rust.env);
+    });
+
+    it('stays ephemeral when ANIMAOS_DEV_EPHEMERAL=1', () => {
+      expect(
+        hostProcessEnv(rust, { ANIMAOS_DEV_EPHEMERAL: '1' }, '/home/dev')
+      ).toEqual(rust.env);
+    });
+
+    it('adds nothing for other hosts', () => {
+      const elixir = getHostDefinition('elixir');
+      expect(hostProcessEnv(elixir, {}, '/home/dev')).toEqual(elixir.env);
+    });
   });
 });

@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { buildWorkspaceDevPlan, parseHostArg } from './main.js';
@@ -8,7 +10,9 @@ describe('workspace-dev orchestration', () => {
   });
 
   it('plans the rust host and UI processes with injected backend origin', () => {
-    expect(buildWorkspaceDevPlan('rust')).toEqual({
+    expect(
+      buildWorkspaceDevPlan('rust', { env: {}, homeDir: '/home/dev' })
+    ).toEqual({
       host: {
         key: 'rust',
         projectName: 'rust-daemon',
@@ -27,6 +31,12 @@ describe('workspace-dev orchestration', () => {
           env: {
             ANIMAOS_RS_HOST: '127.0.0.1',
             ANIMAOS_RS_PORT: '8080',
+            ANIMAOS_RS_CONTROL_PLANE_FILE: join(
+              '/home/dev',
+              '.animaos-swarm',
+              'data',
+              'control-plane.json'
+            ),
           },
         },
         {
