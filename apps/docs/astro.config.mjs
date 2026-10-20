@@ -31,7 +31,7 @@ export default defineConfig({
       title: 'animaOS',
       description: 'Agent runtime SDK and API documentation',
       logo: {
-        src: './src/assets/logo.png',
+        src: './src/assets/anima-mark.svg',
         replacesTitle: false,
       },
       social: [
@@ -74,6 +74,19 @@ export default defineConfig({
                 { label: 'Overview', link: '/sdk/memories/' },
                 { label: 'Search & Recall', link: '/sdk/memories/recall/' },
                 { label: 'Evaluation & Retention', link: '/sdk/memories/operations/' },
+                { label: 'Core Memory & Export', link: '/sdk/memories/core/' },
+              ],
+            },
+            {
+              label: 'Working with the Daemon',
+              collapsed: false,
+              items: [
+                { label: 'Sessions & Runs', link: '/sdk/sessions/' },
+                { label: 'Approvals', link: '/sdk/approvals/' },
+                { label: 'Jobs & Automations', link: '/sdk/automations/' },
+                { label: 'MCP, Skills & Learning', link: '/sdk/extensions/' },
+                { label: 'Usage, Logs & Status', link: '/sdk/observability/' },
+                { label: 'Workspace & Capabilities', link: '/sdk/workspace/' },
               ],
             },
             { label: 'API Reference', link: '/sdk/reference/' },
@@ -101,7 +114,7 @@ export default defineConfig({
 
       ],
       customCss: ['./src/styles/custom.css'],
-      favicon: '/favicon.png',
+      favicon: '/favicon.svg',
     }),
   ],
 });

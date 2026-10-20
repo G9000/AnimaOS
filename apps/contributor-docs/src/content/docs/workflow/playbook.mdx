@@ -9,15 +9,15 @@ This page is the shortest reliable path to getting the whole repo running locall
 
 ## What "Whole Repo" Means Here
 
-The normal local workspace loop starts:
+The normal loop (`bun dev`, through `tools/workspace-dev`) starts:
 
-- the selected host, usually `rust-daemon`
-- the web app
+- the Rust daemon (`anima-daemon`), the only host
+- the web console
 - the playground
 - the public docs app
 - the contributor docs app
 
-That is what `bun dev` orchestrates through `tools/workspace-dev`. `bun dev` defaults to the `rust` host, so `bun dev` and `bun dev --host rust` are equivalent for the normal local workflow.
+`bun dev` defaults to the `rust` host, so `bun dev` and `bun dev --host rust` are equivalent. `rust` is the only accepted host key.
 
 ## 5-Minute Bring-Up
 
@@ -43,7 +43,7 @@ That is what `bun dev` orchestrates through `tools/workspace-dev`. `bun dev` def
    rustc --version
    ```
 
-4. Set at least one provider key if you want to run real agent tasks.
+4. Optionally set a provider key in your shell. You can also add keys later in the console (**Settings**), or sign in with a ChatGPT subscription.
 
    ```bash
    export ANTHROPIC_API_KEY=sk-ant-...
@@ -60,20 +60,22 @@ That is what `bun dev` orchestrates through `tools/workspace-dev`. `bun dev` def
 </Steps>
 
 <Aside type="tip">
-  The workspace dev launcher checks whether the selected host is already reachable. If the Rust daemon is already running, `bun dev --host rust` reuses it and only starts the browser surfaces and docs apps.
+  The launcher checks `http://127.0.0.1:8080/api/health` first. If a daemon is already running there, `bun dev` reuses it and only starts the browser surfaces and docs apps.
+</Aside>
+
+<Aside type="note">
+  `bun dev` persists the daemon's data in `~/.animaos-swarm/data/` (agents, history, memory). Set `ANIMAOS_DEV_EPHEMERAL=1` for a throwaway run, or `ANIMAOS_RS_CONTROL_PLANE_FILE=./data/control-plane.json` for a project-local store. That default folder is the one an installed `anima` also uses.
 </Aside>
 
 ## What You Should See
 
-After bring-up, these local surfaces should be available:
-
 | Surface | URL | Notes |
 |---|---|---|
-| Rust daemon | `http://127.0.0.1:8080` | HTTP API and SSE host |
-| Web app | `http://127.0.0.1:4200` | Main browser UI |
+| Rust daemon | `http://127.0.0.1:8080` | HTTP API, SSE, `/docs` (Scalar) |
+| Web console | `http://127.0.0.1:4200` | Main browser UI |
 | Playground | `http://127.0.0.1:4201` | Interactive runtime playground |
 | Public docs | `http://127.0.0.1:4321` | User-facing docs |
-| Contributor docs | `http://127.0.0.1:4322` | Internal docs and architecture notes |
+| Contributor docs | `http://127.0.0.1:4322` | This site |
 
 Quick checks:
 
@@ -82,13 +84,15 @@ curl http://127.0.0.1:8080/health
 curl http://127.0.0.1:8080/ready
 ```
 
+Open the console from `4200`, not the daemon's port: the console proxies the daemon and its origin is the one the daemon accepts for owner actions.
+
 ## Choose the Right Loop
 
 Use the smallest loop that matches your change.
 
 ### Full repo loop
 
-Use this when you are touching host plus browser surfaces, docs, or overall integration.
+For host plus browser surfaces, docs or overall integration.
 
 ```bash
 bun dev
@@ -96,23 +100,20 @@ bun dev
 
 ### Host-only loop
 
-Use this when you are only changing the Rust daemon.
+For changes confined to the Rust daemon.
 
 ```bash
 bun x nx run rust-daemon:dev
 ```
 
-### Web-only loop
+### Web-only and playground-only loops
 
 ```bash
 bun x nx run @animaOS-SWARM/web:serve
-```
-
-### Playground-only loop
-
-```bash
 bun x nx run @animaOS-SWARM/playground:serve
 ```
+
+Both proxy to the daemon at `UI_BACKEND_ORIGIN` (default from the launcher: `http://127.0.0.1:8080`), so start a daemon too.
 
 ### Docs-only loop
 
@@ -123,9 +124,7 @@ bun x nx run @animaOS-SWARM/contributor-docs:dev
 
 ### CLI plus daemon loop
 
-Use this when you are working on agency creation, launch, chat, or TUI flows.
-
-Terminal 1:
+For agency creation, launch, chat or TUI flows. Terminal 1:
 
 ```bash
 bun run daemon
@@ -135,21 +134,21 @@ Terminal 2:
 
 ```bash
 bun run build:cli-sdk
-bun run animaos create my-agency --provider openai --model gpt-4o-mini
-cd my-agency
+bun run animaos create agent my-agent --provider openai --model gpt-4o-mini
+cd my-agent
 bun run animaos launch "your task"
 ```
 
-`create` is local and does not require the daemon. `launch`, `run`, and `chat` are daemon-backed.
+`create` writes a local workspace and does not need the daemon. `launch`, `run`, `chat`, `agents` and `assistant` are daemon-backed.
 
 ## Recommended Local Host Profiles
 
 ### Default host development
 
-Use SQLite-backed memory snapshots and local embeddings for the fastest reliable host loop:
+Durable agents, history and memory in `./data` with cheap deterministic vectors:
 
 ```bash
-ANIMAOS_RS_MEMORY_SQLITE_FILE=./data/runtime-memories.sqlite \
+ANIMAOS_RS_CONTROL_PLANE_FILE=./data/control-plane.json \
 ANIMAOS_RS_MEMORY_EMBEDDINGS=local \
 ANTHROPIC_API_KEY=sk-ant-... \
 cargo run -p anima-daemon
@@ -157,7 +156,7 @@ cargo run -p anima-daemon
 
 ### Postgres host development
 
-Use this when you need to test durable retry behavior or host-owned Postgres snapshots:
+For durable step-log retry behavior or Postgres-backed snapshots and history:
 
 ```bash
 ANIMAOS_RS_PERSISTENCE_MODE=postgres \
@@ -168,65 +167,35 @@ cargo run -p anima-daemon
 
 ## Daily Commands
 
-These are the commands you will use most often while working in this repo:
-
 ```bash
-# list projects
-bun x nx show projects
+bun x nx show projects            # list projects
+bun run build                     # nx run-many -t build
+bun run test                      # nx run-many -t test
+bun run typecheck                 # nx run-many -t typecheck
+bun run lint                      # oxlint over packages and apps
 
-# build all
-bun run build
-
-# test all
-bun run test
-
-# typecheck all
-bun run typecheck
-
-# lint user code
-bun run lint
-
-# build contributor docs
-bun x nx run @animaOS-SWARM/contributor-docs:build --skipNxCache
-
-# build public docs
-bun x nx run @animaOS-SWARM/docs:build --skipNxCache
-
-# validate the Rust daemon
 bun x nx run rust-daemon:test --skipNxCache
+bun x nx run @animaOS-SWARM/contributor-docs:build --skipNxCache
+bun x nx run @animaOS-SWARM/docs:build --skipNxCache
 ```
 
 ## Before You Push
 
-If you changed the host or core crates:
+| You changed | Run |
+|-------------|-----|
+| Rust host or core crates | `bun x nx run rust-daemon:test --skipNxCache` (runs `core-rust:test` first) |
+| Dev launcher (`tools/workspace-dev`) | `bun x nx test workspace-dev --runInBand --skipNxCache` |
+| A TypeScript package | the package's `test`, `typecheck` and `build` targets, for example `bun x nx test @animaOS-SWARM/sdk` |
+| Contributor docs | `bun x nx run @animaOS-SWARM/contributor-docs:build --skipNxCache` |
+| Public docs | `bun x nx run @animaOS-SWARM/docs:build --skipNxCache` |
+| Several areas | `bun run affected:build` and `bun run affected:test` |
 
-```bash
-bun x nx run rust-daemon:test --skipNxCache
-```
-
-If you changed contributor docs:
-
-```bash
-bun x nx run @animaOS-SWARM/contributor-docs:build --skipNxCache
-```
-
-If you changed public docs:
-
-```bash
-bun x nx run @animaOS-SWARM/docs:build --skipNxCache
-```
-
-If you changed multiple workspace areas and want a broader pass:
-
-```bash
-bun run affected:build
-bun run affected:test
-```
+Do not call work complete until the relevant commands pass in the current tree.
 
 ## Windows Notes
 
 - A running daemon can keep `target/debug/anima-daemon.exe` locked.
-- If Rust daemon validation hits that lock, rerun with an isolated cargo target dir:
+- If Rust validation hits that lock, rerun with an isolated target directory:
 
 ```bash
 CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache
@@ -235,6 +204,6 @@ CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:tes
 ## Related Pages
 
 - [Development](/workflow/dev/) for workspace setup and reference commands.
-- [Testing](/workflow/testing/) for more focused validation paths.
+- [Testing](/workflow/testing/) for focused validation paths.
 - [Rust Daemon Local Development](/hosts/rust-daemon/local/) for host-only development.
-- [Rust Daemon Staging Deployment](/hosts/rust-daemon/staging/) for online staging.
+- [Packaged Anima](/packaged-anima/) for the installable program.

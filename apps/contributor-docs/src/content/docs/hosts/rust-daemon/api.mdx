@@ -1,35 +1,32 @@
 ---
 title: HTTP API
-description: HTTP and SSE endpoints exposed by the Rust daemon
+description: Route families, conventions, authorization and key request shapes of the Rust daemon
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+The daemon serves operational endpoints, `/api/*` application endpoints and a Scalar API explorer at `/docs`. This page is a map and a set of conventions. For the exhaustive route list use the generated inventory in `hosts/rust-daemon/README.md` (it follows `ApiDoc::openapi()` and is checked against the router) or `GET /openapi.json` on a running daemon; per-route limits and error codes are documented there and enforced by handler tests. The TypeScript SDK (`packages/sdk`) is the reference client.
 
-<Aside type="caution" title="Work in Progress">
-  This contributor documentation is actively being written. Sections may be incomplete, reorganized, or expanded.
-</Aside>
+## Conventions
 
-The daemon serves operational endpoints, `/api/*` application endpoints, and a Scalar UI at `/docs`.
+- **JSON is camelCase** everywhere (`agentId`, `createdAtMs`, `maxTurns`, `tokenUsage`). Several request types reject unknown fields.
+- **Envelopes.** Lists and single resources are wrapped: `{ agents: [...] }`, `{ agent: {...} }`, `{ swarm: {...} }`, `{ results: [...] }`, `{ memories: [...] }`, `{ session }`, `{ run }`.
+- **Errors** are `{ "error": "message" }` (some families add a machine `code`). Common statuses: `400` validation, `403` `local owner authorization required`, `404`, `408` timeout, `409` conflict or stale revision, `429` rate or queue limit, `503` store unavailable or shutting down.
+- **`x-request-id`** is returned on every response and propagated when sent.
+- **Owner-only routes** answer `Cache-Control: no-store`. They require the owner authorization described in [Rust Daemon](/hosts/rust-daemon/#request-boundary). A client that is not a browser on an allowed origin sends `Authorization: Bearer <ANIMA_LOCAL_ADMIN_TOKEN>`.
+- **Optional API key.** With `ANIMAOS_RS_API_KEY` set, every non-exempt route also needs `Authorization: Bearer` or `x-api-key` with that key.
+- **Idempotency.** Session run submission requires an `Idempotency-Key` header (1 to 128 visible ASCII characters, remembered for 24 hours).
 
 ## Operational Endpoints
 
 | Method | Path | Description |
-|---|---|---|
-| `GET` | `/health` | Liveness check. Always returns `200 OK` with `{"status":"ok"}` |
-| `GET` | `/ready` | Readiness check. Returns `200` when ready, `503` with issues |
-| `GET` | `/metrics` | Prometheus-style metrics |
-| `GET` | `/openapi.json` | OpenAPI 3.0 document for all routes |
-| `GET` | `/docs` | Scalar API explorer (interactive docs UI) |
+|--------|------|-------------|
+| `GET` | `/health`, `/api/health` | Liveness: `200 {"status":"ok"}` |
+| `GET` | `/ready`, `/api/ready` | Readiness: `200` when ready, else `503`; see below |
+| `GET` | `/metrics` | Prometheus text. Unauthenticated; counts only (see [Operations](/hosts/rust-daemon/ops/)) |
+| `GET` | `/openapi.json` | OpenAPI document for the live routes |
+| `GET` | `/docs`, `/docs/` | Scalar API reference |
+| `GET` | `/api/status` | Owner-only snapshot: version, uptime, readiness, storage health, providers, connectors, automations, approvals, runs, limits |
 
-### Health Response
-
-```json
-{
-  "status": "ok"
-}
-```
-
-### Readiness Response
+Readiness response (`ReadinessResponse`):
 
 ```json
 {
@@ -41,178 +38,145 @@ The daemon serves operational endpoints, `/api/*` application endpoints, and a S
 }
 ```
 
-If `ANIMAOS_RS_PERSISTENCE_MODE=postgres` is set without a working DB:
+`status` is `ready` or `not_ready`. `database` is `configured`, `disabled` (memory mode) or `missing` (Postgres mode without a working adapter). `issues` lists strings such as `postgres persistence mode requires a configured database connection`, `background process manager unavailable: ...` or a history-store problem; any issue gives `503`.
 
-```json
-{
-  "status": "not_ready",
-  "database": "missing",
-  "issues": ["Postgres connection failed"]
-}
-```
+## Route Families
+
+| Prefix | What it covers | Auth |
+|--------|----------------|------|
+| `/api/agents`, `/api/agents/{id}` | Create, list, get, patch agents; profile and agency generation | open (API-key gated); `DELETE` is owner-only |
+| `/api/agents/{id}/avatar`, `/agent-files` | Avatar, agent-file preview | owner for `agent-files` |
+| `/api/agents/{id}/sessions...` | Sessions, messages, export, compaction, attachments, voice and speech | owner |
+| `/api/agents/{id}/sessions/{sid}/runs`, `/runs/{rid}`, `/runs/{rid}/stop`, `/events` | Live runs, steer, stop, SSE | owner |
+| `/api/agents/{id}/run`, `/messages` | Legacy blocking run; peer messages | open (API-key gated) |
+| `/api/approvals`, `/api/agents/{id}/approval-policy`, `approval-rules`, `autonomy` | Approvals, policy, rules, autonomy mode | owner |
+| `/api/agents/{id}/schedules...`, `/api/schedules/preview` | Automations | owner |
+| `/api/agents/{id}/jobs...`, `/api/goals...` | Jobs and goals | owner |
+| `/api/agents/{id}/core-memory...`, `/api/memories...`, `/api/search` | Memory | mixed |
+| `/api/agents/{id}/learning-*`, `/api/skills...`, `/api/skill-drafts`, `/api/skill-ledger` | Learning reviews, skills, drafts | owner |
+| `/api/agents/{id}/connectors...`, `/api/connectors/...` | Telegram, Discord, Drive, Calendar, mail, OAuth apps | owner (callbacks exempt) |
+| `/api/agents/{id}/mcp-connections...` | MCP connections | owner |
+| `/api/agents/{id}/community-bundles...` | Community bundles | owner |
+| `/api/agents/{id}/browser-*`, `/runs/{rid}/browser-scope` | Browser policies and scopes | owner |
+| `/api/agents/{id}/app-sessions/...`, `/acp-sessions/...`, `/coding-keys`, `/api/coding-apps`, `/api/foreign-sessions...` | Coding apps and imports | owner |
+| `/api/swarms...` | Swarms | open (API-key gated) |
+| `/api/workspace...` | Workspace configuration (`GET` / `PUT /api/workspace`: open); file listing, file reads, downloads and the folder picker (owner) | mixed |
+| `/api/providers...`, `/api/provider-keys...`, `/api/settings/side-model`, `/api/capabilities` | Providers, key pools, side-task model | mixed |
+| `/api/usage...` | Usage summary, records, CSV export, pricing overrides | owner |
+| `/api/logs`, `/api/logs/stream` | Redacted log tail | owner |
+| `/api/system...` | Drain, shutdown, supervisor relay, console session | admin token or console session |
+
+"Open" means the owner checks do not apply; the optional API key still does. This is the original API surface: agent create, list, get and patch, `/run`, `/messages`, swarms, `GET` / `PUT /api/workspace` and the first-generation `/api/memories` routes. The owner edit routes (`PATCH` / `DELETE` memories, facts and entities, export, core memory) are owner-only. Treat the README section for a route family as the authority; handlers either call the owner check or they do not, and handler tests pin which.
 
 ## Agents
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/agents` | List all registered agent snapshots |
-| `POST` | `/api/agents` | Create an agent. Body: `AgentConfig` JSON |
-| `GET` | `/api/agents/{id}` | Get one agent snapshot |
-| `DELETE` | `/api/agents/{id}` | Remove an agent runtime |
-| `POST` | `/api/agents/{id}/run` | Run the agent with `{"text":"..."}`. Blocks until completion |
-| `GET` | `/api/agents/{id}/memories/recent` | Get recent memories. Optional `?limit=N` |
-
-### Create Agent Request
-
-```json
+```http
+POST /api/agents
 {
   "name": "researcher",
   "model": "gpt-4o",
   "provider": "openai",
   "system": "You are a research assistant.",
-  "bio": "I help users find and synthesize information.",
-  "knowledge": ["machine learning", "neuroscience"],
-  "tools": [
-    {
-      "name": "web_search",
-      "description": "Search the web",
-      "parameters": { "query": { "type": "string" } }
-    }
-  ]
+  "bio": "I find and synthesize information.",
+  "tools": ["read_file", "web_fetch"],
+  "settings": { "temperature": 0.2, "maxTokens": 2048, "maxToolIterations": 8 },
+  "fallbacks": [{ "provider": "anthropic", "model": "claude-sonnet-4-5" }]
 }
 ```
 
-### Create Agent Response
+`tools` entries are names or objects `{ name, description, parameters, examples }`. `fallbacks` allows at most 3 entries, none equal to the agent's own provider and model. The response is `201 { agent }`:
 
 ```json
 {
-  "state": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "name": "researcher",
-    "status": "idle",
-    "config": { ... },
-    "createdAtMs": 1715000000000,
-    "tokenUsage": { "promptTokens": 0, "completionTokens": 0, "totalTokens": 0 }
-  },
-  "messageCount": 0,
-  "eventCount": 0,
-  "lastTask": null
-}
-```
-
-### Run Agent Request
-
-```json
-{
-  "text": "What are the main types of neural networks?"
-}
-```
-
-### Run Agent Response
-
-```json
-{
-  "agent": { ... },
-  "result": {
-    "status": "success",
-    "data": { "text": "The main types are..." },
-    "duration_ms": 2500
+  "agent": {
+    "state": {
+      "id": "agent-1-...", "name": "researcher", "status": "idle",
+      "config": { "name": "researcher", "model": "gpt-4o", "provider": "openai", "...": "..." },
+      "createdAtMs": 1760000000000,
+      "tokenUsage": { "promptTokens": 0, "completionTokens": 0, "totalTokens": 0 }
+    },
+    "messageCount": 0, "messages": [], "eventCount": 0, "lastTask": null
   }
 }
 ```
+
+`GET /api/agents?view=summary` omits `messages`. `PATCH /api/agents/{id}` updates `name`, `model`, `provider`, `system`, `tools` and `fallbacks` (at least one field). `messages` and `messageCount` cover only the hot tail (see [Persistence](/hosts/rust-daemon/persistence/#history-store)); session routes cover the full history.
+
+### Run (legacy blocking)
+
+```http
+POST /api/agents/{agent_id}/run
+{ "text": "What are the main types of neural networks?" }
+```
+
+Body fields: `text` (or `task`), optional `roomId`, `attachments`, `metadata` (client retry keys are stripped for agent runs). The call blocks until completion or the run timeout and returns `{ agent, result }` where `result` is `{ "status": "success" | "error", "data": { "text": "..." }, "error": null, "durationMs": 2500 }`. After a `408` the admitted run continues. New clients should use session runs (below).
+
+## Sessions and Live Runs
+
+The console and SDK send messages to a session and consume the agent event stream.
+
+```http
+POST /api/agents/{agent_id}/sessions/{session_id}/runs
+Idempotency-Key: 7d1f...
+{ "text": "Plan the migration", "attachmentIds": [], "skill": "release-notes", "mode": "queue" }
+```
+
+Answers `202 { run }` with a `queued` run. `"mode": "steer"` joins a running run instead. `POST /api/agents/{id}/runs/{run_id}/stop` stops one. `GET /api/agents/{id}/events` is the SSE stream. Details and event names are in [Runs and Sessions](/hosts/rust-daemon/runs/).
 
 ## Swarms
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/swarms` | List all registered swarm snapshots |
-| `POST` | `/api/swarms` | Create a swarm. Body: `SwarmConfig` JSON |
-| `GET` | `/api/swarms/{id}` | Get one swarm snapshot |
-| `POST` | `/api/swarms/{id}/run` | Run swarm task. Body: `{"text":"..."}` |
-| `GET` | `/api/swarms/{id}/events` | SSE event stream |
-
-### Create Swarm Request
-
-```json
+```http
+POST /api/swarms
 {
   "strategy": "supervisor",
-  "manager": {
-    "name": "manager",
-    "model": "gpt-4o",
-    "system": "You manage a team of researchers."
-  },
+  "manager": { "name": "manager", "model": "gpt-4o", "provider": "openai", "system": "You manage a team." },
   "workers": [
-    { "name": "researcher-1", "model": "gpt-4o-mini" },
-    { "name": "researcher-2", "model": "gpt-4o-mini" }
+    { "name": "researcher-1", "model": "gpt-4o-mini", "provider": "openai" },
+    { "name": "researcher-2", "model": "gpt-4o-mini", "provider": "openai" }
   ],
-  "max_turns": 10
+  "maxTurns": 10,
+  "maxParallelDelegations": 2,
+  "maxConcurrentAgents": 4,
+  "tokenBudget": 200000
 }
 ```
 
-### Swarm SSE Events
+`strategy` is required: `supervisor`, `dynamic` or `round-robin`. `manager` and `workers` are required. Returns `201 { swarm }` where `swarm` is `{ id, status, agentIds, messages, results, tokenUsage, startedAt, completedAt }`. `GET /api/swarms`, `GET /api/swarms/{id}` list and fetch. `POST /api/swarms/{id}/run` takes `{ "text": "..." }` and returns `{ swarm, result }` when done; an admitted dispatch continues if the HTTP response times out. `tokenBudget` is an observed per-dispatch limit shared by manager and workers; it is not a hard billing cap.
 
-```
-event: swarm:task:started
-data: {"swarm_id":"...","input":"..."}
-
-event: agent:delegated
-data: {"agent_id":"...","task":"..."}
-
-event: message:generated
-data: {"agent_id":"...","content":"..."}
-
-event: swarm:task:completed
-data: {"swarm_id":"...","result":"..."}
-```
+`GET /api/swarms/{id}/events` is SSE. Event names: `swarm:created`, `swarm:running`, `swarm:message`, `swarm:completed`, `swarm:lagged` (`{ missed }`, refetch state) and the agents' republished `task:*`, `tool:*`, `agent:tokens`, `agent:terminated` events. See [Message Bus](/architecture/rust-core/anima-swarm/message-bus/#daemon-events).
 
 ## Memories
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/memories` | Store a memory |
-| `GET` | `/api/memories/search` | Keyword search. Required `?q=` |
-| `GET` | `/api/memories/recent` | Recent memories |
-| `GET` | `/api/memories/recall` | Hybrid recall. Required `?q=` |
-| `POST` | `/api/memories/evaluations` | Evaluate memory without storing |
-| `POST` | `/api/memories/evaluated` | Evaluate and conditionally store |
-| `GET` | `/api/memories/{id}/trace` | Evidence trace |
-| `POST` | `/api/memories/retention` | Apply retention policy |
-| `GET` | `/api/memories/readiness` | Memory system health |
-| `POST` / `GET` | `/api/memories/relationships` | Create / query relationships |
-| `POST` / `GET` | `/api/memories/entities` | Create / query entities |
+Memory records use `camelCase` fields and the `type` values `fact`, `observation`, `task_result`, `reflection`.
 
-### Store Memory Request
-
-```json
+```http
+POST /api/memories
 {
-  "agent_id": "550e8400-e29b-41d4-a716-446655440000",
-  "agent_name": "researcher",
-  "type": "episodic",
-  "content": "User asked about neural networks",
-  "importance": 0.8,
-  "scope": "shared",
-  "tags": ["ml", "question"]
+  "agentId": "agent-1-...", "agentName": "researcher",
+  "type": "observation", "content": "User asked about neural networks",
+  "importance": 0.8, "scope": "private", "tags": ["ml", "question"]
 }
 ```
 
-### Recall Request
+Required: `agentId`, `agentName`, `type`, `content`, `importance` (0 to 1). Optional: `scope` (`shared`, `private`, `room`), `roomId`, `worldId`, `sessionId`, `tags`.
 
-```bash
-GET /api/memories/recall?q=neural+networks&limit=10
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/memories/search?q=`, `/api/search` | Keyword (BM25) search. Returns `{ results }` with a `score` |
+| `GET` | `/api/memories/recent` | Recent memories |
+| `GET` | `/api/memories/recall?q=` | Hybrid recall: `{ results: [{ memory, score, lexicalScore, vectorScore, relationshipScore, temporalScore, recencyScore, importanceScore }] }`. Extra params: `entityId`, `recallAgentId`, `limit`, `lexicalLimit`, `recentLimit`, `relationshipLimit`, `temporalLimit` |
+| `POST` | `/api/memories/evaluations`, `/api/memories/evaluated` | Evaluate a candidate; evaluate and store |
+| `GET` | `/api/memories/{id}/trace` | Evidence trace |
+| `POST` | `/api/memories/retention` | Apply a retention policy (core entries are protected) |
+| `GET` | `/api/memories/readiness` | Embedding status, external-provider status and the baseline eval report |
+| `POST` / `GET` | `/api/memories/entities`, `/api/memories/relationships` | Create or update, and list |
+| `PATCH` / `DELETE` | `/api/memories/{id}`, `/facts/{id}`, `/entities/{id}?kind=` | Owner edits |
+| `GET` | `/api/memories/facts` | Temporal facts |
+| `GET` | `/api/memories/export?format=json\|md&agentId=` | Owner download |
+| `GET` / `POST` / `PATCH` / `DELETE` | `/api/agents/{id}/core-memory...` | Core memory blocks |
 
-### Recall Response
+See [Memory in the Daemon](/architecture/rust-core/anima-memory/daemon-memory/) for behavior.
 
-```json
-[
-  {
-    "memory": { ... },
-    "lexical_score": 0.95,
-    "vector_score": 0.87,
-    "temporal_score": 0.92,
-    "relationship_score": 0.60,
-    "importance_score": 0.80,
-    "final_score": 0.88
-  }
-]
-```
+## SDK Mapping
+
+`packages/sdk/src/` has one module per family (`agents`, `sessions`, `runs`, `approvals`, `memories`, `connectors`, `automations`, `skills`, `logs`, `chatgpt`, `provider-keys`, ...). When you change a route or a response shape, update the matching SDK module and its spec, and the web console's `daemon-api.ts` if it calls the route.

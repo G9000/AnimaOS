@@ -1,256 +1,177 @@
 ---
 title: AgentRuntime
-description: The agent execution loop, state machine, and message flow
+description: The agent execution loop, state machine, stop and steering controls
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
-<Aside type="caution" title="Work in Progress">
-  This contributor documentation is actively being written. Sections may be incomplete, reorganized, or expanded.
-</Aside>
-
-`AgentRuntime` is the stateful executor at the center of `anima-core`. It is defined in `packages/core-rust/crates/anima-core/src/runtime.rs` (~700 lines) and is the only struct that orchestrates the full task loop.
+`AgentRuntime` is the stateful executor at the center of `anima-core`. It lives in `packages/core-rust/crates/anima-core/src/runtime.rs`, with run control, live frames, run deltas and failure guards in `runtime/`. It drives one task at a time through the loop below.
 
 ## Creating a Runtime
 
 ```rust
-use anima_core::{AgentConfig, AgentRuntime, ModelAdapter};
+use anima_core::{AgentConfig, AgentRuntime};
 use std::sync::Arc;
 
 let config = AgentConfig {
     name: "researcher".into(),
-    model: "gpt-4".into(),
+    model: "gpt-4o".into(),
+    provider: Some("openai".into()),
     bio: Some("You are a meticulous research assistant.".into()),
+    lore: None,
+    knowledge: None,
+    topics: None,
+    adjectives: None,
+    style: None,
+    system: None,
     tools: Some(vec![search_tool_descriptor]),
-    ..Default::default()
+    plugins: None,
+    settings: None,
+    fallbacks: Vec::new(),
 };
 
 let mut runtime = AgentRuntime::new(config, Arc::new(my_model_adapter));
-runtime.init();                       // emits AgentSpawned event
+runtime.init();                                  // records the AgentSpawned event
 runtime.register_provider(Arc::new(my_provider));
 runtime.register_evaluator(Arc::new(my_evaluator));
-runtime.set_database(Arc::new(my_db));
+runtime.set_database(Arc::new(my_db));           // optional step persistence
 ```
 
-`AgentRuntime::new` assigns a unique agent ID (atomic counter, prefixed `agent-N`), sets status to `Idle`, and stores the config and model adapter. No network calls happen during construction.
+`AgentRuntime::new` assigns an agent id (`agent-N`, from an atomic counter; `new_with_id` takes your own), sets status `Idle`, and stores the config and adapter. No network call happens during construction. `AgentConfig` has no `Default` impl; the optional fields (`bio`, `lore`, `knowledge`, `topics`, `adjectives`, `style`, `provider`, `system`, `tools`, `plugins`, `settings`, `fallbacks`) must be spelled out.
 
-## Internal State
+## Run Entry Points
 
-```rust
-pub struct AgentRuntime {
-    state: AgentState,                           // id, name, status, config, tokens
-    messages: Vec<Message>,                      // full conversation history
-    last_task: Option<TaskResult<Content>>,      // result of the most recent run()
-    events: Vec<EngineEvent>,                    // every event ever emitted
-    event_listener: Option<Arc<dyn Fn(EngineEvent) + Send + Sync>>,
-    providers: Vec<Arc<dyn Provider>>,           // context injectors
-    evaluators: Vec<Arc<dyn Evaluator>>,         // post-response hooks
-    model_adapter: Arc<dyn ModelAdapter>,        // LLM bridge
-    db: Option<Arc<dyn DatabaseAdapter>>,        // optional step persistence
-    step_counter: u64,                           // monotonic step index
-}
-```
+| Method | Behavior |
+|--------|----------|
+| `run(input)` | New room, no history, no tools. A tool call fails with `Unknown tool`. |
+| `run_with_context(history, input)` | New room, with earlier messages. |
+| `run_in_room_with_context(room, history, input)` | Host-chosen room. |
+| `run_with_tools(input, execute_tool)` | New room, with a tool executor closure. |
+| `run_with_context_and_tools(...)`, `run_in_room_with_context_and_tools(...)` | The general forms; the daemon uses the in-room one. |
 
-| Field | Purpose |
-|-------|---------|
-| `state` | The public face of the agent. Hosts query this for dashboards, health checks, or snapshots. |
-| `messages` | Every `User`, `Assistant`, and `Tool` message the runtime has ever seen. Grows unbounded within a session. |
-| `events` | Every `EngineEvent` emitted. Stored in-memory unless the host listens and persists them. |
-| `event_listener` | Optional callback fired synchronously on every event. The `rust-daemon` host uses this to push events over SSE. |
-| `providers` | Called before every model generation to inject dynamic context (time, memories, user info). |
-| `evaluators` | Called after a final response to validate, score, or trigger follow-up actions. |
-| `model_adapter` | The only required dependency. Converts `ModelGenerateRequest` into `ModelGenerateResponse`. |
-| `db` | Optional. If set, tool execution steps are persisted as `Step` records, and completed steps can be reused on explicit retries when the caller repeats the same retry metadata key. |
-| `step_counter` | Monotonically increasing counter used to assign stable indices to tool-call steps. |
+`execute_tool` is `Fn(AgentState, Message, ToolCall) -> Future<Output = TaskResult<Content>>`. All variants return `TaskResult<Content>`.
+
+## Builder-Style Hooks
+
+| Setter | Purpose |
+|--------|---------|
+| `set_event_listener` | Synchronous callback for every `EngineEvent` |
+| `set_run_observer` | Live, non-recorded `RunFrame`s (text deltas, tool cards) |
+| `set_run_control` | `RunControl`: stop signal plus steering inbox |
+| `set_run_id`, `set_persistence_agent_id` | Scope persisted tool-step keys to a host run |
+| `set_agent_files` | Rendered `SOUL.md` / project instruction files for this run |
+| `set_host_guidance` | Mandatory host-owned prompt text |
+| `set_default_tool_iterations` | Tool-round budget when the agent's settings leave it unset |
+| `set_providers`, `set_evaluators`, `set_database` | Bulk or optional collaborators |
 
 ## The Task Loop
 
-The core of the runtime is `run_with_tools`, an async method that drives the entire lifecycle of a single task:
-
 ```
-run_with_tools(input, execute_tool)
+run_in_room_with_context_and_tools(room, history, input, execute_tool)
 │
-├─► 1. mark_running() ──▶ status = Running
-│      emit agent:started + task:started
+├─ mark_running()                       status = Running; agent:started, task:started
+├─ record the user message in the room  agent:message
 │
-├─► 2. Record user message in new room
-│      emit agent:message
-│
-├─► 3. Build provider context
-│      Call each registered Provider::get()
-│      Concatenate results into context_parts
-│
-├─► 4. Build system prompt
-│      Assemble bio, lore, adjectives, topics,
-│      knowledge, style, base system text,
-│      and provider context_parts
-│
-├─► 5. Call ModelAdapter::generate(request)
-│      request = { system, messages, temperature, max_tokens }
-│
-├─► 6. Inspect ModelStopReason
-│      ├─ End / MaxTokens ──▶ run evaluators ──▶ mark_completed()
-│      │
-│      └─ ToolCall ──▶ check iteration limit (max 8)
-│            ├─ exceeded ──▶ mark_failed("tool iteration limit exceeded")
-│            └─ ok ──▶ execute each tool in parallel (join_all)
-│                  ├─ write pending Step records to db
-│                  ├─ emit tool:before for each
-│                  ├─ call execute_tool(state, message, tool_call)
-│                  ├─ write done/failed Step records to db
-│                  ├─ emit tool:after for each
-│                  ├─ append tool results to conversation
-│                  └─ LOOP back to step 5
-│
-└─► Return TaskResult<Content>
+└─ loop:
+     ├─ stop checkpoint                 → finish as stopped
+     ├─ drain the steering inbox        steered messages join as user messages
+     ├─ build provider context          providers by priority; one snapshot per run
+     ├─ build the system prompt
+     ├─ ModelAdapter::stream(...)       frames forwarded to the RunObserver
+     ├─ record usage                    agent:tokens
+     └─ on the stop reason:
+          End | MaxTokens  → run evaluators → Accept: complete
+          │                                   Retry:  revise (max 2) and loop
+          │                                   Abort:  fail with the reason
+          ToolCall         → validate tools are configured
+                             prepare steps (persistence, retry-key reuse)
+                             run the batch in parallel (join_all)
+                             record tool results, loop again
 ```
 
-### Step-by-Step Breakdown
+### System prompt
 
-**1. Mark Running**
-Status becomes `AgentStatus::Running`. Two events fire: `agent:started` and `task:started`.
+Built in this order, joined with blank lines:
 
-**2. Record User Message**
-A new `room_id` is generated (atomic counter, prefixed `room-N`). The user's `Content` is stored as a `Message` with `role = User`. This message is the anchor for the entire conversation turn.
+1. If a host accepted a SOUL / identity file, its text. Otherwise, the legacy persona: `bio` (Who You Are), `lore` (Your Backstory), `adjectives` (Your Personality), `topics` (Your Expertise).
+2. `knowledge` as a bullet list (What You Know). Always included.
+3. Without an identity file: `style` (How You Communicate), then `system` (default `You are a helpful task agent.`).
+4. Project context rendered from agent files.
+5. Host guidance.
+6. Provider output as `[provider_name]: text` lines under `## Context`.
 
-**3. Build Provider Context**
-Every registered `Provider` is called concurrently-ish (sequential `await` in a loop). Each returns a `ProviderResult` containing text and optional metadata. Results are formatted as `[provider_name]: {text}` and collected into `context_parts`.
+### Providers
 
-If any provider fails, the entire task fails immediately with `"provider context failed"`.
+Providers run in descending `priority()` order (ties keep registration order). Each is called once per run and its text is reused for later model calls in the same run, unless the provider's `refresh_each_model_request()` returns true. A provider error fails the run with that error text.
 
-**4. Build System Prompt**
-The system prompt is assembled from `AgentConfig` fields in a fixed order:
+### Tool rounds and the budget wrap-up
 
-1. `bio` → "## Who You Are"
-2. `lore` → "## Your Backstory"
-3. `adjectives` → "## Your Personality"
-4. `topics` → "## Your Expertise"
-5. `knowledge` → "## What You Know" (bullet list)
-6. `style` → "## How You Communicate"
-7. `system` (fallback: "You are a helpful task agent.")
-8. Provider `context_parts` → "## Context"
+The round limit is `AgentSettings.max_tool_iterations`, else the host default set by `set_default_tool_iterations`, else `MAX_TOOL_ITERATIONS` (8). When the limit is reached the next model call is a **tool-free wrap-up**: tools are removed, retries are set to zero, and guidance tells the model to report completed and remaining work honestly. If that answer requests tools, is truncated or is empty, the run fails (`tool iteration limit exceeded`, `budget wrap-up was truncated`, `budget wrap-up returned empty text`). An accepted wrap-up is marked with `budgetWrapup: true` metadata.
 
-All sections are joined with `\n\n`. This is deterministic and testable.
+A tool the model requests that is not in `config.tools` is refused: once per run with a tool-result message the model can recover from, otherwise the run fails with `tool '<name>' is not configured for this agent`.
 
-**5. Model Generation**
-A `ModelGenerateRequest` is built containing:
-- `system`: the assembled prompt
-- `messages`: the conversation history (including the latest user message and any tool results from prior iterations)
-- `temperature` and `max_tokens` from `AgentSettings` if present
+### Failure-streak hints
 
-The `ModelAdapter` is called. On success, token usage is accumulated into `state.token_usage`.
+`runtime/failure_guard.rs` watches single-call tool rounds. When the exact same call returns the same error, the same result, or the same sequence repeats three times, a hint is appended to the next system prompt telling the model to change approach or use the result. State lives only inside one invocation.
 
-**6. Handle Stop Reason**
+### Parallel tool execution
 
-| `ModelStopReason` | Action |
-|-------------------|--------|
-| `End` | Normal completion. Run evaluators, mark completed. |
-| `MaxTokens` | Same as `End`. The response is treated as complete. |
-| `ToolCall` | Enter the tool loop (see below). |
+Tool calls from one model response run together with `join_all`. Each receives a clone of `AgentState`, the user `Message` and its `ToolCall`. Results are appended to the conversation in the order the model requested them.
 
-If the model adapter returns an error, the task fails with `"model generation failed"`.
+### Step persistence
 
-## Tool Execution Loop
+With a `DatabaseAdapter`, each tool call is written as a `Step` in two phases: `Pending` before execution, then `Done` or `Failed`. The idempotency key is a UUIDv5 over the agent id, the run id, the user message id, the room, the round, the call position and the call payload. If the input carries a `retryKey` / `retry_key` / `idempotencyKey` / `idempotency_key` in its metadata, the key uses that instead of the run id, so a re-run under a new host run finds the earlier steps and **reuses completed tool results** (`recovered: true` on `tool:after`). Persistence errors are non-fatal: they become `agent:message` events and the run continues.
 
-When the model requests tools, the runtime enters a sub-loop:
+## Stop and Steering
 
-```
-iterations = 0
+`RunControl { cancel: CancelSignal, steering: SteeringInbox }` is shared with the host by cloning.
 
-LOOP:
-  iterations += 1
-  if iterations > MAX_TOOL_ITERATIONS (8):
-      fail("tool iteration limit exceeded")
+- **Stop.** The runtime checks the signal before each model call, while streaming (dropping the request), and before each tool batch. Tools already running finish; every requested call that never ran gets the result `Cancelled before running (stopped by owner)`. Streamed text so far stays as an assistant message marked `stopped`. An owner stop returns `TaskResult::error("stopped")` and leaves the agent `Idle`. A helper deadline or daemon shutdown (`CancelCause::HelperDeadline`, `DaemonShutdown`) ends the run as failed with its own error text. The first cause wins.
+- **Steering.** `SteeringInbox::push(content)` queues an owner message for the next model call; the runtime records it as a user message with `steer: true` and emits `RunFrame::Steered`. After `close()`, `push` gives the content back so the host can queue a new run instead.
 
-  1. Record assistant message with tool_call metadata
-  2. Assign step indices (monotonic, based on step_counter)
-  3. Write pending Step records to db
-  4. Emit tool:before events
-  5. Execute all tool calls in parallel via join_all
-  6. Write done/failed Step records to db
-  7. Emit tool:after events
-  8. Append each tool result as a Tool message to conversation
-  9. Call model again with updated conversation
-  10. Check stop reason ──▶ loop or exit
-```
+## Live Frames
 
-### Step Persistence
+`RunObserver::on_frame` receives non-recorded `RunFrame`s: `StepStarted`, `TextDelta`, `StepUsage`, `ModelServed` (a fallback model answered), `StepFinished`, `ToolStarted`, `ToolFinished` and `Steered`. They never enter the stored event log. The daemon turns them into the SSE stream described in [Runs and Sessions](/hosts/rust-daemon/runs/). The observer runs inline and must not block.
 
-If a `DatabaseAdapter` is registered, every logical tool step is persisted in **two phases**:
+Message metadata the runtime sets (constants in `runtime/observer.rs` and `control.rs`): `runId`, `stepId`, `revised`, `incomplete`, `stopped`, `steer`, `toolStatus`, `toolDurationMs`, plus `toolCalls` on assistant messages that requested tools.
 
-1. **Pending** — written before execution. Contains the tool name and arguments.
-2. **Done** or **Failed** — the same logical step is rewritten after execution with the result, status, and error (if any).
+## Concurrent Rooms
 
-When request metadata includes `retryKey` or `idempotencyKey`, the runtime derives a stable logical idempotency key from the agent, the retry identity, and the tool call payload. A later retried request with the same retry key can reuse a previously completed tool step instead of re-executing it. Without explicit retry metadata, persisted steps are still durable for observability, but fresh requests do not reuse old results.
-
-### Parallel Execution
-
-Tool calls within a single model response are executed in parallel using `futures::future::join_all`. Each receives:
-- A clone of `AgentState`
-- The original user `Message`
-- The specific `ToolCall`
-
-Results are collected and appended to the conversation in the order the tool calls were returned by the model.
+`run_snapshot`, `run_base`, `run_delta_since`, `apply_run_delta`, `revert_run_delta` and `retain_messages` (in `runtime/run_delta.rs`) let a host run several rooms of one agent at once on isolated copies, then merge exactly what each run added back into the canonical record, or undo it.
 
 ## State Transitions
 
-```
-┌─────────┐   new()   ┌─────────┐   run()   ┌─────────┐
-│  (none) │ ────────▶ │  Idle   │ ────────▶ │ Running │
-└─────────┘           └─────────┘           └────┬────┘
-                                                  │
-              ┌───────────────────────────────────┼──────────┐
-              │                                   │          │
-              ▼                                   ▼          ▼
-         ┌─────────┐                        ┌─────────┐ ┌───────────┐
-         │Completed│                        │ Failed  │ │Terminated │
-         └─────────┘                        └─────────┘ └───────────┘
-              │                                   │
-              ▼                                   ▼
-         mark_completed()                    mark_failed()
-         (or normal end)                     (or error)
-```
+| Method | Status change | Events |
+|--------|---------------|--------|
+| `mark_running()` | to `Running` | `agent:started`, `task:started` |
+| completion | to `Completed` | `agent:completed`, `task:completed` |
+| `mark_failed(...)` | to `Failed` | `agent:failed`, `task:failed` |
+| `mark_cancelled(...)` for an owner stop | to `Idle` | `task:failed` |
+| `stop()` | to `Terminated` | `agent:terminated` |
 
-| Method | Status Change | Events Emitted |
-|--------|--------------|----------------|
-| `mark_running()` | `Idle` → `Running` | `agent:started`, `task:started` |
-| `mark_completed_in_room(...)` | `Running` → `Completed` | `agent:completed`, `task:completed` |
-| `mark_failed(...)` | `Running` → `Failed` | `agent:failed`, `task:failed` |
-| `stop()` | Any → `Terminated` | `agent:terminated` |
-
-## Snapshotting
+## Snapshots
 
 ```rust
-pub fn snapshot(&self) -> AgentRuntimeSnapshot {
-    AgentRuntimeSnapshot {
-        state: self.state(),
-        message_count: self.messages.len(),
-        messages: self.messages.clone(),
-        event_count: self.events.len(),
-        last_task: self.last_task.clone(),
-    }
+pub struct AgentRuntimeSnapshot {
+    pub state: AgentState,
+    pub message_count: usize,
+    pub messages: Vec<Message>,
+    pub event_count: usize,        // all events ever recorded
+    pub events: Vec<EngineEvent>,  // newest MAX_RETAINED_EVENTS (500)
+    pub last_task: Option<TaskResult<Content>>,
+    pub step_count: u64,
 }
 ```
 
-A snapshot is a complete, serializable capture of the in-memory runtime. Hosts can use this for:
-- Debug snapshots during graceful shutdown
-- Debugging (dump full message history)
-- Health checks (check `message_count`, `event_count`)
-- Host-managed restore or migration work
-
-The Rust daemon now uses these snapshots through its host-owned control-plane store, backed by `ANIMAOS_RS_CONTROL_PLANE_FILE` or Postgres `host_snapshots`. It restores registered agents after restart and marks any restored running task as failed/interrupted rather than pretending mid-turn resume happened.
+`AgentRuntime::snapshot()` captures it and `from_snapshot(snapshot, adapter)` rebuilds a runtime. The daemon stores snapshots in its control-plane store and, on restart, marks work that was running as interrupted rather than resuming it.
 
 ## Return Value
 
-Both `run()` and `run_with_tools()` return `TaskResult<Content>`:
-
 ```rust
 pub struct TaskResult<T> {
-    pub status: TaskStatus,      // Success | Error
-    pub data: Option<T>,         // the Content on success
-    pub error: Option<String>,   // error message on failure
-    pub duration_ms: u64,        // wall-clock time of the entire run
+    pub status: TaskStatus,     // Success | Error
+    pub data: Option<T>,
+    pub error: Option<String>,
+    pub duration_ms: u64,
 }
 ```
 
-`duration_ms` is measured from the start of `run_with_tools` to the moment the final status is set. It includes all model calls, all tool executions, all provider lookups, and all evaluator runs.
+`duration_ms` is measured from the start of the run and includes model calls, tools, providers and evaluators.

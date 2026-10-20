@@ -51,8 +51,11 @@ function isCurrentInGroup(entries: typeof sublist): boolean {
     }
 
     .entry-title {
-        font-weight: 600;
-        font-size: 0.75rem;
+        font-family: var(--anima-font-mono, var(--sl-font-mono));
+        font-weight: 500;
+        font-size: 0.68rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
         line-height: 1rem;
         padding-top: calc(var(--spacing) * 1);
         padding-bottom: calc(var(--spacing) * 1);
@@ -129,6 +132,7 @@ function isCurrentInGroup(entries: typeof sublist): boolean {
     .entry-link[aria-current='page'] .entry-link-inner {
         background-color: var(--accent);
         color: var(--accent-foreground);
+        box-shadow: inset 2px 0 0 var(--anima-accent, currentColor);
     }
 
     .entry-link:hover:not([aria-current='page']) .entry-link-inner {
@@ -137,14 +141,15 @@ function isCurrentInGroup(entries: typeof sublist): boolean {
     }
 
     .entry-badge {
-        color: rgb(0 0 0);
+        color: var(--anima-accent-fg, rgb(0 0 0));
+        font-family: var(--anima-font-mono, var(--sl-font-mono));
         line-height: 1;
-        font-size: 0.75rem;
+        font-size: 0.68rem;
         padding-top: calc(var(--spacing) * 0.5);
         padding-bottom: calc(var(--spacing) * 0.5);
         padding-left: calc(var(--spacing) * 1.5);
         padding-right: calc(var(--spacing) * 1.5);
-        background-color: rgb(173 250 29);
+        background-color: var(--anima-accent, rgb(173 250 29));
         border-radius: calc(var(--radius) - 2px);
         margin-left: calc(var(--spacing) * 2);
     }

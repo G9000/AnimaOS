@@ -21,12 +21,15 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 <CardGrid stagger>
   <Card title="Architecture" icon="seti:rust">
-    Monorepo layout, Rust core crates, TypeScript client surfaces, and host boundaries.
+    Monorepo layout, the Rust crates under `packages/core-rust`, and how the TypeScript client surfaces sit on top of the daemon.
   </Card>
   <Card title="Rust Daemon" icon="seti:json">
-    How the Rust daemon wraps the core and exposes it over HTTP/SSE.
+    `hosts/rust-daemon`: the Axum HTTP/SSE host, its persistence, runs and sessions, approvals, connectors and coding-app tools.
+  </Card>
+  <Card title="Packaged Anima" icon="seti:shell">
+    `hosts/anima`: the installable supervisor, tray, updater and embedded console that wrap the daemon.
   </Card>
   <Card title="Workflow" icon="seti:git">
-    Dev setup, Nx commands, testing, and contribution guidelines.
+    Dev setup, Nx commands, testing and the checks to run before you push.
   </Card>
 </CardGrid>

@@ -1,0 +1,60 @@
+---
+title: Durable Engine
+description: The portable durable-execution engine, capability, policy and execution-store contracts in anima-core
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Besides `AgentRuntime`, `anima-core` carries a second, portable execution path: `DurableAgentEngine`. It runs an agent against a **store** with leases, checkpoints, an approval gate and explicit recovery, instead of an in-memory conversation.
+
+<Aside type="note" title="Not wired into the daemon">
+  `hosts/rust-daemon` runs chat, job and swarm work on `AgentRuntime`. A search of the workspace finds `DurableAgentEngine` and `InMemoryExecutionStore` only inside `anima-core` and in the integration test `anima-model-adapters/tests/durable_engine_provider_loop.rs`. Treat this engine as a tested contract and reference implementation, not as the production path.
+</Aside>
+
+## Pieces
+
+| Module | Key types | Role |
+|--------|-----------|------|
+| `definition.rs` | `AgentDefinition`, `AgentDefinitionDraft`, `DefinitionPublisher`, `ProfileRef`, `ResolvedCapability`, `ModelPolicy`, `MemoryPolicy`, `RuntimeLimits`, `LifecyclePolicy`, `HostRequirement` | A published, versioned agent definition that pins exact capability manifests by version and schema digest. `ModelPolicy` holds a credential *reference*, never a credential. |
+| `capability.rs` | `CapabilityManifest`, `CapabilityRegistry`, `ManifestCatalog`, `CapabilityExecutor`, `CapabilityKind`, `RiskLevel`, `RecoveryMode`, `LogicalInvocation`, `ExecutionFence` | A capability is a named, schema-validated action with a declared risk (`None` to `Critical`) and recovery mode (`InherentlyIdempotent`, `KeyedIdempotent`, `Reconcilable`, `NonRetryable`, plus legacy forms). Kinds: `Knowledge`, `Workspace`, `Communication`, `Automation`, `Custom`. Arguments are canonicalized, bounded and digested. |
+| `policy.rs` | `PolicyEngine::evaluate`, `PolicyContext`, `AutonomyGrant`, `PolicyDecision` (`Allow`, `RequireApproval`, `Deny`), `ApprovalRequest`, `ApprovalDecision` | Pure risk evaluation against grants. Records bind stable ids and argument digests, never arguments or credentials. |
+| `execution/` | `ExecutionStore` (trait), `InMemoryExecutionStore`, `Run`, `RunState`, `Session`, `CheckpointV1`, `Budget`, `ExecutionLease`, `RuntimeCommand`, `RuntimeEvent` | The durable state and the store port. Each store operation is atomic. `assert_execution_store_conformance` checks an adapter. |
+| `engine.rs` | `DurableAgentEngine`, `DurableEngineConfig`, `EngineRunOutcome`, `DefinitionResolver`, `CurrentPolicyResolver`, `EngineCapabilityRuntime`, `EngineControlSignal`, `EngineLiveEventSink` | The loop that ties them together. |
+| `evidence.rs`, `memory.rs` | `DocumentPort`, `RetrieverPort`, `ArtifactPort`, `MemoryPort` | Storage-neutral contracts for documents, retrieval, artifacts and revisioned memory. |
+
+## Run States
+
+`RunState`: `Queued`, `Running`, `WaitingForApproval`, `Paused`, `RecoveryRequired`, `Completed`, `Failed`, `Cancelled`. The terminal states are `Completed`, `Failed` and `Cancelled`.
+
+`DurableAgentEngine::run(owner_id, run_id, signal)` returns an `EngineRunOutcome`:
+
+| Outcome | Meaning |
+|---------|---------|
+| `Completed { content }` | The model finished with a final answer |
+| `WaitingForApproval` | A capability call needs an approval decision |
+| `PausedForBudget` | A `Budget` limit was reached |
+| `PausedByRequest` | The control signal asked for a pause |
+| `Cancelled` | The control signal cancelled the run |
+| `RecoveryRequired` | An invocation's outcome is uncertain and needs a recovery decision |
+| `Denied` | Policy denied a call |
+
+The engine pins the definition and manifest versions at run start, acquires a lease (default `lease_duration_ms` of 30,000; zero is rejected), checkpoints after steps, and records every capability attempt before and after dispatch so a crash between dispatch and result leaves a reconcilable record.
+
+## Capabilities and Recovery
+
+A `CapabilityExecutor` has `manifest()`, `execute(context)` and `reconcile(...)`. Before any irreversible side effect, an executor must await `context.execution_fence().ensure_valid()` and pass the fence's token and idempotency key to destinations that can deduplicate. `reconcile` answers an uncertain earlier attempt with a `ReconcileOutcome`:
+
+- `Completed(result)`
+- `Pending`
+- `AuthoritativeAbsence` (only with a strong guarantee that the earlier operation cannot later complete)
+- `RecoveryRequired`
+
+`RecoveryAction` kinds (`RetrySameKey`, `Completed`, `Pending`, `AuthoritativeAbsence`, `CompensationRequired`, `RecoveryRequired`) tell a host recovery orchestrator what to do next. The fence is not a generic exactly-once guarantee.
+
+## Testing Hooks
+
+`EngineCrashInjector` and `EngineCrashPoint` (`AfterDispatchCommitBeforeExecutor`, `AfterExecutorBeforeResultCommit`) let tests simulate a crash at the two risky boundaries. `ManualExecutionClock` gives deterministic time.
+
+## When to Touch It
+
+Changes here must keep the crate I/O-free and every record bounded and validated (see the `MAX_*` constants re-exported from `lib.rs`). If you are changing how the daemon runs agents today, you want [AgentRuntime](/architecture/rust-core/anima-core/agent-runtime/), not this engine.

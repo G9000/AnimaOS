@@ -3,51 +3,54 @@ title: Contributor Overview
 description: How to navigate and contribute to the animaOS monorepo
 ---
 
-import { Aside, Steps } from '@astrojs/starlight/components';
+import { Steps } from '@astrojs/starlight/components';
 
-<Aside type="caution" title="Work in Progress">
-  This contributor documentation is actively being written. Sections may be incomplete, reorganized, or expanded. If you spot something missing or unclear, open an issue or PR.
-</Aside>
-
-This site is for **contributors and maintainers** of animaOS. If you are looking for user-facing SDK, CLI, or TUI documentation, see the [public docs site](https://github.com/G9000/animaOS-SWARM/tree/main/apps/docs).
+This site is for **contributors and maintainers** of animaOS. If you are looking for user-facing SDK, CLI, or TUI documentation, see the [public docs site](https://github.com/G9000/animaOS-SWARM/tree/main/apps/docs). The repository's `AGENTS.md` states the current repo rules and verification commands; this site expands on them.
 
 ## What is animaOS?
 
-animaOS is a host-agnostic agent runtime. The architecture has three layers:
+animaOS is an agent runtime with a Rust engine and a single runnable host:
 
-1. **Core** — Reusable engine crates (Rust) and type contracts (TypeScript). Zero I/O.
-2. **Hosts** — Runnable backend processes that wrap core and expose it over HTTP/SSE.
-3. **Surfaces** — SDK, CLI, TUI, and web UI that talk to any compatible host.
+1. **Core** (`packages/core-rust`): reusable Rust crates for the agent loop, memory, swarms, model-provider adapters and a few tool-support libraries. `anima-core` has no HTTP, database or filesystem dependency.
+2. **Host** (`hosts/rust-daemon`): the `anima-daemon` process. It wraps the core in an Axum HTTP/SSE server and supplies the real world: provider calls, persistence, connectors, approvals, process custody.
+3. **Packaged host** (`hosts/anima`): the installable `anima` program. It supervises the daemon, adds a tray icon and a self-updater, and embeds the web console.
+4. **Surfaces**: the TypeScript SDK, CLI, TUI, web console and playground. They are thin clients of the daemon over HTTP/SSE and embed no execution engine.
+
+The repo previously carried a TypeScript runtime, a mod system, an agency generator and placeholder Elixir/Python hosts. They were removed; the Rust daemon is the only host.
 
 ## Design Philosophy
 
-- **Core defines behavior, hosts provide reality.** The core has zero I/O dependencies. All external concerns (HTTP, databases, filesystem) are abstracted behind traits.
-- **Host-agnostic.** The SDK, CLI, and TUI work with any host implementing the HTTP contract. The Rust daemon is the reference implementation.
-- **Memory-first.** Agents have long-term memory with BM25 + vector + temporal + relationship search. This is not an afterthought — it is a first-class primitive.
-- **Composable.** Agents are built from tools, providers, evaluators, and plugins. Swarms are built from agents + strategies.
+- **Core defines behavior, hosts provide reality.** `anima-core` does no I/O. External concerns (model calls, storage, tools) arrive through traits such as `ModelAdapter`, `Provider`, `Evaluator` and `DatabaseAdapter`.
+- **One host, thin clients.** The SDK, CLI, TUI, web console and playground talk to the daemon on `127.0.0.1:8080` (dev) or `8787` (installed). Host selection for dev lives in `tools/workspace-dev` only.
+- **Memory is a first-class primitive.** Agents have BM25 plus vector plus relationship plus temporal recall, owner-editable core memory, and conversation reviews. See [anima-memory](/architecture/rust-core/anima-memory/).
+- **The owner stays in control.** Tool calls are risk-classed and gated by per-agent approval policy; owner-only routes require a loopback bind and an approved browser origin or an admin token. See [Runs and Sessions](/hosts/rust-daemon/runs/).
 
 ## Repo Boundaries
 
 | Directory | Purpose | Language |
 |-----------|---------|----------|
-| `packages/core-rust/` | Rust engine: `anima-core`, `anima-memory`, `anima-swarm`, and related crates | Rust |
-| `packages/sdk/` | TypeScript SDK: `@animaOS-SWARM/sdk` | TypeScript |
-| `packages/cli/` | Command-line interface: `@animaOS-SWARM/cli` | TypeScript |
-| `packages/tui/` | Ink terminal UI: `@animaOS-SWARM/tui` | TypeScript |
-| `packages/ui/` | Shared React UI components | TypeScript |
-| `hosts/rust-daemon/` | Production-ready Rust host (Axum HTTP/SSE) | Rust |
-| `apps/docs/` | Public user-facing documentation site | Astro |
-| `apps/contributor-docs/` | This site — contributor documentation | Astro |
+| `packages/core-rust/` | Rust crates: `anima-core`, `anima-memory`, `anima-swarm`, `anima-schedule`, `anima-harness`, `anima-model-adapters`, `anima-service-adapters`, `anima-document-content`, `anima-process`, `anima-acp`, `anima-worktree` | Rust |
+| `packages/sdk/` | `@animaOS-SWARM/sdk`: daemon HTTP/SSE client | TypeScript |
+| `packages/cli/` | `@animaOS-SWARM/cli`: the `animaos` command | TypeScript |
+| `packages/tui/` | `@animaOS-SWARM/tui`: Ink terminal UI | TypeScript |
+| `packages/ui/` | Shared React UI primitives | TypeScript |
+| `hosts/rust-daemon/` | `anima-daemon`: the Rust host (Axum HTTP/SSE) | Rust |
+| `hosts/anima/` | `anima`: installable supervisor, tray, updater | Rust |
 | `apps/web/` | Web console (thin client of the daemon) | TypeScript |
+| `apps/web-e2e/` | Browser tests for the console | TypeScript |
 | `apps/playground/` | Interactive playground | TypeScript |
-| `tools/workspace-dev/` | Dev launcher: `bun dev --host rust` | TypeScript |
+| `apps/docs/` | Public user-facing documentation site | Astro |
+| `apps/contributor-docs/` | This site | Astro |
+| `tools/workspace-dev/` | Dev launcher behind `bun dev` | TypeScript |
+| `tools/memory-eval/`, `tools/release/` | Memory benchmark scripts; release signing and docs | JS / shell |
+| `deploy/vps/` | Docker Compose and Caddy package for a one-owner VPS | Config |
 
 ## Key Rules
 
-- **Do not move reusable code into `hosts/`.** If multiple hosts could use it, it belongs in `packages/`.
-- **Do not make core depend on HTTP frameworks or DB drivers.** All external concerns are traits.
-- **TypeScript surfaces are thin clients.** The SDK, CLI, TUI, web console, and playground talk to the Rust daemon over HTTP/SSE; they do not embed an execution engine.
-- **Hosts are swappable.** The SDK, CLI, and TUI work with any host implementing the HTTP contract.
+- **Do not move reusable code into `hosts/`.** If it could serve more than one host, it belongs in `packages/`.
+- **Do not make `anima-core` depend on an HTTP framework, DB driver or host runtime.**
+- **Keep host selection centralized** in `tools/workspace-dev`; do not hardcode host ports or project names in UI or client packages.
+- **TypeScript surfaces are thin clients.** Behavior changes go in the daemon, not in the SDK or console.
 
 ## Getting Started
 
@@ -55,9 +58,9 @@ animaOS is a host-agnostic agent runtime. The architecture has three layers:
 
 1. **Install prerequisites**
 
-   - [Bun](https://bun.sh) (latest)
+   - [Bun](https://bun.sh) (the repo pins `bun@1.3.8`)
    - [Rust](https://rustup.rs) (stable)
-   - [cargo-nextest](https://nexte.st) (optional but recommended)
+   - [cargo-nextest](https://nexte.st) (optional)
 
 2. **Clone and install**
 
@@ -67,49 +70,35 @@ animaOS is a host-agnostic agent runtime. The architecture has three layers:
    bun install
    ```
 
-3. **Verify toolchains**
-
-   ```bash
-   cargo --version
-   rustc --version
-   bun --version
-   ```
-
-4. **Start the dev environment**
+3. **Start the dev environment**
 
    ```bash
    bun dev --host rust
    ```
 
-   This starts the Rust daemon, web UI, playground, public docs, and contributor docs.
+   This starts the Rust daemon on `127.0.0.1:8080`, the web console (`4200`), the playground (`4201`), the public docs (`4321`) and these contributor docs (`4322`). The daemon keeps its data across restarts; see [Development](/workflow/dev/).
 
-5. **Run tests**
+4. **Run the checks for what you changed**
 
    ```bash
-   # Rust
-   cargo test --workspace
+   # Rust host or core crates
+   bun x nx run rust-daemon:test --skipNxCache
 
-   # TypeScript
-   bun x nx run-many -t test
+   # TypeScript packages
+   bun x nx test @animaOS-SWARM/sdk
    ```
 
 </Steps>
 
 ## Contribution Workflow
 
-1. **Open an issue first** for large changes (new crates, breaking API changes, new hosts).
-2. **Branch from `main`** — `git checkout -b feature/description`.
-3. **Write tests** for Rust core changes and TypeScript package changes.
-4. **Run affected tests** before pushing:
-   ```bash
-   bun x nx affected:test
-   ```
-5. **Update docs** if you change public APIs or architecture.
+1. **Open an issue first** for large changes (new crates, breaking API changes).
+2. **Branch from `main`.**
+3. **Write tests** for meaningful behavior and regression risks.
+4. **Run the verification commands** for the area you changed (see [Testing](/workflow/testing/)). Do not claim completion until they pass in the current tree.
+5. **Update docs** when you change public APIs, routes, env vars or architecture.
 6. **PR description** should reference the issue and explain the change.
 
 ## Code Review
 
-- All PRs require at least one review.
-- CI runs `cargo test --workspace`, `bun x nx affected:test`, and docs builds.
-- Rust changes: run `bun x nx run rust-daemon:test --skipNxCache`.
-- On Windows, if the binary is locked: `CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache`.
+CI (`.github/workflows/ci.yml`) runs `nx format:check` against `main`, then `bun x nx run-many -t lint test build typecheck e2e-ci`. For Rust changes, run `bun x nx run rust-daemon:test --skipNxCache` locally first. On Windows, if a running daemon locks the binary, use `CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache`.

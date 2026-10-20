@@ -1,53 +1,55 @@
 ---
 title: History & Resume
-description: Saved runs, retry flows, and resumed-session behavior in the animaOS TUI
+description: Saved runs, resuming, retrying and undoing deletes in the animaOS TUI
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-The TUI keeps local launch history so prior agency runs can be inspected and retried instead of disappearing once the session ends.
+`animaos launch` keeps a local record of the tasks it runs, so you can reopen a result, rerun a task or give a run a name after the session ends.
 
 ## Where History Lives
 
-For agency workspaces launched through `animaos launch`, run history is stored in:
+For a workspace launched with `animaos launch`, history is stored in `anima-history.json` next to `anima.yaml`. The newest 100 entries are kept. Each entry records the task, its result text, whether it failed, a timestamp and an optional label. Both TUI and `--no-tui` launches append to it.
 
-```text
-anima-history.json
-```
+When an interactive session starts and the file has entries, the TUI opens the most recent one as a resumed result.
 
-That file lives next to `anima.yaml` in the agency directory.
+<Aside type="note">
+  History is local CLI state, not a daemon API. Conversation history on the daemon (sessions and messages) is separate; see [Sessions & Runs](/sdk/sessions/).
+</Aside>
 
-## What History Gives You
+## Browsing
 
-- browse earlier runs with `/history`
-- inspect saved output without rerunning the task immediately
-- reopen a prior run after restarting the CLI
-- retry recent work with `/retry` when retry is available
+- `/history` opens the run browser with the newest run selected.
+- `/resume` opens the browser for resuming: named runs first, then the rest newest first, with the first one selected.
+- `/resume <label>` opens a run directly. Matching tries an exact label, then a prefix, then a substring. With several matches, the TUI shows up to three and you pick with Ctrl+N, Ctrl+P and Ctrl+Y; with none, it suggests the closest labels.
+- Ctrl+O opens saved runs between tasks.
+
+In the browser: `↑` and `↓` move, `/` searches task and result text (`n` and `N` jump between matches), Enter opens the selected run, `r` retries it, and `q`, `b` or Esc returns.
 
 ## Resumed Views
 
-When you reopen a saved or recent run, the TUI can switch into a resumed-session inspection state. From there:
+Opening a run shows its task and result. From there:
 
-- `/back` returns to the main session surface
-- `/retry` reruns the prior task when the daemon is healthy
-- `/clear` clears the current surface
+- `/back` returns to the swarm view.
+- `/retry` reruns the task when the daemon is healthy. While the daemon is down it is unavailable, and `/health` rechecks.
+- `/rename <label>` names the run so you can find it again with `/resume`.
+- `/delete` removes it.
 
-## Failure and Recovery Cases
+## Naming, Deleting and Undoing
 
-History is especially useful when local runtime work is messy:
+Names are labels you set with `/rename`; a label already used by another run is refused, and the TUI suggests the next free one. In the resume browser, `x` deletes the selected run (press it again to confirm). From the input bar, `/delete <label>` needs an exact label and asks you to repeat the command; any other command cancels the pending delete.
 
-- the daemon was temporarily down
-- you want to compare current behavior against a prior run
-- you want to rerun the last task without rebuilding the workspace context by hand
+Deleted runs go into an undo queue of up to five. `/undo` (or `u` in the resume browser) restores the most recent one, `/undo-status` shows the queue, and `/undo-drop` (or `D`, pressed twice) discards the oldest queued entry. The queue lives in memory for the session. After a delete or a rename the history file is rewritten.
 
-<Aside type="note">
-  History is local CLI session state, not a database-backed host history API. It complements the daemon rather than replacing host-side persistence.
-</Aside>
+`/clear` empties the session, the undo queue and the history file.
+
+## Retrying
+
+`/retry` reruns the open run's task, or the last task if none is open. A retry is a new run, so it adds a new entry rather than overwriting the old one.
 
 ## Suggested Workflow
 
-1. Launch an agency with `animaos launch`.
+1. Launch a workspace with `animaos launch`.
 2. Run a few tasks.
-3. Use `/history` to inspect prior runs.
-4. Use `/retry` to rerun the last useful task.
-5. Use `/back` to return to the live operator view.
+3. Use `/history` to inspect earlier runs, and `/rename` to name the ones worth keeping.
+4. Next session, use `/resume <label>` and `/retry` to continue.

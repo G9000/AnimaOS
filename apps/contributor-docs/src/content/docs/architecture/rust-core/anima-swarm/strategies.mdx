@@ -1,76 +1,72 @@
 ---
 title: Strategies
-description: Supervisor, RoundRobin, Dynamic, and custom strategies
+description: Supervisor, round-robin and dynamic strategies, and custom strategies
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+A strategy is a function `CoordinatorDispatchContext -> Future<TaskResult<Content>>` (`CoordinatorStrategyFn`). `resolve_strategy(SwarmStrategy)` in `strategies/mod.rs` maps the config's `strategy` to one of the three built-ins. In the daemon, `strategy` is the string `supervisor`, `dynamic` or `round-robin`; anything else is rejected with `strategy must be supervisor, dynamic, or round-robin`.
 
-<Aside type="caution" title="Work in Progress">
-  This contributor documentation is actively being written. Sections may be incomplete, reorganized, or expanded.
-</Aside>
+All three share a few mechanics: workers come from the coordinator's pool (spawned at `start()`), each agent run gets a scoped input (`scoped_task_content`) so retries stay distinguishable, and the strategy's result becomes the dispatch result.
 
 ## Supervisor
 
 ```
-Manager receives input
-  │
-  ├─► Manager delegates subtasks to workers
-  │   Workers execute and return results
-  │
-  ├─► Manager reviews all worker results
-  │
-  └─► Manager synthesizes final answer
+Manager receives the task and two tools: delegate_task, delegate_tasks
+  ├─ delegate_task(worker_name, task)          → one worker runs the subtask
+  └─ delegate_tasks(delegations: [{worker_name, task}, ...])
+                                                → workers run concurrently
+Manager reads the results and writes the final answer
 ```
 
-The manager has a special system prompt that instructs it to delegate, review, and synthesize. Workers receive only their assigned subtask.
+- The manager's system prompt is extended with the worker names and synthesis guidelines: surface disagreement rather than force consensus, attribute strong claims, present multiple defensible answers as alternatives.
+- `max_parallel_delegations` (default: worker count, at least 1) bounds concurrent delegations with a semaphore, within a batch and across calls.
+- `max_turns` is applied as the manager's `max_tool_iterations`, so it caps how many tool rounds (delegations) the manager can make before the runtime's tool-free wrap-up.
+- An unknown worker name returns an error result listing the available workers. A batch returns one text line per delegation (`[worker] text` or `[worker] Error: ...`) plus metadata (`delegationCount`, `parallelLimit`, `results`); if any failed, the batch result is an error with `one or more delegated subtasks failed`.
+- The result is the manager's final result.
 
-## RoundRobin
+## Round-Robin
 
 ```
-Input → Worker 1 → Worker 2 → ... → Worker N
+Turn 0: manager gets the task
+Turn n: next agent in [manager, worker 1, ..., worker N] gets
+        "Continue working on this task: <task> ... It's your turn to contribute."
+        plus the conversation so far
 ```
 
-Each worker sees the previous worker's output as context. The last worker produces the final answer. Good for pipeline-style workflows (e.g., draft → edit → review).
+- The rotation includes the **manager**, then every worker, wrapping around, for exactly `max_turns` turns (default `workers + 1`, so one pass). `max_turns = 0` is an error.
+- A failed turn is recorded as `Error: ...` in the history and the rotation continues. At the end, the result text is `[speaker]: text` blocks joined by blank lines, with metadata `history` (and `errors` when any). If any turn failed, the status is `Error` with a combined message but the content is still returned.
+- There is no synthesis step: the output is the transcript.
 
 ## Dynamic
 
 ```
-Manager receives input
-  │
-  ├─► Manager analyzes input and worker capabilities
-  ├─► Manager dynamically assigns tasks
-  │   Workers execute in parallel where possible
-  │
-  ├─► Manager monitors progress
-  ├─► Manager may re-assign or spawn additional workers
-  │
-  └─► Manager synthesizes final answer
+Manager gets one tool: choose_speaker(agent_name, instruction)
+  ├─ agent_name = a worker → that worker runs with the instruction + "Conversation so far"
+  └─ agent_name = "DONE"   → returns "DONE"; the manager then writes its final synthesis
 ```
 
-The dynamic strategy uses the `StrategyContext` to make decisions:
-
-```rust
-pub struct StrategyContext {
-    pub input: Content,
-    pub swarm_state: SwarmState,
-    pub worker_results: Vec<(AgentId, TaskResult)>,
-    pub iteration: u32,
-    pub max_iterations: u32,
-}
-```
+- The manager decides who speaks next and when to stop. `max_turns` caps the manager's tool iterations, hence the number of `choose_speaker` calls.
+- Each speaker sees the shared history (`[speaker]: text` lines). Errors are added to the history as `Error: ...`.
+- The result is the manager's final result.
 
 ## Custom Strategies
 
-Implement `StrategyFn` to create your own:
+Write a function with the `CoordinatorStrategyFn` shape and build the coordinator with `SwarmCoordinator::with_hooks`:
 
 ```rust
-pub type StrategyFn = Box<
-    dyn Fn(&StrategyContext) -> StrategyDecision + Send + Sync,
->;
+use anima_swarm::coordinator::{CoordinatorDispatchContext, CoordinatorFuture};
+use anima_core::{Content, TaskResult};
 
-pub enum StrategyDecision {
-    Delegate { agent_id: AgentId, task: Content },
-    Synthesize { agent_id: AgentId },
-    Done { result: Content },
+fn first_worker_only(ctx: CoordinatorDispatchContext) -> CoordinatorFuture<TaskResult<Content>> {
+    Box::pin(async move {
+        let Some(config) = ctx.worker_configs().first().cloned() else {
+            return TaskResult::error("no workers", 0);
+        };
+        match ctx.spawn_agent(config).await {
+            Ok(worker) => worker.run_content(ctx.scoped_task_content("first-worker")).await,
+            Err(error) => TaskResult::error(error, 0),
+        }
+    })
 }
 ```
+
+The context exposes `task()`, `task_content()`, `scoped_task_content(scope)`, `scoped_text_content(scope, text)`, `manager_config()`, `worker_configs()`, `max_turns()`, `max_parallel_delegations()`, `message_bus()`, `spawn_agent(config)` and `spawn_manager(config, delegate_task, delegate_tasks)`. The daemon only exposes the three built-in strategies over HTTP; custom strategies are for embedders.

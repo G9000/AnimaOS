@@ -1,0 +1,67 @@
+---
+title: Supporting Crates
+description: anima-service-adapters, anima-document-content, anima-process, anima-acp and anima-worktree
+---
+
+Five crates support the daemon's tools. They are reusable libraries, kept in `packages/core-rust` so another host could use them. None implements HTTP routes or owns agent policy; the daemon decides authority, approvals and persistence.
+
+| Crate | Depends on | Purpose |
+|-------|-----------|---------|
+| `anima-service-adapters` | `anima-core` | Passive contracts and validation: browser, connectors, community bundles, speech and transcription, documents, token-cost estimation |
+| `anima-document-content` | `anima-service-adapters` | DOCX, PDF and XLSX text extraction from bytes |
+| `anima-process` | none | Process custody, PTY app sessions |
+| `anima-acp` | `anima-process` | Agent Client Protocol client |
+| `anima-worktree` | none | Git worktree isolation for helper agents |
+
+## anima-service-adapters
+
+"This crate depends on the engine; the engine never depends on this crate." It defines data, bounds and traits; hosts implement transports and enforce authority.
+
+| Module | Contents |
+|--------|----------|
+| `browser` | `BrowserScope`, `BrowserOperation`, `BrowserObservation`, `BrowserPort` and strict, bounded decoders and digests (for example 16 routes, 40 actions, 80 requests, 120 s per scope, 128 observation nodes). A scope is admission data, not an owner grant; the crate launches no browser. |
+| `connectors` | `ConnectorDescriptor` (protocol id, contract revision, display name, transport kind `polling`, operations `identify` / `receive` / `send`, source), `ConnectorTransport` (host-implemented), `ConnectorFailure` / `ConnectorErrorKind`, and an immutable `ConnectorRegistry` metadata catalog. Descriptors never carry credentials or agent bindings. |
+| `community_bundles` | `CommunityManifest` (schema version, id, version, compatibility, requested permissions, attribution, up to 4 components: at most 2 MCP and 2 skill). Manifests are at most 128 KiB; a bundle describes content and requested permissions and confers no authority. |
+| `document_content` | `DocumentFormat` (`Docx`, `Pdf`, `Xlsx`), locators and `ExtractedDocumentText`, with bounds: 16 KiB rendered text, at most 10 snapshots (2 usable), 100 PDF pages, 16 XLSX sheets, 2,000 XLSX cells |
+| `audio_content`, `speech` | `TranscriptionPort`, `SpeechPort`, WAV validation, duration and size bounds |
+| `context` | `ServiceTokenEstimator`: ordinary engine token costs plus the exact derived document text sent to the model (document bytes are never discounted by calibration) |
+
+## anima-document-content
+
+`extract_document(format, bytes)` dispatches to `extract_docx`, `extract_pdf` or `extract_xlsx`. It uses `rawzip`, `quick-xml`, `flate2` and `pdf-extract`, and exposes no filesystem, process, network, OCR or password APIs. XLSX extraction reads stored cells and hidden-sheet metadata; it never evaluates formulas.
+
+The crate's own warning matters: PDF dependencies build internal objects, so input and output bounds and panic containment **do not bound their memory or wall time**. Production callers must run extraction in a physically limited, owned worker process. The daemon does: `anima-daemon --document-worker-v2` is the worker entry point (`src/main.rs`), run under the daemon's admission and deadline policy (Windows only today; other hosts report document extraction as unavailable).
+
+## anima-process
+
+Process custody: launch a program so its whole process tree can be stopped and proven gone.
+
+- `Custody::prepare(executable, args)` builds the containment and the command. `Containment` reports the guarantee: `JobObject` (Windows background commands), `Cgroup` (Linux with a delegated cgroup v2), `ProcessGroup` (macOS and Linux without delegation; a descendant that calls `setsid` escapes) or `ProcessTree` (Windows app sessions, killed with `taskkill /T /F`; a descendant whose parent already exited is missed).
+- `session::AppSession` runs a program on a real terminal: ConPTY on Windows, a PTY elsewhere (`portable-pty`), with a `vt100` screen model. `AppSession::start(AppSessionConfig)`, `send(text, keys)`, `screen()`, `output_since(cursor, max_bytes)`, `wait(from, WaitFor)` (text, regex, or output settled), `resize`, `exit`, `idle_for`, `stop`. On Unix the session answers terminal queries that full-screen apps block on (cursor position, size, status, device attributes).
+
+The daemon's `app_start` / `app_send` / `app_read` / `app_stop` and `bg_*` tools are built on it. See [Coding Apps and Helpers](/hosts/rust-daemon/coding/).
+
+## anima-acp
+
+A host-agnostic client for the [Agent Client Protocol](https://agentclientprotocol.com): drive a coding agent (Claude Code, Codex, OpenCode, Gemini CLI through their ACP adapters) with typed events, real cancel, and permission requests routed to the host's own approvals.
+
+- Why its own JSON-RPC (`rpc.rs`) rather than Zed's crate: that crate brings a different runtime stack and spawns the agent itself, while every owner-launched program here must run under `anima_process::Custody` so Stop can prove the tree gone.
+- Implemented client surface: `initialize`, `session/new` and `session/load`, `session/prompt`, `session/cancel`, `session/update`, and serving `fs/read_text_file`, `fs/write_text_file` and `session/request_permission`. Unknown fields are ignored. No `terminal/*` is offered (agents use their own shell, inside the custody tree). `authenticate` is never called: an agent that needs a login surfaces as `AcpError::AuthRequired`.
+- API: `AcpSession::start(AcpLaunch, Arc<dyn AcpClientHost>)`, `prompt(text) -> PromptHandle`, `wait`, `status`, `events_since(cursor)`, `cancel`, `stop`. The host implements `AcpClientHost` (file access, permission decisions). A fake agent binary (`fake-acp-agent`) backs the crate's tests only.
+
+## anima-worktree
+
+Creates and inspects git worktrees for helper agents by driving the `git` CLI through a hardened wrapper (hooks, fsmonitor, filters, pagers, credential helpers and global config disabled; 30-second default timeout per call).
+
+- Layout: `<repo top level>/.worktrees/anima-helper-<name>` on branch `anima-helper/<name>`, from the current `HEAD`. `.worktrees/` is excluded through `<git-common-dir>/info/exclude`, so no tracked file changes. Names match `[a-z0-9-]{1,40}`.
+- `Worktrees::create(repo_dir, name)`, `inspect(&Worktree) -> Outcome` (changed files up to 200, `git diff --stat` up to 8 KiB, `is_clean()`), `finish` (remove a clean worktree and branch, keep one with work) and `sweep(repo_dir, live)` for stale clean ones.
+
+The daemon wires it to `spawn_helper` / `spawn_helper_async` with `worktree: true`.
+
+## Tests
+
+```bash
+cargo test -p anima-service-adapters -p anima-document-content -p anima-process -p anima-acp -p anima-worktree
+```
+
+Process and PTY tests spawn real short-lived processes; worktree tests use temporary git repositories.

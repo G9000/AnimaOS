@@ -5,213 +5,190 @@ description: How to test each part of the animaOS monorepo
 
 import { Aside } from '@astrojs/starlight/components';
 
-<Aside type="caution" title="Work in Progress">
-  This contributor documentation is actively being written. Sections may be incomplete, reorganized, or expanded.
-</Aside>
+Run commands from the repo root. Prefer the Nx targets; they run the same cargo and vitest commands CI uses. `AGENTS.md` lists the required verification per area, and a change is not done until those commands pass in the current tree. Prefix with `NX_TUI=false` for quieter output, and add `--skipNxCache` when you need a real re-run.
+
+## What to Run
+
+| You changed | Command |
+|-------------|---------|
+| Rust host or core crates | `bun x nx run rust-daemon:test --skipNxCache` |
+| Core crates only | `bun x nx run core-rust:test --skipNxCache` |
+| Packaged program (`hosts/anima`) | `bun x nx run anima:test` |
+| Dev launcher | `bun x nx test workspace-dev --runInBand --skipNxCache` |
+| A TypeScript package | `bun x nx test <project>` plus `typecheck` and `build` |
+| Public docs | `bun x nx run @animaOS-SWARM/docs:build --skipNxCache` |
+| Contributor docs | `bun x nx run @animaOS-SWARM/contributor-docs:build --skipNxCache` |
 
 ## Rust Core
 
-### Unit Tests
-
 ```bash
-# All Rust core tests
-cargo test --workspace
+# All eleven core crates (cargo test -p ... with target dir target/core-rust/test)
+bun x nx run core-rust:test
 
-# Individual crates
+# One crate, or one module
 cargo test -p anima-core
-cargo test -p anima-memory
+cargo test -p anima-memory memory_manager::tests
 cargo test -p anima-swarm
 
-# With nextest (faster, better output)
-cargo nextest run --workspace
+# nextest, if installed
+cargo nextest run -p anima-memory
 
-# With filter
-cargo test -p anima-memory memory_manager::tests::test_recall
+# Everything in the Cargo workspace, daemon and packaged program included
+cargo test --workspace
 ```
 
-### Memory Benchmark
+`core-rust:test` covers `anima-core`, `anima-service-adapters`, `anima-model-adapters`, `anima-memory`, `anima-schedule`, `anima-swarm`, `anima-harness`, `anima-document-content`, `anima-process`, `anima-acp` and `anima-worktree`. Some crates have integration tests under `tests/` (for example `anima-harness/tests/harness.rs`, `anima-model-adapters/tests/durable_engine_provider_loop.rs`) and `anima-acp` builds a fake ACP agent binary for its tests.
+
+### Memory evaluation
 
 ```bash
-# LoCoMo eval (long-context memory benchmark)
-bun x nx run core-rust:memory-locomo --skipNxCache
+# Fast deterministic regression gate (baseline_memory_eval_cases_pass)
+NX_TUI=false bun x nx run core-rust:memory-eval --skipNxCache
 
-# Baseline eval harness
-bun x nx run core-rust:memory-eval --skipNxCache
+# Temporal fact and relationship CRUD and supersession
+cargo test -p anima-memory temporal -- --nocapture
+
+# LoCoMo-style smoke benchmark (feature "locomo-eval")
+NX_TUI=false bun x nx run core-rust:memory-locomo --skipNxCache
+
+# Download the public dataset into .cache/locomo (git-ignored), then run the full retrieval benchmark
+NX_TUI=false bun x nx run core-rust:memory-locomo-fetch --skipNxCache
+NX_TUI=false bun x nx run core-rust:memory-locomo-dataset --skipNxCache
+
+# End-to-end agent benchmark with real model calls (expensive; needs real provider config)
+NX_TUI=false bun x nx run rust-daemon:memory-locomo-agent --skipNxCache
 ```
 
-The LoCoMo eval measures:
-- Recall precision at K=5, 10, 20
-- Latency per query
-- Memory usage at 1k, 10k, 100k memories
+Thresholds and tunables (`LOCOMO_*` variables, `ANIMAOS_RS_MEMORY_QUERY_EXPANDER=locomo`) are documented in `docs/testing.md`. The dataset targets compile `anima-memory` with `locomo-eval`. The agent benchmark fails without real providers; it never falls back to the deterministic model. A no-default-features portability check: `CARGO_TARGET_DIR=target/validation-memory-no-default cargo test -p anima-memory --no-default-features`.
 
-### Mocking in Rust Tests
+### Node oracles and the browser worker
 
-The core uses trait objects for all external dependencies, making mocking straightforward:
+`core-rust` also has Node-based targets that run `node --test`: `browser-worker-test` (the Playwright worker in `browser-worker/`), `coding-acceptance-test` (`acceptance/coding-m47`), `coding-acceptance-m87-test`, `coding-reliability-test` (`coding-m86`), `provider-task-acceptance-test` (`provider-task-m52`) and `research-acceptance-test` (`research-m84`). They are not cached and not parallel.
+
+### Mocking in Rust tests
+
+The core uses traits for every external dependency, so tests inject fakes. A model adapter only needs `provider` and `generate`; `stream` falls back to `generate`:
 
 ```rust
-#[derive(Default)]
-struct MockModelAdapter {
-    responses: Vec<ModelGenerateResponse>,
-}
+struct Scripted(ModelGenerateResponse);
 
 #[async_trait]
-impl ModelAdapter for MockModelAdapter {
-    async fn generate(&self, _req: ModelGenerateRequest) -> Result<ModelGenerateResponse, String> {
-        Ok(self.responses.get(0).cloned().unwrap())
+impl ModelAdapter for Scripted {
+    fn provider(&self) -> &str { "scripted" }
+    async fn generate(&self, _c: &AgentConfig, _r: &ModelGenerateRequest)
+        -> Result<ModelGenerateResponse, String> {
+        Ok(self.0.clone())
     }
 }
 
 #[tokio::test]
-async fn test_agent_run() {
-    let adapter = Arc::new(MockModelAdapter::default());
-    let runtime = AgentRuntime::new(config, adapter.clone());
-    let result = runtime.run("Hello").await;
-    assert!(result.status == TaskStatus::Success);
+async fn run_succeeds() {
+    let mut runtime = AgentRuntime::new(config(), Arc::new(Scripted(end_response("hi"))));
+    let result = runtime.run(Content { text: "hello".into(), ..Content::default() }).await;
+    assert_eq!(result.status, TaskStatus::Success);
 }
 ```
+
+For provider HTTP code, `anima-model-adapters` tests run local `axum` servers. For the daemon, use the in-process router constructors (`app_with_config` and friends use a deterministic model adapter).
 
 ## Rust Daemon
 
 ```bash
-# Standard test run
+# Standard run: core-rust:test first, then cargo test -p anima-daemon
 bun x nx run rust-daemon:test --skipNxCache
 
-# On Windows, if the binary is locked by a running process:
+# Format check
+bun x nx run rust-daemon:lint --skipNxCache
+
+# Windows, when a running daemon locks target/debug/anima-daemon.exe
 CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache
 ```
 
 <Aside type="note">
-  The Windows workaround uses a separate target directory so the running binary and test binary don't conflict.
+  The Windows workaround uses a separate target directory so the running binary and the test binary do not conflict. In PowerShell set `$env:CI="1"` and `$env:CARGO_TARGET_DIR="target/validation-rust-daemon"` first (and clear them afterwards).
 </Aside>
 
-### Integration Tests
-
-Daemon integration tests start the full Axum server and make HTTP requests:
-
-```rust
-#[tokio::test]
-async fn test_create_agent() {
-    let app = create_test_app().await;
-    let client = TestClient::new(app);
-    
-    let response = client
-        .post("/api/agents")
-        .json(&json!({"name":"test","model":"gpt-4o"}))
-        .send()
-        .await;
-    
-    assert_eq!(response.status(), 201);
-}
-```
+Daemon tests live in `hosts/rust-daemon/tests/` (HTTP-level: `agent_api`, `connector_api`, `memory_api`, `schedule_api`, `swarm_api`, `workspace_api`, `health`, `document_worker`, `step_log_integration`) and in `*_tests.rs` files beside the modules. They build routers in process, use deterministic model adapters, fake connector transports and credential stores, temporary stores and random ports, and never call real providers, open real accounts or start containers. Connector tests follow `CONNECTOR-CONTRIBUTING.md`: injected fakes and deterministic barriers, no real services, no reading user profiles or secrets. `step_log_integration` is `#[ignore]`d because it needs a `DATABASE_URL`-backed Postgres; run it deliberately with `cargo test -p anima-daemon --test step_log_integration -- --ignored`.
 
 ## TypeScript Packages
 
 ```bash
-# SDK
 bun x nx test @animaOS-SWARM/sdk
-
-# TUI
 bun x nx test @animaOS-SWARM/tui
-
-# CLI
 bun x nx test @animaOS-SWARM/cli
+bun x nx test @animaOS-SWARM/web
+bun x nx typecheck @animaOS-SWARM/sdk
 
-# All TypeScript tests
-bun x nx run-many -t test -p @animaOS-SWARM/sdk @animaOS-SWARM/tui @animaOS-SWARM/cli
+# Everything
+bun run test
+bun run typecheck
 ```
 
-### Vitest Configuration
+Tests use Vitest. Each project has a `vitest.config.mts`; `vitest.workspace.ts` collects them. Mock `fetch` for SDK and CLI tests; the SDK's `*.spec.ts` files next to each module are the model to follow. When you change a daemon route or response shape, update the matching SDK module and spec.
 
-Tests use Vitest with the workspace config in `vitest.workspace.ts`:
-
-```typescript
-export default [
-  '**/vite.config.{mjs,js,ts,mts}',
-  '**/vitest.config.{mjs,js,ts,mts}',
-];
-```
-
-### Mocking HTTP Calls
-
-Use `msw` or simple `fetch` mocks:
-
-```typescript
-import { vi } from 'vitest';
-
-beforeEach(() => {
-  globalThis.fetch = vi.fn().mockResolvedValue({
-    ok: true,
-    json: () => Promise.resolve({ status: 'ok' }),
-  });
-});
-```
-
-### Mocking the Event Bus
-
-The TUI exports `EventBus` and the `IEventBus` interface. Components and hooks such as `App` and `useEventLog` take an `IEventBus`, so a test can pass a mock:
+The TUI exports `EventBus` and the `IEventBus` interface (`on`, `emit`, `clear`), so components and hooks take a mock:
 
 ```typescript
 import { vi } from 'vitest';
 import type { IEventBus } from '@animaOS-SWARM/tui';
 
-const mockEventBus: IEventBus = {
+const bus: IEventBus = {
   on: vi.fn(() => () => {}),
   emit: vi.fn().mockResolvedValue(undefined),
   clear: vi.fn(),
 };
 ```
 
+## Browser Journeys
+
+`apps/web-e2e` covers the console with Playwright. The offline journeys need no daemon, dev server or database: fake APIs fulfill routes and real SSE bytes go through the SDK parser.
+
+```bash
+bun x nx run @animaOS-SWARM/web-e2e:e2e-console --skipNxCache
+bun x nx run @animaOS-SWARM/web-e2e:typecheck --skipNxCache
+bun x nx run @animaOS-SWARM/web-e2e:deployment-contracts --skipNxCache
+```
+
+CI runs `e2e-ci` through `nx run-many`. The service-starting suites (`e2e`, companion configuration) use preview and dev servers and are kept for separately authorized runtime testing. Simulated passes do not establish real HTTP chunking, selected-model streaming, microphone behavior or container restarts; see `deploy/vps/README.md` for manual acceptance.
+
 ## Dev Launcher
 
 ```bash
-# Tests for the workspace-dev launcher
 bun x nx test workspace-dev --runInBand --skipNxCache
 ```
 
-These tests verify:
-- Host argument parsing
-- Process orchestration
-- Graceful shutdown behavior
+These tests cover host selection and argument parsing, the persistence environment for the dev daemon, process orchestration and graceful shutdown, and the daemon build and signing arguments (`hosts.spec.ts`, `main.spec.ts`, `process.spec.ts`, `rust-daemon-dev.spec.ts`).
 
 ## Docs
 
 ```bash
-# Build public docs (catches MDX errors, broken links, etc.)
+# Catches MDX errors and broken sidebar links
 bun x nx run @animaOS-SWARM/docs:build --skipNxCache
-
-# Build contributor docs
 bun x nx run @animaOS-SWARM/contributor-docs:build --skipNxCache
 ```
 
+## Diff Hygiene
+
+```bash
+git --no-pager diff --check
+```
+
+On Windows this can print LF-to-CRLF warnings; conflict markers and trailing-whitespace errors are the blocking problems. Git Bash accepts inline `NX_TUI=false command`; in PowerShell set `$env:NX_TUI="false"` first.
+
 ## Continuous Integration
 
-The CI pipeline runs:
-1. `cargo fmt --check` — Rust formatting
-2. `cargo clippy --workspace` — Rust linting
-3. `cargo test --workspace` — Rust unit tests
-4. `bun x nx affected:test` — TypeScript tests
-5. `bun x nx run @animaOS-SWARM/docs:build` — docs build
-6. `bun x nx run @animaOS-SWARM/contributor-docs:build` — contributor docs build
+`.github/workflows/ci.yml` runs on pushes to `main` and on pull requests:
 
-## Test Patterns
+1. `bun install --frozen-lockfile`
+2. `nx format:check --base=remotes/origin/main`
+3. `bun x nx run-many -t lint test build typecheck e2e-ci`
 
-### Rust
+Nx Cloud distributes the work. The Rust targets (`core-rust`, `rust-daemon`, `anima`) are part of `run-many`. Releases have their own workflows (`release.yml`, `sign-release.yml`).
 
-- Core tests should not depend on I/O. Mock `ModelAdapter` and `DatabaseAdapter`.
-- Use `tokio::test` for async tests.
-- Use `insta` for snapshot testing where appropriate.
-- Use `pretty_assertions` for better diff output.
+## Golden Rules
 
-### TypeScript
-
-- Use Vitest (configured at the workspace root).
-- Mock HTTP calls with `msw` or simple `fetch` mocks.
-- Test helpers are in `packages/sdk/test-utils/` if present.
-- Use `expectTypeOf` from `vitest` for type-level tests.
-
-### Golden Rules
-
-1. **Never call real LLM APIs in tests.** Always mock `ModelAdapter`.
-2. **Never write to the filesystem in core tests.** Use `DatabaseAdapter` mocks.
-3. **Tests should be deterministic.** No random seeds, no time-dependent assertions.
-4. **Fast feedback.** A single crate's tests should run in < 10 seconds.
+1. **Never call real LLM APIs or real services in tests.** Inject a mock `ModelAdapter` or transport.
+2. **Never read or write a user's real stores or credentials.** Use temporary directories and in-memory credential stores.
+3. **Deterministic tests.** No random seeds, no wall-clock-dependent assertions; use deterministic barriers and manual clocks.
+4. **Add tests for meaningful behavior and regression risks**, not for trivial edits.
+5. **Fast feedback.** Run the smallest target that covers your change, then the full target before pushing.

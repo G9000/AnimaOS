@@ -1,0 +1,72 @@
+---
+title: Connectors
+description: Telegram, Discord, Google Drive, Calendar, mail, MCP and OAuth apps in the Rust daemon
+---
+
+Connectors are host features in `hosts/rust-daemon/src/connectors/` (plus `mcp/`). They run **inside the daemon**: polling, pairing, delivery, persistence and restart recovery have no second process. Restored, enabled connectors start at boot after job recovery (`start_restored`). Credentials come from the OS credential store; connector records in the control plane never contain secrets.
+
+The portable contract (descriptors, `ConnectorTransport`, bounds) is in `anima-service-adapters` (see [Supporting Crates](/architecture/rust-core/supporting-crates/)). `hosts/rust-daemon/CONNECTOR-CONTRIBUTING.md` is the contributor guide for adding a transport.
+
+## Trust Model
+
+- **Reviewed source only.** Community connectors are source contributions compiled into the host. They run with host privileges and need a rebuild. There is no installer, dynamic ABI, WASM loader or sandbox. Installable modules are deferred.
+- **Descriptors are passive.** The `ConnectorRegistry` (`connectors/registry.rs`) is an immutable metadata catalog; registering a descriptor discovers, activates and authorizes nothing.
+- **Remote input is never authority.** Sender ids, message ids and channel ids are native strings and never grant tool access. The owner decides which chats and users may talk to an agent.
+- **Owner routes only.** Every connector management route is owner-authorized, `no-store`, and (apart from OAuth callbacks) needs an approved origin or admin token. See [Rust Daemon](/hosts/rust-daemon/#request-boundary).
+
+## Telegram
+
+Code: `connectors/telegram.rs` (client), `connectors/runtime/` (manager, workers, inbound, delivery, processing, owner turns), `connectors/adapters/telegram.rs` (transport bridge).
+
+- **Setup.** `POST /api/agents/{id}/connectors/telegram` validates a bot token with Telegram, stores the token in the credential store and saves a record (bot identity, room id, state). `PUT .../connectors/{connector_id}/credential` replaces the token; `restart`, `messages` (list), `messages` (send) and `DELETE` complete the lifecycle. There is no shared token environment variable, and the same bot can be connected to only one copy (dev or installed) at a time.
+- **Pairing.** A first message from an unknown chat creates a pending pairing candidate (valid 10 minutes); the owner approves one chat with `POST .../pairings/{chat_id}/approve`. Only the approved chat can reach the agent.
+- **Intake.** A long-poll worker per connector reads updates, with exponential retry (100 ms up to 30 s) and a 60-second wait when Telegram reports another poller. Inbound updates are admitted durably before the agent runs, and the cursor (`nextUpdateId`) advances with them.
+- **Runs.** A message in the paired private chat runs the agent's owner turn in a dedicated session (`kind: telegram`, source `telegram`). Groups and shared chats do not count as owner turns for conversation reviews. An approval requested by a Telegram-started run waits 15 minutes, not 30, because the connector handles one message at a time.
+- **Delivery.** Replies are recorded in an outbound journal and delivered at least once. Network success followed by a failed save is uncertain and may be retried; a retry reuses the stored text and does not run the model again. A stopped Telegram run whose reply is not yet delivered suppresses it.
+- **Retention.** Delivered rows are kept 7 days (at most 1,000).
+
+## Discord
+
+Code: `connectors/discord/`, `connectors/adapters/discord.rs`.
+
+- **Scope.** One guild text channel per connection plus a non-empty list of permitted user ids. One agent can have several connections, even the same bot in different channels; each has its own conversation, cursor, credential and delivery journal. A second non-deleted connection for the same agent and channel is rejected. Channel or user changes mean disconnect and recreate.
+- **Activation.** New records are saved **disabled**. First activation records a latest-message baseline so earlier history is never dispatched; later enables resume from the saved cursor. Routes: `POST .../connectors/discord`, `PATCH .../discord/{id}`, `PUT .../discord/{id}/credential`, `activate`, `restart`, `retry`, `outbound/suppress`, `DELETE`.
+- **Intake.** A persistent Gateway connection (`twilight-gateway`, owned independently of model runs) signals readiness and channel activity (`GatewaySignal` carries only guild and channel ids). Messages are read through the REST channel API with a bounded backward catch-up that must prove it reached the saved cursor before receipts and the cursor are committed together. An unproven or oversized backlog pauses visibly. Bot, self, webhook and unsupported messages never run the agent. Gateway identify attempts share pacing per verified bot id.
+- **Delivery.** Each reply chunk has a durable send intent and receipt; at most 8 chunks are sent, with a truncation notice if needed, and all mentions are disabled. Ambiguous or partial sends become `Unknown` and are never replayed automatically. Safe retry refuses `Unknown`; the owner checks Discord and explicitly suppresses the uncertain output.
+- **Limits.** Edits, deletions, reactions, threads, slash commands and voice are not observed; a message deleted before polling can be missed. Required bot permissions: View Channel, Read Message History, Send Messages (and the Message Content intent where the portal requires it).
+
+## Google Drive, Calendar and Mail
+
+All three share the OAuth app service (`connectors/oauth_apps.rs`). The owner configures a Google (and, for Outlook, Microsoft) OAuth application in the console (`GET` / `PUT` / `DELETE /api/connectors/oauth-apps/{provider}`) or through `ANIMA_GOOGLE_*` / `ANIMA_MICROSOFT_*` variables, and registers the exact callback URLs shown in the UI under `ANIMA_PUBLIC_BASE_URL`:
+
+| Service | Callback path |
+|---------|---------------|
+| Gmail | `/api/connectors/mail/gmail/callback` |
+| Google Calendar | `/api/connectors/gcalendar/callback` |
+| Google Drive | `/api/connectors/gdrive/callback` |
+| Outlook | `/api/connectors/mail/outlook/callback` |
+
+Callbacks are the only `GET` routes exempt from the API key and the owner check; they authenticate with an expiring, single-use OAuth state. Pending nonces and verifiers are in memory, so a restart invalidates an unfinished consent.
+
+- **Drive** (`connectors/drive/`). On-demand native tools, not a messaging transport. The owner pastes 1 to 16 Drive or Docs links or ids and approves Google's `drive.readonly` scope; Anima then restricts that agent to its immutable selected ids. Only `drive_search` (selected file names) and `drive_read` exist: exact-id metadata, Google Docs exported as plain text, stored UTF-8 plain text, at most 1 MiB streamed and 32,768 characters returned, with source link, timestamps and digests. No listing, folder traversal, writes or indexing. Every read rechecks agent, connector generation, selected ids, account and tool grant. Disconnecting removes local authority and tokens but never revokes Google-wide access.
+- **Calendar** (`connectors/gcalendar/`). OAuth connect, `calendar_list_events` and confirmation-gated writes: `calendar_create_event`, `calendar_update_event` and `calendar_delete_event` create pending write records (at most 50 per agent) that the owner approves or rejects (`.../writes/{write_id}/approve|reject`). There is no polling loop; proactive behavior uses ordinary scheduled prompts.
+- **Mail** (`connectors/mail/`, providers `gmail` and `outlook`). `mail_list_messages` reads; `mail_create_draft` creates a local immutable draft. Sending happens only when the owner approves the draft through the owner route; agents cannot send.
+
+Tokens for these services live in the credential store under generation-specific keys, separate per service.
+
+## MCP
+
+Code: `mcp/` (`records.rs`, `service.rs`, `transport.rs`, `stdio.rs`, `credentials.rs`), built on the `rmcp` client (fixed protocol `2025-11-25`). Reference: `docs/companion/mcp.md`.
+
+- A connection is scoped to one ordinary agent: anonymous or Bearer-authenticated **Streamable HTTP** (HTTPS, or literal loopback HTTP; no redirects or proxies) or an explicitly started **local stdio** process (absolute executable path, at most 32 arguments, no shell strings; **Windows only**: on other platforms the stdio transport reports itself unavailable). At most 4 connections (`MAX_CONNECTIONS`) and 32 reviewed tools (`MAX_REVIEWED_TOOLS`) are kept.
+- Saving, listing or restoring a connection starts nothing. The owner connects, discovers, **reviews** one exact descriptor (a digest check; no grant), then separately adds the reviewed alias to the agent's tool grants.
+- Every external tool is classified as **exec** for approvals; server hints cannot lower it. The dispatcher captures the full reviewed descriptor, connection generation and grant epoch before approval and rechecks them before dispatch and before accepting the result. Helpers inherit no MCP grants.
+- Routes under `/api/agents/{id}/mcp-connections`: create, list, get, patch (compare-and-swap on `expectedVersion`), `connect`, `discover`, `review`, `disconnect`, `PATCH .../grants/{alias}`, `PUT` / `DELETE .../credential`, `DELETE`.
+
+## Community Bundles
+
+`community_bundles/` installs reviewed, declarative bundles (`CommunityManifest` from `anima-service-adapters`): MCP configuration and inline `SKILL.md` drafts. Installation creates **disabled connections and pending content**; the owner still starts connections, grants descriptors and approves each skill by hash. Bundles install no executable artifacts or native connector modules. Routes: `/api/agents/{id}/community-bundles` (list, install, review, update, patch, delete). The coding-agent bundles under `bundles/coding-agents/` are examples. See `docs/companion/community-bundles.md`.
+
+## Tests
+
+Use injected fakes and deterministic barriers; do not start real providers, services or containers, and never read a user's profile or credentials. Reuse the host regressions for pairing, stop and restart, cancellation, credential replacement, durable admission and outbox recovery. Run `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run rust-daemon:lint --skipNxCache`.

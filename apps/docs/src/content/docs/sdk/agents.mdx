@@ -1,20 +1,20 @@
 ---
 title: Agents
-description: Create, run, and manage agents with the animaOS SDK
+description: Create, run, update, and manage agents with the animaOS SDK
 ---
 
 import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
-An **agent** in animaOS is an autonomous LLM-powered runtime with a configuration, state, and optional tools. Agents can run tasks individually or be composed into [swarms](/sdk/swarms/) for multi-agent coordination.
+An **agent** in animaOS is a persistent, LLM-backed runtime registered with the daemon: a configuration, state, a main conversation, memory and a set of tools. Agents run tasks individually or join a [swarm](/sdk/swarms/). The web console and the [Sessions & Runs](/sdk/sessions/) API talk to the same agents.
 
 ## In This Section
 
-- [Lifecycle & Retry](/sdk/agents/lifecycle/) covers create, run, inspect, recent-memory reads, and safe retry keys.
+- [Lifecycle & Retry](/sdk/agents/lifecycle/) covers create, run, update, remove, inspect and safe retry keys.
 - [Tools](/sdk/agents/tools/) covers registering daemon tools by name or descriptor.
 
 ## Agent Configuration
 
-The `AgentConfig` interface defines everything an agent needs to operate. Use the `agent()` helper for typed autocompletion.
+`AgentConfig` is what `client.agents.create()` accepts. The `agent()` helper only types it.
 
 ```typescript
 import { agent } from '@animaOS-SWARM/sdk';
@@ -30,8 +30,7 @@ const config = agent({
   topics: ['AI', 'science'],
   adjectives: ['curious', 'precise'],
   style: 'Concise and technical',
-  tools: [],
-  plugins: [],
+  tools: ['memory_search'],
   settings: {
     temperature: 0.7,
     maxTokens: 2048,
@@ -44,58 +43,57 @@ const config = agent({
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | `string` | ✅ | Unique identifier for the agent |
-| `model` | `string` | ✅ | LLM model identifier (e.g. `gpt-4o-mini`) |
-| `provider` | `string` | — | Provider key: `openai`, `anthropic`, `ollama`, `openrouter` |
-| `system` | `string` | — | System prompt that defines behavior |
-| `bio` | `string` | — | Short biography used in character building |
-| `lore` | `string` | — | Background story / origin context |
-| `knowledge` | `string[]` | — | Domain knowledge topics |
-| `topics` | `string[]` | — | Conversation topics the agent focuses on |
-| `adjectives` | `string[]` | — | Personality descriptors |
-| `style` | `string` | — | Response style guidance |
-| `tools` | `AgentToolInput[]` | — | Daemon tool names or JSON descriptors the agent can invoke (see [Tools](#tools)) |
-| `plugins` | `DaemonPluginDescriptor[]` | — | Plugin descriptors (`name`, `description`) attached to the agent |
-| `settings` | `AgentSettings` | — | Model hyperparameters (see below) |
+| `name` | `string` | yes | Agent name; must not be empty |
+| `model` | `string` | yes | Model identifier, for example `gpt-4o-mini` |
+| `provider` | `string` | no | Provider id such as `openai`, `anthropic`, `google`, `ollama`, `openrouter` (see [Providers & Environment](/cli/providers/)). Omit to use the daemon default |
+| `system` | `string` | no | System prompt |
+| `bio`, `lore`, `style` | `string` | no | Character fields |
+| `knowledge`, `topics`, `adjectives` | `string[]` | no | Character fields |
+| `tools` | `AgentToolInput[]` | no | Daemon tool names or JSON descriptors (see [Tools](/sdk/agents/tools/)) |
+| `plugins` | `DaemonPluginDescriptor[]` | no | Plugin descriptors (`name`, `description`) |
+| `settings` | `AgentSettings` | no | Model parameters (below) |
 
 ### `AgentSettings`
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `temperature` | `number` | — | Sampling temperature (0–2) |
-| `maxTokens` | `number` | — | Maximum tokens per response |
-| `timeoutMs` | `number` | — | Request timeout in milliseconds |
-| `maxRetries` | `number` | — | Retry count on transient failures |
+| Field | Type | Description |
+|-------|------|-------------|
+| `temperature` | `number` | Sampling temperature |
+| `maxTokens` | `number` | Maximum tokens per response |
+| `timeoutMs` | `number` | Request timeout in milliseconds |
+| `maxRetries` | `number` | Retry count on transient failures |
+| `maxToolIterations` | `number` | Cap on tool-call rounds in one run (read by the daemon; not named in the SDK type, which has an index signature) |
+| `[key: string]` | `unknown` | Other keys are kept by the daemon |
 
-<Aside type="note">
-  `AgentSettings` also accepts arbitrary additional keys via `[key: string]: unknown`, allowing provider-specific parameters.
-</Aside>
+Extra keys the daemon recognizes include `apiKey` and `baseUrl` (a per-agent provider credential and endpoint; the CLI sets them), `contextBudgetTokens` and `autoCompact` for conversation context, and `completionReview`. See the daemon README for what each does.
 
 ## Create an Agent
 
 ```typescript
-const myAgent = await client.agents.create(config);
-
-// Returns: AgentSnapshot
-// {
-//   state: AgentState,
-//   messageCount: number,
-//   eventCount: number,
-//   lastTask: TaskResult<Content> | null
-// }
+const snapshot = await client.agents.create(config);
+console.log(snapshot.state.id);
 ```
 
-The agent is persisted by the daemon and can be retrieved later by its `state.id`.
+`create()` returns an `AgentSnapshot`:
 
-## List Agents
+| Field | Type | Description |
+|-------|------|-------------|
+| `state` | `DaemonAgentState` | `id`, `name`, `status`, `config`, `createdAtMs`, `tokenUsage` |
+| `messageCount` | `number` | Messages in the daemon's hot tail (recent history; older messages live in the history store and are read through [sessions](/sdk/sessions/)) |
+| `messages` | `DaemonAgentMessage[]` | The hot-tail messages |
+| `eventCount` | `number` | Events emitted |
+| `lastTask` | `DaemonTaskResult \| null` | Result of the most recent task |
+
+`state.config` is the daemon's normalized view (`DaemonAgentConfig`): optional fields are `null` when unset, `tools` are full descriptors, and `settings` carries `maxToolIterations` and an `additional` map.
+
+## List and Read Agents
 
 ```typescript
-const agents = await client.agents.list();
+const agents = await client.agents.list();          // full snapshots with messages
+const summaries = await client.agents.listSummaries(); // same, without `messages`
+const one = await client.agents.get('AGENT_ID');
 
-for (const snapshot of agents) {
-  console.log(
-    `${snapshot.state.id}: ${snapshot.state.name} (${snapshot.state.status})`
-  );
+for (const entry of summaries) {
+  console.log(`${entry.state.id}: ${entry.state.name} (${entry.state.status})`);
 }
 ```
 
@@ -109,54 +107,36 @@ for (const snapshot of agents) {
 | `failed` | Last task failed |
 | `terminated` | Agent was stopped |
 
-## Get Agent Details
-
-```typescript
-const snapshot = await client.agents.get('agent-uuid-here');
-
-console.log('Name:', snapshot.state.name);
-console.log('Status:', snapshot.state.status);
-console.log('Messages:', snapshot.messageCount);
-console.log('Events:', snapshot.eventCount);
-console.log('Token usage:', snapshot.state.tokenUsage);
-```
-
-### `AgentState`
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | `UUID` | Unique agent identifier |
-| `name` | `string` | Agent name |
-| `status` | `AgentStatus` | Current runtime status |
-| `config` | `AgentConfig` | Full configuration snapshot |
-| `createdAtMs` | `number` | Unix timestamp (ms) |
-| `tokenUsage` | `TokenUsage` | Cumulative token consumption |
-
 ### `TokenUsage`
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `promptTokens` | `number` | Tokens sent to the model |
-| `completionTokens` | `number` | Tokens generated by the model |
-| `totalTokens` | `number` | Sum of prompt + completion |
+`promptTokens`, `completionTokens` and `totalTokens`, all numbers.
 
 ## Run an Agent
 
-The `run` method sends a `Content` message to the agent and returns its result.
+`run()` sends one `Content` message and blocks until the run finishes.
 
 ```typescript
-const run = await client.agents.run('agent-uuid-here', {
+const run = await client.agents.run('AGENT_ID', {
   text: 'Research the latest advances in quantum computing',
 });
 
 if (run.result.status === 'success') {
-  console.log('Result:', (run.result.data as { text: string }).text);
+  console.log(run.result.data?.text);
 } else {
   console.error('Run failed:', run.result.error);
 }
 ```
 
-### `Content` shape
+`DaemonTaskResult` is `{ status: 'success' | 'error', data: DaemonContent | null, error: string | null, durationMs }`, and `DaemonContent` is `{ text, attachments: Attachment[] | null, metadata: Record<string, unknown> | null }`.
+
+Pass a stable `roomId` to keep consecutive direct turns in one conversation:
+
+```typescript
+await client.agents.run('AGENT_ID', { text: 'Plan the release' }, { roomId: 'release-planning' });
+await client.agents.run('AGENT_ID', { text: 'Expand the testing steps' }, { roomId: 'release-planning' });
+```
+
+### `Content`
 
 ```typescript
 interface Content {
@@ -172,95 +152,75 @@ interface Attachment {
 }
 ```
 
-### Retrying a run safely
-
-When the Rust daemon is configured with Postgres persistence, completed tool steps can be reused on a retried run. To opt into that behavior, send a stable retry key in `metadata` and repeat the same value when retrying the same logical request.
-
-```typescript
-const run = await client.agents.run('agent-uuid-here', {
-  text: 'Research the latest advances in quantum computing',
-  metadata: {
-    retryKey: 'quantum-brief-2026-05-04',
-  },
-});
-```
-
-- Reuse only happens when you resend the same `retryKey` or `idempotencyKey`.
-- Fresh runs should omit the key or use a new value.
-- This is tool-step retry recovery, not full daemon process resume.
-
 ### `AgentRunResponse`
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `agent` | `AgentSnapshot` | Updated agent snapshot after the run |
-| `result` | `TaskResult<Content>` | Task execution result |
+| `result` | `DaemonTaskResult` | Task execution result |
 
-## Tools
+<Aside type="note">
+  `agents.run()` is the compatibility path. The daemon answers `408` after `ANIMAOS_RS_RUN_REQUEST_TIMEOUT_SECS` (600 seconds by default) while an admitted run keeps going. The web console instead sends messages to a session and follows `/events`; see [Sessions & Runs](/sdk/sessions/).
+</Aside>
 
-Tools are executed by the Rust daemon. Each entry in `tools` is an `AgentToolInput`: either the name of a tool the daemon has registered, or a JSON descriptor.
+### Retrying a run safely
+
+When the daemon has durable step logging (Postgres persistence), completed tool steps are reused on a retried run if you resend the same `retryKey` or `idempotencyKey` in `metadata`.
 
 ```typescript
-const myAgent = await client.agents.create(
-  agent({
-    name: 'researcher',
-    provider: 'openai',
-    model: 'gpt-4o-mini',
-    system: 'You are a research assistant.',
-    tools: [
-      'memory_search',
-      {
-        name: 'web_fetch',
-        description: 'Fetch and summarize a URL',
-        parameters: {
-          type: 'object',
-          properties: { url: { type: 'string', description: 'URL to fetch' } },
-          required: ['url'],
-        },
-      },
-    ],
-  })
-);
+await client.agents.run('AGENT_ID', {
+  text: 'Research the latest advances in quantum computing',
+  metadata: { retryKey: 'quantum-brief-2026-05-04' },
+});
 ```
 
-### `AgentToolInput`
+- Reuse only happens when you resend the same key; omit it or use a new value for a fresh request.
+- This is tool-step reuse, not a resume of a run interrupted by a daemon restart.
 
-| Form | Description |
-|------|-------------|
-| `string` | Name of a daemon-registered tool |
-| `{ name, description?, parameters?, examples? }` | Descriptor with the name, LLM-visible description, JSON Schema `parameters`, and few-shot `examples` |
+## Update and Remove
 
-Use `client.capabilities()` to list the native tool handlers the daemon exposes. See [Tools](/sdk/agents/tools/) for details.
+```typescript
+const updated = await client.agents.update('AGENT_ID', {
+  model: 'gpt-4o',
+  system: 'Be brief.',
+  fallbacks: [{ provider: 'anthropic', model: 'claude-sonnet-4-5' }],
+});
+
+await client.agents.remove('AGENT_ID');
+```
+
+`AgentUpdateInput` accepts `name`, `model`, `provider`, `system`, `tools` and `fallbacks`; at least one field is required. An empty `provider` or `system` string restores the default, and `fallbacks: []` clears them. `fallbacks` are models tried in order when the primary fails before replying: at most three, none equal to the primary. `remove()` fails with `409` while one of the agent's runs is running.
+
+## Peer Messages
+
+```typescript
+const reply = await client.agents.sendMessage('SENDER_ID', 'RECIPIENT_ID', 'Review the release plan');
+console.log(reply.agent.state.id, reply.result.data?.text);
+```
+
+`sendMessage(senderId, toAgentId, message)` requests one bounded recipient run and returns the recipient's `{ agent, result }`. It does not start an automatic message loop.
 
 ## Recent Memories
 
-Retrieve the most recent memories for a specific agent:
-
 ```typescript
-const memories = await client.agents.recentMemories('agent-uuid-here', {
-  limit: 10,
-});
+const memories = await client.agents.recentMemories('AGENT_ID', { limit: 10 });
 
 for (const memory of memories) {
   console.log(`[${memory.importance}] ${memory.type}: ${memory.content}`);
 }
 ```
 
-### `AgentMemory` fields
+`AgentMemory` carries `id`, `agentId`, `agentName`, `type`, `content`, `importance`, `createdAt`, optional `tags`, `scope` (`shared`, `private` or `room`) and optional `roomId`, `worldId` and `sessionId`.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | `string` | Memory identifier |
-| `agentId` | `string` | Owning agent |
-| `agentName` | `string` | Agent name at creation time |
-| `type` | `string` | Memory type (e.g. `fact`, `reflection`) |
-| `content` | `string` | Memory text |
-| `importance` | `number` | Importance score (0–1) |
-| `createdAt` | `number` | Unix timestamp (ms) |
-| `tags` | `string[] \| null` | Optional tags |
-| `scope` | `'shared' \| 'private' \| 'room'` | Visibility scope |
+## Tasks, Jobs and Schedules
 
-## Full Example: Research Agent with Tools
+The agents client also holds the agent's saved task list (`tasks()`, `updateTasks()`), background jobs (`jobs()`, `createJob()` and friends) and the older `schedules()` helpers. Jobs, goals and automations are covered in [Jobs & Automations](/sdk/automations/); `updateTasks()` needs the revision from your last read and answers `409` for a stale one.
+
+## Avatars
+
+`setAvatar(agentId, blob)` stores a PNG, JPEG or WebP image (up to 5 MiB) in the workspace; `removeAvatar(agentId)` deletes it.
+
+## Full Example
 
 ```typescript
 import { agent, createDaemonClient } from '@animaOS-SWARM/sdk';

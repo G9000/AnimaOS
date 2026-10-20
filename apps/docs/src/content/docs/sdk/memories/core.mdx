@@ -1,0 +1,100 @@
+---
+title: Core Memory & Export
+description: Always-on core memory, owner edits to memories and facts, and downloading an agent's memory
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+These APIs let the owner see and fix what an agent remembers. They are **owner routes**: the daemon refuses them without local-owner authorization (`403 local owner authorization required`). From a script that means sending `Authorization: Bearer <ANIMA_LOCAL_ADMIN_TOKEN>`; see [Authentication](/sdk/client/#authentication). Every response is `Cache-Control: no-store`.
+
+## Core Memory
+
+Each agent has two always-on blocks, shown at the top of every run's context:
+
+| Block | Name in the console | Holds | Budget |
+|-------|---------------------|-------|--------|
+| `user` | About you | The owner's profile | 1,500 characters |
+| `notes` | Agent notes | What the agent learned about its work | 2,500 characters |
+
+An entry is at most 500 characters, and budgets count characters. Entries are stored as private facts tagged `core:user` or `core:notes`, so history, export and scanning apply. Text the threat scanner flags is hidden from the agent and shown as `[entry hidden: flagged <ids>]`. The daemon also keeps read-only `USER.md` and `MEMORY.md` copies under `<workspace>/.animaos-swarm/agent-profiles/`; edits to them are overwritten.
+
+The agent edits core memory with the `core_memory` tool (`add`, `replace` or `remove`). You edit it through the SDK:
+
+```typescript
+const core = await client.memories.coreMemory('AGENT_ID');
+console.log(core.user.used, '/', core.user.limit, core.user.entries);
+
+const added = await client.memories.addCoreEntry('AGENT_ID', 'user', 'Prefers metric units.');
+// added.entryId, added.changed (false for an exact duplicate), added.warnings
+
+await client.memories.updateCoreEntry('AGENT_ID', 'user', added.entryId, 'Prefers metric units and 24-hour time.');
+await client.memories.removeCoreEntry('AGENT_ID', 'user', added.entryId);
+```
+
+| Method | Returns | Notes |
+|--------|---------|-------|
+| `coreMemory(agentId, { signal? })` | `CoreMemory` | `{ user, notes }`, each a block with `used`, `limit` and `entries` (`id`, `content`, `flagged`) |
+| `addCoreEntry(agentId, block, text)` | `CoreMemoryEdit` | Both blocks as they are now, plus `entryId`, `changed` and `warnings` |
+| `updateCoreEntry(agentId, block, entryId, text)` | `CoreMemoryEdit` | Same shape |
+| `removeCoreEntry(agentId, block, entryId)` | `CoreMemoryEdit` | Same shape |
+
+Entry text is untrusted (the agent may have written it): show it as text, not markup. Flagged text you save is stored anyway and reported in `warnings`. Generic memory routes refuse to edit a core entry or add a core tag.
+
+Conversation reviews, which run every 10 owner messages and may propose core-memory edits, are covered in [MCP, Skills & Learning](/sdk/extensions/#learning-reviews).
+
+## Edit and Delete Memories
+
+```typescript
+const edited = await client.memories.update('MEMORY_ID', {
+  content: 'Corrected text',
+  importance: 0.9,
+  tags: null, // null clears the tags; omit to keep them; an array replaces them
+});
+
+const removed = await client.memories.delete('MEMORY_ID', 'Corrected text');
+console.log(removed.removedRelationships, removed.updatedFacts);
+```
+
+- `update()` patches `content`, `importance` and `tags`, and the content is re-indexed and re-embedded. The SDK exports the daemon's limits as constants: `MAX_MEMORY_EDIT_CHARS` (8,000), `MAX_MEMORY_TAGS` (20) and `MAX_MEMORY_TAG_CHARS` (40).
+- `delete(id, expectedContent?)` removes the memory and drops it from fact and relationship citations. With `expectedContent`, the daemon checks the exact current text under its write lock and answers `409` if it changed; without it, the older id-only deletion applies. It returns `{ id, removedRelationships, updatedRelationships, updatedFacts }`.
+
+## Temporal Facts
+
+Temporal facts record a subject, predicate, value and validity window, with the memories that evidence them. They carry no agent of their own: an agent's facts are those whose evidence includes one of its memories.
+
+```typescript
+const facts = await client.memories.facts({ agentId: 'AGENT_ID', subject: 'user-42', limit: 50 });
+
+const { fact, superseded } = await client.memories.replaceFact(facts[0].id, 'New value');
+await client.memories.deleteFact(fact.id);
+```
+
+- `facts({ agentId, subject, includeInactive, limit })` lists newest first. `limit` is 1 to 500 (default 100); `subject` matches the subject id, or the subject name ignoring ASCII case; `includeInactive: true` adds superseded and retracted facts (`status` is `active`, `superseded` or `retracted`).
+- `replaceFact(factId, value)` (1 to `MAX_FACT_VALUE_CHARS`, 500, characters) saves a new active fact that supersedes the old one. Only an active fact with a value can be edited (`409` otherwise).
+- `deleteFact(factId)` returns `{ id }`.
+- `deleteEntity(kind, entityId)` removes an entity plus the relationships and facts that name it, and answers `409` while the entity still has memories. Deleting the `user` entity is soft in practice: a later relationship or fact that names the user recreates it.
+
+Fact and entity text is untrusted; display it as text.
+
+## Export
+
+```typescript
+import { writeFile } from 'node:fs/promises';
+
+const blob = await client.memories.exportMemories({ format: 'md', agentId: 'AGENT_ID' });
+await writeFile('anima-memory.md', Buffer.from(await blob.arrayBuffer()));
+```
+
+`exportMemories({ format?, agentId? })` returns a `Blob`: `json` (the default) or `md`, for one agent or, without `agentId`, every agent. Embedding vectors are never exported.
+
+The JSON document has `version`, `exportedAt` and an `agents` array. Each agent entry holds `id`, `name`, `core` (`user` and `notes` entries), its `memories` (newest first, core entries excluded), `entities`, `relationships` and `temporalFacts`. An all-agents export adds `unattributed` with the entities, relationships and facts no agent section holds, so nothing is left out. The Markdown export groups memories by type.
+
+<Aside type="note">
+  Export, edits and deletes act on the daemon's store only. Old chats, receipts and backups may still contain removed text.
+</Aside>
+
+## Where Next
+
+- [Memories Overview](/sdk/memories/) for create, search and recall.
+- [Evaluation & Retention](/sdk/memories/operations/) for retention policies and the entity graph.
+- [API Reference](/sdk/reference/) for every `MemoriesClient` method.

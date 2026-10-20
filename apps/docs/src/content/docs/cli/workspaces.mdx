@@ -1,28 +1,26 @@
 ---
 title: Agency Workflow
-description: Create, inspect, and launch agency workspaces from the animaOS CLI
+description: Create, edit, and launch agent workspaces from the animaos CLI
 ---
 
 import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
 
-This page covers the CLI workflow that starts on disk rather than in the daemon: scaffold an agent workspace locally (or hand-write an agency `anima.yaml`), edit it like normal project files, then launch it against the host.
+This page covers the workflow that starts on disk: scaffold an agent workspace (or hand-write an `anima.yaml`), edit it like project files, then launch it on the daemon.
 
 ## Core Split
 
-- `animaos create` is local. It writes files and does not require the daemon.
-- `animaos launch` is daemon-backed. It reads `anima.yaml`, creates a runtime swarm in the host, and runs tasks through the daemon.
-
-That split is the main reason the CLI is practical for real work: you can shape the workspace locally, review it, and only then execute it.
+- `animaos create` is local. It writes files and does not need the daemon.
+- `animaos launch` is daemon-backed. It reads `anima.yaml`, creates a swarm on the daemon (an orchestrator as manager, the `agents` as workers), and runs tasks through it.
 
 <CardGrid>
   <Card title="Create">
-    Scaffold a single-agent workspace locally with `animaos create agent`, or write an agency `anima.yaml` by hand.
+    Scaffold a single-agent workspace with `animaos create agent`, or write an `anima.yaml` by hand for a team.
   </Card>
   <Card title="Refine">
-    Edit `anima.yaml`, agent profiles, and optional seed memories before execution.
+    Edit `anima.yaml`, agent profiles and optional seed memories before running.
   </Card>
   <Card title="Launch">
-    Run the workspace against the daemon with `animaos launch` and use the TUI or plain text.
+    Run it with `animaos launch`, in the TUI or in plain text.
   </Card>
 </CardGrid>
 
@@ -37,24 +35,9 @@ animaos create agent medicine-helper \
   -d "Research medical literature and summarize risks clearly"
 ```
 
-`create` makes no model call. It writes the workspace files from a template and records the provider in `anima.yaml`: the one you pass with `-p`, otherwise the first remote provider with credentials configured, otherwise `deterministic`.
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--kind` | — | `agent` |
-| `-p, --provider` | `auto` | Provider recorded in the workspace. Supports `deterministic` and the daemon-facing provider family |
-| `-m, --model` | `gpt-4o-mini` | Model recorded in the workspace |
-| `-d, --description` | — | What the agent should do |
-| `--system` | — | System prompt for the agent |
-| `--api-key` | — | API key, used only to detect which provider is configured |
-
-<Aside type="note">
-  `create` only scaffolds a single agent. To run a multi-agent agency, write `anima.yaml` by hand (an `orchestrator` plus an `agents` list) and run `animaos launch` in that directory.
-</Aside>
+`create` makes no model call. See the [CLI overview](/cli/#animaos-create) for its flags. It only scaffolds a single agent; for a multi-agent team, write `anima.yaml` yourself.
 
 ## Workspace Shape
-
-The scaffolded workspace is designed to be edited by humans before launch:
 
 ```text
 medicine-helper/
@@ -68,46 +51,104 @@ medicine-helper/
         └── memory/
 ```
 
-The important files are:
+- `anima.yaml` is the runtime config `launch` reads.
+- `agents/<slug>/profile.md` is a human-readable profile. The slug is the agent name lowercased and kebab-cased.
+- `agents/<slug>/memory/seed.json` holds optional starting memories. Add it by hand; `create` does not generate it.
+- `org-chart.mmd` and `README.md` are generated documentation; `launch` does not read them.
 
-- `anima.yaml` for runtime config
-- `agents/*/profile.md` for human-readable role shaping
-- `agents/*/memory/seed.json` for optional preloaded memories posted at launch time (add it by hand; `create` does not generate it)
+## `anima.yaml`
+
+```yaml
+name: content-team
+description: Researches topics and writes articles
+model: gpt-4o-mini
+provider: openai
+strategy: supervisor
+maxParallelDelegations: 2
+orchestrator:
+  name: editor
+  bio: Senior editor who plans and reviews the work
+  system: Break the task into steps, delegate to the team, and combine the results.
+  tools: [memory_search, web_fetch]
+agents:
+  - name: researcher
+    bio: Finds and checks facts
+    system: Research the assigned topic and return concise findings.
+    tools: [web_fetch, exa_search]
+  - name: writer
+    bio: Writes clear articles
+    system: Turn findings into a polished article.
+    model: gpt-4o
+```
+
+| Top-level key | Required | Default | Description |
+|---------------|----------|---------|-------------|
+| `name` | yes | | Agency name |
+| `orchestrator` | yes | | The manager agent; needs `name`, `bio` and `system` |
+| `agents` | no | `[]` | Worker agents |
+| `description` | no | empty | Free text |
+| `model` | no | `gpt-4o` | Default model for every agent |
+| `provider` | no | `openai` | Default provider (see [Providers](/cli/providers/)) |
+| `strategy` | no | `supervisor` | `supervisor`, `dynamic` or `round-robin` |
+| `maxParallelDelegations` | no | | Passed to the swarm when set to a non-zero number |
+
+Each agent (orchestrator or worker) accepts `name`, `bio`, `system`, `lore`, `adjectives`, `topics`, `knowledge`, `style`, `model` (overrides the agency model), `provider` (overrides the agency provider) and `tools`. A missing `name` becomes `unnamed`; names matter because seed memories are matched to agents by name.
+
+`create` also writes `mission`, `values`, `position`, `role` and `collaboratesWith`, which feed the generated README and org chart. `launch` does not read them, so saving changes from the TUI's `/agents` panel rewrites `anima.yaml` without them.
+
+### Tools
+
+`tools` lists daemon tool names. Launch always gives every agent `memory_search` and `recent_memories` plus the memory plugin, and adds any of these you name: `memory_add`, `web_fetch`, `exa_search`, `get_current_time`, `calculate`, `read_file`, `list_dir`, `glob`, `grep`, `write_file`, `edit_file`, `multi_edit`, `todo_write`, `todo_read`, `bash`, `bg_start`, `bg_output`, `bg_stop` and `bg_list` (`memory_recent` is accepted as an alias of `recent_memories`). Any other entry is ignored with a warning, so unknown names stay declarative. Naming a tool only requests it: the daemon's own checks and the tool's prerequisites (for example a configured workspace for file tools) still apply.
 
 ## Launch a Workspace
 
 ```bash
 cd medicine-helper
 
-# TUI session
-animaos launch
-
-# One-shot task in the TUI workflow
-animaos launch "Summarize the latest research"
-
-# Plain-text mode
-animaos launch --no-tui "Summarize the latest research"
+animaos launch                          # TUI, interactive
+animaos launch "Summarize the latest research"   # TUI, one task
+animaos launch --no-tui "Summarize the latest research"   # plain text
 ```
 
-`launch` is the best operator flow when you want the TUI, saved run history, and daemon-backed workspace execution.
+See the [CLI overview](/cli/#animaos-launch) for flags (`-d, --dir`, `--api-key`, `--no-tui`).
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--api-key` | — | API key override for the current daemon-backed run |
-| `--no-tui` | — | Disable Ink and use plain text |
+How launch builds the swarm:
+
+- The orchestrator becomes the swarm manager and each entry in `agents` becomes a worker.
+- Each agent's model is its own `model`, otherwise the agency `model`; its provider is its own `provider`, otherwise the agency `provider`.
+- `--api-key` applies to the agency provider only. Provider credentials are otherwise taken from your environment.
+- The swarm is created on the first task and reused for the session. After an error, or after you save an agent in the TUI, the next task builds a fresh swarm.
 
 <Aside type="tip">
-  Use `launch` when you care about durable workspace structure, team composition, saved history, or the TUI. Use `run` only when you want a quick one-off result without creating a workspace first.
+  Use `launch` when you care about a durable workspace, team composition, saved history or the TUI. Use [`run`](/cli/daemon/) for a one-off result without a workspace.
 </Aside>
 
 ## Seed Memories
 
-If the workspace contains `agents/<slug>/memory/seed.json`, the CLI can post those memories into the daemon before the agency starts running. That gives the launched team a useful local memory baseline without hardcoding those facts into the host.
+If an agent has `agents/<slug>/memory/seed.json`, `launch` posts those memories to the daemon after it creates the swarm, so the team starts with a baseline. The file is a JSON array (or a single object) of entries:
 
-This keeps agency memory bootstrap close to the workspace itself instead of hiding it in global daemon state.
+```json
+[
+  { "type": "fact", "content": "The audience is senior engineers.", "importance": 0.9, "tags": ["audience"] },
+  { "type": "observation", "content": "Past articles ran about 800 words." }
+]
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | yes | `fact`, `observation`, `task_result` or `reflection` |
+| `content` | yes | Non-empty text |
+| `importance` | no | Number from 0 to 1 (default `0.5`) |
+| `tags` | no | Array of strings |
+
+Invalid files stop the launch with an error naming the agent and entry. Posting failures, or an agent name that is not in the swarm, are reported as warnings and never block the launch. On success the CLI prints `Seeded N memories from agents/<slug>/memory/seed.json`.
+
+## Saved History
+
+Every task `launch` runs (TUI or plain text) is appended to `anima-history.json` in the workspace directory, keeping the newest 100 entries. In the TUI the same file backs `/history` and `/resume`, and `/clear` empties it. TUI runs also write the latest task and result to `anima-result.md`. See [History & Resume](/tui/history/).
 
 ## Where Next
 
-- Go to [Daemon Commands](/cli/daemon/) for `run`, `chat`, and `agents`.
-- Go to [Providers & Environment](/cli/providers/) for provider setup and env vars.
-- Go to [TUI Overview](/tui/) for the operator surface behind `launch`.
+- [Daemon Commands](/cli/daemon/) for `run`, `chat`, `agents` and `assistant`.
+- [Providers & Environment](/cli/providers/) for provider setup.
+- [TUI Overview](/tui/) for the surface behind `launch`.

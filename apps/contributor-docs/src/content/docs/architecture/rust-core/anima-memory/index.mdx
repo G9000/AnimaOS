@@ -1,30 +1,28 @@
 ---
 title: anima-memory
-description: Hybrid memory system with BM25, vector search, temporal reasoning, and relationship graphs
+description: In-memory memory store with BM25, vector hooks, relationships, temporal facts and owner edits
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
-<Aside type="caution" title="Work in Progress">
-  This contributor documentation is actively being written. Sections may be incomplete, reorganized, or expanded.
-</Aside>
-
-`anima-memory` is the hybrid memory crate. It combines lexical search (BM25), vector similarity, temporal reasoning, and relationship graphs into a single recall pipeline. All data lives in-memory — no external database is required.
+`anima-memory` is the memory crate. `MemoryManager` stores memories, entities, relationships and temporal facts in standard collections, indexes memory text with BM25, and fuses lexical, vector, relationship, temporal, recency and importance signals into one ranked recall. It does no I/O: persistence is a snapshot the host reads and writes, and real embeddings arrive through the `MemoryVectorIndex` trait. Its only non-test dependencies are `anima-core` and `async-trait`.
 
 ## Module Structure
 
 ```
 src/
-├── lib.rs              # Public exports
-├── bm25.rs             # BM25 index, text analysis, query expansion
-├── memory_manager.rs   # MemoryManager, recall, evaluate, snapshot
-├── vector_index.rs     # In-memory vector index, cosine similarity
-└── eval_harness.rs     # Test cases for memory evaluation
+├── lib.rs                  # re-exports
+├── bm25.rs                 # BM25, TextAnalyzer, QueryExpander
+├── memory_manager.rs       # MemoryManager: add, evaluate, recall, entities, relationships, temporal, retention, snapshot
+├── memory_manager/
+│   ├── types.rs            # all option / record / error types
+│   └── edit.rs             # owner edits, exact-content deletion, fact consolidation
+├── vector_index.rs         # InMemoryVectorIndex, MemoryTextEmbedder
+├── external_provider.rs    # ExternalMemoryProvider plug-in point, NoExternalMemory
+├── core_port.rs            # conversions between legacy records and anima-core memory ports
+├── eval_harness.rs         # baseline evaluation cases
+└── locomo_eval.rs          # LoCoMo smoke cases (feature "locomo-eval")
 ```
 
 ## MemoryManager
-
-The central struct. Stores everything in standard library collections:
 
 ```rust
 pub struct MemoryManager {
@@ -37,18 +35,69 @@ pub struct MemoryManager {
 }
 ```
 
-## Memory Types
+Constructors: `new()`, `with_text_analyzer(..)`, `with_query_expander(..)`, `with_text_analyzer_and_query_expander(..)`. Adding a memory indexes it and creates an `Agent` entity for the owning agent if none exists.
 
-| Type | Description | Example |
-|------|-------------|---------|
-| `Episodic` | Specific events and interactions | "User asked about neural networks" |
-| `Semantic` | Facts and knowledge | "Neural networks are inspired by biological neurons" |
-| `Procedural` | How-to knowledge | "To create an agent, call `client.agents.create()`" |
-| `Reflective` | Agent's own thoughts and observations | "The user seems interested in ML topics" |
+## Records
+
+| Type | Variants / fields |
+|------|-------------------|
+| `MemoryType` | `Fact`, `Observation`, `TaskResult` (`task_result`), `Reflection` |
+| `MemoryScope` | `Shared`, `Private`, `Room`. Default when unspecified: `Room` if a non-empty `room_id` is given, else `Private`. |
+| `Memory` | `id`, `agent_id`, `agent_name`, `memory_type`, `content`, `importance` (0 to 1), `created_at`, `tags`, `scope`, `room_id`, `world_id`, `session_id` |
+| `MemoryEntity` | `kind` (`agent`, `user`, `system`, `external`), `id`, `name`, `aliases`, `summary`; keyed by kind plus id |
+| `AgentRelationship` | directed edge between two entities with `relationship_type`, `strength`, `confidence` (both 0 to 1), `evidence_memory_ids`, tags and context ids |
+| `TemporalFact` | subject, predicate, object or `value`, `valid_from` / `valid_to`, `observed_at`, `confidence`, `evidence_memory_ids`, `supersedes_fact_ids`, `status` (`Active`, `Superseded`, `Retracted`) |
+| `TemporalRelationship` | same idea for edges with validity and supersession |
+
+Validation errors are a `MemoryError` enum with fixed messages (for example `importance must be between 0 and 1`, `entity still owns memories`, `memory not found`).
+
+## Operations
+
+| Area | Methods |
+|------|---------|
+| Write | `add`, `evaluate_new_memory`, `add_evaluated` (see [Evaluation](/architecture/rust-core/anima-memory/evaluation/)) |
+| Read | `get`, `search`, `search_filtered`, `get_recent`, `get_recent_filtered`, `trace_memory` |
+| Recall | `recall`, `recall_with_vector_index`, `recall_with_vector_index_filtered`, `select_context`, `select_context_with_vector_index` (see [Recall Fusion](/architecture/rust-core/anima-memory/recall/)) |
+| Graph | `upsert_entity`, `list_entities`, `upsert_agent_relationship`, `list_agent_relationships`, `add_temporal_fact`, `list_temporal_facts`, `add_temporal_relationship`, `list_temporal_relationships`, `forget_*` |
+| Owner edits | `update_memory` (`MemoryPatch`), `delete_memory`, `delete_entity`, `detach_session`, `consolidate_facts` |
+| Lifecycle | `apply_retention`, `apply_retention_protecting`, `forget`, `clear`, `snapshot`, `replace_snapshot`, counters |
+
+### Owner edits (`memory_manager/edit.rs`)
+
+- `update_memory` applies a `MemoryPatch` (content, importance, tags; absent fields keep their value) and reindexes. Content is trimmed and may not be empty.
+- `delete_memory` removes the memory and its index entry and strips its id from every citation. Only agent relationships left with **no** evidence are removed; temporal facts and temporal relationships are kept even with no evidence. It returns a `MemoryDeletion` listing what changed.
+- `delete_entity` refuses an `agent` entity that still owns memories (`EntityOwnsMemories`) and otherwise removes the entity plus the relationships and facts that name it, returning an `EntityDeletion`.
+- `consolidate_facts` validates a whole cohort of 2 to 8 source facts against their exact current text under one call, then adds one summary `Fact` and archives the sources as `Reflection`s (ids, text and citations intact; a shared `cg:<32 hex>` tag associates them). Any stale or unavailable source rejects the batch with a `MemoryConsolidationError`. Success says nothing about whether the summary is faithful.
+
+## Retention
+
+`MemoryRetentionPolicy` has `max_age_millis`, `min_importance`, `max_memories` and `decay_half_life_millis`. `apply_retention` first decays importance by `0.5 ^ (age / half_life)`, then removes by age, by minimum importance, then keeps only the top `max_memories` by importance (ties newer first). `apply_retention_protecting` skips memories a predicate protects; they are neither decayed, removed nor counted toward `max_memories`. The daemon uses it so core memory entries survive. Relationships left with no evidence are pruned.
+
+## Snapshot Boundary
+
+```rust
+pub fn snapshot(&self) -> MemoryManagerSnapshot;
+pub fn replace_snapshot(&mut self, snapshot: MemoryManagerSnapshot); // clears, then reloads
+```
+
+`MemoryManagerSnapshot` holds `memories`, `memory_entities`, `agent_relationships`, `temporal_facts` and `temporal_relationships`, each sorted deterministically. It does not contain the BM25 index (rebuilt on load) or any vectors (the host stores embeddings separately).
+
+## External Provider Plug-in Point
+
+`ExternalMemoryProvider` (async trait, in `external_provider.rs`) lets a host run **one** external memory service beside the local store: `recall(RecallRequest)` adds untrusted items to a run's context, `sync_turn(TurnRecord)` receives finished owner turns, `on_memory_write(MemoryWriteEvent)` mirrors saved changes, `status()` feeds readiness. Events are delivered one at a time in save order through a bounded queue that drops when full; errors are logged by id and never fail a run. `NoExternalMemory` (id `none`) is the default. The daemon registers only `none` today (`ANIMAOS_RS_MEMORY_PROVIDER`).
+
+## core_port bridge
+
+`MemoryManager` is deliberately **not** a `anima_core::MemoryPort`: it has no revision compare-and-swap, correction lineage or auditable forgetting. `core_port.rs` offers explicit conversions (`legacy_memory_to_core`, `core_memory_to_legacy`, `legacy_new_memory_to_core`) and `memory_manager_port_unavailable()` for hosts that must say so.
+
+## Daemon Integration
+
+Core memory blocks, real embeddings, memory stores, conversation reviews and the export route are daemon features built on this crate. See [Memory in the Daemon](/architecture/rust-core/anima-memory/daemon-memory/).
 
 ## Design Rules
 
-1. **Zero I/O** — No filesystem access, no network calls
-2. **Snapshot persistence** — Full state serializable via `snapshot()`
-3. **Pure algorithms** — BM25 and cosine similarity from scratch
-4. **Configurable fusion** — Weights tunable per query
+1. **No I/O.** No filesystem, network or database access.
+2. **Snapshot persistence.** All durable state round-trips through `MemoryManagerSnapshot`.
+3. **Small deterministic algorithms.** BM25 and cosine similarity are implemented in the crate.
+4. **Vectors are injected.** The manager never embeds text; it asks a `MemoryVectorIndex` supplied per call.
+5. **Eligibility before ranking.** Recall and context selection filter by scope, ownership and a host `visible` predicate before they pick top results.

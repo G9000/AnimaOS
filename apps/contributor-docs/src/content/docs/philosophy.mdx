@@ -3,51 +3,50 @@ title: Philosophy
 description: Why animaOS exists and how it is designed
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
-<Aside type="caution" title="Work in Progress">
-  This contributor documentation is actively being written. Sections may be incomplete, reorganized, or expanded.
-</Aside>
-
 ## Problem
 
-Agent tools today lock you in:
+Agent tooling tends to lock you in at one of two layers:
 
-- **Frameworks** (LangChain, AutoGen) own your abstractions. When they change, you rewrite.
-- **Platforms** (OpenAI Assistants, Claude computer use) own your runtime. When they break, you're down.
+- **Frameworks** own your abstractions. When they change, you rewrite.
+- **Platforms** own your runtime and your data. When they break, you are down.
 
 ## Solution
 
 Separate **engine** from **host**.
 
-The Rust core (`packages/core-rust`) has zero I/O — no HTTP, no DB, no filesystem. It only defines behavior: agent runtime, memory search, swarm coordination. A host wraps the core and provides reality: HTTP server, LLM adapters, persistence.
+The engine (`packages/core-rust`) defines behavior: the agent loop, memory search, swarm coordination, model-provider adapters. `anima-core` has no HTTP, database or filesystem code; everything it needs from the outside arrives through traits. A host wraps the engine and provides reality: the HTTP server, persistence, credentials, connectors, process control.
 
-The SDK, CLI, and TUI talk to any host over HTTP. Swap the host, keep the agents.
+Today there is one host, `hosts/rust-daemon`, and the SDK, CLI, TUI and web console are thin clients of it. The boundary is the daemon's HTTP/SSE contract, so a client never embeds an engine.
 
 ## Memory-First
 
-Memory is not a vector DB bolt-on. It is a first-class primitive with four signals:
+Memory is a primitive of the runtime, not a bolt-on. Recall fuses lexical (BM25), vector, relationship, temporal and recency signals. Each agent also has small always-on **core memory** blocks the owner can read and edit, and the daemon reviews conversations to propose edits. See [anima-memory](/architecture/rust-core/anima-memory/).
 
-- **Lexical** (BM25)
-- **Vector** (cosine similarity)
-- **Temporal** (time decay)
-- **Relationship** (graph proximity)
+## The Owner Stays in Control
+
+The daemon assumes one trusted owner on a local machine and an agent that must earn each risky action:
+
+- Every tool is risk-classed (read, write, exec, network, delegate) and judged against a per-agent policy, rules and session allowances. Calls that need the owner wait for an explicit decision.
+- Owner-only routes require a loopback bind and either an approved browser origin or an admin token. Credentials live in the OS credential store, not in files or in model-visible context.
+- Interrupted work is reported as interrupted. The daemon does not silently replay uncertain effects.
+
+See [Runs and Sessions](/hosts/rust-daemon/runs/).
 
 ## Swarms
 
-Single agents are bounded by one model's context window. Swarms distribute cognition across specialized agents with pluggable strategies (supervisor, round-robin, dynamic).
+A single agent is bounded by one model's context window. `anima-swarm` coordinates a manager and workers with three strategies (supervisor, round-robin, dynamic) over an in-memory message bus.
 
 ## Rust + TypeScript
 
-- **Rust** runs the engine (no GC, memory-safe, embeddable).
-- **TypeScript** runs the surfaces (SDK, CLI, TUI) where DX matters.
+- **Rust** runs the engine and the host: memory-safe, no garbage collector, one deployable binary.
+- **TypeScript** runs the surfaces (SDK, CLI, TUI, web console) where iteration speed and the React ecosystem matter.
 
 ## What animaOS Is Not
 
 - Not a framework. You own your code.
-- Not a platform. You run the host.
-- Not an LLM. We run agents that use models.
+- Not a hosted platform. You run the daemon.
+- Not a model. Agents use the providers you configure.
 
 ## In One Sentence
 
-animaOS is the engine you run when you want autonomous agents with long-term memory and swarm coordination — without giving up control of your runtime or data.
+animaOS is an engine and a local host for autonomous agents with long-term memory and swarm coordination, under the owner's control of the runtime and the data.

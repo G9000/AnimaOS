@@ -1,36 +1,42 @@
 ---
 title: Staging Deployment
-description: Recommended online staging profile for the Rust daemon host
+description: The Postgres container profile for the Rust daemon and the one-owner VPS package
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
 
-<Aside type="caution" title="V1 Staging Boundary">
-  Run one Rust daemon replica for staging unless you add a shared vector store. Postgres shares host snapshots and step logs, but vector indexes are still process-local and rebuild from memory snapshots on startup.
+<Aside type="caution" title="Read this before binding to 0.0.0.0">
+  Owner-only routes (sessions, runs, approvals, connectors, usage, logs, memory edits, the workspace file browser and the rest of the console's API) require a **loopback bind** and a loopback `Host`, and reject forwarding headers. A daemon bound to `0.0.0.0` behind a proxy answers those routes with `403 local owner authorization required`. The profile below serves the agent, swarm, memory, health and readiness APIs; for the full console behind TLS use the VPS package, which keeps the daemon on loopback.
 </Aside>
 
-## Recommended Shape
+<Aside type="caution" title="Single replica">
+  Run one daemon. Vector indexes are process-local and rebuilt from the memory snapshot on startup, and run state, workers and connector pollers live in one process.
+</Aside>
 
-Use Postgres as the staging source of truth for host durability:
+## Container Profile (Postgres)
 
-- Step logs and explicit retry-key reuse use the `step_log` table.
-- Registered agents, swarms, latest states, and memory snapshots use Postgres `host_snapshots` by default.
-- `ANIMAOS_RS_CONTROL_PLANE_FILE`, `ANIMAOS_RS_MEMORY_FILE`, and `ANIMAOS_RS_MEMORY_SQLITE_FILE` should stay unset in container staging unless you intentionally mount persistent files.
-- Vector search stays in process for v1. If cold-start rebuilds become expensive, attach a persistent volume and set `ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE`.
-
-## Container Build
-
-Build the daemon container from the repository root:
+`hosts/rust-daemon/Dockerfile` builds from the repository root:
 
 ```bash
 docker build -f hosts/rust-daemon/Dockerfile -t anima-daemon:staging .
 ```
 
-Push that image to your staging registry, then run it with the env profile in `hosts/rust-daemon/.env.staging.example` translated into your provider's secret settings.
+It is a two-stage build (Chainguard Rust builder running `cargo build --release --locked -p anima-daemon`, Wolfi runtime with `ca-certificates`, `libgomp` and `libstdc++`), runs as a non-root user (`uid 10001`), sets `ANIMAOS_RS_HOST=0.0.0.0` and `ANIMAOS_RS_PORT=8080`, exposes 8080 and starts `/usr/local/bin/anima-daemon`.
+
+`hosts/rust-daemon/.env.staging.example` is the env profile. Translate it into your platform's secret settings; do not commit real values.
+
+### Durability
+
+With Postgres as the source of truth:
+
+- The control plane (agents, swarms, sessions, runs, settings, connector records) and the memory snapshot are `host_snapshots` rows (`control_plane`, `memory`).
+- Step logs and explicit retry-key reuse use `step_log`.
+- History uses the `history_*` tables (Postgres 12 or newer).
+- Leave `ANIMAOS_RS_CONTROL_PLANE_FILE`, `ANIMAOS_RS_MEMORY_FILE` and `ANIMAOS_RS_MEMORY_SQLITE_FILE` unset unless those paths are on a persistent disk.
+- Vectors stay in process. If cold-start rebuilds get expensive and you have a persistent volume, set `ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE`.
+- Credentials (bot tokens, OAuth tokens, ChatGPT login) use the OS credential store, which a bare container does not provide. The VPS package supplies a keyring; the plain image above does not include one, so features that must store secrets (connectors, ChatGPT sign-in) cannot rely on it.
 
 ## Required Environment
-
-The minimum online staging profile is:
 
 ```bash
 ANIMAOS_RS_HOST=0.0.0.0
@@ -41,48 +47,51 @@ ANIMAOS_RS_MEMORY_EMBEDDINGS=local
 RUST_LOG=info,tower_http=info
 ```
 
-Set at least one model provider key used by the staged agents, such as `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
+Set at least one provider key (for example `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`). The example file also sets `ANIMAOS_RS_REQUEST_TIMEOUT_SECS=60`, `ANIMAOS_RS_MAX_REQUEST_BYTES=262144`, `ANIMAOS_RS_MAX_CONCURRENT_RUNS=8` and `ANIMAOS_RS_MAX_BACKGROUND_PROCESSES=4`. Set `ANIMAOS_RS_API_KEY` for anything reachable beyond the host: without it the daemon trusts the network.
 
 <Aside type="note">
-  The daemon runs embedded SQL migrations at startup. If `ANIMAOS_RS_PERSISTENCE_MODE=postgres` is set and Postgres is unavailable, startup fails instead of silently falling back to memory mode.
+  The daemon runs embedded migrations at startup. If `ANIMAOS_RS_PERSISTENCE_MODE=postgres` is set and Postgres is unavailable or a migration fails, startup fails; there is no silent fallback to memory mode.
 </Aside>
 
 ## Vector Strategy
 
-For staging, prefer the simple path first:
+The default embedding mode is `fastembed`, an in-process ONNX model that downloads on first use and needs model cache space (`ANIMAOS_RS_MEMORY_EMBEDDINGS_CACHE_DIR`). The staging example pins `local` (hashed vectors, no download). The other options push embedding work to an endpoint: `ollama`, `openai`, `openai-compatible`. See [Memory in the Daemon](/architecture/rust-core/anima-memory/daemon-memory/#embeddings).
 
-- `ANIMAOS_RS_MEMORY_EMBEDDINGS=local` gives cheap deterministic vectors and no external dependency.
-- `fastembed` gives better local semantic recall but can increase image/runtime requirements and needs model cache space.
-- `ollama`, `openai`, or `openai-compatible` push embedding work to a provider endpoint.
-- `ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE=/var/lib/anima/memory-embeddings.sqlite` only helps if `/var/lib/anima` is a persistent volume.
-
-Without `ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE`, vectors are rebuilt from the Postgres-backed memory snapshot on boot. That is acceptable for v1 staging and keeps deployment portable.
-
-## Staging Checklist
+## Checklist
 
 <Steps>
 
-1. Provision a managed Postgres database for staging.
+1. Provision a managed Postgres database (12 or newer).
 
-2. Set `ANIMAOS_RS_PERSISTENCE_MODE=postgres` and `DATABASE_URL` in the host platform.
+2. Set `ANIMAOS_RS_PERSISTENCE_MODE=postgres` and `DATABASE_URL`.
 
-3. Leave JSON/SQLite memory and control-plane file env vars unset unless the platform provides a persistent disk.
+3. Leave file-based store variables unset unless the platform provides a persistent disk.
 
-4. Start with one daemon replica.
+4. Start one replica from the image built above.
 
-5. Deploy the container image built from `hosts/rust-daemon/Dockerfile`.
-
-6. Verify liveness and readiness:
+5. Verify liveness and readiness:
 
    ```bash
    curl https://staging.example.com/health
    curl https://staging.example.com/ready
    ```
 
-7. Confirm `/ready` reports `controlPlaneDurability: "postgres"` and `database: "configured"`.
+6. Confirm `/ready` reports `controlPlaneDurability: "postgres"` and `database: "configured"`.
 
 </Steps>
 
 ## What This Does Not Claim
 
-Postgres staging restores registered agents, swarms, latest snapshots, swarm message history, memory snapshots, and completed tool-step reuse for explicit retries. It does not resume a model call from the middle after process restart. Restored running work is marked failed/interrupted so callers can retry intentionally.
+Postgres staging restores registered agents, swarms, latest snapshots, swarm message history, sessions, the run ledger and memory snapshots, and lets a retried request reuse completed tool steps. It does not resume a model call from the middle after a restart: work that was running is restored as failed or interrupted so callers retry on purpose.
+
+## One-Owner VPS Package
+
+`deploy/vps/` builds the web console and the daemon and puts Caddy in front: HTTPS, one HTTP Basic owner login, and a gateway that checks Origin and Fetch Metadata and translates the authenticated owner into the daemon's internal API key and admin token. The daemon shares the gateway's network namespace and listens only on `127.0.0.1:8080`; only ports 80 and 443 are published. It is intended for one trusted owner, one daemon and one VPS; it is not multi-user and not a sandbox for hostile agent code.
+
+Key points (`deploy/vps/README.md` is the full procedure):
+
+- The Compose project is `anima-companion`. The daemon runs with `ANIMAOS_RS_PERSISTENCE_MODE=memory` plus explicit files under `/state` (`control-plane.json`, `memory.sqlite`, `history.sqlite`), `ANIMAOS_WORKSPACE_ROOT=/workspace` and `ANIMAOS_RS_MEMORY_EMBEDDINGS=local`.
+- Five named volumes (`daemon_state`, `workspace`, `daemon_home`, `caddy_data`, `caddy_config`) plus the protected `.env` and the image ids form one backup generation; back up with the daemon stopped and restore all of them together.
+- Secrets (`ANIMA_INTERNAL_API_KEY`, `ANIMA_LOCAL_ADMIN_TOKEN`, `ANIMA_KEYRING_PASSWORD`) are mandatory with no defaults. The image runs a private D-Bus session and GNOME Secret Service, unlocks the persisted login keyring at startup and probes a write, read and delete before the daemon starts; a wrong password fails startup instead of using transient credentials. Never replace `ANIMA_KEYRING_PASSWORD` to troubleshoot an existing vault.
+- `ANIMA_PUBLIC_BASE_URL=https://<domain>` sets the OAuth callback origin for Google and Microsoft apps.
+- Verification is by contract tests (`deploy/vps/contracts.test.ts`, the `deployment-contracts` Nx target of `web-e2e`) and manual acceptance (public TLS, real providers, reboot, off-site restore); the package is not verified by starting containers in CI.

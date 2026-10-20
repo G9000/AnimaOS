@@ -1,0 +1,66 @@
+---
+title: anima-harness
+description: The embeddable agent harness builder over anima-core and anima-model-adapters
+---
+
+`anima-harness` is a small convenience crate for embedding an agent in a Rust program without running the daemon. It composes `anima-core`'s `AgentRuntime` with `anima-model-adapters`' provider catalog behind a builder: system prompt, tools, credentials, agent loop and events. It is about 500 lines (`config.rs`, `harness.rs`, `tool.rs`) and depends only on `anima-core`, `anima-model-adapters` and `async-trait`.
+
+The daemon does **not** use it. The daemon builds `AgentRuntime` itself with its own tool registry, approvals, persistence and run ledger. Use the harness for scripts, tests, examples and tools that want the agent loop without the host.
+
+## Usage
+
+```rust
+use anima_harness::Harness;
+
+let mut harness = Harness::builder()
+    .provider("anthropic")              // resolves ANTHROPIC_API_KEY from the environment
+    .model("claude-sonnet-4-5")
+    .system("You are a helpful assistant.")
+    .build()?;
+
+let first = harness.run("Say hello").await;   // single task, no earlier history
+let next  = harness.chat("And again?").await; // includes all recorded messages as history
+```
+
+Run the bundled example from the repo root:
+
+```bash
+ANIMA_PROVIDER=anthropic ANIMA_MODEL=claude-sonnet-4-5 cargo run -p anima-harness --example chat
+```
+
+## Builder
+
+`Harness::builder()` returns a `HarnessBuilder`:
+
+| Method | Effect |
+|--------|--------|
+| `name(..)` | Agent name (default `harness-agent`) |
+| `provider(..)` | Provider id or alias from the model-adapter catalog (`anthropic`, `openai`, `ollama`, `gemini`, ...) |
+| `model(..)` | Model id passed to the provider (required) |
+| `system(..)` | System prompt |
+| `api_key(..)`, `base_url(..)` | Override the catalog credential |
+| `temperature(..)`, `max_tokens(..)`, `max_tool_iterations(..)` | Written to `AgentSettings`; zero tool iterations allows only the tool-free wrap-up text response |
+| `tool(..)`, `tool_shared(..)`, `tools(ToolSet)` | Register tools |
+| `adapter(Arc<dyn ModelAdapter>)` | Use your own adapter (tests, bespoke providers); the provider name defaults to the adapter's |
+| `on_event(..)` | Listen to every `EngineEvent` |
+| `build()` | `Result<Harness, HarnessError>` |
+
+Credential resolution for a catalog provider: explicit `api_key` / `base_url`, then the provider's environment variables, then its default base URL.
+
+`HarnessError`: `MissingModel`, `MissingProvider` (no provider and no adapter), `UnknownProvider(id)`.
+
+## Tools
+
+```rust
+#[async_trait]
+pub trait HarnessTool: Send + Sync {
+    fn descriptor(&self) -> ToolDescriptor;       // advertised through AgentConfig::tools
+    async fn execute(&self, args: BTreeMap<String, DataValue>) -> Result<Content, String>;
+}
+```
+
+`ToolSet` is the registry (`register`, `register_shared`, `with_tool`, `extend`, `descriptors`, `execute`). A call to an unknown tool returns `Unknown tool: <name>`. `Ok` becomes a successful `TaskResult`, `Err` an error result the model sees. There are no approvals and no sandboxing: a tool does whatever its code does.
+
+## Harness API
+
+`run`, `chat`, `snapshot` / `restore` (an `AgentRuntimeSnapshot`; the event listener is not part of it), `set_event_listener`, `id`, `config`, `state`, `messages`, `tools` and `adapter`. The crate re-exports `anima_core` and `anima_model_adapters` so one dependency is enough.

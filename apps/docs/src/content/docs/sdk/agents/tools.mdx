@@ -5,17 +5,17 @@ description: Registering daemon tools on an agent by name or JSON descriptor
 
 import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
 
-Tools are executed by the Rust daemon. The SDK does not run tool code: it only tells the daemon which tools an agent may use, by name or by JSON descriptor.
+Tools are executed by the Rust daemon. The SDK does not run tool code: it tells the daemon which tools an agent may use, by name or by JSON descriptor.
 
 <CardGrid>
   <Card title="By name">
-    Pass the name of a tool the daemon has already registered, for example `'memory_search'`.
+    Pass the name of a tool the daemon has registered, for example `'memory_search'`.
   </Card>
   <Card title="By descriptor">
-    Pass `{ name, description, parameters, examples }` to describe the tool the model should see.
+    Pass `{ name, description, parameters, examples }` to control what the model sees.
   </Card>
-  <Card title="Registration">
-    Set `tools` on the agent config before you register the agent with the daemon.
+  <Card title="Granted per agent">
+    A tool runs only for agents whose `tools` list includes it, and approval policy still applies.
   </Card>
 </CardGrid>
 
@@ -35,11 +35,11 @@ type AgentToolInput =
 ```
 
 - A plain string is the name of a tool registered in the daemon.
-- An object supplies the name plus an optional description, JSON Schema `parameters`, and few-shot `examples` for the model.
+- An object supplies the name plus an optional description, JSON Schema `parameters`, and few-shot `examples`.
 
 ## Discover Registered Tools
 
-Ask the daemon which native tool handlers it has before you reference them:
+Ask the daemon which tool handlers it has registered:
 
 ```typescript
 import { createDaemonClient } from '@animaOS-SWARM/sdk';
@@ -52,8 +52,10 @@ for (const tool of capabilities.tools) {
 }
 ```
 
+Each `DaemonCapabilityTool` has a `name`, `description`, a `category` (`workspace`, `terminal`, `memory`, `team`, `research`, `productivity`, `browser`, `documents` or `utility`) and a `requirements` list. Registered tools include, among others, `memory_search`, `memory_add`, `core_memory`, `recent_memories`, `web_fetch`, `web_search`, `exa_search`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `list_dir`, `bash`, `bg_start`, `todo_write`, `load_skill`, `create_automation` and `send_message`; call `capabilities()` for the live list. See [Workspace & Capabilities](/sdk/workspace/) for the rest of that response.
+
 <Aside type="note">
-  A registered handler is not a connection check or a permission grant. It only shows what the daemon can execute.
+  A registered handler is not a connection check or a permission grant. It only shows what the daemon can execute, and many tools need a configured workspace, a connector or an owner opt-in first.
 </Aside>
 
 ## Register Tools on an Agent
@@ -87,19 +89,17 @@ const researcher = await client.agents.create(
 );
 ```
 
-You can change an agent's tools later with `AgentUpdateInput.tools`.
+Change an agent's tools later with `client.agents.update(id, { tools: [...] })`; an empty array clears them.
 
-## Practical Capability Split
+## Practical Split
 
-- use a tool name when the daemon already registers the capability you need
-- use a descriptor when you want to control the description or schema the model sees
-- keep runtime-heavy behavior in the daemon instead of pushing orchestration into the SDK caller
-
-<Aside type="tip">
-  The SDK gives you typed configuration. The actual runtime execution happens inside the daemon, not inside the SDK package.
-</Aside>
+- Use a tool name when the daemon already registers the capability you need.
+- Use a descriptor when you want to control the description or schema the model sees.
+- Keep tool execution in the daemon instead of orchestrating it from the SDK caller.
+- Tools that change files, run commands, reach the network or delegate are subject to the agent's [approval policy](/sdk/approvals/), which by default asks before running commands (`exec`).
 
 ## Where Next
 
-- [Agents Overview](/sdk/agents/) for the broader agent lifecycle.
+- [Agents Overview](/sdk/agents/) for the broader agent surface.
 - [Lifecycle & Retry](/sdk/agents/lifecycle/) for the run loop and retry-key behavior.
+- [Approvals](/sdk/approvals/) for the policy that gates tool calls.

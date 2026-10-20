@@ -1,22 +1,20 @@
 ---
 title: TUI
-description: Terminal UI for visual swarm monitoring and agent interaction
+description: Terminal UI for watching a swarm run, with history, retry and daemon health
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-The animaOS Terminal UI (TUI) is the main operator surface for agency work. It is built with [Ink](https://github.com/vadimdemedes/ink) and runs inside your terminal, giving you a real-time view of swarm execution, tools, results, health, and saved history.
-
-The TUI sits behind `animaos launch`. It is designed for agency workspaces that already have an `anima.yaml`.
+The animaOS terminal UI is built with [Ink](https://github.com/vadimdemedes/ink) and runs in your terminal. It is a client of the Rust daemon: `animaos launch` creates a swarm from your `anima.yaml` on the daemon, subscribes to its event stream, and draws the agents, messages, tool calls and results as they arrive. It is not the main surface for everyday use of anima (that is the web console); it is a lightweight way to run and watch an agent team from a workspace.
 
 <Aside type="caution">
-  Use `animaos launch` for the TUI. `animaos run` is plain-text today and does not render the TUI for daemon-backed runs.
+  The TUI sits behind `animaos launch`. `animaos run` and `animaos chat` are plain text and never render it, and `animaos launch --no-tui` is the plain-text mode.
 </Aside>
 
 ## In This Section
 
-- [Commands & States](/tui/commands/) covers slash commands, health checks, keyboard flow, and daemon-down behavior.
-- [History & Resume](/tui/history/) covers `anima-history.json`, saved runs, retry flows, and resumed-session inspection.
+- [Commands & States](/tui/commands/) covers slash commands, keys and daemon-down behavior.
+- [History & Resume](/tui/history/) covers saved runs, `anima-history.json`, `/resume`, `/retry` and undoing deletes.
 
 ## Recommended Flow
 
@@ -26,13 +24,13 @@ The TUI sits behind `animaos launch`. It is designed for agency workspaces that 
    bun run daemon
    ```
 
-2. Create a workspace if you do not already have one (or write an agency `anima.yaml` by hand).
+2. Create a workspace, or write an `anima.yaml` by hand for a team.
 
    ```bash
    animaos create agent content-writer -d "Research topics and write articles"
    ```
 
-3. Launch the workspace in the TUI.
+3. Launch it in the TUI.
 
    ```bash
    cd content-writer
@@ -42,114 +40,48 @@ The TUI sits behind `animaos launch`. It is designed for agency workspaces that 
 ## Launch Modes
 
 ```bash
-# Launch an agency in the TUI
-cd content-writer
-animaos launch
-
-# One-shot task inside the TUI session
-animaos launch "Build a website"
-
-# Plain-text fallback for automation or CI
-animaos launch --no-tui "Build a website"
+animaos launch                       # interactive TUI session
+animaos launch "Build a website"     # one task in the TUI, then exit
+animaos launch --no-tui "Build a website"   # plain text, for scripts and CI
 ```
 
-`launch` uses the workspace config in `anima.yaml`, can seed daemon memories from `agents/<slug>/memory/seed.json`, and keeps local launch history for later browsing and replay.
+- **Interactive** (no task) opens an input bar. Each task you enter runs on the swarm, and past runs stay available. If the workspace has saved history, the last run opens first as a resumed result.
+- **One task** runs it, shows the live view, and exits when you press Enter, Esc or `q`. While it is on screen, `t` opens the trace, `h` the history and `r` reruns the task.
 
-## What the TUI Is Good At
+`launch` seeds daemon memories from `agents/<slug>/memory/seed.json`, saves run history in the workspace, and in the TUI writes the latest task and result to `anima-result.md`.
 
-- watching a swarm work in real time
-- tracking which agent is active and what tools are being called
-- checking whether the daemon is healthy without leaving the terminal
-- browsing recent run history and replaying prior work
-- staying productive when the daemon temporarily drops by switching into command-only mode
+## What You See
 
-Use the TUI subsections in the sidebar if you want the operator details instead of the overview.
-
-
-## Layout
-
-```
-┌─────────────────────────────────────────────┐
-│  animaOS  │  content-team  │  supervisor   │
-├───────────┴────────────────┴───────────────┤
-│  ┌─────────┐  ┌─────────────────────────┐  │
-│  │ Agents  │  │ Message Stream          │  │
-│  │ ★ Alice │  │ Alice > Researching...  │  │
-│  │ • Bob   │  │ Bob > Drafting...       │  │
-│  │ • Carol │  │                         │  │
-│  └─────────┘  └─────────────────────────┘  │
-│  ┌────────────────────────────────────────┐ │
-│  │ Result Log                             │ │
-│  │ • Task completed — 12.3s               │ │
-│  └────────────────────────────────────────┘ │
-├─────────────────────────────────────────────┤
-│  task > _                                   │
-├─────────────────────────────────────────────┤
-│  Status: running  │  Tokens: 4,231          │
-└─────────────────────────────────────────────┘
-```
-
-## Panels
+The live swarm view stacks these panels:
 
 | Panel | Description |
 |-------|-------------|
-| **Agents** | Shows the orchestrator and workers, plus their current status |
-| **Message Stream** | Real-time swarm messages and lifecycle events |
-| **Tool / Trace Views** | Shows tool calls, arguments, and returned results |
-| **Result Log** | Stores completed tasks with duration and token summaries |
-| **History View** | Lets you browse saved runs and resume inspection |
-| **Input Bar** | Accepts tasks and slash commands |
-| **Status Bar** | Shows run status, health state, and daemon-related hints |
+| **Header** | Strategy, agent count (and how many are active) and the current task |
+| **Agents** | The configured agents plus any live ones, with status (`idle`, `thinking`, `running_tool`, `done`, `error`) and tokens |
+| **Messages** | The latest agent-to-agent and lifecycle messages |
+| **Tools** | The latest tool calls with status, truncated arguments and duration |
+| **Past runs** | In interactive mode, the three most recent saved runs |
+| **Status bar** | Total tokens, elapsed seconds, agent count, `gaps` when events were missed, and `daemon: up` or `daemon: down` with the last check time |
+| **Input bar** | In interactive mode, where you type tasks and slash commands |
+
+Other full-screen views open from commands: the saved-run **History** and **Resume** browser, the **Trace** of messages and tool activity, a single **Result**, and the **Agents** editor.
 
 ## Operator States
 
-The TUI is not just a pretty event stream. It has explicit operator behavior for the hard parts of local runtime work:
-
-- **Preflight health checks** warn you when the daemon is down before a task is sent.
-- **Command-only mode** appears when the daemon is unavailable, blocking task submission while still allowing health checks and help.
-- **Recovery messaging** tells you when daemon connectivity returns.
-- **History and resume flows** let you reopen saved runs and retry them without rebuilding context from scratch.
-
-## Slash Commands
-
-| Command | Description |
-|---------|-------------|
-| `/help` | Show available commands |
-| `/health` | Check daemon connectivity and report recovery or failure state |
-| `/history` | Browse saved run history |
-| `/retry` | Rerun the most recent task or saved run when retry is available |
-| `/clear` | Clear the current result/history surface |
-| `/back` | Return from history or resumed-run views |
-
-## Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Enter` | Submit task |
-| `Tab` | Cycle between panels |
-| `Ctrl+C` | Quit |
-
-## History and Resume
-
-Launch sessions keep local history so the TUI can show prior runs, inspect them, and offer rerun affordances. In agency workspaces, that history is stored in `anima-history.json` next to `anima.yaml`.
-
-This makes the TUI useful even outside the active run itself:
-
-- browse what happened in prior sessions
-- resume inspection after a restart
-- retry recent tasks without reconstructing the workspace manually
+- **Preflight check.** `launch` checks `GET /health` before the TUI starts and shows a warning if the daemon is unreachable.
+- **Health polling.** While the TUI is open it rechecks the daemon about every 5 seconds.
+- **Command-only mode.** When the daemon is down, the input bar blocks tasks (`daemon down - tasks paused; use /health or /help`) but still accepts commands such as `/health`, `/help`, `/history` and `/trace`.
+- **Recovery.** When the daemon returns, a recovery notice appears and tasks work again.
+- **Gaps.** If the daemon reports that your event stream fell behind (`swarm:lagged`), the status bar shows a `gaps` count so you know the trace has holes.
 
 ## Live Telemetry
 
-The TUI subscribes to the daemon's SSE event stream, so you see everything in real time:
+The TUI subscribes to the swarm's SSE stream: task starts and completions, tool calls with arguments and results, per-agent token usage, and the final result. The same stream is available to your own code through the [SDK](/sdk/swarms/events/).
 
-- Agent status changes (`idle` → `running` → `completed`)
-- Tool invocations with arguments and results
-- Token usage updates per agent
-- Swarm completion events
+## Editing Agents
 
-That live stream is what makes the TUI the best surface for understanding multi-agent behavior as it happens instead of after the fact.
+`/agents` opens the agent profiles from `anima.yaml`. Select an agent to view its profile; press `e` to edit `bio`, `lore`, `adjectives`, `topics`, `knowledge`, `style` and `system`, and Ctrl+S to save. Saving writes `anima.yaml` and makes the next task build a fresh swarm. Because `anima.yaml` is rewritten from the fields `launch` reads, fields it ignores (such as `mission` and `values`) are dropped on save.
 
 <Aside type="tip">
-  The TUI works best in a terminal that supports true color and at least 80x24 characters. Give it more width if you want the agent list, tool trace, and result history to stay readable during busy runs.
+  The TUI works best in a terminal with true color and at least 80 columns by 24 rows. Set `NO_COLOR` to turn colors off.
 </Aside>

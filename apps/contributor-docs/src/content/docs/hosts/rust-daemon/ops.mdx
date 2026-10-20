@@ -1,181 +1,121 @@
 ---
 title: Operations
-description: Operational notes, building, and testing the Rust daemon
+description: Readiness, metrics, status, logs, drain and shutdown, building and debugging the Rust daemon
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-<Aside type="caution" title="Work in Progress">
-  This contributor documentation is actively being written. Sections may be incomplete, reorganized, or expanded.
-</Aside>
+## Health, Readiness and Status
 
-## Operational Notes
+| Endpoint | Auth | Use |
+|----------|------|-----|
+| `GET /health`, `/api/health` | none | Liveness. Always `200 {"status":"ok"}` |
+| `GET /ready`, `/api/ready` | none | Readiness. `503` with `issues` when the daemon cannot serve |
+| `GET /metrics` | none | Prometheus text, counts only |
+| `GET /api/status` | owner | One snapshot of version, uptime, storage, providers, connectors, automations, approvals, runs, events, logs, limits |
 
-### Control Plane Durability
+Readiness reports `database: "missing"` and returns `503` when `ANIMAOS_RS_PERSISTENCE_MODE=postgres` is set without a working database adapter. It also reports an issue when the background-process manager is unavailable or the history store is failing, so orchestrators can retry or fail fast. A healthy proxy alone does not establish a healthy daemon or a configured model.
 
-By default, the daemon is an `ephemeral` control plane and agent/swarm runtime state lives in memory. For restart recovery, set `ANIMAOS_RS_CONTROL_PLANE_FILE` to a JSON snapshot path or run the host with `ANIMAOS_RS_PERSISTENCE_MODE=postgres`.
+`/api/status` details: `buildRevision` is non-null only when the build set `ANIMAOS_BUILD_REVISION` at compile time; `storage` includes persistence mode, control-plane durability and the history store's health, queue sizes, redacted last error and flush-error count; `providers` says whether each provider is configured and never includes a key; `connectors` is capped at 50 entries and never includes a credential. A console talking to an older daemon without this route shows an update instruction.
 
-- **JSON control-plane snapshots recover registrations.** Agents, swarms, latest snapshots, and swarm message history are restored after a restart.
-- **Interrupted runs are not resumed mid-turn.** Work marked running before restart is restored as failed/interrupted so callers can retry intentionally.
-- **Postgres persistence stores host snapshots.** In Postgres mode, the daemon stores control-plane and memory snapshots in the `host_snapshots` table unless explicit JSON/SQLite file stores are configured.
-- **Retried requests can reuse completed tool steps.** When the caller repeats the same `retryKey` or `idempotencyKey` metadata, Postgres-backed step logs let the daemon skip re-executing already completed tools.
-- **Snapshots preserve memory state.** Set `ANIMAOS_RS_MEMORY_SQLITE_FILE` or `ANIMAOS_RS_MEMORY_FILE` for file-backed memory snapshots, or use Postgres mode for database-backed memory snapshots.
+## Control-Plane Durability
 
-### Readiness Behavior
+By default the daemon is an `ephemeral` control plane. Set `ANIMAOS_RS_CONTROL_PLANE_FILE` or run Postgres mode for restart recovery. Recovery restores registrations, sessions, the run ledger, approvals policy, connector records and the latest snapshots; **work that was running is restored as interrupted or failed and is never resumed mid-turn**. In Postgres mode, retried requests that repeat the same retry key can reuse completed tool steps from `step_log`. Full detail and upgrade backups: [Persistence](/hosts/rust-daemon/persistence/).
 
-Readiness reports `database: "missing"` and returns `503` when `ANIMAOS_RS_PERSISTENCE_MODE=postgres` is set without a working database adapter. This allows orchestrators (Kubernetes, Docker Compose) to retry or fail fast.
+## Metrics
 
-### Metrics
+`GET /metrics` (`routes/health.rs`, `routes/status.rs`) is unauthenticated and carries counts only: no agent names, ids, prompts or costs.
 
-Prometheus metrics exposed at `/metrics`:
+| Metric | Meaning |
+|--------|---------|
+| `anima_daemon_ready` | 1 when ready |
+| `anima_daemon_uptime_seconds` | Process uptime |
+| `anima_daemon_agents`, `anima_daemon_swarms`, `anima_daemon_swarm_snapshots`, `anima_daemon_memories` | Registered counts |
+| `anima_daemon_runs`, `anima_daemon_runs_running`, `anima_daemon_runs_queued` | Run ledger counts (the ledger prunes old finished runs, so these are not lifetime totals) |
+| `anima_daemon_approvals_pending` | Approvals waiting for the owner |
+| `anima_daemon_automations_failing` | Automations in failure |
+| `anima_daemon_background_processes`, `anima_daemon_background_process_manager_healthy` | Background command count and manager health |
+| `anima_daemon_database_configured`, `anima_daemon_persistence_mode_info`, `anima_daemon_control_plane_durability_info` | Persistence configuration (labelled `mode`) |
+| `anima_daemon_max_concurrent_runs`, `anima_daemon_max_background_processes`, `anima_daemon_max_request_bytes`, `anima_daemon_request_timeout_seconds` | Configured limits |
+| `anima_daemon_event_subscribers`, `anima_daemon_event_lagged_total` | Open live streams; times a subscriber lagged |
+| `anima_daemon_history_pending_flush`, `anima_daemon_history_usage_queued`, `anima_daemon_history_failing`, `anima_daemon_history_flush_errors_total` | History outbox health |
+| `anima_daemon_messages_pruned_total` | Messages pruned from the hot tail |
+| `anima_daemon_log_lines_buffered` | Lines in the in-memory log tail |
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `anima_daemon_agents` | Gauge | Current number of registered agents |
-| `anima_daemon_swarms` | Gauge | Current number of registered swarms |
-| `anima_daemon_background_processes` | Gauge | Current bg processes |
-| `anima_daemon_control_plane_durability_info` | Gauge | `ephemeral`, `json`, or `postgres` control-plane mode |
-| `anima_daemon_max_concurrent_runs` | Gauge | Configured concurrent run limit |
-| `anima_daemon_max_background_processes` | Gauge | Configured bg process limit |
-| `http_requests_total` | Counter | Total HTTP requests |
-| `http_request_duration_seconds` | Histogram | Request latency |
+There are no HTTP request-count or latency metrics; use the request log lines (below).
 
-### Logging
+## Logging
 
-The daemon emits structured logs through `tracing`. Every HTTP request is logged with:
-- `method` — HTTP method
-- `uri` — Request path
-- `latency_ms` — Request duration
-- `x-request-id` — Request correlation ID
-- `status` — Response status code
+The daemon logs through `tracing`. The default filter is `anima_daemon=info,tower_http=info`; override with `RUST_LOG`. Each HTTP request gets a span with method, URI and `x-request-id`, and a response line with status and latency in milliseconds. The daemon sets `x-request-id` on every response and propagates a client-supplied one, so client and server logs can be correlated.
 
-Example:
+An in-memory tail keeps the last 2,000 lines (each at most 4 KiB), redacted at capture (API keys, `Authorization` and bearer values, OAuth and Telegram tokens, JWTs and long unlabeled tokens become `[redacted]`). Redaction is pattern-based, so treat `RUST_LOG=debug` or `trace` with care: it lets request and provider payload fragments into both the console and the tail.
 
-```
-2024-05-01T12:00:00Z  INFO  method=POST uri=/api/agents/550e8400/run latency_ms=2500 status=200 x_request_id=abc123
-```
+| Route | Description |
+|-------|-------------|
+| `GET /api/logs?level=&q=&after=&limit=` | Owner. `{ lines, newestSeq }`; `limit` 1 to 1,000 (default 200) |
+| `GET /api/logs/stream?level=&q=&after=` | Owner SSE: `event: log` per line, `event: resync` when the stream fell behind; at most 8 streams |
 
-### Request Correlation
+`anima logs [-f]` (packaged program) reads the supervisor's log files instead.
 
-The daemon adds `x-request-id` to all HTTP responses. If the client sends `x-request-id` in the request, the daemon propagates it. Otherwise, it generates a UUID. This allows correlating client logs with server logs.
+## Drain, Shutdown and the Supervisor Relay
+
+Before Stop, Restart, Quit or Update a supervisor drains the daemon so no agent work is cut off (`system/drain.rs`):
+
+| Route | Description |
+|-------|-------------|
+| `POST /api/system/drain` | Begin draining; `202 { draining, inFlight }` |
+| `GET /api/system/drain` | `{ draining, inFlight }` where `inFlight` counts chat runs, queued runs, swarm runs, helper runs, jobs, background processes, app sessions and ACP sessions |
+| `DELETE /api/system/drain` | Cancel the drain; `204` |
+| `POST /api/system/shutdown` | `202`, then the same graceful shutdown as SIGTERM |
+| `GET /api/system`, `POST /api/system/actions/{action}` | Relay to the supervisor (`start`, `stop`, `restart`, `quit`, `update`, `check-update`, `cancel`); `supervised: false` when no supervisor is configured |
+| `POST /api/system/session` | Trade the one-time console launch code (valid 15 seconds) for a 12-hour console session |
+
+While draining, new chat messages, legacy runs, peer messages, connector sends, swarm runs, jobs and goals are refused with `503`; Telegram and Discord messages are still received, and due automations and queued jobs stay due. Accepted runs finish. Authorization: without an `Origin`, the admin bearer token (`ANIMA_LOCAL_ADMIN_TOKEN`); from a browser, an allowed Origin plus a console session (cookie `anima_console_<port>` and the `x-anima-console-session` header), because any local process can send an Origin header. See [Packaged Anima](/packaged-anima/) for the console-session model and its stated limits.
 
 ## Building
 
 ```bash
-# Release build
+# Debug build of the daemon binary (what the Nx target runs)
 bun x nx run rust-daemon:build --skipNxCache
 
-# The binary is written to target/release/anima-daemon (or .exe on Windows)
+# Release build
+cargo build --release -p anima-daemon
 ```
 
-### Cross-Compilation
+The Nx `build` target runs `tools/workspace-dev/src/rust-daemon-dev.ts --build-only`, which builds `anima-daemon` in the **debug** profile (after `core-rust:build`) and re-signs it on macOS when `ANIMAOS_DEV_SIGNING_IDENTITY` is set. The release binary is `target/release/anima-daemon` (`.exe` on Windows). The packaged `anima` binary is built by `cargo build -p anima` (`bun x nx run anima:build`) or by the release pipeline.
 
-```bash
-# Linux from macOS
-rustup target add x86_64-unknown-linux-gnu
-cargo build --release -p anima-daemon --target x86_64-unknown-linux-gnu
-
-# ARM64
-rustup target add aarch64-unknown-linux-gnu
-cargo build --release -p anima-daemon --target aarch64-unknown-linux-gnu
-```
+Cross-compilation needs the target toolchain and its native dependencies (the daemon links SQLite, ONNX Runtime through `fastembed` and the platform credential APIs); only `aarch64-apple-darwin` and `x86_64-pc-windows-msvc` are built and tested for releases.
 
 ## Testing
 
 ```bash
-# Run daemon tests
 bun x nx run rust-daemon:test --skipNxCache
+bun x nx run rust-daemon:lint --skipNxCache
 
-# On Windows, if the binary is locked by a running process:
+# Windows, when a running daemon locks the binary
 CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache
 ```
 
-<Aside type="note">
-  The Windows workaround uses a separate target directory so the running binary and test binary don't conflict.
-</Aside>
-
-### Integration Tests
-
-Daemon integration tests spin up the full Axum server and make HTTP requests against it. They use:
-- Mock model adapters (no real LLM calls)
-- In-memory memory stores
-- Random ports to avoid conflicts
-
-### Load Testing
-
-For load testing, use `k6` or `autocannon`:
-
-```bash
-# Start daemon
-bun run daemon
-
-# Load test agent creation
-autocannon -c 10 -d 30 http://127.0.0.1:8080/api/agents
-```
+Daemon tests build routers in process (`tests/*.rs` and unit tests beside modules) with deterministic model adapters, fake transports and vaults, temporary stores and random ports. They do not call real providers or start containers. `tests/document_worker.rs` and the stdio MCP fixture start small helper binaries built from the same crate's examples.
 
 ## Debugging
 
-### Enable Debug Logs
-
 ```bash
 RUST_LOG=debug cargo run -p anima-daemon
-```
+RUST_LOG=anima_daemon=debug,tower_http=debug cargo run -p anima-daemon
 
-Or per-module:
-
-```bash
-RUST_LOG=anima_daemon=debug,anima_core=trace cargo run -p anima-daemon
-```
-
-### Attach Debugger
-
-```bash
-# Run with debug symbols
 cargo build -p anima-daemon
 rust-lldb target/debug/anima-daemon
 ```
 
-### Inspect Memory Snapshots
+Inspect stores with the daemon stopped:
 
 ```bash
-# SQLite snapshot
-sqlite3 data/runtime-memories.sqlite ".schema"
-
-# JSON snapshot
-jq '.memories | length' data/runtime-memories.json
+sqlite3 data/history.sqlite ".tables"
+sqlite3 data/memory.sqlite ".tables"          # memory_store_snapshots, memory_embeddings tables
+jq 'keys' data/control-plane.json
 ```
 
-## Deployment
-
-### Docker
-
-```dockerfile
-FROM rust:1.75 as builder
-WORKDIR /app
-COPY . .
-RUN cargo build --release -p anima-daemon
-
-FROM debian:bookworm-slim
-COPY --from=builder /app/target/release/anima-daemon /usr/local/bin/
-EXPOSE 8080
-CMD ["anima-daemon"]
-```
-
-### systemd
-
-```ini
-[Unit]
-Description=animaOS Daemon
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/anima-daemon
-Restart=always
-Environment=ANIMAOS_RS_PORT=8080
-Environment=ANIMAOS_RS_CONTROL_PLANE_FILE=/var/lib/anima/control-plane.json
-Environment=ANIMAOS_RS_MEMORY_SQLITE_FILE=/var/lib/anima/memories.sqlite
-
-[Install]
-WantedBy=multi-user.target
-```
+<Aside type="caution">
+  Control-plane, history and memory files can contain conversation text and memory content. Do not paste them into issues or chat. Secrets are not in them (they live in the OS credential store), but private conversation content is.
+</Aside>

@@ -1,21 +1,21 @@
 ---
 title: Client Basics
-description: DaemonClient structure, health checks, base URL configuration, and error handling
+description: DaemonClient structure, health checks, base URL configuration, owner authentication, and error handling
 ---
 
 import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
 
-The SDK is organized around one `DaemonClient` instance. You create it once, point it at an animaOS-compatible host, and then work through the typed `agents`, `swarms`, `memories`, and `connectors` sub-clients.
+The SDK is organized around one `DaemonClient`. You create it once, point it at the Rust daemon, and work through typed sub-clients such as `agents`, `swarms`, `memories`, `sessions` and `runs`.
 
 <CardGrid>
   <Card title="Health">
-    Verify host reachability with `client.health()` before doing application work.
+    `client.health()` calls `GET /health`. Use it to confirm the daemon is reachable before doing real work.
   </Card>
-  <Card title="Domain Clients">
-    Use `client.agents`, `client.swarms`, `client.memories`, and `client.connectors` instead of raw request construction.
+  <Card title="Domain clients">
+    Prefer `client.agents`, `client.sessions`, `client.memories` and the rest over hand-built requests.
   </Card>
-  <Card title="Transport Escape Hatches">
-    Use `requestJson()` and `subscribe()` when you need lower-level control over JSON or SSE.
+  <Card title="Transport escape hatches">
+    `requestJson()`, `requestText()`, `requestBlob()` and `subscribe()` reach any daemon route the typed clients do not cover.
   </Card>
 </CardGrid>
 
@@ -24,6 +24,7 @@ The SDK is organized around one `DaemonClient` instance. You create it once, poi
 ```typescript
 import { createDaemonClient } from '@animaOS-SWARM/sdk';
 
+// Defaults to http://127.0.0.1:8080
 const client = createDaemonClient();
 
 const explicitClient = createDaemonClient({
@@ -32,55 +33,107 @@ const explicitClient = createDaemonClient({
 });
 ```
 
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `baseUrl` | `string` | `http://127.0.0.1:8080` | Daemon origin or path prefix. An empty string means same-origin requests in a browser; Node needs an absolute URL. Trailing slashes are removed. |
+| `fetch` | `typeof fetch` | `globalThis.fetch` | Custom fetch, used to add headers (see [Authentication](#authentication)). Construction throws if no fetch is available. |
+
+<Aside type="note">
+  The SDK does not read environment variables. The CLI reads `ANIMA_DAEMON_URL` and passes it as `baseUrl`; in your own code, do the same yourself.
+</Aside>
+
+### Which port?
+
+| How the daemon runs | Daemon / API port |
+|---------------------|-------------------|
+| `bun dev --host rust` or `bun run daemon` from the repo | `8080` (the web console runs separately on `4200`) |
+| The installed `anima` program | `8787` by default, with the console served on the same port |
+
+Use `baseUrl: 'http://127.0.0.1:8787'` (or `ANIMA_DAEMON_URL`) to target an installed copy. The daemon's own bind address and port come from `ANIMAOS_RS_HOST` and `ANIMAOS_RS_PORT`.
+
 ## Client Shape
 
-The client surface is intentionally small:
-
-- `health()` for daemon status
-- `agents` for single-agent lifecycle operations
-- `swarms` for multi-agent coordination and live SSE
-- `memories` for memory search, recall, evaluation, and graph operations
-- `connectors` for account connections, inbox reads, drafts and owner approvals
-- `requestJson()` and `subscribe()` for lower-level transport access
+| Accessor | What it covers |
+|----------|----------------|
+| `health()` | Liveness (`{ status: 'ok' }`) |
+| `capabilities()` | Registered tool handlers and persistence labels ([Workspace & Capabilities](/sdk/workspace/)) |
+| `agents` | Agent lifecycle, runs, jobs, tasks, schedules ([Agents](/sdk/agents/)) |
+| `swarms` | Swarm create, run and SSE ([Swarms](/sdk/swarms/)) |
+| `memories` | Memory search, recall, editing, core memory, export ([Memories](/sdk/memories/)) |
+| `sessions`, `runs`, `events`, `attachments` | Conversations, accepted runs and the live event stream ([Sessions & Runs](/sdk/sessions/)) |
+| `approvals` | Tool-call approvals, policy and rules ([Approvals](/sdk/approvals/)) |
+| `automations`, `goals` | Scheduled prompts and goals ([Jobs & Automations](/sdk/automations/)) |
+| `mcp`, `skills`, `communityBundles`, `learning` | Extensions and learning reviews ([MCP & Skills](/sdk/extensions/)) |
+| `usage`, `logs`, `status`, `system` | Owner observability ([Usage, Logs & Status](/sdk/observability/)) |
+| `workspace`, `agentFiles`, `agencies` | Workspace config, files and agency drafts ([Workspace & Capabilities](/sdk/workspace/)) |
+| `connectors` | Mail, Calendar, Drive, Discord and OAuth apps ([Connectors](/sdk/connectors/)) |
+| `voice`, `speech`, `browserScopes`, `chatgpt` | Opt-in voice, scoped browser work and ChatGPT subscription login ([API Reference](/sdk/reference/)) |
 
 ## Health and Reachability
 
 ```typescript
 const health = await client.health();
-console.log(health.status); // 'ok' | 'degraded' | 'unavailable'
+console.log(health.status); // 'ok'
 ```
 
-This is useful in browser apps, CLIs, and CI flows where the host may not already be running.
-
-## Generic JSON Requests
-
-If you need one lower-level typed JSON request:
+`health()` always resolves to `{ status: 'ok' }` when the daemon answers. For readiness and the rest of the daemon's state, use `client.status.get()` (owner route) or call `GET /api/ready` yourself:
 
 ```typescript
 const ready = await client.requestJson<{ status: string }>('/api/ready');
-console.log(ready.status);
+console.log(ready.status); // 'ready' when the daemon can serve traffic
 ```
 
-Prefer the domain clients when a typed helper already exists. `requestJson()` is the escape hatch, not the default path.
+## Authentication
 
-## Generic SSE Subscriptions
+The daemon distinguishes two kinds of access:
 
-If you need raw SSE access instead of a domain helper:
+- **Owner routes** (sessions, runs and the event stream, approvals, skills, usage, logs, status, automations, jobs, memory editing, core memory and export, and similar) act as the machine's owner. The daemon accepts them only when it is bound to a loopback address and the request's `Host` is loopback with no forwarding headers, and then requires either an approved browser `Origin` (the web console) or `Authorization: Bearer <ANIMA_LOCAL_ADMIN_TOKEN>`. A script has no browser origin, so it needs the token. Without a configured token the daemon refuses with `403 local owner authorization required`.
+- **A global API key.** When `ANIMAOS_RS_API_KEY` is set on the daemon, every route except health, readiness, metrics and the docs pages needs it as `Authorization: Bearer <key>` or `x-api-key: <key>`. When both the API key and the admin token are set and differ, send the key in `x-api-key` and the admin token in `Authorization`.
+
+The SDK has no auth option; supply headers through a custom `fetch`:
 
 ```typescript
-for await (const event of client.subscribe('/api/swarms/swarm-123/events')) {
+import { createDaemonClient } from '@animaOS-SWARM/sdk';
+
+const withOwnerToken: typeof fetch = (input, init) => {
+  const headers = new Headers(init?.headers);
+  headers.set('authorization', `Bearer ${process.env.ANIMA_LOCAL_ADMIN_TOKEN}`);
+  return fetch(input, { ...init, headers });
+};
+
+const client = createDaemonClient({ fetch: withOwnerToken });
+```
+
+Keep the token out of logs and agent-visible text. See [`hosts/rust-daemon/README.md`](https://github.com/G9000/animaOS-SWARM/blob/main/hosts/rust-daemon/README.md) for the full authorization rules.
+
+## Generic Requests
+
+```typescript
+// Typed JSON request. Objects are sent as JSON; FormData, Blob and strings pass through.
+const ready = await client.requestJson<{ status: string }>('/api/ready');
+
+// Text (for example a Markdown export) and binary responses
+const markdown = await client.requestText('/api/agents/AGENT_ID/sessions/SESSION_ID/export');
+const file = await client.requestBlob('/api/memories/export');
+
+// Raw SSE
+for await (const event of client.subscribe('/api/swarms/SWARM_ID/events')) {
   console.log(event.event, event.data);
 }
 ```
 
-Again, prefer `client.swarms.subscribe()` when the domain surface already exposes the stream you want.
+`requestJson()` throws `DaemonHttpError` for non-2xx responses and `DaemonConnectionError` when the daemon cannot be reached or the body fails midway. Prefer the domain clients whenever a typed helper exists.
 
 ## Error Surfaces
 
-The SDK throws two main error types:
+| Error | Thrown when | Properties |
+|-------|-------------|------------|
+| `DaemonHttpError` | The daemon answered with a non-2xx status | `status: number`, `body: unknown`; `message` is the body's `error` string when present |
+| `DaemonConnectionError` | The daemon could not be reached | `cause: unknown` |
+| `DaemonTooOldError` | `sessions.list()` or `sessions.main()` got a 404 for an agent that exists, so the daemon predates sessions | `code: 'daemon_too_old'`, `agentId` |
+| `StatusTooOldError` | `status.get()` got a 404, so the daemon has no `/api/status` | `code: 'daemon_too_old'` |
 
-- `DaemonHttpError` when the host responded with a non-2xx status
-- `DaemonConnectionError` when the host could not be reached at all
+An aborted request rethrows its `AbortError` unchanged.
 
 ```typescript
 import { DaemonConnectionError, DaemonHttpError } from '@animaOS-SWARM/sdk';
@@ -98,12 +151,9 @@ try {
 }
 ```
 
-<Aside type="tip">
-  The SDK is host-agnostic, but the Rust daemon is the reference implementation in this repo. The cleaner your `DaemonClient` setup is, the easier it is to swap hosts later without rewriting application logic.
-</Aside>
-
 ## Where Next
 
-- [Quick Start](/sdk/quickstart/) for the end-to-end onboarding path.
-- [Agents](/sdk/agents/) for single-agent runtime workflows.
-- [API Reference](/sdk/reference/) for the full typed surface.
+- [Quick Start](/sdk/quickstart/) for the end-to-end path.
+- [Agents](/sdk/agents/) for single-agent workflows.
+- [Sessions & Runs](/sdk/sessions/) for the conversation model the web console uses.
+- [API Reference](/sdk/reference/) for every client and method.

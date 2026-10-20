@@ -1,19 +1,20 @@
 ---
 title: Daemon Commands
-description: Run, chat, inspect, and operate daemon-backed workflows from the CLI
+description: Run, chat, inspect, and target the daemon from the CLI
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-These commands talk directly to the daemon instead of generating local workspace files.
+These commands talk to the Rust daemon instead of writing local workspace files. Start a daemon first: `bun run daemon` from the repository, or the installed `anima` program.
 
 ## Choose the Right Command
 
 | Command | Use it when | Notes |
 |---------|-------------|-------|
-| `run` | You want one quick result right now | Creates a temporary agent or swarm and prints plain text |
-| `chat` | You want an interactive single-agent REPL | Creates one daemon-backed agent and keeps the conversation open |
-| `agents` | You want to inspect daemon-held agents | Useful for debugging or checking host state |
+| `run` | You want one result now | Creates a temporary agent (or swarm with `-s`) and prints plain text |
+| `chat` | You want an interactive REPL with one agent | Creates one daemon agent and keeps the conversation open |
+| `agents` | You want to inspect what the daemon holds | Lists and shows registered agents |
+| `assistant` | You want to chat with an existing agent by name | Sends your user id and name as metadata |
 
 ## `animaos run`
 
@@ -25,54 +26,63 @@ animaos run "Summarize the Rust book" -m gpt-4o-mini
 animaos run "Build a landing page" -s supervisor -m gpt-4o
 ```
 
-`run` is the fastest daemon-backed CLI path. It is ideal when you do not want to create a workspace first.
-
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-m, --model` | `gpt-4o-mini` | Model to use |
-| `-p, --provider` | `openai` | Provider family |
-| `-n, --name` | `task-agent` | Agent name for single-agent mode |
-| `-s, --strategy` | — | Swarm strategy: `supervisor`, `dynamic`, `round-robin` |
-| `--api-key` | — | API key override |
-| `--no-tui` | — | Force plain-text output |
+| `-p, --provider` | `openai` | Provider (see [Providers](/cli/providers/)) |
+| `-n, --name` | `task-agent` | Agent name (single-agent mode) |
+| `-s, --strategy` | | `supervisor`, `dynamic` or `round-robin` |
+| `--api-key` | | API key override |
+| `--no-tui` | | Skips the "TUI not available" note |
 
-<Aside type="caution">
-  `run` is plain-text today. The `--no-tui` flag exists for interface consistency, but daemon-backed `run` does not currently render the Ink TUI.
-</Aside>
+In single-agent mode `run` creates an agent with the system prompt `You are a helpful task agent. Use tools when needed. Be concise.` and runs your task. With `-s` it creates a swarm with a manager and one worker using the same model and provider, runs the task, and prints the swarm's result and token total. Credentials are forwarded with the request (`--api-key`, otherwise the provider's environment variables), so switching keys never needs a daemon restart.
+
+The agent or swarm stays registered in the daemon after the command finishes. They appear in `animaos agents list`, and agents can be removed with the SDK's `client.agents.remove()`.
 
 ## `animaos chat`
 
 ```bash
-animaos chat -m claude-3-5-sonnet -p anthropic
+animaos chat -m claude-sonnet-4-5 -p anthropic
 ```
 
-`chat` creates a daemon-backed agent and opens a terminal REPL with the `you >` prompt. Type `exit` to quit.
-
-This is the right choice when you want iterative back-and-forth without creating a workspace.
+`chat` creates a daemon agent and opens a terminal REPL at `you >`. Type `exit` or press Enter on an empty line to quit. Replies print as `agent > ...`; a failed run prints `[error] ...` and the prompt returns. Options match `run` except for `-s`: `-p`, `-m`, `-n` and `--api-key`.
 
 ## `animaos agents`
 
 ```bash
-# List all registered daemon-backed agents
 animaos agents list
-
-# Show one by name or id
 animaos agents show researcher
 ```
 
-Use this when you want to inspect host state after launches, retries, or debugging sessions.
+`list` prints a count, then each agent's name, id, status, model and message and event counts, or `No daemon-backed agents are currently registered.` `show` accepts a name or an id and adds token usage and the last task status; an unknown name prints the available agents and exits with code 1. Use it to check daemon state after launches, retries or restarts.
+
+## `animaos assistant`
+
+```bash
+animaos assistant chat --name assistant --user-id sam --user-name Sam
+```
+
+Looks up an agent with that exact name on the daemon (default `assistant`) and opens the same kind of REPL as `chat`, attaching `{ userId, userName }` metadata to each message. If no agent has that name it exits with an error.
+
+<Aside type="caution">
+  `animaos assistant inbox [--since <ms>] [--limit <n>]` requests `/api/assistant/outbox`, a route the current Rust daemon does not serve, and the not-found error text mentions `ANIMAOS_RS_ASSISTANT_ENABLED`, which the daemon no longer reads. Treat `inbox` as unavailable.
+</Aside>
 
 ## Targeting a Different Daemon
 
-The CLI defaults to `http://127.0.0.1:8080`, but daemon-backed commands can be pointed elsewhere:
+The CLI defaults to `http://127.0.0.1:8080`. Point it elsewhere with `ANIMA_DAEMON_URL`:
 
 ```bash
+# An installed `anima` program
+ANIMA_DAEMON_URL=http://127.0.0.1:8787 animaos agents list
+
+# Another local port or host
 ANIMA_DAEMON_URL=http://127.0.0.1:8081 animaos agents list
 ```
 
-That is useful for staging, alternate local ports, or multiple hosts.
+The CLI sends no authorization headers. It cannot reach a daemon that sets `ANIMAOS_RS_API_KEY`, and it does not use the owner routes (sessions, approvals and so on). For those, use the [SDK](/sdk/client/#authentication) with a custom `fetch`.
 
 ## Where Next
 
-- Go to [Agency Workflow](/cli/workspaces/) for `create` and `launch`.
-- Go to [Providers & Environment](/cli/providers/) for provider credentials and endpoint overrides.
+- [Agency Workflow](/cli/workspaces/) for `create` and `launch`.
+- [Providers & Environment](/cli/providers/) for provider credentials and endpoint overrides.

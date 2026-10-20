@@ -1,69 +1,64 @@
 ---
 title: Message Bus
-description: In-memory pub/sub between swarm agents
+description: The in-memory inbox and history store between swarm agents
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
-<Aside type="caution" title="Work in Progress">
-  This contributor documentation is actively being written. Sections may be incomplete, reorganized, or expanded.
-</Aside>
-
-## MessageBus
-
-`MessageBus` is an in-memory pub/sub channel between swarm agents.
+`MessageBus` is an in-memory store of per-agent inboxes plus a global history. It is not a pub/sub transport: the daemon publishes live events through its own hooks.
 
 ```rust
 pub struct MessageBus {
-  inboxes: HashMap<String, Vec<AgentMessage>>,
-  all_messages: Vec<AgentMessage>,
+    inboxes: HashMap<String, Vec<AgentMessage>>,
+    all_messages: Vec<AgentMessage>,
 }
 ```
 
-It keeps per-agent inboxes for the currently live coordinator and a global message history used for state snapshots.
+The `SwarmMessageBus` trait (`send`, `broadcast`, `get_messages`, `get_all_messages`, `clear`, `clear_inboxes`) is what strategies see; `MessageBus` implements it.
 
 ## Operations
 
 | Method | Description |
 |--------|-------------|
-| `register_agent(agent_id)` | Create an inbox for a live coordinator agent |
-| `unregister_agent(agent_id)` | Remove an inbox when an agent leaves the live pool |
-| `send_message(from, to, content)` | Direct message from one agent to another and append it to global history |
-| `broadcast_message(from, content)` | Message to every registered agent except the sender and append it to global history |
-| `get_messages(agent_id)` | Clone the current inbox for an agent |
-| `get_all_messages()` | Clone the global message history |
-| `clear()` | Remove all inboxes and global history |
-| `clear_inboxes()` | Empty inboxes while preserving registrations and global history |
+| `register_agent(id)` / `unregister_agent(id)` | Create or remove an agent's inbox |
+| `send_message(from, to, content)` | Append to the history and, if `to` has an inbox, to it. Returns the `AgentMessage`. |
+| `broadcast_message(from, content)` | Append to the history with `to = "broadcast"` and to every inbox except the sender's |
+| `get_messages(id)` | Clone one agent's inbox |
+| `get_all_messages()` | Clone the global history |
+| `clear()` | Drop all inboxes and the history |
+| `clear_inboxes()` | Empty inboxes, keep registrations and the history |
 
-Messages are persistent within a swarm run. The coordinator captures `get_all_messages()` into `SwarmState.messages`, which means completed message history can be included in daemon control-plane snapshots. Live inboxes are still in-memory coordinator state; they are not a mid-turn resume mechanism after process restart.
+(`send` and `broadcast` are the trait-style forms that discard the returned message.)
 
 ## AgentMessage
 
 ```rust
 pub struct AgentMessage {
-  pub id: String,
-  pub from: String,
-  pub to: String,           // "broadcast" for broadcast messages
-  pub content: Content,
-  pub timestamp: u64,       // milliseconds since UNIX epoch
+    pub id: String,        // "swarm-msg-<millis>-<n>"
+    pub from: String,
+    pub to: String,        // an agent id, or "broadcast"
+    pub content: Content,
+    pub timestamp: u64,    // ms since the UNIX epoch
 }
 ```
 
-## Current Boundaries
+## How the Coordinator Uses It
 
-- There is no FIFO overflow policy today; inboxes and global history grow for the lifetime of a live coordinator.
-- `max_turns` limits strategy turns. Request timeouts are enforced by the Rust daemon route layer, not by `anima-swarm` itself.
-- Restart recovery restores registered swarms and latest `SwarmState` snapshots through the daemon's JSON or Postgres host snapshot store, but it does not rebuild a partially completed in-flight message-bus turn.
+Each agent shell gets `send`, `broadcast`, `inbox` and `participants` closures from the coordinator. The send and broadcast closures check the sender is still live, write to the bus, then call the optional `CoordinatorMessageEventFn` (swarm id plus the message). `get_state()` and the end of every dispatch copy `get_all_messages()` into `SwarmState.messages`. `stop()` clears the bus and `SwarmState.messages`.
 
-## Swarm Events
+## Boundaries
 
-`MessageBus` itself is transport-free and does not emit network events. The Rust daemon wires `CoordinatorMessageEventFn` to publish live swarm messages over SSE and to persist message relationships into memory.
+- No size cap or eviction: inboxes and history grow for the life of a live coordinator.
+- Inboxes are coordinator memory. A daemon restart restores the registered swarm and its last `SwarmState` (including `messages`) from the control plane, but not live inboxes, and it never resumes a partly finished dispatch.
+- Time limits are not enforced here. The daemon's route layer applies the run request timeout, and `token_budget` is checked by host hooks.
 
-Common daemon-facing event names include:
+## Daemon Events
 
-| Event | Fired When |
-|-------|------------|
-| `swarm:created` | A swarm is registered in the daemon |
-| `swarm:running` | A run transitions into running state |
-| `swarm:message` | A coordinator message is sent or broadcast |
-| `swarm:completed` | A run finishes and final state/result are published |
+`MessageBus` emits nothing itself. The daemon wires `CoordinatorMessageEventFn` to publish `swarm:message` on the swarm event streams and to persist message relationships into memory. The swarm SSE stream (`GET /api/swarms/{swarm_id}/events`) uses these event names:
+
+| Event | When |
+|-------|------|
+| `swarm:created` | A swarm is registered |
+| `swarm:running` | A dispatch starts running |
+| `swarm:message` | A message is sent or broadcast: `{ swarmId, message }` |
+| `swarm:completed` | A dispatch finishes; payload `{ swarmId, state, result }` |
+| `swarm:lagged` | The subscriber fell behind: `{ missed }` (refetch the swarm state) |
+| `task:started`, `task:completed`, `task:failed`, `tool:before`, `tool:after`, `agent:tokens`, `agent:terminated` | Republished runtime events of the swarm's agents |

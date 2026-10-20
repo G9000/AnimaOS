@@ -1,13 +1,13 @@
 ---
 title: API Reference
-description: Complete SDK API reference with types, errors, and helper functions
+description: Every SDK client, method, helper, constant and core type
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-The animaOS SDK is organized around a single `DaemonClient` with three domain-specific sub-clients: `AgentsClient`, `SwarmsClient`, and `MemoriesClient`.
+The SDK is one `DaemonClient` with typed sub-clients, plus shared types. It is a client for the [Rust daemon](https://github.com/G9000/animaOS-SWARM/tree/main/hosts/rust-daemon) over HTTP and SSE; the daemon's own route inventory and OpenAPI document (`GET /openapi.json`, browsable at `/docs`) are the contract behind it. Methods marked **owner** use owner routes and need `Authorization: Bearer <ANIMA_LOCAL_ADMIN_TOKEN>` from a script ([Authentication](/sdk/client/#authentication)).
 
-The SDK communicates with any animaOS-compatible host over HTTP and SSE. The [Rust daemon](https://github.com/G9000/animaOS-SWARM/tree/main/hosts/rust-daemon) in this repo is the reference implementation. Hosts that implement the same HTTP contract (agents, swarms, memories, health endpoints) work out of the box.
+All `signal` options are an `AbortSignal`. Unless noted, methods resolve to the unwrapped payload (for example `agents.get()` returns the `AgentSnapshot`, not `{ agent }`).
 
 ## `DaemonClient`
 
@@ -17,189 +17,200 @@ import { createDaemonClient, DaemonClient } from '@animaOS-SWARM/sdk';
 const client = createDaemonClient(options);
 ```
 
-### Constructor options (`DaemonClientOptions`)
+| `DaemonClientOptions` | Type | Default | Description |
+|-----------------------|------|---------|-------------|
+| `baseUrl` | `string` | `http://127.0.0.1:8080` | Daemon origin or path prefix; `''` for same-origin browsers |
+| `fetch` | `FetchLike` | `globalThis.fetch` | Custom fetch (add auth headers here) |
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `baseUrl` | `string` | `http://127.0.0.1:8080` | Daemon HTTP endpoint |
-| `fetch` | `FetchLike` | `globalThis.fetch` | Custom fetch implementation |
+| Method | Description |
+|--------|-------------|
+| `health()` | `GET /health`: `{ status: 'ok' }` |
+| `capabilities()` | `GET /api/capabilities`: `DaemonCapabilities` |
+| `requestJson<T>(path, init?)` | JSON request; objects in `body` are serialized, `FormData`, `Blob` and strings pass through |
+| `requestText(path, init?)` | Text response (Markdown, CSV) |
+| `requestBlob(path, init?)` | Binary response |
+| `requestBoundedBlob(path, init, limits)` | Binary response with a strict size and content-type check |
+| `requestNoBody(path, init, expectedStatus)` | Status-only call; the body is discarded |
+| `subscribe<T>(path, init?)` | Async generator of `DaemonEvent<T>` (`event`, `data`, optional `id`) over SSE |
 
-### Methods
+Sub-clients: `agents`, `swarms`, `memories`, `sessions`, `runs`, `events`, `attachments`, `approvals`, `automations`, `goals`, `mcp`, `skills`, `communityBundles`, `learning`, `usage`, `logs`, `status`, `system`, `workspace`, `agentFiles`, `agencies`, `connectors`, `voice`, `speech`, `browserScopes`, `chatgpt`.
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `health()` | `() => Promise<DaemonHealth>` | Check daemon status |
-| `requestJson<T>(path, init?)` | `(string, RequestInit?) => Promise<T>` | Generic typed JSON request |
-| `subscribe<T>(path, init?)` | `(string, RequestInit?) => AsyncGenerator<DaemonEvent<T>>` | SSE event stream |
+### Errors
 
-### `DaemonHealth`
+| Class | Thrown when | Properties |
+|-------|-------------|------------|
+| `DaemonHttpError` | Non-2xx response | `status`, `body` |
+| `DaemonConnectionError` | The daemon cannot be reached or the body fails midway | `cause` |
+| `DaemonTooOldError` | `sessions.list()` or `sessions.main()` on a daemon without sessions | `code: 'daemon_too_old'`, `agentId` |
+| `StatusTooOldError` | `status.get()` on a daemon without `/api/status` | `code: 'daemon_too_old'` |
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `status` | `string` | Health status: `ok`, `degraded`, or `unavailable` |
+## `AgentsClient` (`client.agents`)
 
-### `DaemonEvent<T>`
+See [Agents](/sdk/agents/).
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `event` | `string` | SSE event name |
-| `data` | `T` | Parsed JSON payload |
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `create(config: AgentConfig)` | `AgentSnapshot` | Create an agent |
+| `list()` / `listSummaries()` | `AgentSnapshot[]` / `AgentSummary[]` | All agents; summaries omit `messages` |
+| `get(agentId)` | `AgentSnapshot` | One agent |
+| `update(agentId, patch: AgentUpdateInput)` | `AgentSnapshot` | `name`, `model`, `provider`, `system`, `tools`, `fallbacks` |
+| `remove(agentId)` | `void` | Delete; `409` while a run is running |
+| `run(agentId, content, { roomId? })` | `AgentRunResponse` | Blocking run: `{ agent, result }` |
+| `sendMessage(senderId, toAgentId, message)` | `AgentRunResponse` | One bounded peer request |
+| `recentMemories(agentId, { limit? })` | `AgentMemory[]` | Recent memories |
+| `setAvatar(agentId, image: Blob)` / `removeAvatar(agentId)` | `void` | PNG, JPEG or WebP up to 5 MiB |
+| `tasks(agentId)` / `updateTasks(agentId, { tasks, revision })` | `AgentTasks` | Saved task list; stale revision is `409` |
+| `jobs(agentId)` | `AgentJob[]` | **owner**. See [Jobs & Automations](/sdk/automations/) |
+| `createJob`, `approveJob`, `cancelJob`, `retryJob`, `reviewJob` | `AgentJob` | **owner**. Job lifecycle |
+| `schedules`, `createSchedule`, `updateSchedule`, `removeSchedule` | `AgentSchedule[]` and friends | Older interval and daily helpers; prefer `automations` |
 
----
+## `SwarmsClient` (`client.swarms`)
 
-## `AgentsClient`
+See [Swarms](/sdk/swarms/).
 
-Accessed via `client.agents`.
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `create(config: SwarmConfig)` | `SwarmState` | Create a swarm |
+| `get(swarmId)` | `SwarmState` | Current state |
+| `run(swarmId, content)` | `SwarmRunResponse` | `{ swarm, result }`; blocks until done |
+| `subscribe(swarmId, init?)` | `AsyncGenerator<DaemonEvent<SwarmStreamEventPayload>>` | SSE stream |
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `create` | `(config: AgentConfig) => Promise<AgentSnapshot>` | Create a new agent |
-| `list` | `() => Promise<AgentSnapshot[]>` | List all agents |
-| `get` | `(agentId: string) => Promise<AgentSnapshot>` | Get agent by ID |
-| `run` | `(agentId: string, input: Content) => Promise<AgentRunResponse>` | Execute a task |
-| `recentMemories` | `(agentId: string, options?) => Promise<AgentMemory[]>` | Fetch recent memories |
+Payloads: `SwarmEventPayload`, `SwarmMessagePayload`, `SwarmAgentEventPayload`, `SwarmTaskFailedPayload`, `SwarmToolBeforePayload`, `SwarmToolAfterPayload`, `SwarmAgentTokensPayload` ([Event Streaming](/sdk/swarms/events/)).
 
-### `AgentSnapshot`
+## `MemoriesClient` (`client.memories`)
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `state` | `AgentState` | Runtime state |
-| `messageCount` | `number` | Total messages processed |
-| `eventCount` | `number` | Total events emitted |
-| `lastTask` | `TaskResult<Content> \| null` | Result of the most recent task |
+See [Memories](/sdk/memories/).
 
-### `AgentRunResponse`
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `create(input)` | `Memory` | Store a memory |
+| `search(query, options?)` | `MemorySearchResult[]` | Keyword search; flat results with `score` |
+| `recent(options?)` | `Memory[]` | Recent memories |
+| `recall(query, options?)` | `MemoryRecallResult[]` | Fused recall: `{ memory, score, ...signal scores }` |
+| `evaluate(input)` | `MemoryEvaluation` | Decide `store`, `merge` or `ignore` without storing |
+| `addEvaluated(input)` | `MemoryEvaluationOutcome` | Evaluate, then store if `store` |
+| `trace(memoryId)` | `MemoryEvidenceTrace` | Memory, citing relationships, entities |
+| `applyRetention(input)` | `MemoryRetentionReport` | Decay and cleanup |
+| `readiness()` | `MemoryReadiness` | Embeddings, external provider, eval self-test |
+| `createEntity(input)` / `entities(options?)` | `MemoryEntity` / `MemoryEntity[]` | Entity graph |
+| `createRelationship(input)` / `relationships(options?)` | `AgentRelationship` / `AgentRelationship[]` | Relationship edges |
+| `update(memoryId, patch)` | `Memory` | **owner**. `content`, `importance`, `tags` |
+| `delete(memoryId, expectedContent?)` | `MemoryDeleteResult` | **owner** |
+| `facts(options?)`, `replaceFact(id, value)`, `deleteFact(id)` | `MemoryFact[]` and friends | **owner**. Temporal facts |
+| `deleteEntity(kind, entityId)` | `MemoryEntityDeleteResult` | **owner** |
+| `coreMemory(agentId)`, `addCoreEntry`, `updateCoreEntry`, `removeCoreEntry` | `CoreMemory`, `CoreMemoryEdit` | **owner**. Core blocks `user` and `notes` |
+| `exportMemories({ format?, agentId? })` | `Blob` | **owner**. JSON or Markdown |
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `agent` | `AgentSnapshot` | Updated agent snapshot |
-| `result` | `TaskResult<Content>` | Task result |
+Constants: `MAX_MEMORY_EDIT_CHARS` (8,000), `MAX_MEMORY_TAGS` (20), `MAX_MEMORY_TAG_CHARS` (40), `MAX_FACT_VALUE_CHARS` (500), `MAX_FACTS_SHOWN` (500).
 
-### `AgentMemory`
+## `SessionsClient`, `RunsClient`, `AgentEventsClient`, `AttachmentsClient`
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | `string` | Memory ID |
-| `agentId` | `string` | Owning agent |
-| `agentName` | `string` | Agent name |
-| `type` | `string` | Memory type |
-| `content` | `string` | Memory content |
-| `importance` | `number` | Importance score |
-| `createdAt` | `number` | Unix timestamp |
-| `tags` | `string[] \| null` | Tags |
-| `scope` | `'shared' \| 'private' \| 'room'` | Visibility scope |
-| `roomId` | `string \| null` | Room context |
-| `worldId` | `string \| null` | World context |
-| `sessionId` | `string \| null` | Session context |
+All **owner**. See [Sessions & Runs](/sdk/sessions/).
 
----
+| Client | Method | Returns |
+|--------|--------|---------|
+| `sessions` | `main(agentId)` | `Session` |
+| | `list(agentId, options?)` | `SessionPage` |
+| | `get(agentId, sessionId)` | `Session` |
+| | `create(agentId, { title? })` | `Session` |
+| | `update(agentId, sessionId, patch)` | `Session` |
+| | `remove(agentId, sessionId)` | `void` |
+| | `messages(agentId, sessionId, options?)` | `SessionMessagePage` |
+| | `searchMessages(agentId, { q, limit?, signal? })` | `SessionMessageSearchPage` |
+| | `exportMarkdown(agentId, sessionId)` | `string` |
+| | `compact(agentId, sessionId)` | `Session` |
+| `runs` | `start(agentId, sessionId, input, { idempotencyKey, signal? })` | `StartRunResult` |
+| | `get(agentId, runId)` | `Run` |
+| | `stop(agentId, runId)` | `Run` |
+| | `listForSession(agentId, sessionId, { limit? })` | `Run[]` |
+| `events` | `stream(agentId, { signal? })` | `AsyncGenerator<AgentEvent>` |
+| `attachments` | `upload(agentId, sessionId, file, name)` | `{ attachment: UploadedAttachment }` |
+| | `download(agentId, attachmentId)` | `Blob` |
 
-## `SwarmsClient`
+Exports: `isTerminalRunStatus`, `isRunLifecycleEvent`, `isApprovalEvent`, `isSkillEvent`, `isAutomationEvent`. Types include `Session`, `SessionKind`, `SessionOrigin`, `SessionMessage`, `Run`, `RunStatus`, `RunMode`, `RunSource`, `StartRunInput`, `ActionReceipt`, `AsyncHelperSummary`, `AgentEvent` and `LiveToolCard`.
 
-Accessed via `client.swarms`.
+## `ApprovalsClient` (`client.approvals`)
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `create` | `(config: SwarmConfig) => Promise<SwarmState>` | Create a swarm |
-| `get` | `(swarmId: string) => Promise<SwarmState>` | Get swarm state |
-| `run` | `(swarmId: string, input: Content) => Promise<SwarmRunResponse>` | Execute swarm task |
-| `subscribe` | `(swarmId: string, init?) => AsyncGenerator<DaemonEvent<SwarmStreamEventPayload>>` | SSE stream |
+**Owner.** See [Approvals](/sdk/approvals/).
 
-### `SwarmRunResponse<T>`
+| Method | Returns |
+|--------|---------|
+| `list({ status, agentId?, cursor?, limit?, signal? })` | `ApprovalPage` |
+| `decide(approvalId, { decision, revision, note?, matcher? })` | `Approval` |
+| `policy(agentId)` / `setPolicy(agentId, policy)` | `ApprovalPolicy` |
+| `rules(agentId)` | `ApprovalRules` (`rules`, `tools`) |
+| `addRule(agentId, { tool, matcher })` | `ApprovalRule` |
+| `removeRule(agentId, ruleId)` | `void` |
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `swarm` | `SwarmState` | Final swarm state |
-| `result` | `TaskResult<T>` | Synthesized result |
+Exports: `DEFAULT_APPROVAL_POLICY`, `POLICY_CLASSES`, `MAX_APPROVAL_NOTE_CHARS` (1,000).
 
-### `SwarmState`
+## `AutomationsClient` and `GoalsClient`
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | `string` | Swarm ID |
-| `status` | `string` | Runtime status |
-| `agentIds` | `string[]` | Participating agents |
-| `tokenUsage` | `TokenUsage` | Cumulative tokens |
+**Owner.** See [Jobs & Automations](/sdk/automations/).
 
-### `SwarmStreamEventPayload`
+| Client | Methods |
+|--------|---------|
+| `automations` | `list`, `create`, `createHeartbeat`, `update`, `remove`, `runNow`, `history`, `preview` |
+| `goals` | `list`, `create`, `setStatus`, `jobs` |
 
-A discriminated union of:
+Exports: `MAX_AUTOMATIONS_PER_AGENT` (20), `MAX_AUTOMATION_HISTORY` (50), `MAX_AUTOMATION_NAME_CHARS` (80), `AUTOMATION_PREVIEW_RUNS` (3).
 
-| Type | Key fields |
-|------|-----------|
-| `SwarmEventPayload` | `swarmId`, `state`, `result` |
-| `SwarmMessagePayload` | `swarmId`, `message` |
-| `SwarmAgentEventPayload` | `agentId`, `agentName` |
-| `SwarmTaskFailedPayload` | `agentId`, `agentName`, `error` |
-| `SwarmToolBeforePayload` | `agentId`, `agentName`, `toolName`, `args` |
-| `SwarmToolAfterPayload` | `agentId`, `agentName`, `toolName`, `status`, `durationMs` |
-| `SwarmAgentTokensPayload` | `agentId`, `agentName`, `usage` |
+## `McpClient`, `SkillsClient`, `CommunityBundlesClient`, `LearningClient`
 
----
+**Owner.** See [MCP, Skills & Learning](/sdk/extensions/).
 
-## `MemoriesClient`
+| Client | Methods |
+|--------|---------|
+| `mcp` | `list`, `get`, `create`, `update`, `connect`, `discover`, `review`, `disconnect`, `remove`, `saveBearerCredential`, `clearBearerCredential`, `setGrant` |
+| `skills` | `list`, `get`, `save`, `setEnabled`, `remove`, `approve`, `drafts`, `approveDraft`, `rejectDraft`, `importFile` |
+| `communityBundles` | `list`, `get`, `review`, `install`, `update`, `setEnabled`, `remove` |
+| `learning` | `policy`, `setPolicy`, `requestReview`, `listReviews`, `getReview`, `undoLesson`, `cancelReview`, `decideProposal`, `createSkillDraft` |
 
-Accessed via `client.memories`.
+Exports: `MAX_SKILL_BODY_BYTES` (32 KiB), `MAX_SKILL_NAME_CHARS` (64), `MAX_SKILL_DESCRIPTION_CHARS` (300), `SKILL_SLUG_PATTERN`.
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `create` | `(input: CreateMemoryInput) => Promise<Memory>` | Create a memory |
-| `search` | `(query: string, options?) => Promise<MemorySearchResult[]>` | Hybrid search |
-| `recent` | `(options?) => Promise<Memory[]>` | Recent memories |
-| `recall` | `(query: string, options?) => Promise<MemoryRecallResult[]>` | Fused recall |
-| `evaluate` | `(input: EvaluatedMemoryInput) => Promise<MemoryEvaluation>` | Evaluate without storing |
-| `addEvaluated` | `(input: EvaluatedMemoryInput) => Promise<MemoryEvaluationOutcome>` | Evaluate and store |
-| `trace` | `(memoryId: string) => Promise<MemoryEvidenceTrace>` | Evidence trace |
-| `applyRetention` | `(input: MemoryRetentionInput) => Promise<MemoryRetentionReport>` | Cleanup |
-| `readiness` | `() => Promise<MemoryReadiness>` | Health check |
-| `createRelationship` | `(input: CreateAgentRelationshipInput) => Promise<AgentRelationship>` | Create relationship |
-| `relationships` | `(options?) => Promise<AgentRelationship[]>` | Query relationships |
-| `createEntity` | `(input: CreateMemoryEntityInput) => Promise<MemoryEntity>` | Create entity |
-| `entities` | `(options?) => Promise<MemoryEntity[]>` | Query entities |
+## `UsageClient`, `LogsClient`, `StatusClient`, `SystemClient`
 
-### `MemoryEvaluation`
+**Owner.** See [Usage, Logs & Status](/sdk/observability/).
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `decision` | `'store' \| 'merge' \| 'ignore'` | Evaluation outcome |
-| `reason` | `string` | Human-readable explanation |
-| `score` | `number` | Confidence score |
-| `suggestedImportance` | `number` | Recommended importance |
-| `duplicateMemoryId` | `string \| null` | Existing memory to merge with |
+| Client | Methods |
+|--------|---------|
+| `usage` | `summary`, `records`, `exportCsv`, `pricing`, `setPricing` |
+| `logs` | `list`, `stream` |
+| `status` | `get` |
+| `system` | `status`, `action(action, { force? })` |
 
-### `MemoryEvaluationOutcome`
+Exports: `MAX_USAGE_RECORDS_LIMIT` (200), `MAX_PRICING_OVERRIDES` (100), `MAX_PRICE_MICROS_PER_MTOK`, `LOG_LEVELS`, `MAX_LOGS_LIMIT` (1,000), `STATUS_TOO_OLD`.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `evaluation` | `MemoryEvaluation` | Evaluation result |
-| `memory` | `Memory \| null` | Stored memory, if any |
+## `WorkspaceClient`, `AgentFilesClient`, `AgenciesClient`
 
-### `MemoryEvidenceTrace`
+See [Workspace & Capabilities](/sdk/workspace/).
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `memory` | `Memory` | Traced memory |
-| `relationships` | `AgentRelationship[]` | Connected relationships |
-| `entities` | `MemoryEntity[]` | Linked entities |
+| Client | Methods |
+|--------|---------|
+| `workspace` | `get`, `put`, `validate`, `inspect`, `resume`, `bootstrap`, `pickFolder`, `listFiles`, `readFile`, `downloadFile` |
+| `agentFiles` | `preview(agentId)` (**owner**, metadata only) |
+| `agencies` | `generate(input)`: draft an agency (mission, values, agents) from a description. Give exactly one of `teamSize` or `maxTeamSize`. Suggested tools are not grants |
 
-### `MemoryRetentionReport`
+## `ConnectorsClient` (`client.connectors`)
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `decayedMemories` | `MemoryImportanceAdjustment[]` | Importance adjustments |
-| `removedMemoryIds` | `string[]` | Deleted memories |
-| `removedRelationshipIds` | `string[]` | Deleted relationships |
+See [Connectors](/sdk/connectors/). Owner routes.
 
-### `MemoryReadiness`
+| Area | Methods |
+|------|---------|
+| OAuth apps | `oauthAppStatus`, `configureOauthApp`, `removeOauthApp` |
+| Mail | `mailStatus`, `connectMail`, `disconnectMail`, `mailMessages`, `mailDrafts`, `createMailDraft`, `approveMailDraft`, `rejectMailDraft` |
+| Calendar | `calendarStatus`, `connectCalendar`, `disconnectCalendar`, `calendarWrites`, `approveCalendarWrite`, `rejectCalendarWrite` |
+| Drive | `driveStatus`, `connectDrive`, `disconnectDrive` |
+| Discord | `discordConnectors`, `createDiscordConnector`, `activateDiscordConnector`, `replaceDiscordCredential`, `setDiscordEnabled`, `restartDiscordConnector`, `retryDiscordDelivery`, `suppressDiscordUnknownDelivery`, `deleteDiscordConnector` |
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `passed` | `boolean` | Overall health |
-| `embeddings` | `MemoryEmbeddingStatus` | Embedding status, including the search model's `status` (`downloading`, `rebuilding`, `ready`, `fallback`, `off`), `done`/`total` and a fallback `reason` |
-| `externalProvider` | `ExternalMemoryProviderStatus` (optional) | External memory provider `id`, `status` (`ready`/`unavailable`) and `reason` |
-| `evaluation` | `MemoryEvalReport` | Self-test report |
+## Voice, speech, browser scopes, ChatGPT
 
----
+| Client | Methods | Notes |
+|--------|---------|-------|
+| `voice` | `capabilities`, `transcribe`, `cancel` | Opt-in transcription (`ANIMAOS_STT_ENABLED`) |
+| `speech` | `capabilities`, `generate`, `cancel` | Opt-in speech output (`ANIMAOS_TTS_ENABLED`); `speechTextIsValid(text)` checks input |
+| `browserScopes` | `get(agentId, runId)`, `list(agentId)`, `policies(agentId)`, `save(agentId, runId, input)`, `stop(agentId, runId, { expectedVersion })` | Owner transport for scoped browser work; never grants a tool or starts a worker |
+| `chatgpt` | `status`, `login`, `cancel`, `disconnect`, `models`, `refreshModels` | Daemon-owned ChatGPT subscription state; credentials never leave the daemon |
 
 ## Core Types
 
@@ -207,131 +218,74 @@ Accessed via `client.memories`.
 
 | Field | Type | Required |
 |-------|------|----------|
-| `name` | `string` | ✅ |
-| `model` | `string` | ✅ |
-| `provider` | `string` | — |
-| `system` | `string` | — |
-| `bio` | `string` | — |
-| `lore` | `string` | — |
-| `knowledge` | `string[]` | — |
-| `topics` | `string[]` | — |
-| `adjectives` | `string[]` | — |
-| `style` | `string` | — |
-| `tools` | `AgentToolInput[]` | — |
-| `plugins` | `DaemonPluginDescriptor[]` | — |
-| `settings` | `AgentSettings` | — |
+| `name` | `string` | yes |
+| `model` | `string` | yes |
+| `provider`, `system`, `bio`, `lore`, `style` | `string` | no |
+| `knowledge`, `topics`, `adjectives` | `string[]` | no |
+| `tools` | `AgentToolInput[]` | no |
+| `plugins` | `DaemonPluginDescriptor[]` | no |
+| `settings` | `AgentSettings` | no |
 
-### `AgentSettings`
+`AgentSettings`: `temperature`, `maxTokens`, `timeoutMs`, `maxRetries` and an index signature for other keys.
 
-| Field | Type |
-|-------|------|
-| `temperature` | `number` |
-| `maxTokens` | `number` |
-| `timeoutMs` | `number` |
-| `maxRetries` | `number` |
-| `[key: string]` | `unknown` |
+### Snapshots and state
 
-### `AgentState`
+| Type | Fields |
+|------|--------|
+| `AgentSnapshot` | `state: DaemonAgentState`, `messageCount`, `messages: DaemonAgentMessage[]`, `eventCount`, `lastTask: DaemonTaskResult \| null` |
+| `AgentSummary` | `AgentSnapshot` without `messages` |
+| `DaemonAgentState` | `id`, `name`, `status`, `config: DaemonAgentConfig`, `createdAtMs`, `tokenUsage` |
+| `AgentRunResponse` | `agent: AgentSnapshot`, `result: DaemonTaskResult` |
+| `DaemonTaskResult<T>` | `status: 'success' \| 'error'`, `data: T \| null`, `error: string \| null`, `durationMs` |
+| `DaemonContent` | `text`, `attachments: Attachment[] \| null`, `metadata: Record<string, unknown> \| null` |
+| `SwarmState` | `id`, `status`, `agentIds`, `messages`, `results`, `tokenUsage`, `startedAt?`, `completedAt?` |
 
-| Field | Type |
-|-------|------|
-| `id` | `UUID` |
-| `name` | `string` |
-| `status` | `AgentStatus` |
-| `config` | `AgentConfig` |
-| `createdAtMs` | `number` |
-| `tokenUsage` | `TokenUsage` |
+`AgentStatus` is `'idle' | 'running' | 'completed' | 'failed' | 'terminated'`. `SwarmStatus` is `'idle' | 'running' | 'completed' | 'failed'`. `SwarmStrategy` is `'supervisor' | 'dynamic' | 'round-robin'`. `UUID` is a branded string template.
 
-### `AgentStatus`
+### `Content`, `Attachment`, `TokenUsage`
 
-`'idle' | 'running' | 'completed' | 'failed' | 'terminated'`
+| Type | Fields |
+|------|--------|
+| `Content` | `text`, optional `attachments: Attachment[]`, optional `metadata` |
+| `Attachment` | `type: 'file' \| 'image' \| 'url'`, `name`, `data` |
+| `TaskResult<T>` | `status`, optional `data`, `error`, `durationMs` (the in-process shape) |
+| `TokenUsage` | `promptTokens`, `completionTokens`, `totalTokens` |
 
-### `Content`
+### Tool descriptors
 
-| Field | Type |
-|-------|------|
-| `text` | `string` |
-| `attachments` | `Attachment[]` |
-| `metadata` | `Record<string, unknown>` |
+`AgentToolInput` is `string | { name: string; description?: string; parameters?: Record<string, unknown>; examples?: DaemonToolDescriptor['examples'] }`. `DaemonToolDescriptor` is `{ name, description, parameters, examples }`; `DaemonPluginDescriptor` is `{ name, description }`.
 
-### `Attachment`
+### Memory types
 
-| Field | Type |
-|-------|------|
-| `type` | `'file' \| 'image' \| 'url'` |
-| `name` | `string` |
-| `data` | `string` |
+`MemoryType` is `'fact' | 'observation' | 'task_result' | 'reflection'`, `MemoryScope` is `'shared' | 'private' | 'room'`, and `RelationshipEndpointKind` is `'agent' | 'user' | 'system' | 'external'`. `Memory`, `MemorySearchResult` (a `Memory` plus `score`), `MemorySearchOptions`, `AgentRelationship`, `NewAgentRelationshipInput` and `AgentRelationshipOptions` are exported from the same module.
 
-### `TaskResult<T>`
+### Provider key types
 
-| Field | Type |
-|-------|------|
-| `status` | `'success' \| 'error'` |
-| `data` | `T` |
-| `error` | `string` |
-| `durationMs` | `number` |
-
-### `TokenUsage`
-
-| Field | Type |
-|-------|------|
-| `promptTokens` | `number` |
-| `completionTokens` | `number` |
-| `totalTokens` | `number` |
-
----
-
-## Component Types
-
-### `AgentToolInput`
-
-`string | { name: string; description?: string; parameters?: Record<string, unknown>; examples?: DaemonToolDescriptor['examples'] }`
-
-A string names a daemon-registered tool. An object is a JSON descriptor.
-
-### `DaemonToolDescriptor`
-
-| Field | Type |
-|-------|------|
-| `name` | `string` |
-| `description` | `string` |
-| `parameters` | `Record<string, unknown>` |
-| `examples` | `Array<{ input: string; args: Record<string, unknown>; output: string }> \| null` |
-
-### `DaemonPluginDescriptor`
-
-| Field | Type |
-|-------|------|
-| `name` | `string` |
-| `description` | `string` |
-
----
+`ProviderKey`, `ProviderKeys`, `AddProviderKeyInput`, `KeyStrategy` (`fill_first`, `round_robin`, `random`, `least_used`; also exported as `KEY_STRATEGIES`) and `ModelChoice` (`{ provider, model }`) are exported as types. They describe the daemon's `/api/provider-keys` routes, which have no SDK client yet; use `client.requestJson` against them.
 
 ## Helper Functions
 
-These are typed identity functions that provide full IntelliSense when defining configurations.
-
 | Function | Signature | Purpose |
 |----------|-----------|---------|
-| `agent(config)` | `<T extends AgentConfig>(config: T) => T` | Typed `AgentConfig` helper |
-| `swarm(config)` | `<T extends SwarmConfig>(config: T) => T` | Typed `SwarmConfig` helper |
+| `agent(config)` | `<T extends AgentConfig>(config: T) => T` | Typed `AgentConfig` |
+| `swarm(config)` | `<T extends SwarmConfig>(config: T) => T` | Typed `SwarmConfig` |
+| `createDaemonClient(options?)` | `DaemonClient` | Create the client |
+| `isTerminalRunStatus(status)` | `boolean` | `completed`, `failed`, `cancelled` or `interrupted` |
+| `speechTextIsValid(text)` | `boolean` | Whether text fits speech-output limits |
 
----
+The daemon-health helpers `DAEMON_CONNECTION_LOST_MESSAGE`, `DAEMON_HEALTHY_MESSAGE`, `DAEMON_HEALTH_UNAVAILABLE_MESSAGE`, `DAEMON_RECOVERED_MESSAGE`, `describeDaemonWarningTransition` and `formatDaemonUnreachableWarning` produce the wording the CLI and TUI show when the daemon drops and returns.
 
-## Errors
+<Aside type="note">
+  Several areas the daemon serves have no SDK client: Telegram connectors, agent autonomy modes, provider API keys, the side-task model, coding apps and foreign (Claude Code and Codex) session import. Reach them with `client.requestJson` using the routes in the daemon README.
+</Aside>
 
-| Class | Thrown When | Properties |
-|-------|-------------|------------|
-| `DaemonHttpError` | Daemon returns non-2xx status | `status: number`, `body: unknown` |
-| `DaemonConnectionError` | Network failure reaching daemon | `cause: unknown` |
-
-### Example: structured error handling
+## Example: structured error handling
 
 ```typescript
 import { DaemonHttpError, DaemonConnectionError } from '@animaOS-SWARM/sdk';
 
 try {
-  const result = await client.agents.run(agentId, { text: 'Hello' });
+  await client.agents.run(agentId, { text: 'Hello' });
 } catch (error) {
   if (error instanceof DaemonHttpError) {
     console.error(`Daemon error ${error.status}:`, error.body);
