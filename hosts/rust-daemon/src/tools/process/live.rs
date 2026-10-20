@@ -183,6 +183,23 @@ impl LiveSessions {
         session.cancel().await.map_err(|error| error.to_string())
     }
 
+    /// Open app and ACP sessions, as `(apps, acp)`, of the agents `owns`
+    /// accepts: what a drain waits for, since they die with the daemon.
+    pub(crate) fn open_counts(&self, owns: impl Fn(&str) -> bool) -> (usize, usize) {
+        self.entries()
+            .values()
+            .filter(|entry| entry.finished_at.is_none() && owns(&entry.agent_id))
+            .fold((0, 0), |(apps, acp), entry| match &entry.kind {
+                LiveKind::App(app) if app.session.exit().is_none() => (apps + 1, acp),
+                LiveKind::Acp(live)
+                    if !matches!(live.session.status(), TurnStatus::Exited { .. }) =>
+                {
+                    (apps, acp + 1)
+                }
+                _ => (apps, acp),
+            })
+    }
+
     async fn sweep(&self) {
         let mut idle = Vec::new();
         {

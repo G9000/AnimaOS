@@ -276,15 +276,28 @@ impl ConnectorManager {
                         .insert(connector_id, ConnectorRuntimeStatus::CredentialRequired);
                     return;
                 }
-                Err(_) => {
+                Err(error) => {
+                    let status = if error == TelegramTransportError::PollConflict {
+                        ConnectorRuntimeStatus::PollConflict
+                    } else {
+                        ConnectorRuntimeStatus::Error
+                    };
                     self.statuses
                         .lock()
                         .await
-                        .insert(connector_id.clone(), ConnectorRuntimeStatus::Error);
-                    if wait_or_stop(&mut cancel, &mut owner_close, poll_backoff).await {
+                        .insert(connector_id.clone(), status);
+                    if wait_or_stop(
+                        &mut cancel,
+                        &mut owner_close,
+                        poll_retry_delay(error, poll_backoff),
+                    )
+                    .await
+                    {
                         return;
                     }
-                    poll_backoff = next_poll_backoff(poll_backoff);
+                    if error != TelegramTransportError::PollConflict {
+                        poll_backoff = next_poll_backoff(poll_backoff);
+                    }
                     continue;
                 }
             };

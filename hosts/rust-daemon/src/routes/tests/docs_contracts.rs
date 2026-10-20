@@ -42,7 +42,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 227, "complete registered operation count");
+    assert_eq!(actual.len(), 234, "complete registered operation count");
     let message_search_additions = [("GET", "/api/agents/{agent_id}/message-search")];
     for (method, path) in message_search_additions {
         assert!(
@@ -121,6 +121,21 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         assert!(
             actual.contains(&(method.to_string(), path.to_string())),
             "provider key pool operation must be registered"
+        );
+    }
+    let system_additions = [
+        ("GET", "/api/system/drain"),
+        ("POST", "/api/system/drain"),
+        ("DELETE", "/api/system/drain"),
+        ("POST", "/api/system/shutdown"),
+        ("GET", "/api/system"),
+        ("POST", "/api/system/actions/{action}"),
+        ("POST", "/api/system/session"),
+    ];
+    for (method, path) in system_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "system operation must be registered"
         );
     }
     let autonomy_additions = [
@@ -219,6 +234,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                     && !autonomy_additions.contains(&(method.as_str(), path.as_str()))
                     && !side_model_additions.contains(&(method.as_str(), path.as_str()))
                     && !provider_key_additions.contains(&(method.as_str(), path.as_str()))
+                    && !system_additions.contains(&(method.as_str(), path.as_str()))
                     && !skill_ledger_additions.contains(&(method.as_str(), path.as_str()))
                     && !learning_undo_additions.contains(&(method.as_str(), path.as_str()))
                     && !import_additions.contains(&(method.as_str(), path.as_str()))
@@ -262,6 +278,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                     && !autonomy_additions.contains(&(method.as_str(), path.as_str()))
                     && !side_model_additions.contains(&(method.as_str(), path.as_str()))
                     && !provider_key_additions.contains(&(method.as_str(), path.as_str()))
+                    && !system_additions.contains(&(method.as_str(), path.as_str()))
                     && !skill_ledger_additions.contains(&(method.as_str(), path.as_str()))
                     && !learning_undo_additions.contains(&(method.as_str(), path.as_str()))
                     && !import_additions.contains(&(method.as_str(), path.as_str()))

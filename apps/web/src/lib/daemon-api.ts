@@ -67,6 +67,7 @@ import {
   type UsageQuery,
   type UsageRecordsQuery,
 } from '@animaOS-SWARM/sdk';
+import { consoleSessionHeaders } from './console-session';
 
 export type {
   AddProviderKeyInput,
@@ -93,10 +94,10 @@ export type {
   CommunityManifest,
 } from '@animaOS-SWARM/sdk';
 
-/** Shared owner transport policy. The current console uses same-origin cookies;
- *  future owner headers belong here for both fetch and multipart XHR. */
+/** Shared owner transport policy, for both fetch and multipart XHR: the
+ *  console session's token half, when the console has one. */
 export function daemonRequestHeaders(): Record<string, string> {
-  return {};
+  return consoleSessionHeaders();
 }
 
 const setupClient = createDaemonClient({
@@ -109,6 +110,9 @@ const setupClient = createDaemonClient({
     return globalThis.fetch(url, { ...init, headers });
   },
 });
+
+/** The Anima app's lifecycle (`/api/system`), with the owner transport. */
+export const systemApi = setupClient.system;
 
 /** All external-tool owner actions use the shared owner transport policy. */
 export const mcpOwnerApi = {
@@ -257,7 +261,8 @@ export type TelegramConnectorStatus =
   | 'credentialRequired'
   | 'error'
   | 'degraded'
-  | 'reconciling';
+  | 'reconciling'
+  | 'pollConflict';
 
 export interface TelegramChat {
   id: string;

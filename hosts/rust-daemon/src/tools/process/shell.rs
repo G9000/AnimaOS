@@ -847,6 +847,33 @@ where
 }
 
 #[cfg(test)]
+mod env_tests {
+    use super::*;
+
+    #[test]
+    fn shell_env_excludes_anima_tokens() {
+        let keys = [
+            "ANIMA_SUPERVISOR_TOKEN",
+            "ANIMA_SUPERVISOR_URL",
+            "ANIMA_LOCAL_ADMIN_TOKEN",
+        ];
+        for key in keys {
+            std::env::set_var(key, "secret");
+        }
+        let env = shell_env();
+        for key in keys {
+            std::env::remove_var(key);
+        }
+        for key in keys {
+            assert!(
+                !env.iter().any(|(name, _)| *name == key),
+                "{key} must not reach agent shells"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod capture_tests {
     use super::*;
     struct MeteredReader {

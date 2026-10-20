@@ -1,3 +1,4 @@
+pub(crate) mod entry;
 pub(crate) mod lifecycle;
 pub(crate) mod persistence;
 
@@ -13,6 +14,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{RwLock, Semaphore};
 
 use self::{
+    entry::ServeOptions,
     lifecycle::shutdown_signal,
     persistence::{configure_persistence, skip_memory_model_load, start_memory_model_load},
 };
@@ -52,6 +54,7 @@ struct DaemonRuntime {
     scheduler: SchedulerService,
     jobs: JobService,
     history: crate::history::HistoryWorker,
+    drain: crate::system::DrainController,
 }
 
 const DEFAULT_MAX_CONCURRENT_RUNS: usize = 8;
@@ -242,6 +245,15 @@ pub async fn app_with_configured_persistence(config: DaemonConfig) -> io::Result
 }
 
 pub async fn serve(listener: TcpListener, config: DaemonConfig) -> io::Result<()> {
+    serve_with(listener, config, ServeOptions::default()).await
+}
+
+/// [`serve`] with host additions: a UI fallback router and a shutdown handle.
+pub async fn serve_with(
+    listener: TcpListener,
+    config: DaemonConfig,
+    options: ServeOptions,
+) -> io::Result<()> {
     // Only the real daemon reads explicit operator configuration. Embeddings
     // and deterministic constructors remain independent of ambient config.
     // An unknown external memory provider id stops boot.
@@ -301,19 +313,22 @@ pub async fn serve(listener: TcpListener, config: DaemonConfig) -> io::Result<()
         // model call.
         guard.set_generated_titles(true);
     }
+    let ServeOptions { ui, shutdown } = options;
     serve_with_state_and_voice(
         listener,
         state,
         config,
         shutdown_signal(),
+        shutdown,
         crate::runtime_model::transcription_service_from_env(),
         crate::runtime_model::speech_service_from_env(),
+        ui,
     )
     .await
 }
 
-/// Serves until `shutdown` resolves (Ctrl+C for [`serve`]), then shuts down
-/// gracefully.
+/// Serves until `shutdown` resolves (Ctrl+C for [`serve`]) or
+/// `POST /api/system/shutdown` asks, then shuts down gracefully.
 #[cfg(test)]
 pub(crate) async fn serve_with_state(
     listener: TcpListener,
@@ -326,24 +341,41 @@ pub(crate) async fn serve_with_state(
         state,
         config,
         shutdown,
+        None,
         crate::voice::VoiceService::disabled(),
         crate::speech::SpeechService::disabled(),
+        None,
     )
     .await
 }
 
+/// `requested`, the host's shutdown handle, is notified by the host or by
+/// `POST /api/system/shutdown`; without one the route notifies its own.
+#[allow(clippy::too_many_arguments)]
 async fn serve_with_state_and_voice(
     listener: TcpListener,
     state: SharedDaemonState,
     config: DaemonConfig,
     shutdown: impl Future<Output = ()> + Send + 'static,
+    requested: Option<Arc<tokio::sync::Notify>>,
     voice: crate::voice::VoiceService,
     speech: crate::speech::SpeechService,
+    ui: Option<Router>,
 ) -> io::Result<()> {
     let bind_is_loopback = listener.local_addr()?.ip().is_loopback();
     let mut runtime = daemon_runtime(Arc::clone(&state), &config)?;
     runtime.voice = voice;
     runtime.speech = speech;
+    if let Some(requested) = requested {
+        runtime.drain = runtime.drain.with_shutdown(requested);
+    }
+    let requested = runtime.drain.shutdown_handle();
+    let shutdown = async move {
+        tokio::select! {
+            _ = shutdown => {}
+            _ = requested.notified() => {}
+        }
+    };
     state
         .write()
         .await
@@ -359,6 +391,11 @@ async fn serve_with_state_and_voice(
     let live = state.read().await.live.clone();
     let browser_state = state.clone();
     let router = router_with_runtime(state, config, runtime, bind_is_loopback);
+    // Added last, so every daemon route wins over the host's UI.
+    let router = match ui {
+        Some(ui) => router.fallback_service(ui),
+        None => router,
+    };
     // Router installation uses uncontended construction-time state. Restored
     // workers and the scanner may acquire it immediately after being started.
     jobs.start().await.map_err(|error| {
@@ -513,7 +550,14 @@ fn daemon_runtime(state: SharedDaemonState, config: &DaemonConfig) -> io::Result
         Arc::clone(&state),
         agent_runs.control_plane_transactions(),
     );
-    let scheduler = SchedulerService::new(state, agent_runs.clone(), connectors.clone());
+    let scheduler =
+        SchedulerService::new(Arc::clone(&state), agent_runs.clone(), connectors.clone());
+    let drain = crate::system::DrainController::new(
+        state,
+        agent_runs.clone(),
+        jobs.clone(),
+        scheduler.clone(),
+    );
     Ok(DaemonRuntime {
         voice: crate::voice::VoiceService::disabled(),
         speech: crate::speech::SpeechService::disabled(),
@@ -528,6 +572,7 @@ fn daemon_runtime(state: SharedDaemonState, config: &DaemonConfig) -> io::Result
         scheduler,
         jobs,
         history,
+        drain,
     })
 }
 
@@ -615,7 +660,14 @@ fn deterministic_daemon_runtime_with_mail_transport(
         Arc::clone(&state),
         agent_runs.control_plane_transactions(),
     );
-    let scheduler = SchedulerService::new(state, agent_runs.clone(), connectors.clone());
+    let scheduler =
+        SchedulerService::new(Arc::clone(&state), agent_runs.clone(), connectors.clone());
+    let drain = crate::system::DrainController::new(
+        state,
+        agent_runs.clone(),
+        jobs.clone(),
+        scheduler.clone(),
+    );
     DaemonRuntime {
         voice: crate::voice::VoiceService::disabled(),
         speech: crate::speech::SpeechService::disabled(),
@@ -630,6 +682,7 @@ fn deterministic_daemon_runtime_with_mail_transport(
         scheduler,
         jobs,
         history,
+        drain,
     }
 }
 
@@ -663,6 +716,7 @@ fn router_with_runtime(
         runtime.drive,
         runtime.voice,
         runtime.speech,
+        runtime.drain,
     );
     if tokio::runtime::Handle::try_current().is_ok() {
         history.start(&history_owner);

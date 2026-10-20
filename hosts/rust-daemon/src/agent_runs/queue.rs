@@ -647,6 +647,10 @@ impl AgentRunCoordinator {
             if self.accepted_runs.is_closing() {
                 return Err(super::shutdown::shutting_down());
             }
+            // A drain before a restart refuses new messages; queued ones carry on.
+            if self.accepted_runs.is_draining() {
+                return Err(super::shutdown::draining());
+            }
             let capabilities =
                 session.capabilities(crate::sessions::views::automation_exists(&guard, session));
             let retitle = session.kind == SessionKind::Chat

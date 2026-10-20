@@ -29,7 +29,7 @@ where
     }
 }
 
-pub(super) const SHUTDOWN_BUDGET: std::time::Duration = std::time::Duration::from_secs(40);
+pub(crate) const SHUTDOWN_BUDGET: std::time::Duration = std::time::Duration::from_secs(40);
 
 /// Bounds server completion too: long HTTP handlers cannot extend the stop budget.
 /// The timer is supplied only once shutdown actually starts.

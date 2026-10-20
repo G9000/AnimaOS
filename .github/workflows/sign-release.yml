@@ -1,0 +1,68 @@
+# Signs each release archive with minisign, so `anima update` will install it.
+#
+# dist runs this after it has published the release (post-announce-jobs in
+# dist-workspace.toml). Until the .minisig files are uploaded, the updater treats
+# the release as incomplete and does not offer it. The signature format and the
+# MINISIGN_* secrets are described in tools/release/README.md.
+#
+# The archives signed are the ones this workflow run built (its own artifacts),
+# never what the GitHub Release holds by the time this job runs: release assets
+# can be replaced, so signing them could sign something this run did not build.
+
+name: Sign release
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+jobs:
+  sign:
+    runs-on: ubuntu-24.04
+    # Holds the MINISIGN_* secrets; give it required reviewers (README).
+    environment: release
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ fromJson(inputs.plan).announcement_tag }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Install minisign
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y minisign
+      - name: Fetch the archives this run built
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: artifacts-build-local-*
+          path: assets
+          merge-multiple: true
+      - name: Sign the archives
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          shopt -s nullglob
+          archives=(assets/anima-*.tar.gz assets/anima-*.zip)
+          [ "${#archives[@]}" -gt 0 ] || { echo "no release archives in this run's artifacts" >&2; exit 1; }
+          key="$RUNNER_TEMP/minisign.key"
+          trap 'rm -f "$key"' EXIT
+          (umask 077 && printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key")
+          tools/release/sign-assets.sh "${TAG#v}" "$key" "${archives[@]}"
+      - name: Check the signatures against the committed release key
+        run: |
+          if grep -q PLACEHOLDER hosts/anima/release-key.pub; then
+            echo "hosts/anima/release-key.pub is still the placeholder: skipping the signature check"
+            exit 0
+          fi
+          shopt -s nullglob
+          for archive in assets/anima-*.tar.gz assets/anima-*.zip; do
+            minisign -V -p hosts/anima/release-key.pub -m "$archive" -x "$archive.minisig"
+          done
+      - name: Upload the signatures
+        run: gh release upload "$TAG" assets/*.minisig --repo "$GITHUB_REPOSITORY" --clobber

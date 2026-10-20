@@ -153,7 +153,7 @@ struct LoadedGoogleCredential {
 
 fn keyring_entry(connector_id: &str) -> Result<keyring::Entry, CredentialStoreError> {
     let account = account_for(connector_id)?;
-    keyring::Entry::new(KEYRING_SERVICE, &account)
+    keyring::Entry::new(&crate::keychain::service_name(KEYRING_SERVICE), &account)
         .map_err(|_| CredentialStoreError::BackendUnavailable)
 }
 

@@ -4,13 +4,17 @@ import { StatusTooOldError } from '@animaOS-SWARM/sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { COMPANION_UNREACHABLE } from '../lib/approvals';
-import { daemon } from '../lib/daemon-api';
+import { daemon, systemApi } from '../lib/daemon-api';
 import { HEALTH_TOO_OLD } from '../lib/status';
 import { statusFixture } from '../test/system';
 import { HealthPage } from './HealthPage';
 
 beforeEach(() => {
   vi.spyOn(daemon, 'status').mockResolvedValue(statusFixture());
+  vi.spyOn(systemApi, 'status').mockResolvedValue({
+    supervised: false,
+    version: '0.3.0',
+  });
 });
 
 afterEach(() => {
@@ -20,6 +24,17 @@ afterEach(() => {
 const card = (name: string) => screen.findByRole('region', { name });
 
 describe('HealthPage', () => {
+  it('shows the Anima app card first', async () => {
+    render(<HealthPage online epoch={1} />);
+    const app = await card('Anima app');
+    expect(
+      within(app).getByText('v0.3.0 (running without the Anima app)'),
+    ).toBeVisible();
+    expect(app.compareDocumentPosition(await card('Readiness'))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
   it('shows a card for each area', async () => {
     render(<HealthPage online epoch={1} />);
     expect(

@@ -125,9 +125,31 @@ fn find_on_path(program: &str, path: Option<&std::ffi::OsStr>) -> Option<PathBuf
     })
 }
 
+/// The variables an app gets to answer `--version`: enough to find and run
+/// it, and nothing of the daemon's own (its tokens and provider keys).
+const VERSION_ENV: &[&str] = if cfg!(windows) {
+    &[
+        "PATH",
+        "HOME",
+        "USERPROFILE",
+        "SYSTEMROOT",
+        "PATHEXT",
+        "COMSPEC",
+    ]
+} else {
+    &["PATH", "HOME"]
+};
+
 /// The app's version, or why it would not start.
 fn version_of(program: &std::path::Path) -> Result<Option<String>, String> {
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command.env_clear();
+    for name in VERSION_ENV {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    let mut child = command
         .arg("--version")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -204,5 +226,28 @@ mod tests {
             Err("installed but won't start".to_string())
         );
         assert!(find_on_path("claude", Some(dir.path().as_os_str())).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_app_asked_for_its_version_sees_none_of_the_daemon_environment() {
+        const SENTINEL: &str = "ANIMA_CODING_APPS_TEST_SENTINEL";
+        std::env::set_var(SENTINEL, "sk-should-not-leak");
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("codex");
+        // 1.0.0 only when the sentinel is unset and PATH and HOME still reach it.
+        std::fs::write(
+            &app,
+            format!(
+                "#!/bin/sh\nif [ -z \"${SENTINEL}\" ] && [ -n \"$PATH\" ] && [ -n \"$HOME\" ]; then echo 1.0.0; else echo 6.6.6; fi\n"
+            ),
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&app).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+        std::fs::set_permissions(&app, permissions).unwrap();
+        let version = version_of(&app);
+        std::env::remove_var(SENTINEL);
+        assert_eq!(version, Ok(Some("1.0.0".to_string())));
     }
 }

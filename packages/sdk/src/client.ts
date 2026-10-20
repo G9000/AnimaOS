@@ -22,6 +22,7 @@ import { AutomationsClient } from './automations.js';
 import { UsageClient } from './usage.js';
 import { LogsClient } from './logs.js';
 import { StatusClient } from './status.js';
+import { SystemClient } from './system.js';
 import { AgentEventsClient } from './events.js';
 import type { DaemonCapabilities } from './capabilities.js';
 
@@ -103,6 +104,7 @@ export class DaemonClient {
   readonly usage: UsageClient;
   readonly logs: LogsClient;
   readonly status: StatusClient;
+  readonly system: SystemClient;
 
   private readonly baseUrl: string;
   private readonly fetchImpl: FetchLike;
@@ -141,6 +143,7 @@ export class DaemonClient {
     this.usage = new UsageClient(this);
     this.logs = new LogsClient(this);
     this.status = new StatusClient(this);
+    this.system = new SystemClient(this);
   }
 
   async health(): Promise<DaemonHealth> {

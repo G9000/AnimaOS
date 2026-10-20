@@ -267,6 +267,37 @@
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+/* The Anima app card */
+.anima-app-card {
+  align-self: stretch;
+}
+.anima-app-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0;
+  font-size: 13px;
+}
+.anima-app-facts dt {
+  color: var(--color-ink-3);
+}
+.anima-app-facts dd {
+  margin: 0;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+.anima-app-drain {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.anima-app-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
 @media (max-width: 640px) {
   .system-page {
     padding: 16px;

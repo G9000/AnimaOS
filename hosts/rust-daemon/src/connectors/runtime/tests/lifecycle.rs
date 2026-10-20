@@ -1121,6 +1121,21 @@ fn poll_backoff_is_exponential_and_capped() {
     assert_eq!(super::next_poll_backoff(delay), super::POLL_RETRY_MAX);
 }
 
+#[test]
+fn poll_retry_delay_waits_a_minute_for_a_conflict_only() {
+    let current = Duration::from_millis(400);
+    assert_eq!(
+        super::poll_retry_delay(TelegramTransportError::PollConflict, current),
+        Duration::from_secs(60)
+    );
+    for error in [
+        TelegramTransportError::Transport,
+        TelegramTransportError::UpstreamApi { code: Some(409) },
+    ] {
+        assert_eq!(super::poll_retry_delay(error, current), current);
+    }
+}
+
 #[tokio::test]
 async fn agent_deletion_is_rejected_while_a_run_is_in_flight() {
     let entered = Arc::new(Semaphore::new(0));

@@ -52,6 +52,61 @@ async fn background_processing_waits_for_global_admission_instead_of_failing() {
     assert_eq!(result, Ok(true));
 }
 
+#[tokio::test]
+async fn a_drain_leaves_received_telegram_messages_for_after_cancel() {
+    let state = state_with_agent();
+    let agent_id = state.read().await.list_agents()[0].state.id.clone();
+    let runs = AgentRunCoordinator::new(Arc::clone(&state), Arc::new(Semaphore::new(8)));
+    let manager = ConnectorManager::new(
+        Arc::clone(&state),
+        runs.clone(),
+        Arc::new(InMemoryCredentialStore::default()),
+        Arc::new(FakeTransport::default()),
+    );
+    let connector = manager
+        .create(agent_id, TelegramBotToken::parse("42:token").unwrap())
+        .await
+        .unwrap();
+    manager.shutdown().await;
+    for (update_id, text) in [(1, "pair"), (2, "while draining")] {
+        manager
+            .accept_batch(
+                connector.id.clone(),
+                TelegramUpdateBatch {
+                    updates: vec![text_update(update_id, "101", text)],
+                    next_update_id: update_id + 1,
+                },
+            )
+            .await
+            .unwrap();
+        if update_id == 1 {
+            manager.approve_pending(connector.id.clone()).await.unwrap();
+        }
+    }
+    let key = (connector.id.clone(), 2);
+    let inbound_state = || async { state.read().await.inbound[&key].processing_state.clone() };
+
+    runs.begin_drain();
+    assert_eq!(
+        manager.process_pending_once(connector.id.clone()).await,
+        Ok(false)
+    );
+    assert_eq!(
+        inbound_state().await,
+        crate::connectors::InboundProcessingState::Received
+    );
+
+    runs.cancel_drain();
+    assert_eq!(
+        manager.process_pending_once(connector.id.clone()).await,
+        Ok(true)
+    );
+    assert_ne!(
+        inbound_state().await,
+        crate::connectors::InboundProcessingState::Received
+    );
+}
+
 /// An owner thread (no paired chat) whose room `blocker` holds without a
 /// global permit, so the next owner send passes the permit pre-check and
 /// then waits for that room. Its agent's model calls park on the gate.

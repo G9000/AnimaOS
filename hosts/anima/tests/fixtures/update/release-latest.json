@@ -1,0 +1,123 @@
+{
+  "url": "https://api.github.com/repos/G9000/animaOS-SWARM/releases/1",
+  "html_url": "https://github.com/G9000/animaOS-SWARM/releases/tag/v0.2.0",
+  "id": 1,
+  "tag_name": "v0.2.0",
+  "target_commitish": "main",
+  "name": "0.2.0",
+  "draft": false,
+  "prerelease": false,
+  "created_at": "2026-10-18T10:00:00Z",
+  "published_at": "2026-10-18T10:30:00Z",
+  "assets": [
+    {
+      "url": "https://api.github.com/repos/G9000/animaOS-SWARM/releases/assets/1000",
+      "id": 1000,
+      "name": "anima-aarch64-apple-darwin.tar.gz",
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 1234,
+      "browser_download_url": "https://github.com/G9000/animaOS-SWARM/releases/download/v0.2.0/anima-aarch64-apple-darwin.tar.gz"
+    },
+    {
+      "url": "https://api.github.com/repos/G9000/animaOS-SWARM/releases/assets/1001",
+      "id": 1001,
+      "name": "anima-aarch64-apple-darwin.tar.gz.sha256",
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 1234,
+      "browser_download_url": "https://github.com/G9000/animaOS-SWARM/releases/download/v0.2.0/anima-aarch64-apple-darwin.tar.gz.sha256"
+    },
+    {
+      "url": "https://api.github.com/repos/G9000/animaOS-SWARM/releases/assets/1002",
+      "id": 1002,
+      "name": "anima-aarch64-apple-darwin.tar.gz.minisig",
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 1234,
+      "browser_download_url": "https://github.com/G9000/animaOS-SWARM/releases/download/v0.2.0/anima-aarch64-apple-darwin.tar.gz.minisig"
+    },
+    {
+      "url": "https://api.github.com/repos/G9000/animaOS-SWARM/releases/assets/1003",
+      "id": 1003,
+      "name": "anima-x86_64-pc-windows-msvc.zip",
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 1234,
+      "browser_download_url": "https://github.com/G9000/animaOS-SWARM/releases/download/v0.2.0/anima-x86_64-pc-windows-msvc.zip"
+    },
+    {
+      "url": "https://api.github.com/repos/G9000/animaOS-SWARM/releases/assets/1004",
+      "id": 1004,
+      "name": "anima-x86_64-pc-windows-msvc.zip.sha256",
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 1234,
+      "browser_download_url": "https://github.com/G9000/animaOS-SWARM/releases/download/v0.2.0/anima-x86_64-pc-windows-msvc.zip.sha256"
+    },
+    {
+      "url": "https://api.github.com/repos/G9000/animaOS-SWARM/releases/assets/1005",
+      "id": 1005,
+      "name": "anima-x86_64-pc-windows-msvc.zip.minisig",
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 1234,
+      "browser_download_url": "https://github.com/G9000/animaOS-SWARM/releases/download/v0.2.0/anima-x86_64-pc-windows-msvc.zip.minisig"
+    },
+    {
+      "url": "https://api.github.com/repos/G9000/animaOS-SWARM/releases/assets/1006",
+      "id": 1006,
+      "name": "anima-installer.sh",
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 1234,
+      "browser_download_url": "https://github.com/G9000/animaOS-SWARM/releases/download/v0.2.0/anima-installer.sh"
+    },
+    {
+      "url": "https://api.github.com/repos/G9000/animaOS-SWARM/releases/assets/1007",
+      "id": 1007,
+      "name": "anima-installer.ps1",
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 1234,
+      "browser_download_url": "https://github.com/G9000/animaOS-SWARM/releases/download/v0.2.0/anima-installer.ps1"
+    },
+    {
+      "url": "https://api.github.com/repos/G9000/animaOS-SWARM/releases/assets/1008",
+      "id": 1008,
+      "name": "sha256.sum",
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 1234,
+      "browser_download_url": "https://github.com/G9000/animaOS-SWARM/releases/download/v0.2.0/sha256.sum"
+    },
+    {
+      "url": "https://api.github.com/repos/G9000/animaOS-SWARM/releases/assets/1009",
+      "id": 1009,
+      "name": "dist-manifest.json",
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 1234,
+      "browser_download_url": "https://github.com/G9000/animaOS-SWARM/releases/download/v0.2.0/dist-manifest.json"
+    },
+    {
+      "url": "https://api.github.com/repos/G9000/animaOS-SWARM/releases/assets/1010",
+      "id": 1010,
+      "name": "source.tar.gz",
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 1234,
+      "browser_download_url": "https://github.com/G9000/animaOS-SWARM/releases/download/v0.2.0/source.tar.gz"
+    },
+    {
+      "url": "https://api.github.com/repos/G9000/animaOS-SWARM/releases/assets/1011",
+      "id": 1011,
+      "name": "source.tar.gz.sha256",
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 1234,
+      "browser_download_url": "https://github.com/G9000/animaOS-SWARM/releases/download/v0.2.0/source.tar.gz.sha256"
+    }
+  ],
+  "body": "## Release Notes\n"
+}

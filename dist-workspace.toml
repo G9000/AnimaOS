@@ -1,0 +1,39 @@
+[workspace]
+members = ["cargo:."]
+
+# Release configuration for `dist` (cargo-dist). Only the `anima` package ships;
+# see tools/release/README.md for the owner steps and secrets.
+[dist]
+# Packages opt in (hosts/anima does); nothing else in the workspace ships
+dist = false
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.32.0"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = ["shell", "powershell"]
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = ["aarch64-apple-darwin", "x86_64-pc-windows-msvc"]
+# The archive format to use for non-windows builds (defaults .tar.xz)
+unix-archive = ".tar.gz"
+# The archive format to use for windows builds (defaults .zip)
+windows-archive = ".zip"
+# Checksums to generate for each App
+checksum = "sha256"
+# GitHub already offers the source archive
+source-tarball = false
+# Path that installers should place binaries in
+install-path = "CARGO_HOME"
+# Anima updates itself (`anima update`), so no dist updater
+install-updater = false
+# The installers can't run `anima setup` themselves. dist pastes this inside a
+# double-quoted string in both installers, so it must not contain double quotes.
+install-success-msg = "Run 'anima setup' to finish installing Anima."
+# Build the web console (embedded by the bundled-ui feature) before cargo runs
+github-build-setup = "../build-setup.yml"
+# Sign the macOS binary with the CODESIGN_* secrets
+macos-sign = true
+# Sign each archive with minisign once the release is published
+post-announce-jobs = ["./sign-release"]
+# The signing job uploads the .minisig files to the release
+github-custom-job-permissions = { "sign-release" = { contents = "write" } }
