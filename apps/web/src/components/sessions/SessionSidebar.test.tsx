@@ -570,4 +570,25 @@ describe('SessionSidebar', () => {
     const row = screen.getByRole('button', { name: 'Deploy, needs approval' });
     expect(within(row).getByText('2')).toBeVisible();
   });
+
+  it('never lists an automation check-in thread: its words are in the main chat', () => {
+    renderSidebar({
+      sessions: [
+        sessionFixture('chat:plans', {
+          title: 'Plans',
+          lastActivityAtMs: NOW.getTime(),
+        }),
+        sessionFixture('schedule:morning', {
+          kind: 'checkin',
+          title: 'Morning brief',
+          lastActivityAtMs: NOW.getTime(),
+        }),
+      ],
+    });
+
+    expect(screen.getByRole('button', { name: 'Plans' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: /Morning brief/ })).toBeNull();
+    // Without a check-in left, the kind filter has nothing to offer for it.
+    expect(screen.queryByRole('button', { name: 'Check-ins' })).toBeNull();
+  });
 });

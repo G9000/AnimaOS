@@ -55,6 +55,10 @@ pub(crate) const PROMPT_AND_TRIGGER_REQUIRED: &str =
     "prompt and trigger are required unless preset is heartbeat";
 pub(crate) const AUTOMATION_HISTORY_UNAVAILABLE: &str = "automation history is unavailable";
 pub(crate) const AUTOMATION_ALREADY_RUNNING: &str = "This automation is already running";
+pub(crate) const ONLY_ONE_TIME_REMINDERS: &str =
+    "Only a one-time reminder can be marked done or snoozed";
+pub(crate) const SNOOZE_MINUTES_INVALID: &str = "minutes must be between 1 and 1440";
+pub(crate) const MAX_SNOOZE_MINUTES: u64 = 1440;
 pub(crate) const TOO_MANY_RUNNING_AUTOMATIONS: &str =
     "Too many automations are running; try again shortly";
 /// The existing update literal, now named.
@@ -145,6 +149,13 @@ pub(crate) fn display_name(record: &ScheduledPromptRecord) -> String {
 
 /// Restore validation of the M6 fields (the trigger has its own).
 pub(crate) fn validate_stored_automation(record: &ScheduledPromptRecord) -> Result<(), String> {
+    if record.delivery_events.len() > 100 {
+        return Err("has too many reminder delivery events".into());
+    }
+    if record.verification_for.is_some() && !matches!(record.trigger, ScheduleTrigger::Once { .. })
+    {
+        return Err("reminder verification must be one-time".into());
+    }
     if record.name.chars().count() > MAX_AUTOMATION_NAME_CHARS
         || record.name.chars().any(char::is_control)
     {
@@ -256,6 +267,8 @@ pub(crate) enum AutomationRunTool {
     Resume,
     Delete,
     Trigger,
+    CompleteReminder,
+    SnoozeReminder,
 }
 
 impl AutomationRunTool {
@@ -267,6 +280,8 @@ impl AutomationRunTool {
             Self::Resume => "resume_automation",
             Self::Delete => "delete_automation",
             Self::Trigger => "trigger_automation",
+            Self::CompleteReminder => "complete_reminder",
+            Self::SnoozeReminder => "snooze_reminder",
         }
     }
 }
@@ -304,6 +319,19 @@ impl AutomationRunAuthority {
         state: &crate::state::DaemonState,
         agent_id: &str,
     ) -> Result<(), ScheduleError> {
+        if state
+            .runs
+            .get(&self.link.run_id)
+            .filter(|run| run.source == crate::runs::RunSource::Schedule)
+            .and_then(|run| run.source_ref.as_ref())
+            .and_then(|id| state.schedules.get(id))
+            .is_some_and(|schedule| schedule.verification_for.is_some())
+        {
+            return Err(ScheduleError::Rejected(
+                "A one-time reminder status check cannot create, change, or trigger automations"
+                    .into(),
+            ));
+        }
         let live_source = state.runs.get(&self.link.run_id).is_some_and(|run| {
             self.link.agent_id == agent_id
                 && run.id == self.link.run_id
@@ -755,6 +783,10 @@ impl AutomationService {
             created_by: input.created_by,
             preset: input.preset,
             counters: AutomationCounters::default(),
+            delivery_events: Vec::new(),
+            verification: None,
+            verification_for: None,
+            done_at_ms: None,
         };
         self.locked(move |service| async move { service.insert(record, now_ms, authority).await })
             .await
@@ -766,13 +798,66 @@ impl AutomationService {
         now_ms: u64,
         authority: Option<AutomationRunAuthority>,
     ) -> Result<(ScheduledPromptRecord, bool), ScheduleError> {
+        let verify_once = match authority
+            .as_ref()
+            .and_then(|source| source.call.args.get("verifyOnce"))
+        {
+            None | Some(anima_core::DataValue::Bool(false)) => false,
+            Some(anima_core::DataValue::Bool(true)) => true,
+            _ => return Err(ScheduleError::Invalid("verifyOnce must be a boolean")),
+        };
+        if verify_once && !matches!(record.trigger, ScheduleTrigger::Once { .. }) {
+            return Err(ScheduleError::Invalid(
+                "verifyOnce requires a one-time reminder",
+            ));
+        }
+        if verify_once
+            && authority
+                .as_ref()
+                .is_some_and(|source| source.call.name != "create_automation")
+        {
+            return Err(ScheduleError::Invalid(
+                "verifyOnce is available only when creating a reminder",
+            ));
+        }
+        let mut verification = None;
         let persist = {
             let mut state = self.state.write().await;
             if let Some(authority) = &authority {
                 authority.validate(&state, &record.agent_id)?;
+                if verify_once
+                    && !state.runs.get(&authority.link.run_id).is_some_and(|run| {
+                        matches!(
+                            run.source,
+                            crate::runs::RunSource::Web
+                                | crate::runs::RunSource::Api
+                                | crate::runs::RunSource::Telegram
+                                | crate::runs::RunSource::Discord
+                        )
+                    })
+                {
+                    return Err(ScheduleError::Invalid(
+                        "verifyOnce requires a direct user run",
+                    ));
+                }
             }
             if state.get_agent(&record.agent_id).is_none() {
                 return Err(ScheduleError::AgentNotFound);
+            }
+            if verify_once
+                && !state.get_agent(&record.agent_id).is_some_and(|agent| {
+                    agent
+                        .state
+                        .config
+                        .tools
+                        .iter()
+                        .flatten()
+                        .any(|tool| tool.name == "check_automation_status")
+                })
+            {
+                return Err(ScheduleError::Invalid(
+                    "verifyOnce requires the check_automation_status tool",
+                ));
             }
             if let Some(key) = record.import_idempotency_key.as_ref() {
                 if let Some(existing) = state
@@ -793,7 +878,9 @@ impl AutomationService {
                 .values()
                 .filter(|item| item.agent_id == record.agent_id)
                 .count();
-            if record.import_idempotency_key.is_none() && owned >= MAX_AUTOMATIONS_PER_AGENT {
+            if record.import_idempotency_key.is_none()
+                && owned + 1 + usize::from(verify_once) > MAX_AUTOMATIONS_PER_AGENT
+            {
                 return Err(ScheduleError::Conflict(TOO_MANY_AUTOMATIONS));
             }
             record.id = loop {
@@ -802,17 +889,52 @@ impl AutomationService {
                     break candidate;
                 }
             };
+            if verify_once {
+                let check_at = record
+                    .next_due_at_ms
+                    .checked_add(5_000)
+                    .ok_or(ScheduleError::Invalid("verification time is out of range"))?;
+                let mut check = record.clone();
+                check.id = loop {
+                    let candidate = next_schedule_id(now_ms);
+                    if candidate != record.id && !state.schedules.contains_key(&candidate) {
+                        break candidate;
+                    }
+                };
+                check.name = "Reminder status check".into();
+                check.prompt = format!("Report the single runtime check of reminder {} (check_automation_status evidence). Use the supplied status snapshot and timestamps, including failed or delivery unconfirmed; do not perform another lookup. A run or spoke is not receipt evidence. If sent, say receipt cannot be verified unless actual device/read receipts exist. Do not poll, retry this check, create automations, or reschedule yourself.", record.id);
+                check.verification_for = Some(record.id.clone());
+                check.trigger = ScheduleTrigger::Once { at_ms: check_at };
+                check.next_due_at_ms = check_at;
+                check.active_hours = None;
+                record.verification = Some(super::delivery::ReminderVerification {
+                    automation_id: check.id.clone(),
+                    scheduled_at_ms: check_at,
+                });
+                state.schedules.insert(check.id.clone(), check.clone());
+                verification = Some(check);
+            }
             state.schedules.insert(record.id.clone(), record.clone());
             state.control_plane_persist_request()
         };
         if persist.save().await.is_err() {
-            self.state.write().await.schedules.remove(&record.id);
+            let mut state = self.state.write().await;
+            state.schedules.remove(&record.id);
+            if let Some(check) = verification {
+                state.schedules.remove(&check.id);
+            }
             return Err(ScheduleError::Persistence);
         }
         self.state
             .read()
             .await
             .publish_automation_updated(&record.agent_id, &record.id, false);
+        if let Some(check) = verification {
+            self.state
+                .read()
+                .await
+                .publish_automation_updated(&check.agent_id, &check.id, false);
+        }
         Ok((record, true))
     }
 
@@ -876,7 +998,7 @@ impl AutomationService {
         }
         let (agent_id, schedule_id) = (agent_id.to_string(), schedule_id.to_string());
         self.locked(move |service| async move {
-            let (updated, previous, previous_events, persist) = {
+            let (updated, previous, previous_events, previous_check, persist) = {
                 let mut state = service.state.write().await;
                 if let Some(authority) = &authority {
                     authority.validate(&state, &agent_id)?;
@@ -888,6 +1010,7 @@ impl AutomationService {
                     .cloned()
                     .ok_or(ScheduleError::NotFound)?;
                 let mut updated = previous.clone();
+                let retargeted = patch.target.is_some();
                 if let Some(name) = name {
                     updated.name = name;
                 }
@@ -906,6 +1029,13 @@ impl AutomationService {
                     || (!was_enabled && updated.enabled);
                 if let Some(trigger) = patch.trigger {
                     updated.trigger = normalized_trigger(trigger);
+                }
+                if updated.verification_for.is_some()
+                    && !matches!(updated.trigger, ScheduleTrigger::Once { .. })
+                {
+                    return Err(ScheduleError::Invalid(
+                        "reminder verification must remain one-time",
+                    ));
                 }
                 if let Some(hours) = patch.active_hours {
                     updated.active_hours = hours;
@@ -928,11 +1058,48 @@ impl AutomationService {
                 if updated.trigger != previous.trigger {
                     state.automation_events.discard_pending(&schedule_id);
                 }
+                let mut previous_check = None;
+                if retimed || retargeted {
+                    if let Some(verification) = &updated.verification {
+                        if let Some(check) = state
+                            .schedules
+                            .get(&verification.automation_id)
+                            .filter(|check| {
+                                check.agent_id == agent_id && check.last_fired.is_none()
+                            })
+                            .cloned()
+                        {
+                            let mut retimed_check = check.clone();
+                            retimed_check.target = updated.target.clone();
+                            if matches!(updated.trigger, ScheduleTrigger::Once { .. }) {
+                                let check_at = updated.next_due_at_ms.checked_add(5_000).ok_or(
+                                    ScheduleError::Invalid("verification time is out of range"),
+                                )?;
+                                retimed_check.trigger = ScheduleTrigger::Once { at_ms: check_at };
+                                retimed_check.next_due_at_ms = check_at;
+                                updated
+                                    .verification
+                                    .as_mut()
+                                    .expect("verification exists")
+                                    .scheduled_at_ms = check_at;
+                            } else {
+                                retimed_check.enabled = false;
+                                updated.verification = None;
+                            }
+                            retimed_check.updated_at_ms = now_ms.max(check.updated_at_ms);
+                            state
+                                .schedules
+                                .insert(retimed_check.id.clone(), retimed_check);
+                            previous_check = Some(check);
+                        }
+                    }
+                }
                 state.schedules.insert(schedule_id.clone(), updated.clone());
                 (
                     updated,
                     previous,
                     previous_events,
+                    previous_check,
                     state.control_plane_persist_request(),
                 )
             };
@@ -940,6 +1107,9 @@ impl AutomationService {
                 let mut state = service.state.write().await;
                 state.schedules.insert(schedule_id, previous);
                 state.automation_events = previous_events;
+                if let Some(check) = previous_check {
+                    state.schedules.insert(check.id.clone(), check);
+                }
                 return Err(ScheduleError::Persistence);
             }
             service.state.read().await.publish_automation_updated(
@@ -947,6 +1117,13 @@ impl AutomationService {
                 &updated.id,
                 false,
             );
+            if let Some(check) = previous_check {
+                service.state.read().await.publish_automation_updated(
+                    &check.agent_id,
+                    &check.id,
+                    false,
+                );
+            }
             Ok(updated)
         })
         .await
@@ -996,6 +1173,103 @@ impl AutomationService {
                 false,
             );
             Ok((updated, true))
+        })
+        .await
+    }
+
+    /// Marks a one-time reminder done: it stops (if it had not fired yet)
+    /// and leaves the list a day later. Marking it again keeps the first time.
+    pub(crate) async fn complete(
+        &self,
+        agent_id: &str,
+        schedule_id: &str,
+        now_ms: u64,
+        authority: Option<AutomationRunAuthority>,
+    ) -> Result<ScheduledPromptRecord, ScheduleError> {
+        self.change_once(agent_id, schedule_id, now_ms, authority, move |record| {
+            record.enabled = false;
+            record.done_at_ms.get_or_insert(now_ms);
+            Ok(())
+        })
+        .await
+    }
+
+    /// Re-arms a one-time reminder `minutes` from now and clears its done
+    /// mark, so it fires (and pops up) again.
+    pub(crate) async fn snooze(
+        &self,
+        agent_id: &str,
+        schedule_id: &str,
+        minutes: u64,
+        now_ms: u64,
+        authority: Option<AutomationRunAuthority>,
+    ) -> Result<ScheduledPromptRecord, ScheduleError> {
+        if !(1..=MAX_SNOOZE_MINUTES).contains(&minutes) {
+            return Err(ScheduleError::Invalid(SNOOZE_MINUTES_INVALID));
+        }
+        let at_ms = now_ms.saturating_add(minutes * 60_000);
+        self.change_once(agent_id, schedule_id, now_ms, authority, move |record| {
+            record.trigger = ScheduleTrigger::Once { at_ms };
+            record.next_due_at_ms = at_ms;
+            record.enabled = true;
+            record.done_at_ms = None;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Applies `change` to a one-time automation and saves it, or puts the
+    /// previous record back when the save fails.
+    async fn change_once<F>(
+        &self,
+        agent_id: &str,
+        schedule_id: &str,
+        now_ms: u64,
+        authority: Option<AutomationRunAuthority>,
+        change: F,
+    ) -> Result<ScheduledPromptRecord, ScheduleError>
+    where
+        F: FnOnce(&mut ScheduledPromptRecord) -> Result<(), ScheduleError> + Send + 'static,
+    {
+        let (agent_id, schedule_id) = (agent_id.to_owned(), schedule_id.to_owned());
+        self.locked(move |service| async move {
+            let (previous, updated, persist) = {
+                let mut state = service.state.write().await;
+                if let Some(authority) = &authority {
+                    authority.validate(&state, &agent_id)?;
+                }
+                let previous = state
+                    .schedules
+                    .get(&schedule_id)
+                    .filter(|record| record.agent_id == agent_id)
+                    .cloned()
+                    .ok_or(ScheduleError::NotFound)?;
+                if !matches!(previous.trigger, ScheduleTrigger::Once { .. }) {
+                    return Err(ScheduleError::Conflict(ONLY_ONE_TIME_REMINDERS));
+                }
+                let mut updated = previous.clone();
+                change(&mut updated)?;
+                updated.updated_at_ms = now_ms
+                    .max(updated.created_at_ms)
+                    .max(previous.updated_at_ms);
+                state.schedules.insert(schedule_id.clone(), updated.clone());
+                (previous, updated, state.control_plane_persist_request())
+            };
+            if persist.save().await.is_err() {
+                service
+                    .state
+                    .write()
+                    .await
+                    .schedules
+                    .insert(schedule_id, previous);
+                return Err(ScheduleError::Persistence);
+            }
+            service.state.read().await.publish_automation_updated(
+                &updated.agent_id,
+                &updated.id,
+                false,
+            );
+            Ok(updated)
         })
         .await
     }
@@ -1115,6 +1389,10 @@ pub(crate) fn test_automation(agent_id: &str, id: &str) -> ScheduledPromptRecord
         created_by: AutomationCreator::Owner,
         preset: None,
         counters: AutomationCounters::default(),
+        delivery_events: Vec::new(),
+        verification: None,
+        verification_for: None,
+        done_at_ms: None,
     }
 }
 
@@ -1630,6 +1908,7 @@ mod tests {
             let record = state.schedules.get_mut(&record.id).unwrap();
             record.last_fired = Some(ScheduleLastFired {
                 fired_at_ms: NOW + MINUTE,
+                scheduled_at_ms: None,
                 run_idempotency_key: format!("schedule:{}:{}", record.id, NOW + MINUTE),
                 manual: false,
             });

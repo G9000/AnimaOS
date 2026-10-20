@@ -148,7 +148,7 @@ describe('Anima operator visual contract', () => {
     expect(onboardingShell).toContain('min-height: 0');
     expect(onboardingShell).toContain('overflow-y: auto');
     expect(onboardingShell).not.toContain('--safe-area-');
-    expect(read('components/WorkspaceShell.tsx')).toContain(
+    expect(read('components/SettingsNavigation.tsx')).toContain(
       "'safe-bottom-dock glass-strong absolute",
     );
     // Settings render inside the app frame, so they take no safe area of their own.
@@ -198,11 +198,11 @@ describe('Anima operator visual contract', () => {
     expect(styles).toContain('@media (prefers-reduced-motion: reduce)');
     expect(styles).toContain('.agent-orb');
 
-    expect(read('components/WorkspaceShell.tsx')).toContain(
+    expect(read('components/SettingsNavigation.tsx')).toContain(
       'data-placement={placement}',
     );
-    expect(read('components/WorkspaceShell.tsx')).toContain("'sidebar'");
-    expect(read('components/WorkspaceShell.tsx')).toContain("'bottom-dock'");
+    expect(read('components/SettingsNavigation.tsx')).toContain("'sidebar'");
+    expect(read('components/SettingsNavigation.tsx')).toContain("'bottom-dock'");
     expect(read('components/WorkspaceShell.tsx')).toContain(
       'aria-label="Settings"',
     );

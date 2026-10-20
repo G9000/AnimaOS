@@ -1800,3 +1800,94 @@ describe('Composer one button', () => {
     }
   });
 });
+
+describe('automation cards in the main chat', () => {
+  const automation = (extra: Record<string, unknown>): ChatMessage => ({
+    id: String(extra.runId),
+    role: 'Assistant',
+    content: { text: 'written for the model, never shown', metadata: extra },
+    created_at_ms: 1_725_000_000_000,
+  });
+  const base = {
+    kind: 'automation',
+    automationId: 'rem',
+    automationName: 'Call the bank',
+    reminder: true,
+    body: 'Their cut-off is 3:00 PM.',
+    delivery: 'main',
+    firedAtMs: 1_725_000_000_000,
+  };
+
+  it('shows the card from the metadata, never the text written for the model', () => {
+    render(
+      <MessageList
+        agent={{
+          ...agent,
+          messages: [
+            automation({ ...base, runId: 'run-1' }),
+            automation({
+              kind: 'automationNote',
+              automationId: 'weekly',
+              automationName: 'Weekly review',
+              body: 'full text',
+              delivery: 'discord',
+              destinationLabel: '#home',
+              runId: 'run-2',
+              firedAtMs: 1_725_000_000_000,
+            }),
+          ],
+        }}
+        sending={false}
+        scrollerRef={{ current: null }}
+        onSuggestion={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('article', { name: 'Reminder Call the bank' })).toBeVisible();
+    expect(screen.getByText('Their cut-off is 3:00 PM.')).toBeVisible();
+    expect(screen.getByText(/Weekly review went to Discord · #home/)).toBeVisible();
+    expect(screen.queryByText(/written for the model/)).toBeNull();
+  });
+
+  it('shows the daemon copy of a Discord post as a plain reply with a small tag', () => {
+    render(
+      <MessageList
+        agent={{
+          ...agent,
+          messages: [
+            automation({
+              kind: 'automationPost',
+              automationId: 'weekly',
+              automationName: 'Weekly review',
+              runId: 'post-1',
+            }),
+          ],
+        }}
+        sending={false}
+        scrollerRef={{ current: null }}
+        onSuggestion={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('Automation · Weekly review')).toBeVisible();
+    expect(screen.getByText(/written for the model, never shown/)).toBeVisible();
+    expect(screen.queryByRole('article')).toBeNull();
+  });
+
+  it('tells the page whether the newest message is in view', () => {
+    const onAtBottomChange = vi.fn();
+    render(
+      <MessageList
+        agent={agent}
+        sending={false}
+        scrollerRef={{ current: null }}
+        onSuggestion={vi.fn()}
+        onAtBottomChange={onAtBottomChange}
+      />,
+    );
+    expect(onAtBottomChange).toHaveBeenLastCalledWith(true);
+    const scroller = screen.getByLabelText('Conversation with Nova');
+    Object.defineProperty(scroller, 'scrollHeight', { value: 2_000 });
+    Object.defineProperty(scroller, 'clientHeight', { value: 500 });
+    fireEvent.scroll(scroller);
+    expect(onAtBottomChange).toHaveBeenLastCalledWith(false);
+  });
+});

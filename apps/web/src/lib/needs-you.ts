@@ -232,6 +232,7 @@ const QUIET_TOOLS: ReadonlySet<string> = new Set([
   'read_conversation_window',
   'load_skill',
   'list_automations',
+  'check_automation_status',
   PLAN_TOOL,
 ]);
 
@@ -264,6 +265,8 @@ const ACTION_LABELS: Record<string, string> = {
   resume_automation: 'Resumed an automation',
   delete_automation: 'Deleted an automation',
   trigger_automation: 'Ran an automation',
+  complete_reminder: 'Marked a reminder done',
+  snooze_reminder: 'Snoozed a reminder',
   mail_create_draft: 'Drafted an email',
   calendar_create_event: 'Added a calendar event',
   calendar_update_event: 'Moved a calendar event',

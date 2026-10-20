@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AgentMemory } from '@animaOS-SWARM/sdk';
 import { daemon } from '../lib/daemon-api';
 import type { AgentDetail } from '../lib/types';
@@ -7,10 +7,13 @@ import { AgentAvatar, refreshAgentAvatar } from './AgentAvatar';
 export function AgentProfileDetails({
   agent,
   disabled,
+  children,
 }: {
   agent: AgentDetail;
   disabled: boolean;
+  children?: ReactNode;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
@@ -38,46 +41,40 @@ export function AgentProfileDetails({
     }
   };
   return (
-    <section className="space-y-4" aria-label="Agent identity">
-      <div className="flex items-center gap-4">
-        <AgentAvatar id={agent.id} name={agent.name} size={64} />
-        <div className="min-w-0">
-          <p className="break-words text-xl font-semibold">{agent.name}</p>
-          <p className="mt-1 text-sm text-ink-3">
-            {agent.workspaceRole === 'lead' ? 'Workspace manager' : 'Teammate'}{' '}
-            ·{' '}
-            {agent.status === 'Running'
-              ? 'Working now'
-              : agent.status === 'Failed'
-                ? 'Needs attention'
-                : agent.status === 'Terminated'
-                  ? 'Stopped'
-                  : 'Ready for a conversation'}
-          </p>
+    <section className="profile-identity" aria-label="Agent identity">
+      <div className="profile-identity-row">
+        <div className="profile-avatar-controls">
+          <button
+            type="button"
+            aria-label="Change agent avatar"
+            disabled={disabled || busy}
+            onClick={() => inputRef.current?.click()}
+            className="profile-avatar-change"
+          >
+            <AgentAvatar id={agent.id} name={agent.name} size={72} />
+            <span>Change</span>
+          </button>
+          <input
+            ref={inputRef}
+            aria-label="Agent avatar image file"
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            disabled={disabled || busy}
+            className="sr-only"
+            tabIndex={-1}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = '';
+              if (file) void change(file);
+            }}
+          />
         </div>
+        <div className="profile-identity-fields">{children}</div>
       </div>
-      <label className="block text-xs text-ink-3">
-        Change avatar
-        <input
-          aria-label="Change agent avatar"
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          disabled={disabled || busy}
-          className="mt-2 block w-full text-sm"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            event.target.value = '';
-            if (file) void change(file);
-          }}
-        />
-      </label>
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-xs text-ink-3">
-          PNG, JPEG or WebP · up to 5 MB
-        </span>
+      <div className="profile-avatar-help">
+        <span>PNG, JPEG or WebP · up to 5 MB</span>
         <button
           type="button"
-          className="text-xs underline"
           disabled={disabled || busy}
           onClick={() => void change(null)}
         >

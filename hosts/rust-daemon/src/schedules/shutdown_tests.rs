@@ -220,6 +220,7 @@ async fn persisted_unfinished_claim_recovers_in_fresh_states_without_replay() {
             claimed.last_fired,
             Some(ScheduleLastFired {
                 fired_at_ms: declared_t,
+                scheduled_at_ms: Some(initial.next_due_at_ms),
                 run_idempotency_key: occurrence_id.clone(),
                 manual: false,
             })
@@ -450,6 +451,7 @@ async fn persisted_interval_outage_collapses_missed_occurrences_without_catch_up
             first_record.last_fired,
             Some(ScheduleLastFired {
                 fired_at_ms: outage_n,
+                scheduled_at_ms: Some(initial.next_due_at_ms),
                 run_idempotency_key: format!("schedule:{}:{outage_n}", initial.id),
                 manual: false,
             })
@@ -559,6 +561,7 @@ async fn persisted_interval_outage_collapses_missed_occurrences_without_catch_up
             second_record.last_fired,
             Some(ScheduleLastFired {
                 fired_at_ms: next_due,
+                scheduled_at_ms: Some(next_due),
                 run_idempotency_key: format!("schedule:{}:{next_due}", initial.id),
                 manual: false,
             })

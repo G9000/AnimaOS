@@ -35,6 +35,7 @@ import {
 } from '../lib/transcript';
 import { PendingMessage, RunActivity, ToolBlock } from './sessions/RunActivity';
 import { RunOutcomeCard } from './sessions/RunOutcomeCard';
+import { AutomationMessageCard } from './sessions/AutomationMessageCard';
 import { TaskReviewAction } from './learning/TaskReviewAction';
 import { TaskReviewProvider } from './learning/TaskReviewContext';
 import { DelegatedTurn, TrimmedDivider } from './sessions/TranscriptNotes';
@@ -84,6 +85,16 @@ function messageFlag(message: ChatMessage): string | null {
   return null;
 }
 
+/** The automation behind a post it made in a channel's own thread (the
+ *  daemon's copy of a Discord post): an ordinary reply with a small tag. */
+function automationPostName(message: ChatMessage): string | null {
+  const metadata = message.content.metadata;
+  if (message.role !== 'Assistant' || metadata?.kind !== 'automationPost')
+    return null;
+  const name = metadata.automationName;
+  return typeof name === 'string' && name.trim() ? name : 'Automation';
+}
+
 /** Where an owner message came from, when not this console: the owner's
  *  private Telegram chat shares the main chat. */
 const SOURCE_LABELS: Record<string, string> = {
@@ -124,6 +135,7 @@ const Bubble = memo(function Bubble({
   const flag = messageFlag(message);
   const time = formatTime(message.created_at_ms);
   const source = messageSource(message);
+  const automationPost = automationPostName(message);
   // A reply is a turn under the companion's name; the owner's words sit in
   // a slim bubble on the right. Actions stay out of the way until wanted.
   return (
@@ -135,6 +147,11 @@ const Bubble = memo(function Bubble({
           {agentName && <span className="chat-agent-name">{agentName}</span>}
           <span className="chat-time">{time}</span>
           {flag && <span className="message-flag">{flag}</span>}
+          {automationPost && (
+            <span className="chat-source">
+              Automation · {revealInvisible(automationPost).text}
+            </span>
+          )}
         </div>
       )}
       <div
@@ -275,6 +292,7 @@ function ThinkingIndicator({ name }: { name: string }) {
 function candidateAnchorIds(item: TranscriptItem): string[] {
   switch (item.kind) {
     case 'message':
+    case 'automation':
     case 'delegated':
     case 'revised':
       return [item.message.id];
@@ -306,6 +324,7 @@ function anchorsFor(transcript: readonly TranscriptItem[]): string[][] {
 /** When a transcript item happened, for day dividers; live items have none. */
 function itemTime(item: TranscriptItem): number | null {
   return item.kind === 'message' ||
+    item.kind === 'automation' ||
     item.kind === 'delegated' ||
     item.kind === 'revised'
     ? item.message.created_at_ms
@@ -391,6 +410,13 @@ const TranscriptEntry = memo(function TranscriptEntry({
           )}
         </>
       );
+    case 'automation':
+      return (
+        <AutomationMessageCard
+          meta={item.meta}
+          actions={actions?.automationCards}
+        />
+      );
     case 'revised':
       return (
         <details className="revised-draft">
@@ -475,6 +501,7 @@ export const MessageList = memo(function MessageList({
   jumpRequestKey = 0,
   jumpReady = true,
   onJumpToLatest,
+  onAtBottomChange,
 }: {
   agent: AgentDetail;
   sending: boolean;
@@ -498,8 +525,14 @@ export const MessageList = memo(function MessageList({
   /** The requested historical window has finished loading successfully. */
   jumpReady?: boolean;
   onJumpToLatest?: () => void;
+  /** Tells the page whether the newest message is in view, so a toast for a
+   *  new automation card shows only when it would otherwise be missed. */
+  onAtBottomChange?: (atBottom: boolean) => void;
 }) {
   const [awayFromBottom, setAwayFromBottom] = useState(false);
+  useEffect(() => {
+    onAtBottomChange?.(!awayFromBottom);
+  }, [awayFromBottom, onAtBottomChange]);
   const [highlight, setHighlight] = useState<string | null>(null);
   const highlightedMessageId =
     highlight ?? (jumpReady ? highlightMessageId : null);

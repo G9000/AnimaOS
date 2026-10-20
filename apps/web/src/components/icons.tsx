@@ -133,3 +133,108 @@ export const PaperclipIcon = (p: IconProps) =>
     p,
     <path d="m21 11-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4L15.5 7" />,
   );
+
+export const BellIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+      <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+    </>,
+  );
+export const CheckIcon = (p: IconProps) =>
+  base(p, <path d="M20 6 9 17l-5-5" />);
+export const HashIcon = (p: IconProps) =>
+  base(p, <path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" />);
+export const TelegramIcon = (p: IconProps) =>
+  base(p, <path d="M22 2 11 13M22 2l-7 20-4-9-9-4z" />);
+export const SnoozeIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <circle cx="12" cy="13" r="8" />
+      <path d="M12 9v4l2 2M5 3 2 6M22 6l-3-3" />
+    </>,
+  );
+
+export const UserRoundIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <circle cx="12" cy="8" r="5" />
+      <path d="M20 21a8 8 0 0 0-16 0" />
+    </>,
+  );
+export const ShieldCheckIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+      <path d="m9 12 2 2 4-4" />
+    </>,
+  );
+export const PuzzleIcon = (p: IconProps) =>
+  base(
+    p,
+    <path d="M19.4 15a1 1 0 0 0 1.6.8H22v4a2 2 0 0 1-2 2h-4v-1a2 2 0 1 0-4 0v1H8a2 2 0 0 1-2-2v-4H5a2 2 0 1 1 0-4h1V8a2 2 0 0 1 2-2h4V5a2 2 0 1 1 4 0v1h4a2 2 0 0 1 2 2v4h-1a2 2 0 0 0-1.6 3Z" />,
+  );
+export const BrainIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <path d="M12 18V5a3 3 0 0 0-5.9-.7A4 4 0 0 0 4 11a4 4 0 0 0 1 7.5A3.5 3.5 0 0 0 12 18ZM12 5a3 3 0 0 1 5.9-.7A4 4 0 0 1 20 11a4 4 0 0 1-1 7.5A3.5 3.5 0 0 1 12 18" />
+      <path d="M8 8a4 4 0 0 1-2-3M16 8a4 4 0 0 0 2-3M7 15a4 4 0 0 0 5-3M17 15a4 4 0 0 1-5-3" />
+    </>,
+  );
+export const BlocksIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <path d="M4 14h6v7H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1ZM14 14h7v6a1 1 0 0 1-1 1h-6ZM3 3h7v7H3Z" />
+    </>,
+  );
+export const LinkIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <path d="M10 13a5 5 0 0 0 7 .2l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7-.2l-3 3a5 5 0 0 0 7 7l1.7-1.7" />
+    </>,
+  );
+export const CalendarClockIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <path d="M16 2v4M8 2v4M3 10h18M21 11V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h6" />
+      <circle cx="17" cy="17" r="5" />
+      <path d="M17 14v3l2 1" />
+    </>,
+  );
+export const ListChecksIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <path d="m3 6 2 2 4-4M13 6h8M3 14l2 2 4-4M13 14h8M13 21h8" />
+    </>,
+  );
+export const FolderIcon = (p: IconProps) =>
+  base(
+    p,
+    <path d="M20 20H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2Z" />,
+  );
+export const ServerIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <rect x="2" y="3" width="20" height="7" rx="2" />
+      <rect x="2" y="14" width="20" height="7" rx="2" />
+      <path d="M6 6.5h.01M6 17.5h.01" />
+    </>,
+  );
+export const ScrollTextIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <path d="M8 21h12a2 2 0 0 0 2-2v-2H10v2a2 2 0 0 1-4 0V5a2 2 0 0 0-4 0v3h4M4 3h13a2 2 0 0 1 2 2v12M10 7h5M10 11h5" />
+    </>,
+  );

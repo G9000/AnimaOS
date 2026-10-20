@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { HaloOrb } from './halo/HaloOrb';
 
 export function refreshAgentAvatar(id: string) {
   window.dispatchEvent(new CustomEvent('agent-avatar-changed', { detail: id }));
@@ -8,7 +9,7 @@ export function AgentAvatar({
   id,
   name,
   size = 28,
-  fallback = null,
+  fallback = <HaloOrb />,
 }: {
   id: string;
   name: string;
@@ -35,8 +36,10 @@ export function AgentAvatar({
       data-default={failed || undefined}
       title={failed ? name : undefined}
     >
-      {/* No uploaded image: the default orb (styled) stands in for the agent. */}
-      {failed ? fallback : (
+      {/* Use the same presence shader as the design when no image is stored. */}
+      {failed ? (
+        fallback
+      ) : (
         <img
           key={`${id}:${revision}`}
           src={`/api/agents/${encodeURIComponent(id)}/avatar?v=${revision}`}

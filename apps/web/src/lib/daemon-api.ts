@@ -791,6 +791,12 @@ export const daemon = {
     setupClient.automations.remove(agentId, id),
   runAutomationNow: (agentId: string, id: string) =>
     setupClient.automations.runNow(agentId, id),
+  /** Marks a one-time reminder done. */
+  completeAutomation: (agentId: string, id: string) =>
+    setupClient.automations.complete(agentId, id),
+  /** Re-arms a fired one-time reminder `minutes` from now. */
+  snoozeAutomation: (agentId: string, id: string, minutes: number) =>
+    setupClient.automations.snooze(agentId, id, minutes),
   automationHistory: (
     agentId: string,
     id: string,

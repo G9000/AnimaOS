@@ -9,6 +9,11 @@ import type { DaemonWorkspaceState } from '../lib/daemon-api';
 import type { HashPage, HashRoute, Navigate } from '../lib/hash-route';
 import type { AgentDetail } from '../lib/types';
 import { AgentPresence } from './AgentPresence';
+import {
+  SettingsSidebar,
+  DestinationNavigation,
+  SETTINGS_DESTINATIONS,
+} from './SettingsNavigation';
 import { AgentSwitcher } from './AgentSwitcher';
 import { AgentsView } from './AgentsView';
 import { HaloBackdrop } from './halo/HaloBackdrop';
@@ -22,23 +27,13 @@ import { WorkspaceFiles } from './WorkspaceFiles';
 import { WorkspaceCapabilities } from './WorkspaceCapabilities';
 import { CommandMenu, type StudioCommand } from './CommandMenu';
 import { PROMPT_LIBRARY } from '../lib/prompt-library';
-import { sessionKey } from '../lib/session-groups';
+import { sessionKey, shouldShowSession } from '../lib/session-groups';
 import {
-  AgentsIcon,
-  BoltIcon,
-  ChartIcon,
-  ChipIcon,
   ChevronIcon,
-  ClockIcon,
   GearIcon,
-  HeartIcon,
   HistoryIcon,
   InboxIcon,
-  LogIcon,
-  PulseIcon,
   SearchIcon,
-  ShieldIcon,
-  SparkIcon,
   XIcon,
 } from './icons';
 import { ImportConversationDialog } from './sessions/ImportConversationDialog';
@@ -69,73 +64,6 @@ export type AvailablePage = (typeof AVAILABLE_PAGES)[number];
 /** Session titles the command menu offers, newest activity first. */
 export const MAX_SESSION_COMMANDS = 50;
 
-interface Destination {
-  page: AvailablePage;
-  label: string;
-  icon: ReactNode;
-}
-
-interface DestinationGroup {
-  label: string;
-  items: Destination[];
-}
-
-/** Settings are grouped by what the owner is deciding, not by daemon feature. */
-const DESTINATION_GROUPS: DestinationGroup[] = [
-  {
-    label: 'Companion',
-    items: [
-      { page: 'profile', label: 'Profile', icon: <AgentsIcon size={15} /> },
-      { page: 'model', label: 'Model', icon: <ChipIcon size={15} /> },
-      {
-        page: 'approvals',
-        label: 'Permissions',
-        icon: <ShieldIcon size={15} />,
-      },
-    ],
-  },
-  {
-    label: 'Learning',
-    items: [
-      { page: 'skills', label: 'Skills', icon: <BoltIcon size={15} /> },
-      { page: 'memory', label: 'Memory', icon: <PulseIcon size={15} /> },
-    ],
-  },
-  {
-    label: 'Abilities',
-    items: [
-      { page: 'capabilities', label: 'Tools', icon: <SparkIcon size={15} /> },
-      {
-        page: 'connectors',
-        label: 'Connections',
-        icon: <GearIcon size={15} />,
-      },
-    ],
-  },
-  {
-    label: 'Activity',
-    items: [
-      {
-        page: 'automations',
-        label: 'Automations',
-        icon: <ClockIcon size={15} />,
-      },
-      { page: 'work', label: 'Work', icon: <SparkIcon size={15} /> },
-      { page: 'files', label: 'Files', icon: <LogIcon size={15} /> },
-    ],
-  },
-  {
-    label: 'System',
-    items: [
-      { page: 'runtime', label: 'Runtime', icon: <HeartIcon size={15} /> },
-      { page: 'usage', label: 'Usage', icon: <ChartIcon size={15} /> },
-      { page: 'health', label: 'Diagnostics', icon: <PulseIcon size={15} /> },
-      { page: 'logs', label: 'Logs', icon: <LogIcon size={15} /> },
-    ],
-  },
-];
-const DESTINATIONS = DESTINATION_GROUPS.flatMap((group) => group.items);
-
 export function availablePage(route: HashRoute): AvailablePage | null {
   return route.kind === 'page' &&
     (AVAILABLE_PAGES as readonly HashPage[]).includes(route.page)
@@ -161,71 +89,6 @@ function useDesktopNavigation() {
     return () => media.removeEventListener('change', update);
   }, []);
   return desktop;
-}
-
-function DestinationNavigation({
-  page,
-  navigate,
-  placement,
-  pendingApprovals,
-  locked,
-}: {
-  page: AvailablePage | null;
-  navigate: Navigate;
-  placement: 'sidebar' | 'bottom-dock';
-  pendingApprovals: number;
-  locked: boolean;
-}) {
-  const sidebar = placement === 'sidebar';
-  const itemClass = `studio-nav-item ${sidebar ? 'is-row' : 'is-tab'}`;
-  const destination = (item: Destination) => {
-    const waiting = item.page === 'approvals' ? pendingApprovals : 0;
-    return (
-      <button
-        key={item.page}
-        type="button"
-        disabled={locked}
-        onClick={() => navigate({ kind: 'page', page: item.page })}
-        aria-current={page === item.page ? 'page' : undefined}
-        aria-label={
-          waiting > 0 ? `${item.label}, ${waiting} waiting` : item.label
-        }
-        className={itemClass}
-      >
-        {item.icon}
-        <span>{item.label}</span>
-        {waiting > 0 && (
-          <span className="nav-badge" aria-hidden>
-            {waiting}
-          </span>
-        )}
-      </button>
-    );
-  };
-  return (
-    <nav
-      aria-label="Workspace navigation"
-      aria-orientation={sidebar ? 'vertical' : 'horizontal'}
-      data-placement={placement}
-      className={
-        sidebar
-          ? 'studio-navigation'
-          : 'safe-bottom-dock glass-strong absolute inset-x-0 bottom-0 z-30 flex items-center gap-1 overflow-x-auto p-1.5'
-      }
-    >
-      {DESTINATION_GROUPS.map((group) => (
-        <div
-          key={group.label}
-          role="group"
-          aria-label={group.label}
-          className="contents"
-        >
-          {sidebar && <p className="studio-nav-group">{group.label}</p>}
-          {group.items.map((item) => destination(item))}
-        </div>
-      ))}
-    </nav>
-  );
 }
 
 const FOCUSABLE =
@@ -492,6 +355,8 @@ export function WorkspaceShell({
   );
   const lastConversation = conversationRoute ?? visitedConversation;
   const [commandsOpen, setCommandsOpen] = useState(false);
+  const [settingsQuery, setSettingsQuery] = useState('');
+  const settingsSearchRef = useRef<HTMLInputElement>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const desktopNavigation = useDesktopNavigation();
@@ -533,6 +398,7 @@ export function WorkspaceShell({
     if (route.kind === 'session' || route.kind === 'home')
       setVisitedConversation(route);
     setDrawerOpen(false);
+    setSettingsQuery('');
   }, [route]);
 
   useEffect(() => {
@@ -544,12 +410,17 @@ export function WorkspaceShell({
       ) {
         if (document.querySelector('[aria-modal="true"]')) return;
         event.preventDefault();
-        setCommandsOpen(true);
+        if (page !== null && desktopNavigation) {
+          settingsSearchRef.current?.focus();
+          settingsSearchRef.current?.select();
+        } else {
+          setCommandsOpen(true);
+        }
       }
     };
     window.addEventListener('keydown', shortcut);
     return () => window.removeEventListener('keydown', shortcut);
-  }, []);
+  }, [page, desktopNavigation]);
 
   const commands: StudioCommand[] = [
     {
@@ -580,7 +451,7 @@ export function WorkspaceShell({
           },
         ]
       : []),
-    ...DESTINATIONS.map((item) => ({
+    ...SETTINGS_DESTINATIONS.map((item) => ({
       id: item.page,
       title: `Go to ${item.label}`,
       description: `Open ${item.label.toLowerCase()}`,
@@ -589,7 +460,7 @@ export function WorkspaceShell({
     })),
     ...(onOpenSession
       ? sessions
-          .filter((session) => !session.archived)
+          .filter((session) => !session.archived && shouldShowSession(session))
           .slice(0, MAX_SESSION_COMMANDS)
           .map((session) => ({
             id: `session:${sessionKey(session)}`,
@@ -618,9 +489,15 @@ export function WorkspaceShell({
       : []),
   ];
 
-  const pageLabel = page === 'agents' ? 'Manage agents' : page === 'new-agent' ? 'New agent' : page
-    ? (DESTINATIONS.find((item) => item.page === page)?.label ?? null)
-    : null;
+  const pageLabel =
+    page === 'agents'
+      ? 'Manage agents'
+      : page === 'new-agent'
+        ? 'New agent'
+        : page
+          ? (SETTINGS_DESTINATIONS.find((item) => item.page === page)?.label ??
+            null)
+          : null;
 
   return (
     <>
@@ -646,8 +523,12 @@ export function WorkspaceShell({
                   busy={presence !== 'calm'}
                   locked={locked}
                   onSelect={onSelectAgent}
-                  onNewAgent={() => navigate({ kind: 'page', page: 'new-agent' })}
-                  onManageAgents={() => navigate({ kind: 'page', page: 'agents' })}
+                  onNewAgent={() =>
+                    navigate({ kind: 'page', page: 'new-agent' })
+                  }
+                  onManageAgents={() =>
+                    navigate({ kind: 'page', page: 'agents' })
+                  }
                 />
                 {sideThread && (
                   <>
@@ -681,18 +562,20 @@ export function WorkspaceShell({
               <div className="studio-topbar-actions">
                 {inbox ? (
                   <InboxButton inbox={inbox} />
-                ) : pendingApprovals > 0 && (
-                  <button
-                    type="button"
-                    className="studio-tool-button scenic-waiting"
-                    aria-label={`Approvals, ${pendingApprovals} waiting`}
-                    onClick={() =>
-                      navigate({ kind: 'page', page: 'approvals' })
-                    }
-                  >
-                    <i aria-hidden />
-                    {pendingApprovals} waiting
-                  </button>
+                ) : (
+                  pendingApprovals > 0 && (
+                    <button
+                      type="button"
+                      className="studio-tool-button scenic-waiting"
+                      aria-label={`Approvals, ${pendingApprovals} waiting`}
+                      onClick={() =>
+                        navigate({ kind: 'page', page: 'approvals' })
+                      }
+                    >
+                      <i aria-hidden />
+                      {pendingApprovals} waiting
+                    </button>
+                  )
                 )}
                 {sidebar !== null && (
                   <button
@@ -738,30 +621,33 @@ export function WorkspaceShell({
                 {conversation}
               </div>
               {page !== null && (
-                <section className="settings-window" aria-label="Settings">
+                <section
+                  className="settings-window"
+                  data-page={page}
+                  aria-label="Settings"
+                >
                   {desktopNavigation && (
-                    <aside className="studio-sidebar settings-window-nav">
-                      <p className="settings-window-title">Settings</p>
-                      <AgentPresence
-                        agent={mainAgent}
-                        connection={connection}
-                        companyName={companyName}
-                        placement="sidebar"
-                        hasAvatar={hasAvatar}
-                        onChangeWorkspaceAvatar={onChangeWorkspaceAvatar}
-                      />
-                      <DestinationNavigation
-                        page={page}
-                        navigate={navigate}
-                        placement="sidebar"
-                        pendingApprovals={pendingApprovals}
-                        locked={locked}
-                      />
-                    </aside>
+                    <SettingsSidebar
+                      page={page}
+                      navigate={navigate}
+                      pendingApprovals={pendingApprovals}
+                      locked={locked}
+                      searchRef={settingsSearchRef}
+                      query={settingsQuery}
+                      onQueryChange={setSettingsQuery}
+                    />
                   )}
                   <div className="settings-window-content">
                     <div className="settings-window-head">
-                      <strong>{pageLabel}</strong>
+                      <div>
+                        <strong>{pageLabel}</strong>
+                        {page === 'profile' && (
+                          <p className="settings-profile-description">
+                            Who {mainAgent.name} is, what it thinks with, and
+                            how it sounds.
+                          </p>
+                        )}
+                      </div>
                       {locked && (
                         <span id="settings-window-locked" className="sr-only">
                           Settings stay on this page until the change finishes.
@@ -777,7 +663,9 @@ export function WorkspaceShell({
                         disabled={locked}
                         onClick={openConversation}
                       >
-                        <span className="scenic-hide-narrow">Back to chat</span>
+                        <span className="scenic-hide-narrow">
+                          {page === 'profile' ? 'ESC' : 'Back to chat'}
+                        </span>
                         <XIcon size={14} />
                       </button>
                     </div>
@@ -794,7 +682,20 @@ export function WorkspaceShell({
                           }}
                         />
                       ) : page === 'profile' ? (
-                        profile
+                        <>
+                          {profile}
+                          <details className="settings-workspace-identity">
+                            <summary>Workspace identity</summary>
+                            <AgentPresence
+                              agent={mainAgent}
+                              connection={connection}
+                              companyName={companyName}
+                              placement="sidebar"
+                              hasAvatar={hasAvatar}
+                              onChangeWorkspaceAvatar={onChangeWorkspaceAvatar}
+                            />
+                          </details>
+                        </>
                       ) : page === 'model' ? (
                         model
                       ) : page === 'runtime' ? (
@@ -951,4 +852,3 @@ function InboxButton({
     </div>
   );
 }
-

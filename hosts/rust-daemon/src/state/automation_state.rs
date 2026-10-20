@@ -4,8 +4,16 @@
 
 use super::DaemonState;
 use crate::live::{LiveEvent, LiveEventBody};
+use crate::schedules::delivery::{DeliveryChannel, DeliveryEvent, DeliveryResult};
 use crate::schedules::history::FireUndo;
 use crate::schedules::{ScheduleFireRecord, ScheduleSafeOutcome, ScheduledPromptRecord};
+
+#[derive(Clone, Debug)]
+pub(crate) struct DeliveryUndo {
+    schedule_id: String,
+    before: Vec<DeliveryEvent>,
+    after: Vec<DeliveryEvent>,
+}
 
 /// What `record_automation_outcome` changed, so a rollback puts it back.
 #[derive(Clone, Debug)]
@@ -15,6 +23,50 @@ pub(crate) struct OutcomeUndo {
 }
 
 impl DaemonState {
+    /// Append transport evidence using the durable outbox correlation, even
+    /// when a newer occurrence has since run. Never infer identity from text.
+    pub(crate) fn record_reminder_delivery(
+        &mut self,
+        outbound_id: &str,
+        attempted_at_ms: u64,
+        completed_at_ms: Option<u64>,
+        result: DeliveryResult,
+        provider_message_ids: Vec<String>,
+    ) -> Option<DeliveryUndo> {
+        let schedule = self.schedules.values_mut().find(|schedule| {
+            schedule
+                .delivery_events
+                .iter()
+                .any(|event| event.outbound_id.as_deref() == Some(outbound_id))
+        })?;
+        let mut event = schedule
+            .delivery_events
+            .iter()
+            .rev()
+            .find(|event| event.outbound_id.as_deref() == Some(outbound_id))?
+            .clone();
+        let before = schedule.delivery_events.clone();
+        event.attempted_at_ms = Some(attempted_at_ms);
+        event.completed_at_ms = completed_at_ms;
+        event.result = result;
+        event.provider_message_ids = provider_message_ids;
+        schedule.record_delivery_event(event);
+        Some(DeliveryUndo {
+            schedule_id: schedule.id.clone(),
+            before,
+            after: schedule.delivery_events.clone(),
+        })
+    }
+
+    pub(crate) fn undo_reminder_delivery(&mut self, undo: Option<DeliveryUndo>) {
+        if let Some(undo) = undo {
+            if let Some(schedule) = self.schedules.get_mut(&undo.schedule_id) {
+                if schedule.delivery_events == undo.after {
+                    schedule.delivery_events = undo.before;
+                }
+            }
+        }
+    }
     /// Publishes `automation.updated` on the automation's agent's stream.
     /// Call it only after the change was saved.
     pub(crate) fn publish_automation_updated(
@@ -54,6 +106,23 @@ impl DaemonState {
         run: Option<(String, String)>,
         finished_at_ms: u64,
     ) -> Option<OutcomeUndo> {
+        let channel = self
+            .schedules
+            .get(schedule_id)
+            .map(|schedule| match &schedule.target {
+                crate::schedules::ScheduleTarget::Workspace => DeliveryChannel::Workspace,
+                crate::schedules::ScheduleTarget::Connector { connector_id }
+                    if self.discord_connectors.contains_key(connector_id) =>
+                {
+                    DeliveryChannel::Discord
+                }
+                crate::schedules::ScheduleTarget::Connector { connector_id }
+                    if self.connectors.contains_key(connector_id) =>
+                {
+                    DeliveryChannel::Telegram
+                }
+                _ => DeliveryChannel::Unknown,
+            })?;
         let schedule = self.schedules.get_mut(schedule_id)?;
         let previous = schedule.clone();
         schedule.counters.record(&outcome.status);
@@ -76,6 +145,22 @@ impl DaemonState {
                 error_code: outcome.error_code.clone(),
                 manual: fired.manual,
             });
+        if let Some(fired) = &schedule.last_fired {
+            schedule.record_delivery_event(DeliveryEvent {
+                occurrence_id: fired.run_idempotency_key.clone(),
+                outbound_id: None,
+                scheduled_at_ms: fired.scheduled_at_ms,
+                channel,
+                attempted_at_ms: None,
+                completed_at_ms: Some(finished_at_ms),
+                result: if outcome.status == crate::schedules::ScheduleOutcomeStatus::Failed {
+                    DeliveryResult::Failed
+                } else {
+                    DeliveryResult::Unknown
+                },
+                provider_message_ids: Vec::new(),
+            });
+        }
         schedule.last_safe_outcome = Some(outcome);
         let fire = fire.map(|fire| self.schedule_fires.record_undoable(fire));
         Some(OutcomeUndo { previous, fire })
@@ -92,6 +177,7 @@ impl DaemonState {
         if let Some(schedule) = self.schedules.get_mut(&undo.previous.id) {
             schedule.last_safe_outcome = undo.previous.last_safe_outcome;
             schedule.counters = undo.previous.counters;
+            schedule.delivery_events = undo.previous.delivery_events;
         }
     }
 }
@@ -110,6 +196,7 @@ mod tests {
         let mut record = test_automation(agent_id, "s1");
         record.last_fired = Some(ScheduleLastFired {
             fired_at_ms: 10_000,
+            scheduled_at_ms: None,
             run_idempotency_key: "schedule:s1:10000".into(),
             manual: true,
         });
@@ -176,10 +263,61 @@ mod tests {
         let reverted = &state.schedules["s1"];
         assert_eq!(reverted.counters, before.counters);
         assert_eq!(reverted.last_safe_outcome, None);
+        assert!(
+            reverted.delivery_events.is_empty(),
+            "failed commits undo delivery evidence too"
+        );
         assert_eq!(state.schedule_fires.len(), 0);
         assert!(state
             .record_automation_outcome("missing", outcome(ScheduleOutcomeStatus::Spoke), None, 1)
             .is_none());
+    }
+
+    #[test]
+    fn reminder_delivery_settlement_rollback_restores_the_unknown_attempt() {
+        use crate::schedules::delivery::{
+            DeliveryChannel, DeliveryEvent, DeliveryResult, ReminderStatus,
+        };
+        let mut state = DaemonState::new();
+        let agent = state
+            .create_agent(companion_config("companion"))
+            .unwrap()
+            .state
+            .id;
+        let mut schedule = claimed(&agent);
+        schedule.delivery_events.push(DeliveryEvent {
+            occurrence_id: "schedule:s1:10000".into(),
+            outbound_id: Some("outbound".into()),
+            scheduled_at_ms: Some(10_000),
+            channel: DeliveryChannel::Telegram,
+            attempted_at_ms: Some(11_000),
+            completed_at_ms: None,
+            result: DeliveryResult::Unknown,
+            provider_message_ids: Vec::new(),
+        });
+        state
+            .schedules
+            .insert(schedule.id.clone(), schedule.clone());
+        let undo = state.record_reminder_delivery(
+            "outbound",
+            11_000,
+            Some(12_000),
+            DeliveryResult::Sent,
+            vec!["101".into()],
+        );
+        assert_eq!(
+            ReminderStatus::from_record(&state.schedules["s1"], 13_000).status,
+            "sent"
+        );
+        state.undo_reminder_delivery(undo);
+        assert_eq!(
+            state.schedules["s1"].delivery_events,
+            schedule.delivery_events
+        );
+        assert_eq!(
+            ReminderStatus::from_record(&state.schedules["s1"], 13_000).status,
+            "delivery_unconfirmed"
+        );
     }
 
     #[tokio::test]

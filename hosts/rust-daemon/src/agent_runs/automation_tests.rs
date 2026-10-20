@@ -26,6 +26,329 @@ fn independent_call(id: &str, name: &str, args: &[(&str, &str)]) -> ToolCall {
     tool
 }
 
+#[tokio::test]
+async fn reminder_status_tool_is_scoped_and_does_not_infer_receipt_from_spoke() {
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![call("check_automation_status", &[("id", "mine")])]),
+        Step::Tools(vec![independent_call(
+            "status-2",
+            "check_automation_status",
+            &[("id", "theirs")],
+        )]),
+        Step::Text(vec!["delivery unconfirmed"]),
+    ]);
+    let (coordinator, agent_id) = automating(model, &["check_automation_status"]).await;
+    {
+        let mut state = coordinator.state.write().await;
+        state
+            .schedules
+            .insert("mine".into(), test_automation(&agent_id, "mine"));
+        state
+            .schedules
+            .insert("theirs".into(), test_automation("another-agent", "theirs"));
+    }
+    coordinator
+        .run(chat_request(&agent_id, "chat:x", "check my reminder once"))
+        .await
+        .unwrap();
+    let results = tool_results(&coordinator, &agent_id).await;
+    assert!(results[0].contains("delivery_unconfirmed"), "{results:?}");
+    assert!(results[0].contains("does not confirm"), "{results:?}");
+    assert!(results[1].contains(AUTOMATION_NOT_YOURS), "{results:?}");
+    assert_eq!(
+        crate::approvals::risk_class("check_automation_status"),
+        crate::approvals::RiskClass::Read
+    );
+}
+
+#[tokio::test]
+async fn reminder_requested_verification_creates_one_once_followup_and_default_creates_none() {
+    for verify in [false, true] {
+        let due = anima_core::primitives::now_millis() + 60_000;
+        let clock = chrono::DateTime::from_timestamp_millis(due as i64)
+            .unwrap()
+            .to_rfc3339();
+        let mut create = call(
+            "create_automation",
+            &[
+                ("prompt", "Test reminder"),
+                ("schedule", &format!("at {clock}")),
+            ],
+        );
+        if verify {
+            create
+                .args
+                .insert("verifyOnce".into(), DataValue::Bool(true));
+        }
+        let model = ScriptedModel::new(vec![
+            Step::Tools(vec![create]),
+            Step::Text(vec!["scheduled"]),
+        ]);
+        let (coordinator, agent) =
+            automating(model, &["create_automation", "check_automation_status"]).await;
+        coordinator
+            .run(chat_request(
+                &agent,
+                "chat:x",
+                if verify {
+                    "test a reminder and check it once"
+                } else {
+                    "set a reminder"
+                },
+            ))
+            .await
+            .unwrap();
+        let records: Vec<_> = coordinator
+            .state
+            .read()
+            .await
+            .schedules
+            .values()
+            .cloned()
+            .collect();
+        assert_eq!(records.len(), if verify { 2 } else { 1 });
+        let original = records
+            .iter()
+            .find(|record| record.prompt == "Test reminder")
+            .unwrap();
+        if verify {
+            let check = records
+                .iter()
+                .find(|record| record.id != original.id)
+                .unwrap();
+            assert_eq!(check.trigger, ScheduleTrigger::Once { at_ms: due + 5_000 });
+            assert!(check.prompt.contains(&original.id));
+            assert!(check.prompt.contains("check_automation_status"));
+            let reply = tool_results(&coordinator, &agent).await;
+            assert!(reply[0].contains(&check.id));
+        }
+    }
+}
+
+#[tokio::test]
+async fn reminder_verification_checks_after_due_once_and_cannot_reschedule_on_unconfirmed() {
+    let due = anima_core::primitives::now_millis() + 60_000;
+    let clock = chrono::DateTime::from_timestamp_millis(due as i64)
+        .unwrap()
+        .to_rfc3339();
+    let mut create = call(
+        "create_automation",
+        &[
+            ("prompt", "Test reminder"),
+            ("schedule", &format!("at {clock}")),
+        ],
+    );
+    create
+        .args
+        .insert("verifyOnce".into(), DataValue::Bool(true));
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![create]),
+        Step::Text(vec!["scheduled"]),
+        Step::Text(vec!["CHECKIN_OK"]),
+        Step::Tools(vec![independent_call(
+            "forbidden-watcher",
+            "create_automation",
+            &[("prompt", "keep checking"), ("schedule", "every 5 minutes")],
+        )]),
+        Step::Tools(vec![independent_call(
+            "extra-check-1",
+            "check_automation_status",
+            &[("id", "original")],
+        )]),
+        Step::Tools(vec![independent_call(
+            "extra-check-2",
+            "check_automation_status",
+            &[("id", "original")],
+        )]),
+        Step::Text(vec![
+            "Delivery unconfirmed: the reminder ran without a send receipt.",
+        ]),
+    ]);
+    let (coordinator, agent) = automating(
+        model.clone(),
+        &["create_automation", "check_automation_status"],
+    )
+    .await;
+    let connectors = crate::connectors::runtime::ConnectorManager::new(
+        coordinator.state.clone(),
+        coordinator.clone(),
+        Arc::new(crate::connectors::credentials::InMemoryCredentialStore::default()),
+        Arc::new(crate::schedules::tests::NoopTelegram),
+    );
+    let scheduler = crate::schedules::SchedulerService::new(
+        coordinator.state.clone(),
+        coordinator.clone(),
+        connectors,
+    );
+    coordinator
+        .run(chat_request(
+            &agent,
+            "chat:x",
+            "test a reminder and check once",
+        ))
+        .await
+        .unwrap();
+    let original = coordinator
+        .state
+        .read()
+        .await
+        .schedules
+        .values()
+        .find(|record| record.prompt == "Test reminder")
+        .unwrap()
+        .clone();
+    let check_id = original
+        .verification
+        .as_ref()
+        .unwrap()
+        .automation_id
+        .clone();
+    assert_eq!(scheduler.tick_at(due).await.unwrap(), 1);
+    assert_eq!(scheduler.tick_at(due + 4_999).await.unwrap(), 0);
+    assert_eq!(scheduler.tick_at(due + 5_000).await.unwrap(), 1);
+    assert_eq!(scheduler.tick_at(due + 600_000).await.unwrap(), 0);
+    let state = coordinator.state.read().await;
+    assert_eq!(state.schedules.len(), 2);
+    assert!(!state.schedules[&check_id].enabled);
+    assert_eq!(state.schedules[&check_id].counters.runs, 1);
+    drop(state);
+    let requests = model.requests();
+    let evidence = format!("{:?}", requests[3]);
+    assert!(
+        evidence.contains("Single reminder status check"),
+        "{evidence}"
+    );
+    assert!(evidence.contains("delivery_unconfirmed"), "{evidence}");
+    assert!(
+        model
+            .configs()
+            .iter()
+            .skip(3)
+            .all(|config| config.tools.as_ref().is_some_and(Vec::is_empty)),
+        "verification has no tools for another check, watcher, or side effect"
+    );
+    scheduler.shutdown().await;
+}
+
+#[tokio::test]
+async fn reminder_pending_verification_retimes_atomically_with_the_original() {
+    let due = anima_core::primitives::now_millis() + 60_000;
+    let clock = chrono::DateTime::from_timestamp_millis(due as i64)
+        .unwrap()
+        .to_rfc3339();
+    let mut create = call(
+        "create_automation",
+        &[
+            ("prompt", "Test reminder"),
+            ("schedule", &format!("at {clock}")),
+        ],
+    );
+    create
+        .args
+        .insert("verifyOnce".into(), DataValue::Bool(true));
+    let (coordinator, agent) = automating(
+        ScriptedModel::new(vec![
+            Step::Tools(vec![create]),
+            Step::Text(vec!["scheduled"]),
+        ]),
+        &["create_automation", "check_automation_status"],
+    )
+    .await;
+    coordinator
+        .run(chat_request(
+            &agent,
+            "chat:x",
+            "test a reminder and check once",
+        ))
+        .await
+        .unwrap();
+    let original = coordinator
+        .state
+        .read()
+        .await
+        .schedules
+        .values()
+        .find(|record| record.prompt == "Test reminder")
+        .unwrap()
+        .clone();
+    let check_id = original
+        .verification
+        .as_ref()
+        .unwrap()
+        .automation_id
+        .clone();
+    let service = coordinator.automations();
+    let retimed = service
+        .update(
+            &agent,
+            &original.id,
+            crate::schedules::AutomationPatch {
+                trigger: Some(ScheduleTrigger::Once {
+                    at_ms: due + 60_000,
+                }),
+                ..Default::default()
+            },
+            anima_core::primitives::now_millis(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        retimed.verification.as_ref().unwrap().automation_id,
+        check_id
+    );
+    assert_eq!(
+        retimed.verification.as_ref().unwrap().scheduled_at_ms,
+        due + 65_000
+    );
+    assert_eq!(
+        coordinator.state.read().await.schedules[&check_id].next_due_at_ms,
+        due + 65_000
+    );
+    assert!(
+        !coordinator.state.read().await.schedules[&check_id]
+            .prompt
+            .contains(&due.to_string()),
+        "the check uses only the current runtime timestamps, never stale prompt text"
+    );
+    let before = coordinator.state.read().await.schedules.clone();
+    let gate = coordinator
+        .state
+        .write()
+        .await
+        .install_test_control_plane_save_gate(true);
+    let updating = tokio::spawn({
+        let service = service.clone();
+        let agent = agent.clone();
+        let id = original.id.clone();
+        async move {
+            service
+                .update(
+                    &agent,
+                    &id,
+                    crate::schedules::AutomationPatch {
+                        trigger: Some(ScheduleTrigger::Once {
+                            at_ms: due + 120_000,
+                        }),
+                        ..Default::default()
+                    },
+                    anima_core::primitives::now_millis(),
+                )
+                .await
+        }
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(3), gate.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    gate.release.add_permits(1);
+    assert_eq!(
+        updating.await.unwrap(),
+        Err(crate::schedules::ScheduleError::Persistence)
+    );
+    assert_eq!(coordinator.state.read().await.schedules, before);
+}
+
 /// A coordinator whose one companion may use `tools`.
 async fn automating(model: Arc<ScriptedModel>, tools: &[&str]) -> (AgentRunCoordinator, String) {
     let mut config = companion_config("companion");
@@ -232,11 +555,166 @@ async fn list_and_pause_reach_only_the_agents_own_automations() {
     assert!(guard.schedules["theirs"].enabled);
 }
 
+fn reminder(agent_id: &str, id: &str) -> crate::schedules::ScheduledPromptRecord {
+    let mut record = test_automation(agent_id, id);
+    record.name = "Call the bank".into();
+    record.trigger = ScheduleTrigger::Once { at_ms: 70_000 };
+    record
+}
+
+fn minutes_call(id: &str, schedule: &str, minutes: DataValue) -> ToolCall {
+    let mut tool = independent_call(id, "snooze_reminder", &[("id", schedule)]);
+    tool.args.insert("minutes".into(), minutes);
+    tool
+}
+
+#[tokio::test]
+async fn complete_and_snooze_reminder_change_only_the_agents_one_time_reminders() {
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![call("complete_reminder", &[("id", "done-me")])]),
+        Step::Tools(vec![minutes_call(
+            "snooze-1",
+            "snooze-me",
+            DataValue::Number(15.0),
+        )]),
+        Step::Tools(vec![independent_call(
+            "complete-theirs",
+            "complete_reminder",
+            &[("id", "theirs")],
+        )]),
+        Step::Text(vec!["done"]),
+    ]);
+    let (coordinator, agent_id) =
+        automating(model, &["complete_reminder", "snooze_reminder"]).await;
+    {
+        let mut guard = coordinator.state.write().await;
+        let other = guard
+            .create_agent(companion_config("other"))
+            .unwrap()
+            .state
+            .id;
+        guard
+            .schedules
+            .insert("done-me".into(), reminder(&agent_id, "done-me"));
+        let mut snoozed = reminder(&agent_id, "snooze-me");
+        snoozed.enabled = false;
+        snoozed.done_at_ms = Some(80_000);
+        guard.schedules.insert("snooze-me".into(), snoozed);
+        guard
+            .schedules
+            .insert("theirs".into(), reminder(&other, "theirs"));
+    }
+
+    let before = anima_core::primitives::now_millis();
+    coordinator
+        .run(chat_request(&agent_id, "chat:x", "done, then snooze that"))
+        .await
+        .unwrap();
+    let after = anima_core::primitives::now_millis();
+
+    let results = tool_results(&coordinator, &agent_id).await;
+    assert_eq!(
+        results[0], "Marked \"Call the bank\" (done-me) done.",
+        "{results:?}"
+    );
+    assert!(
+        results[1].starts_with("Snoozed \"Call the bank\" (snooze-me) until ")
+            && results[1].ends_with(')'),
+        "{results:?}"
+    );
+    assert!(results[2].contains(AUTOMATION_NOT_YOURS), "{results:?}");
+    let guard = coordinator.state.read().await;
+    let done = &guard.schedules["done-me"];
+    assert!(!done.enabled);
+    assert!(done.done_at_ms.is_some());
+    let snoozed = &guard.schedules["snooze-me"];
+    assert!(snoozed.enabled);
+    assert_eq!(snoozed.done_at_ms, None);
+    assert!(
+        (before + 15 * 60_000..=after + 15 * 60_000).contains(&snoozed.next_due_at_ms),
+        "{}",
+        snoozed.next_due_at_ms
+    );
+    assert_eq!(
+        snoozed.trigger,
+        ScheduleTrigger::Once {
+            at_ms: snoozed.next_due_at_ms
+        }
+    );
+    let theirs = &guard.schedules["theirs"];
+    assert!(theirs.enabled && theirs.done_at_ms.is_none());
+}
+
+#[tokio::test]
+async fn complete_and_snooze_reminder_refuse_recurring_automations_and_bad_minutes() {
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![call("complete_reminder", &[("id", "recurring")])]),
+        Step::Tools(vec![minutes_call(
+            "snooze-recurring",
+            "recurring",
+            DataValue::Number(15.0),
+        )]),
+        Step::Tools(vec![minutes_call("zero", "once", DataValue::Number(0.0))]),
+        Step::Tools(vec![minutes_call("big", "once", DataValue::Number(1441.0))]),
+        Step::Tools(vec![minutes_call("frac", "once", DataValue::Number(1.5))]),
+        Step::Tools(vec![minutes_call(
+            "text",
+            "once",
+            DataValue::String("15".into()),
+        )]),
+        Step::Tools(vec![independent_call(
+            "no-minutes",
+            "snooze_reminder",
+            &[("id", "once")],
+        )]),
+        Step::Text(vec!["done"]),
+    ]);
+    let (coordinator, agent_id) =
+        automating(model, &["complete_reminder", "snooze_reminder"]).await;
+    let once = reminder(&agent_id, "once");
+    let recurring = test_automation(&agent_id, "recurring");
+    {
+        let mut guard = coordinator.state.write().await;
+        guard.schedules.insert("once".into(), once.clone());
+        guard
+            .schedules
+            .insert("recurring".into(), recurring.clone());
+    }
+
+    coordinator
+        .run(chat_request(&agent_id, "chat:x", "done"))
+        .await
+        .unwrap();
+
+    let results = tool_results(&coordinator, &agent_id).await;
+    assert_eq!(results.len(), 7, "{results:?}");
+    assert!(results[..2]
+        .iter()
+        .all(|result| { result.contains(crate::schedules::automations::ONLY_ONE_TIME_REMINDERS) }));
+    assert!(
+        results[2..].iter().all(|result| {
+            result.contains(crate::schedules::automations::SNOOZE_MINUTES_INVALID)
+        }),
+        "{results:?}"
+    );
+    let guard = coordinator.state.read().await;
+    assert_eq!(guard.schedules["once"].trigger, once.trigger);
+    assert_eq!(guard.schedules["once"].next_due_at_ms, once.next_due_at_ms);
+    assert!(guard.schedules["once"].done_at_ms.is_none());
+    assert_eq!(guard.schedules["recurring"], recurring);
+}
+
 #[tokio::test]
 async fn helpers_cannot_manage_automations() {
     let (coordinator, agent_id) = automating(
         ScriptedModel::new(vec![]),
-        &["create_automation", "list_automations", "pause_automation"],
+        &[
+            "create_automation",
+            "list_automations",
+            "pause_automation",
+            "complete_reminder",
+            "snooze_reminder",
+        ],
     )
     .await;
     let link = ledger_run(&coordinator, &agent_id, "chat:x").await;
@@ -264,6 +742,8 @@ async fn helpers_cannot_manage_automations() {
         ),
         call("list_automations", &[]),
         call("pause_automation", &[("id", "x")]),
+        call("complete_reminder", &[("id", "x")]),
+        call("snooze_reminder", &[("id", "x")]),
     ] {
         let result = context
             .clone()
@@ -290,6 +770,8 @@ fn a_helper_never_gets_the_automation_tools() {
                 "resume_automation",
                 "delete_automation",
                 "trigger_automation",
+                "complete_reminder",
+                "snooze_reminder",
                 "calculate",
             ])
             .unwrap(),

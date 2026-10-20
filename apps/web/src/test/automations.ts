@@ -15,6 +15,8 @@ export function automationFixture(
     target: { type: 'workspace' },
     nextDueAtMs: 10,
     lastFiredAtMs: null,
+    doneAtMs: null,
+    removesAtMs: null,
     lastOutcome: null,
     running: false,
     createdBy: { kind: 'owner' },

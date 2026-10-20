@@ -18,6 +18,8 @@ const schedule: Automation = {
   target: { type: 'workspace' },
   nextDueAtMs: 20,
   lastFiredAtMs: 10,
+  doneAtMs: null,
+  removesAtMs: null,
   lastOutcome: {
     status: 'error',
     occurredAtMs: 10,
@@ -62,7 +64,7 @@ function props(overrides: Partial<PropsWithOnline> = {}): PropsWithOnline {
     version: 1,
     online: true,
     onClose: vi.fn(),
-    onOpenSession: vi.fn(),
+    onShowInChat: vi.fn(),
     ...overrides,
   };
 }
@@ -104,33 +106,43 @@ describe('AutomationHistory', () => {
     expect(screen.getByText('schedule_run_interrupted')).toBeVisible();
   });
 
-  it('opens only the recorded thread for an interrupted occurrence', async () => {
+  it('shows an interrupted occurrence in the main chat by its run', async () => {
     const user = userEvent.setup();
-    const onOpenSession = vi.fn();
+    const onShowInChat = vi.fn();
     vi.spyOn(daemon, 'automationHistory').mockResolvedValue([occurrence()]);
 
-    render(view(props({ onOpenSession })));
-    await user.click(
-      await screen.findByRole('button', { name: 'Review thread' }),
-    );
+    render(view(props({ onShowInChat })));
+    await user.click(await screen.findByRole('button', { name: 'Show in chat' }));
 
-    expect(onOpenSession).toHaveBeenCalledTimes(1);
-    expect(onOpenSession).toHaveBeenCalledWith('schedule:schedule-1');
+    expect(onShowInChat).toHaveBeenCalledTimes(1);
+    expect(onShowInChat).toHaveBeenCalledWith({
+      automationId: 'schedule-1',
+      runId: 'run-1',
+    });
+    expect(screen.queryByRole('button', { name: 'Review thread' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Open' })).toBeNull();
   });
 
-  it('explains when an interrupted occurrence has no saved thread', async () => {
+  it('keeps the safety text meaningful without a thread to review', async () => {
     vi.spyOn(daemon, 'automationHistory').mockResolvedValue([
       occurrence({ sessionId: null }),
     ]);
 
     render(view(props()));
 
-    expect(
-      await screen.findByText('No saved thread is available.'),
-    ).toBeVisible();
-    expect(
-      screen.queryByRole('button', { name: 'Review thread' }),
-    ).not.toBeInTheDocument();
+    expect(await screen.findByText(/check what it did in the main chat/i)).toBeVisible();
+    expect(screen.queryByText(/saved thread/i)).not.toBeInTheDocument();
+  });
+
+  it('offers nothing to show for a run that had nothing to report', async () => {
+    vi.spyOn(daemon, 'automationHistory').mockResolvedValue([
+      occurrence({ outcome: 'silent', errorCode: null }),
+    ]);
+
+    render(view(props()));
+
+    await screen.findByText('Nothing to report');
+    expect(screen.queryByRole('button', { name: 'Show in chat' })).toBeNull();
   });
 
   it('keeps ordinary failure and stopped occurrences on their existing labels', async () => {

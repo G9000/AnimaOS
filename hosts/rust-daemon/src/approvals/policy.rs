@@ -41,6 +41,7 @@ const READ_TOOLS: &[&str] = &[
     "read_conversation_window",
     "load_skill",
     "list_automations",
+    "check_automation_status",
 ];
 /// Tools that change files and records (spec §7.1). The mail draft and the
 /// calendar writes still only create records the owner approves in
@@ -64,6 +65,8 @@ const WRITE_TOOLS: &[&str] = &[
     "update_automation",
     "resume_automation",
     "delete_automation",
+    "complete_reminder",
+    "snooze_reminder",
     "mail_create_draft",
     "calendar_create_event",
     "calendar_update_event",
@@ -684,6 +687,8 @@ mod tests {
                     "propose_skill",
                     "create_automation",
                     "pause_automation",
+                    "complete_reminder",
+                    "snooze_reminder",
                     "mail_create_draft",
                     "calendar_create_event",
                     "calendar_update_event",

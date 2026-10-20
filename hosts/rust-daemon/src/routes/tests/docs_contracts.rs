@@ -42,7 +42,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 242, "complete registered operation count");
+    assert_eq!(actual.len(), 245, "complete registered operation count");
     let durable_work_additions = [
         ("GET", "/api/agents/{agent_id}/runs/{run_id}/recovery"),
         ("POST", "/api/agents/{agent_id}/runs/{run_id}/recovery"),
@@ -59,6 +59,10 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             "/api/agents/{agent_id}/sessions/{session_id}/side-question",
         ),
         ("POST", "/api/agents/{agent_id}/automation-events"),
+        (
+            "GET",
+            "/api/agents/{agent_id}/schedules/{schedule_id}/status",
+        ),
     ];
     for (method, path) in durable_work_additions {
         assert!(
@@ -241,6 +245,22 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             "core memory operation must be registered"
         );
     }
+    let reminder_additions = [
+        (
+            "POST",
+            "/api/agents/{agent_id}/schedules/{schedule_id}/done",
+        ),
+        (
+            "POST",
+            "/api/agents/{agent_id}/schedules/{schedule_id}/snooze",
+        ),
+    ];
+    for (method, path) in reminder_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "reminder done and snooze operations must be registered"
+        );
+    }
     let memory_export_additions = [("GET", "/api/memories/export")];
     for (method, path) in memory_export_additions {
         assert!(
@@ -283,6 +303,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                     && !memory_export_additions.contains(&(method.as_str(), path.as_str()))
                     && !discord_interaction_additions.contains(&(method.as_str(), path.as_str()))
                     && !durable_work_additions.contains(&(method.as_str(), path.as_str()))
+                    && !reminder_additions.contains(&(method.as_str(), path.as_str()))
             })
             .count(),
         193,
@@ -329,6 +350,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                     && !memory_export_additions.contains(&(method.as_str(), path.as_str()))
                     && !discord_interaction_additions.contains(&(method.as_str(), path.as_str()))
                     && !durable_work_additions.contains(&(method.as_str(), path.as_str()))
+                    && !reminder_additions.contains(&(method.as_str(), path.as_str()))
             )
             .count(),
         188,

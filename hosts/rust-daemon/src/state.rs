@@ -6,6 +6,7 @@ pub(crate) mod run_stop;
 mod runtime_events;
 mod session_import;
 mod session_state;
+mod side_posts;
 mod skill_state;
 mod swarm_relationships;
 mod swarm_runtime;
@@ -1219,6 +1220,7 @@ mod tests {
             next_due_at_ms: 14,
             last_fired: Some(ScheduleLastFired {
                 fired_at_ms: 13,
+                scheduled_at_ms: None,
                 run_idempotency_key: "schedule-1:13".into(),
                 manual: false,
             }),
@@ -1238,6 +1240,10 @@ mod tests {
                 failures: 0,
                 consecutive_failures: 0,
             },
+            delivery_events: Vec::new(),
+            verification: None,
+            verification_for: None,
+            done_at_ms: None,
         }
     }
 
@@ -1695,6 +1701,9 @@ pub(crate) struct DaemonState {
     pub(crate) history: crate::history::SharedHistory,
     /// Session creations per agent per minute (spec §14); not persisted.
     pub(crate) session_limiter: crate::sessions::SessionCreateLimiter,
+    /// Messages the running commit's hook added to other sessions; drained by
+    /// that commit (`state/side_posts.rs`). Never persisted on its own.
+    pub(crate) side_posts: Vec<side_posts::SidePost>,
     pub(crate) tool_grants_applied: std::collections::BTreeSet<String>,
     /// Saved history deletions the store has not applied yet (spec §3.3).
     pub(crate) pending_history_deletions: Vec<crate::history::HistoryDeletion>,
@@ -2307,6 +2316,7 @@ impl DaemonState {
             side_model: None,
             history: crate::history::HistoryService::ephemeral(),
             session_limiter: crate::sessions::SessionCreateLimiter::default(),
+            side_posts: Vec::new(),
             tool_grants_applied: std::collections::BTreeSet::new(),
             pending_history_deletions: Vec::new(),
             calendar_connectors: HashMap::new(),

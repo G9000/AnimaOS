@@ -82,6 +82,7 @@ impl DiscordManager {
         let Some(claim) = self.claim(&c.id, epoch) else {
             return Ok(false);
         };
+        let attempted_at_ms = now_ms();
         let (sending, persist) = {
             let _txn = self.transaction.lock().await;
             let mut state = self.state.write().await;
@@ -98,6 +99,13 @@ impl DiscordManager {
             state
                 .discord_outbound
                 .insert(sending.id.clone(), sending.clone());
+            let delivery_undo = state.record_reminder_delivery(
+                &record.id,
+                attempted_at_ms,
+                None,
+                crate::schedules::delivery::DeliveryResult::Unknown,
+                Vec::new(),
+            );
             let persist = state.control_plane_persist_request();
             drop(state);
             if persist.save().await.is_err() {
@@ -107,6 +115,7 @@ impl DiscordManager {
                         .discord_outbound
                         .insert(record.id.clone(), record.clone());
                 }
+                state.undo_reminder_delivery(delivery_undo);
                 return Err(DiscordManagerError::Persistence);
             }
             (sending, ())
@@ -126,7 +135,7 @@ impl DiscordManager {
             Err(DiscordTransportError::Uncertain)
         };
         let _txn = self.transaction.lock().await;
-        let (settled, persist) = {
+        let (settled, delivery_undo, persist) = {
             let mut state = self.state.write().await;
             let current = state
                 .discord_outbound
@@ -198,11 +207,40 @@ impl DiscordManager {
             state
                 .discord_outbound
                 .insert(settled.id.clone(), settled.clone());
-            (settled, state.control_plane_persist_request())
+            let result = match settled.delivery_state {
+                DiscordDeliveryState::Delivered => crate::schedules::delivery::DeliveryResult::Sent,
+                DiscordDeliveryState::Failed
+                    if !settled
+                        .chunks
+                        .iter()
+                        .any(|chunk| chunk.provider_message_id.is_some()) =>
+                {
+                    crate::schedules::delivery::DeliveryResult::Failed
+                }
+                _ => crate::schedules::delivery::DeliveryResult::Unknown,
+            };
+            let message_ids = settled
+                .chunks
+                .iter()
+                .filter_map(|chunk| chunk.provider_message_id.clone())
+                .collect();
+            let delivery_undo = state.record_reminder_delivery(
+                &record.id,
+                attempted_at_ms,
+                Some(now_ms()),
+                result,
+                message_ids,
+            );
+            (
+                settled,
+                delivery_undo,
+                state.control_plane_persist_request(),
+            )
         };
         if persist.save().await.is_err() {
             // Sending on disk is crash-safe evidence: never return it to Pending after an effect.
             let mut state = self.state.write().await;
+            state.undo_reminder_delivery(delivery_undo);
             if state.discord_outbound.get(&record.id) == Some(&settled) {
                 let mut uncertain = settled.clone();
                 uncertain.chunks[index].state = DiscordDeliveryState::Unknown;

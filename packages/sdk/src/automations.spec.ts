@@ -33,6 +33,8 @@ const automation: Automation = {
   target: { type: 'workspace' },
   nextDueAtMs: 10,
   lastFiredAtMs: null,
+  doneAtMs: null,
+  removesAtMs: null,
   lastOutcome: null,
   running: false,
   createdBy: {
@@ -181,5 +183,18 @@ describe('automations client', () => {
     expect(MAX_AUTOMATION_HISTORY).toBe(50);
     expect(MAX_AUTOMATION_NAME_CHARS).toBe(80);
     expect(AUTOMATION_PREVIEW_RUNS).toBe(3);
+  });
+
+  it('marks a reminder done and snoozes it by the minute, accepting either response shape', async () => {
+    const bare = transport(() => Response.json({ ...automation, doneAtMs: 5 }));
+    expect((await bare.automations.complete('agent/a', 'schedule/1')).doneAtMs).toBe(5);
+    expect(bare.requests[0].url).toBe('/api/agents/agent%2Fa/schedules/schedule%2F1/done');
+    expect(bare.requests[0].init?.method).toBe('POST');
+    expect(bare.requests[0].init?.body).toBeUndefined();
+
+    const wrapped = transport(() => Response.json({ schedule: automation }));
+    expect(await wrapped.automations.snooze('agent/a', 'schedule/1', 15)).toEqual(automation);
+    expect(wrapped.requests[0].url).toBe('/api/agents/agent%2Fa/schedules/schedule%2F1/snooze');
+    expect(JSON.parse(wrapped.requests[0].init?.body as string)).toEqual({ minutes: 15 });
   });
 });

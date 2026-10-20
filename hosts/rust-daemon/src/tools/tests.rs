@@ -476,9 +476,10 @@ fn registry_defines_every_registered_tool_schema() {
         (
             "create_automation",
             &["prompt", "schedule"][..],
-            &["name", "timeZone", "target", "activeHours"][..],
+            &["name", "verifyOnce", "timeZone", "target", "activeHours"][..],
         ),
         ("list_automations", &[][..], &[][..]),
+        ("check_automation_status", &["id"][..], &[][..]),
         ("pause_automation", &["id"][..], &[][..]),
         (
             "update_automation",
@@ -497,6 +498,8 @@ fn registry_defines_every_registered_tool_schema() {
         ("resume_automation", &["id"][..], &[][..]),
         ("delete_automation", &["id"][..], &[][..]),
         ("trigger_automation", &["id"][..], &[][..]),
+        ("complete_reminder", &["id"][..], &[][..]),
+        ("snooze_reminder", &["id", "minutes"][..], &[][..]),
         ("read_file", &["file_path"][..], &["offset", "limit"][..]),
         ("read_document", &["file_path"][..], &[][..]),
         ("list_dir", &["path"][..], &[][..]),

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { daemon } from '../../lib/daemon-api';
@@ -67,5 +67,31 @@ describe('Discord automation destinations', () => {
         target: { type: 'connector', connectorId: 'dc-2' },
       }),
     );
+  });
+});
+
+describe('Automation destination wording', () => {
+  it('offers the main chat, with Telegram or a Discord note, and says the main chat always gets one', () => {
+    render(
+      <AutomationEditor
+        automation={null}
+        telegramConnectorId="tg-1"
+        discordDestinations={[{ connectorId: 'dc-1', label: 'Nova · #home' }]}
+        onSave={vi.fn(async () => true)}
+        onCancel={() => {}}
+      />,
+    );
+    const options = within(screen.getByLabelText('Runs in'))
+      .getAllByRole('option')
+      .map((option) => option.textContent);
+    expect(options).toEqual([
+      'Main chat',
+      'Main chat + Telegram',
+      'Discord #home (note in main chat)',
+    ]);
+    expect(
+      screen.getByText(/main chat always gets a card or a note/i),
+    ).toBeVisible();
+    expect(screen.queryByText(/its own thread/i)).toBeNull();
   });
 });

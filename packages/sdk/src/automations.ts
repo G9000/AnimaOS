@@ -19,7 +19,8 @@ export interface ActiveHours {
   timeZone: string;
 }
 
-/** `workspace`: the automation's own thread. */
+/** `workspace`: the companion's main chat. `connector`: also a copy to that
+ *  connector (Telegram) or a note in the main chat (Discord). */
 export type AutomationTarget =
   | { type: 'workspace' }
   | { type: 'connector'; connectorId: string };
@@ -60,6 +61,12 @@ export interface Automation {
   target: AutomationTarget;
   nextDueAtMs: number;
   lastFiredAtMs: number | null;
+  /** When the owner (or the companion) marked a one-time reminder done; the
+   *  daemon removes a done reminder a day later. */
+  doneAtMs: number | null;
+  /** When a finished one-time automation leaves the list (a day after it
+   *  finished); null while it has not finished. */
+  removesAtMs: number | null;
   lastOutcome: AutomationOutcome | null;
   /** Its latest occurrence has no outcome yet. */
   running: boolean;
@@ -237,6 +244,34 @@ export class AutomationsClient {
       { method: 'POST' },
     );
     return response.schedule;
+  }
+
+  /** Marks a one-time reminder done; answers the updated automation. */
+  async complete(agentId: string, id: string): Promise<Automation> {
+    return this.answer(await this.post(`${item(agentId, id)}/done`));
+  }
+
+  /** Re-arms a fired one-time reminder `minutes` (1 to 1440) from now. */
+  async snooze(
+    agentId: string,
+    id: string,
+    minutes: number,
+  ): Promise<Automation> {
+    return this.answer(
+      await this.post(`${item(agentId, id)}/snooze`, { minutes }),
+    );
+  }
+
+  private post(path: string, body?: { minutes: number }) {
+    return this.client.requestJson<Automation | { schedule: Automation }>(
+      path,
+      body ? { method: 'POST', body } : { method: 'POST' },
+    );
+  }
+
+  /** The updated automation, bare or wrapped as the other routes do. */
+  private answer(result: Automation | { schedule: Automation }): Automation {
+    return 'schedule' in result ? result.schedule : result;
   }
 
   /** Its latest occurrences, newest first (at most 50). */

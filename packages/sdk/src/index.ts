@@ -228,6 +228,13 @@ export type {
   SkillInput,
   SkillStatus,
 } from './skills.js';
+export { automationMessageMeta } from './automation-messages.js';
+export type {
+  AutomationCardMeta,
+  AutomationMessageLike,
+  AutomationMessageMeta,
+  AutomationNoteMeta,
+} from './automation-messages.js';
 export {
   AUTOMATION_PREVIEW_RUNS,
   AutomationsClient,

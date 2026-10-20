@@ -105,6 +105,36 @@ describe('useTranscriptActions', () => {
     expect(actionsFor({}).result.current.onUndoAutomation).toBeUndefined();
   });
 
+  it('gives automation cards the list, their answers, and a way to open a thread', async () => {
+    const reminder = automationFixture('rem');
+    const completeAutomation = vi.fn().mockResolvedValue(true);
+    const snoozeAutomation = vi.fn().mockResolvedValue(true);
+    const openSessionAt = vi.fn();
+    const { result } = actionsFor({
+      automations: [reminder],
+      automationsLoaded: true,
+      online: true,
+      completeAutomation,
+      snoozeAutomation,
+      openSessionAt,
+    });
+    const cards = result.current.automationCards;
+    expect(cards).toMatchObject({
+      automations: [reminder],
+      loaded: true,
+      online: true,
+    });
+    await act(async () => {
+      expect(await cards?.onDone(reminder)).toBe(true);
+      expect(await cards?.onSnooze(reminder, 15)).toBe(true);
+    });
+    cards?.onOpenSession('discord:home', 'message-9');
+    expect(completeAutomation).toHaveBeenCalledWith(reminder);
+    expect(snoozeAutomation).toHaveBeenCalledWith(reminder, 15);
+    expect(openSessionAt).toHaveBeenCalledWith('discord:home', 'message-9');
+    expect(actionsFor({}).result.current.automationCards).toBeUndefined();
+  });
+
   it('offers what the session allows through its handlers', () => {
     const { result, options } = actionsFor({});
     const run = runFixture('run_q', { sessionId: 'room-7' });

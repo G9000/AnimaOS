@@ -1,6 +1,8 @@
 import {
+  automationMessageMeta,
   isTerminalRunStatus,
   type Automation,
+  type AutomationMessageMeta,
   type ModelFallback,
   type Run,
   type SessionMessageAttachment,
@@ -9,6 +11,7 @@ import {
 
 import type { SaveOutcome, SavedState } from '../hooks/useSaveToMemory';
 import type { ApprovalDecide } from './approvals';
+import type { AutomationCardActions } from './automation-cards';
 import { PLAN_TOOL, parsePlan, type Plan } from './plan';
 import { REVIEW_MIN_ACTIONS, type TaskReviewApi } from './task-reviews';
 import { emptyLiveRun, stepRunId, type LiveRun } from './session-events';
@@ -78,6 +81,12 @@ export interface PendingBubble {
 
 export type TranscriptItem =
   | { kind: 'message'; key: string; message: ChatMessage }
+  | {
+      kind: 'automation';
+      key: string;
+      message: ChatMessage;
+      meta: AutomationMessageMeta;
+    }
   | { kind: 'delegated'; key: string; message: ChatMessage; from: string }
   | { kind: 'revised'; key: string; message: ChatMessage }
   | { kind: 'tools'; key: string; steps: ToolStep[]; messageIds: string[] }
@@ -122,6 +131,8 @@ export interface TranscriptActions {
   automationNotice?: (step: ToolStep) => Automation | null;
   /** Undo (delete) an automation the companion made; true when it went. */
   onUndoAutomation?: (automation: Automation) => Promise<boolean>;
+  /** What the automation cards in the main chat read and do. */
+  automationCards?: AutomationCardActions;
   /** Saves a chat message to the companion's memory (spec §10, §15.2). */
   onSaveToMemory?: (message: ChatMessage) => Promise<SaveOutcome>;
   /** Whether a message was saved from this page, for a bubble that mounts
@@ -463,6 +474,12 @@ function messageItem(
   const metadata = metadataOf(message);
   if (message.role === 'User' && stringField(metadata, 'recoveryOf'))
     return { kind: 'model-note', key: message.id, text: RECOVERY_WORK_NOTICE };
+  if (message.role === 'Assistant') {
+    // A run of an automation spoke here: the owner reads its card, not the
+    // text written for the model.
+    const meta = automationMessageMeta(message);
+    if (meta) return { kind: 'automation', key: message.id, message, meta };
+  }
   if (message.role === 'Assistant' && metadata.revised === true)
     return { kind: 'revised', key: message.id, message };
   if (message.role === 'User' && delegatedBy)

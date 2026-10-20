@@ -73,7 +73,7 @@ A goal has a title (up to 160 characters), an objective (up to 32 KiB) and a `ma
 
 ## Automations
 
-An automation is a prompt the daemon sends its agent on a trigger. Each one runs in its own thread unless it targets a connector.
+An automation is a prompt the daemon sends its agent on a trigger. It runs on its own, but whatever it says lands in the owner's main chat: a card there, a copy on Telegram when it targets the owner's Telegram chat, or, for a Discord post, a one-line note with a link to the post.
 
 ```typescript
 const automation = await client.automations.create(agentId, {
@@ -95,7 +95,7 @@ console.log(automation.id, new Date(automation.nextDueAtMs));
 | `cron` | `expression`, `timeZone` | Five fields, or `@hourly`, `@daily`, `@midnight`, `@weekly`, `@monthly`, `@yearly`, `@annually`; `L`, `W`, `#` and `?` are refused |
 | `once` | `atMs` | Fires once, then turns itself off |
 
-A time a daylight-saving jump skips does not fire that day, and a repeated time fires once. `activeHours` (`start` and `end` as `HH:MM`, `days` as 0 for Sunday to 6, `timeZone`) keeps fires inside a window; an `end` before `start` runs overnight, and a `once` automation takes none. `target` is `{ type: 'workspace' }` (the default, its own thread) or `{ type: 'connector', connectorId }`.
+A time a daylight-saving jump skips does not fire that day, and a repeated time fires once. `activeHours` (`start` and `end` as `HH:MM`, `days` as 0 for Sunday to 6, `timeZone`) keeps fires inside a window; an `end` before `start` runs overnight, and a `once` automation takes none. `target` is `{ type: 'workspace' }` (the default, the main chat) or `{ type: 'connector', connectorId }`.
 
 ### Methods
 
@@ -107,10 +107,12 @@ A time a daylight-saving jump skips does not fire that day, and a repeated time 
 | `update(agentId, id, patch)` | `prompt`, `trigger`, `target`, `enabled`, `name`; `activeHours: null` clears them. Turning a past `once` automation back on needs a new `atMs` |
 | `remove(agentId, id)` | Delete. Fire records stay until the agent is deleted |
 | `runNow(agentId, id)` | Fire it now; its due time and switch stay, and the occurrence is recorded as manual |
+| `complete(agentId, id)` | Mark a one-time reminder done. It leaves the list a day later |
+| `snooze(agentId, id, minutes)` | Fire a one-time reminder again in 1 to 1440 minutes |
 | `history(agentId, id, { limit? })` | Latest occurrences, newest first, at most 50 |
 | `preview({ trigger, activeHours? })` | The next fire times the daemon computes: three, or one for `once` |
 
-An `Automation` reports `enabled`, `nextDueAtMs`, `lastFiredAtMs`, `lastOutcome`, `running`, `counters` (`runs`, `failures`, `consecutiveFailures`), `createdBy` (the owner, or an agent's tool call) and `preset`. A history entry has an `outcome` of `silent`, `spoke`, `failed` or `stopped`. The SDK exports the limits `MAX_AUTOMATIONS_PER_AGENT` (20), `MAX_AUTOMATION_HISTORY` (50), `MAX_AUTOMATION_NAME_CHARS` (80) and `AUTOMATION_PREVIEW_RUNS` (3).
+An `Automation` reports `enabled`, `nextDueAtMs`, `lastFiredAtMs`, `lastOutcome`, `running`, `counters` (`runs`, `failures`, `consecutiveFailures`), `createdBy` (the owner, or an agent's tool call) `preset`, and for one-time automations `doneAtMs` and `removesAtMs` (finished one-time automations are removed a day after they finish; their card in the chat stays). A history entry has an `outcome` of `silent`, `spoke`, `failed` or `stopped`. The SDK exports the limits `MAX_AUTOMATIONS_PER_AGENT` (20), `MAX_AUTOMATION_HISTORY` (50), `MAX_AUTOMATION_NAME_CHARS` (80) and `AUTOMATION_PREVIEW_RUNS` (3).
 
 ```typescript
 const nextRuns = await client.automations.preview({

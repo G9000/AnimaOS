@@ -12,7 +12,8 @@ use crate::schedules::{
 use super::contracts::{
     ConnectorErrorBody, DeleteResponse, LegacyScheduleImportRequest, PresetRequest,
     ScheduleCreateRequest, ScheduleEnvelope, SchedulePreviewRequest, SchedulePreviewResponse,
-    ScheduleResponse, ScheduleRunsEnvelope, ScheduleUpdateRequest, SchedulesEnvelope,
+    ScheduleResponse, ScheduleRunsEnvelope, ScheduleSnoozeRequest, ScheduleUpdateRequest,
+    SchedulesEnvelope,
 };
 use super::http::{json_response, read_limited_body, request_query, LocalOwnerRejection};
 use super::{parse_json_body, AppState};
@@ -203,6 +204,64 @@ pub(super) async fn run_schedule(
     }
 }
 
+#[utoipa::path(post, path = "/api/agents/{agent_id}/schedules/{schedule_id}/done", tag = "schedules", params(("agent_id" = String, Path), ("schedule_id" = String, Path)), responses((status = 200, body = ScheduleEnvelope), (status = 403, body = ConnectorErrorBody), (status = 404, body = ConnectorErrorBody), (status = 409, body = ConnectorErrorBody), (status = 503, body = ConnectorErrorBody)))]
+pub(super) async fn complete_schedule(
+    State(state): State<AppState>,
+    Path((agent_id, schedule_id)): Path<(String, String)>,
+    request: AxumRequest,
+) -> AxumResponse {
+    if let Err(rejection) = state.local_owner.authorize(request.headers()) {
+        return local_owner_error(rejection);
+    }
+    match state
+        .scheduler
+        .automations()
+        .complete(&agent_id, &schedule_id, now_millis(), None)
+        .await
+    {
+        Ok(record) => no_store(json_response(
+            StatusCode::OK,
+            &ScheduleEnvelope {
+                schedule: record.into(),
+            },
+        )),
+        Err(error) => schedule_error(error),
+    }
+}
+
+#[utoipa::path(post, path = "/api/agents/{agent_id}/schedules/{schedule_id}/snooze", tag = "schedules", params(("agent_id" = String, Path), ("schedule_id" = String, Path)), request_body = ScheduleSnoozeRequest, responses((status = 200, body = ScheduleEnvelope), (status = 400, body = ConnectorErrorBody), (status = 403, body = ConnectorErrorBody), (status = 404, body = ConnectorErrorBody), (status = 409, body = ConnectorErrorBody), (status = 503, body = ConnectorErrorBody)))]
+pub(super) async fn snooze_schedule(
+    State(state): State<AppState>,
+    Path((agent_id, schedule_id)): Path<(String, String)>,
+    request: AxumRequest,
+) -> AxumResponse {
+    if let Err(rejection) = state.local_owner.authorize(request.headers()) {
+        return local_owner_error(rejection);
+    }
+    let body = match read_limited_body(request, state.config.max_request_bytes).await {
+        Ok(body) => body,
+        Err(_) => return invalid("malformed request"),
+    };
+    let request = match parse_json_body::<ScheduleSnoozeRequest>(body) {
+        Ok(request) => request,
+        Err(_) => return invalid("request body is invalid"),
+    };
+    match state
+        .scheduler
+        .automations()
+        .snooze(&agent_id, &schedule_id, request.minutes, now_millis(), None)
+        .await
+    {
+        Ok(record) => no_store(json_response(
+            StatusCode::OK,
+            &ScheduleEnvelope {
+                schedule: record.into(),
+            },
+        )),
+        Err(error) => schedule_error(error),
+    }
+}
+
 #[utoipa::path(get, path = "/api/agents/{agent_id}/schedules/{schedule_id}/history", tag = "schedules", params(("agent_id" = String, Path), ("schedule_id" = String, Path), ("limit" = Option<usize>, Query, description = "1 to 50, default 50")), responses((status = 200, body = ScheduleRunsEnvelope), (status = 400, body = ConnectorErrorBody), (status = 403, body = ConnectorErrorBody), (status = 404, body = ConnectorErrorBody), (status = 503, body = ConnectorErrorBody)))]
 pub(super) async fn schedule_history(
     State(state): State<AppState>,
@@ -237,6 +296,32 @@ pub(super) async fn schedule_history(
             &ScheduleRunsEnvelope {
                 runs: runs.into_iter().map(Into::into).collect(),
             },
+        )),
+        Err(error) => schedule_error(error),
+    }
+}
+
+#[utoipa::path(get, path = "/api/agents/{agent_id}/schedules/{schedule_id}/status", tag = "schedules", params(("agent_id" = String, Path), ("schedule_id" = String, Path)), responses((status = 200, body = crate::schedules::delivery::ReminderStatus), (status = 403, body = ConnectorErrorBody), (status = 404, body = ConnectorErrorBody)))]
+pub(super) async fn schedule_status(
+    State(state): State<AppState>,
+    Path((agent_id, schedule_id)): Path<(String, String)>,
+    request: AxumRequest,
+) -> AxumResponse {
+    if let Err(rejection) = state.local_owner.authorize_read(request.headers()) {
+        return local_owner_error(rejection);
+    }
+    match state
+        .scheduler
+        .automations()
+        .get(&agent_id, &schedule_id)
+        .await
+    {
+        Ok(record) => no_store(json_response(
+            StatusCode::OK,
+            &crate::schedules::delivery::ReminderStatus::from_record(
+                &record,
+                anima_core::primitives::now_millis(),
+            ),
         )),
         Err(error) => schedule_error(error),
     }

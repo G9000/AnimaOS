@@ -38,6 +38,11 @@ export interface AutomationsView {
    *  instead of landing in `error`: the notice card's Undo shows it. */
   undo: (automation: Automation) => Promise<boolean>;
   runNow: (automation: Automation) => Promise<boolean>;
+  /** Marks a one-time reminder done. Like `undo`, a refusal rejects with the
+   *  daemon's error so the reminder card shows it. */
+  complete: (automation: Automation) => Promise<boolean>;
+  /** Snoozes a fired one-time reminder; refusals reject as `complete`'s. */
+  snooze: (automation: Automation, minutes: number) => Promise<boolean>;
 }
 
 function message(error: unknown): string {
@@ -158,6 +163,17 @@ export function useAutomations({
     [act],
   );
 
+  const complete = useCallback(
+    (automation: Automation) =>
+      act((id) => daemon.completeAutomation(id, automation.id), true),
+    [act],
+  );
+  const snooze = useCallback(
+    (automation: Automation, minutes: number) =>
+      act((id) => daemon.snoozeAutomation(id, automation.id, minutes), true),
+    [act],
+  );
+
   return {
     automations,
     loaded,
@@ -171,5 +187,7 @@ export function useAutomations({
     remove,
     undo,
     runNow,
+    complete,
+    snooze,
   };
 }

@@ -123,6 +123,10 @@ fn schedule(
         created_by: AutomationCreator::Owner,
         preset: None,
         counters,
+        delivery_events: Vec::new(),
+        verification: None,
+        verification_for: None,
+        done_at_ms: None,
     }
 }
 

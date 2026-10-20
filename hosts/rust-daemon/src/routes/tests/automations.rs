@@ -118,6 +118,11 @@ async fn the_automation_routes_require_the_owner() {
         ("GET", format!("/api/agents/{agent}/schedules"), None),
         (
             "GET",
+            format!("/api/agents/{agent}/schedules/s1/status"),
+            None,
+        ),
+        (
+            "GET",
             format!("/api/agents/{agent}/schedules/s1/history"),
             None,
         ),
@@ -140,6 +145,32 @@ async fn the_automation_routes_require_the_owner() {
         assert_eq!(refused.status(), StatusCode::FORBIDDEN, "{method} {uri}");
         assert_eq!(refused.headers()["cache-control"], "no-store");
     }
+}
+
+#[tokio::test]
+async fn reminder_status_endpoint_reports_missing_evidence_without_sending_or_watching() {
+    let (state, agent) = daemon_with(DaemonState::new());
+    state
+        .write()
+        .await
+        .schedules
+        .insert("s1".into(), crate::schedules::test_automation(&agent, "s1"));
+    let app = router(state.clone(), DaemonConfig::default());
+    let uri = format!("/api/agents/{agent}/schedules/s1/status");
+    let response = send(&app, "GET", &uri, None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let body = json_body(response).await;
+    assert_eq!(body["automationId"], "s1");
+    assert_eq!(body["status"], "delivery_unconfirmed");
+    assert_eq!(body["receiptVerified"], false);
+    assert_eq!(state.read().await.schedules.len(), 1);
+    assert_eq!(
+        send(&app, "GET", "/api/agents/foreign/schedules/s1/status", None)
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
 }
 
 #[tokio::test]
@@ -349,6 +380,7 @@ async fn run_now_conflicts_while_an_occurrence_has_no_outcome() {
         .unwrap()
         .last_fired = Some(ScheduleLastFired {
         fired_at_ms: 1,
+        scheduled_at_ms: None,
         run_idempotency_key: format!("schedule:{id}:1"),
         manual: false,
     });

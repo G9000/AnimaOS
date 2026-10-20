@@ -891,6 +891,10 @@ async fn deletion_archives_completed_history_purges_pending_work_and_disables_sc
                 created_by: crate::schedules::AutomationCreator::Owner,
                 preset: None,
                 counters: Default::default(),
+                delivery_events: Vec::new(),
+                verification: None,
+                verification_for: None,
+                done_at_ms: None,
             },
         );
     }

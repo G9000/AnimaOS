@@ -389,7 +389,10 @@ export function SettingsPanel({
   ];
 
   return (
-    <div className="settings-form" aria-busy={controlsDisabled}>
+    <div
+      className={`settings-form${shows('profile') ? ' settings-profile' : ''}`}
+      aria-busy={controlsDisabled}
+    >
       {shows('profile') && (
         <>
           <section
@@ -403,65 +406,164 @@ export function SettingsPanel({
               key={agent.id}
               agent={agent}
               disabled={controlsDisabled}
-            />
-            <div>
-              <label className={labelCls} htmlFor="settings-name">
-                Name
-              </label>
-              <input
-                id="settings-name"
-                aria-label="Name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
+            >
+              <div className="profile-name-row">
+                <div>
+                  <label className={labelCls} htmlFor="settings-name">
+                    Name
+                  </label>
+                  <input
+                    id="settings-name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    disabled={controlsDisabled}
+                    className="field"
+                  />
+                </div>
+                <div>
+                  <label className={labelCls} htmlFor="settings-owner">
+                    Calls you
+                  </label>
+                  <input
+                    id="settings-owner"
+                    value={
+                      system.match(/^The owner's name is (.*)\.$/m)?.[1] ?? ''
+                    }
+                    onChange={(event) => {
+                      const owner = event.target.value;
+                      setSystem((current) => {
+                        const line = owner
+                          ? `The owner's name is ${owner}.`
+                          : '';
+                        return /^The owner's name is .*\.$/m.test(current)
+                          ? current.replace(
+                              /^The owner's name is .*\.$/m,
+                              () => line,
+                            )
+                          : [current.trim(), line].filter(Boolean).join('\n\n');
+                      });
+                    }}
+                    disabled={controlsDisabled}
+                    className="field"
+                  />
+                </div>
+              </div>
+              <fieldset
+                className="profile-personality"
                 disabled={controlsDisabled}
-                className="field"
-              />
-            </div>
+              >
+                <legend className={labelCls}>Personality</legend>
+                <div className="profile-personality-options">
+                  {(
+                    [
+                      ['calm', 'Calm & thoughtful'],
+                      ['direct', 'Direct & practical'],
+                      ['creative', 'Creative & curious'],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <label key={value}>
+                      <input
+                        type="radio"
+                        name="personality"
+                        value={value}
+                        checked={system.includes(
+                          `[Personality style]\n${PERSONALITY_STYLES[value]}\n[/Personality style]`,
+                        )}
+                        onChange={() =>
+                          setSystem((current) =>
+                            [
+                              current
+                                .replace(
+                                  /(?:^|\n\n)\[Personality style\][\s\S]*?\[\/Personality style\]/g,
+                                  '',
+                                )
+                                .trim(),
+                              `[Personality style]\n${PERSONALITY_STYLES[value]}\n[/Personality style]`,
+                            ]
+                              .filter(Boolean)
+                              .join('\n\n'),
+                          )
+                        }
+                      />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            </AgentProfileDetails>
           </section>
-
+          {!shows('model') && (
+            <section
+              className="settings-group"
+              aria-labelledby="profile-model-title"
+            >
+              <h3 id="profile-model-title" className="settings-group-title">
+                Model
+              </h3>
+              <div className="profile-model-row">
+                <div>
+                  <span className={labelCls}>Provider</span>
+                  <div className="profile-model-value">
+                    <span>
+                      {agent.provider === 'chatgpt'
+                        ? 'ChatGPT subscription'
+                        : (providers?.find((item) => item.id === agent.provider)
+                            ?.label ?? agent.provider)}
+                    </span>
+                    <a
+                      href="#/model"
+                      aria-disabled={controlsDisabled || dirty || undefined}
+                      title={
+                        dirty
+                          ? 'Save changes before switching models.'
+                          : undefined
+                      }
+                      onClick={(event) => {
+                        if (controlsDisabled || dirty) event.preventDefault();
+                      }}
+                    >
+                      Switch
+                    </a>
+                  </div>
+                </div>
+                <div>
+                  <span className={labelCls}>Model</span>
+                  <div className="profile-model-value">{agent.model}</div>
+                </div>
+              </div>
+            </section>
+          )}
           <section
             className="settings-group"
-            aria-labelledby="settings-personality"
+            aria-labelledby="settings-advanced-title"
           >
-            <h3 id="settings-personality" className="settings-group-title">
-              Personality & instructions
+            <h3 id="settings-advanced-title" className="settings-group-title">
+              Advanced
             </h3>
-            <p className="settings-group-help">
-              Their role, voice, priorities, and how you want them to work.
-              Changes apply from the next reply.
-            </p>
-            <label className={labelCls} htmlFor="personality-preset">
-              Add a personality style
-            </label>
-            <select
-              id="personality-preset"
-              className="field"
-              disabled={controlsDisabled}
-              value=""
-              onChange={(event) => {
-                const style = PERSONALITY_STYLES[event.target.value];
-                if (style)
-                  setSystem(
-                    (current) =>
-                      `${current.replace(/(?:^|\n\n)\[Personality style\][\s\S]*?\[\/Personality style\]/g, '').trim()}\n\n[Personality style]\n${style}\n[/Personality style]`,
-                  );
-              }}
+            <details
+              className="profile-prompt-editor"
+              open={sections.length > 1 || undefined}
             >
-              <option value="">Choose a style…</option>
-              <option value="calm">Calm & thoughtful</option>
-              <option value="creative">Creative & curious</option>
-              <option value="direct">Direct & practical</option>
-              <option value="proactive">Organized & proactive</option>
-            </select>
-            <textarea
-              aria-label="System prompt"
-              value={system}
-              onChange={(e) => setSystem(e.target.value)}
-              disabled={controlsDisabled}
-              rows={7}
-              placeholder="Leave empty to use the default built from this profile."
-              className="field resize-y leading-relaxed"
-            />
+              <summary>
+                <span>
+                  <strong>System prompt</strong>
+                  <small>
+                    Edit the instructions {name || agent.name} starts every chat
+                    with.
+                  </small>
+                </span>
+                <span className="profile-edit-label">Edit</span>
+              </summary>
+              <textarea
+                aria-label="System prompt"
+                value={system}
+                onChange={(e) => setSystem(e.target.value)}
+                disabled={controlsDisabled}
+                rows={7}
+                placeholder="Leave empty to use the default built from this profile."
+                className="field resize-y leading-relaxed"
+              />
+            </details>
           </section>
 
           <details className="settings-group settings-advanced">

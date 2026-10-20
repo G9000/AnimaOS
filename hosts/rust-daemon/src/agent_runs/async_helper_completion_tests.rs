@@ -1157,6 +1157,8 @@ async fn async_helper_completion_filters_granted_descriptors_and_denies_native_c
         "resume_automation",
         "delete_automation",
         "trigger_automation",
+        "complete_reminder",
+        "snooze_reminder",
         "bg_start",
     ];
     {

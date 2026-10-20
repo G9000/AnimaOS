@@ -60,6 +60,18 @@ export interface TranscriptActionOptions {
   automations?: readonly Automation[];
   /** Deletes an automation (the notice card's Undo). */
   undoAutomation?: (automation: Automation) => Promise<boolean>;
+  /** The automation list was read at least once: reminder cards know their
+   *  state from then on. */
+  automationsLoaded?: boolean;
+  online?: boolean;
+  /** A reminder card's Done and Snooze. */
+  completeAutomation?: (automation: Automation) => Promise<boolean>;
+  snoozeAutomation?: (
+    automation: Automation,
+    minutes: number,
+  ) => Promise<boolean>;
+  /** A Discord note's "Open thread": a session, at one of its messages. */
+  openSessionAt?: (sessionId: string, messageId?: string) => void;
 }
 
 const NO_AUTOMATIONS: readonly Automation[] = [];
@@ -90,6 +102,11 @@ export function useTranscriptActions({
   companionId,
   automations = NO_AUTOMATIONS,
   undoAutomation,
+  automationsLoaded = false,
+  online = true,
+  completeAutomation,
+  snoozeAutomation,
+  openSessionAt,
 }: TranscriptActionOptions): TranscriptActions {
   const latest = {
     stopRun,
@@ -99,6 +116,9 @@ export function useTranscriptActions({
     openSession,
     decideApproval,
     undoAutomation,
+    completeAutomation,
+    snoozeAutomation,
+    openSessionAt,
   };
   const latestRef = useRef(latest);
   useEffect(() => {
@@ -115,6 +135,8 @@ export function useTranscriptActions({
   const canResend = resendable && session?.capabilities.send === true;
   const compactable = session?.capabilities.compact ? session : null;
   const canUndo = undoAutomation !== undefined;
+  const canAnswerReminders =
+    completeAutomation !== undefined && snoozeAutomation !== undefined;
   const sessionAgentId = session?.agentId;
   return useMemo<TranscriptActions>(
     () => ({
@@ -159,6 +181,23 @@ export function useTranscriptActions({
               Promise.resolve(false),
           }
         : {}),
+      ...(canAnswerReminders
+        ? {
+            automationCards: {
+              automations,
+              loaded: automationsLoaded,
+              online,
+              onDone: (automation: Automation) =>
+                latestRef.current.completeAutomation?.(automation) ??
+                Promise.resolve(false),
+              onSnooze: (automation: Automation, minutes: number) =>
+                latestRef.current.snoozeAutomation?.(automation, minutes) ??
+                Promise.resolve(false),
+              onOpenSession: (sessionId: string, messageId?: string) =>
+                latestRef.current.openSessionAt?.(sessionId, messageId),
+            },
+          }
+        : {}),
       ...(companionId ? { companionAgentId: companionId } : {}),
       ...(sessionAgentId ? { sessionAgentId } : {}),
     }),
@@ -173,6 +212,9 @@ export function useTranscriptActions({
       sessionAgentId,
       automations,
       canUndo,
+      canAnswerReminders,
+      automationsLoaded,
+      online,
     ],
   );
 }

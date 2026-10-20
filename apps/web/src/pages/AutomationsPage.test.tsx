@@ -35,7 +35,7 @@ function renderPage(
   view: AutomationsView,
   extra: { focusId?: string; online?: boolean } = {},
 ) {
-  const onOpenSession = vi.fn();
+  const onShowInChat = vi.fn();
   const onFocusHandled = vi.fn();
   render(
     <AutomationsPage
@@ -46,10 +46,10 @@ function renderPage(
       telegramConnectorId={null}
       focusId={extra.focusId ?? null}
       onFocusHandled={onFocusHandled}
-      onOpenSession={onOpenSession}
+      onShowInChat={onShowInChat}
     />,
   );
-  return { onOpenSession, onFocusHandled };
+  return { onShowInChat, onFocusHandled };
 }
 
 const agentMade = automationFixture('schedule-1', {
@@ -130,7 +130,7 @@ describe('AutomationsPage', () => {
       }),
     ]);
     const view = fakeView({ automations: [interrupted] });
-    const { onOpenSession } = renderPage(view);
+    const { onShowInChat } = renderPage(view);
     const row = screen.getByRole('article', { name: interrupted.name });
     expect(
       within(row).queryByRole('button', { name: 'Open thread', exact: true }),
@@ -140,7 +140,7 @@ describe('AutomationsPage', () => {
       within(row).getByText(/may have completed some effects/i),
     ).toBeVisible();
     expect(
-      within(row).getByText(/review.*thread.*effects.*run now.*resume/i),
+      within(row).getByText(/main chat.*before using run now or resume/i),
     ).toBeVisible();
     expectNoAutomationMutation(view);
 
@@ -151,7 +151,7 @@ describe('AutomationsPage', () => {
       name: `History of ${interrupted.name}`,
     });
     const review = await within(drawer).findByRole('button', {
-      name: 'Review thread',
+      name: 'Show in chat',
     });
     expect(daemon.automationHistory).toHaveBeenCalledTimes(1);
     expect(daemon.automationHistory).toHaveBeenCalledWith(
@@ -161,17 +161,18 @@ describe('AutomationsPage', () => {
         signal: expect.any(AbortSignal),
       },
     );
-    expect(onOpenSession).not.toHaveBeenCalled();
+    expect(onShowInChat).not.toHaveBeenCalled();
     expectNoAutomationMutation(view);
     await user.click(review);
-    expect(onOpenSession).toHaveBeenCalledTimes(1);
-    expect(onOpenSession).toHaveBeenCalledWith(
-      'saved-session:actual-occurrence',
-    );
+    expect(onShowInChat).toHaveBeenCalledTimes(1);
+    expect(onShowInChat).toHaveBeenCalledWith({
+      automationId: interrupted.id,
+      runId: 'run_1',
+    });
     expectNoAutomationMutation(view);
   });
 
-  it('m76 does not infer a thread when an interrupted occurrence has no saved session', async () => {
+  it('m76 still reviews an interrupted occurrence that kept no thread, in the main chat', async () => {
     const user = userEvent.setup();
     vi.mocked(daemon.automationHistory).mockResolvedValue([
       automationRunFixture('interrupted-without-session', {
@@ -182,7 +183,7 @@ describe('AutomationsPage', () => {
       }),
     ]);
     const view = fakeView({ automations: [interrupted] });
-    const { onOpenSession } = renderPage(view);
+    const { onShowInChat } = renderPage(view);
     const row = screen.getByRole('article', { name: interrupted.name });
     await user.click(
       within(row).getByRole('button', { name: 'Review interrupted run' }),
@@ -190,27 +191,17 @@ describe('AutomationsPage', () => {
     const drawer = screen.getByRole('complementary', {
       name: `History of ${interrupted.name}`,
     });
-    expect(
-      await within(drawer).findByText('No saved thread is available.'),
-    ).toBeVisible();
+    await within(drawer).findByText('Needs review');
+    expect(within(drawer).queryByText(/saved thread/i)).not.toBeInTheDocument();
     expect(
       within(row).queryByRole('button', { name: 'Open thread', exact: true }),
     ).not.toBeInTheDocument();
-    expect(
-      within(drawer).queryByRole('button', {
-        name: 'Review thread',
-        exact: true,
-      }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(drawer).queryByRole('button', { name: 'Open', exact: true }),
-    ).not.toBeInTheDocument();
-    expect(onOpenSession).not.toHaveBeenCalled();
+    expect(onShowInChat).not.toHaveBeenCalled();
     expectNoAutomationMutation(view);
     await user.click(
       within(drawer).getByRole('button', { name: 'Close history' }),
     );
-    expect(onOpenSession).not.toHaveBeenCalled();
+    expect(onShowInChat).not.toHaveBeenCalled();
     expectNoAutomationMutation(view);
   });
 
@@ -277,7 +268,7 @@ describe('AutomationsPage', () => {
   it('m76 allows offline review entry without history requests or execution', async () => {
     const user = userEvent.setup();
     const view = fakeView({ automations: [interrupted] });
-    const { onOpenSession } = renderPage(view, { online: false });
+    const { onShowInChat } = renderPage(view, { online: false });
     const row = screen.getByRole('article', { name: interrupted.name });
     expect(within(row).getByText('Needs review')).toBeVisible();
     await user.click(
@@ -304,7 +295,7 @@ describe('AutomationsPage', () => {
       within(drawer).getByRole('button', { name: 'Close history' }),
     );
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
-    expect(onOpenSession).not.toHaveBeenCalled();
+    expect(onShowInChat).not.toHaveBeenCalled();
     expectNoAutomationMutation(view);
   });
 
@@ -355,10 +346,10 @@ describe('AutomationsPage', () => {
     ).toBeInTheDocument();
   });
 
-  it('runs, pauses, resumes, opens the thread, and deletes after confirming', async () => {
+  it('runs, pauses, resumes, and deletes after confirming, with no thread to open', async () => {
     const user = userEvent.setup();
     const view = fakeView({ automations: [agentMade, heartbeat] });
-    const { onOpenSession } = renderPage(view);
+    renderPage(view);
     const row = screen.getByRole('article', { name: '<b>Stretch</b>' });
 
     await user.click(within(row).getByRole('button', { name: 'Run now' }));
@@ -372,8 +363,9 @@ describe('AutomationsPage', () => {
       ),
     );
     expect(view.setEnabled).toHaveBeenCalledWith(heartbeat, true);
-    await user.click(within(row).getByRole('button', { name: 'Open thread' }));
-    expect(onOpenSession).toHaveBeenCalledWith('schedule:schedule-1');
+    expect(
+      within(row).queryByRole('button', { name: 'Open thread' }),
+    ).toBeNull();
 
     await user.click(within(row).getByRole('button', { name: 'Delete' }));
     expect(view.remove).not.toHaveBeenCalled();
@@ -689,5 +681,123 @@ describe('AutomationsPage', () => {
       screen.getByRole('form', { name: 'Edit <b>Stretch</b>' }),
     ).toBeInTheDocument();
     expect(onFocusHandled).toHaveBeenCalledTimes(1);
+  });
+
+  describe('grouped by what they are', () => {
+    const FIRED = Date.UTC(2026, 9, 21, 14, 0);
+    const upcoming = automationFixture('call-bank', {
+      name: 'Call the bank',
+      trigger: { type: 'once', atMs: FIRED },
+      nextDueAtMs: FIRED,
+    });
+    const repeating = automationFixture('brief', {
+      name: 'Morning brief',
+      trigger: { type: 'daily', hour: 9, minute: 0, timeZone: 'UTC' },
+    });
+    const done = automationFixture('notes', {
+      name: 'Stand-up notes',
+      trigger: { type: 'once', atMs: FIRED },
+      enabled: false,
+      lastFiredAtMs: FIRED,
+      doneAtMs: FIRED + 60_000,
+      removesAtMs: FIRED + 60_000 + 86_400_000,
+    });
+
+    it('sorts rows into Upcoming, Repeating and Done with their notes', () => {
+      renderPage(fakeView({ automations: [done, repeating, upcoming] }));
+
+      const group = (name: string) =>
+        screen.getByRole('region', { name });
+      expect(
+        within(group('Upcoming')).getByRole('article', { name: 'Call the bank' }),
+      ).toBeVisible();
+      expect(
+        within(group('Repeating')).getByRole('article', { name: 'Morning brief' }),
+      ).toBeVisible();
+      expect(
+        within(group('Done')).getByRole('article', { name: 'Stand-up notes' }),
+      ).toBeVisible();
+      expect(
+        within(group('Upcoming')).getByText(
+          'One-time. Each one clears itself a day after it’s done.',
+        ),
+      ).toBeVisible();
+      expect(
+        within(group('Done')).getByText(
+          'Kept for a day so you can find them, then removed. The card in the chat stays.',
+        ),
+      ).toBeVisible();
+      expect(screen.queryByRole('region', { name: 'Needs review' })).toBeNull();
+    });
+
+    it('leaves out the groups that have nothing in them', () => {
+      renderPage(fakeView({ automations: [repeating] }));
+      expect(screen.getByRole('region', { name: 'Repeating' })).toBeVisible();
+      expect(screen.queryByRole('region', { name: 'Upcoming' })).toBeNull();
+      expect(screen.queryByRole('region', { name: 'Done' })).toBeNull();
+    });
+
+    it('keeps an interrupted automation in Needs review, above the rest', () => {
+      renderPage(fakeView({ automations: [repeating, interrupted] }));
+      const review = screen.getByRole('region', { name: 'Needs review' });
+      expect(
+        within(review).getByRole('article', { name: interrupted.name }),
+      ).toBeVisible();
+      expect(
+        within(screen.getByRole('region', { name: 'Repeating' })).queryByRole(
+          'article',
+          { name: interrupted.name },
+        ),
+      ).toBeNull();
+    });
+
+    it('shows a done reminder in the chat from its row, with no run controls', async () => {
+      const user = userEvent.setup();
+      const { onShowInChat } = renderPage(fakeView({ automations: [done] }));
+      const row = screen.getByRole('article', { name: 'Stand-up notes' });
+
+      expect(within(row).getByText(/^Done at .* · clears /)).toBeVisible();
+      expect(within(row).queryByRole('button', { name: 'Run now' })).toBeNull();
+      expect(within(row).queryByRole('button', { name: 'Pause' })).toBeNull();
+      await user.click(within(row).getByRole('button', { name: 'Show in chat' }));
+      expect(onShowInChat).toHaveBeenCalledWith({ automationId: 'notes' });
+    });
+
+    it('names where each row goes: the main chat, plus Telegram, or Discord with a note', () => {
+      const telegram = automationFixture('tg', {
+        name: 'Pay rent',
+        target: { type: 'connector', connectorId: 'tg-1' },
+      });
+      const discord = automationFixture('dc', {
+        name: 'Weekly review',
+        target: { type: 'connector', connectorId: 'dc-1' },
+      });
+      render(
+        <AutomationsPage
+          view={fakeView({ automations: [repeating, telegram, discord] })}
+          agentId="agent-main"
+          version={0}
+          online
+          telegramConnectorId="tg-1"
+          discordDestinations={[{ connectorId: 'dc-1', label: 'Nova · #home' }]}
+          onShowInChat={vi.fn()}
+        />,
+      );
+      const chips = (name: string) =>
+        within(
+          within(screen.getByRole('article', { name })).getByRole('list', {
+            name: 'Goes to',
+          }),
+        )
+          .getAllByRole('listitem')
+          .map((item) => item.textContent);
+
+      expect(chips('Morning brief')).toEqual(['Main chat']);
+      expect(chips('Pay rent')).toEqual(['Main chat', 'Telegram']);
+      expect(chips('Weekly review')).toEqual([
+        'Discord #home',
+        '+ note in main chat',
+      ]);
+    });
   });
 });

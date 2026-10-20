@@ -55,6 +55,16 @@ pub(crate) const TOOL_GRANTS: &[ToolGrantSet] = &[
         read_class: &[],
         write_class: &[crate::tools::PLAN_TOOL],
     },
+    ToolGrantSet {
+        id: "reminder-delivery-status",
+        read_class: &["check_automation_status"],
+        write_class: &[],
+    },
+    ToolGrantSet {
+        id: "reminder-done-snooze",
+        read_class: &[],
+        write_class: &["complete_reminder", "snooze_reminder"],
+    },
 ];
 
 /// Legacy check-ins ran in a fresh `room-*` room per tick. Those rooms become
@@ -1288,7 +1298,8 @@ mod tests {
                 "clarify",
                 "search_conversations",
                 "load_skill",
-                "list_automations"
+                "list_automations",
+                "check_automation_status"
             ]
         );
         assert_eq!(
@@ -1330,7 +1341,8 @@ mod tests {
                 "clarify",
                 "search_conversations",
                 "load_skill",
-                "list_automations"
+                "list_automations",
+                "check_automation_status"
             ]
         );
         assert_eq!(
@@ -1344,7 +1356,10 @@ mod tests {
                 "list_automations",
                 "create_automation",
                 "pause_automation",
-                "propose_plan"
+                "propose_plan",
+                "check_automation_status",
+                "complete_reminder",
+                "snooze_reminder"
             ]
         );
         assert!(state.tool_grants_applied.contains("m5-skills"));

@@ -10,9 +10,15 @@ it('shows the supplied presence fallback after an image failure and retries on a
   expect(view.getByText('Presence')).toBeVisible();
   expect(view.container.querySelector('img')).toBeNull();
 
-  fireEvent(window, new CustomEvent('agent-avatar-changed', { detail: 'other' }));
+  fireEvent(
+    window,
+    new CustomEvent('agent-avatar-changed', { detail: 'other' }),
+  );
   expect(view.getByText('Presence')).toBeVisible();
-  fireEvent(window, new CustomEvent('agent-avatar-changed', { detail: 'nova' }));
+  fireEvent(
+    window,
+    new CustomEvent('agent-avatar-changed', { detail: 'nova' }),
+  );
   expect(view.queryByText('Presence')).toBeNull();
   expect(view.container.querySelector('img')).toHaveAttribute(
     'src',
@@ -33,4 +39,10 @@ it('tries the new agent image when the previous agent used the fallback', () => 
     'src',
     '/api/agents/scout/avatar?v=0',
   );
+});
+
+it('uses the design presence orb when no uploaded avatar exists', () => {
+  const view = render(<AgentAvatar id="nova" name="Nova" size={72} />);
+  fireEvent.error(view.container.querySelector('img')!);
+  expect(view.container.querySelector('.halo-orb')).toBeInTheDocument();
 });

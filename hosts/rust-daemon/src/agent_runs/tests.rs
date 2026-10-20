@@ -3878,3 +3878,106 @@ async fn a_completed_chat_run_writes_no_reflection_or_derived_memory() {
         })
         .is_empty());
 }
+
+/// A side post (a commit hook's message in another session, such as an
+/// automation's card in the main chat) stands or falls with its run's commit.
+#[tokio::test]
+async fn a_side_post_is_saved_with_its_commit_and_removed_without_it() {
+    let entered = Arc::new(Semaphore::new(0));
+    let release = Arc::new(Semaphore::new(0));
+    let (coordinator, agent_id) = coordinator_with_agent(
+        Arc::new(GateModelAdapter {
+            calls: AtomicUsize::new(0),
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+        }),
+        4,
+    )
+    .await;
+    super::test_support::add_chat(&coordinator, &agent_id, "chat:target").await;
+    let post = |agent_id: &str, id: &str| Message {
+        id: id.into(),
+        agent_id: agent_id.into(),
+        room_id: "chat:target".into(),
+        content: Content {
+            text: "posted".into(),
+            ..Content::default()
+        },
+        role: MessageRole::Assistant,
+        created_at_ms: anima_core::primitives::now_millis(),
+    };
+    let posted = |coordinator: &AgentRunCoordinator| {
+        let state = Arc::clone(&coordinator.state);
+        let agent_id = agent_id.clone();
+        async move {
+            let guard = state.read().await;
+            assert!(guard.side_posts.is_empty(), "every commit drains its posts");
+            guard
+                .get_agent(&agent_id)
+                .unwrap()
+                .messages
+                .into_iter()
+                .filter(|message| message.room_id == "chat:target")
+                .map(|message| message.id)
+                .collect::<Vec<_>>()
+        }
+    };
+
+    // A hook that stages a post and then refuses: the post goes too.
+    release.add_permits(1);
+    let staging = agent_id.clone();
+    let refused = coordinator
+        .run_with_commit_waiting(
+            room_request(&agent_id, "room-a", "one"),
+            move |state, _| {
+                assert!(state.stage_side_post(&staging, "chat:target", post(&staging, "p1")));
+                Err(ApiError::conflict("refused"))
+            },
+            |_| Ok(()),
+        )
+        .await;
+    entered.acquire().await.unwrap().forget();
+    assert!(refused.is_err());
+    assert!(posted(&coordinator).await.is_empty());
+
+    // A commit whose final save fails: the post goes too.
+    let failing = {
+        let coordinator = coordinator.clone();
+        let staging = agent_id.clone();
+        let request = room_request(&agent_id, "room-b", "two");
+        tokio::spawn(async move {
+            coordinator
+                .run_with_commit_waiting(
+                    request,
+                    move |state, _| {
+                        state.stage_side_post(&staging, "chat:target", post(&staging, "p2"));
+                        Ok(())
+                    },
+                    |_| Ok(()),
+                )
+                .await
+        })
+    };
+    fail_the_next_final_save(&coordinator, &entered, &release).await;
+    assert!(failing.await.unwrap().is_err());
+    assert!(posted(&coordinator).await.is_empty());
+
+    // A commit that stands keeps it, and the target session's activity moves.
+    release.add_permits(1);
+    let staging = agent_id.clone();
+    coordinator
+        .run_with_commit_waiting(
+            room_request(&agent_id, "room-c", "three"),
+            move |state, _| {
+                assert!(state.stage_side_post(&staging, "chat:target", post(&staging, "p3")));
+                // An unknown session stages nothing.
+                assert!(!state.stage_side_post(&staging, "chat:missing", post(&staging, "p4")));
+                Ok(())
+            },
+            |_| Ok(()),
+        )
+        .await
+        .expect("the commit stands");
+    entered.acquire().await.unwrap().forget();
+    assert_eq!(posted(&coordinator).await, vec!["p3".to_string()]);
+}

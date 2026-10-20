@@ -238,6 +238,33 @@ impl ConnectorManager {
             .expect("claim has chat")
             .id;
         let outbound = &claim.outbound;
+        let attempted_at_ms = now_ms();
+        // Persist an unknown attempt before the external effect. A crash or a
+        // failed settlement must never leave a durable successful-send claim.
+        {
+            let _mutation = self.mutation_lock.lock().await;
+            let (undo, persist) = {
+                let mut state = self.state.write().await;
+                if !self.claim_is_current(&state, &claim) {
+                    return Ok(false);
+                }
+                let undo = state.record_reminder_delivery(
+                    &outbound.id,
+                    attempted_at_ms,
+                    None,
+                    crate::schedules::delivery::DeliveryResult::Unknown,
+                    Vec::new(),
+                );
+                let persist = undo.as_ref().map(|_| state.control_plane_persist_request());
+                (undo, persist)
+            };
+            if let Some(persist) = persist {
+                if persist.save().await.is_err() {
+                    self.state.write().await.undo_reminder_delivery(undo);
+                    return Err(ConnectorManagerError::Persistence);
+                }
+            }
+        }
         let delivery = self
             .registry
             .telegram(token)
@@ -248,7 +275,7 @@ impl ConnectorManager {
             })
             .await;
         let _mutation = self.mutation_lock.lock().await;
-        let (previous_connector_outbound, persist) = {
+        let (previous_connector_outbound, delivery_undo, persist) = {
             let mut state = self.state.write().await;
             if !self.claim_is_current(&state, &claim) {
                 if delivery.is_ok() {
@@ -263,6 +290,18 @@ impl ConnectorManager {
                 .map(|(id, record)| (id.clone(), record.clone()))
                 .collect::<Vec<_>>();
             let delivered_at_ms = now_ms();
+            let (result, message_ids) = crate::schedules::delivery::telegram_send_result(
+                &delivery,
+                chat_id,
+                &outbound.text,
+            );
+            let delivery_undo = state.record_reminder_delivery(
+                &outbound.id,
+                attempted_at_ms,
+                Some(delivered_at_ms),
+                result,
+                message_ids,
+            );
             {
                 let record = state
                     .outbound
@@ -284,7 +323,7 @@ impl ConnectorManager {
                 compact_delivered_outbox(&mut state.outbound, &connector_id, delivered_at_ms);
             }
             let persist = state.control_plane_persist_request();
-            (previous_connector_outbound, persist)
+            (previous_connector_outbound, delivery_undo, persist)
         };
         if persist.save().await.is_err() {
             let mut state = self.state.write().await;
@@ -292,6 +331,7 @@ impl ConnectorManager {
                 .outbound
                 .retain(|_, record| record.connector_id != connector_id);
             state.outbound.extend(previous_connector_outbound);
+            state.undo_reminder_delivery(delivery_undo);
             drop(state);
             self.statuses
                 .lock()

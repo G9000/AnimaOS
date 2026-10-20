@@ -204,7 +204,9 @@ describe('WorkspaceShell', () => {
     await user.click(button);
     expect(screen.getByRole('dialog', { name: 'Inbox' })).toBeVisible();
     await user.keyboard('{Escape}');
-    expect(screen.queryByRole('dialog', { name: 'Inbox' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('dialog', { name: 'Inbox' }),
+    ).not.toBeInTheDocument();
     expect(button).toHaveFocus();
 
     await user.click(screen.getByRole('button', { name: 'Open command menu' }));
@@ -275,15 +277,21 @@ describe('WorkspaceShell', () => {
   it('opens agent creation and management from the dropdown footer', async () => {
     const user = userEvent.setup();
     render(<Shell newAgent={<div>New agent setup</div>} />);
-    await user.click(screen.getByRole('button', { name: 'Nova, switch agent' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Nova, switch agent' }),
+    );
     await user.click(screen.getByRole('menuitem', { name: 'New agent' }));
     expect(screen.getByText('New agent setup')).toBeVisible();
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Nova, switch agent' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Nova, switch agent' }),
+    );
     await user.click(screen.getByRole('menuitem', { name: 'Manage agents' }));
     expect(screen.getByRole('heading', { name: 'Team' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Chat with Nova' })).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Chat with Nova' }),
+    ).toBeVisible();
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
 
@@ -291,25 +299,38 @@ describe('WorkspaceShell', () => {
     const user = userEvent.setup();
     const main = agent('nova', 'Nova', 1);
     const view = render(
-      <Shell mainAgent={main} agents={[
-        main,
-        agent('scout', 'Scout', 2, { bio: 'Research and news' }),
-      ]} />,
+      <Shell
+        mainAgent={main}
+        agents={[
+          main,
+          agent('scout', 'Scout', 2, { bio: 'Research and news' }),
+        ]}
+      />,
     );
-    await user.click(screen.getByRole('button', { name: 'Nova, switch agent' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Nova, switch agent' }),
+    );
     const scout = screen.getByRole('menuitemradio', { name: /Scout/ });
     expect(scout).toHaveTextContent('Ready · Research and news');
     for (const img of view.container.querySelectorAll('.agent-switch-menu img'))
       fireEvent.error(img);
     expect(scout.querySelector('.halo-orb')).not.toBeNull();
-    expect(view.container.querySelectorAll('.agent-switch-menu .agent-switch-status-dot')).toHaveLength(2);
+    expect(
+      view.container.querySelectorAll(
+        '.agent-switch-menu .agent-switch-status-dot',
+      ),
+    ).toHaveLength(2);
   });
 
   it('keeps agent footer actions disabled while settings are saving', async () => {
     render(<Shell locked />);
-    await userEvent.click(screen.getByRole('button', { name: 'Nova, switch agent' }));
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Nova, switch agent' }),
+    );
     expect(screen.getByRole('menuitem', { name: 'New agent' })).toBeDisabled();
-    expect(screen.getByRole('menuitem', { name: 'Manage agents' })).toBeDisabled();
+    expect(
+      screen.getByRole('menuitem', { name: 'Manage agents' }),
+    ).toBeDisabled();
   });
 
   it('opens commands with Control K, filters actions and navigates with Enter', async () => {
@@ -475,7 +496,7 @@ describe('WorkspaceShell', () => {
       within(nav)
         .getAllByRole('group')
         .map((group) => group.getAttribute('aria-label')),
-    ).toEqual(['Companion', 'Learning', 'Abilities', 'Activity', 'System']);
+    ).toEqual(['Agent', 'Learning', 'Abilities', 'Activity', 'System']);
   });
 
   it('opens the companion pages from the window', async () => {
@@ -570,7 +591,9 @@ describe('WorkspaceShell', () => {
       );
       expect(screen.getByRole('region', { name: 'Settings' })).toBeVisible();
 
-      await user.keyboard('{Control>}k{/Control}');
+      await user.click(
+        screen.getByRole('button', { name: 'Open command menu' }),
+      );
       expect(
         screen.getByRole('option', { name: new RegExp(`Go to ${label}`) }),
       ).toBeVisible();
@@ -653,7 +676,7 @@ describe('WorkspaceShell', () => {
     expect(screen.getByText('Approvals page')).toBeVisible();
   });
 
-  it('shows the workspace identity and uploads a replacement avatar from the window', async () => {
+  it('keeps workspace avatar controls in Profile while the sidebar follows the design', async () => {
     const user = userEvent.setup();
     const onChangeWorkspaceAvatar = vi.fn().mockResolvedValue(undefined);
     Object.defineProperties(URL, {
@@ -665,13 +688,15 @@ describe('WorkspaceShell', () => {
     });
     render(
       <Shell
-        initialRoute={{ kind: 'page', page: 'memory' }}
+        initialRoute={{ kind: 'page', page: 'profile' }}
         workspaceState={configuredWorkspace(true)}
         onChangeWorkspaceAvatar={onChangeWorkspaceAvatar}
       />,
     );
     const sidebar = screen.getByRole('complementary');
-    expect(within(sidebar).getByText('Northwind Research')).toBeVisible();
+    expect(within(sidebar).queryByText('Northwind Research')).toBeNull();
+    await user.click(screen.getByText('Workspace identity', { exact: true }));
+    expect(screen.getByText('Northwind Research')).toBeVisible();
     expect(
       screen
         .getByRole('button', { name: 'Change workspace avatar' })
@@ -952,4 +977,60 @@ describe('WorkspaceShell', () => {
       screen.queryByRole('button', { name: 'Telegram' }),
     ).not.toBeInTheDocument();
   });
+});
+
+it('filters settings destinations and restores the complete sidebar after navigation', async () => {
+  const user = userEvent.setup();
+  render(
+    <Shell
+      initialRoute={{ kind: 'page', page: 'profile' }}
+      model={<p>Model page</p>}
+    />,
+  );
+  const search = screen.getByRole('searchbox', { name: 'Search settings' });
+  await user.type(search, 'model');
+  const nav = screen.getByRole('navigation', { name: 'Workspace navigation' });
+  expect(within(nav).getAllByRole('button')).toHaveLength(1);
+  await user.click(within(nav).getByRole('button', { name: 'Model' }));
+  expect(screen.getByText('Model page')).toBeVisible();
+  expect(search).toHaveValue('');
+  expect(within(nav).getAllByRole('button')).toHaveLength(14);
+  expect(within(nav).getByRole('button', { name: 'Model' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+});
+
+it('focuses settings search with the platform shortcut and clears a failed search with Escape', async () => {
+  const user = userEvent.setup();
+  render(<Shell initialRoute={{ kind: 'page', page: 'memory' }} />);
+  await user.keyboard('{Control>}k{/Control}');
+  const search = screen.getByRole('searchbox', { name: 'Search settings' });
+  expect(search).toHaveFocus();
+  expect(
+    screen.queryByRole('combobox', { name: 'Search commands' }),
+  ).toBeNull();
+  await user.type(search, 'no matching destination');
+  expect(
+    within(
+      screen.getByRole('navigation', { name: 'Workspace navigation' }),
+    ).getByRole('status'),
+  ).toHaveTextContent('No settings found.');
+  await user.keyboard('{Escape}');
+  expect(search).toHaveValue('');
+  expect(screen.getByRole('button', { name: 'Memory' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+});
+
+it('keeps settings search and navigation locked during a save', () => {
+  render(<Shell locked initialRoute={{ kind: 'page', page: 'profile' }} />);
+  expect(
+    screen.getByRole('searchbox', { name: 'Search settings' }),
+  ).toBeDisabled();
+  fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+  expect(
+    screen.queryByRole('combobox', { name: 'Search commands' }),
+  ).toBeNull();
 });

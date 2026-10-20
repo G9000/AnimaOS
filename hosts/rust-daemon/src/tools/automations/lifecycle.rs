@@ -1,7 +1,9 @@
 //! Scoped lifecycle operations reuse the existing automation transaction.
 use super::*;
 use crate::agent_runs::AgentRunCoordinator;
-use crate::schedules::automations::{AutomationRunAuthority, AutomationRunTool};
+use crate::schedules::automations::{
+    AutomationRunAuthority, AutomationRunTool, SNOOZE_MINUTES_INVALID,
+};
 use crate::schedules::AutomationPatch;
 
 fn coordinator(
@@ -229,6 +231,81 @@ pub(crate) fn delete_automation(
             coordinator.automations().delete_from_run(&agent.id, id, authority).await.map_err(refusal)?;
             Ok(format!("Deleted the automation ({id}). Already claimed work retains its existing cancellation and outcome handling."))
         }.await;
+        match result {
+            Ok(reply) => text(reply),
+            Err(error) => TaskResult::error(error, 0),
+        }
+    })
+}
+
+/// `minutes` as a whole number; the service enforces the 1..=1440 range.
+fn minutes_arg(call: &ToolCall) -> Result<u64, String> {
+    match call.args.get("minutes") {
+        Some(DataValue::Number(minutes))
+            if minutes.is_finite() && minutes.fract() == 0.0 && *minutes >= 0.0 =>
+        {
+            Ok(*minutes as u64)
+        }
+        _ => Err(SNOOZE_MINUTES_INVALID.into()),
+    }
+}
+
+pub(crate) fn complete_reminder(
+    context: ToolExecutionContext,
+    agent: AgentState,
+    _message: Message,
+    call: ToolCall,
+) -> BoxFuture<'static, TaskResult<Content>> {
+    Box::pin(async move {
+        let result: Result<String, String> = async {
+            let coordinator = coordinator(&context, &agent)?;
+            let authority = authority(&context, AutomationRunTool::CompleteReminder, &call)?;
+            let id = id(&call, &["id"])?;
+            let saved = coordinator
+                .automations()
+                .complete(&agent.id, id, now_millis(), Some(authority))
+                .await
+                .map_err(refusal)?;
+            Ok(format!(
+                "Marked \"{}\" ({}) done.",
+                display_name(&saved),
+                saved.id
+            ))
+        }
+        .await;
+        match result {
+            Ok(reply) => text(reply),
+            Err(error) => TaskResult::error(error, 0),
+        }
+    })
+}
+
+pub(crate) fn snooze_reminder(
+    context: ToolExecutionContext,
+    agent: AgentState,
+    _message: Message,
+    call: ToolCall,
+) -> BoxFuture<'static, TaskResult<Content>> {
+    Box::pin(async move {
+        let result: Result<String, String> = async {
+            let coordinator = coordinator(&context, &agent)?;
+            let authority = authority(&context, AutomationRunTool::SnoozeReminder, &call)?;
+            let id = id(&call, &["id", "minutes"])?;
+            let minutes = minutes_arg(&call)?;
+            let saved = coordinator
+                .automations()
+                .snooze(&agent.id, id, minutes, now_millis(), Some(authority))
+                .await
+                .map_err(refusal)?;
+            let zone = context.owner_time_zone.effective();
+            Ok(format!(
+                "Snoozed \"{}\" ({}) until {} ({zone})",
+                display_name(&saved),
+                saved.id,
+                at(saved.next_due_at_ms, zone)
+            ))
+        }
+        .await;
         match result {
             Ok(reply) => text(reply),
             Err(error) => TaskResult::error(error, 0),

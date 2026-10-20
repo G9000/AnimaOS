@@ -75,6 +75,11 @@ import { useNeedsYou } from './hooks/useNeedsYou';
 import { NeedsYouPanel } from './components/inbox/NeedsYouPanel';
 import { WeeklyReport } from './components/report/WeeklyReport';
 import { checkinScheduleId } from './lib/automations';
+import { findAutomationMessage } from './lib/automation-cards';
+import { shouldShowSession } from './lib/session-groups';
+import type { ChatAttention, AutomationToast } from './lib/automation-toasts';
+import { useAutomationToasts } from './hooks/useAutomationToasts';
+import { AutomationToasts } from './components/sessions/AutomationToasts';
 import { useHashRoute, type HashRoute } from './lib/hash-route';
 import { exportFileName, sessionKey } from './lib/session-groups';
 import { loadDraft, storeDraft } from './lib/drafts';
@@ -699,6 +704,37 @@ export function ViewHarness() {
     navigate,
     upsertMainSession,
   ]);
+  // The transcript's newest message is in view: an automation card that
+  // lands outside the view gets a toast.
+  const mainAtBottomRef = useRef(true);
+  const onMainAtBottomChange = useCallback((atBottom: boolean) => {
+    mainAtBottomRef.current = atBottom;
+  }, []);
+  const mainSessionIdRef = useRef<string | null>(null);
+  mainSessionIdRef.current = mainChat.session?.id ?? null;
+  const agentIdRef = useRef(agentId);
+  agentIdRef.current = agentId;
+  const chatAttention = useCallback((): ChatAttention => {
+    const current = routeRef.current;
+    const mainId = mainSessionIdRef.current;
+    const viewingMainChat =
+      current.kind === 'home' ||
+      (current.kind === 'session' &&
+        mainId !== null &&
+        current.sessionId === mainId &&
+        (!current.agentId || current.agentId === agentIdRef.current));
+    return {
+      viewingMainChat,
+      atBottom: mainAtBottomRef.current,
+      documentHidden: document.hidden,
+    };
+  }, []);
+  const automationToasts = useAutomationToasts({
+    agentId,
+    mainSessionId: mainChat.session?.id ?? null,
+    enabled: connection === 'online',
+    attention: chatAttention,
+  });
   const [legacyMigrationError, setLegacyMigrationError] = useState<
     string | null
   >(null);
@@ -1237,6 +1273,41 @@ export function ViewHarness() {
   const { stopRun } = commands;
   const openSession = (session: Session) =>
     commands.openTarget({ agentId: session.agentId, sessionId: session.id });
+  /** A session, at one of its messages when given (a Discord note's "Open
+   *  thread"). */
+  const openSessionAt = (sessionId: string, messageId?: string) => {
+    if (messageId) setJumpRequestKey((value) => value + 1);
+    navigate({
+      kind: 'session',
+      sessionId,
+      ...(messageId ? { messageId } : {}),
+    });
+  };
+  /** "Show in chat": the main chat, at the automation's card when that
+   *  message is loaded, else just open it. */
+  const showAutomationInChat = (target: {
+    automationId: string;
+    runId?: string | null;
+  }) => {
+    const mainId = mainChat.session?.id ?? null;
+    if (!mainId) {
+      navigate({ kind: 'home' });
+      return;
+    }
+    const loaded =
+      conversationRoute.kind === 'session' &&
+      conversationRoute.sessionId === mainId
+        ? history.messages
+        : [];
+    openSessionAt(mainId, findAutomationMessage(loaded, target) ?? undefined);
+  };
+  const openToast = (toast: AutomationToast) => {
+    automationToasts.dismiss(toast.id);
+    const { meta } = toast;
+    if (meta.kind === 'automationNote' && meta.destinationSessionId)
+      openSessionAt(meta.destinationSessionId, meta.destinationMessageId);
+    else newChat();
+  };
   const transcriptActions = useTranscriptActions({
     session: activeSession,
     // A Telegram session's messages need its connector.
@@ -1260,6 +1331,11 @@ export function ViewHarness() {
     companionId: agentId,
     automations: automations.automations,
     undoAutomation: automations.undo,
+    automationsLoaded: automations.loaded,
+    online: connection === 'online',
+    completeAutomation: automations.complete,
+    snoozeAutomation: automations.snooze,
+    openSessionAt,
   });
 
   if (connection === 'unknown' || (connection === 'online' && !loaded)) {
@@ -1322,7 +1398,7 @@ export function ViewHarness() {
     <SessionSidebar
       // The main chat is where you are; History lists everything else.
       sessions={sessions.sessions.filter(
-        (session) => session.mainChat !== true,
+        (session) => session.mainChat !== true && shouldShowSession(session),
       )}
       activeKey={activeSession ? sessionKey(activeSession) : null}
       query={sessionQuery}
@@ -1383,6 +1459,7 @@ export function ViewHarness() {
           : undefined
       }
       jumpRequestKey={jumpRequestKey}
+      onAtBottomChange={onMainAtBottomChange}
       contextRefreshKey={`${messagesRefresh}:${sessionRereads}:${activeSession?.lastActivityAtMs}:${activeSession?.messageCount}`}
       skillDrafts={{
         version: live.state.skillsVersion,
@@ -1809,9 +1886,7 @@ export function ViewHarness() {
               }
               focusId={automationFocus}
               onFocusHandled={clearAutomationFocus}
-              onOpenSession={(sessionId) =>
-                commands.openTarget({ agentId: agent.id, sessionId })
-              }
+              onShowInChat={showAutomationInChat}
             />
           }
           memory={
@@ -1874,6 +1949,16 @@ export function ViewHarness() {
           conversationRoute={conversationRoute}
         />
       </div>
+      <AutomationToasts
+        toasts={automationToasts.toasts}
+        automations={automations.automations}
+        loaded={automations.loaded}
+        online={connection === 'online'}
+        onDismiss={automationToasts.dismiss}
+        onOpen={openToast}
+        onDone={automations.complete}
+        onSnooze={automations.snooze}
+      />
       {reportOpen && agent && (
         <WeeklyReport
           agentId={agent.id}

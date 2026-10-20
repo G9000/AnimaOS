@@ -217,7 +217,10 @@ use crate::runtime_model::provider_summaries_with_pool;
         schedules::delete_schedule,
         schedules::import_legacy_schedules,
         schedules::run_schedule,
+        schedules::complete_schedule,
+        schedules::snooze_schedule,
         schedules::schedule_history,
+        schedules::schedule_status,
         schedules::preview_schedule,
         sessions::list_sessions, sessions::get_session, sessions::list_session_messages, sessions::search_session_messages,
         sessions::create_session, sessions::main_chat, sessions::update_session, sessions::delete_session, sessions::export_session,
@@ -1330,8 +1333,20 @@ fn router_with_services_with_policies_and_integrations(
             axum::routing::post(schedules::run_schedule),
         )
         .route(
+            "/api/agents/{agent_id}/schedules/{schedule_id}/done",
+            axum::routing::post(schedules::complete_schedule),
+        )
+        .route(
+            "/api/agents/{agent_id}/schedules/{schedule_id}/snooze",
+            axum::routing::post(schedules::snooze_schedule),
+        )
+        .route(
             "/api/agents/{agent_id}/schedules/{schedule_id}/history",
             get(schedules::schedule_history),
+        )
+        .route(
+            "/api/agents/{agent_id}/schedules/{schedule_id}/status",
+            get(schedules::schedule_status),
         )
         .route(
             "/api/schedules/preview",

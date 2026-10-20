@@ -8,6 +8,19 @@ use super::AgentRunCoordinator;
 use crate::schedules::{AutomationService, ScheduleError, ScheduledPromptRecord, SchedulerTrigger};
 
 impl AgentRunCoordinator {
+    pub(crate) async fn is_reminder_verification_run(&self, link: &crate::runs::RunLink) -> bool {
+        let state = self.state.read().await;
+        state
+            .runs
+            .get(&link.run_id)
+            .filter(|run| {
+                run.agent_id == link.agent_id && run.source == crate::runs::RunSource::Schedule
+            })
+            .and_then(|run| run.source_ref.as_ref())
+            .and_then(|id| state.schedules.get(id))
+            .is_some_and(|schedule| schedule.verification_for.is_some())
+    }
+
     pub(crate) fn bind_scheduler_trigger(&self, trigger: SchedulerTrigger) {
         *self
             .scheduler_trigger

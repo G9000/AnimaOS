@@ -15,6 +15,7 @@ import {
   describeTrigger,
   localTimeZone,
 } from '../../lib/automations';
+import { discordChannelLabel } from '../../lib/automation-cards';
 import { daemon } from '../../lib/daemon-api';
 import { PHRASE_EXAMPLES, parseSchedule } from '../../lib/schedule-parse';
 import { invisibleNote, revealInvisible } from '../../lib/skills';
@@ -378,16 +379,16 @@ export function AutomationEditor({
           value={target}
           onChange={(event) => setTarget(event.target.value)}
         >
-          <option value="workspace">Its own thread</option>
+          <option value="workspace">Main chat</option>
           <option value="telegram" disabled={!telegramConnectorId}>
-            Telegram
+            Main chat + Telegram
           </option>
           {discordDestinations.map((item) => (
             <option
               key={item.connectorId}
               value={`discord:${item.connectorId}`}
             >
-              Discord · {item.label}
+              Discord {discordChannelLabel(item.label)} (note in main chat)
             </option>
           ))}
           {target.startsWith('discord:') &&
@@ -400,6 +401,9 @@ export function AutomationEditor({
             )}
         </select>
       </label>
+      <p className="automation-help">
+        The main chat always gets a card or a note, wherever else this goes.
+      </p>
       <div className="automation-actions">
         <button
           type="submit"

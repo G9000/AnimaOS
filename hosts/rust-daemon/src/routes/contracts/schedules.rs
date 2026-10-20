@@ -298,12 +298,27 @@ pub(crate) struct ScheduleResponse {
     pub(crate) counters: AutomationCountersResponse,
     /// Its latest occurrence has no outcome yet.
     pub(crate) running: bool,
+    /// When a one-time reminder was marked done.
+    pub(crate) done_at_ms: Option<u64>,
+    /// When a finished one-time automation leaves the list (a day after it
+    /// finished); null while it is not finished.
+    pub(crate) removes_at_ms: Option<u64>,
+}
+
+/// `POST .../schedules/{id}/snooze`.
+#[derive(Clone, Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ScheduleSnoozeRequest {
+    /// 1 to 1440.
+    pub(crate) minutes: u64,
 }
 
 impl From<ScheduledPromptRecord> for ScheduleResponse {
     fn from(value: ScheduledPromptRecord) -> Self {
         let name = display_name(&value);
         let running = is_running(&value);
+        let removes_at_ms = crate::schedules::once_finished_at(&value)
+            .map(|at| at.saturating_add(crate::schedules::FINISHED_ONCE_RETENTION_MS));
         let trigger = match value.trigger {
             ScheduleTrigger::Event { topic } => ScheduleTriggerResponse::Event { topic },
             ScheduleTrigger::Interval { interval_ms } => {
@@ -361,6 +376,8 @@ impl From<ScheduledPromptRecord> for ScheduleResponse {
                 consecutive_failures: value.counters.consecutive_failures,
             },
             running,
+            done_at_ms: value.done_at_ms,
+            removes_at_ms,
         }
     }
 }

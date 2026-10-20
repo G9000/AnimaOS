@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -13,6 +14,7 @@ import {
   groupSessions,
   presentKinds,
   sessionKey,
+  shouldShowSession,
 } from '../../lib/session-groups';
 
 /** Typing settles this long before the list is searched. */
@@ -296,7 +298,7 @@ function moveBetweenRows(event: KeyboardEvent<HTMLDivElement>) {
 
 /** The sessions list of the sidebar and the mobile drawer (spec §15.1). */
 export function SessionSidebar({
-  sessions,
+  sessions: listed,
   activeKey,
   query,
   onQueryChange,
@@ -309,6 +311,9 @@ export function SessionSidebar({
   onLoadMore,
   ...actions
 }: SessionSidebarProps) {
+  // An automation's check-in thread is not a place to go: its words are in
+  // the main chat.
+  const sessions = useMemo(() => listed.filter(shouldShowSession), [listed]);
   const [text, setText] = useState(query);
   const [kind, setKind] = useState<SessionKind | null>(null);
   const navRef = useRef<HTMLElement>(null);

@@ -10,14 +10,22 @@ import { RUN_OUTCOME_LABELS } from '../../lib/automations';
 import { daemon } from '../../lib/daemon-api';
 import { revealInvisible } from '../../lib/skills';
 
-/** An automation's latest runs, newest first (spec §9.1, §15.4). */
+/** Goes to the main chat, at this run's card when it is loaded. */
+export type ShowInChat = (target: {
+  automationId: string;
+  /** Absent when the whole automation is meant, not one run. */
+  runId?: string | null;
+}) => void;
+
+/** An automation's latest runs, newest first (spec §9.1, §15.4). Everything a
+ *  run said is in the main chat, so each run offers to show it there. */
 export function AutomationHistory({
   agentId,
   automation,
   version,
   online,
   onClose,
-  onOpenSession,
+  onShowInChat,
 }: {
   agentId: string;
   automation: Automation;
@@ -25,7 +33,7 @@ export function AutomationHistory({
   version: number;
   online: boolean;
   onClose: () => void;
-  onOpenSession: (sessionId: string) => void;
+  onShowInChat: ShowInChat;
 }) {
   const contentKey = JSON.stringify([agentId, automation.id, version, online]);
 
@@ -45,7 +53,7 @@ export function AutomationHistory({
         agentId={agentId}
         automation={automation}
         online={online}
-        onOpenSession={onOpenSession}
+        onShowInChat={onShowInChat}
       />
     </aside>
   );
@@ -55,12 +63,12 @@ function AutomationHistoryContent({
   agentId,
   automation,
   online,
-  onOpenSession,
+  onShowInChat,
 }: {
   agentId: string;
   automation: Automation;
   online: boolean;
-  onOpenSession: (sessionId: string) => void;
+  onShowInChat: ShowInChat;
 }) {
   const [runs, setRuns] = useState<AutomationRun[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -110,8 +118,9 @@ function AutomationHistoryContent({
                 <>
                   <span data-outcome="failed">Needs review</span>
                   <p>
-                    Some actions may have already happened. Review the prior
-                    thread and its effects before using Run now or Resume.
+                    Some actions may have already happened. Check what it did in
+                    the main chat, and anything it touched, before using Run now
+                    or Resume.
                   </p>
                 </>
               ) : (
@@ -121,29 +130,19 @@ function AutomationHistoryContent({
               )}
               {run.manual && <span className="automation-badge">Run now</span>}
               {run.errorCode && <code>{run.errorCode}</code>}
-              {run.outcome === 'failed' &&
-              run.errorCode === 'schedule_run_interrupted' ? (
-                run.sessionId ? (
-                  <button
-                    type="button"
-                    className="studio-tool-button"
-                    onClick={() => onOpenSession(run.sessionId as string)}
-                  >
-                    Review thread
-                  </button>
-                ) : (
-                  <p>No saved thread is available.</p>
-                )
-              ) : (
-                run.sessionId && (
-                  <button
-                    type="button"
-                    className="studio-tool-button"
-                    onClick={() => onOpenSession(run.sessionId as string)}
-                  >
-                    Open
-                  </button>
-                )
+              {run.outcome !== 'silent' && (
+                <button
+                  type="button"
+                  className="studio-tool-button"
+                  onClick={() =>
+                    onShowInChat({
+                      automationId: automation.id,
+                      runId: run.runId,
+                    })
+                  }
+                >
+                  Show in chat
+                </button>
               )}
             </li>
           ))}

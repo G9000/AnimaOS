@@ -963,6 +963,7 @@ describe('SettingsPanel access', () => {
 
     view.rerender(<SettingsPanel {...view.props} sections={['profile']} />);
     expect(screen.getByRole('textbox', { name: 'Name' })).toBeVisible();
+    fireEvent.click(screen.getByText('Edit', { exact: true }));
     expect(
       screen.getByRole('textbox', { name: 'System prompt' }),
     ).toBeVisible();
@@ -1246,9 +1247,7 @@ it('replaces a personality style saved at the start of an otherwise empty prompt
   renderPanel(
     agent({ system: '[Personality style]\nBe calm.\n[/Personality style]' }),
   );
-  fireEvent.change(screen.getByLabelText('Add a personality style'), {
-    target: { value: 'direct' },
-  });
+  fireEvent.click(screen.getByRole('radio', { name: 'Direct & practical' }));
   const prompt = screen.getByRole('textbox', {
     name: 'System prompt',
   }) as HTMLTextAreaElement;
@@ -1345,4 +1344,43 @@ it('m67_read_document_profile_replacement_clears_the_opt_in_until_reselected', a
     tools: [...toolNamesForProfile('collaborate'), 'read_document'],
   });
   expect(toolNamesForProfile('collaborate')).not.toContain('read_document');
+});
+
+it('edits identity beside the avatar and preserves instructions when changing personality', async () => {
+  const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+  renderPanel(
+    agent({
+      system: "The owner's name is Julio.\n\nKeep my project instructions.",
+    }),
+    { sections: ['profile'], saveSettings },
+  );
+  expect(screen.getByLabelText('Calls you')).toHaveValue('Julio');
+  expect(
+    screen.getByRole('button', { name: 'Change agent avatar' }),
+  ).toBeVisible();
+  fireEvent.change(screen.getByLabelText('Calls you'), {
+    target: { value: 'Leo' },
+  });
+  fireEvent.click(screen.getByRole('radio', { name: 'Direct & practical' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  await waitFor(() =>
+    expect(saveSettings).toHaveBeenCalledWith({
+      system: expect.stringContaining("The owner's name is Leo."),
+    }),
+  );
+  const prompt = saveSettings.mock.calls[0][0].system;
+  expect(prompt).toContain('Keep my project instructions.');
+  expect(prompt).toContain('Be direct, practical, and concise.');
+  expect(prompt).not.toContain('Julio');
+});
+
+it('keeps profile drafts when switching models is unavailable during unsaved changes', () => {
+  renderPanel(agent(), { sections: ['profile'] });
+  fireEvent.change(screen.getByLabelText('Name'), {
+    target: { value: 'Unsaved Nova' },
+  });
+  const link = screen.getByRole('link', { name: 'Switch' });
+  expect(link).toHaveAttribute('aria-disabled', 'true');
+  expect(fireEvent.click(link)).toBe(false);
+  expect(screen.getByLabelText('Name')).toHaveValue('Unsaved Nova');
 });

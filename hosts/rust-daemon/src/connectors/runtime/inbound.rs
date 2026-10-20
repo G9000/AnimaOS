@@ -275,13 +275,7 @@ impl ConnectorManager {
 /// Without one (the console has not resolved it yet), Telegram keeps its own
 /// conversation.
 fn main_chat_room(state: &DaemonState, agent_id: &str) -> Option<String> {
-    let mut designated = state
-        .sessions
-        .records()
-        .filter(|record| record.agent_id == agent_id && record.main_chat);
-    let record = designated.next()?;
-    if designated.next().is_some() || record.archived || !record.has_main_chat_identity() {
-        return None;
-    }
-    Some(record.room_id().to_owned())
+    state
+        .main_chat_session(agent_id)
+        .map(|record| record.room_id().to_owned())
 }

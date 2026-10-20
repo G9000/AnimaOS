@@ -112,6 +112,48 @@ describe('useAutomations', () => {
     expect(daemon.listAutomations).toHaveBeenCalledTimes(4);
   });
 
+  it('marks a reminder done and snoozes it, reading the list again, and rejects refusals', async () => {
+    const complete = vi
+      .spyOn(daemon, 'completeAutomation')
+      .mockResolvedValue(automationFixture('schedule-1', { doneAtMs: 5 }));
+    const snooze = vi
+      .spyOn(daemon, 'snoozeAutomation')
+      .mockRejectedValueOnce(
+        new DaemonHttpError(409, { error: 'It is not a one-time reminder' }),
+      )
+      .mockResolvedValue(automationFixture('schedule-1'));
+    const { result } = renderHook(() =>
+      useAutomations({
+        agentId: 'agent-main',
+        version: 0,
+        epoch: 0,
+        enabled: true,
+      }),
+    );
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+
+    await act(async () => {
+      expect(await result.current.complete(result.current.automations[0])).toBe(
+        true,
+      );
+    });
+    expect(complete).toHaveBeenCalledWith('agent-main', 'schedule-1');
+    expect(daemon.listAutomations).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await expect(
+        result.current.snooze(result.current.automations[0], 15),
+      ).rejects.toThrow('It is not a one-time reminder');
+    });
+    expect(result.current.error).toBeNull();
+    await act(async () => {
+      expect(
+        await result.current.snooze(result.current.automations[0], 60),
+      ).toBe(true);
+    });
+    expect(snooze).toHaveBeenLastCalledWith('agent-main', 'schedule-1', 60);
+  });
+
   it('rejects an undo the daemon refused, so the card can say why', async () => {
     const refusal = new DaemonHttpError(409, {
       error: 'This automation is already running',

@@ -54,6 +54,15 @@ const GROUP_ORDER: readonly SessionGroupLabel[] = [
   'Older',
 ];
 
+/**
+ * Whether a session is something the owner navigates to. An automation's own
+ * check-in thread is not: everything it says lands in the main chat, and the
+ * thread stays an implementation detail.
+ */
+export function shouldShowSession(session: Pick<Session, 'kind'>): boolean {
+  return session.kind !== 'checkin';
+}
+
 /** Sessions are keyed by agent and id; helper sessions belong to other agents. */
 export function sessionKey(session: Pick<Session, 'agentId' | 'id'>): string {
   return `${session.agentId}\u0000${session.id}`;

@@ -1102,7 +1102,7 @@ impl ToolRegistry {
         registry.register(
             tool_descriptor(
                 "create_automation",
-                "Schedule a prompt that runs you again later, in the automation's own thread or in the owner's Telegram chat. For a one-time local clock request, pass a phrase such as 'today at 11:50pm' so it is resolved on the owner's clock. The owner sees it in this chat with Undo and on the Automations page. Its runs must be at least 5 minutes apart; you may have at most 20 automations.",
+                "Schedule a prompt that runs you again later, in its own thread, Telegram, or Discord. Retain the returned automation ID and scheduled time. Scheduling or spoke does not prove sending or receipt. For an explicitly user-requested one-time reminder test, set verifyOnce=true to schedule exactly one status report after its due time. Do not invent successful delivery, poll indefinitely, or create a recurring monitor unless explicitly requested and supported. For local clock requests use a phrase such as 'today at 11:50pm'. Runs must be at least 5 minutes apart; at most 20 automations (the verification uses one slot too).",
                 object_parameters(vec![
                     required_parameter(
                         "prompt",
@@ -1111,13 +1111,14 @@ impl ToolRegistry {
                     required_parameter(
                         "schedule",
                         non_blank_string_parameter(
-                            "A 5-field cron expression or @hourly, @daily, @weekly, @monthly; \"every <n> minutes|hours|days\"; \"today at 11:50pm\", \"tomorrow at 15:00\", or \"at 11:50pm\" for one run in timeZone (the owner's zone when absent); \"at <RFC 3339 time>\" also works; or \"on <event.topic>\" such as on task.completed",
+                            "A 5-field cron expression or @hourly, @daily, @weekly, @monthly; \"every <n> minutes|hours|days\"; \"today at 11:50pm\", \"tomorrow at 15:00\", or \"at 11:50pm\" for one run in timeZone (the owner's zone when absent); \"at <RFC 3339 time>\" also works; or \"on <event.topic>\" such as on task.completed. A single time such as \"at 2pm today\" or \"tomorrow at 9\" must use the one-time form (today at / tomorrow at / at <time>), never a daily or recurring schedule",
                         ),
                     ),
                     optional_parameter(
                         "name",
                         string_parameter("A short name, at most 80 characters; from the prompt when absent"),
                     ),
+                    optional_parameter("verifyOnce", boolean_parameter("Only when the user explicitly requests a reminder test/status follow-up: save one status check 5 seconds after a one-time reminder's due time. Default false; requires check_automation_status. Never creates a recurring watcher.")),
                     optional_parameter(
                         "timeZone",
                         string_parameter("IANA time zone for cron schedules, local one-time clock phrases, and active hours, such as Europe/London; the owner's time zone when absent"),
@@ -1125,7 +1126,7 @@ impl ToolRegistry {
                     optional_parameter(
                         "target",
                         string_enum_parameter(
-                            "Delivery destination: its own thread (the default), the owner's Telegram chat, or the configured Discord home channel",
+                            "Where the result is delivered: thread (the default) posts it in the owner's main chat; telegram posts it in the main chat and also sends a copy to the owner's Telegram private chat; discord posts it to the configured Discord home channel and leaves a one-line note in the main chat",
                             &["thread", "telegram", "discord"],
                         ),
                     ),
@@ -1154,10 +1155,14 @@ impl ToolRegistry {
         registry.register(
             tool_descriptor(
                 "list_automations",
-                "List your automations: id, name, schedule, whether each is on, its next run, and its last outcome.",
+                "List your automations: id, name, schedule, whether each is on, its next run, and its last execution outcome. An outcome such as spoke does not establish sending or receipt; use check_automation_status for channel evidence.",
                 object_parameters(vec![]),
             ),
             automations::list_automations,
+        );
+        registry.register(
+            tool_descriptor("check_automation_status", "Read a specific reminder's latest occurrence once, using its retained automation ID. Explains scheduled, sent, failed, or delivery unconfirmed with timestamps and channel evidence. Sent confirms channel acceptance or saving to the workspace thread only. Never infer device delivery or reading from ran/spoke. If receipt is unsupported, say the message was sent but receipt cannot be verified. This tool never waits, polls, sends, or schedules work.", object_parameters(vec![required_parameter("id", non_blank_string_parameter("The original reminder's automation ID"))])),
+            automations::check_automation_status,
         );
         registry.register(
             tool_descriptor(
@@ -1175,7 +1180,7 @@ impl ToolRegistry {
                 required_parameter("id", non_blank_string_parameter("Your automation id from list_automations")),
                 optional_parameter("name", non_blank_string_parameter("New display name")),
                 optional_parameter("prompt", non_blank_string_parameter("New scheduled task prompt")),
-                optional_parameter("schedule", non_blank_string_parameter("Cron, every <n> minutes|hours|days, local phrases like today at 11:50pm, at <RFC3339>, or on <event.topic>")),
+                optional_parameter("schedule", non_blank_string_parameter("Cron, every <n> minutes|hours|days, local phrases like today at 11:50pm, at <RFC3339>, or on <event.topic>. A single time (\"at 2pm today\", \"tomorrow at 9\") must use the one-time form, never daily")),
                 optional_parameter("timeZone", non_blank_string_parameter("IANA time zone for schedule or activeHours")),
                 optional_parameter("activeHours", object_parameter(vec![
                     required_parameter("start", non_blank_string_parameter("HH:MM start")),
@@ -1183,7 +1188,7 @@ impl ToolRegistry {
                     optional_parameter("days", array_parameter("Days 0 Sunday through 6 Saturday", bounded_integer_parameter("Weekday", 0, 6), Some(1))),
                 ])),
                 optional_parameter("clearActiveHours", boolean_parameter("Remove active hours; cannot be combined with activeHours")),
-                optional_parameter("target", string_enum_parameter("Current owner delivery target; discord requires a configured home channel", &["thread", "telegram", "discord"])),
+                optional_parameter("target", string_enum_parameter("Where the result is delivered: thread posts in the owner's main chat; telegram posts in the main chat and also sends a copy to the owner's Telegram private chat; discord posts to the configured Discord home channel (which must be configured) and leaves a one-line note in the main chat", &["thread", "telegram", "discord"])),
                 optional_parameter("enabled", boolean_parameter("Whether the automation is on")),
             ])), automations::update_automation,
         );
@@ -1198,6 +1203,36 @@ impl ToolRegistry {
         registry.register(
             tool_descriptor("trigger_automation", "Admit one manual occurrence of your automation without changing its schedule or enabled state. Returns after durable admission, before the result. Only an active direct user run can call this; scheduled, helper and delegated runs cannot trigger more runs.", object_parameters(vec![required_parameter("id", non_blank_string_parameter("Your automation id"))])),
             automations::trigger_automation,
+        );
+        registry.register(
+            tool_descriptor(
+                "complete_reminder",
+                "Mark a one-time reminder done (from the reminder card in the main chat, e.g. when the owner says it's done). It leaves the Automations list a day later.",
+                object_parameters(vec![required_parameter(
+                    "id",
+                    non_blank_string_parameter("The reminder's automation id, from the reminder card"),
+                )]),
+            ),
+            automations::complete_reminder,
+        );
+        registry.register(
+            tool_descriptor(
+                "snooze_reminder",
+                "Fire a one-time reminder again `minutes` from now.",
+                object_parameters(vec![
+                    required_parameter(
+                        "id",
+                        non_blank_string_parameter(
+                            "The reminder's automation id, from the reminder card",
+                        ),
+                    ),
+                    required_parameter(
+                        "minutes",
+                        bounded_integer_parameter("Minutes from now, 1 to 1440", 1, 1440),
+                    ),
+                ]),
+            ),
+            automations::snooze_reminder,
         );
         registry.register(
             tool_descriptor(

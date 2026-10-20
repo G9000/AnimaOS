@@ -6,6 +6,7 @@ struct BlockedDelivery {
     inner: FakeTransport,
     entered: Semaphore,
     release: Semaphore,
+    valid_receipt: AtomicBool,
 }
 impl Default for BlockedDelivery {
     fn default() -> Self {
@@ -13,6 +14,7 @@ impl Default for BlockedDelivery {
             inner: FakeTransport::default(),
             entered: Semaphore::new(0),
             release: Semaphore::new(0),
+            valid_receipt: AtomicBool::new(false),
         }
     }
 }
@@ -39,7 +41,20 @@ impl TelegramTransport for BlockedDelivery {
     ) -> Result<Vec<TelegramSentMessage>, TelegramTransportError> {
         self.entered.add_permits(1);
         self.release.acquire().await.unwrap().forget();
-        self.inner.send_message(token, chat, text).await
+        let result = self.inner.send_message(token, chat, text).await;
+        if result.is_ok() && self.valid_receipt.load(Ordering::SeqCst) {
+            Ok(vec![TelegramSentMessage {
+                message_id: "101".into(),
+                chat: TelegramChatMetadata {
+                    id: chat.into(),
+                    kind: TelegramChatKind::Private,
+                    title: None,
+                    username: None,
+                },
+            }])
+        } else {
+            result
+        }
     }
 }
 async fn setup() -> (ConnectorManager, Arc<BlockedDelivery>, String) {
@@ -98,6 +113,159 @@ fn send(
     let manager = manager.clone();
     let id = id.to_owned();
     tokio::spawn(async move { manager.deliver_pending_once(id).await })
+}
+
+#[tokio::test]
+async fn reminder_transport_journals_sent_rejected_ambiguous_and_missing_receipts() {
+    use crate::schedules::delivery::{
+        DeliveryChannel, DeliveryEvent, DeliveryResult, ReminderStatus,
+    };
+    use crate::schedules::{test_automation, ScheduleLastFired};
+    for mode in ["sent", "rejected", "ambiguous", "missing"] {
+        let (manager, transport, id) = setup().await;
+        transport
+            .valid_receipt
+            .store(mode == "sent", Ordering::SeqCst);
+        transport
+            .inner
+            .revoked_send
+            .store(mode == "rejected", Ordering::SeqCst);
+        transport
+            .inner
+            .remaining_send_failures
+            .store(usize::from(mode == "ambiguous"), Ordering::SeqCst);
+        {
+            let mut state = manager.state.write().await;
+            let agent = state.outbound["first"].agent_id.clone();
+            let mut record = test_automation(&agent, "reminder");
+            record.last_fired = Some(ScheduleLastFired {
+                fired_at_ms: 10,
+                scheduled_at_ms: Some(9),
+                run_idempotency_key: "occurrence".into(),
+                manual: false,
+            });
+            record.delivery_events.push(DeliveryEvent {
+                occurrence_id: "occurrence".into(),
+                outbound_id: Some("first".into()),
+                scheduled_at_ms: Some(9),
+                channel: DeliveryChannel::Telegram,
+                attempted_at_ms: None,
+                completed_at_ms: None,
+                result: DeliveryResult::Unknown,
+                provider_message_ids: Vec::new(),
+            });
+            state.schedules.insert(record.id.clone(), record);
+        }
+        let delivering = send(&manager, &id);
+        within("reminder transport enters", transport.entered.acquire())
+            .await
+            .unwrap()
+            .forget();
+        // In-flight attempts already have durable unknown evidence.
+        assert_eq!(
+            manager.state.read().await.schedules["reminder"]
+                .delivery_events
+                .last()
+                .unwrap()
+                .result,
+            DeliveryResult::Unknown
+        );
+        transport.release.add_permits(1);
+        let _ = within("reminder settlement", delivering).await.unwrap();
+        let state = manager.state.read().await;
+        let record = &state.schedules["reminder"];
+        let status = ReminderStatus::from_record(record, super::super::now_ms());
+        assert_eq!(
+            status.status,
+            match mode {
+                "sent" => "sent",
+                "rejected" => "failed",
+                _ => "delivery_unconfirmed",
+            }
+        );
+        let event = status.delivery_events.last().unwrap();
+        assert!(event.attempted_at_ms.is_some());
+        assert!(event.completed_at_ms >= event.attempted_at_ms);
+        assert!(!status.receipt_verified);
+        if mode == "sent" {
+            assert_eq!(event.provider_message_ids, vec!["101"]);
+        }
+        drop(state);
+        manager.shutdown().await;
+    }
+}
+
+#[tokio::test]
+async fn reminder_success_with_failed_settlement_save_remains_unconfirmed() {
+    use crate::schedules::delivery::{
+        DeliveryChannel, DeliveryEvent, DeliveryResult, ReminderStatus,
+    };
+    use crate::schedules::{test_automation, ScheduleLastFired};
+    let (manager, transport, id) = setup().await;
+    transport.valid_receipt.store(true, Ordering::SeqCst);
+    {
+        let mut state = manager.state.write().await;
+        let mut record = test_automation(&state.outbound["first"].agent_id, "reminder");
+        record.last_fired = Some(ScheduleLastFired {
+            fired_at_ms: 71_000,
+            scheduled_at_ms: Some(70_000),
+            run_idempotency_key: "occurrence".into(),
+            manual: false,
+        });
+        record.delivery_events.push(DeliveryEvent {
+            occurrence_id: "occurrence".into(),
+            outbound_id: Some("first".into()),
+            scheduled_at_ms: Some(70_000),
+            channel: DeliveryChannel::Telegram,
+            attempted_at_ms: None,
+            completed_at_ms: None,
+            result: DeliveryResult::Unknown,
+            provider_message_ids: Vec::new(),
+        });
+        state.schedules.insert(record.id.clone(), record);
+    }
+    let delivering = send(&manager, &id);
+    within("reminder send enters", transport.entered.acquire())
+        .await
+        .unwrap()
+        .forget();
+    let gate = manager
+        .state
+        .write()
+        .await
+        .install_test_control_plane_save_gate(true);
+    transport.release.add_permits(1);
+    within("settlement save enters", gate.entered.acquire())
+        .await
+        .unwrap()
+        .forget();
+    gate.release.add_permits(1);
+    assert_eq!(
+        within("settlement fails", delivering).await.unwrap(),
+        Err(super::super::ConnectorManagerError::Persistence)
+    );
+    let state = manager.state.read().await;
+    let status = ReminderStatus::from_record(&state.schedules["reminder"], super::super::now_ms());
+    assert_eq!(status.status, "delivery_unconfirmed");
+    assert!(status
+        .delivery_events
+        .last()
+        .unwrap()
+        .attempted_at_ms
+        .is_some());
+    assert!(status
+        .delivery_events
+        .last()
+        .unwrap()
+        .completed_at_ms
+        .is_none());
+    assert_eq!(
+        transport.inner.sent.lock().unwrap().len(),
+        1,
+        "transport accepted the send, but its settlement was not saved"
+    );
+    drop(state);
+    manager.shutdown().await;
 }
 #[tokio::test]
 async fn blocked_delivery_releases_transaction_and_duplicate_claim_preserves_order() {

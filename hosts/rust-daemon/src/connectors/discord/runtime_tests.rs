@@ -309,6 +309,92 @@ async fn setup() -> (DiscordManager, Arc<FakeTransport>, DiscordConnectorRecord)
     );
     (manager, transport, c)
 }
+
+#[tokio::test]
+async fn reminder_discord_requires_all_chunks_and_preserves_partial_send_uncertainty() {
+    use crate::schedules::delivery::{
+        DeliveryChannel, DeliveryEvent, DeliveryResult, ReminderStatus,
+    };
+    use crate::schedules::{test_automation, ScheduleLastFired};
+    for error in [
+        None,
+        Some(DiscordTransportError::PermissionDenied),
+        Some(DiscordTransportError::Uncertain),
+    ] {
+        let (manager, transport, c) = setup().await;
+        let outbound = outbound_for(&c, "reminder-reply", &"x".repeat(2100), false);
+        let outbound_id = outbound.id.clone();
+        {
+            let mut state = manager.state.write().await;
+            let mut schedule = test_automation(&c.agent_id, "reminder");
+            schedule.last_fired = Some(ScheduleLastFired {
+                fired_at_ms: 71_000,
+                scheduled_at_ms: Some(70_000),
+                run_idempotency_key: "occurrence".into(),
+                manual: false,
+            });
+            schedule.delivery_events.push(DeliveryEvent {
+                occurrence_id: "occurrence".into(),
+                outbound_id: Some(outbound_id.clone()),
+                scheduled_at_ms: Some(70_000),
+                channel: DeliveryChannel::Discord,
+                attempted_at_ms: None,
+                completed_at_ms: None,
+                result: DeliveryResult::Unknown,
+                provider_message_ids: Vec::new(),
+            });
+            state.schedules.insert(schedule.id.clone(), schedule);
+            state.discord_outbound.insert(outbound_id.clone(), outbound);
+        }
+        transport
+            .results
+            .lock()
+            .unwrap()
+            .push_back(Ok(DiscordSendReceipt {
+                message_id: "101".into(),
+                channel_id: c.channel.id.clone(),
+            }));
+        assert!(manager.deliver_one(c.id.clone()).await.unwrap());
+        assert_eq!(
+            ReminderStatus::from_record(
+                &manager.state.read().await.schedules["reminder"],
+                now_ms()
+            )
+            .status,
+            "delivery_unconfirmed"
+        );
+        if let Some(error) = error {
+            transport.results.lock().unwrap().push_back(Err(error));
+        } else {
+            transport
+                .results
+                .lock()
+                .unwrap()
+                .push_back(Ok(DiscordSendReceipt {
+                    message_id: "102".into(),
+                    channel_id: c.channel.id.clone(),
+                }));
+        }
+        assert!(manager.deliver_one(c.id.clone()).await.unwrap());
+        let state = manager.state.read().await;
+        let status = ReminderStatus::from_record(&state.schedules["reminder"], now_ms());
+        assert_eq!(
+            status.status,
+            if error.is_none() {
+                "sent"
+            } else {
+                "delivery_unconfirmed"
+            }
+        );
+        assert!(!status.receipt_verified);
+        assert!(status
+            .delivery_events
+            .last()
+            .unwrap()
+            .provider_message_ids
+            .contains(&"101".into()));
+    }
+}
 fn incoming(c: &DiscordConnectorRecord, id: &str) -> DiscordMessage {
     DiscordMessage {
         id: id.into(),

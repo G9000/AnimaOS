@@ -1253,3 +1253,67 @@ describe('the note after a fallback', () => {
     ]);
   });
 });
+
+describe('automation messages in the main chat', () => {
+  const metadata = {
+    kind: 'automation',
+    automationId: 'rem',
+    automationName: 'Call the bank',
+    reminder: true,
+    body: 'Their cut-off is 3:00 PM.',
+    delivery: 'main',
+    runId: 'run-1',
+    firedAtMs: 5,
+  };
+
+  it('turns an assistant message with automation metadata into a card item', () => {
+    const items = buildTranscript({
+      messages: [
+        message('hi', 'User', 'Hello'),
+        message('card', 'Assistant', 'written for the model', metadata),
+      ],
+    });
+    expect(items.map((item) => item.kind)).toEqual(['message', 'automation']);
+    expect(items[1]).toMatchObject({
+      kind: 'automation',
+      key: 'card',
+      meta: { kind: 'automation', automationName: 'Call the bank' },
+    });
+  });
+
+  it('turns a Discord note into an item too', () => {
+    const items = buildTranscript({
+      messages: [
+        message('note', 'Assistant', 'text', {
+          kind: 'automationNote',
+          automationId: 'weekly',
+          automationName: 'Weekly review',
+          body: 'full text',
+          delivery: 'discord',
+          destinationLabel: '#home',
+          runId: 'run-2',
+          firedAtMs: 6,
+        }),
+      ],
+    });
+    expect(items[0]).toMatchObject({
+      kind: 'automation',
+      meta: { kind: 'automationNote', destinationLabel: '#home' },
+    });
+  });
+
+  it('keeps an ordinary reply, and the same metadata on a user message, as messages', () => {
+    const items = buildTranscript({
+      messages: [
+        message('reply', 'Assistant', 'Sure.'),
+        message('odd', 'User', 'text', metadata),
+        message('broken', 'Assistant', 'text', { kind: 'automation' }),
+      ],
+    });
+    expect(items.map((item) => item.kind)).toEqual([
+      'message',
+      'message',
+      'message',
+    ]);
+  });
+});

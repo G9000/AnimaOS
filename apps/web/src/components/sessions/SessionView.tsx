@@ -130,6 +130,8 @@ export interface SessionViewProps {
     onReturnToLatest(): void;
   };
   jumpRequestKey?: number;
+  /** The transcript's newest message is in view (or not). */
+  onAtBottomChange?: (atBottom: boolean) => void;
   /** Activity outside a historical window that refreshes its context estimate. */
   contextRefreshKey?: number | string;
 }
@@ -326,6 +328,7 @@ export function SessionView({
   skillDrafts,
   historyAnchor,
   jumpRequestKey,
+  onAtBottomChange,
   contextRefreshKey,
 }: SessionViewProps) {
   // The session record names its agent, so a helper's session saves to that
@@ -559,6 +562,7 @@ export function SessionView({
           !historyAnchor || (!historyAnchor.loading && !historyAnchor.error)
         }
         onJumpToLatest={historyAnchor?.onReturnToLatest}
+        onAtBottomChange={onAtBottomChange}
       />
       {session?.kind === 'chat' && skillDrafts && (
         <SessionSkillDrafts

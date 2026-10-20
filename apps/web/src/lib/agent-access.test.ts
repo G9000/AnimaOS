@@ -17,6 +17,7 @@ const COMMON_TOOLS = [
   'search_conversations',
   'load_skill',
   'list_automations',
+  'check_automation_status',
   'clarify',
 ];
 
@@ -40,6 +41,8 @@ const COLLABORATE_TOOLS = [
   'propose_plan',
   'create_automation',
   'pause_automation',
+  'complete_reminder',
+  'snooze_reminder',
 ];
 
 const OPERATE_TOOLS = [

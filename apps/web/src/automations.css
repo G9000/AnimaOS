@@ -152,3 +152,314 @@
   color: var(--color-ink-3);
   font-size: 12px;
 }
+
+/* ── In the main chat: what an automation run says ──
+ * Quiet surfaces. The accent is for one thing: a reminder that needs you. */
+.automation-card,
+.automation-note,
+.automation-toast {
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 4px;
+  background: rgb(15 19 22 / 0.9);
+  color: var(--color-ink);
+}
+.automation-card {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+}
+.automation-card[data-state='due'],
+.automation-toast[data-kind='reminder'] {
+  border-color: rgb(var(--color-accent-rgb) / 0.6);
+}
+.automation-card[data-state='done'],
+.automation-card[data-state='gone'],
+.automation-card[data-state='earlier'] {
+  opacity: 0.62;
+}
+.automation-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.automation-card-icon {
+  flex: none;
+  color: var(--color-ink-2);
+}
+.automation-card[data-state='due'] .automation-card-icon {
+  color: var(--color-accent);
+}
+.automation-card-titles {
+  min-width: 0;
+  flex: 1;
+}
+.automation-card-title,
+.automation-toast-title {
+  color: var(--color-ink);
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.automation-card-sub,
+.automation-toast-detail {
+  margin-top: 1px;
+  color: var(--color-ink-2);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.automation-card-time {
+  flex: none;
+  color: var(--color-ink-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.automation-card-needs {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  border: 1px solid rgb(var(--color-accent-rgb) / 0.55);
+  border-radius: 2px;
+  background: rgb(var(--color-accent-rgb) / 0.12);
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.automation-card-body {
+  padding: 10px 12px;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.automation-card-foot,
+.automation-toast-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+}
+.automation-card-actions,
+.automation-toast-actions,
+.automation-card-later {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.automation-card-actions .studio-tool-button,
+.automation-toast-actions .studio-tool-button,
+.automation-card-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 9px;
+  border-radius: 2px;
+  font-size: 12px;
+}
+.automation-card-primary {
+  border: 1px solid transparent;
+  background: var(--color-ink);
+  color: var(--color-abyss);
+  font-weight: 500;
+  cursor: pointer;
+}
+.automation-card-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.automation-card-also {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-ink-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.automation-card-problem {
+  padding: 0 12px 10px;
+}
+
+/* A line, not a card: the text went somewhere else. */
+.automation-note {
+  display: flex;
+  flex-direction: column;
+}
+.automation-note-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+.automation-note-text {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.automation-note-link,
+.automation-toast-open {
+  flex: none;
+  border: 0;
+  background: none;
+  color: var(--color-ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+.automation-note-link:hover,
+.automation-toast-open:hover {
+  text-decoration: underline;
+}
+.automation-note-toggle,
+.automation-toast-close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  color: var(--color-ink-2);
+  cursor: pointer;
+}
+.automation-note-toggle:hover,
+.automation-toast-close:hover {
+  color: var(--color-ink);
+}
+.automation-note[data-open] .automation-note-toggle svg {
+  transform: rotate(180deg);
+}
+.automation-note-body {
+  padding: 8px 12px 10px 36px;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  color: var(--color-ink-2);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* ── Toasts: top-right under the bar, newest on top ── */
+.automation-toasts {
+  position: fixed;
+  top: calc(var(--safe-area-top) + 60px);
+  right: calc(var(--safe-area-right) + 16px);
+  z-index: 40;
+  display: flex;
+  width: min(380px, calc(100vw - 32px));
+  flex-direction: column;
+  gap: 8px;
+}
+.automation-toast {
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.55);
+  backdrop-filter: blur(24px);
+}
+.automation-toast[data-kind='reminder'] {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 0;
+}
+.automation-toast-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.automation-toast-actions {
+  margin-top: 4px;
+}
+.automation-toast-actions .automation-toast-open {
+  margin-left: auto;
+}
+.automation-toast-foot {
+  margin: 4px -12px 0;
+}
+.automation-toast-stays {
+  color: var(--color-ink-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.automation-toast-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.automation-toast-lines {
+  min-width: 0;
+  flex: 1;
+}
+.automation-toast-progress {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: rgb(255 255 255 / 0.4);
+  transform-origin: left;
+  animation: automation-toast-progress 8s linear forwards;
+}
+.automation-toast-progress[data-paused] {
+  animation: none;
+}
+@keyframes automation-toast-progress {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .automation-toast-progress {
+    animation: none;
+  }
+}
+
+/* ── Settings > Automations: grouped rows with destination chips ── */
+.automations-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.automations-group-title {
+  color: var(--color-ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+.automations-group-note,
+.automation-help {
+  color: var(--color-ink-3);
+  font-size: 12px;
+}
+.automation-row[data-done] {
+  opacity: 0.7;
+}
+.automation-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+.automation-chip {
+  border: 1px solid var(--color-line);
+  border-radius: 2px;
+  padding: 1px 7px;
+  background: var(--color-abyss);
+  color: var(--color-ink-2);
+  font-size: 11px;
+}
