@@ -62,11 +62,15 @@ pub fn server_env(
         format!("http://127.0.0.1:{}", port),
     );
     put("ANIMAOS_RS_KEYCHAIN_NAMESPACE", "installed".to_string());
-    if let Ok(token) = std::fs::read_to_string(&paths.admin_token) {
-        let token = token.trim();
-        if !token.is_empty() {
-            put("ANIMA_LOCAL_ADMIN_TOKEN", token.to_string());
-        }
+    // The path, not the token: other processes of the same user can read a
+    // process's environment.
+    let has_admin_token =
+        std::fs::read_to_string(&paths.admin_token).is_ok_and(|token| !token.trim().is_empty());
+    if has_admin_token && !process_env.contains_key("ANIMA_LOCAL_ADMIN_TOKEN") {
+        put(
+            "ANIMA_LOCAL_ADMIN_TOKEN_FILE",
+            paths.admin_token.to_string_lossy().into_owned(),
+        );
     }
     out
 }
@@ -102,6 +106,7 @@ mod tests {
         );
         assert!(!env.contains_key("ANIMAOS_WORKSPACE_ROOT"));
         assert!(!env.contains_key("ANIMA_LOCAL_ADMIN_TOKEN"));
+        assert!(!env.contains_key("ANIMA_LOCAL_ADMIN_TOKEN_FILE"));
         assert_eq!(
             env.contains_key("ANIMAOS_RS_CHECKPOINT_ROOT"),
             cfg!(windows)
@@ -137,7 +142,15 @@ mod tests {
         };
         let env = server_env(&cfg, &paths, &BTreeMap::new());
         assert_eq!(env["ANIMAOS_WORKSPACE_ROOT"], "/work/space");
-        assert_eq!(env["ANIMA_LOCAL_ADMIN_TOKEN"], "secret-token");
+        // The token's path, not the token: a process's environment is not secret.
+        assert_eq!(
+            env["ANIMA_LOCAL_ADMIN_TOKEN_FILE"],
+            paths.admin_token.to_string_lossy()
+        );
+        assert!(!env.values().any(|value| value.contains("secret-token")));
+        // An inherited token still wins over the file.
+        let process = BTreeMap::from([("ANIMA_LOCAL_ADMIN_TOKEN".to_string(), "x".to_string())]);
+        assert!(!server_env(&cfg, &paths, &process).contains_key("ANIMA_LOCAL_ADMIN_TOKEN_FILE"));
         assert_eq!(env["ANIMAOS_RS_PORT"], "9100");
         assert_eq!(env["ANIMA_PUBLIC_BASE_URL"], "http://127.0.0.1:9100");
     }

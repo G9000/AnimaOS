@@ -1,5 +1,5 @@
 //! The drain and shutdown routes a supervisor (admin token) and the console
-//! (allowed Origin) call.
+//! (allowed Origin plus a console session) call.
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -137,6 +137,71 @@ async fn send_body(
     )
 }
 
+/// A console session's two halves, as the browser holds them.
+struct Console {
+    cookie: String,
+    token: String,
+}
+
+impl Console {
+    /// What the console's lifecycle requests carry.
+    fn headers(&self) -> [(&str, &str); 3] {
+        [
+            ("origin", OWNER_ORIGIN),
+            ("cookie", self.cookie.as_str()),
+            ("x-anima-console-session", self.token.as_str()),
+        ]
+    }
+}
+
+async fn trade_code(
+    app: &axum::Router,
+    code: &str,
+    auth: &[(&str, &str)],
+) -> axum::response::Response {
+    let mut builder = Request::builder()
+        .method("POST")
+        .uri("/api/system/session")
+        .header("host", "127.0.0.1:8787")
+        .header("content-type", "application/json");
+    for (name, value) in auth {
+        builder = builder.header(*name, *value);
+    }
+    let body = serde_json::json!({ "code": code }).to_string();
+    app.clone()
+        .oneshot(builder.body(Body::from(body)).unwrap())
+        .await
+        .unwrap()
+}
+
+/// Opens a console session the way the console does: a launch code from
+/// the admin token, traded from the console's origin.
+async fn open_console(app: &axum::Router) -> Console {
+    let code = crate::console_session::launch_code(ADMIN_TOKEN);
+    let response = trade_code(app, &code, &[("origin", OWNER_ORIGIN)]).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let set_cookie = response.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    for attribute in ["HttpOnly", "SameSite=Strict", "Path=/api/system"] {
+        assert!(set_cookie.contains(attribute), "{set_cookie}");
+    }
+    // A browser-session cookie: none of it is meant to reach the disk.
+    assert!(!set_cookie.contains("Max-Age"), "{set_cookie}");
+    assert!(!set_cookie.contains("Expires"), "{set_cookie}");
+    assert!(
+        set_cookie.starts_with("anima_console_8787="),
+        "{set_cookie}"
+    );
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    Console {
+        cookie: set_cookie.split(';').next().unwrap().to_string(),
+        token: body["token"].as_str().unwrap().to_string(),
+    }
+}
+
 fn idle() -> Value {
     serde_json::json!({
         "chatRuns": 0, "queuedRuns": 0, "swarmRuns": 0, "helperRuns": 0,
@@ -161,10 +226,23 @@ async fn drain_routes_require_local_owner() {
             assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path} {auth:?}");
         }
     }
+    // An approved Origin alone, which any local process can send, may read
+    // but not act.
+    for (method, path) in [
+        ("POST", "/api/system/drain"),
+        ("DELETE", "/api/system/drain"),
+        ("POST", "/api/system/shutdown"),
+    ] {
+        let (status, body) = send(&app, method, path, &origin).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}");
+        assert_eq!(body["code"], "console_session_required", "{method} {path}");
+    }
     let (_, body) = send(&app, "GET", "/api/system/drain", &origin).await;
     assert_eq!(body["draining"], false, "a refused begin changes nothing");
 
-    let (status, body) = send(&app, "POST", "/api/system/drain", &origin).await;
+    let console = open_console(&app).await;
+    let session = console.headers();
+    let (status, body) = send(&app, "POST", "/api/system/drain", &session).await;
     assert_eq!(status, StatusCode::ACCEPTED);
     assert_eq!(
         body,
@@ -178,7 +256,7 @@ async fn drain_routes_require_local_owner() {
         serde_json::json!({"draining": true, "inFlight": idle()})
     );
 
-    let (status, _) = send(&app, "DELETE", "/api/system/drain", &origin).await;
+    let (status, _) = send(&app, "DELETE", "/api/system/drain", &session).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (_, body) = send(&app, "GET", "/api/system/drain", &origin).await;
     assert_eq!(body["draining"], false);
@@ -203,13 +281,8 @@ async fn drain_routes_accept_the_supervisor_admin_token() {
 #[tokio::test]
 async fn a_drain_refuses_new_work_with_503() {
     let app = app();
-    let (status, _) = send(
-        &app,
-        "POST",
-        "/api/system/drain",
-        &[("origin", OWNER_ORIGIN)],
-    )
-    .await;
+    let console = open_console(&app).await;
+    let (status, _) = send(&app, "POST", "/api/system/drain", &console.headers()).await;
     assert_eq!(status, StatusCode::ACCEPTED);
     for (path, body) in [
         ("/api/agents/missing/run", "{}"),
@@ -270,7 +343,8 @@ async fn a_drain_refuses_run_now_with_503() {
         .await
         .unwrap();
     let origin = [("origin", OWNER_ORIGIN)];
-    let (status, _) = send(&app, "POST", "/api/system/drain", &origin).await;
+    let console = open_console(&app).await;
+    let (status, _) = send(&app, "POST", "/api/system/drain", &console.headers()).await;
     assert_eq!(status, StatusCode::ACCEPTED);
 
     let path = format!("/api/agents/{agent_id}/schedules/{}/run", schedule.id);
@@ -286,6 +360,10 @@ async fn a_drain_refuses_run_now_with_503() {
 
 #[tokio::test]
 async fn shutdown_route_stops_server() {
+    // This server's policy comes from the environment. A token no other test
+    // presents leaves their policies' answers as they were.
+    let token = format!("shutdown-test-{}", uuid::Uuid::new_v4());
+    std::env::set_var("ANIMA_LOCAL_ADMIN_TOKEN", &token);
     let state = Arc::new(RwLock::new(DaemonState::new()));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -297,17 +375,24 @@ async fn shutdown_route_stops_server() {
         std::future::pending(),
     ));
 
-    let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
-    let request = format!(
-        "POST /api/system/shutdown HTTP/1.1\r\nHost: {address}\r\nOrigin: {OWNER_ORIGIN}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-    );
-    stream.write_all(request.as_bytes()).await.unwrap();
-    let mut received = Vec::new();
-    tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut received))
-        .await
-        .expect("the shutdown response arrives")
-        .unwrap();
-    let received = String::from_utf8_lossy(&received);
+    let post = |auth: String| async move {
+        let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+        let request = format!(
+            "POST /api/system/shutdown HTTP/1.1\r\nHost: {address}\r\n{auth}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        stream.write_all(request.as_bytes()).await.unwrap();
+        let mut received = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut received))
+            .await
+            .expect("the shutdown response arrives")
+            .unwrap();
+        String::from_utf8_lossy(&received).into_owned()
+    };
+    // A forged Origin, as an agent's `curl` could send, does nothing.
+    let received = post(format!("Origin: {OWNER_ORIGIN}")).await;
+    assert!(received.starts_with("HTTP/1.1 403"), "{received}");
+    let received = post(format!("Authorization: Bearer {token}")).await;
+    std::env::remove_var("ANIMA_LOCAL_ADMIN_TOKEN");
     assert!(received.starts_with("HTTP/1.1 202"), "{received}");
 
     tokio::time::timeout(crate::app::lifecycle::SHUTDOWN_BUDGET, server)
@@ -453,7 +538,8 @@ async fn status_unsupervised_reports_version() {
 async fn action_proxied_with_force() {
     let (url, seen) = fake_supervisor().await;
     let app = supervised(&url);
-    let origin = [("origin", OWNER_ORIGIN)];
+    let console = open_console(&app).await;
+    let origin = console.headers();
 
     let (status, body) = send_body(
         &app,
@@ -519,12 +605,13 @@ async fn action_proxied_with_force() {
 async fn unknown_action_404() {
     let (url, seen) = fake_supervisor().await;
     let app = supervised(&url);
+    let console = open_console(&app).await;
     for action in ["reboot", "drain", "START", "shutdown"] {
         let (status, body) = send(
             &app,
             "POST",
             &format!("/api/system/actions/{action}"),
-            &[("origin", OWNER_ORIGIN)],
+            &console.headers(),
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{action}");
@@ -564,6 +651,7 @@ async fn action_requires_owner() {
 async fn action_rejects_a_malformed_body() {
     let (url, seen) = fake_supervisor().await;
     let app = supervised(&url);
+    let console = open_console(&app).await;
     for body in [
         r#"{"force":"yes"}"#,
         "not json",
@@ -573,7 +661,7 @@ async fn action_rejects_a_malformed_body() {
             &app,
             "POST",
             "/api/system/actions/stop",
-            &[("origin", OWNER_ORIGIN)],
+            &console.headers(),
             json_body(body),
         )
         .await;
@@ -585,13 +673,8 @@ async fn action_rejects_a_malformed_body() {
 #[tokio::test]
 async fn action_unsupervised_409() {
     let app = app();
-    let (status, body) = send(
-        &app,
-        "POST",
-        "/api/system/actions/stop",
-        &[("origin", OWNER_ORIGIN)],
-    )
-    .await;
+    let console = open_console(&app).await;
+    let (status, body) = send(&app, "POST", "/api/system/actions/stop", &console.headers()).await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(
         body,
@@ -613,9 +696,160 @@ async fn supervisor_down_502() {
     assert_eq!(status, StatusCode::BAD_GATEWAY);
     assert_eq!(body, expected);
 
-    let (status, body) = send(&app, "POST", "/api/system/actions/restart", &origin).await;
+    let console = open_console(&app).await;
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/api/system/actions/restart",
+        &console.headers(),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_GATEWAY);
     assert_eq!(body, expected);
+}
+
+#[tokio::test]
+async fn only_a_launch_code_opens_a_console_session() {
+    let app = app();
+    let origin = [("origin", OWNER_ORIGIN)];
+    let status = |response: axum::response::Response| response.status();
+
+    // Not from a browser, from a foreign origin, or forwarded: refused, and
+    // the code stays unspent.
+    let code = crate::console_session::launch_code(ADMIN_TOKEN);
+    for auth in [
+        &[][..],
+        &[("origin", "https://foreign.example.invalid")][..],
+        &[("origin", OWNER_ORIGIN), ("x-forwarded-for", "10.0.0.1")][..],
+        &[("authorization", "Bearer supervisor-admin")][..],
+    ] {
+        let response = trade_code(&app, &code, auth).await;
+        assert_eq!(status(response), StatusCode::FORBIDDEN, "{auth:?}");
+    }
+    assert_eq!(
+        status(trade_code(&app, &code, &origin).await),
+        StatusCode::OK
+    );
+    // A second trade says so, so the owner learns someone else may hold
+    // the session.
+    let (status_code, body) = {
+        let response = trade_code(&app, &code, &origin).await;
+        let status_code = response.status();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        (
+            status_code,
+            serde_json::from_slice::<Value>(&bytes).unwrap(),
+        )
+    };
+    assert_eq!(
+        status_code,
+        StatusCode::CONFLICT,
+        "a code opens one session"
+    );
+    assert_eq!(body["code"], "launch_code_spent");
+    assert!(body["error"].as_str().unwrap().contains("already used"));
+    // Codes nobody signed with this admin token.
+    for code in [
+        crate::console_session::launch_code("another-admin-token"),
+        "1.2.3".to_string(),
+        String::new(),
+    ] {
+        let response = trade_code(&app, &code, &origin).await;
+        assert_eq!(status(response), StatusCode::FORBIDDEN, "{code}");
+    }
+}
+
+/// What an agent's shell can send without the owner: any headers, any path
+/// spelling, and whatever it could scrape or lure out of the browser. None
+/// of it stops, updates or drains Anima, and nothing reaches the supervisor.
+#[tokio::test]
+async fn forged_lifecycle_requests_are_refused() {
+    let (url, seen) = fake_supervisor().await;
+    let app = supervised(&url);
+    let console = open_console(&app).await;
+    let other_port = console
+        .cookie
+        .replacen("anima_console_8787=", "anima_console_9999=", 1);
+    let forged: [&[(&str, &str)]; 7] = [
+        // `curl -H 'Origin: http://127.0.0.1:8787' …`
+        &[("origin", OWNER_ORIGIN)],
+        // …dressed as a same-origin browser fetch.
+        &[
+            ("origin", OWNER_ORIGIN),
+            ("sec-fetch-site", "same-origin"),
+            ("referer", "http://localhost:4200/"),
+        ],
+        // The token half scraped from the browser profile, without the cookie.
+        &[
+            ("origin", OWNER_ORIGIN),
+            ("x-anima-console-session", console.token.as_str()),
+        ],
+        // The cookie half lured to a page on another port, without the token.
+        &[
+            ("origin", OWNER_ORIGIN),
+            ("cookie", console.cookie.as_str()),
+        ],
+        // One half passed off as the other.
+        &[
+            ("origin", OWNER_ORIGIN),
+            ("cookie", console.cookie.as_str()),
+            ("x-anima-console-session", console.cookie.as_str()),
+        ],
+        // A cookie this daemon's port didn't set.
+        &[
+            ("origin", OWNER_ORIGIN),
+            ("cookie", other_port.as_str()),
+            ("x-anima-console-session", console.token.as_str()),
+        ],
+        // The session, from a page that isn't the console.
+        &[
+            ("origin", "http://127.0.0.1:9999"),
+            ("cookie", console.cookie.as_str()),
+            ("x-anima-console-session", console.token.as_str()),
+        ],
+    ];
+    for auth in forged {
+        for (method, path) in [
+            ("POST", "/api/system/actions/quit"),
+            ("POST", "/api/system/actions/update"),
+            ("POST", "/api/system/drain"),
+            ("DELETE", "/api/system/drain"),
+            ("POST", "/api/system/shutdown"),
+        ] {
+            let (status, _) = send(&app, method, path, auth).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path} {auth:?}");
+        }
+    }
+    // Path spellings `curl --path-as-is` sends unchanged don't reach a route.
+    for path in [
+        "/api/./system/actions/quit",
+        "/api//system/actions/quit",
+        "/api/x/../system/actions/quit",
+        "/api/%73ystem/actions/quit",
+    ] {
+        let request = Request::builder()
+            .method("POST")
+            .uri(path)
+            .header("host", "127.0.0.1:8787")
+            .header("origin", OWNER_ORIGIN)
+            .body(Body::empty())
+            .unwrap();
+        let status = app.clone().oneshot(request).await.unwrap().status();
+        assert!(!status.is_success(), "{path} {status}");
+    }
+    assert!(seen.lock().unwrap().is_empty(), "nothing was relayed");
+    let (_, body) = send(
+        &app,
+        "GET",
+        "/api/system/drain",
+        &[("origin", OWNER_ORIGIN)],
+    )
+    .await;
+    assert_eq!(body["draining"], false, "nothing drained");
+
+    // The console itself still acts.
+    let (status, _) = send(&app, "POST", "/api/system/actions/quit", &console.headers()).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
 }
 
 #[test]

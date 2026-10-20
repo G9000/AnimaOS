@@ -203,7 +203,7 @@ Restart, Stop, Quit and Update all go through the same gate:
    - On macOS, a per-user LaunchAgent at `~/Library/LaunchAgents/dev.animaos.anima.plist` with `KeepAlive` set to restart only on an unsuccessful exit, so Quit stays quit.
    - On Windows, a per-user logon entry (Task Scheduler task or `HKCU\…\Run`), so the tray has access to the user's desktop session. Not a Windows Service.
 9. **Control channel.** CLI commands talk to the supervisor over loopback HTTP, authenticated with `~/.animaos-swarm/control-token`.
-   - The web console's System section goes through the server's existing local-owner checks (allowed origins), and the server relays to the supervisor.
+   - The web console's System section goes through the server, which relays to the supervisor. Reads need the local-owner checks (allowed origins). Actions, drain and shutdown also need a console session: the tray and `anima` open the console with a one-time launch code signed with the admin token, and the console trades it for an `HttpOnly` cookie plus a token it sends as a header (`console_session.rs`). An Origin header alone is not enough, because any local process can send one. Launch codes last 15 seconds and sessions 12 hours, and the cookie is a browser-session cookie. Remaining risk: the code travels in a URL (the opener's arguments, the browser's history), so a same-user process that watches at the right moment can trade it first. The owner's console then warns that the link was already used. Reading browser profile and cookie stores needs approval. An installed copy allows only its own origins, not the dev console's ports 4200/4201.
    - The tray calls the supervisor directly.
    - All three use the same supervisor functions.
 10. **Work-in-progress gate.** A new drain mode in the server for Restart, Stop, Quit and Update. While draining, the server:
@@ -227,6 +227,7 @@ Restart, Stop, Quit and Update all go through the same gate:
     - Agent file tools can't reach `~/.animaos-swarm/` except through existing approval flows.
     - `anima stop|quit|restart|update|config|autostart|setup` are added to the self-stop / host-control detection in `approvals/detection.rs`, so they always require owner approval.
     - The control token grants lifecycle actions only.
+    - Reading the control and admin tokens, `config.toml` or `data/provider-keys.json` needs owner approval on its own. The supervisor passes the server both tokens as file paths (`ANIMA_LOCAL_ADMIN_TOKEN_FILE`, `ANIMA_SUPERVISOR_TOKEN_FILE`), because another process of the same user can read a process's environment.
 14. **Who installs it.** v1 targets the owner and other technical users who install with the terminal one-liner. Downloading through a browser and double-clicking may trigger Gatekeeper / SmartScreen warnings until paid signing is added.
 
 ## Installed copy and `bun dev` on the same machine

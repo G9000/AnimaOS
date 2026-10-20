@@ -24,7 +24,7 @@ fn lifecycle(home: &Path) -> Lifecycle {
         ..Config::default()
     };
     cfg.save(&paths.config_file).unwrap();
-    let (control_token, admin_token) = tokens::ensure(&paths).unwrap();
+    let (_, admin_token) = tokens::ensure(&paths).unwrap();
     let api = ServerApi::new(cfg.port, admin_token.clone(), None).unwrap();
     let status: SharedStatus = Arc::new(Mutex::new(SupervisorStatus {
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -47,8 +47,6 @@ fn lifecycle(home: &Path) -> Lifecycle {
         control_url: format!("http://127.0.0.1:{}", cfg.control_port),
         paths,
         cfg,
-        control_token,
-        admin_token,
         api,
         api_tx,
         updater: Updater::new(Arc::clone(&status)),

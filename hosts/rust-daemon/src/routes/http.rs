@@ -15,6 +15,7 @@ use tracing::info_span;
 use zeroize::Zeroizing;
 
 use super::ApiError;
+use crate::console_session::{self, LaunchRefusal, SpentLaunchCodes, SESSION_HEADER};
 
 const DEFAULT_LOCAL_UI_ORIGINS: [&str; 4] = [
     "http://localhost:4200",
@@ -31,6 +32,7 @@ pub(super) struct LocalOwnerPolicy {
     bind_is_loopback: bool,
     allowed_origins: BTreeSet<String>,
     admin_token: Option<Zeroizing<String>>,
+    spent_launch_codes: SpentLaunchCodes,
 }
 
 #[derive(Clone)]
@@ -42,6 +44,21 @@ pub(super) struct ApiKeyPolicy {
 pub(super) enum LocalOwnerRejection {
     LocalAdminRequired,
     OriginRejected,
+}
+
+/// Why a lifecycle request (`authorize_lifecycle`) was refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum LifecycleRejection {
+    Denied,
+    /// An approved browser origin, but no console session.
+    ConsoleSessionRequired,
+}
+
+/// A console session the browser keeps: the `Set-Cookie` value for its
+/// cookie half, and its token half.
+pub(super) struct OpenedConsoleSession {
+    pub(super) set_cookie: String,
+    pub(super) token: String,
 }
 
 impl LocalOwnerPolicy {
@@ -77,25 +94,20 @@ impl LocalOwnerPolicy {
         self.authorize(headers)
     }
     pub(super) fn from_env(bind_is_loopback: bool) -> Self {
-        let mut allowed_origins = DEFAULT_LOCAL_UI_ORIGINS
-            .into_iter()
-            .map(str::to_string)
-            .collect::<BTreeSet<_>>();
-        if let Ok(configured) = std::env::var("ANIMA_ALLOWED_UI_ORIGINS") {
-            allowed_origins.extend(
-                configured
-                    .split(',')
-                    .filter_map(normalize_serialized_origin),
-            );
-        }
-        let admin_token = std::env::var("ANIMA_LOCAL_ADMIN_TOKEN")
-            .ok()
-            .filter(|value| !value.is_empty() && value.len() <= MAX_LOCAL_ADMIN_TOKEN_BYTES)
-            .map(Zeroizing::new);
+        let supervised = std::env::var("ANIMA_SUPERVISOR_URL").is_ok_and(|url| !url.is_empty());
+        let allowed_origins = allowed_origins(
+            std::env::var("ANIMA_ALLOWED_UI_ORIGINS").ok().as_deref(),
+            supervised,
+        );
+        let admin_token = configured_admin_token(
+            std::env::var_os("ANIMA_LOCAL_ADMIN_TOKEN_FILE"),
+            std::env::var("ANIMA_LOCAL_ADMIN_TOKEN").ok(),
+        );
         Self {
             bind_is_loopback,
             allowed_origins,
             admin_token,
+            spent_launch_codes: SpentLaunchCodes::default(),
         }
     }
 
@@ -108,6 +120,7 @@ impl LocalOwnerPolicy {
                 .map(str::to_string)
                 .collect(),
             admin_token: admin_token.map(|value| Zeroizing::new(value.to_string())),
+            spent_launch_codes: SpentLaunchCodes::default(),
         }
     }
 
@@ -115,23 +128,100 @@ impl LocalOwnerPolicy {
         &self,
         headers: &axum::http::HeaderMap,
     ) -> Result<(), LocalOwnerRejection> {
+        self.local_request(headers)?;
+        if headers.contains_key(header::ORIGIN) {
+            return self.approved_origin(headers);
+        }
+        self.admin_bearer(headers)
+    }
+
+    /// Stopping, updating or draining Anima. A browser needs a console
+    /// session as well as an approved Origin, which any local process can
+    /// send; anything else needs the admin token.
+    pub(super) fn authorize_lifecycle(
+        &self,
+        headers: &axum::http::HeaderMap,
+    ) -> Result<(), LifecycleRejection> {
+        self.local_request(headers)
+            .map_err(|_| LifecycleRejection::Denied)?;
+        if !headers.contains_key(header::ORIGIN) {
+            return self
+                .admin_bearer(headers)
+                .map_err(|_| LifecycleRejection::Denied);
+        }
+        self.approved_origin(headers)
+            .map_err(|_| LifecycleRejection::Denied)?;
+        let session = self
+            .admin_token
+            .as_deref()
+            .zip(console_cookie(headers))
+            .zip(
+                headers
+                    .get(SESSION_HEADER)
+                    .and_then(|value| value.to_str().ok()),
+            );
+        match session {
+            Some(((key, cookie), token))
+                if console_session::session_is_valid(key, &cookie, token) =>
+            {
+                Ok(())
+            }
+            _ => Err(LifecycleRejection::ConsoleSessionRequired),
+        }
+    }
+
+    /// Trades a launch code from an approved browser origin for a console
+    /// session. Refused (`Invalid`) without an admin token, which signs
+    /// sessions.
+    pub(super) fn open_console_session(
+        &self,
+        headers: &axum::http::HeaderMap,
+        code: &str,
+    ) -> Result<OpenedConsoleSession, LaunchRefusal> {
+        let from_console = self.local_request(headers).is_ok()
+            && headers.contains_key(header::ORIGIN)
+            && self.approved_origin(headers).is_ok();
+        let key = self
+            .admin_token
+            .as_deref()
+            .filter(|_| from_console)
+            .ok_or(LaunchRefusal::Invalid)?;
+        let opened = console_session::open_session(key, code, &self.spent_launch_codes)?;
+        // No `Max-Age`: a browser-session cookie, which browsers don't
+        // usually keep on disk. `Strict` keeps it off cross-site requests;
+        // the path keeps it off every other route.
+        let set_cookie = format!(
+            "{}={}; Path=/api/system; HttpOnly; SameSite=Strict",
+            console_cookie_name(headers),
+            opened.cookie
+        );
+        Ok(OpenedConsoleSession {
+            set_cookie,
+            token: opened.token,
+        })
+    }
+
+    fn local_request(&self, headers: &axum::http::HeaderMap) -> Result<(), LocalOwnerRejection> {
         if !self.bind_is_loopback
             || !request_host_is_loopback(headers)
             || has_forwarding_headers(headers)
         {
             return Err(LocalOwnerRejection::LocalAdminRequired);
         }
+        Ok(())
+    }
 
-        if let Some(origin) = headers.get(header::ORIGIN) {
-            let Ok(origin) = origin.to_str() else {
-                return Err(LocalOwnerRejection::OriginRejected);
-            };
-            return normalize_serialized_origin(origin)
-                .filter(|origin| self.allowed_origins.contains(origin))
-                .map(|_| ())
-                .ok_or(LocalOwnerRejection::OriginRejected);
-        }
+    fn approved_origin(&self, headers: &axum::http::HeaderMap) -> Result<(), LocalOwnerRejection> {
+        headers
+            .get(header::ORIGIN)
+            .and_then(|origin| origin.to_str().ok())
+            .and_then(normalize_serialized_origin)
+            .filter(|origin| self.allowed_origins.contains(origin))
+            .map(|_| ())
+            .ok_or(LocalOwnerRejection::OriginRejected)
+    }
 
+    fn admin_bearer(&self, headers: &axum::http::HeaderMap) -> Result<(), LocalOwnerRejection> {
         let Some(expected) = self.admin_token.as_deref() else {
             return Err(LocalOwnerRejection::LocalAdminRequired);
         };
@@ -183,6 +273,63 @@ impl ApiKeyPolicy {
         constant_time_eq(authorization.as_bytes(), expected.as_bytes())
             | constant_time_eq(x_api_key.as_bytes(), expected.as_bytes())
     }
+}
+
+/// The browser origins allowed to act as the local owner: those configured,
+/// plus the dev console's (`DEFAULT_LOCAL_UI_ORIGINS`) unless a supervisor
+/// started this daemon. An installed copy has no dev console, and a page on
+/// those ports may be anyone's.
+fn allowed_origins(configured: Option<&str>, supervised: bool) -> BTreeSet<String> {
+    let defaults = DEFAULT_LOCAL_UI_ORIGINS
+        .into_iter()
+        .filter(|_| !supervised)
+        .map(str::to_string);
+    let configured = configured
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(normalize_serialized_origin);
+    defaults.chain(configured).collect()
+}
+
+/// The admin token from `ANIMA_LOCAL_ADMIN_TOKEN_FILE` when that is set (an
+/// unreadable file means none), else from `ANIMA_LOCAL_ADMIN_TOKEN`. A file
+/// keeps it out of the process environment, which other processes of the
+/// same user can read.
+fn configured_admin_token(
+    file: Option<std::ffi::OsString>,
+    inline: Option<String>,
+) -> Option<Zeroizing<String>> {
+    match file {
+        Some(path) => std::fs::read_to_string(path)
+            .ok()
+            .map(|token| token.trim().to_string()),
+        None => inline,
+    }
+    .filter(|value| !value.is_empty() && value.len() <= MAX_LOCAL_ADMIN_TOKEN_BYTES)
+    .map(Zeroizing::new)
+}
+
+/// The console cookie's name, per port: daemons on one host share cookies.
+fn console_cookie_name(headers: &axum::http::HeaderMap) -> String {
+    let port = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|host| host.parse::<axum::http::uri::Authority>().ok())
+        .and_then(|authority| authority.port_u16())
+        .unwrap_or(80);
+    format!("anima_console_{port}")
+}
+
+fn console_cookie(headers: &axum::http::HeaderMap) -> Option<String> {
+    let name = console_cookie_name(headers);
+    headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(';'))
+        .filter_map(|pair| pair.trim().split_once('='))
+        .find(|(key, _)| *key == name)
+        .map(|(_, value)| value.to_string())
 }
 
 pub(crate) fn configured_bind_is_loopback() -> bool {
@@ -513,6 +660,49 @@ mod owner_read_tests {
             );
             assert!(policy.authorize_read(&headers).is_err(), "{name}");
         }
+    }
+
+    #[test]
+    fn a_supervised_daemon_drops_the_dev_console_origins() {
+        let installed = "http://127.0.0.1:8787,http://localhost:8787";
+        let dev = allowed_origins(Some(installed), false);
+        assert!(dev.contains("http://localhost:4200"));
+        assert!(dev.contains("http://127.0.0.1:8787"));
+        let supervised = allowed_origins(Some(installed), true);
+        assert_eq!(
+            supervised.into_iter().collect::<Vec<_>>(),
+            vec!["http://127.0.0.1:8787", "http://localhost:8787"]
+        );
+        assert!(allowed_origins(None, true).is_empty());
+        assert_eq!(
+            allowed_origins(None, false).len(),
+            DEFAULT_LOCAL_UI_ORIGINS.len()
+        );
+    }
+
+    #[test]
+    fn the_admin_token_file_wins_over_the_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("admin-token");
+        std::fs::write(&file, "  from-file\n").unwrap();
+        let token = |file: Option<&std::path::Path>, inline: Option<&str>| {
+            configured_admin_token(
+                file.map(|path| path.as_os_str().to_owned()),
+                inline.map(str::to_string),
+            )
+            .map(|token| token.to_string())
+        };
+        assert_eq!(
+            token(Some(&file), Some("inline")).as_deref(),
+            Some("from-file")
+        );
+        assert_eq!(token(None, Some("inline")).as_deref(), Some("inline"));
+        // A named file that can't be read is no token, not a fallback.
+        assert_eq!(
+            token(Some(&dir.path().join("missing")), Some("inline")),
+            None
+        );
+        assert_eq!(token(None, Some("")), None);
     }
 
     #[tokio::test]

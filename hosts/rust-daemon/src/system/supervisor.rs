@@ -11,6 +11,9 @@ use zeroize::Zeroizing;
 
 const URL_ENV: &str = "ANIMA_SUPERVISOR_URL";
 const TOKEN_ENV: &str = "ANIMA_SUPERVISOR_TOKEN";
+/// The token's file, which wins over `TOKEN_ENV`: other processes of the same
+/// user can read a process's environment, not a user-only file.
+const TOKEN_FILE_ENV: &str = "ANIMA_SUPERVISOR_TOKEN_FILE";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Where the supervisor's control API is, and the token it expects. No
@@ -40,11 +43,18 @@ pub(crate) struct SupervisorRelay {
 }
 
 impl SupervisorRelay {
-    /// Configured only when both `ANIMA_SUPERVISOR_URL` and
-    /// `ANIMA_SUPERVISOR_TOKEN` are set.
+    /// Configured only when both `ANIMA_SUPERVISOR_URL` and a token
+    /// (`ANIMA_SUPERVISOR_TOKEN_FILE` or `ANIMA_SUPERVISOR_TOKEN`) are set.
     pub(crate) fn from_env() -> Self {
         let read = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
-        match (read(URL_ENV), read(TOKEN_ENV)) {
+        let token = match std::env::var_os(TOKEN_FILE_ENV) {
+            Some(path) => std::fs::read_to_string(path)
+                .ok()
+                .map(|token| token.trim().to_string())
+                .filter(|token| !token.is_empty()),
+            None => read(TOKEN_ENV),
+        };
+        match (read(URL_ENV), token) {
             (Some(url), Some(token)) => Self::new(Some((url, token))),
             _ => Self::new(None),
         }

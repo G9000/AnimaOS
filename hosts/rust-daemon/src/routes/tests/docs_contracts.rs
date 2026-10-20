@@ -42,7 +42,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 233, "complete registered operation count");
+    assert_eq!(actual.len(), 234, "complete registered operation count");
     let message_search_additions = [("GET", "/api/agents/{agent_id}/message-search")];
     for (method, path) in message_search_additions {
         assert!(
@@ -130,6 +130,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         ("POST", "/api/system/shutdown"),
         ("GET", "/api/system"),
         ("POST", "/api/system/actions/{action}"),
+        ("POST", "/api/system/session"),
     ];
     for (method, path) in system_additions {
         assert!(
