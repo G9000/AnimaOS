@@ -1,3 +1,6 @@
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
 export const HOST_KEYS = ['rust', 'elixir', 'python'] as const;
 
 export type HostKey = (typeof HOST_KEYS)[number];
@@ -50,4 +53,37 @@ export function getHostDefinition(value: string): HostDefinition {
   }
 
   return HOSTS[value];
+}
+
+export const CONTROL_PLANE_FILE_ENV = 'ANIMAOS_RS_CONTROL_PLANE_FILE';
+export const DEV_EPHEMERAL_ENV = 'ANIMAOS_DEV_EPHEMERAL';
+
+/** The daemon keeps memory.sqlite and history.sqlite beside this file. */
+export function defaultControlPlaneFile(homeDir: string): string {
+  return join(homeDir, '.animaos-swarm', 'data', 'control-plane.json');
+}
+
+/**
+ * Without a control-plane file the rust daemon forgets agents, connectors,
+ * history and memories on every restart, so dev persists by default. A path
+ * or Postgres mode from the shell wins, and ANIMAOS_DEV_EPHEMERAL=1 opts out.
+ */
+export function hostProcessEnv(
+  host: HostDefinition,
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir: string = homedir()
+): Record<string, string> {
+  const keepsOwnStore =
+    env[CONTROL_PLANE_FILE_ENV] !== undefined ||
+    env.ANIMAOS_RS_PERSISTENCE_MODE?.toLowerCase() === 'postgres' ||
+    env[DEV_EPHEMERAL_ENV] === '1';
+
+  if (host.key !== 'rust' || keepsOwnStore) {
+    return host.env;
+  }
+
+  return {
+    ...host.env,
+    [CONTROL_PLANE_FILE_ENV]: defaultControlPlaneFile(homeDir),
+  };
 }
