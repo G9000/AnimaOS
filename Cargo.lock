@@ -159,6 +159,7 @@ dependencies = [
  "chrono-tz",
  "fastembed",
  "futures",
+ "hmac",
  "http-body-util",
  "iana-time-zone",
  "keyring",

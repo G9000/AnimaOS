@@ -192,6 +192,7 @@ impl Supervisor {
             status: Arc::clone(&self.status),
             paths: self.paths.clone(),
             log: self.log.clone(),
+            admin_token: self.admin_token.clone(),
             runtime,
         }
     }
@@ -238,8 +239,6 @@ impl Supervisor {
         let lifecycle = Lifecycle {
             exe: std::env::current_exe()?,
             control_url: format!("http://127.0.0.1:{}", self.cfg.control_port),
-            control_token: self.control_token,
-            admin_token: self.admin_token,
             log: self.log,
             paths: self.paths,
             cfg: self.cfg,
@@ -278,6 +277,8 @@ pub struct Link {
     status: SharedStatus,
     paths: AnimaPaths,
     log: ServerLog,
+    /// Signs the console's launch codes.
+    admin_token: AdminToken,
     runtime: tokio::runtime::Handle,
 }
 
@@ -286,6 +287,15 @@ pub struct Link {
 impl Link {
     pub fn status(&self) -> SupervisorStatus {
         lock(&self.status).clone()
+    }
+
+    /// The console's address with a one-time launch code, which lets it use
+    /// the lifecycle controls.
+    pub fn console_url(&self) -> String {
+        crate::commands::open::console_url(
+            &lock(&self.status).server_url,
+            Some(self.admin_token.as_str()),
+        )
     }
 
     pub fn runtime(&self) -> &tokio::runtime::Handle {
@@ -555,8 +565,6 @@ struct Lifecycle {
     cfg: Config,
     exe: PathBuf,
     control_url: String,
-    control_token: ControlToken,
-    admin_token: AdminToken,
     api: ServerApi,
     api_tx: watch::Sender<ServerApi>,
     status: SharedStatus,
@@ -1001,15 +1009,16 @@ impl Lifecycle {
         let port = effective_port(&self.cfg, &process_env);
         let mut env = server_env(&self.cfg, &self.paths, &process_env);
         // The supervisor's own calls depend on the server holding this admin
-        // token, so it wins over an inherited one.
+        // token, so it wins over an inherited one. Both tokens go as files:
+        // other processes of the same user can read a process's environment.
         env.insert(
-            "ANIMA_LOCAL_ADMIN_TOKEN".to_string(),
-            self.admin_token.as_str().to_string(),
+            "ANIMA_LOCAL_ADMIN_TOKEN_FILE".to_string(),
+            self.paths.admin_token.to_string_lossy().into_owned(),
         );
         env.insert("ANIMA_SUPERVISOR_URL".to_string(), self.control_url.clone());
         env.insert(
-            "ANIMA_SUPERVISOR_TOKEN".to_string(),
-            self.control_token.as_str().to_string(),
+            "ANIMA_SUPERVISOR_TOKEN_FILE".to_string(),
+            self.paths.control_token.to_string_lossy().into_owned(),
         );
         self.log.clear_tail();
         self.log

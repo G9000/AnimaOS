@@ -241,7 +241,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         provider_keys::list_keys, provider_keys::add_key, provider_keys::remove_key, provider_keys::set_strategy,
         provider_keys::wake_key,
         system::begin_drain, system::drain_status, system::cancel_drain, system::shutdown,
-        system::status, system::action,
+        system::status, system::action, system::open_console_session,
         status::get_status,
         attachments::upload, attachments::serve,
         voice::capabilities, voice::transcribe, voice::cancel,
@@ -1164,6 +1164,10 @@ fn router_with_services_with_policies_and_integrations(
                 .delete(system::cancel_drain),
         )
         .route("/api/system/shutdown", axum::routing::post(system::shutdown))
+        .route(
+            "/api/system/session",
+            axum::routing::post(system::open_console_session),
+        )
         .route("/api/system", get(system::status))
         .route(
             "/api/system/actions/{action}",

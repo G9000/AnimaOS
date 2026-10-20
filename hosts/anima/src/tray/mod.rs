@@ -309,12 +309,13 @@ mod native {
     }
 
     fn open_console(link: &Link) {
-        let url = format!("{}/", link.status().server_url);
+        let url = link.console_url();
         let task_link = link.clone();
         link.runtime().spawn_blocking(move || {
             let link = task_link;
             if let Err(error) = open::that(&url) {
-                link.note(&format!("Could not open {url}: {error}"));
+                // Not the URL: its launch code is a secret.
+                link.note(&format!("Could not open the console: {error}"));
             }
         });
     }

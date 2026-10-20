@@ -149,6 +149,8 @@ fn analyze_into(text: &str, depth: usize, out: &mut Analysis) {
             if !segment.words.is_empty() {
                 out.segments.push(segment.clone());
                 stages.push(segment);
+            } else if !segment.text.is_empty() {
+                out.segments.push(segment);
             }
         }
         if !stages.is_empty() {
@@ -200,6 +202,15 @@ fn build_segment(command: &Command, depth: usize) -> (Segment, Vec<String>) {
         if front.bare_env {
             segment.words = vec!["printenv".to_string()];
             segment.text = "printenv".to_string();
+        } else {
+            // Redirects alone still open files and sockets:
+            // `exec 3<>/dev/tcp/127.0.0.1/8788`.
+            segment.text = command
+                .redirects
+                .iter()
+                .map(|redirect| format!("{} {}", redirect.op, redirect.target))
+                .collect::<Vec<_>>()
+                .join(" ");
         }
         return (segment, nested);
     }
@@ -496,9 +507,149 @@ fn anima_lifecycle_words(words: &[String]) -> bool {
         })
 }
 
-/// What a command names when it calls Anima's own controls directly: the
-/// server's `/api/system` routes, or the supervisor's default control port.
-const ANIMA_CONTROL_ENDPOINTS: &[&str] = &["/api/system", "127.0.0.1:8788", "localhost:8788"];
+/// The supervisor's control port when `ANIMA_SUPERVISOR_URL` doesn't say.
+const DEFAULT_CONTROL_PORT: u16 = 8788;
+/// The supervisor's lifecycle actions, as `/v1/actions/{action}` names them.
+const SUPERVISOR_ACTIONS: &[&str] = &[
+    "start",
+    "stop",
+    "restart",
+    "quit",
+    "update",
+    "check-update",
+    "cancel",
+];
+
+/// The supervisor's control ports: the default, and the one in
+/// `ANIMA_SUPERVISOR_URL` when the supervisor configured another.
+static CONTROL_PORTS: LazyLock<Vec<u16>> =
+    LazyLock::new(|| control_ports(std::env::var("ANIMA_SUPERVISOR_URL").ok().as_deref()));
+
+fn control_ports(supervisor_url: Option<&str>) -> Vec<u16> {
+    let mut ports = vec![DEFAULT_CONTROL_PORT];
+    let configured = supervisor_url
+        .and_then(|url| reqwest::Url::parse(url).ok())
+        .and_then(|url| url.port_or_known_default());
+    if let Some(port) = configured.filter(|port| !ports.contains(port)) {
+        ports.push(port);
+    }
+    ports
+}
+
+/// `word` read as a path: `\` as `/`, `%xx` decoded, and empty, `.` and
+/// `..` parts resolved, so `/api/./system`, `/api//system` and
+/// `/api/x/../system` all read `/api/system`.
+fn normalized_path(word: &str) -> String {
+    let decoded = percent_decoded(&word.replace('\\', "/"));
+    let mut parts: Vec<&str> = Vec::new();
+    for part in decoded.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            part => parts.push(part),
+        }
+    }
+    format!("/{}", parts.join("/"))
+}
+
+fn percent_decoded(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let hex = bytes
+            .get(index + 1..index + 3)
+            .and_then(|pair| std::str::from_utf8(pair).ok())
+            .and_then(|pair| u8::from_str_radix(pair, 16).ok());
+        match (bytes[index], hex) {
+            (b'%', Some(byte)) => {
+                out.push(byte);
+                index += 3;
+            }
+            (byte, _) => {
+                out.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).to_lowercase()
+}
+
+/// Whether `word` names `port` as a port: a run of digits with that value
+/// after `:`, `/`, a comma, a bracket, `=`, a quote, a space or nothing, as in
+/// `127.1:8788`, `/dev/tcp/0/8788`, `('localhost', 8788)` or `nc 0 8788`.
+/// Whatever the host is spelled as, the port number shows.
+fn names_port(word: &str, port: u16) -> bool {
+    let bytes = word.as_bytes();
+    let mut start = 0;
+    while start < bytes.len() {
+        if !bytes[start].is_ascii_digit() {
+            start += 1;
+            continue;
+        }
+        let end = bytes[start..]
+            .iter()
+            .position(|byte| !byte.is_ascii_digit())
+            .map_or(bytes.len(), |length| start + length);
+        let before = start.checked_sub(1).map(|index| bytes[index]);
+        let after = bytes.get(end).copied();
+        let opens = before.is_none_or(|byte| b":/,([= '\"`".contains(&byte));
+        let closes = after.is_none_or(|byte| !byte.is_ascii_alphanumeric());
+        if opens && closes && word[start..end].parse::<u16>() == Ok(port) {
+            return true;
+        }
+        start = end;
+    }
+    false
+}
+
+/// A host that may be this machine, written without a scheme: a loopback
+/// name, any IP spelling (`127.1`, `0`, `2130706433`, `0x7f.1`, `[::1]`), or
+/// a variable.
+static HOST_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^(\$\{?[a-z_][a-z0-9_]*\}?|localhost\.?|[a-z0-9.-]*\.localhost\.?|\[[0-9a-f:.]*\]|[0-9a-fx.]+)(:[0-9]+)?$",
+    )
+    .unwrap()
+});
+
+/// The normalized paths `word` requests: after each `scheme://host` in it
+/// (URLs inside code included), or after a leading host such as
+/// `127.1:8787/…`. A plain file path like `src/api/system` requests nothing.
+fn request_paths(word: &str) -> Vec<String> {
+    let word = word.replace('\\', "/");
+    let mut rests: Vec<&str> = word
+        .match_indices("://")
+        .map(|(at, _)| &word[at + 3..])
+        .collect();
+    if rests.is_empty()
+        && word
+            .split_once('/')
+            .is_some_and(|(host, _)| HOST_PREFIX.is_match(host))
+    {
+        rests.push(&word);
+    }
+    rests
+        .into_iter()
+        .filter_map(|rest| rest.split_once('/'))
+        .map(|(_, path)| normalized_path(path))
+        .collect()
+}
+
+/// Whether `word` calls Anima's own controls directly: a URL to the
+/// server's `/api/system` routes in any path spelling or to the supervisor's
+/// lifecycle actions, or anything on the supervisor's control port, whatever
+/// the loopback host is spelled as (`127.1`, `0.0.0.0`, `[::1]`, a name).
+fn calls_anima_controls(word: &str, control_ports: &[u16]) -> bool {
+    request_paths(word).iter().any(|path| {
+        path.contains("/api/system")
+            || SUPERVISOR_ACTIONS
+                .iter()
+                .any(|action| path.contains(&format!("/v1/actions/{action}")))
+    }) || control_ports.iter().any(|port| names_port(word, *port))
+}
 
 /// Whether the command runs an `anima` lifecycle subcommand, calls Anima's
 /// controls over HTTP, or edits the `AnimaOS` autostart entry in the Windows
@@ -511,14 +662,19 @@ fn controls_anima_host(seg: &Segment) -> bool {
         return true;
     }
     let names_endpoint = |words: &[String]| {
-        words.iter().any(|word| {
-            let word = word.to_ascii_lowercase();
-            ANIMA_CONTROL_ENDPOINTS
-                .iter()
-                .any(|endpoint| word.contains(endpoint))
-        })
+        words
+            .iter()
+            .any(|word| calls_anima_controls(&word.to_ascii_lowercase(), &CONTROL_PORTS))
     };
-    if names_endpoint(&seg.words) || names_endpoint(&seg.raw_words) {
+    // The text adds redirects: `exec 3<>/dev/tcp/127.0.0.1/8788`.
+    if names_endpoint(&seg.words)
+        || names_endpoint(&seg.raw_words)
+        || seg
+            .text
+            .split(' ')
+            .chain(seg.input_from.iter().map(String::as_str))
+            .any(|word| calls_anima_controls(word, &CONTROL_PORTS))
+    {
         return true;
     }
     let program_is_reg = |words: &[String]| {
@@ -684,6 +840,101 @@ const SECRET_PATHS: &[&str] = &[
     ".animaos-swarm/config.toml",
     ".animaos-swarm/data/provider-keys.json",
 ];
+
+/// The packaged Anima's own keys, by file name.
+const ANIMA_KEY_FILES: &[&str] = &["control-token", "admin-token", "provider-keys.json"];
+
+/// Whether `word` names the packaged Anima's keys: its control and admin
+/// tokens, config or stored provider keys, alone or by file name (after a
+/// `cd`), the whole `~/.animaos-swarm` folder or its `data` folder, or a glob
+/// in it. Its logs and other files are not keys.
+fn names_anima_keys(word: &str) -> bool {
+    let word = word.trim_matches(['\'', '"']);
+    if SECRET_PATHS
+        .iter()
+        .filter(|secret| secret.starts_with(".animaos-swarm/"))
+        .any(|secret| word.contains(secret))
+    {
+        return true;
+    }
+    let path = normalized_path(word);
+    let name = path.rsplit('/').next().unwrap_or_default();
+    if ANIMA_KEY_FILES.contains(&name)
+        || SECRET_PATHS
+            .iter()
+            .filter(|secret| secret.starts_with(".animaos-swarm/"))
+            .any(|secret| path.contains(secret))
+    {
+        return true;
+    }
+    // Code that builds the path in parts: `join(home, '.animaos-swarm', 'control-token')`.
+    if word.contains(".animaos-swarm")
+        && ["token", "provider-keys", "config.toml"]
+            .iter()
+            .any(|part| word.contains(part))
+    {
+        return true;
+    }
+    let Some(rest) = path.strip_prefix("/~/.animaos-swarm") else {
+        return false;
+    };
+    matches!(rest, "" | "/data") || rest.contains(['*', '?', '[', '{'])
+}
+
+/// Where browsers keep cookies, storage and history, by path (`/`-separated,
+/// lowercase): Chrome, Chromium, Edge, Brave, Firefox and Safari on macOS,
+/// Windows and Linux. The console's session lives there.
+const BROWSER_PROFILES: &[&str] = &[
+    "application support/google/chrome",
+    "application support/chromium",
+    "application support/microsoft edge",
+    "application support/bravesoftware",
+    "application support/firefox",
+    "library/safari",
+    "library/cookies",
+    "library/containers/com.apple.safari",
+    "google/chrome/user data",
+    "chromium/user data",
+    "microsoft/edge/user data",
+    "bravesoftware/brave-browser/user data",
+    "mozilla/firefox",
+    ".config/google-chrome",
+    ".config/chromium",
+    ".config/microsoft-edge",
+    ".config/bravesoftware",
+];
+
+/// A command that names a browser's profile or cookie store. With the
+/// console's session in it, an agent could stop or update its own host.
+fn reads_browser_profile(segment: &Segment) -> bool {
+    segment
+        .words
+        .iter()
+        .chain(&segment.raw_words)
+        .chain(&segment.input_from)
+        .map(String::as_str)
+        .chain(segment.stdin_code.split_whitespace())
+        .any(|word| {
+            let path = normalized_path(&word.to_lowercase());
+            BROWSER_PROFILES
+                .iter()
+                .any(|profile| path.contains(profile))
+        })
+}
+
+/// A command that reads the packaged Anima's keys. With them an agent could
+/// stop, update or reconfigure its own host, so reading them asks even when
+/// nothing is sent anywhere.
+fn reads_anima_keys(segment: &Segment) -> bool {
+    segment
+        .words
+        .iter()
+        .chain(&segment.raw_words)
+        .chain(&segment.input_from)
+        .map(String::as_str)
+        .chain(segment.stdin_code.split_whitespace())
+        .any(names_anima_keys)
+}
 
 fn program(segment: &Segment) -> &str {
     segment.words.first().map_or("", |word| program_name(word))
@@ -1027,6 +1278,12 @@ pub(crate) fn dangerous(seg: &Segment) -> Option<&'static str> {
     if controls_anima_host(seg) {
         return Some("controls anima itself");
     }
+    if reads_anima_keys(seg) {
+        return Some("reads anima's own keys");
+    }
+    if reads_browser_profile(seg) {
+        return Some("reads your browser's saved data");
+    }
     let segment = seg.text.as_str();
     let words: Vec<&str> = segment.split(' ').collect();
     let program = words
@@ -1214,7 +1471,7 @@ pub(crate) fn glob_matches(pattern: &str, text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::super::autonomy::{floor, AgentAutonomy, Floor};
-    use super::{analyze, prepare, reads_secrets};
+    use super::{analyze, calls_anima_controls, control_ports, prepare, reads_secrets};
 
     fn judge(command: &str) -> Floor {
         floor(command, &AgentAutonomy::default())
@@ -1548,16 +1805,87 @@ mod tests {
                 "{command:?}"
             );
         }
+        // Path and host spellings that reach the same routes.
+        for command in [
+            "curl -X POST -H 'Origin: http://127.0.0.1:8787' http://127.0.0.1:8787/api/./system/actions/quit",
+            "curl -X POST http://127.0.0.1:8787/api//system/actions/quit",
+            "curl -X POST http://127.0.0.1:8787/api/x/../system/actions/quit",
+            "curl -X POST http://127.0.0.1:8787/api/%73ystem/actions/quit",
+            "curl -X POST 127.1:8787/api/./system/actions/quit",
+            "curl -X POST localhost:8787//api/system/actions/stop",
+            "curl -X POST $base/api/system/actions/quit",
+            "curl -X POST http://localhost:8787/proxy/api/system/actions/quit",
+            "curl -X POST 'http://127.0.0.1:8787\\api\\system\\actions\\quit'",
+            "curl -X POST http://127.1:8788/v1/actions/quit",
+            "curl -X POST http://0.0.0.0:8788/v1/actions/stop",
+            "curl -X POST http://0:8788/v1/actions/stop",
+            "curl -X POST 'http://[::1]:8788/v1/actions/stop'",
+            "curl -X POST http://localhost.:8788/v1/actions/stop",
+            "curl -X POST http://2130706433:8788/v1/actions/stop",
+            "curl -X POST http://anything.localhost:8788/v1/actions/stop",
+            "curl -X POST http://127.0.0.1:08788/v1/actions/stop",
+            // A port built from a variable still names the supervisor's actions.
+            "curl -X POST http://127.0.0.1:$p/v1/actions/quit",
+            "curl -X POST \"http://127.0.0.1:${port}/v1/actions/update\"",
+            // Raw sockets name the port.
+            "nc 127.1 8788",
+            "exec 3<>/dev/tcp/127.0.0.1/8788",
+            "printf 'POST /v1/actions/quit' > /dev/tcp/127.1/8788",
+            "socat - tcp:127.1:8788",
+            "python3 -c \"import socket; socket.create_connection(('127.0.0.1', 8788))\"",
+        ] {
+            assert_eq!(
+                judge(command),
+                Floor::Dangerous("controls anima itself"),
+                "{command:?}"
+            );
+        }
         // Sending the control token is caught too, as a secret leaving.
         assert_eq!(
             judge("curl -H \"Authorization: Bearer $(cat ~/.animaos-swarm/control-token)\" -X POST http://127.0.0.1:8788/v1/actions/quit"),
             Floor::Dangerous("sends secrets off this computer")
         );
-        // Other API calls are judged as before.
-        assert_eq!(
-            judge("curl http://127.0.0.1:8787/api/agents"),
-            Floor::Ordinary
-        );
+        // Other API calls, numbers, and file paths that merely look like a
+        // route are judged as before.
+        for command in [
+            "grep -r api/system src/",
+            "rg /api/system hosts/",
+            "ls apps/x/api/system",
+            "cat hosts/rust-daemon/src/routes/api/system.rs",
+            "rg v1/actions/stop packages/",
+            "curl http://127.0.0.1:8787/api/agents",
+            "curl http://localhost:18788/",
+            "cat notes/issue-8788.md",
+            "curl https://api.example.com/v1/status",
+        ] {
+            assert_eq!(judge(command), Floor::Ordinary, "{command:?}");
+        }
+    }
+
+    #[test]
+    fn the_configured_control_port_is_matched_on_any_loopback_spelling() {
+        let ports = control_ports(Some("http://127.0.0.1:9123"));
+        assert_eq!(ports, vec![8788, 9123]);
+        assert_eq!(control_ports(None), vec![8788]);
+        assert_eq!(control_ports(Some("not a url")), vec![8788]);
+        for word in [
+            "http://127.0.0.1:9123/v1/status",
+            "http://127.1:9123/v1/status",
+            "http://0.0.0.0:9123/",
+            "http://[::ffff:127.0.0.1]:9123/",
+            "http://localhost:9123",
+            "localhost:9123",
+            "9123",
+            "/dev/tcp/127.0.0.1/9123",
+        ] {
+            assert!(calls_anima_controls(word, &ports), "{word}");
+            assert!(
+                !calls_anima_controls(word, &[8788]),
+                "{word} without the configured port"
+            );
+        }
+        assert!(!calls_anima_controls("http://localhost:91234/", &ports));
+        assert!(!calls_anima_controls("v9123", &ports));
     }
 
     #[test]
@@ -1584,6 +1912,81 @@ mod tests {
         // Anima's other files are not.
         let analysis = analyze(&prepare("cat ~/.animaos-swarm/logs/anima.log").text);
         assert!(!reads_secrets(&analysis.segments[0]));
+    }
+
+    #[test]
+    fn browser_profiles_and_cookie_stores_ask() {
+        for command in [
+            "sqlite3 ~/library/application\\ support/google/chrome/default/cookies 'select * from cookies'",
+            "grep -r anima ~/Library/Application\\ Support/Google/Chrome/Default/Local\\ Storage",
+            "cat \"$HOME/Library/Application Support/Firefox/Profiles/x.default/cookies.sqlite\"",
+            "ls ~/Library/Application\\ Support/BraveSoftware/Brave-Browser/Default",
+            "ls ~/Library/Application\\ Support/Microsoft\\ Edge/Default",
+            "cp ~/Library/Cookies/Cookies.binarycookies /tmp/c",
+            "cat ~/Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies",
+            "ls ~/Library/Safari",
+            r#"type "%LOCALAPPDATA%\Google\Chrome\User Data\Default\Network\Cookies""#,
+            r#"dir "C:\Users\me\AppData\Local\Microsoft\Edge\User Data""#,
+            r"Get-Content $env:APPDATA\Mozilla\Firefox\Profiles\x\cookies.sqlite",
+            "cat ~/.config/google-chrome/Default/Cookies",
+            "python3 -c \"import sqlite3; sqlite3.connect('/users/me/library/application support/google/chrome/default/cookies')\"",
+        ] {
+            assert_eq!(
+                judge(command),
+                Floor::Dangerous("reads your browser's saved data"),
+                "{command:?}"
+            );
+        }
+        for command in ["ls ~/Library/Application\\ Support", "cat chrome-notes.md"] {
+            assert_eq!(judge(command), Floor::Ordinary, "{command:?}");
+        }
+    }
+
+    #[test]
+    fn reading_anima_keys_asks_on_its_own() {
+        let mut commands = vec![
+            "cat ~/.animaos-swarm/control-token".to_string(),
+            "head -c 64 ~/.animaos-swarm/admin-token".to_string(),
+            "grep . ~/.animaos-swarm/config.toml".to_string(),
+            "cp ~/.animaos-swarm/data/provider-keys.json /tmp/keys.json".to_string(),
+            "sed -n 1p ~/.animaos-swarm/control-token".to_string(),
+            "cat < ~/.animaos-swarm/control-token".to_string(),
+            "cat ~/.animaos-swarm/./control-token".to_string(),
+            "cat ~//.animaos-swarm//control-token".to_string(),
+            "cat $HOME/.animaos-swarm/admin-token".to_string(),
+            "cat ${HOME}/.animaos-swarm/admin-token".to_string(),
+            "cat ~/.animaos-swarm/*token*".to_string(),
+            "cat ~/.animaos-swarm/control-tok?n".to_string(),
+            "cd ~/.animaos-swarm && cat control-token".to_string(),
+            "cat ./control-token".to_string(),
+            "tar czf /tmp/anima.tgz ~/.animaos-swarm".to_string(),
+            "grep -r token ~/.animaos-swarm/".to_string(),
+            "zip -r /tmp/d.zip ~/.animaos-swarm/data".to_string(),
+            "python3 -c \"print(open('/tmp/../' + __import__('os').path.expanduser('~/.animaos-swarm/control-token')).read())\"".to_string(),
+            "python3 -c \"import os; print(open(os.path.join(os.environ['HOME'], '.animaos-swarm', 'admin-token')).read())\"".to_string(),
+            "python3 - <<'EOF'\nprint(open('/users/me/.animaos-swarm/control-token').read())\nEOF".to_string(),
+            "echo \"$(cat ~/.animaos-swarm/control-token)\"".to_string(),
+        ];
+        if let Ok(home) = std::env::var("HOME") {
+            commands.push(format!("cat {home}/.animaos-swarm/control-token"));
+        }
+        for command in &commands {
+            assert_eq!(
+                judge(command),
+                Floor::Dangerous("reads anima's own keys"),
+                "{command:?}"
+            );
+        }
+        // Its logs, a workspace's own folder and other files stay ordinary.
+        for command in [
+            "cat ~/.animaos-swarm/logs/anima.log",
+            "tail -f ~/.animaos-swarm/logs/server.log",
+            "ls .animaos-swarm",
+            "cat .animaos-swarm/permissions.json",
+            "cat src/tokens.rs",
+        ] {
+            assert_eq!(judge(command), Floor::Ordinary, "{command:?}");
+        }
     }
 
     #[test]

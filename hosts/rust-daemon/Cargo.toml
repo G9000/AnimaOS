@@ -21,6 +21,7 @@ cap-std = "3.4.5"
 cap-fs-ext = "3.4.5"
 async-trait = "0.1"
 base64 = "0.22"
+hmac = "0.12"
 sha2 = "0.10"
 axum = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

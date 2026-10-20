@@ -15,11 +15,32 @@ pub fn open() -> io::Result<ExitCode> {
         return relaunch_detached();
     }
     let started = ensure_running(&paths, &cfg)?;
-    let url = format!("{}/", started.status().server_url);
-    println!("Opening {url}");
-    ::open::that(&url)
-        .map_err(|error| io::Error::new(error.kind(), format!("could not open {url}: {error}")))?;
+    let server_url = started.status().server_url.clone();
+    let admin_token = std::fs::read_to_string(&paths.admin_token).ok();
+    let url = console_url(&server_url, admin_token.as_deref().map(str::trim));
+    // The address without its launch code, which is a secret.
+    println!("Opening {server_url}/");
+    ::open::that(&url).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("could not open {server_url}/: {error}"),
+        )
+    })?;
     Ok(ExitCode::SUCCESS)
+}
+
+/// The console's address, with a one-time launch code when there is an
+/// admin token to sign it: only a console opened this way can stop, restart
+/// or update Anima (`anima_daemon::console_session`).
+pub fn console_url(server_url: &str, admin_token: Option<&str>) -> String {
+    match admin_token.filter(|token| !token.is_empty()) {
+        Some(token) => format!(
+            "{server_url}/?{}={}",
+            anima_daemon::console_session::LAUNCH_PARAM,
+            anima_daemon::console_session::launch_code(token)
+        ),
+        None => format!("{server_url}/"),
+    }
 }
 
 /// Set on the relaunched copy, so it does not relaunch itself in turn.
@@ -78,4 +99,31 @@ pub fn relaunch_detached() -> io::Result<ExitCode> {
         .creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW)
         .spawn()?;
     Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::console_url;
+
+    #[test]
+    fn the_console_url_carries_a_launch_code() {
+        let url = console_url("http://127.0.0.1:8787", Some("admin"));
+        let code = url
+            .strip_prefix("http://127.0.0.1:8787/?anima-login=")
+            .expect("a launch code");
+        assert_eq!(code.split('.').count(), 3, "{code}");
+        assert_ne!(
+            url,
+            console_url("http://127.0.0.1:8787", Some("admin")),
+            "one-time"
+        );
+        assert_eq!(
+            console_url("http://127.0.0.1:8787", None),
+            "http://127.0.0.1:8787/"
+        );
+        assert_eq!(
+            console_url("http://127.0.0.1:8787", Some("")),
+            "http://127.0.0.1:8787/"
+        );
+    }
 }
