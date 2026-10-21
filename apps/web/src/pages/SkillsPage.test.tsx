@@ -62,6 +62,29 @@ afterEach(() => {
 });
 
 describe('SkillsPage', () => {
+  it('puts the skill to keep first, then the skills, then how it learns', async () => {
+    render(
+      <SkillsPage
+        version={0}
+        epoch={1}
+        online
+        onOpenSession={vi.fn()}
+        learning={<p>Review switch</p>}
+      />,
+    );
+    await screen.findByRole('region', { name: 'Skills' });
+    expect(screen.getByText('New skill to keep')).toBeVisible();
+    const headings = screen
+      .getAllByRole('heading', { level: 2 })
+      .map((heading) => heading.textContent);
+    expect(headings).toEqual([
+      'Waiting for review',
+      'Skills',
+      'How it learns',
+      'Recently decided',
+    ]);
+  });
+
   it('shows learning lineage and links a pending draft to its source task', async () => {
     const user = userEvent.setup();
     const draft = skillDraftFixture('skd_learning', {

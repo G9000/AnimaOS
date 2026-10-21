@@ -232,6 +232,20 @@ describe('MemoryPage: M78 context freshness', () => {
 });
 
 describe('MemoryPage: memories', () => {
+  it('counts what each tab holds without changing its name', async () => {
+    vi.mocked(daemon.recentMemories).mockResolvedValue([
+      memoryFixture('m1', { content: 'Likes tea' }),
+      memoryFixture('m2', { content: 'Needs bun' }),
+    ]);
+    renderPage();
+    await screen.findByText('Likes tea');
+    const tab = screen.getByRole('tab', { name: 'Memories' });
+    expect(tab).toHaveTextContent('Memories2');
+    expect(screen.getByRole('tab', { name: 'About you' })).toHaveTextContent(
+      'About you0',
+    );
+  });
+
   it('shows the empty state when nothing is remembered', async () => {
     renderPage();
     expect(await screen.findByText(MEMORY_EMPTY)).toBeVisible();

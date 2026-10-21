@@ -61,8 +61,11 @@ export function SkillsPage({
   // Task reviews belong to the companion, so they show even when the
   // skills folder cannot be read.
   const learningSection = learning && (
-    <section className="skills-section" aria-labelledby="skills-learning">
-      <h2 id="skills-learning">Learning from finished tasks</h2>
+    <section
+      className="skills-section skills-learning"
+      aria-labelledby="skills-learning"
+    >
+      <h2 id="skills-learning">How it learns</h2>
       {learning}
     </section>
   );
@@ -187,7 +190,6 @@ export function SkillsPage({
         )}
         {moreFiles && <p className="skills-empty">{moreFiles}</p>}
       </section>
-      {learningSection}
       <section className="skills-section" aria-labelledby="skills-list">
         <div className="skills-section-header">
           <h2 id="skills-list">Skills</h2>
@@ -427,6 +429,7 @@ export function SkillsPage({
           </ul>
         )}
       </section>
+      {learningSection}
       <section className="skills-section" aria-labelledby="skills-decided">
         <h2 id="skills-decided">Recently decided</h2>
         {view.decided.length === 0 ? (

@@ -116,7 +116,7 @@ export function MemoryPage({ agentId, online, epoch }: MemoryPageProps) {
   return (
     <div className="memory-page">
       <div className="memory-header">
-        <h2>What your companion remembers</h2>
+        <h2 className="sr-only">What your companion remembers</h2>
         {!headerError && (
           <button
             type="button"
@@ -156,6 +156,15 @@ export function MemoryPage({ agentId, online, epoch }: MemoryPageProps) {
             onClick={() => selectTab(item.id)}
           >
             {item.label}
+            {view.loaded && (
+              <span className="memory-tab-count" aria-hidden>
+                {item.id === 'memories'
+                  ? view.memories.length
+                  : item.id === 'about'
+                    ? view.facts.length
+                    : view.entities.length}
+              </span>
+            )}
           </button>
         ))}
       </div>

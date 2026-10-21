@@ -99,6 +99,7 @@ export function SkillDraftCard({
 
   return (
     <section className="skill-draft" aria-label={`Skill draft: ${name.text}`}>
+      <p className="skill-draft-kicker">New skill to keep</p>
       <header className="skill-draft-header">
         <strong>{name.text}</strong>
         <code>/{draft.slug}</code>

@@ -4503,3 +4503,350 @@ details.settings-item > :not(summary) {
 .settings-window .approvals-page .settings-form {
   padding: 0;
 }
+
+/* ── Skills and Memory as row lists (Settings · Skills, Settings · Memory) ── */
+
+.settings-window .skills-page,
+.settings-window .memory-page {
+  padding: 28px 32px 32px;
+  gap: 28px;
+}
+
+.settings-window .skills-section h2 {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.settings-window .skills-section-header {
+  gap: 8px;
+}
+
+.settings-window .skills-section-header h2 {
+  margin-right: auto;
+}
+
+.settings-window .skills-list,
+.settings-window .skills-decided {
+  gap: 0;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+}
+
+.settings-window .skills-list > li,
+.settings-window .skills-decided > li {
+  border-radius: 0;
+}
+
+.settings-window .skills-list > li + li,
+.settings-window .skills-decided > li + li {
+  border-top: 1px solid rgb(236 230 218 / 0.1);
+}
+
+.settings-window .skills-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 60px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 0;
+}
+
+.settings-window .skills-row-text {
+  display: grid;
+  flex: 1;
+  grid-template-columns: auto auto 1fr;
+  column-gap: 10px;
+  row-gap: 2px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.settings-window .skills-row-text > strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-window .skills-row-text > code {
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.45);
+}
+
+.settings-window .skills-description {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.5);
+}
+
+.settings-window .skills-status {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.settings-window .skills-row .skill-actions {
+  flex-wrap: nowrap;
+  flex: none;
+  gap: 8px;
+}
+
+.settings-window .skills-row .studio-tool-button,
+.settings-window .skills-section-header .studio-tool-button {
+  height: 30px;
+  min-height: 0;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.settings-window .skills-switch {
+  gap: 8px;
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.5);
+}
+
+.settings-window .skills-switch input,
+.settings-window .skills-learning input[type='checkbox'] {
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  border-radius: 10px;
+  background: rgb(236 230 218 / 0.15);
+  appearance: none;
+  cursor: pointer;
+}
+
+.settings-window .skills-switch input::after,
+.settings-window .skills-learning input[type='checkbox']::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  background: rgb(236 230 218 / 0.6);
+  transition: transform 120ms ease;
+}
+
+.settings-window .skills-switch input:checked,
+.settings-window .skills-learning input[type='checkbox']:checked {
+  background: var(--color-accent);
+}
+
+.settings-window .skills-switch input:checked::after,
+.settings-window .skills-learning input[type='checkbox']:checked::after {
+  background: #fff;
+  transform: translateX(14px);
+}
+
+.settings-window .skills-switch input:focus-visible,
+.settings-window .skills-learning input[type='checkbox']:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.settings-window .skills-decided > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+}
+
+.settings-window .skills-decided > li > time {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: rgb(236 230 218 / 0.4);
+}
+
+/* The skill waiting to be kept is the thing to look at */
+.settings-window .skill-draft {
+  gap: 10px;
+  padding: 16px 18px;
+  border: 1px solid rgb(233 77 171 / 0.3);
+  border-radius: 8px;
+  background: rgb(233 77 171 / 0.05);
+}
+
+.skill-draft-kicker {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+.settings-window .skill-draft-header > strong {
+  font-family: var(--font-serif);
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--color-ink);
+}
+
+.settings-window .skill-draft .studio-tool-button {
+  height: 30px;
+  min-height: 0;
+  padding: 0 14px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.settings-window .skill-draft .skill-actions .studio-tool-button:first-child {
+  background: #ece6da;
+  color: #121212;
+  border-color: transparent;
+}
+
+/* How it learns: the review switch sits on a row */
+.settings-window .skills-learning > div > section > div:first-of-type {
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+  background: none;
+}
+
+/* Memory: counts on the tabs, a quiet pill group, rows for what it holds */
+.settings-window .memory-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-content: start;
+  gap: 20px 12px;
+}
+
+.settings-window .memory-page > * {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.settings-window .memory-page > .memory-header:first-child {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+}
+
+.settings-window .memory-page > .memory-tabs {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: start;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid rgb(236 230 218 / 0.14);
+  border-radius: 8px;
+}
+
+.settings-window .memory-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.5);
+}
+
+.settings-window .memory-tab[aria-selected='true'] {
+  border-color: transparent;
+  background: rgb(233 77 171 / 0.15);
+  color: var(--color-ink);
+}
+
+.memory-tab-count {
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.4);
+}
+
+.settings-window .memory-section h3 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.settings-window .memory-section h4 {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+.settings-window .memory-list {
+  gap: 0;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+}
+
+.settings-window .memory-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.settings-window .memory-item + .memory-item {
+  border-top: 1px solid rgb(236 230 218 / 0.1);
+}
+
+.settings-window .memory-item > * {
+  grid-column: 1 / -1;
+}
+
+.settings-window .memory-item > .memory-item-body {
+  grid-column: 1;
+  flex-direction: column-reverse;
+  gap: 2px;
+}
+
+.settings-window .memory-item > .memory-actions {
+  grid-column: 2;
+  grid-row: 1;
+  flex-wrap: nowrap;
+}
+
+.settings-window .memory-content {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+.settings-window .memory-item .memory-meta {
+  gap: 8px;
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.5);
+}
+
+.settings-window .memory-item .studio-tool-button {
+  height: 28px;
+  min-height: 0;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.settings-window .memory-search input,
+.settings-window .memory-toolbar select {
+  border-radius: 6px;
+}
+
+/* The daemon-wide search check is housekeeping: it goes under the list. */
+.settings-window .memory-page > section[aria-label='Memory search status'] {
+  order: 9;
+  padding: 14px 16px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+}
+
