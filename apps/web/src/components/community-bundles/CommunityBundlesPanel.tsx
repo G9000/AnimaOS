@@ -389,7 +389,7 @@ export function CommunityBundlesPanel({
   return (
     <section
       aria-label="Community bundles"
-      className="space-y-4 rounded-2xl border border-line bg-panel/60 p-4 sm:p-6"
+      className="space-y-4 connections-card"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>

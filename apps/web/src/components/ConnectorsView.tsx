@@ -174,10 +174,7 @@ function Card({
   children: ReactNode;
 }) {
   return (
-    <section
-      aria-label={title}
-      className="min-w-0 space-y-4 rounded-2xl border border-line bg-panel/60 p-4 sm:p-6"
-    >
+    <section aria-label={title} className="min-w-0 space-y-4 connections-card">
       <div>
         <h2 className="text-base font-semibold text-ink">{title}</h2>
         <p className="mt-1 text-xs leading-relaxed text-ink-3">{description}</p>
@@ -1007,18 +1004,9 @@ export function ConnectorsView({
     <ConnectorContext.Provider
       value={{ owner: agentId, online, epoch, disabled }}
     >
-      <section
-        aria-label="Connectors"
-        className="h-full min-w-0 overflow-y-auto p-4 pb-8 sm:p-6 lg:p-8"
-      >
-        <div className="mx-auto max-w-6xl space-y-6">
-          <header>
-            <h1 className="text-xl font-semibold text-ink">Connectors</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-ink-3">
-              Bring your conversations, calendar, and inbox into your workspace.
-              Connections belong to your main agent.
-            </p>
-          </header>
+      <section aria-label="Connectors" className="connections-page">
+        <div className="connections-stack">
+          <h1 className="sr-only">Connectors</h1>
           {!online && (
             <p role="status" className="text-xs text-ink-3">
               Offline — reconnect to review current connection status.
@@ -1026,7 +1014,7 @@ export function ConnectorsView({
           )}
           <section
             aria-labelledby="oauth-app-setup-heading"
-            className="space-y-4 rounded-2xl border border-line bg-panel/60 p-4 sm:p-6"
+            className="space-y-4 connections-card"
           >
             <div>
               <h2
@@ -1092,13 +1080,9 @@ export function ConnectorsView({
             onPermissionsUncertain={onMcpPermissionsUncertain}
           />
           <div className="grid min-w-0 items-start gap-4 xl:grid-cols-2">
-            <div className="min-w-0 rounded-2xl border border-line bg-panel/60 p-4 sm:p-6">
-              {telegram}
-            </div>
+            <div className="min-w-0 connections-card">{telegram}</div>
             {discord && (
-              <div className="min-w-0 rounded-2xl border border-line bg-panel/60 p-4 sm:p-6">
-                {discord}
-              </div>
+              <div className="min-w-0 connections-card">{discord}</div>
             )}
             <CalendarCard
               key={`${agentId}:calendar:${oauthGeneration.google}`}

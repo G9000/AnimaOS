@@ -4850,3 +4850,228 @@ details.settings-item > :not(summary) {
   border-radius: 8px;
 }
 
+/* ── Tools and Connections as hairline lists ── */
+
+.tools-page,
+.connections-page {
+  min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+  padding: 28px 32px 32px;
+}
+
+.connections-stack,
+.tools-page {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.tools-head {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: -14px;
+}
+
+.tools-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tools-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tools-section-head h3,
+.tools-authority h3,
+.tools-group h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+.tools-section-head p,
+.tools-group-help,
+.tools-note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgb(236 230 218 / 0.5);
+}
+
+.tools-count {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  color: rgb(236 230 218 / 0.4);
+}
+
+.tools-search {
+  width: min(260px, 100%);
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgb(236 230 218 / 0.14);
+  border-radius: 6px;
+  background: rgb(236 230 218 / 0.03);
+  font-size: 12px;
+  color: var(--color-ink);
+}
+
+.tools-authority {
+  padding: 12px 14px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+  background: rgb(236 230 218 / 0.025);
+}
+
+.tools-authority h3 {
+  font-size: 13px;
+}
+
+.tools-authority p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: rgb(236 230 218 / 0.55);
+}
+
+.tools-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 16px;
+  align-items: start;
+}
+
+.tools-group > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tools-group > header > span {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.4);
+}
+
+.tools-group .settings-list {
+  margin-top: 10px;
+  list-style: none;
+}
+
+.tools-row {
+  padding: 12px 14px;
+}
+
+.tools-row-name {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-accent);
+  overflow-wrap: anywhere;
+}
+
+.tools-row-help {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgb(236 230 218 / 0.6);
+}
+
+.tools-row-needs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.tools-row-needs span {
+  padding: 2px 8px;
+  border: 1px solid rgb(236 230 218 / 0.14);
+  border-radius: 999px;
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.55);
+}
+
+.tools-fact {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.tools-fact dt {
+  flex: none;
+  width: 200px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+.tools-fact dd {
+  flex: 1;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgb(236 230 218 / 0.6);
+  overflow-wrap: anywhere;
+}
+
+.tools-limits {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgb(236 230 218 / 0.5);
+}
+
+.tools-status {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.45);
+}
+
+.tools-error {
+  border-color: rgb(227 187 112 / 0.35);
+}
+
+@media (max-width: 900px) {
+  .tools-groups {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tools-page,
+  .connections-page {
+    padding: 24px;
+  }
+}
+
+/* Every connection is one hairline block in the same language. */
+.connections-card {
+  padding: 16px 18px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+  background: none;
+}
+
+.connections-card h2,
+.connections-card > div > h2 {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+.connections-card .field {
+  border-radius: 6px;
+}
