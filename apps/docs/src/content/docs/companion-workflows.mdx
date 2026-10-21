@@ -9,7 +9,7 @@ In **Permissions**, turn on **Allow workflows in chat** and save. This explicitl
 
 > Create a saved workflow called “Reviewed report”: summarize the selected notes, pause for my approval, ask who the audience is, then draft the report using the saved summary and my answer.
 
-The **Workflows** section inside chat shows the selected companion's saved workflows, including workflows created elsewhere. Use **Approve checkpoint** on its card, or enter **Your answer** and choose **Submit answer**. These are direct owner decisions; simply typing “approved” into the regular message composer does not resume a checkpoint. Creation may still require the companion's existing execution approval. Completed and cancelled cards collapse in chat and can be expanded to inspect their saved results and decisions. Disabling chat workflow permission prevents model creation/listing; the owner can still inspect and continue previously saved workflows using the cards.
+The **Active workflows** section inside chat appears only while the selected companion has running work or a checkpoint needing owner input or review. Completed and cancelled workflows stay in **Work → Workflows**, with the full saved history. Use **Approve checkpoint** on its card, or enter **Your answer** and choose **Submit answer**. These are direct owner decisions; simply typing “approved” into the regular message composer does not resume a checkpoint. Creation may still require the companion's existing execution approval. Chat hides completed and cancelled cards and template management; inspect saved results, decisions, and reusable templates in **Work → Workflows**. Disabling chat workflow permission prevents model creation/listing; the owner can still inspect and continue previously saved workflows using the cards.
 
 Open **Work -> Workflows**, choose a companion, and add an ordered sequence of **Task**, **Approval**, and **Question** steps. A report workflow might gather facts, wait for your approval, ask who the audience is, and then write the report.
 
@@ -129,7 +129,7 @@ Each call starts fresh; variables do not persist between programs. The generated
 
 ## Reuse a workflow template
 
-Open **Reusable templates** in the chat's Workflows section or in **Work → Workflows**. Choose **New template**, or copy the steps of an existing workflow. Give it a slug, add named parameters and optional defaults, and use placeholders such as `${topic}` in titles or prompts. `$${topic}` keeps the placeholder as literal text. Parameter values are plain strings; they never evaluate code or expand environment variables.
+Open **Reusable templates** in **Work → Workflows**. Choose **New template**, or copy the steps of an existing workflow. Give it a slug, add named parameters and optional defaults, and use placeholders such as `${topic}` in titles or prompts. `$${topic}` keeps the placeholder as literal text. Parameter values are plain strings; they never evaluate code or expand environment variables.
 
 Save the template, select it, enter its inputs, and choose **Run template**. Each start creates a separate workflow. Its template revision, resolved inputs, steps, results, and checkpoint decisions remain pinned even if you later edit or remove the template. Existing owner checkpoint controls still apply.
 

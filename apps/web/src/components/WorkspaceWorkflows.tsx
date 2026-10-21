@@ -12,6 +12,11 @@ import { WorkflowTemplates } from './WorkflowTemplates';
 
 const buttonClass =
   'rounded-xl border border-line px-4 py-3 text-sm disabled:opacity-50';
+// Work stays open alongside the mounted chat; owner changes must refresh both.
+const workflowChanges = new EventTarget();
+const notifyWorkflowChange = (agentId: string) =>
+  workflowChanges.dispatchEvent(new CustomEvent('change', { detail: agentId }));
+
 const labels = {
   pending: 'Pending',
   running: 'Running',
@@ -203,6 +208,15 @@ export function WorkflowAgentView({
     context.active && contextRef.current === context && online;
 
   useEffect(() => {
+    const update = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === agentId)
+        setRefresh((value) => value + 1);
+    };
+    workflowChanges.addEventListener('change', update);
+    return () => workflowChanges.removeEventListener('change', update);
+  }, [agentId]);
+
+  useEffect(() => {
     save(draftKey, draft);
   }, [draftKey, draft]);
   useEffect(() => {
@@ -297,10 +311,10 @@ export function WorkflowAgentView({
       else if (command.type === 'resume')
         await daemon.resumeWorkflow(agentId, command.id, command.input);
       else await daemon.cancelWorkflow(agentId, command.id, command.input);
+      notifyWorkflowChange(agentId);
       if (!validContext()) return;
       remember(null);
       if (command.type === 'create') setDraft(newDraft());
-      setRefresh((value) => value + 1);
     } catch (error) {
       if (!validContext()) return;
       setActionError({
@@ -340,24 +354,43 @@ export function WorkflowAgentView({
   const error =
     actionError?.context === context ? actionError.message : current?.error;
 
+  const chat = surface === 'chat';
+  const visibleWorkflows = (current?.workflows ?? []).filter(
+    (workflow) =>
+      !chat ||
+      (workflow.status !== 'completed' && workflow.status !== 'cancelled'),
+  );
+  if (chat && !visibleWorkflows.length && !pending && !error) return null;
+  const Container = chat ? 'section' : 'div';
+
   return (
-    <div className="space-y-5">
-      <details onToggle={(event) => setTemplatesOpen(event.currentTarget.open)}>
-        <summary className="cursor-pointer rounded-xl border border-line px-4 py-3 text-sm font-semibold">
-          Reusable templates
-        </summary>
-        {templatesOpen && (
-          <div className="pt-4">
-            <WorkflowTemplates
-              agentId={agentId}
-              online={online}
-              workflows={current?.workflows ?? []}
-              refreshKey={refreshKey}
-              onRun={() => setRefresh((value) => value + 1)}
-            />
-          </div>
-        )}
-      </details>
+    <Container
+      aria-label={chat ? 'Active workflows' : undefined}
+      className="space-y-5"
+    >
+      {chat && visibleWorkflows.length > 0 && (
+        <h2 className="text-base font-semibold">Active workflows</h2>
+      )}
+      {!chat && (
+        <details
+          onToggle={(event) => setTemplatesOpen(event.currentTarget.open)}
+        >
+          <summary className="cursor-pointer rounded-xl border border-line px-4 py-3 text-sm font-semibold">
+            Reusable templates
+          </summary>
+          {templatesOpen && (
+            <div className="pt-4">
+              <WorkflowTemplates
+                agentId={agentId}
+                online={online}
+                workflows={current?.workflows ?? []}
+                refreshKey={refreshKey}
+                onRun={() => notifyWorkflowChange(agentId)}
+              />
+            </div>
+          )}
+        </details>
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
@@ -537,17 +570,19 @@ export function WorkflowAgentView({
           </button>
         </form>
       )}
-      {online && current?.workflows?.length === 0 && !current.loading && (
-        <p className="rounded-2xl border border-dashed border-line p-8 text-sm text-ink-3">
-          No workflows yet for this agent.
-        </p>
-      )}
+      {!chat &&
+        online &&
+        current?.workflows?.length === 0 &&
+        !current.loading && (
+          <p className="rounded-2xl border border-dashed border-line p-8 text-sm text-ink-3">
+            No workflows yet for this agent.
+          </p>
+        )}
       {online &&
-        current?.workflows?.map((workflow) => (
+        visibleWorkflows.map((workflow) => (
           <WorkflowCard
             key={`${workflow.id}:${workflow.revision}`}
             workflow={workflow}
-            collapseTerminal={surface === 'chat'}
             disabled={disabled || !!pending}
             onResume={(input) =>
               void mutate({ type: 'resume', id: workflow.id, input })
@@ -561,19 +596,17 @@ export function WorkflowAgentView({
             }
           />
         ))}
-    </div>
+    </Container>
   );
 }
 
 function WorkflowCard({
   workflow,
-  collapseTerminal = false,
   disabled,
   onResume,
   onCancel,
 }: {
   workflow: WorkflowRun;
-  collapseTerminal?: boolean;
   disabled: boolean;
   onResume: (input: WorkflowResumeInput) => void;
   onCancel: () => void;
@@ -583,24 +616,6 @@ function WorkflowCard({
   const step = workflow.steps[workflow.currentStep];
   const terminal =
     workflow.status === 'completed' || workflow.status === 'cancelled';
-  if (collapseTerminal && terminal) {
-    return (
-      <details className="rounded-2xl border border-line bg-surface p-5">
-        <summary className="cursor-pointer text-sm font-semibold">
-          {workflow.title} ·{' '}
-          <span className="text-ink-3">{labels[workflow.status]}</span>
-        </summary>
-        <div className="pt-4">
-          <WorkflowCard
-            workflow={workflow}
-            disabled={disabled}
-            onResume={onResume}
-            onCancel={onCancel}
-          />
-        </div>
-      </details>
-    );
-  }
   return (
     <article
       aria-label={workflow.title}

@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { WorkflowTemplate } from '@animaOS-SWARM/sdk';
 import { WorkflowTemplates } from './WorkflowTemplates';
@@ -127,4 +133,38 @@ it('saves a named parameterized template and leaves fields disabled offline', as
   );
   view.rerender(<WorkflowTemplates agentId="alpha" online={false} />);
   expect(screen.getByRole('button', { name: 'Run template' })).toBeDisabled();
+});
+
+it('notifies the originating agent of a successful run after the source view is replaced', async () => {
+  let finish!: (value: unknown) => void;
+  api.runWorkflowTemplate.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const onAlphaRun = vi.fn();
+  const onBetaRun = vi.fn();
+  const view = render(
+    <WorkflowTemplates key="alpha" agentId="alpha" online onRun={onAlphaRun} />,
+  );
+  fireEvent.change(await screen.findByLabelText('Template to run'), {
+    target: { value: 'brief' },
+  });
+  fireEvent.change(screen.getByLabelText('Input topic'), {
+    target: { value: 'Alpha' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Run template' }));
+  expect(api.runWorkflowTemplate).toHaveBeenCalledWith(
+    'alpha',
+    'brief',
+    expect.anything(),
+  );
+  view.rerender(
+    <WorkflowTemplates key="beta" agentId="beta" online onRun={onBetaRun} />,
+  );
+  await act(async () => finish({ id: 'alpha-run' }));
+  expect(onAlphaRun).toHaveBeenCalledTimes(1);
+  expect(onBetaRun).not.toHaveBeenCalled();
+  expect(sessionStorage.getItem('anima:template-command:alpha')).toBeNull();
 });

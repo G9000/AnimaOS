@@ -83,18 +83,38 @@ beforeEach(() => {
 });
 
 describe('chat workflows integration', () => {
-  it.each([null, sessionFixture('helper-chat')])('does not mount workflows for a helper agent with session %s', async (session) => {
-    renderView({ agent: { ...agent, workspaceRole: 'helper' }, session });
-    await act(async () => {});
-    expect(screen.queryByRole('region', { name: /Workflows for/ })).not.toBeInTheDocument();
-    expect(daemon.listWorkflows).not.toHaveBeenCalled();
-  });
-  it('places agent workflows inside the empty chat scroller and keeps its composer available', async () => {
-    vi.mocked(daemon.listWorkflows).mockResolvedValue([]);
+  it.each([null, sessionFixture('helper-chat')])(
+    'does not mount workflows for a helper agent with session %s',
+    async (session) => {
+      renderView({ agent: { ...agent, workspaceRole: 'helper' }, session });
+      await act(async () => {});
+      expect(
+        screen.queryByRole('region', { name: 'Active workflows' }),
+      ).not.toBeInTheDocument();
+      expect(daemon.listWorkflows).not.toHaveBeenCalled();
+    },
+  );
+  it('places active workflows inside the chat scroller and keeps its composer available', async () => {
+    vi.mocked(daemon.listWorkflows).mockResolvedValue([
+      {
+        id: 'active-workflow',
+        agentId: agent.id,
+        title: 'Waiting for owner',
+        requestKey: 'test',
+        status: 'awaiting_approval',
+        revision: 1,
+        currentStep: 0,
+        steps: [],
+        decisions: [],
+        error: null,
+        createdAtMs: 1,
+        updatedAtMs: 1,
+      },
+    ]);
     const scrollerRef = createRef<HTMLDivElement>();
     renderView({ scrollerRef });
     const workflows = await screen.findByRole('region', {
-      name: 'Workflows for Nova',
+      name: 'Active workflows',
     });
     expect(scrollerRef.current).toContainElement(workflows);
     expect(screen.getByRole('textbox', { name: /Message/ })).toBeVisible();
@@ -107,8 +127,10 @@ describe('chat workflows integration', () => {
     const list = vi.mocked(daemon.listWorkflows);
     list.mockResolvedValue([]);
     const view = renderView({ session: sessionFixture('chat:workflows') });
-    await screen.findByText('No workflows yet for this agent.');
-    expect(list).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+    expect(
+      screen.queryByRole('region', { name: 'Active workflows' }),
+    ).not.toBeInTheDocument();
     view.rerender({
       messages: [
         {
@@ -144,7 +166,7 @@ describe('chat workflows integration', () => {
     renderView({ session: sessionFixture('other', { kind }) });
     await act(async () => {});
     expect(
-      screen.queryByRole('region', { name: /Workflows for/ }),
+      screen.queryByRole('region', { name: 'Active workflows' }),
     ).not.toBeInTheDocument();
     expect(daemon.listWorkflows).not.toHaveBeenCalled();
   });
@@ -161,7 +183,7 @@ describe('chat workflows integration', () => {
     });
     await act(async () => {});
     expect(
-      screen.queryByRole('region', { name: /Workflows for/ }),
+      screen.queryByRole('region', { name: 'Active workflows' }),
     ).not.toBeInTheDocument();
     expect(daemon.listWorkflows).not.toHaveBeenCalled();
   });

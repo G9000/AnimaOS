@@ -153,10 +153,10 @@ export function WorkflowTemplates({
         await daemon.runWorkflowTemplate(agentId, command.slug, command.input);
       // Clear the originating agent's durable retry receipt even if the view changed.
       remember(commandKey, null);
+      if (command.type === 'run') onRun?.();
       if (current !== epoch.current) return;
       setPending(null);
       if (command.type === 'save' || command.type === 'delete') setDraft(null);
-      if (command.type === 'run') onRun?.();
       setRefresh((value) => value + 1);
     } catch (reason) {
       if (current !== epoch.current) return;

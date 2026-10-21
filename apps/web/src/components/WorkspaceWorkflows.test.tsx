@@ -411,3 +411,21 @@ it('cancels with the inspected revision and does not describe a load failure as 
   ).not.toBeInTheDocument();
   expect(list).toHaveBeenCalledTimes(2);
 });
+
+it('keeps completed and cancelled history plus template management under Work', async () => {
+  vi.spyOn(daemon, 'listWorkflows').mockResolvedValue([
+    { ...run('completed'), id: 'done', title: 'Old completed run' },
+    { ...run('cancelled'), id: 'cancelled', title: 'Old cancelled run' },
+  ]);
+  render(<WorkspaceWorkflows agents={agents} online />);
+  expect(
+    await screen.findByRole('article', { name: 'Old completed run' }),
+  ).toBeVisible();
+  expect(
+    screen.getByRole('article', { name: 'Old cancelled run' }),
+  ).toBeVisible();
+  expect(
+    screen.getByText('Reusable templates', { selector: 'summary' }),
+  ).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Create workflow' })).toBeVisible();
+});
