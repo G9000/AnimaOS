@@ -4163,3 +4163,343 @@ button.scenic-thread[aria-expanded='true'] {
 .settings-window-head .settings-page-title {
   display: block;
 }
+
+/* ── Settings rows ──
+ * A section is a hairline list of rows: icon, title and one quiet line, and
+ * the action on the right (Settings · Profile and Model in design.pen). */
+
+.settings-list {
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+}
+
+.settings-list > * + * {
+  border-top: 1px solid rgb(236 230 218 / 0.1);
+}
+
+.settings-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 60px;
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.settings-item-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  color: rgb(236 230 218 / 0.5);
+}
+
+.settings-item-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-item-text strong,
+.settings-item-text label,
+.settings-item-text h3 {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+
+.settings-item-text small,
+.settings-item-text p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgb(236 230 218 / 0.5);
+}
+
+.settings-item-action,
+.profile-edit-label {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid rgb(236 230 218 / 0.14);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.7);
+  cursor: pointer;
+}
+
+.settings-item-action:hover,
+.profile-edit-label:hover {
+  border-color: rgb(236 230 218 / 0.3);
+  color: var(--color-ink);
+}
+
+.settings-item-action[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-item-select {
+  flex: none;
+  max-width: 200px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid rgb(236 230 218 / 0.14);
+  border-radius: 6px;
+  background: rgb(236 230 218 / 0.03);
+  font-size: 12px;
+  color: var(--color-ink);
+}
+
+/* Profile · identity */
+.settings-list > .profile-identity {
+  gap: 8px;
+  padding: 14px;
+}
+
+.profile-avatar-change .agent-avatar {
+  width: 44px !important;
+  height: 44px !important;
+}
+
+.profile-avatar-controls {
+  width: 56px;
+}
+
+.profile-identity-row {
+  gap: 16px;
+}
+
+.profile-name-row {
+  gap: 12px;
+}
+
+.profile-identity .labelless,
+.settings-profile .profile-name-row label {
+  margin-bottom: 4px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: rgb(236 230 218 / 0.55);
+}
+
+.settings-profile .field {
+  border-radius: 6px;
+}
+
+/* Profile · personality is a segmented control on its row */
+fieldset.profile-personality {
+  margin: 0;
+  border: 0;
+}
+
+.settings-list > fieldset.profile-personality {
+  border-top: 1px solid rgb(236 230 218 / 0.1);
+}
+
+fieldset.profile-personality .profile-personality-options {
+  flex: none;
+  width: auto;
+  padding: 2px;
+  border: 1px solid rgb(236 230 218 / 0.14);
+  border-radius: 8px;
+  background: none;
+}
+
+fieldset.profile-personality .profile-personality-options span {
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+fieldset.profile-personality .profile-personality-options input:checked + span {
+  background: rgb(233 77 171 / 0.15);
+  color: var(--color-ink);
+}
+
+/* Advanced rows that open */
+details.settings-item {
+  display: block;
+  padding: 0;
+}
+
+details.settings-item > summary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 60px;
+  padding: 12px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+details.settings-item > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.settings-item > :not(summary) {
+  margin: 0 14px 14px;
+}
+
+.profile-prompt-editor {
+  border: 0;
+}
+
+.profile-prompt-editor textarea {
+  width: calc(100% - 28px);
+}
+
+.settings-list > .settings-danger {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 0;
+  border-top: 1px solid rgb(236 230 218 / 0.1);
+}
+
+.settings-list > .settings-danger .settings-item-icon {
+  color: #ff6b5b;
+}
+
+.settings-list > .settings-danger h3 {
+  color: var(--color-ink);
+}
+
+.settings-list > .settings-danger > button {
+  height: 30px;
+  min-height: 0;
+  padding: 0 12px;
+  border: 1px solid rgb(255 107 91 / 0.45);
+  border-radius: 6px;
+  font-size: 12px;
+  color: #ff6b5b;
+}
+
+/* Model · the main model is one row you can change */
+.settings-model-block {
+  position: relative;
+}
+
+.settings-model-summary {
+  padding: 12px 14px;
+  border: 1px solid rgb(233 77 171 / 0.35);
+  border-radius: 8px;
+  background: rgb(233 77 171 / 0.07);
+}
+
+.settings-model-summary::after {
+  display: none;
+}
+
+.settings-model-text strong {
+  font-size: 13px;
+}
+
+.settings-model-text span {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: rgb(236 230 218 / 0.55);
+}
+
+.settings-model-more > summary {
+  position: absolute;
+  top: 15px;
+  right: 14px;
+  align-self: auto;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border-color: rgb(236 230 218 / 0.2);
+  line-height: 28px;
+  color: rgb(236 230 218 / 0.8);
+}
+
+.settings-model-more[open] > summary {
+  margin-bottom: 0;
+}
+
+.settings-model-more[open] {
+  margin-top: 12px;
+}
+
+/* Model · fallbacks: a title with Add on the right, then the order */
+.fallback-models {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 12px;
+  row-gap: 8px;
+}
+
+.fallback-models > h4,
+.fallback-models > p {
+  grid-column: 1;
+}
+
+.fallback-models > .fallback-list,
+.fallback-models > .fallback-problem {
+  grid-column: 1 / -1;
+}
+
+.fallback-footer {
+  display: contents;
+}
+
+.fallback-footer > button:first-child {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: start;
+  height: 30px;
+  border-radius: 6px;
+}
+
+.fallback-footer > button:last-child {
+  grid-column: 1 / -1;
+  justify-self: end;
+  border-radius: 6px;
+}
+
+.fallback-footer > button:last-child:disabled {
+  display: none;
+}
+
+.fallback-list {
+  border-radius: 8px;
+}
+
+.fallback-number {
+  border-radius: 50%;
+}
+
+/* Model · keys: each provider is its own bordered block */
+.key-provider {
+  padding: 12px 14px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+}
+
+.settings-window .settings-form {
+  max-width: none;
+  padding: 28px 32px 32px;
+}
+
+.settings-window .approvals-page .settings-form {
+  padding: 0;
+}

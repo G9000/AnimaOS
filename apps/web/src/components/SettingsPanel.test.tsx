@@ -1580,7 +1580,7 @@ it('keeps profile drafts when switching models is unavailable during unsaved cha
   fireEvent.change(screen.getByLabelText('Name'), {
     target: { value: 'Unsaved Nova' },
   });
-  const link = screen.getByRole('link', { name: 'Switch' });
+  const link = screen.getByRole('link', { name: 'Change' });
   expect(link).toHaveAttribute('aria-disabled', 'true');
   expect(fireEvent.click(link)).toBe(false);
   expect(screen.getByLabelText('Name')).toHaveValue('Unsaved Nova');

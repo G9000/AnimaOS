@@ -18,7 +18,15 @@ import {
   type AgentUpdateInput,
   type DaemonProvider,
 } from '../lib/daemon-api';
-import { AlertIcon, TrashIcon } from './icons';
+import {
+  AlertIcon,
+  ChipIcon,
+  FolderIcon,
+  ScrollTextIcon,
+  SparkIcon,
+  TrashIcon,
+} from './icons';
+import { ProfileVoice } from './ProfileVoice';
 import { ChatGptConnection } from './ChatGptConnection';
 import { ChatGptModelSelect } from './ChatGptModelSelect';
 import { AgentProfileDetails } from './AgentProfileDetails';
@@ -497,57 +505,68 @@ export function SettingsPanel({
             <h3 id="settings-identity" className="settings-group-title">
               Identity
             </h3>
-            <AgentProfileDetails
-              key={agent.id}
-              agent={agent}
-              disabled={controlsDisabled}
-            >
-              <div className="profile-name-row">
-                <div>
-                  <label className={labelCls} htmlFor="settings-name">
-                    Name
-                  </label>
-                  <input
-                    id="settings-name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    disabled={controlsDisabled}
-                    className="field"
-                  />
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="settings-owner">
-                    Calls you
-                  </label>
-                  <input
-                    id="settings-owner"
-                    value={
-                      system.match(/^The owner's name is (.*)\.$/m)?.[1] ?? ''
-                    }
-                    onChange={(event) => {
-                      const owner = event.target.value;
-                      setSystem((current) => {
-                        const line = owner
-                          ? `The owner's name is ${owner}.`
-                          : '';
-                        return /^The owner's name is .*\.$/m.test(current)
-                          ? current.replace(
-                              /^The owner's name is .*\.$/m,
-                              () => line,
-                            )
-                          : [current.trim(), line].filter(Boolean).join('\n\n');
-                      });
-                    }}
-                    disabled={controlsDisabled}
-                    className="field"
-                  />
-                </div>
-              </div>
-              <fieldset
-                className="profile-personality"
+            <div className="settings-list">
+              <AgentProfileDetails
+                key={agent.id}
+                agent={agent}
                 disabled={controlsDisabled}
               >
-                <legend className={labelCls}>Personality</legend>
+                <div className="profile-name-row">
+                  <div>
+                    <label className={labelCls} htmlFor="settings-name">
+                      Name
+                    </label>
+                    <input
+                      id="settings-name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      disabled={controlsDisabled}
+                      className="field"
+                    />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="settings-owner">
+                      Calls you
+                    </label>
+                    <input
+                      id="settings-owner"
+                      value={
+                        system.match(/^The owner's name is (.*)\.$/m)?.[1] ?? ''
+                      }
+                      onChange={(event) => {
+                        const owner = event.target.value;
+                        setSystem((current) => {
+                          const line = owner
+                            ? `The owner's name is ${owner}.`
+                            : '';
+                          return /^The owner's name is .*\.$/m.test(current)
+                            ? current.replace(
+                                /^The owner's name is .*\.$/m,
+                                () => line,
+                              )
+                            : [current.trim(), line]
+                                .filter(Boolean)
+                                .join('\n\n');
+                        });
+                      }}
+                      disabled={controlsDisabled}
+                      className="field"
+                    />
+                  </div>
+                </div>
+              </AgentProfileDetails>
+              <fieldset
+                className="profile-personality settings-item"
+                disabled={controlsDisabled}
+              >
+                <legend className="sr-only">Personality</legend>
+                <span className="settings-item-icon" aria-hidden="true">
+                  <SparkIcon size={16} />
+                </span>
+                <div className="settings-item-text" aria-hidden="true">
+                  <strong>Personality</strong>
+                  <small>How it talks and how much it takes the lead.</small>
+                </div>
                 <div className="profile-personality-options">
                   {(
                     [
@@ -585,7 +604,7 @@ export function SettingsPanel({
                   ))}
                 </div>
               </fieldset>
-            </AgentProfileDetails>
+            </div>
           </section>
           {!shows('model') && (
             <section
@@ -593,38 +612,39 @@ export function SettingsPanel({
               aria-labelledby="profile-model-title"
             >
               <h3 id="profile-model-title" className="settings-group-title">
-                Model
+                Model and voice
               </h3>
-              <div className="profile-model-row">
-                <div>
-                  <span className={labelCls}>Provider</span>
-                  <div className="profile-model-value">
-                    <span>
+              <div className="settings-list">
+                <div className="settings-item">
+                  <span className="settings-item-icon" aria-hidden="true">
+                    <ChipIcon size={16} />
+                  </span>
+                  <div className="settings-item-text">
+                    <strong>{agent.model || 'No model chosen'}</strong>
+                    <small>
                       {agent.provider === 'chatgpt'
                         ? 'ChatGPT subscription'
                         : (providers?.find((item) => item.id === agent.provider)
                             ?.label ?? agent.provider)}
-                    </span>
-                    <a
-                      href="#/model"
-                      aria-disabled={controlsDisabled || dirty || undefined}
-                      title={
-                        dirty
-                          ? 'Save changes before switching models.'
-                          : undefined
-                      }
-                      onClick={(event) => {
-                        if (controlsDisabled || dirty) event.preventDefault();
-                      }}
-                    >
-                      Switch
-                    </a>
+                    </small>
                   </div>
+                  <a
+                    className="settings-item-action"
+                    href="#/model"
+                    aria-disabled={controlsDisabled || dirty || undefined}
+                    title={
+                      dirty
+                        ? 'Save changes before switching models.'
+                        : undefined
+                    }
+                    onClick={(event) => {
+                      if (controlsDisabled || dirty) event.preventDefault();
+                    }}
+                  >
+                    Change
+                  </a>
                 </div>
-                <div>
-                  <span className={labelCls}>Model</span>
-                  <div className="profile-model-value">{agent.model}</div>
-                </div>
+                <ProfileVoice agentName={agent.name} />
               </div>
             </section>
           )}
@@ -635,36 +655,72 @@ export function SettingsPanel({
             <h3 id="settings-advanced-title" className="settings-group-title">
               Advanced
             </h3>
-            <details
-              className="profile-prompt-editor"
-              open={sections.length > 1 || undefined}
-            >
-              <summary>
-                <span>
-                  <strong>System prompt</strong>
-                  <small>
-                    Edit the instructions {name || agent.name} starts every chat
-                    with.
-                  </small>
-                </span>
-                <span className="profile-edit-label">Edit</span>
-              </summary>
-              <textarea
-                aria-label="System prompt"
-                value={system}
-                onChange={(e) => setSystem(e.target.value)}
-                disabled={controlsDisabled}
-                rows={7}
-                placeholder="Leave empty to use the default built from this profile."
-                className="field resize-y leading-relaxed"
-              />
-            </details>
-          </section>
+            <div className="settings-list">
+              <details
+                className="profile-prompt-editor settings-item"
+                open={sections.length > 1 || undefined}
+              >
+                <summary>
+                  <span className="settings-item-icon" aria-hidden="true">
+                    <ScrollTextIcon size={16} />
+                  </span>
+                  <span className="settings-item-text">
+                    <strong>System prompt</strong>
+                    <small>
+                      Edit the instructions {name || agent.name} starts every
+                      chat with.
+                    </small>
+                  </span>
+                  <span className="profile-edit-label">Edit</span>
+                </summary>
+                <textarea
+                  aria-label="System prompt"
+                  value={system}
+                  onChange={(e) => setSystem(e.target.value)}
+                  disabled={controlsDisabled}
+                  rows={7}
+                  placeholder="Leave empty to use the default built from this profile."
+                  className="field resize-y leading-relaxed"
+                />
+              </details>
 
-          <details className="settings-group settings-advanced">
-            <summary>Instruction files</summary>
-            <AgentFilesPanel agentId={agent.id} />
-          </details>
+              <details className="settings-item settings-advanced">
+                <summary>
+                  <span className="settings-item-icon" aria-hidden="true">
+                    <FolderIcon size={16} />
+                  </span>
+                  <span className="settings-item-text">
+                    <strong>Instruction files</strong>
+                    <small>
+                      The files {agent.name} reads along with its prompt.
+                    </small>
+                  </span>
+                </summary>
+                <AgentFilesPanel agentId={agent.id} />
+              </details>
+              <section
+                className="settings-item settings-danger"
+                aria-labelledby="settings-reset"
+              >
+                <span className="settings-item-icon" aria-hidden="true">
+                  <TrashIcon size={16} />
+                </span>
+                <div className="settings-item-text">
+                  <h3 id="settings-reset">Reset {agent.name}</h3>
+                  <p>Deletes the companion and every conversation with it.</p>
+                </div>
+                <button
+                  onClick={resetAgent}
+                  aria-describedby={
+                    resetError ? 'settings-reset-error' : undefined
+                  }
+                  disabled={resetting || saving}
+                >
+                  {resetting ? 'Resetting…' : 'Reset'}
+                </button>
+              </section>
+            </div>
+          </section>
         </>
       )}
 
@@ -677,133 +733,135 @@ export function SettingsPanel({
             The model {agent.name} thinks with. Switching keeps every
             conversation.
           </p>
-          <div className="settings-model-summary" data-testid="main-model">
-            <span className="settings-model-mark" aria-hidden="true" />
-            <div className="settings-model-text">
-              <strong>
-                {(model === '__custom__' ? customModel : model).trim() ||
-                  agent.model ||
-                  'No model chosen'}
-              </strong>
-              <span>
-                {provider === 'chatgpt'
-                  ? 'ChatGPT subscription'
-                  : (providers?.find((p) => p.id === provider)?.label ??
-                    provider)}
-                {providers
-                  ? providers.find((p) => p.id === provider)?.configured
-                    ? ' · ready'
-                    : ' · not connected'
-                  : ''}
-              </span>
+          <div className="settings-model-block">
+            <div className="settings-model-summary" data-testid="main-model">
+              <span className="settings-model-mark" aria-hidden="true" />
+              <div className="settings-model-text">
+                <strong>
+                  {(model === '__custom__' ? customModel : model).trim() ||
+                    agent.model ||
+                    'No model chosen'}
+                </strong>
+                <span>
+                  {provider === 'chatgpt'
+                    ? 'ChatGPT subscription'
+                    : (providers?.find((p) => p.id === provider)?.label ??
+                      provider)}
+                  {providers
+                    ? providers.find((p) => p.id === provider)?.configured
+                      ? ' · ready'
+                      : ' · not connected'
+                    : ''}
+                </span>
+              </div>
             </div>
-          </div>
-          <details className="settings-model-more">
-            <summary>Change model</summary>
-            <div className="settings-model-change">
-              <label className={labelCls} htmlFor="settings-provider">
-                Provider
-              </label>
-              <select
-                id="settings-provider"
-                aria-label="Provider"
-                value={provider}
-                disabled={controlsDisabled}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setProvider(next);
-                  const options = MODEL_SUGGESTIONS[next] ?? [];
-                  setModel(
-                    next === 'chatgpt' ? '' : (options[0] ?? '__custom__'),
-                  );
-                }}
-                className="field"
-              >
-                {/* Keep the current provider selectable even if the daemon
+            <details className="settings-model-more">
+              <summary>Change model</summary>
+              <div className="settings-model-change">
+                <label className={labelCls} htmlFor="settings-provider">
+                  Provider
+                </label>
+                <select
+                  id="settings-provider"
+                  aria-label="Provider"
+                  value={provider}
+                  disabled={controlsDisabled}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setProvider(next);
+                    const options = MODEL_SUGGESTIONS[next] ?? [];
+                    setModel(
+                      next === 'chatgpt' ? '' : (options[0] ?? '__custom__'),
+                    );
+                  }}
+                  className="field"
+                >
+                  {/* Keep the current provider selectable even if the daemon
               catalog is still loading or lacks it. */}
-                {(providers ?? [])
-                  .map((p) => p.id)
-                  .concat(
-                    providers?.some((p) => p.id === agent.provider) ||
-                      !agent.provider
-                      ? []
-                      : [agent.provider],
-                  )
-                  .filter((id, i, all) => all.indexOf(id) === i)
-                  .map((id) => (
-                    <option key={id} value={id}>
-                      {id === 'chatgpt'
-                        ? 'ChatGPT subscription'
-                        : (providers?.find((p) => p.id === id)?.label ?? id)}
-                    </option>
-                  ))}
-              </select>
-              {providers && provider !== 'chatgpt' && (
-                <p className="settings-field-note">
-                  {providers.find((p) => p.id === provider)?.configured
-                    ? 'Key configured on the server.'
-                    : 'No key configured for this provider on the server.'}
-                </p>
-              )}
-            </div>
-            {provider === 'chatgpt' ? (
-              <ChatGptModelSelect
-                id="settings-chatgpt-model"
-                scopeKey={JSON.stringify([agent.id, modelScope.revision])}
-                connectionPending={modelScope.pending}
-                model={model}
-                customModel={customModel}
-                onModelChange={setModel}
-                onCustomModelChange={setCustomModel}
-                disabled={controlsDisabled}
-              />
-            ) : (
-              <>
-                <div>
-                  <label className={labelCls} htmlFor="settings-model-id">
-                    Model
-                  </label>
-                  <select
-                    id="settings-model-id"
-                    aria-label="Model"
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    disabled={controlsDisabled}
-                    className="field"
-                  >
-                    {(MODEL_SUGGESTIONS[provider] ?? []).map((m) => (
-                      <option key={m} value={m}>
-                        {m}
+                  {(providers ?? [])
+                    .map((p) => p.id)
+                    .concat(
+                      providers?.some((p) => p.id === agent.provider) ||
+                        !agent.provider
+                        ? []
+                        : [agent.provider],
+                    )
+                    .filter((id, i, all) => all.indexOf(id) === i)
+                    .map((id) => (
+                      <option key={id} value={id}>
+                        {id === 'chatgpt'
+                          ? 'ChatGPT subscription'
+                          : (providers?.find((p) => p.id === id)?.label ?? id)}
                       </option>
                     ))}
-                    <option value="__custom__">custom…</option>
-                  </select>
-                </div>
-                {model === '__custom__' && (
-                  <input
-                    aria-label="Custom model"
-                    value={customModel}
-                    onChange={(e) => setCustomModel(e.target.value)}
-                    disabled={controlsDisabled}
-                    placeholder="model id, e.g. llama3.1"
-                    className="field animate-fade-in"
-                  />
+                </select>
+                {providers && provider !== 'chatgpt' && (
+                  <p className="settings-field-note">
+                    {providers.find((p) => p.id === provider)?.configured
+                      ? 'Key configured on the server.'
+                      : 'No key configured for this provider on the server.'}
+                  </p>
                 )}
-              </>
-            )}
-            {provider === 'chatgpt' && (
-              <ChatGptConnection
-                key={agent.id}
-                onConnectionChange={refreshProviders}
-                onModelScopeChange={(pending) =>
-                  setModelScope((current) => ({
-                    revision: current.revision + 1,
-                    pending,
-                  }))
-                }
-              />
-            )}
-          </details>
+              </div>
+              {provider === 'chatgpt' ? (
+                <ChatGptModelSelect
+                  id="settings-chatgpt-model"
+                  scopeKey={JSON.stringify([agent.id, modelScope.revision])}
+                  connectionPending={modelScope.pending}
+                  model={model}
+                  customModel={customModel}
+                  onModelChange={setModel}
+                  onCustomModelChange={setCustomModel}
+                  disabled={controlsDisabled}
+                />
+              ) : (
+                <>
+                  <div>
+                    <label className={labelCls} htmlFor="settings-model-id">
+                      Model
+                    </label>
+                    <select
+                      id="settings-model-id"
+                      aria-label="Model"
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                      disabled={controlsDisabled}
+                      className="field"
+                    >
+                      {(MODEL_SUGGESTIONS[provider] ?? []).map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                      <option value="__custom__">custom…</option>
+                    </select>
+                  </div>
+                  {model === '__custom__' && (
+                    <input
+                      aria-label="Custom model"
+                      value={customModel}
+                      onChange={(e) => setCustomModel(e.target.value)}
+                      disabled={controlsDisabled}
+                      placeholder="model id, e.g. llama3.1"
+                      className="field animate-fade-in"
+                    />
+                  )}
+                </>
+              )}
+              {provider === 'chatgpt' && (
+                <ChatGptConnection
+                  key={agent.id}
+                  onConnectionChange={refreshProviders}
+                  onModelScopeChange={(pending) =>
+                    setModelScope((current) => ({
+                      revision: current.revision + 1,
+                      pending,
+                    }))
+                  }
+                />
+              )}
+            </details>
+          </div>
           <FallbackModels
             key={agent.id}
             primary={{ provider: agent.provider, model: agent.model }}
@@ -1019,23 +1077,6 @@ export function SettingsPanel({
                 : 'No changes'}
         </button>
       </div>
-
-      {shows('profile') && (
-        <section className="settings-danger" aria-labelledby="settings-reset">
-          <div>
-            <h3 id="settings-reset">Reset {agent.name}</h3>
-            <p>Deletes the companion and every conversation with it.</p>
-          </div>
-          <button
-            onClick={resetAgent}
-            aria-describedby={resetError ? 'settings-reset-error' : undefined}
-            disabled={resetting || saving}
-          >
-            <TrashIcon size={12} />
-            {resetting ? 'Resetting…' : 'Reset'}
-          </button>
-        </section>
-      )}
     </div>
   );
 }
