@@ -44,6 +44,17 @@ impl AgentRunCoordinator {
                 anima_core::learn::skill_authoring_guidance().into(),
             )));
         }
+        // Plan mode is the owner's per-session choice; without the plan tool
+        // there is nothing to plan with.
+        if runtime.config().allows_tool(crate::tools::PLAN_TOOL)
+            && self
+                .state
+                .read()
+                .await
+                .plan_first_for(runtime.id(), session_id)
+        {
+            runtime.register_provider(Arc::new(SkillContextProvider::plan_first()));
+        }
         if let Some(slug) = requested_skill(content) {
             // By exact slug, reread and rehashed now: the route's check at
             // acceptance is advisory.

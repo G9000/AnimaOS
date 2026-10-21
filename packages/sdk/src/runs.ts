@@ -141,6 +141,9 @@ export interface StartRunInput {
   attachmentIds?: string[];
   skill?: string;
   mode?: RunMode;
+  /** Plan mode: the agent shows its plan and waits for a go before a job
+   *  that changes things. Left out, the message is a Do message. */
+  plan?: boolean;
   /** Explicit owner opt-in for a new immediately eligible Chat run; replay never renews it. */
   browserSelection?: BrowserSelection;
   /** The sender's IANA time zone; the daemon keeps it as the owner's, so

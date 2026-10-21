@@ -252,6 +252,21 @@ impl DaemonState {
         evaluate(&policy, &rules, allowances, call)
     }
 
+    /// Plan mode for a session: the owner's choice for what they send next.
+    pub(crate) fn set_plan_first(&mut self, agent_id: &str, session_id: &str, on: bool) {
+        let key = (agent_id.to_string(), session_id.to_string());
+        if on {
+            self.plan_first.insert(key);
+        } else {
+            self.plan_first.remove(&key);
+        }
+    }
+
+    pub(crate) fn plan_first_for(&self, agent_id: &str, session_id: &str) -> bool {
+        self.plan_first
+            .contains(&(agent_id.to_string(), session_id.to_string()))
+    }
+
     pub(crate) fn approval_verdict(
         &self,
         agent: &AgentState,
@@ -270,6 +285,14 @@ impl DaemonState {
                 .map(|session| session.session_allowances.as_slice())
                 .unwrap_or(&[])
         };
+        // In Plan mode the plan waits for the owner even where Free would
+        // just show it; only "Always allow" for plans skips the wait.
+        if call.name == crate::tools::PLAN_TOOL
+            && !is_helper_config(&agent.config)
+            && self.plan_first_for(&agent.id, session_id)
+        {
+            return evaluate(&policy, &rules, allowances, call);
+        }
         crate::approvals::policy::evaluate_with_floor(&policy, &rules, allowances, call, &autonomy)
     }
 
@@ -716,6 +739,37 @@ mod tests {
             state.approval_verdict(&agent, "chat:b", &remember()),
             Verdict::Ask,
             "an allowance covers its own session only"
+        );
+    }
+
+    #[test]
+    fn plan_mode_makes_a_plan_wait_even_in_free_and_only_for_its_session() {
+        let (mut state, link) = daemon();
+        state.start_free(&link.agent_id);
+        let agent = agent_state(&state, &link.agent_id);
+        let plan = call("propose_plan", "title", "Lisbon trip");
+        assert_eq!(
+            state.approval_verdict(&agent, "chat:a", &plan),
+            Verdict::Allow,
+            "Free shows a plan and starts it"
+        );
+
+        state.set_plan_first(&link.agent_id, "chat:a", true);
+        assert_eq!(
+            state.approval_verdict(&agent, "chat:a", &plan),
+            Verdict::Ask,
+            "Plan mode waits for a go"
+        );
+        assert_eq!(
+            state.approval_verdict(&agent, "chat:b", &plan),
+            Verdict::Allow,
+            "Plan mode belongs to one session"
+        );
+
+        state.set_plan_first(&link.agent_id, "chat:a", false);
+        assert_eq!(
+            state.approval_verdict(&agent, "chat:a", &plan),
+            Verdict::Allow
         );
     }
 

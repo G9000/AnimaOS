@@ -1685,6 +1685,10 @@ pub(crate) struct DaemonState {
     pub(crate) approvals: crate::approvals::ApprovalRegistry,
     /// How much each agent asks: Free, Strict or Custom.
     pub(crate) autonomy: crate::approvals::autonomy::AutonomyRegistry,
+    /// Sessions where the owner chose Plan mode: the agent plans first and
+    /// waits for a go. Each message the console sends says which it is, so
+    /// this is not saved.
+    pub(crate) plan_first: std::collections::HashSet<(String, String)>,
     /// Skills agents in Free saved themselves, newest last (at most 200).
     pub(crate) skill_ledger: Vec<crate::skills::ledger::SkillLedgerEntry>,
     /// Skill records, drafts, and the last scan (spec §8).
@@ -2276,6 +2280,7 @@ impl DaemonState {
             helper_worktree_repos: Vec::new(),
             browser_setup: None,
             browser_permission_epochs: HashMap::new(),
+            plan_first: std::collections::HashSet::new(),
             mcp_publication: crate::mcp::McpRegistry::default().published(),
             mcp_manager: None,
             control_plane_store: None,

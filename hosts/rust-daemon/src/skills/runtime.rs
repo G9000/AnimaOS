@@ -57,6 +57,9 @@ pub(crate) fn requested_skill(content: &Content) -> Option<String> {
     }
 }
 
+const PLAN_FIRST_PROVIDER: &str = "plan_first";
+const PLAN_FIRST_INSTRUCTIONS: &str = "The owner chose Plan mode for this conversation. Before any job with several steps that changes things outside this chat (sending messages, booking, editing files, running commands, spending money), call propose_plan first and wait: do nothing in the plan until the owner approves it. Questions, explanations and single small actions need no plan.";
+
 /// A fixed context part for one run.
 pub(crate) struct SkillContextProvider {
     name: &'static str,
@@ -77,6 +80,15 @@ impl SkillContextProvider {
             name: SKILLS_INDEX_PROVIDER,
             description: "Owner-approved skills the companion may load",
             text,
+        }
+    }
+
+    /// Plan mode: show the plan and wait before changing anything.
+    pub(crate) fn plan_first() -> Self {
+        Self {
+            name: PLAN_FIRST_PROVIDER,
+            description: "The owner chose Plan mode for this conversation",
+            text: PLAN_FIRST_INSTRUCTIONS.into(),
         }
     }
 

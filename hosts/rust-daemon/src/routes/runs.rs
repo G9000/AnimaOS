@@ -52,6 +52,11 @@ pub(super) struct StartRunRequest {
     skill: Option<String>,
     #[serde(default)]
     mode: StartRunMode,
+    /// Plan mode: the agent shows its plan and waits for a go before a job
+    /// that changes things. It holds for this session until the next message,
+    /// and a message that leaves it out is a Do message.
+    #[serde(default)]
+    plan: bool,
     /// The sender's IANA time zone, as their browser reports it; it becomes
     /// the owner's time zone for every run, Telegram and automations too.
     #[serde(default)]
@@ -184,6 +189,19 @@ pub(super) async fn start_session_run(
         return rejected(error);
     }
     remember_owner_time_zone(&state, input.time_zone.as_deref()).await;
+    let plan_changed = state
+        .daemon
+        .read()
+        .await
+        .plan_first_for(&agent_id, &session_id)
+        != input.plan;
+    if plan_changed {
+        state
+            .daemon
+            .write()
+            .await
+            .set_plan_first(&agent_id, &session_id, input.plan);
+    }
     if let Some(replayed) = state
         .agent_runs
         .replayed_run_with_attachments(
