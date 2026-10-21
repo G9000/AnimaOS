@@ -164,18 +164,22 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `DELETE` | `/api/memories/entities/{entity_id}`                                                         |
 | `DELETE` | `/api/memories/facts/{fact_id}`                                                              |
 | `DELETE` | `/api/memories/{memory_id}`                                                                  |
+| `DELETE` | `/api/provider-keys/{provider}/{key_id}`                                                     |
 | `DELETE` | `/api/providers/chatgpt`                                                                     |
 | `DELETE` | `/api/providers/chatgpt/login`                                                               |
 | `DELETE` | `/api/skills/{slug}`                                                                         |
+| `DELETE` | `/api/system/drain`                                                                          |
 | `GET`    | `/api/agents`                                                                                |
 | `GET`    | `/api/agents/{agent_id}`                                                                     |
 | `GET`    | `/api/agents/{agent_id}/agent-files`                                                         |
 | `GET`    | `/api/agents/{agent_id}/approval-policy`                                                     |
 | `GET`    | `/api/agents/{agent_id}/approval-rules`                                                      |
 | `GET`    | `/api/agents/{agent_id}/attachments/{attachment_id}`                                         |
+| `GET`    | `/api/agents/{agent_id}/autonomy`                                                            |
 | `GET`    | `/api/agents/{agent_id}/avatar`                                                              |
 | `GET`    | `/api/agents/{agent_id}/browser-policies`                                                    |
 | `GET`    | `/api/agents/{agent_id}/browser-scopes`                                                      |
+| `GET`    | `/api/agents/{agent_id}/coding-keys`                                                         |
 | `GET`    | `/api/agents/{agent_id}/community-bundles`                                                   |
 | `GET`    | `/api/agents/{agent_id}/community-bundles/{bundle_id}`                                       |
 | `GET`    | `/api/agents/{agent_id}/connectors`                                                          |
@@ -196,13 +200,13 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/mcp-connections`                                                     |
 | `GET`    | `/api/agents/{agent_id}/mcp-connections/{connection_id}`                                     |
 | `GET`    | `/api/agents/{agent_id}/memories/recent`                                                     |
+| `GET`    | `/api/agents/{agent_id}/message-search`                                                      |
 | `GET`    | `/api/agents/{agent_id}/runs/{run_id}`                                                       |
 | `GET`    | `/api/agents/{agent_id}/runs/{run_id}/browser-scope`                                         |
 | `GET`    | `/api/agents/{agent_id}/runs/{run_id}/recovery`                                              |
 | `GET`    | `/api/agents/{agent_id}/schedules`                                                           |
 | `GET`    | `/api/agents/{agent_id}/schedules/{schedule_id}/history`                                     |
 | `GET`    | `/api/agents/{agent_id}/schedules/{schedule_id}/status`                                      |
-| `GET`    | `/api/agents/{agent_id}/message-search`                                                      |
 | `GET`    | `/api/agents/{agent_id}/sessions`                                                            |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}`                                               |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/clarifications`                                |
@@ -212,12 +216,17 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/voice`                                         |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/voice/speech`                                  |
 | `GET`    | `/api/agents/{agent_id}/tasks`                                                               |
+| `GET` | `/api/agents/{agent_id}/workflows` |
+| `GET` | `/api/agents/{agent_id}/workflows/{workflow_id}` |
 | `GET`    | `/api/approvals`                                                                             |
 | `GET`    | `/api/capabilities`                                                                          |
+| `GET`    | `/api/coding-apps`                                                                           |
 | `GET`    | `/api/connectors/gcalendar/callback`                                                         |
 | `GET`    | `/api/connectors/gdrive/callback`                                                            |
 | `GET`    | `/api/connectors/mail/{provider}/callback`                                                   |
 | `GET`    | `/api/connectors/oauth-apps/{provider}`                                                      |
+| `GET`    | `/api/foreign-sessions`                                                                      |
+| `GET`    | `/api/foreign-sessions/{handle}/preview`                                                     |
 | `GET`    | `/api/goals`                                                                                 |
 | `GET`    | `/api/goals/{goal_id}/jobs`                                                                  |
 | `GET`    | `/api/health`                                                                                |
@@ -232,19 +241,23 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/memories/relationships`                                                                |
 | `GET`    | `/api/memories/search`                                                                       |
 | `GET`    | `/api/memories/{memory_id}/trace`                                                            |
+| `GET`    | `/api/provider-keys`                                                                         |
 | `GET`    | `/api/providers`                                                                             |
 | `GET`    | `/api/providers/chatgpt/models`                                                              |
 | `GET`    | `/api/providers/chatgpt/status`                                                              |
 | `GET`    | `/api/ready`                                                                                 |
 | `GET`    | `/api/search`                                                                                |
+| `GET`    | `/api/settings/side-model`                                                                   |
 | `GET`    | `/api/skill-drafts`                                                                          |
-| `GET`    | `/api/skills`                                                                                |
 | `GET`    | `/api/skill-ledger`                                                                          |
+| `GET`    | `/api/skills`                                                                                |
 | `GET`    | `/api/skills/{slug}`                                                                         |
 | `GET`    | `/api/status`                                                                                |
 | `GET`    | `/api/swarms`                                                                                |
 | `GET`    | `/api/swarms/{swarm_id}`                                                                     |
 | `GET`    | `/api/swarms/{swarm_id}/events`                                                              |
+| `GET`    | `/api/system`                                                                                |
+| `GET`    | `/api/system/drain`                                                                          |
 | `GET`    | `/api/usage/export.csv`                                                                      |
 | `GET`    | `/api/usage/pricing`                                                                         |
 | `GET`    | `/api/usage/records`                                                                         |
@@ -272,6 +285,9 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agencies/generate`                                                                     |
 | `POST`   | `/api/agents`                                                                                |
 | `POST`   | `/api/agents/generate-profile`                                                               |
+| `POST`   | `/api/agents/{agent_id}/acp-sessions/{session_id}/cancel`                                    |
+| `POST`   | `/api/agents/{agent_id}/acp-sessions/{session_id}/stop`                                      |
+| `POST`   | `/api/agents/{agent_id}/app-sessions/{session_id}/stop`                                      |
 | `POST`   | `/api/agents/{agent_id}/approval-rules`                                                      |
 | `POST`   | `/api/agents/{agent_id}/automation-events`                                                  |
 | `POST`   | `/api/agents/{agent_id}/community-bundles`                                                   |
@@ -296,6 +312,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/pairings/{chat_id}/approve`                |
 | `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/restart`                                   |
 | `POST`   | `/api/agents/{agent_id}/core-memory/{block}`                                                 |
+| `POST`   | `/api/agents/{agent_id}/foreign-sessions/{handle}/import`                                    |
 | `POST`   | `/api/agents/{agent_id}/jobs`                                                                |
 | `POST`   | `/api/agents/{agent_id}/jobs/{job_id}/approve`                                               |
 | `POST`   | `/api/agents/{agent_id}/jobs/{job_id}/cancel`                                                |
@@ -318,8 +335,8 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/runs/{run_id}/stop`                                                  |
 | `POST`   | `/api/agents/{agent_id}/schedules`                                                           |
 | `POST`   | `/api/agents/{agent_id}/schedules/import`                                                    |
-| `POST`   | `/api/agents/{agent_id}/schedules/{schedule_id}/run`                                         |
 | `POST`   | `/api/agents/{agent_id}/schedules/{schedule_id}/done`                                        |
+| `POST`   | `/api/agents/{agent_id}/schedules/{schedule_id}/run`                                         |
 | `POST`   | `/api/agents/{agent_id}/schedules/{schedule_id}/snooze`                                      |
 | `POST`   | `/api/agents/{agent_id}/sessions`                                                            |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/attachments`                                   |
@@ -329,6 +346,9 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/side-question`                                 |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/voice/speech`                                  |
 | `POST`   | `/api/agents/{agent_id}/sessions/{session_id}/voice/transcriptions`                          |
+| `POST` | `/api/agents/{agent_id}/workflows` |
+| `POST` | `/api/agents/{agent_id}/workflows/{workflow_id}/cancel` |
+| `POST` | `/api/agents/{agent_id}/workflows/{workflow_id}/resume` |
 | `POST`   | `/api/approvals/{approval_id}/decision`                                                      |
 | `POST`   | `/api/goals`                                                                                 |
 | `POST`   | `/api/goals/{goal_id}/status`                                                                |
@@ -338,6 +358,8 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/memories/evaluations`                                                                  |
 | `POST`   | `/api/memories/relationships`                                                                |
 | `POST`   | `/api/memories/retention`                                                                    |
+| `POST`   | `/api/provider-keys/{provider}`                                                              |
+| `POST`   | `/api/provider-keys/{provider}/{key_id}/wake`                                                |
 | `POST`   | `/api/providers/chatgpt/login`                                                               |
 | `POST`   | `/api/providers/chatgpt/models/refresh`                                                      |
 | `POST`   | `/api/schedules/preview`                                                                     |
@@ -348,11 +370,17 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/skills/{slug}/revert-last`                                                             |
 | `POST`   | `/api/swarms`                                                                                |
 | `POST`   | `/api/swarms/{swarm_id}/run`                                                                 |
+| `POST`   | `/api/system/actions/{action}`                                                               |
+| `POST`   | `/api/system/drain`                                                                          |
+| `POST`   | `/api/system/session`                                                                        |
+| `POST`   | `/api/system/shutdown`                                                                       |
 | `POST`   | `/api/workspace/bootstrap`                                                                   |
 | `POST`   | `/api/workspace/pick-folder`                                                                 |
 | `POST`   | `/api/workspace/resume`                                                                      |
 | `PUT`    | `/api/agents/{agent_id}/approval-policy`                                                     |
+| `PUT`    | `/api/agents/{agent_id}/autonomy`                                                            |
 | `PUT`    | `/api/agents/{agent_id}/avatar`                                                              |
+| `PUT`    | `/api/agents/{agent_id}/coding-keys`                                                         |
 | `PUT`    | `/api/agents/{agent_id}/connectors/discord/{connector_id}/credential`                        |
 | `PUT`    | `/api/agents/{agent_id}/connectors/discord/{connector_id}/settings`                          |
 | `PUT`    | `/api/agents/{agent_id}/connectors/{connector_id}/credential`                                |
@@ -360,35 +388,13 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `PUT`    | `/api/agents/{agent_id}/runs/{run_id}/browser-scope`                                         |
 | `PUT`    | `/api/agents/{agent_id}/tasks`                                                               |
 | `PUT`    | `/api/connectors/oauth-apps/{provider}`                                                      |
+| `PUT`    | `/api/provider-keys/{provider}/strategy`                                                     |
+| `PUT`    | `/api/settings/side-model`                                                                   |
 | `PUT`    | `/api/skills/{slug}`                                                                         |
 | `PUT`    | `/api/usage/pricing`                                                                         |
 | `PUT`    | `/api/workspace`                                                                             |
 | `PUT`    | `/api/workspace/avatar`                                                                      |
-| `GET`    | `/api/agents/{agent_id}/coding-keys`                                                         |
-| `PUT`    | `/api/agents/{agent_id}/coding-keys`                                                         |
-| `POST`   | `/api/agents/{agent_id}/app-sessions/{session_id}/stop`                                      |
-| `POST`   | `/api/agents/{agent_id}/acp-sessions/{session_id}/stop`                                      |
-| `POST`   | `/api/agents/{agent_id}/acp-sessions/{session_id}/cancel`                                    |
-| `GET`    | `/api/coding-apps`                                                                           |
-| `GET`    | `/api/foreign-sessions`                                                                      |
-| `GET`    | `/api/foreign-sessions/{handle}/preview`                                                     |
-| `POST`   | `/api/agents/{agent_id}/foreign-sessions/{handle}/import`                                    |
-| `GET`    | `/api/agents/{agent_id}/autonomy`                                                            |
-| `PUT`    | `/api/agents/{agent_id}/autonomy`                                                            |
-| `GET`    | `/api/settings/side-model`                                                                   |
-| `PUT`    | `/api/settings/side-model`                                                                   |
-| `GET`    | `/api/provider-keys`                                                                         |
-| `POST`   | `/api/provider-keys/{provider}`                                                              |
-| `DELETE` | `/api/provider-keys/{provider}/{key_id}`                                                     |
-| `PUT`    | `/api/provider-keys/{provider}/strategy`                                                     |
-| `POST`   | `/api/provider-keys/{provider}/{key_id}/wake`                                                |
-| `GET`    | `/api/system/drain`                                                                          |
-| `POST`   | `/api/system/drain`                                                                          |
-| `DELETE` | `/api/system/drain`                                                                          |
-| `POST`   | `/api/system/shutdown`                                                                       |
-| `GET`    | `/api/system`                                                                                |
-| `POST`   | `/api/system/actions/{action}`                                                               |
-| `POST`   | `/api/system/session`                                                                        |
+
 <!-- openapi-route-inventory:end -->
 
 ### Current workspace report downloads
@@ -603,7 +609,7 @@ Refresh has a ten-second total bound, returns `409` while another refresh is act
 and reports metadata failure as unavailable/stale without changing saved agents.
 Catalog presence is metadata, not proof of model/tool acceptance. New selection is
 deliberate; existing/custom model strings and grants remain unchanged until Save.
-The registered OpenAPI inventory now contains 243 operations, including explicit owner-scoped voice operations, Discord bot checks and interaction settings, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
+The registered OpenAPI inventory now contains 250 operations, including explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
 
 ### Agents
 

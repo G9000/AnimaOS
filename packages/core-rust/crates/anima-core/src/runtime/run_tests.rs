@@ -775,6 +775,71 @@ fn budget_reply(stop_reason: ModelStopReason, value: &str, calls: bool) -> Model
 }
 
 #[test]
+fn model_output_truncated_max_tokens_marks_short_terminal_output_without_changing_success() {
+    let model = BudgetBoundaryModel::new(vec![Ok(ModelGenerateResponse {
+        content: text("short partial"),
+        tool_calls: None,
+        usage: usage(),
+        stop_reason: ModelStopReason::MaxTokens,
+    })]);
+    let mut runtime = AgentRuntime::new(config(), model);
+    runtime.init();
+
+    let result = run_in(&mut runtime, "truncated-room", "Write the result");
+
+    assert_eq!(result.status, TaskStatus::Success);
+    let content = result.data.as_ref().unwrap();
+    assert_eq!(content.text, "short partial");
+    assert_eq!(
+        content
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.get("modelOutputTruncated")),
+        Some(&DataValue::Bool(true))
+    );
+    let saved = &runtime.messages().last().unwrap().content;
+    assert_eq!(
+        saved
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.get("modelOutputTruncated")),
+        Some(&DataValue::Bool(true)),
+        "the persisted assistant result must retain provider truncation evidence"
+    );
+}
+
+#[test]
+fn model_output_truncated_end_response_does_not_keep_provider_supplied_provenance() {
+    let model = BudgetBoundaryModel::new(vec![Ok(ModelGenerateResponse {
+        content: Content {
+            text: "complete output".into(),
+            metadata: Some(BTreeMap::from([
+                ("modelOutputTruncated".into(), DataValue::Bool(true)),
+                ("sourceTag".into(), DataValue::String("preserved".into())),
+            ])),
+            ..Content::default()
+        },
+        tool_calls: None,
+        usage: usage(),
+        stop_reason: ModelStopReason::End,
+    })]);
+    let mut runtime = AgentRuntime::new(config(), model);
+    runtime.init();
+
+    let result = run_in(&mut runtime, "complete-room", "Write the result");
+
+    assert_eq!(result.status, TaskStatus::Success);
+    let content = result.data.as_ref().unwrap();
+    assert_eq!(content.text, "complete output");
+    let metadata = content.metadata.as_ref().unwrap();
+    assert!(!metadata.contains_key("modelOutputTruncated"));
+    assert_eq!(
+        metadata.get("sourceTag"),
+        Some(&DataValue::String("preserved".into()))
+    );
+}
+
+#[test]
 fn budget_wrapup_rejects_tools_empty_and_truncated_replies_without_retry_or_unpaired_calls() {
     for (reason, value, tool_calls, expected) in [
         (

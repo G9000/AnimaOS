@@ -22,6 +22,7 @@ mod goals;
 pub(crate) use goals::{validate_goals, GoalRecord, GoalStatus, GoalView};
 pub(crate) mod helper_completion;
 mod records;
+pub(crate) mod workflows;
 pub(crate) use records::{
     AgentJobAttempt, AgentJobRecord, AgentJobStatus, JobOutputReview, JobReviewDecision,
 };
@@ -100,12 +101,17 @@ impl JobService {
                         "Durable jobs require control-plane persistence".into(),
                     ));
                 }
-                let before = (state.jobs.clone(), state.goals.clone());
+                let before = (
+                    state.jobs.clone(),
+                    state.goals.clone(),
+                    state.workflows.clone(),
+                );
                 let value = match action(&mut state) {
                     Ok(value) => value,
                     Err(error) => {
                         state.jobs = before.0;
                         state.goals = before.1;
+                        state.workflows = before.2;
                         return Err(error);
                     }
                 };
@@ -115,6 +121,7 @@ impl JobService {
                 let mut state = service.state.write().await;
                 state.jobs = before.0;
                 state.goals = before.1;
+                state.workflows = before.2;
                 return Err(JobError::Unavailable(error.to_string()));
             }
             service.wake.notify_one();
@@ -188,6 +195,11 @@ impl JobService {
         goal_id: Option<&str>,
     ) -> Result<AgentJobRecord, JobError> {
         self.refuse_while_draining()?;
+        if request_key.starts_with("workflow:") {
+            return Err(JobError::Validation(
+                "Workflow job request keys are reserved".into(),
+            ));
+        }
         let goal_id = goal_id.map(str::to_owned);
         if !(1..=3).contains(&max_attempts) {
             return Err(JobError::Validation(
@@ -270,6 +282,7 @@ impl JobService {
                 pending_delegations: None,
                 final_output: None,
                 delegation_evidence: None,
+                workflow: None,
             };
             state.jobs.insert(job.id.clone(), job.clone());
             Ok(job)
@@ -554,10 +567,14 @@ impl JobService {
             if *stop.borrow() {
                 break;
             }
+            self.stop_cancelled_workflow_runs().await;
             // A drain before a restart claims nothing new: queued jobs are
             // durable and dispatch after the restart, or once it is cancelled.
             if self.runs.is_draining() {
                 continue;
+            }
+            if let Err(error) = self.reconcile_workflows().await {
+                tracing::warn!(?error, "Workflow progression could not be saved");
             }
             let mut queued: Vec<_> = {
                 let state = self.state.read().await;
@@ -565,7 +582,9 @@ impl JobService {
                     .jobs
                     .values()
                     .filter(|job| {
-                        job.status == AgentJobStatus::Queued && goals::dispatch_allowed(&state, job)
+                        job.status == AgentJobStatus::Queued
+                            && goals::dispatch_allowed(&state, job)
+                            && workflows::dispatch_allowed(&state, job)
                     })
                     .cloned()
                     .collect()
@@ -614,7 +633,9 @@ impl JobService {
                             return Err(JobError::Unavailable(JOB_PRODUCER_SHUTTING_DOWN.into()));
                         }
                         let candidate = state.jobs.get(&id).ok_or(JobError::NotFound)?;
-                        if !goals::dispatch_allowed(state, candidate) {
+                        if !goals::dispatch_allowed(state, candidate)
+                            || !workflows::dispatch_allowed(state, candidate)
+                        {
                             return Err(JobError::Conflict("Goal is paused or unavailable".into()));
                         }
                         let job = state.jobs.get_mut(&id).ok_or(JobError::NotFound)?;
@@ -704,8 +725,13 @@ impl JobService {
                     current.finished_at_ms = Some(current.updated_at_ms);
                     current.preserve_legacy_attempt();
                     if let Some(attempt) = current.attempts.last_mut() {
-                        attempt.result_truncated =
-                            result.data.as_ref().is_some_and(|c| c.text.len() > 65536);
+                        attempt.result_truncated = result.data.as_ref().is_some_and(|content| {
+                            content.text.len() > 65536
+                                || content.metadata.as_ref().is_some_and(|metadata| {
+                                    metadata.get(anima_core::MODEL_OUTPUT_TRUNCATED_METADATA_KEY)
+                                        == Some(&anima_core::DataValue::Bool(true))
+                                })
+                        });
                     }
                     Ok(())
                 },
@@ -791,6 +817,18 @@ fn checked_job<'a>(
 ) -> Result<&'a mut AgentJobRecord, JobError> {
     if state.get_agent(agent_id).is_none() {
         return Err(JobError::NotFound);
+    }
+    if !state
+        .jobs
+        .get(id)
+        .is_some_and(|job| job.agent_id == agent_id)
+    {
+        return Err(JobError::NotFound);
+    }
+    if workflows::is_workflow_job(state, id) {
+        return Err(JobError::Conflict(
+            "This task belongs to a workflow; use its workflow controls".into(),
+        ));
     }
     let job = state
         .jobs

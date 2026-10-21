@@ -416,6 +416,8 @@ fn registry_defines_every_registered_tool_schema() {
     let registry = ToolRegistry::new();
     let expectations = [
         ("clarify", &["questions"][..], &[][..]),
+        ("create_workflow", &["title", "requestKey", "steps"][..], &[][..]),
+        ("list_workflows", &[][..], &[][..]),
         ("execute_code", &["code"][..], &["reset"][..]),
         ("list_workspace_agents", &[][..], &[][..]),
         ("delegate_to_agent", &["agent_id", "task"][..], &[][..]),

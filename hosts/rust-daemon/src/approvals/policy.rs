@@ -41,6 +41,7 @@ const READ_TOOLS: &[&str] = &[
     "read_conversation_window",
     "load_skill",
     "list_automations",
+    "list_workflows",
     "check_automation_status",
 ];
 /// Tools that change files and records (spec §7.1). The mail draft and the
@@ -75,6 +76,7 @@ const WRITE_TOOLS: &[&str] = &[
     "acp_edit",
 ];
 const EXEC_TOOLS: &[&str] = &[
+    "create_workflow",
     "execute_code",
     "bash",
     "bg_start",

@@ -105,6 +105,8 @@ fn metadata(name: &str) -> (&'static str, Vec<&'static str>) {
             ("documents", vec!["A configured workspace, explicit document opt-in, and an explicit agent tool grant."]),
         "todo_read" | "todo_write" =>
             ("workspace", vec!["An agent-owned task list in the workspace. Creating a task does not enable a schedule."]),
+        "create_workflow" | "list_workflows" =>
+            ("workspace", vec!["An explicitly granted ordinary companion run and durable storage. Only the owner can continue checkpoints; task steps retain their own tool permissions."]),
         "bash" | "bg_start" | "bg_output" | "bg_wait" | "bg_stop" | "bg_list" =>
             ("terminal", vec!["Shell access. Programs run with the daemon user's operating-system permissions."]),
         name if name.starts_with("app_") =>

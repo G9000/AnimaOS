@@ -1496,6 +1496,7 @@ mod tests {
             pending_delegations: None,
             final_output: None,
             delegation_evidence: None,
+            workflow: None,
         });
         assert_eq!(
             snapshot.version,
@@ -1670,6 +1671,7 @@ pub(crate) struct DaemonState {
     pub(crate) schedules: HashMap<String, ScheduledPromptRecord>,
     pub(crate) jobs: HashMap<String, crate::jobs::AgentJobRecord>,
     pub(crate) goals: HashMap<String, crate::jobs::GoalRecord>,
+    pub(crate) workflows: HashMap<String, anima_core::workflows::WorkflowRun>,
     pub(crate) runs: crate::runs::RunLedger,
     pub(crate) learning: crate::learning::LearningRegistry,
     pub(crate) clarifications: crate::clarifications::ClarificationRegistry,
@@ -2297,6 +2299,7 @@ impl DaemonState {
             discord_outbound: HashMap::new(),
             schedules: HashMap::new(),
             jobs: HashMap::new(),
+            workflows: HashMap::new(),
             goals: HashMap::new(),
             runs: crate::runs::RunLedger::default(),
             learning: crate::learning::LearningRegistry::default(),
@@ -2552,6 +2555,8 @@ impl DaemonState {
         snapshot.jobs.sort_by(|left, right| left.id.cmp(&right.id));
         snapshot.goals = self.goals.values().cloned().collect();
         snapshot.goals.sort_by(|left, right| left.id.cmp(&right.id));
+        snapshot.workflows = self.workflows.values().cloned().collect();
+        snapshot.workflows.sort_by(|left, right| left.id.cmp(&right.id));
         snapshot.runs = self
             .runs
             .snapshot_records(&self.live_agent_ids())
@@ -2752,6 +2757,11 @@ impl DaemonState {
                 (job.id.clone(), job)
             })
             .collect();
+        self.workflows = snapshot
+            .workflows
+            .into_iter()
+            .map(|run| (run.id.clone(), run))
+            .collect();
         self.mail_records = snapshot
             .mail_records
             .into_iter()
@@ -2946,6 +2956,7 @@ impl DaemonState {
         }
 
         crate::jobs::validate_goals(&snapshot.goals, &snapshot.jobs)?;
+        crate::jobs::workflows::validate_snapshot(&snapshot.workflows, &snapshot.jobs)?;
         crate::clarifications::ClarificationRegistry::validate(&snapshot.clarifications)?;
         crate::schedules::event::EventRegistry::restore(
             snapshot.automation_events.clone(),

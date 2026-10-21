@@ -58,6 +58,7 @@ mod voice;
 mod workspace;
 mod workspace_agent_yaml;
 mod workspace_files;
+mod workflows;
 
 use std::sync::Arc;
 
@@ -127,6 +128,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         jobs::retry_job,
         jobs::approve_job,
         jobs::review_job,
+        workflows::list, workflows::create, workflows::get, workflows::resume, workflows::cancel,
         goals::list_goals,
         goals::create_goal,
         goals::change_status,
@@ -958,6 +960,10 @@ fn router_with_services_with_policies_and_integrations(
             axum::routing::post(goals::change_status),
         )
         .route("/api/goals/{goal_id}/jobs", get(goals::goal_jobs))
+        .route("/api/agents/{agent_id}/workflows", get(workflows::list).post(workflows::create))
+        .route("/api/agents/{agent_id}/workflows/{workflow_id}", get(workflows::get))
+        .route("/api/agents/{agent_id}/workflows/{workflow_id}/resume", axum::routing::post(workflows::resume))
+        .route("/api/agents/{agent_id}/workflows/{workflow_id}/cancel", axum::routing::post(workflows::cancel))
         .route(
             "/api/agents/{agent_id}/jobs",
             get(jobs::list_jobs).post(jobs::create_job),
@@ -2836,6 +2842,7 @@ mod tests {
     mod foreign_sessions;
     mod goals;
     mod jobs;
+    mod workflows;
     mod learning_reviews;
     mod logs;
     mod memory_edits;

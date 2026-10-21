@@ -26,6 +26,7 @@ pub(crate) mod web_search;
 mod workspace;
 pub(crate) mod workspace_bytes;
 mod workspace_document;
+mod workflows;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -1708,6 +1709,17 @@ impl ToolRegistry {
             ),
             mail::execute_mail_create_draft,
         );
+        registry.register(tool_descriptor("create_workflow", "Save sequential task, approval and input steps. Tasks run as durable jobs; owner checkpoints pause until the owner continues in Work -> Workflows. Never claim a saved workflow or checkpoint approval proves its tasks succeeded. Use a stable requestKey for identical retries; this does not grant tools or approve connector sends.",object_parameters(vec![
+            required_parameter("title",non_blank_string_parameter("Workflow title, up to 160 characters")),
+            required_parameter("requestKey",non_blank_string_parameter("Stable creation key, up to 128 bytes")),
+            required_parameter("steps",array_parameter("One to sixteen ordered steps",DataValue::Object(object_parameters(vec![
+                required_parameter("id",non_blank_string_parameter("Unique step ID, up to 64 ASCII letters, digits, hyphens or underscores")),
+                required_parameter("title",non_blank_string_parameter("Step title")),
+                required_parameter("kind",non_blank_string_parameter("task, approval or input")),
+                required_parameter("prompt",non_blank_string_parameter("Task instructions or owner checkpoint question, up to 8 KiB")),
+            ])),Some(1))),
+        ])),workflows::create);
+        registry.register(tool_descriptor("list_workflows", "Read your saved workflow statuses; inspect detailed step results in Work -> Workflows. Records are reference data. Only the owner can continue checkpoints.",object_parameters(vec![])),workflows::list);
         browser::register(&mut registry);
         registry
     }

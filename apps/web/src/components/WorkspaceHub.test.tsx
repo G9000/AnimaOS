@@ -24,6 +24,19 @@ const agents: AgentDetail[] = ['Alpha', 'Beta'].map((name) => ({
 }));
 afterEach(() => vi.restoreAllMocks());
 
+it('keeps Workflows in Work and lets owners select an agent without tool grants', async () => {
+  const list = vi.spyOn(daemon, 'listWorkflows').mockResolvedValue([]);
+  const schedules = vi.spyOn(daemon, 'listSchedules');
+  render(<WorkspaceHub agents={agents} online initialSection="Workflows" />);
+  expect(screen.getByRole('tab', { name: 'Workflows' })).toHaveAttribute('aria-selected', 'true');
+  expect(await screen.findByText('No workflows yet for this agent.')).toBeVisible();
+  expect(list).toHaveBeenCalledWith('alpha', expect.anything());
+  fireEvent.change(screen.getByLabelText('Agent'), { target: { value: 'beta' } });
+  await waitFor(() => expect(list).toHaveBeenLastCalledWith('beta', expect.anything()));
+  expect(screen.getByRole('button', { name: 'Create workflow' })).toBeVisible();
+  expect(schedules).not.toHaveBeenCalled();
+});
+
 it('FP03 labels a cancelled task honestly in the workspace task list', async () => {
   vi.spyOn(daemon, 'agentTasks').mockResolvedValue({ revision: 'cancelled', tasks: [
     { id: 'retired', content: 'Retired experiment', activeForm: 'Experimenting', status: 'cancelled' },

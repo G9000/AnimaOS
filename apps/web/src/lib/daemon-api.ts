@@ -67,6 +67,8 @@ import {
   type StartRunInput,
   type UsageQuery,
   type UsageRecordsQuery,
+  type WorkflowInput,
+  type WorkflowResumeInput,
 } from '@animaOS-SWARM/sdk';
 import { consoleSessionHeaders } from './console-session';
 
@@ -581,6 +583,16 @@ export const daemon = {
     setupClient.agents.jobs(id, options),
   createAgentJob: (id: string, input: AgentJobInput) =>
     setupClient.agents.createJob(id, input),
+  listWorkflows: (agentId: string, options: { signal?: AbortSignal } = {}) =>
+    setupClient.workflows.list(agentId, options),
+  getWorkflow: (agentId: string, id: string, options: { signal?: AbortSignal } = {}) =>
+    setupClient.workflows.get(agentId, id, options),
+  createWorkflow: (agentId: string, input: WorkflowInput) =>
+    setupClient.workflows.create(agentId, input),
+  resumeWorkflow: (agentId: string, id: string, input: WorkflowResumeInput) =>
+    setupClient.workflows.resume(agentId, id, input),
+  cancelWorkflow: (agentId: string, id: string, input: { revision: number }) =>
+    setupClient.workflows.cancel(agentId, id, input),
   goals: (options: { signal?: AbortSignal } = {}) =>
     setupClient.goals.list(options),
   createGoal: (input: GoalInput) => setupClient.goals.create(input),

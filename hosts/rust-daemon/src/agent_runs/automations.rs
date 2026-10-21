@@ -8,6 +8,10 @@ use super::AgentRunCoordinator;
 use crate::schedules::{AutomationService, ScheduleError, ScheduledPromptRecord, SchedulerTrigger};
 
 impl AgentRunCoordinator {
+    pub(crate) fn workflows(&self) -> crate::jobs::JobService {
+        crate::jobs::JobService::new(Arc::clone(&self.state), self.clone())
+    }
+
     pub(crate) async fn is_reminder_verification_run(&self, link: &crate::runs::RunLink) -> bool {
         let state = self.state.read().await;
         state

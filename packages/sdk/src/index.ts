@@ -94,6 +94,18 @@ export type {
   SessionUpdateInput,
 } from './sessions.js';
 export { RunsClient, isTerminalRunStatus } from './runs.js';
+export { WorkflowsClient } from './workflows.js';
+export type {
+  WorkflowStatus,
+  WorkflowStepKind,
+  WorkflowStepStatus,
+  WorkflowStepInput,
+  WorkflowInput,
+  WorkflowResumeInput,
+  WorkflowStep,
+  WorkflowDecision,
+  WorkflowRun,
+} from './workflows.js';
 export type { RunRecoverySummary, ContinueRecoveryInput } from './runs.js';
 export type {
   AsyncHelperSummary,

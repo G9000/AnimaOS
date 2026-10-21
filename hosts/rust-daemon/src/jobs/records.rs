@@ -53,6 +53,17 @@ pub(crate) struct AgentJobRecord {
     pub(crate) final_output: Option<crate::runs::DelegationFinalOutput>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) delegation_evidence: Option<crate::runs::DelegationEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) workflow: Option<WorkflowJobBinding>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct WorkflowJobBinding {
+    pub(crate) workflow_id: String,
+    pub(crate) step_id: String,
+    pub(crate) step_index: usize,
+    pub(crate) attempt: u32,
 }
 
 fn default_max_attempts() -> u32 {

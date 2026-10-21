@@ -60,6 +60,8 @@ static NEXT_ROOM_ID: AtomicU64 = AtomicU64::new(0);
 pub const MAX_TOOL_ITERATIONS: usize = 8;
 /// Newest engine events kept in memory and in snapshots; `event_count` keeps the running total.
 pub const MAX_RETAINED_EVENTS: usize = 500;
+/// Marks model content cut short by the provider's output token limit.
+pub const MODEL_OUTPUT_TRUNCATED_METADATA_KEY: &str = "modelOutputTruncated";
 /// Extra events tolerated before trimming, so trimming is amortized.
 const EVENT_TRIM_SLACK: usize = 64;
 const MAX_EVALUATOR_RETRIES: usize = 2;
@@ -644,11 +646,22 @@ impl AgentRuntime {
 
             match outcome {
                 Ok(mut response) => {
-                    // Provenance is host-generated only after acceptance;
-                    // a provider cannot claim that an earlier answer wrapped up.
+                    // Runtime provenance comes from the actual stop reason and
+                    // acceptance, rather than provider-supplied metadata.
                     if let Some(metadata) = response.content.metadata.as_mut() {
                         metadata.remove(BUDGET_WRAPUP_METADATA_KEY);
                         metadata.remove("noProgressWrapup");
+                        metadata.remove(MODEL_OUTPUT_TRUNCATED_METADATA_KEY);
+                    }
+                    if response.stop_reason == ModelStopReason::MaxTokens {
+                        response
+                            .content
+                            .metadata
+                            .get_or_insert_with(BTreeMap::new)
+                            .insert(
+                                MODEL_OUTPUT_TRUNCATED_METADATA_KEY.into(),
+                                DataValue::Bool(true),
+                            );
                     }
                     self.apply_token_usage(&response.usage);
                     if let Some(served) = sink.take_served() {

@@ -34,7 +34,8 @@ use crate::schedules::ScheduledPromptRecord;
 /// recovery lineage and event occurrences. Runtime transport sessions/processes are never persisted. Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 23;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 24;
+pub(crate) const PRE_WORKFLOWS_BACKUP_SUFFIX: &str = ".pre-workflows.bak";
 pub(crate) const PRE_COMPANION_INTERACTION_BACKUP_SUFFIX: &str = ".pre-companion-interaction.bak";
 pub(crate) const ASYNC_ORIGIN_BATCHES_STORE_VERSION: u32 = 21;
 pub(crate) const PRE_DISCORD_CONVERSATIONS_BACKUP_SUFFIX: &str = ".pre-discord-conversations.bak";
@@ -164,6 +165,8 @@ pub(crate) struct ControlPlaneSnapshot {
     pub(crate) jobs: Vec<crate::jobs::AgentJobRecord>,
     #[serde(default)]
     pub(crate) goals: Vec<crate::jobs::GoalRecord>,
+    #[serde(default)]
+    pub(crate) workflows: Vec<anima_core::workflows::WorkflowRun>,
     #[serde(default)]
     pub(crate) calendar_connectors: Vec<GoogleCalendarConnectorRecord>,
     #[serde(default)]
@@ -469,8 +472,10 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
         } else {
             if loaded_version < 22 {
                 PRE_DISCORD_CONVERSATIONS_BACKUP_SUFFIX
-            } else {
+            } else if loaded_version < 23 {
                 PRE_COMPANION_INTERACTION_BACKUP_SUFFIX
+            } else {
+                PRE_WORKFLOWS_BACKUP_SUFFIX
             }
         });
         path.with_file_name(name)
@@ -698,6 +703,7 @@ impl ControlPlaneSnapshot {
             mail_records: vec![],
             jobs: vec![],
             goals: vec![],
+            workflows: vec![],
             mail_drafts: vec![],
             calendar_connectors: vec![],
             calendar_writes: vec![],
@@ -1015,7 +1021,10 @@ mod tests {
 
     #[test]
     fn the_version_constants() {
-        assert_eq!(super::CONTROL_PLANE_STORE_VERSION, 23);
+        assert_eq!(
+            ControlPlaneSnapshot::new(vec![], vec![]).version,
+            super::CONTROL_PLANE_STORE_VERSION
+        );
         assert_eq!(super::USAGE_STORE_VERSION, 10);
         assert_eq!(super::PRE_ATTACHMENTS_BACKUP_SUFFIX, ".pre-attachments.bak");
         assert_eq!(super::postgres_backup_key(10), "control_plane.backup.10");
@@ -1090,6 +1099,8 @@ mod tests {
             (10, ".pre-attachments.bak"),
             (20, ".pre-async-origin-batches.bak"),
             (21, ".pre-discord-conversations.bak"),
+            (22, ".pre-companion-interaction.bak"),
+            (23, ".pre-workflows.bak"),
         ] {
             assert_eq!(
                 super::pre_upgrade_backup_path(path, loaded),
@@ -1097,6 +1108,53 @@ mod tests {
                 "loaded version {loaded}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn workflow_upgrade_keeps_an_independent_exact_version_twenty_three_backup() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("control-plane.json");
+        let original =
+            b"{\r\n  \"version\" : 23,\r\n  \"agents\": [],\r\n  \"swarms\": []\r\n}\r\n";
+        std::fs::write(&path, original).unwrap();
+        let previous_backup = super::pre_upgrade_backup_path(&path, 22);
+        let previous_bytes = b"earlier companion-interaction backup\r\n";
+        std::fs::write(&previous_backup, previous_bytes).unwrap();
+        let config = super::ControlPlaneStoreConfig::Json(path.clone());
+        let mut snapshot = super::load_control_plane_snapshot(&config)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(snapshot.version, 23);
+        assert!(snapshot.workflows.is_empty());
+
+        let backup = super::pre_upgrade_backup_path(&path, snapshot.version);
+        assert_eq!(
+            backup,
+            path.with_file_name("control-plane.json.pre-workflows.bak")
+        );
+        assert_ne!(backup, previous_backup);
+        let location = super::write_pre_upgrade_backup(&config, snapshot.version)
+            .await
+            .unwrap();
+        assert_eq!(location, backup.display().to_string());
+        assert_eq!(std::fs::read(&backup).unwrap(), original);
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert_eq!(std::fs::read(&previous_backup).unwrap(), previous_bytes);
+
+        snapshot.version = super::CONTROL_PLANE_STORE_VERSION;
+        super::save_control_plane_snapshot(Some(&config), &snapshot)
+            .await
+            .unwrap();
+        let upgraded = super::load_control_plane_snapshot(&config)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(upgraded.version, super::CONTROL_PLANE_STORE_VERSION);
+        assert!(upgraded.workflows.is_empty());
+        assert_eq!(std::fs::read(&backup).unwrap(), original);
+        assert_eq!(std::fs::read(previous_backup).unwrap(), previous_bytes);
+        assert_no_temp_residue(&path);
     }
 
     #[tokio::test]
@@ -1171,7 +1229,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .version,
-            23
+            super::CONTROL_PLANE_STORE_VERSION
         );
     }
 
@@ -1402,7 +1460,7 @@ mod discord_upgrade_tests {
         assert!(loaded.discord_connectors.is_empty());
         assert!(loaded.discord_inbound.is_empty());
         assert!(loaded.discord_outbound.is_empty());
-        assert_eq!(CONTROL_PLANE_STORE_VERSION, 23);
+        assert_eq!(loaded.version, 11);
         write_pre_upgrade_backup(&config, 11).await.unwrap();
         assert_eq!(
             std::fs::read_to_string(pre_discord_backup_path(&path)).unwrap(),
@@ -1558,7 +1616,7 @@ mod learning_snapshot_tests {
             std::fs::read_to_string(&old_backup).unwrap(),
             "older backup"
         );
-        assert_eq!(CONTROL_PLANE_STORE_VERSION, 23);
+        assert_eq!(loaded.version, 14);
         std::fs::remove_file(backup).unwrap();
         std::fs::remove_file(old_backup).unwrap();
         std::fs::remove_file(path).unwrap();

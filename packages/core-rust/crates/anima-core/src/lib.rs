@@ -35,6 +35,11 @@ pub mod runtime;
 mod runtime_serde;
 pub mod structured_tasks;
 pub mod tool_rpc;
+pub mod workflows;
+pub use workflows::{
+    WorkflowDecision, WorkflowInput, WorkflowResumeAction, WorkflowResumeRequest, WorkflowRun,
+    WorkflowStatus, WorkflowStep, WorkflowStepKind, WorkflowStepSpec, WorkflowStepStatus,
+};
 
 pub use agent::{
     tool_not_configured_error, AgentConfig, AgentConfigUpdate, AgentSettings, AgentState,
@@ -137,7 +142,8 @@ pub use runtime::{
     content_retry_key, new_room_id, run_step_id, AgentRuntime, AgentRuntimeSnapshot, CancelCause,
     CancelSignal, CancelWait, RunControl, RunFrame, RunObserver, RuntimeRunBase, RuntimeRunDelta,
     RuntimeRunUndo, SteeringInbox, CANCELLED_TOOL_RESULT, INCOMPLETE_METADATA_KEY,
-    MAX_RETAINED_EVENTS, MODEL_STREAM_WITHOUT_FINAL, REVISED_METADATA_KEY, RUN_ID_METADATA_KEY,
-    RUN_STOPPED_ERROR, STEER_METADATA_KEY, STEP_ID_METADATA_KEY, STOPPED_METADATA_KEY,
-    TOOL_DURATION_METADATA_KEY, TOOL_STATUS_METADATA_KEY,
+    MAX_RETAINED_EVENTS, MODEL_OUTPUT_TRUNCATED_METADATA_KEY, MODEL_STREAM_WITHOUT_FINAL,
+    REVISED_METADATA_KEY, RUN_ID_METADATA_KEY, RUN_STOPPED_ERROR, STEER_METADATA_KEY,
+    STEP_ID_METADATA_KEY, STOPPED_METADATA_KEY, TOOL_DURATION_METADATA_KEY,
+    TOOL_STATUS_METADATA_KEY,
 };

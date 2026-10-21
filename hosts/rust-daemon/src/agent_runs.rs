@@ -1546,6 +1546,29 @@ impl AgentRunCoordinator {
         ) = {
             let mut guard = self.state.write().await;
             validate_run_request(&guard, &agent_id, &room)?;
+            // Cancellation may commit after a job claim but before this run starts.
+            // Check under the same transaction that records the run, before sessions
+            // or model work can begin.
+            if source == RunSource::Job {
+                if let Some((job_id, attempt)) = source_ref
+                    .as_deref()
+                    .and_then(|reference| reference.rsplit_once(':'))
+                {
+                    if crate::jobs::workflows::is_workflow_job(&guard, job_id) {
+                        let admitted = guard.jobs.get(job_id).is_some_and(|job| {
+                            job.agent_id == agent_id
+                                && job.status == crate::jobs::AgentJobStatus::Running
+                                && attempt == job.attempt.to_string()
+                                && crate::jobs::workflows::dispatch_allowed(&guard, job)
+                        });
+                        if !admitted {
+                            return Err(ApiError::conflict(
+                                "Workflow task is no longer authorized to start",
+                            ));
+                        }
+                    }
+                }
+            }
             if room_id.starts_with("discord:") {
                 let authorized = source == RunSource::Discord
                     && parent.is_none()
@@ -2006,7 +2029,18 @@ impl AgentRunCoordinator {
             }
             _ => vec![],
         };
+        let is_workflow_job = if source == RunSource::Job {
+            let state = self.state.read().await;
+            started
+                .source_ref
+                .as_deref()
+                .and_then(|s| s.rsplit_once(':'))
+                .is_some_and(|(id, _)| crate::jobs::workflows::is_workflow_job(&state, id))
+        } else {
+            false
+        };
         let can_delegate = !is_helper_completion
+            && !is_workflow_job
             && !is_reminder_verification
             && delegated_parent.is_none()
             && peer_sources.is_empty()
@@ -2020,6 +2054,9 @@ impl AgentRunCoordinator {
                         "spawn_helper_async" | "list_helper_runs" | "steer_helper" | "stop_helper"
                     ))
         });
+        if is_workflow_job {
+            tools.retain(|tool| !is_coordination_tool(&tool.name) && tool.name != "create_workflow");
+        }
         if is_helper_completion {
             tools.retain(|tool| {
                 !is_coordination_tool(&tool.name)
@@ -2059,7 +2096,7 @@ impl AgentRunCoordinator {
                     .expect("registered core_memory tool"),
             );
         }
-        if delegated_parent.is_none() && !is_helper_completion {
+        if delegated_parent.is_none() && !is_helper_completion && !is_workflow_job {
             for name in ["list_workspace_agents", "send_message", "broadcast_message"] {
                 if !tools.iter().any(|tool| tool.name == name) {
                     tools.push(registry.descriptor(name).expect("registered peer tool"));

@@ -3,6 +3,43 @@ title: Companion workflows
 description: Recover work, ask questions, learn procedures, and automate native tools
 ---
 
+## Resume a saved workflow
+
+Open **Work -> Workflows**, choose a companion, and add an ordered sequence of **Task**, **Approval**, and **Question** steps. A report workflow might gather facts, wait for your approval, ask who the audience is, and then write the report.
+
+Each task runs as a durable job. Anima saves its result before admitting the next step. Approval and question checkpoints survive restart: approve or answer the displayed checkpoint to continue the existing workflow. Earlier successful steps stay completed and are not run again.
+
+When a task fails, stops, has an uncertain effect, or lacks a complete saved result, the workflow waits for review. Inspect its linked job and verify any effects. You can explicitly acknowledge the uncertainty and retry that step, or record a verified result yourself to continue. A step allows at most three attempts. Original jobs and their receipts remain available; generic job retry controls cannot replay a workflow attempt.
+
+Cancel stops future steps and requests the current task's existing stop control. It does not roll back effects that already happened. Workflow approval leaves the companion's tool permissions and separate connector approvals in place. Workflow task runs do not delegate or spawn helpers.
+
+An already owner-authorized SDK client can also start a workflow:
+
+```ts
+const workflow = await client.workflows.create(agentId, {
+  title: 'Reviewed weekly report',
+  requestKey: 'weekly-report-2026-10-21',
+  steps: [
+    { id: 'research', title: 'Gather facts', kind: 'task', prompt: 'Read the selected workspace notes and summarize the weekly facts.' },
+    { id: 'review', title: 'Review facts', kind: 'approval', prompt: 'Approve the saved facts before drafting the report.' },
+    { id: 'audience', title: 'Choose audience', kind: 'input', prompt: 'Who should this report be written for?' },
+    { id: 'draft', title: 'Draft report', kind: 'task', prompt: 'Write the report for the chosen audience using the approved facts.' },
+  ],
+});
+
+const current = await client.workflows.get(agentId, workflow.id);
+if (current.status === 'awaiting_approval') {
+  await client.workflows.resume(agentId, current.id, {
+    revision: current.revision,
+    action: 'approve',
+  });
+}
+```
+
+Reuse the original creation key and exact decision payload after an uncertain response. A repeated decision is a no-op; changed input under an already used key or revision conflicts. The web controls retain unresolved requests for explicit retry. The `create_workflow` and `list_workflows` tools require explicit grants and an ordinary companion chat; models cannot approve, answer, retry, or resolve checkpoints themselves.
+
+Persistent storage is required. Limits are 50 retained workflows, 16 steps each, 32 KiB total definition text, 8 KiB per prompt or answer, and 64 KiB per saved task output. The existing 200-job history and eight active-job limits still apply. A pending task waits for a slot; exhausted retained job history pauses for review. These are sequential model-backed tasks, rather than a zero-model-call native tool script, and creating a workflow does not schedule recurring work.
+
 ## Continue interrupted work
 
 An interrupted or failed owner task offers **Review interrupted work** below its recorded actions. Inspect those actions, especially any unknown outcome, acknowledge the review, then choose **Continue remaining work**. Anima starts a linked attempt in the same chat using current permissions and the original attachments and skill selection. It checks saved progress before acting; the original run and its action evidence stay available.
@@ -27,7 +64,7 @@ Anima reviews settled file reads, checks and saved tasks before finishing. Repea
 
 ## Existing workspace data
 
-The new durable state format is version 23. On first upgrade, the daemon preserves the exact version-22 file as `.pre-companion-interaction.bak`; older backups remain separate. No reset or data deletion is needed. Keep your configured persistent store and workspace path across restart.
+The durable state format is version 24. On first upgrade from version 23, the daemon preserves the exact JSON file as `.pre-workflows.bak`. Version-22 upgrades keep their separate `.pre-companion-interaction.bak` backup; older backups remain separate. No reset or data deletion is needed. Keep your configured persistent store and workspace path across restart.
 
 ## Learn a reusable procedure
 

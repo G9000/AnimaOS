@@ -4,10 +4,11 @@ import { describeTrigger } from '../lib/automations';
 import type { AgentDetail } from '../lib/types';
 import { AgentRunsView } from './AgentRuns';
 import { WorkspaceGoals } from './WorkspaceGoals';
+import { WorkspaceWorkflows } from './WorkspaceWorkflows';
 import { AgentAvatar } from './AgentAvatar';
 import { AgentProactiveView, AgentTasksView } from './AgentWork';
 
-type Section = 'Notes' | 'Tasks' | 'Schedules' | 'Runs' | 'Goals';
+type Section = 'Notes' | 'Tasks' | 'Schedules' | 'Runs' | 'Workflows' | 'Goals';
 type Entry = {
   id: string;
   agentId: string;
@@ -156,6 +157,7 @@ export function WorkspaceHub({
     if (
       section === 'Runs' ||
       section === 'Goals' ||
+      section === 'Workflows' ||
       !tasksOnline ||
       (section === 'Tasks' && generationRef.current !== generation)
     )
@@ -219,7 +221,7 @@ export function WorkspaceHub({
         <header className="space-y-2">
           <h2 className="text-2xl font-semibold">Work</h2>
           <p className="text-sm leading-relaxed text-ink-3">
-            Your team’s notes, tasks, schedules, and runs, together in one
+            Your team’s notes, tasks, schedules, runs, and workflows in one
             place.
           </p>
         </header>
@@ -264,7 +266,7 @@ export function WorkspaceHub({
               aria-label="Work categories"
               className="flex flex-wrap gap-2 border-b border-line pb-3"
             >
-              {(['Notes', 'Tasks', 'Schedules', 'Runs', 'Goals'] as const).map(
+              {(['Notes', 'Tasks', 'Schedules', 'Runs', 'Workflows', 'Goals'] as const).map(
                 (item) => (
                   <button
                     key={item}
@@ -278,6 +280,7 @@ export function WorkspaceHub({
                         'Tasks',
                         'Schedules',
                         'Runs',
+                        'Workflows',
                         'Goals',
                       ];
                       const offset =
@@ -322,7 +325,9 @@ export function WorkspaceHub({
               aria-labelledby={`hub-tab-${section}`}
               className="space-y-6"
             >
-              {section === 'Goals' ? (
+              {section === 'Workflows' ? (
+                <WorkspaceWorkflows agents={agents} online={online} />
+              ) : section === 'Goals' ? (
                 <WorkspaceGoals agents={agents} />
               ) : section === 'Runs' ? (
                 <div className="space-y-5">
