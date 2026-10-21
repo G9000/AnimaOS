@@ -59,6 +59,8 @@ mod workspace;
 mod workspace_agent_yaml;
 mod workspace_files;
 mod workflows;
+mod workflow_templates;
+mod tool_results;
 
 use std::sync::Arc;
 
@@ -129,6 +131,8 @@ use crate::runtime_model::provider_summaries_with_pool;
         jobs::approve_job,
         jobs::review_job,
         workflows::list, workflows::create, workflows::get, workflows::resume, workflows::cancel,
+        workflow_templates::list, workflow_templates::save, workflow_templates::get, workflow_templates::delete, workflow_templates::run,
+        tool_results::get_tool_result, tool_results::download_tool_result,
         goals::list_goals,
         goals::create_goal,
         goals::change_status,
@@ -960,6 +964,11 @@ fn router_with_services_with_policies_and_integrations(
             axum::routing::post(goals::change_status),
         )
         .route("/api/goals/{goal_id}/jobs", get(goals::goal_jobs))
+        .route("/api/agents/{agent_id}/workflow-templates", get(workflow_templates::list).post(workflow_templates::save))
+        .route("/api/agents/{agent_id}/workflow-templates/{slug}", get(workflow_templates::get).delete(workflow_templates::delete))
+        .route("/api/agents/{agent_id}/workflow-templates/{slug}/run", axum::routing::post(workflow_templates::run))
+        .route("/api/agents/{agent_id}/tool-results/{artifact_id}", get(tool_results::get_tool_result))
+        .route("/api/agents/{agent_id}/tool-results/{artifact_id}/download", get(tool_results::download_tool_result))
         .route("/api/agents/{agent_id}/workflows", get(workflows::list).post(workflows::create))
         .route("/api/agents/{agent_id}/workflows/{workflow_id}", get(workflows::get))
         .route("/api/agents/{agent_id}/workflows/{workflow_id}/resume", axum::routing::post(workflows::resume))

@@ -463,6 +463,37 @@ describe('SkillsPage', () => {
     expect(save).not.toHaveBeenCalled();
   });
 
+  it('explicitly recreates a missing skill with an empty reviewed supporting-file list', async () => {
+    const user = userEvent.setup();
+    vi.mocked(daemon.skill).mockResolvedValue({
+      skill: skillFixture('notes', { status: 'missing' }),
+      file: null,
+    });
+    const save = vi
+      .spyOn(daemon, 'saveSkill')
+      .mockResolvedValue(skillFixture('notes'));
+    renderPage();
+    const notes = within(
+      await screen.findByRole('region', { name: 'Skills' }),
+    ).getByRole('listitem', { name: 'Notes' });
+    await user.click(within(notes).getByRole('button', { name: 'Edit' }));
+    expect(
+      await screen.findByText(/will recreate.*no supporting files/i),
+    ).toBeVisible();
+    await user.type(
+      screen.getByRole('textbox', { name: 'Instructions' }),
+      'Restored owner instructions.',
+    );
+    await user.click(screen.getByRole('button', { name: 'Save skill' }));
+    expect(save).toHaveBeenCalledWith(
+      'notes',
+      expect.objectContaining({
+        body: 'Restored owner instructions.',
+        files: [],
+      }),
+    );
+  });
+
   it('edits an active skill in the editor', async () => {
     const user = userEvent.setup();
     vi.mocked(daemon.skill).mockResolvedValue({

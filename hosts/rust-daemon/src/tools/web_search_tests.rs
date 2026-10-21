@@ -20,6 +20,156 @@ fn result(text: &str) -> ExternalToolResult {
     }
 }
 
+fn near_budget_citation_envelope() -> String {
+    json!({"version":1,"provider":"exa","mode":"anonymous","untrusted":true,"truncated":false,
+        "results": (0..2).map(|index| json!({
+            "title":format!("Retained exact source {index}"),
+            "url":format!("https://example.com/source-{index}?q={}","x".repeat(1730)),
+            "excerpt":"\0".repeat(1000),
+        })).collect::<Vec<_>>()
+    })
+    .to_string()
+}
+
+fn near_budget_search_fixture(
+    _: ToolExecutionContext,
+    _: AgentState,
+    _: Message,
+    _: ToolCall,
+) -> BoxFuture<'static, TaskResult<Content>> {
+    Box::pin(async {
+        TaskResult::success(
+            Content {
+                text: near_budget_citation_envelope(),
+                metadata: Some(BTreeMap::from([
+                    (
+                        "ordinary".into(),
+                        DataValue::String("retained metadata".into()),
+                    ),
+                    (
+                        "webSources".into(),
+                        DataValue::String("untrusted fabricated sources".into()),
+                    ),
+                ])),
+                ..Content::default()
+            },
+            7,
+        )
+    })
+}
+
+#[tokio::test]
+async fn near_limit_search_context_keeps_valid_json_and_exact_live_and_history_sources() {
+    let envelope = near_budget_citation_envelope();
+    assert!((15 * 1024..=16 * 1024).contains(&envelope.len()));
+    let sources = sources_from_envelope(&envelope).expect("valid bounded search sources");
+    assert_eq!(sources.len(), 2);
+    let outer = TaskResult::success(
+        Content {
+            text: envelope.clone(),
+            ..Content::default()
+        },
+        7,
+    );
+    assert!(serde_json::to_vec(&outer).unwrap().len() > crate::tool_results::INLINE_LIMIT);
+    let temp = tempfile::tempdir().unwrap();
+    for store in [
+        None,
+        Some(crate::tool_results::ToolResultStore::new(
+            temp.path().join("results"),
+        )),
+    ] {
+        let mut registry = crate::tools::ToolRegistry::new();
+        let descriptor = registry.descriptor("web_search").unwrap();
+        registry
+            .registrations
+            .get_mut("web_search")
+            .unwrap()
+            .handler = near_budget_search_fixture;
+        let agent = AgentState {
+            id: "search-owner".into(),
+            name: "Search owner".into(),
+            status: anima_core::AgentStatus::Running,
+            config: serde_json::from_value(
+                json!({"name":"search owner","model":"fixture","tools":[descriptor]}),
+            )
+            .unwrap(),
+            created_at_ms: 1,
+            token_usage: Default::default(),
+        };
+        let context = ToolExecutionContext::new(
+            Arc::new(tokio::sync::RwLock::new(anima_memory::MemoryManager::new())),
+            Arc::new(tokio::sync::RwLock::new(
+                crate::memory_embeddings::MemoryEmbeddingRuntime::disabled(),
+            )),
+            None,
+            registry,
+            crate::tools::new_shared_process_manager_with_limit(
+                crate::tools::DEFAULT_MAX_BACKGROUND_PROCESSES,
+            ),
+            Some(temp.path().into()),
+            None,
+        )
+        .with_tool_results(store)
+        .with_run_link(Some(crate::runs::RunLink {
+            agent_id: agent.id.clone(),
+            run_id: "search-run".into(),
+            session_id: "search-session".into(),
+        }));
+        let message = Message {
+            id: "search-input".into(),
+            agent_id: agent.id.clone(),
+            room_id: "search-session".into(),
+            content: Content::default(),
+            role: MessageRole::User,
+            created_at_ms: 1,
+        };
+        let projected = context
+            .execute_tool(
+                agent,
+                message,
+                ToolCall {
+                    id: "search-call".into(),
+                    name: "web_search".into(),
+                    args: BTreeMap::from([(
+                        "query".into(),
+                        DataValue::String("bounded fixture".into()),
+                    )]),
+                },
+            )
+            .await;
+        assert_eq!(projected.status, TaskStatus::Success);
+        assert_eq!(projected.duration_ms, 7);
+        let mut content = projected.data.unwrap();
+        assert_eq!(content.text, envelope);
+        assert_eq!(
+            content.metadata.as_ref().unwrap()["ordinary"],
+            DataValue::String("retained metadata".into())
+        );
+        assert_eq!(
+            content.metadata.as_ref().unwrap()["webSources"],
+            source_value(&sources)
+        );
+        content
+            .metadata
+            .as_mut()
+            .unwrap()
+            .insert("toolStatus".into(), DataValue::String("success".into()));
+        let historical = Message {
+            id: "search-output".into(),
+            agent_id: "search-owner".into(),
+            room_id: "search-session".into(),
+            content,
+            role: MessageRole::Tool,
+            created_at_ms: 2,
+        };
+        assert_eq!(
+            history_sources(&historical),
+            Some(serde_json::to_value(&sources).unwrap())
+        );
+    }
+}
+
 pub(crate) fn labelled() -> String {
     format!("Title: Fixture research\nURL: https://example.com/research?q=one&lang=en\nHighlights: observed fixture evidence\n{}\n---\nTitle: Second fixture\nURL: https://example.org/report#section\nHighlights: supporting material\n{}", "a".repeat(1150), "b".repeat(1150))
 }

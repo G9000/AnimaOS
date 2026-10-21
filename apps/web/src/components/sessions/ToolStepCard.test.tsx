@@ -11,6 +11,28 @@ import type { ToolStep } from '../../lib/transcript';
 import { ToolBlock } from './RunActivity';
 import { ToolStepCard } from './ToolStepCard';
 
+it('offers owned saved result retrieval from the compact retained-output header', () => {
+  const step: ToolStep = {
+    stepId: 'step',
+    toolCallId: 'call',
+    name: 'read_file',
+    argumentsPreview: 'large.txt',
+    status: 'success',
+    durationMs: 1,
+    result: `[saved-tool-result id=tr_${'a'.repeat(64)} bytes=25000 capture=complete]\nPreview`,
+    truncated: true,
+    helper: null,
+  };
+  render(<ToolStepCard step={step} agentId="agent" />);
+  fireEvent.click(screen.getByRole('button', { name: /read_file/ }));
+  expect(
+    screen.getByRole('button', { name: 'View saved result' }),
+  ).toBeVisible();
+  expect(
+    screen.queryByText('Result shortened to 2 KiB.'),
+  ).not.toBeInTheDocument();
+});
+
 describe('m83 Search sources card', () => {
   const sources = [
     {
@@ -90,7 +112,12 @@ describe('app and coding agent sessions in tool steps', () => {
     status: 'running',
     exitCode: null,
     startedAt: '2026-10-19T10:00:00Z',
-    screen: { rows: ['> Fix the flaky test', '  12 passed'], cursor: [1, 0], size: [24, 80], alternate: true },
+    screen: {
+      rows: ['> Fix the flaky test', '  12 passed'],
+      cursor: [1, 0],
+      size: [24, 80],
+      alternate: true,
+    },
     output: '',
     truncated: false,
     outcome: 'settled',
@@ -106,14 +133,40 @@ describe('app and coding agent sessions in tool steps', () => {
     status: 'waiting_for_you',
     stopReason: null,
     events: [
-      { type: 'plan', entries: [{ content: 'Keep the byte offset', status: 'in_progress', priority: 'high' }] },
-      { type: 'tool_call', id: 't1', title: 'Read src/upload.ts', toolKind: 'read', status: 'completed', locations: [] },
-      { type: 'permission_asked', toolCallId: 't2', title: 'Edit src/upload.ts', toolKind: 'edit', locations: [] },
+      {
+        type: 'plan',
+        entries: [
+          {
+            content: 'Keep the byte offset',
+            status: 'in_progress',
+            priority: 'high',
+          },
+        ],
+      },
+      {
+        type: 'tool_call',
+        id: 't1',
+        title: 'Read src/upload.ts',
+        toolKind: 'read',
+        status: 'completed',
+        locations: [],
+      },
+      {
+        type: 'permission_asked',
+        toolCallId: 't2',
+        title: 'Edit src/upload.ts',
+        toolKind: 'edit',
+        locations: [],
+      },
       { type: 'agent_message', text: 'It wants to make its first change.' },
     ],
     truncated: false,
   };
-  const toolStep = (name: string, result: string, overrides: Partial<ToolStep> = {}): ToolStep => ({
+  const toolStep = (
+    name: string,
+    result: string,
+    overrides: Partial<ToolStep> = {},
+  ): ToolStep => ({
     stepId: 'run:1',
     toolCallId: `call-${name}`,
     runId: 'run',
@@ -134,50 +187,81 @@ describe('app and coding agent sessions in tool steps', () => {
       .spyOn(daemon, 'stopAppSession')
       .mockResolvedValue({ stopped: true, treeGone: true });
     render(
-      <ToolStepCard step={toolStep('app_read', JSON.stringify(appSession))} agentId="agent-1" />,
+      <ToolStepCard
+        step={toolStep('app_read', JSON.stringify(appSession))}
+        agentId="agent-1"
+      />,
     );
     fireEvent.click(screen.getByRole('button', { name: /app_read/ }));
-    const card = screen.getByRole('region', { name: 'Claude Code app session' });
-    expect(within(card).getByLabelText('Claude Code screen')).toHaveTextContent('> Fix the flaky test');
+    const card = screen.getByRole('region', {
+      name: 'Claude Code app session',
+    });
+    expect(within(card).getByLabelText('Claude Code screen')).toHaveTextContent(
+      '> Fix the flaky test',
+    );
     expect(within(card).getByText(/^RUNNING/)).toBeVisible();
     expect(within(card).getByText('claude · ~/code/uploader')).toBeVisible();
     fireEvent.click(within(card).getByRole('button', { name: /Stop/ }));
-    await waitFor(() => expect(within(card).getByText('STOPPED')).toBeVisible());
+    await waitFor(() =>
+      expect(within(card).getByText('STOPPED')).toBeVisible(),
+    );
     expect(stop).toHaveBeenCalledWith('agent-1', 'app-3');
     expect(within(card).queryByRole('button', { name: /Stop/ })).toBeNull();
   });
 
   it('shows an ACP session with its plan, steps, message and pending ask, and cancels its turn', async () => {
-    const cancel = vi.spyOn(daemon, 'cancelAcpTurn').mockResolvedValue({ cancelled: true });
+    const cancel = vi
+      .spyOn(daemon, 'cancelAcpTurn')
+      .mockResolvedValue({ cancelled: true });
     const stop = vi
       .spyOn(daemon, 'stopAcpSession')
       .mockResolvedValue({ stopped: true, treeGone: true });
     render(
-      <ToolStepCard step={toolStep('acp_prompt', JSON.stringify(acpSession))} agentId="agent-1" />,
+      <ToolStepCard
+        step={toolStep('acp_prompt', JSON.stringify(acpSession))}
+        agentId="agent-1"
+      />,
     );
     fireEvent.click(screen.getByRole('button', { name: /acp_prompt/ }));
     const card = screen.getByRole('region', { name: 'Codex coding agent' });
     expect(within(card).getByText('WAITING FOR YOU')).toBeVisible();
-    expect(within(card).getByRole('list', { name: 'Plan' })).toHaveTextContent('Keep the byte offset');
-    expect(within(card).getByRole('list', { name: 'Steps' })).toHaveTextContent('Read src/upload.ts');
-    expect(within(card).getByText('It wants to make its first change.')).toBeVisible();
-    expect(within(card).getByText('Codex wants to edit src/upload.ts')).toBeVisible();
+    expect(within(card).getByRole('list', { name: 'Plan' })).toHaveTextContent(
+      'Keep the byte offset',
+    );
+    expect(within(card).getByRole('list', { name: 'Steps' })).toHaveTextContent(
+      'Read src/upload.ts',
+    );
+    expect(
+      within(card).getByText('It wants to make its first change.'),
+    ).toBeVisible();
+    expect(
+      within(card).getByText('Codex wants to edit src/upload.ts'),
+    ).toBeVisible();
     fireEvent.click(within(card).getByRole('button', { name: 'Cancel turn' }));
     await waitFor(() => expect(within(card).getByText('IDLE')).toBeVisible());
     expect(cancel).toHaveBeenCalledWith('agent-1', 'acp-1');
     fireEvent.click(within(card).getByRole('button', { name: /Stop/ }));
-    await waitFor(() => expect(within(card).getByText('STOPPED')).toBeVisible());
+    await waitFor(() =>
+      expect(within(card).getByText('STOPPED')).toBeVisible(),
+    );
     expect(stop).toHaveBeenCalledWith('agent-1', 'acp-1');
   });
 
   it('keeps a failed Stop visible and offers it again', async () => {
-    vi.spyOn(daemon, 'stopAppSession').mockRejectedValue(new Error('daemon unreachable'));
+    vi.spyOn(daemon, 'stopAppSession').mockRejectedValue(
+      new Error('daemon unreachable'),
+    );
     render(
-      <ToolStepCard step={toolStep('app_read', JSON.stringify(appSession))} agentId="agent-1" />,
+      <ToolStepCard
+        step={toolStep('app_read', JSON.stringify(appSession))}
+        agentId="agent-1"
+      />,
     );
     fireEvent.click(screen.getByRole('button', { name: /app_read/ }));
     fireEvent.click(screen.getByRole('button', { name: /Stop/ }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('daemon unreachable');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'daemon unreachable',
+    );
     expect(screen.getByRole('button', { name: /Stop/ })).toBeEnabled();
   });
 
@@ -186,22 +270,40 @@ describe('app and coding agent sessions in tool steps', () => {
     ['an unknown kind', JSON.stringify({ ...appSession, kind: 'other' })],
     ['plain text', 'started app-3'],
   ])('falls back to the plain result for %s', (_label, result) => {
-    const { container } = render(<ToolStepCard step={toolStep('app_read', result)} />);
+    const { container } = render(
+      <ToolStepCard step={toolStep('app_read', result)} />,
+    );
     fireEvent.click(screen.getByRole('button', { name: /app_read/ }));
-    expect(container.querySelector('.tool-step-result pre')?.textContent).toBe(result);
+    expect(container.querySelector('.tool-step-result pre')?.textContent).toBe(
+      result,
+    );
     expect(screen.queryByRole('region')).toBeNull();
   });
 
   it('offers no Stop without the agent that owns the session', () => {
-    render(<ToolStepCard step={toolStep('app_read', JSON.stringify(appSession))} />);
+    render(
+      <ToolStepCard step={toolStep('app_read', JSON.stringify(appSession))} />,
+    );
     fireEvent.click(screen.getByRole('button', { name: /app_read/ }));
     expect(screen.queryByRole('button', { name: /Stop/ })).toBeNull();
   });
 
   it('shows only the latest snapshot of each session under a finished block', () => {
-    const older = toolStep('app_start', JSON.stringify({ ...appSession, screen: { rows: ['starting'] } }), { toolCallId: 'a' });
-    const typed = toolStep('app_send', JSON.stringify({ ...appSession, screen: { rows: ['typing'] } }), { toolCallId: 'b' });
-    const latest = toolStep('app_read', JSON.stringify({ ...appSession, status: 'exited', exitCode: 0 }), { toolCallId: 'c' });
+    const older = toolStep(
+      'app_start',
+      JSON.stringify({ ...appSession, screen: { rows: ['starting'] } }),
+      { toolCallId: 'a' },
+    );
+    const typed = toolStep(
+      'app_send',
+      JSON.stringify({ ...appSession, screen: { rows: ['typing'] } }),
+      { toolCallId: 'b' },
+    );
+    const latest = toolStep(
+      'app_read',
+      JSON.stringify({ ...appSession, status: 'exited', exitCode: 0 }),
+      { toolCallId: 'c' },
+    );
     render(
       <ToolBlock
         steps={[older, typed, latest]}
@@ -209,7 +311,9 @@ describe('app and coding agent sessions in tool steps', () => {
         actions={{ sessionAgentId: 'agent-1' }}
       />,
     );
-    const cards = screen.getAllByRole('region', { name: 'Claude Code app session' });
+    const cards = screen.getAllByRole('region', {
+      name: 'Claude Code app session',
+    });
     expect(cards).toHaveLength(1);
     expect(within(cards[0]).getByText('EXITED · 0')).toBeVisible();
     expect(within(cards[0]).getByText(/Typed 1 message/)).toBeVisible();

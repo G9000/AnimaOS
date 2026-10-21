@@ -60,6 +60,11 @@ impl From<io::Error> for InstructionReadError {
     }
 }
 impl WorkspaceBytes {
+    /// Clone the held root capability for bounded package traversal and atomic
+    /// directory mutations without reopening ambient paths.
+    pub(crate) fn held_directory(&self) -> io::Result<Dir> {
+        self.directory.try_clone()
+    }
     /// Opened-handle link count, including Windows; an ordinary name can alias
     /// an instruction inode through a hard link without changing canonical paths.
     pub(crate) fn instruction_link_count(&self, relative: &str) -> io::Result<Option<u64>> {

@@ -62,5 +62,8 @@ test-output
 .env.local
 target/
 
+# Windows test-local temporary files and Node compile caches
+/.tmp/vitest*/
+
 # fastembed model cache (a daemon run without a memory store, before the per-user cache default)
 .fastembed_cache/

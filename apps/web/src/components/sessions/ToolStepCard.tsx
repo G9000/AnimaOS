@@ -4,6 +4,7 @@ import { parseCodingSession } from '../../lib/coding-sessions';
 import { formatElapsed, type ToolStep } from '../../lib/transcript';
 import { CodingSessionCard } from '../coding/CodingSessionCard';
 import { toolWebSources } from '../../lib/web-sources';
+import { savedToolResultId, ToolResultArtifact } from './ToolResultArtifact';
 
 const STATUS_LABELS: Record<ToolStep['status'], string> = {
   running: 'running',
@@ -28,6 +29,7 @@ export function ToolStepCard({
   const [open, setOpen] = useState(false);
   const resultId = useId();
   const sources = toolWebSources(step.name, step.status, step.sources);
+  const artifactId = savedToolResultId(step.result);
   return (
     <div className="tool-step" data-status={step.status}>
       <button
@@ -75,7 +77,14 @@ export function ToolStepCard({
               pinned={pinned}
             />
           )}
-          {step.truncated && (
+          {artifactId && agentId && (
+            <ToolResultArtifact
+              key={`${agentId}:${artifactId}`}
+              agentId={agentId}
+              artifactId={artifactId}
+            />
+          )}
+          {step.truncated && !artifactId && (
             <p className="tool-step-note">Result shortened to 2 KiB.</p>
           )}
           {sources.length > 0 && (

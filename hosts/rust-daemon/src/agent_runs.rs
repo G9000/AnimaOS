@@ -509,6 +509,13 @@ impl AgentRunCoordinator {
         })
     }
 
+    pub(crate) async fn tool_result_read_workspace(&self, agent_id: &str) -> Option<std::path::PathBuf> {
+        let state = self.state.read().await;
+        let agent = state.get_agent(agent_id)?;
+        if !agent.state.config.allows_tool("read_tool_result") { return None; }
+        state.workspace.as_ref().map(|workspace| workspace.root_path.clone())
+    }
+
     pub(crate) async fn peer_allows_tool(&self, source_id: &str, tool: &str) -> bool {
         self.state
             .read()
@@ -2055,7 +2062,7 @@ impl AgentRunCoordinator {
                     ))
         });
         if is_workflow_job {
-            tools.retain(|tool| !is_coordination_tool(&tool.name) && tool.name != "create_workflow");
+            tools.retain(|tool| !is_coordination_tool(&tool.name) && !matches!(tool.name.as_str(), "create_workflow" | "save_workflow_template" | "run_workflow_template"));
         }
         if is_helper_completion {
             tools.retain(|tool| {

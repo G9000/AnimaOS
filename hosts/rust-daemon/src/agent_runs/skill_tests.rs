@@ -72,6 +72,103 @@ fn propose_steps() -> Vec<Step> {
 }
 
 #[tokio::test]
+async fn chat_package_proposal_is_reviewed_then_loads_one_supporting_file() {
+    let mut proposal = call(
+        "propose_skill",
+        &[
+            ("name", "Packaged Notes"),
+            ("description", "Use reviewed note templates"),
+            ("body", "Load templates/note.md when writing notes."),
+        ],
+    );
+    proposal.args.insert(
+        "files".into(),
+        DataValue::Array(vec![DataValue::Object(BTreeMap::from([
+            ("path".into(), DataValue::String("templates/note.md".into())),
+            (
+                "content".into(),
+                DataValue::String("Reviewed chat template".into()),
+            ),
+        ]))]),
+    );
+    let mut index_call = call("load_skill", &[("name", "packaged-notes")]);
+    index_call.id = "load-skill-index".into();
+    let mut file_call = call(
+        "load_skill",
+        &[
+            ("name", "packaged-notes"),
+            ("filePath", "templates/note.md"),
+        ],
+    );
+    file_call.id = "load-skill-supporting-file".into();
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![proposal]),
+        Step::Text(vec!["proposed"]),
+        Step::Tools(vec![index_call]),
+        Step::Tools(vec![file_call]),
+        Step::Text(vec!["used"]),
+    ]);
+    let (coordinator, agent_id, root) =
+        skilled(model, &["propose_skill", "load_skill"], "chat-package").await;
+    coordinator
+        .run(chat_request(
+            &agent_id,
+            "chat:package",
+            "Propose a note package",
+        ))
+        .await
+        .unwrap();
+    let draft = coordinator.state.read().await.skills.pending_drafts()[0].clone();
+    assert_eq!(draft.files[0].content, "Reviewed chat template");
+    assert!(!root.join("skills/packaged-notes").exists());
+    coordinator
+        .skills()
+        .approve_draft(&draft.id, crate::skills::DraftApproval::default())
+        .await
+        .unwrap();
+    coordinator
+        .run(chat_request(
+            &agent_id,
+            "chat:package",
+            "Load the approved template",
+        ))
+        .await
+        .unwrap();
+    let results = tool_results(&coordinator, &agent_id).await;
+    assert!(results
+        .iter()
+        .any(|r| r.contains("templates/note.md (22 bytes)")));
+    assert!(results.last().unwrap().ends_with("Reviewed chat template"));
+    let (context, mut agent) = {
+        let guard = coordinator.state.read().await;
+        (
+            guard
+                .tool_execution_context()
+                .with_team(coordinator.clone(), false),
+            guard.agents[&agent_id].state(),
+        )
+    };
+    agent.config.tools = Some(Vec::new());
+    let denied = context
+        .execute_tool(
+            agent,
+            tool_input(&agent_id, "chat:package"),
+            call(
+                "load_skill",
+                &[
+                    ("name", "packaged-notes"),
+                    ("filePath", "templates/note.md"),
+                ],
+            ),
+        )
+        .await;
+    assert!(denied.error.is_some());
+    assert!(!denied
+        .data
+        .is_some_and(|c| c.text.contains("Reviewed chat template")));
+}
+
+#[tokio::test]
 async fn load_skill_returns_an_approved_skills_instructions() {
     let model = ScriptedModel::new(vec![
         Step::Tools(vec![call("load_skill", &[("name", "/notes")])]),

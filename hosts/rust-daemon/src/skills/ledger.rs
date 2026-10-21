@@ -14,10 +14,9 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 use utoipa::ToSchema;
 
-use super::disk;
 use super::drafts::{ApprovedDraft, DraftApproval, Proposal};
 use super::service::{blocking, SkillContent, SkillError, SkillService};
-use super::{is_valid_slug, parse_skill_file, skill_hash, SkillDraft, SkillRecord};
+use super::{is_valid_slug, parse_skill_file, SkillDraft, SkillRecord};
 
 /// `decidedBy` of a draft approved because its agent runs in Free.
 pub(crate) const AUTONOMY_FREE_DECIDER: &str = "autonomy:free";
@@ -49,6 +48,9 @@ pub(crate) enum SkillLedgerAction {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SkillLedgerEntry {
+    #[serde(default)]
+    #[schema(value_type = Vec<serde_json::Value>)]
+    pub(crate) previous_files: Vec<super::SkillSupportingFile>,
     /// `skl_<uuid>`.
     pub(crate) id: String,
     pub(crate) agent_id: String,
@@ -142,10 +144,14 @@ impl SkillService {
         if !free {
             return Ok(ProposeOutcome::Drafted(draft));
         }
-        let previous_content = match &draft.base_hash {
-            Some(base) => self.approved_text(&draft.slug, base).await,
+        let previous_package = match &draft.base_hash {
+            Some(base) => self.approved_package(&draft.slug, base).await,
             None => None,
         };
+        let previous_content = previous_package
+            .as_ref()
+            .and_then(|p| String::from_utf8(p.bytes.clone()).ok());
+        let previous_files = previous_package.map(|p| p.files).unwrap_or_default();
         let approved = match self
             .approve_draft_by(
                 &draft.id,
@@ -170,6 +176,7 @@ impl SkillService {
             SkillLedgerAction::Created
         };
         let entry = SkillLedgerEntry {
+            previous_files,
             id: format!("{LEDGER_ID_PREFIX}{}", uuid::Uuid::new_v4()),
             agent_id,
             skill_slug: approved.skill.slug.clone(),
@@ -188,16 +195,19 @@ impl SkillService {
 
     /// The skill's `SKILL.md` as text when it is still the approved content
     /// (`base`) and at most 36 KiB.
-    async fn approved_text(&self, slug: &str, base: &str) -> Option<String> {
+    async fn approved_package(
+        &self,
+        slug: &str,
+        base: &str,
+    ) -> Option<super::package::SkillPackage> {
         let root = self.workspace().await.ok()?;
         let target = slug.to_string();
-        let bytes = blocking(move || disk::read_skill_bytes(&root, &target))
+        let package = blocking(move || super::package::read_package(&root, &target))
             .await
             .ok()?
             .ok()??;
-        (bytes.len() <= MAX_LEDGER_PREVIOUS_CONTENT_BYTES && skill_hash(&bytes) == base)
-            .then(|| String::from_utf8(bytes).ok())
-            .flatten()
+        (package.bytes.len() <= MAX_LEDGER_PREVIOUS_CONTENT_BYTES && package.hash() == base)
+            .then_some(package)
     }
 
     /// Changes the ledger in memory now and saves it under the control-plane
@@ -258,6 +268,14 @@ impl SkillService {
         if current.as_deref() != Some(entry.content_hash.as_str()) {
             return Err(SkillError::conflict(SKILL_CHANGED_SINCE_AUTOMATIC));
         }
+        let workspace = self.workspace().await?;
+        let target = slug.to_string();
+        let actual = blocking(move || super::package::read_package(&workspace, &target))
+            .await?
+            .map_err(SkillError::Unavailable)?;
+        if actual.as_ref().map(|p| p.hash()).as_deref() != Some(entry.content_hash.as_str()) {
+            return Err(SkillError::conflict(SKILL_CHANGED_SINCE_AUTOMATIC));
+        }
         let outcome = match entry.action {
             SkillLedgerAction::Created => {
                 self.delete(slug).await?;
@@ -270,6 +288,7 @@ impl SkillService {
                     .ok_or_else(|| SkillError::conflict(PREVIOUS_SKILL_NOT_KEPT))?;
                 let file = parse_skill_file(text.as_bytes()).map_err(SkillError::conflict)?;
                 let content = SkillContent {
+                    files: Some(entry.previous_files.clone()),
                     name: file.name,
                     description: file.description,
                     body: file.body,
@@ -303,7 +322,9 @@ mod tests {
     use crate::skills::test_support::{
         content, service, skill_text, temp_workspace, with_workspace, write_skill,
     };
-    use crate::skills::{compose_skill_file, DraftStatus, ProposedBy, SKILL_FILE_UNREVIEWED};
+    use crate::skills::{
+        compose_skill_file, skill_hash, DraftStatus, ProposedBy, SKILL_FILE_UNREVIEWED,
+    };
     use crate::state::DaemonState;
 
     /// A daemon with a workspace and one companion in `mode`.
@@ -333,6 +354,7 @@ mod tests {
 
     fn proposal(agent: &str, name: &str, body: &str) -> Proposal {
         Proposal {
+            files: Vec::new(),
             by: ProposedBy {
                 agent_id: agent.into(),
                 session_id: "chat:1".into(),
@@ -541,6 +563,7 @@ mod tests {
     #[test]
     fn the_ledger_keeps_the_newest_two_hundred() {
         let entry = |at: u64| SkillLedgerEntry {
+            previous_files: Vec::new(),
             id: format!("{LEDGER_ID_PREFIX}{at}"),
             agent_id: "agent-1".into(),
             skill_slug: "notes".into(),

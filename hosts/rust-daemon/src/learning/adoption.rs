@@ -11,8 +11,8 @@ use super::LearningService;
 use super::LearningSkillDraftRequest;
 use crate::routes::ApiError;
 use crate::skills::{
-    compose_skill_file, is_valid_slug, skill_hash, validate_body, validate_description,
-    validate_name, DraftSource, ProposedBy, SkillDraft, SkillFile, MAX_PENDING_DRAFTS_PER_AGENT,
+    compose_skill_file, is_valid_slug, validate_body, validate_description, validate_name,
+    DraftSource, ProposedBy, SkillDraft, SkillFile, MAX_PENDING_DRAFTS_PER_AGENT,
     SKILL_SLUG_INVALID, TOO_MANY_PENDING_DRAFTS,
 };
 
@@ -120,12 +120,12 @@ impl LearningService {
         let disk_root = root.clone();
         let slug = input.skill.slug.clone();
         let bytes = crate::skills::service::blocking(move || {
-            crate::skills::disk::read_skill_bytes(&disk_root, &slug)
+            crate::skills::package::read_package(&disk_root, &slug)
         })
         .await
         .map_err(|_| unavailable())?
         .map_err(|_| unavailable())?;
-        let actual_hash = bytes.as_ref().map(|bytes| skill_hash(bytes));
+        let actual_hash = bytes.as_ref().map(|package| package.hash());
         let fresh = capture_source(&self.state, agent_id, &review.source_run_id).await?;
         if fresh.digest != review.evidence_digest || fresh.session_id != review.session_id {
             return Err(ApiError::conflict(
@@ -181,6 +181,8 @@ impl LearningService {
             input.skill.expected_hash.clone(),
             timestamp,
         );
+        // A lesson edits instructions; preserve every reviewed supporting file.
+        draft.files = bytes.map(|package| package.files).unwrap_or_default();
         draft.learning_source = Some(LearningSkillSource {
             agent_id: agent_id.into(),
             review_id: review.id.clone(),

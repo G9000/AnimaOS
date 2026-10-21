@@ -23,6 +23,7 @@ pub(crate) use goals::{validate_goals, GoalRecord, GoalStatus, GoalView};
 pub(crate) mod helper_completion;
 mod records;
 pub(crate) mod workflows;
+pub(crate) mod workflow_templates;
 pub(crate) use records::{
     AgentJobAttempt, AgentJobRecord, AgentJobStatus, JobOutputReview, JobReviewDecision,
 };
@@ -105,6 +106,7 @@ impl JobService {
                     state.jobs.clone(),
                     state.goals.clone(),
                     state.workflows.clone(),
+                    state.workflow_templates.clone(),
                 );
                 let value = match action(&mut state) {
                     Ok(value) => value,
@@ -112,6 +114,7 @@ impl JobService {
                         state.jobs = before.0;
                         state.goals = before.1;
                         state.workflows = before.2;
+                        state.workflow_templates = before.3;
                         return Err(error);
                     }
                 };
@@ -122,6 +125,7 @@ impl JobService {
                 state.jobs = before.0;
                 state.goals = before.1;
                 state.workflows = before.2;
+                state.workflow_templates = before.3;
                 return Err(JobError::Unavailable(error.to_string()));
             }
             service.wake.notify_one();

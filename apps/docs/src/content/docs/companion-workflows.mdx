@@ -70,7 +70,7 @@ Anima reviews settled file reads, checks and saved tasks before finishing. Repea
 
 ## Existing workspace data
 
-The durable state format is version 24. On first upgrade from version 23, the daemon preserves the exact JSON file as `.pre-workflows.bak`. Version-22 upgrades keep their separate `.pre-companion-interaction.bak` backup; older backups remain separate. No reset or data deletion is needed. Keep your configured persistent store and workspace path across restart.
+The durable state format is version 25. On upgrade from version 24, the daemon preserves the exact JSON file as `.pre-workflow-templates.bak`. Version-23 upgrades keep their separate `.pre-workflows.bak` backup. Version-22 upgrades keep their separate `.pre-companion-interaction.bak` backup; older backups remain separate. No reset or data deletion is needed. Keep your configured persistent store and workspace path across restart.
 
 ## Learn a reusable procedure
 
@@ -125,3 +125,36 @@ print("combined.txt was written")
 ```
 
 Each call starts fresh; variables do not persist between programs. The generated `anima_tools` module includes only the currently granted subset of `web_search`, `web_fetch`, `read_file`, `write_file`, `glob`, `grep`, `edit_file`, `multi_edit` and `bash`. Native keyword arguments are unchanged. The outer program requires execution approval, and native calls keep their own approvals and durable receipts. Local Python has the operating-system access of the daemon user. Cancellation, a five-minute deadline and owned process cleanup remain enforced; uncertain effects require review.
+
+
+## Reuse a workflow template
+
+Open **Reusable templates** in the chat's Workflows section or in **Work → Workflows**. Choose **New template**, or copy the steps of an existing workflow. Give it a slug, add named parameters and optional defaults, and use placeholders such as `${topic}` in titles or prompts. `$${topic}` keeps the placeholder as literal text. Parameter values are plain strings; they never evaluate code or expand environment variables.
+
+Save the template, select it, enter its inputs, and choose **Run template**. Each start creates a separate workflow. Its template revision, resolved inputs, steps, results, and checkpoint decisions remain pinned even if you later edit or remove the template. Existing owner checkpoint controls still apply.
+
+To create, inspect, and start templates by asking the companion, enable **Allow workflow templates in chat** in Permissions and save. This separately grants `save_workflow_template`, `list_workflow_templates`, and `run_workflow_template`. For example:
+
+> Save a reusable template called “Reviewed brief” with slug reviewed-brief, a required topic parameter, and these steps: draft a short brief about the topic, wait for my approval, ask for the audience, then finish the brief. Use the template tools. Save it first; do not start it yet.
+
+Then ask to run that template with a specific topic. Chat text does not approve a checkpoint: use **Approve checkpoint** or **Submit answer** on its saved run card. Disabling template permission prevents model saves, listings, and starts; owner controls remain available.
+
+The owner SDK exposes `client.workflowTemplates.list/get/save/run/delete`. Save uses revision 0 for a new slug and the current revision for edits. Run uses `{ revision, requestKey, inputs }`. Reuse the exact request after an uncertain response. A fresh request key starts separate work. The web interface retains unconfirmed commands for **Retry exact template request**.
+
+Limits are 25 retained templates across the store, including removed picker entries, 16 saved revisions each, 16 parameters, and the existing 16-step workflow bounds. Each input fits 8 KiB and all resolved inputs together fit 16 KiB. Removing a template retains its history and existing runs for consistent recovery; use another slug when revision history is full.
+
+## Include supporting files in skills
+
+The skill editor and chat skill proposals can include reviewed UTF-8 text files under `references/`, `templates/`, `scripts/`, `examples/`, or `assets/`. Use **Add supporting file** in the editor, enter its package-relative path and content, and save the package. A chat request can ask the companion to propose a skill with these files for review.
+
+Review includes SKILL.md and every supporting file. The approved package hash pins all paths and bytes: modifying, adding, or removing a supporting file makes the skill unavailable until reviewed again. Existing single-file skills keep their original hashes. The package supports up to 32 supporting files, 64 KiB per file, and 512 KiB total. Path escapes, links, unsupported roots, and duplicate paths are rejected.
+
+`load_skill({ name })` loads instructions and the file index. `load_skill({ name, filePath: 'references/guide.md' })` loads exactly one currently approved supporting file. Scripts are inert text; including or loading one does not execute it or grant shell permission. Skill proposals follow the current autonomy setting: review when required, or a saved ledger entry that the owner can undo under Free.
+
+## Read a saved large tool result
+
+When an available tool result exceeds 16 KiB, a configured durable host saves its exact JSON result privately and returns a compact preview with an opaque saved-result ID. Already bounded native management and search envelopes keep their structured handles and citation contracts. Expand that tool step in chat and choose **View saved result**. Read bounded pages with **Next page**, or choose **Download saved result** for the full stored payload. Reopening the chat retains the reference. A tool that already reported truncated output is marked incomplete; storage cannot recover bytes it never received.
+
+Enable **Allow saved tool result reads** in Permissions to let the companion use `read_tool_result` for bounded retrieval by ID. Reads remain scoped to the current agent and workspace, recheck the live grant, and treat saved text as reference data. Owner viewing and downloading do not require this model permission. Storage never changes the original tool's success, error, cancellation, or uncertain-effect status.
+
+Each artifact fits 4 MiB; the private store has a 128 MiB and 1024-file quota. Referenced artifacts are not automatically deleted. With a JSON control plane, the default directory is the control-plane filename plus `.tool-results`. For a Postgres control plane, configure an absolute private `ANIMAOS_RS_TOOL_RESULTS_DIR` for that profile. Ephemeral hosts do not retain tool results. A failed or unavailable save is reported without claiming the original output was retained.

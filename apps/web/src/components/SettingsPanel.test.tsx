@@ -1582,3 +1582,84 @@ it('keeps profile drafts when switching models is unavailable during unsaved cha
   expect(fireEvent.click(link)).toBe(false);
   expect(screen.getByLabelText('Name')).toHaveValue('Unsaved Nova');
 });
+
+describe('reusable work permissions', () => {
+  const templates = [
+    'save_workflow_template',
+    'list_workflow_templates',
+    'run_workflow_template',
+  ];
+  it.each([
+    ['Allow workflow templates in chat', templates],
+    ['Allow saved tool result reads', ['read_tool_result']],
+  ] as const)(
+    'grants and revokes %s without widening existing workflows',
+    async (label, tools) => {
+      const original = [
+        'read_file',
+        'create_workflow',
+        'list_workflows',
+        'legacy_custom',
+      ];
+      const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+      const view = renderPanel(agent({ toolNames: original }), {
+        sections: ['access'],
+        saveSettings,
+      });
+      const toggle = screen.getByRole('checkbox', { name: label });
+      expect(toggle).not.toBeChecked();
+      fireEvent.click(toggle);
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() =>
+        expect(saveSettings).toHaveBeenLastCalledWith({
+          tools: [...original, ...tools],
+        }),
+      );
+      view.unmount();
+      renderPanel(agent({ toolNames: [...original, ...tools] }), {
+        sections: ['access'],
+        saveSettings,
+      });
+      fireEvent.click(screen.getByRole('checkbox', { name: label }));
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() =>
+        expect(saveSettings).toHaveBeenLastCalledWith({ tools: original }),
+      );
+      for (const profile of ['observe', 'collaborate', 'operate'] as const)
+        for (const tool of tools)
+          expect(toolNamesForProfile(profile)).not.toContain(tool);
+    },
+  );
+  it('preserves partial template grants and saved-result access through a profile change', async () => {
+    const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+    renderPanel(
+      agent({
+        toolNames: [
+          ...toolNamesForProfile('collaborate'),
+          'list_workflow_templates',
+          'read_tool_result',
+        ],
+      }),
+      { sections: ['access'], saveSettings },
+    );
+    expect(
+      screen.getByRole('checkbox', {
+        name: 'Allow workflow templates in chat',
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByRole('checkbox', { name: 'Allow saved tool result reads' }),
+    ).toBeChecked();
+    fireEvent.click(screen.getByRole('radio', { name: /^Observe/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith({
+        tools: [
+          ...toolNamesForProfile('observe'),
+          'list_workflow_templates',
+          'read_tool_result',
+        ],
+      }),
+    );
+  });
+});

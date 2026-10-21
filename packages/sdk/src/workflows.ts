@@ -57,6 +57,102 @@ export interface WorkflowRun {
   createdAtMs: number;
   updatedAtMs: number;
   error: string | null;
+  sourceTemplate?: WorkflowTemplateSource;
+}
+
+export interface WorkflowTemplateParameter {
+  name: string;
+  default?: string | null;
+}
+
+export interface WorkflowTemplateInput {
+  slug: string;
+  revision: number;
+  title: string;
+  parameters: WorkflowTemplateParameter[];
+  steps: WorkflowStepInput[];
+}
+
+export interface WorkflowTemplateRunInput {
+  requestKey: string;
+  revision: number;
+  inputs: Record<string, string>;
+}
+
+export interface WorkflowTemplateSource {
+  slug: string;
+  revision: number;
+  inputs: Record<string, string>;
+  request: WorkflowTemplateRunInput;
+}
+
+export interface WorkflowTemplate extends WorkflowTemplateInput {
+  agentId: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+  saveHistory: { request: WorkflowTemplateInput; savedAtMs: number }[];
+  deleted: boolean;
+}
+
+export class WorkflowTemplatesClient {
+  constructor(private readonly client: DaemonClient) {}
+
+  async list(
+    agentId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<WorkflowTemplate[]> {
+    const result = await this.client.requestJson<{
+      templates: WorkflowTemplate[];
+    }>(templatePath(agentId), { signal: options.signal });
+    return result.templates;
+  }
+
+  get(
+    agentId: string,
+    slug: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<WorkflowTemplate> {
+    return this.client.requestJson<WorkflowTemplate>(
+      templatePath(agentId, slug),
+      { signal: options.signal },
+    );
+  }
+
+  save(
+    agentId: string,
+    input: WorkflowTemplateInput,
+  ): Promise<WorkflowTemplate> {
+    return this.client.requestJson<WorkflowTemplate>(templatePath(agentId), {
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  run(
+    agentId: string,
+    slug: string,
+    input: WorkflowTemplateRunInput,
+  ): Promise<WorkflowRun> {
+    return this.client.requestJson<WorkflowRun>(
+      `${templatePath(agentId, slug)}/run`,
+      { method: 'POST', body: input },
+    );
+  }
+
+  delete(
+    agentId: string,
+    slug: string,
+    input: { revision: number },
+  ): Promise<WorkflowTemplate> {
+    return this.client.requestJson<WorkflowTemplate>(
+      templatePath(agentId, slug),
+      { method: 'DELETE', body: input },
+    );
+  }
+}
+
+function templatePath(agentId: string, slug?: string): string {
+  return `/api/agents/${encodeURIComponent(agentId)}/workflow-templates${slug === undefined ? '' : `/${encodeURIComponent(slug)}`}`;
 }
 
 export class WorkflowsClient {

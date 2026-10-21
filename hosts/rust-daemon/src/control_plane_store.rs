@@ -31,10 +31,11 @@ use crate::schedules::ScheduledPromptRecord;
 /// execution bounds (FP05); 21 adds bounded pending-origin/final-output evidence
 /// on exact source attempts; 22 adds Discord conversation destinations, response
 /// policy and durable thread-creation claims; 23 adds durable clarification,
-/// recovery lineage and event occurrences. Runtime transport sessions/processes are never persisted. Older
+/// recovery lineage and event occurrences; 24 adds workflows, and 25 adds reusable workflow templates. Runtime transport sessions/processes are never persisted. Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 24;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 25;
+pub(crate) const PRE_WORKFLOW_TEMPLATES_BACKUP_SUFFIX: &str = ".pre-workflow-templates.bak";
 pub(crate) const PRE_WORKFLOWS_BACKUP_SUFFIX: &str = ".pre-workflows.bak";
 pub(crate) const PRE_COMPANION_INTERACTION_BACKUP_SUFFIX: &str = ".pre-companion-interaction.bak";
 pub(crate) const ASYNC_ORIGIN_BATCHES_STORE_VERSION: u32 = 21;
@@ -167,6 +168,8 @@ pub(crate) struct ControlPlaneSnapshot {
     pub(crate) goals: Vec<crate::jobs::GoalRecord>,
     #[serde(default)]
     pub(crate) workflows: Vec<anima_core::workflows::WorkflowRun>,
+    #[serde(default)]
+    pub(crate) workflow_templates: Vec<anima_core::workflow_templates::WorkflowTemplate>,
     #[serde(default)]
     pub(crate) calendar_connectors: Vec<GoogleCalendarConnectorRecord>,
     #[serde(default)]
@@ -474,8 +477,10 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
                 PRE_DISCORD_CONVERSATIONS_BACKUP_SUFFIX
             } else if loaded_version < 23 {
                 PRE_COMPANION_INTERACTION_BACKUP_SUFFIX
-            } else {
+            } else if loaded_version < 24 {
                 PRE_WORKFLOWS_BACKUP_SUFFIX
+            } else {
+                PRE_WORKFLOW_TEMPLATES_BACKUP_SUFFIX
             }
         });
         path.with_file_name(name)
@@ -704,6 +709,7 @@ impl ControlPlaneSnapshot {
             jobs: vec![],
             goals: vec![],
             workflows: vec![],
+            workflow_templates: vec![],
             mail_drafts: vec![],
             calendar_connectors: vec![],
             calendar_writes: vec![],
@@ -1642,5 +1648,28 @@ mod learning_snapshot_tests {
         assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
         std::fs::remove_file(backup).unwrap();
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn version_twenty_four_templates_default_empty_and_keep_workflow_backup() {
+        let directory = std::env::temp_dir().join(format!("anima-template-migration-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("control-plane.json");
+        let original = "{\"version\":24,\"agents\":[],\"workflows\":[]}";
+        std::fs::write(&path, original).unwrap();
+        let prior = super::pre_upgrade_backup_path(&path, 23);
+        std::fs::write(&prior, "prior workflow backup").unwrap();
+        let config = super::ControlPlaneStoreConfig::Json(path.clone());
+        let loaded = super::load_control_plane_snapshot(&config).await.unwrap().unwrap();
+        assert!(loaded.workflow_templates.is_empty());
+        let backup = super::pre_upgrade_backup_path(&path, 24);
+        assert_ne!(backup, prior);
+        assert!(backup.to_string_lossy().ends_with(".pre-workflow-templates.bak"));
+        super::write_pre_upgrade_backup(&config, 24).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
+        assert_eq!(std::fs::read_to_string(&prior).unwrap(), "prior workflow backup");
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 3);
+        for file in [path, prior, backup] { std::fs::remove_file(file).unwrap(); }
+        std::fs::remove_dir(directory).unwrap();
     }
 }

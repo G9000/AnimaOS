@@ -20,6 +20,70 @@ afterEach(() => {
 });
 
 describe('useSkills', () => {
+  it('imports a complete selected skill folder with its reviewed relative text paths', async () => {
+    const imported = vi
+      .spyOn(daemon, 'importSkill')
+      .mockResolvedValue(skillDraftFixture('skd_import'));
+    const main = new File(['instructions'], 'SKILL.md');
+    Object.defineProperty(main, 'webkitRelativePath', {
+      value: 'notes/SKILL.md',
+    });
+    const supporting = new File(['template'], 'note.md');
+    Object.defineProperty(supporting, 'webkitRelativePath', {
+      value: 'notes/templates/note.md',
+    });
+    Object.defineProperty(supporting, 'arrayBuffer', {
+      value: async () => new TextEncoder().encode('Reviewed template').buffer,
+    });
+    const { result } = renderHook(() =>
+      useSkills({ version: 0, epoch: 0, enabled: true }),
+    );
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    let kept = false;
+    await act(async () => {
+      kept = await result.current.importFolder([main, supporting]);
+    });
+    expect(kept).toBe(true);
+    expect(imported).toHaveBeenCalledWith(main, [
+      { path: 'templates/note.md', content: 'Reviewed template' },
+    ]);
+    expect(daemon.listSkills).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects oversized or non-UTF-8 supporting imports before saving', async () => {
+    const imported = vi.spyOn(daemon, 'importSkill');
+    const main = new File(['instructions'], 'SKILL.md');
+    Object.defineProperty(main, 'webkitRelativePath', {
+      value: 'notes/SKILL.md',
+    });
+    const huge = new File(['x'.repeat(65537)], 'guide.md');
+    Object.defineProperty(huge, 'webkitRelativePath', {
+      value: 'notes/references/guide.md',
+    });
+    const invalid = new File(['bytes'], 'guide.md');
+    Object.defineProperty(invalid, 'webkitRelativePath', {
+      value: 'notes/references/guide.md',
+    });
+    Object.defineProperty(invalid, 'arrayBuffer', {
+      value: async () => new Uint8Array([0xff]).buffer,
+    });
+    const { result } = renderHook(() =>
+      useSkills({ version: 0, epoch: 0, enabled: true }),
+    );
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    let kept = true;
+    await act(async () => {
+      kept = await result.current.importFolder([main, huge]);
+    });
+    expect(kept).toBe(false);
+    await act(async () => {
+      kept = await result.current.importFolder([main, invalid]);
+    });
+    expect(kept).toBe(false);
+    expect(result.current.error).toContain('UTF-8');
+    expect(imported).not.toHaveBeenCalled();
+  });
+
   it('reads skills and drafts, and again when a skill event arrives', async () => {
     const { result, rerender } = renderHook(
       (props: { version: number }) =>

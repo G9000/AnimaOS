@@ -7,6 +7,7 @@ pub(crate) mod disk;
 pub(crate) mod drafts;
 pub(crate) mod file;
 pub(crate) mod ledger;
+pub(crate) mod package;
 pub(crate) mod registry;
 pub(crate) mod runtime;
 pub(crate) mod scanner;
@@ -14,6 +15,7 @@ pub(crate) mod service;
 #[cfg(test)]
 pub(crate) mod test_support;
 
+pub(crate) use anima_core::skill_packages::SkillSupportingFile;
 use serde::{Deserialize, Serialize};
 
 pub(crate) use drafts::{DraftApproval, Proposal};
@@ -92,7 +94,7 @@ pub(crate) const SKILL_DESCRIPTION_INVALID: &str =
     "description must be 1–300 characters on one line";
 pub(crate) const SKILL_BODY_EMPTY: &str = "body must not be empty";
 pub(crate) const SKILL_BODY_TOO_LARGE: &str = "body must be at most 32 KiB";
-pub(crate) const SKILL_HASH_REQUIRED: &str = "hash is required: the SKILL.md you reviewed";
+pub(crate) const SKILL_HASH_REQUIRED: &str = "hash is required: the skill package you reviewed";
 
 pub(crate) const SKILL_FILE_NOT_UTF8: &str = "SKILL.md is not UTF-8 text";
 pub(crate) const SKILL_FILE_NO_FRONT_MATTER: &str =
@@ -109,7 +111,7 @@ pub(crate) const SKILL_FOLDER_NOT_LOWERCASE: &str = "Rename the folder to lowerc
 
 pub(crate) const SKILLS_NEED_WORKSPACE: &str = "Skills need a configured workspace";
 pub(crate) const SKILL_HASH_MISMATCH: &str =
-    "SKILL.md changed since you reviewed it; reload and review it again";
+    "Skill package changed since you reviewed it; reload and review it again";
 pub(crate) const SKILL_NOT_CHANGED: &str = "This skill has no changes waiting for approval";
 pub(crate) const SKILL_DRAFT_DECIDED: &str = "This draft was already decided";
 pub(crate) const SKILL_FILE_UNREVIEWED: &str =
@@ -325,7 +327,8 @@ pub(crate) struct SkillRecord {
     pub(crate) name: String,
     pub(crate) description: String,
     pub(crate) enabled: bool,
-    /// Lowercase hex SHA-256 of the approved `SKILL.md`.
+    /// Lowercase hex SHA-256 pinning SKILL.md and every supporting path and
+    /// byte. A package with no supporting files retains its legacy file hash.
     pub(crate) approved_hash: String,
     pub(crate) approved_at_ms: u64,
     pub(crate) updated_at_ms: u64,
@@ -401,6 +404,8 @@ pub(crate) struct ProposedBy {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SkillDraft {
+    #[serde(default)]
+    pub(crate) files: Vec<SkillSupportingFile>,
     pub(crate) id: String,
     pub(crate) slug: String,
     pub(crate) name: String,
@@ -416,7 +421,7 @@ pub(crate) struct SkillDraft {
     /// The skill's approved hash when the draft was made (`None`: a new slug).
     #[serde(default)]
     pub(crate) base_hash: Option<String>,
-    /// A file draft's `SKILL.md` hash (stored only on a rejected file draft).
+    /// A file draft's whole-package hash (stored on a rejected file draft).
     #[serde(default)]
     pub(crate) file_hash: Option<String>,
     pub(crate) created_at_ms: u64,
@@ -440,6 +445,7 @@ impl SkillDraft {
     ) -> Self {
         Self {
             id: format!("{DRAFT_ID_PREFIX}{}", uuid::Uuid::new_v4()),
+            files: Vec::new(),
             slug: slug.to_string(),
             name: file.name,
             description: file.description,

@@ -26,6 +26,7 @@ use super::{
 /// One `SKILL.md` as a scan found it. Never saved.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ScannedFile {
+    pub(crate) files: Vec<super::SkillSupportingFile>,
     /// With `len`, the cache key: a file whose modification time and size
     /// are unchanged is not read again by the next scan. Loading never uses
     /// the cache.
@@ -40,11 +41,22 @@ impl ScannedFile {
     /// A file read whole.
     pub(crate) fn read(bytes: &[u8], modified: Option<SystemTime>) -> Self {
         Self {
+            files: Vec::new(),
             modified,
             len: bytes.len() as u64,
             hash: Some(skill_hash(bytes)),
             parsed: parse_skill_file(bytes).map_err(str::to_string),
         }
+    }
+
+    pub(crate) fn package(
+        package: &super::package::SkillPackage,
+        modified: Option<SystemTime>,
+    ) -> Self {
+        let mut scanned = Self::read(&package.bytes, modified);
+        scanned.hash = Some(package.hash());
+        scanned.files = package.files.clone();
+        scanned
     }
 
     /// A file that could not be read whole (too large, outside the
@@ -55,6 +67,7 @@ impl ScannedFile {
         len: u64,
     ) -> Self {
         Self {
+            files: Vec::new(),
             modified,
             len,
             hash: None,
@@ -124,6 +137,7 @@ fn file_draft(slug: &str, file: &ScannedFile) -> SkillDraft {
         Err(_) => (slug.to_string(), String::new(), String::new()),
     };
     SkillDraft {
+        files: file.files.clone(),
         id: format!("{FILE_DRAFT_ID_PREFIX}{slug}"),
         slug: slug.to_string(),
         name,
@@ -464,6 +478,11 @@ impl SkillRegistry {
         }
         let mut ids = HashSet::new();
         for draft in drafts {
+            anima_core::skill_packages::validate_skill_package(
+                super::compose_skill_file(&draft.name, &draft.description, &draft.body).as_bytes(),
+                &draft.files,
+            )
+            .map_err(str::to_string)?;
             if !draft.id.starts_with(DRAFT_ID_PREFIX) || !ids.insert(draft.id.as_str()) {
                 return Err(format!(
                     "invalid or duplicate skill draft id in snapshot: {}",

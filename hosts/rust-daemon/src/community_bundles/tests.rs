@@ -529,6 +529,7 @@ async fn m45_unchanged_background_scan_keeps_review_installable_without_new_auth
         .save(
             "neighbor",
             SkillContent {
+                files: None,
                 name: "Unmanaged neighbor".into(),
                 description: "Separately approved owner content".into(),
                 body: "Keep approved unmanaged bytes.".into(),
@@ -667,6 +668,7 @@ async fn m45_review_install_exact_adoption_disable_and_remove_keep_separate_auth
         .approve_draft(
             &draft,
             DraftApproval {
+                files: None,
                 body: Some("Owner side-channel edit".into()),
                 hash: None
             }
@@ -693,6 +695,7 @@ async fn m45_review_install_exact_adoption_disable_and_remove_keep_separate_auth
         .save(
             "neighbor",
             SkillContent {
+                files: None,
                 name: "Neighbor".into(),
                 description: "Independent owner content".into(),
                 body: "Keep neighboring file".into(),
@@ -1373,6 +1376,7 @@ async fn m45_uncertain_final_remove_retains_live_intent_but_restores_actual_abse
         .save(
             "neighbor",
             SkillContent {
+                files: None,
                 name: "Neighbor".into(),
                 description: "Independent approved neighbor".into(),
                 body: "Keep unrelated approved bytes.".into(),

@@ -45,6 +45,7 @@ export interface SkillsView {
   ) => Promise<boolean>;
   rejectDraft: (draft: SkillDraft) => Promise<boolean>;
   importFile: (file: File) => Promise<boolean>;
+  importFolder: (files: File[]) => Promise<boolean>;
 }
 
 function message(error: unknown): string {
@@ -155,5 +156,43 @@ export function useSkills({
       act(() => daemon.approveSkillDraft(draft.id, approval)),
     rejectDraft: (draft) => act(() => daemon.rejectSkillDraft(draft.id)),
     importFile: (file) => act(() => daemon.importSkill(file)),
+    importFolder: async (files) => {
+      const main = files.filter(
+        (file) =>
+          file.webkitRelativePath.split('/').length === 2 &&
+          file.name === 'SKILL.md',
+      );
+      const total = files.reduce((bytes, file) => bytes + file.size, 0);
+      if (
+        main.length !== 1 ||
+        files.length > 33 ||
+        total > 512 * 1024 ||
+        files.some((file) => file.name !== 'SKILL.md' && file.size > 64 * 1024)
+      ) {
+        setActionError(
+          'Choose a skill folder with one SKILL.md and up to 32 supporting text files (64 KiB each, 512 KiB total).',
+        );
+        setActionStatus(null);
+        return false;
+      }
+      const prefix = main[0].webkitRelativePath.slice(0, -'SKILL.md'.length);
+      try {
+        const supporting = await Promise.all(
+          files
+            .filter((file) => file !== main[0])
+            .map(async (file) => ({
+              path: file.webkitRelativePath.slice(prefix.length),
+              content: new TextDecoder('utf-8', { fatal: true }).decode(
+                await file.arrayBuffer(),
+              ),
+            })),
+        );
+        return act(() => daemon.importSkill(main[0], supporting));
+      } catch {
+        setActionError('Every supporting file must be UTF-8 text.');
+        setActionStatus(null);
+        return false;
+      }
+    },
   };
 }

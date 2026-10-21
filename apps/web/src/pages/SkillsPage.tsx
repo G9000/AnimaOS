@@ -3,6 +3,7 @@ import { DaemonHttpError } from '@animaOS-SWARM/sdk';
 import type { Skill, SkillDraftProposer, SkillFile } from '@animaOS-SWARM/sdk';
 
 import { SkillDraftCard } from '../components/skills/SkillDraftCard';
+import { SkillSupportingFiles } from '../components/skills/SkillSupportingFiles';
 import {
   SkillEditor,
   type SkillEditorValue,
@@ -34,7 +35,11 @@ export interface SkillsPageProps {
   learning?: ReactNode;
 }
 
-type Editing = { skill: Skill | null; initial?: SkillEditorValue };
+type Editing = {
+  skill: Skill | null;
+  initial?: SkillEditorValue;
+  note?: string;
+};
 type Review = { skill: Skill; file: SkillFile; note: string | null };
 
 /** Shown when a save is refused (409) while a file draft waits in the folder
@@ -102,11 +107,17 @@ export function SkillsPage({
     }
     setEditing({
       skill,
+      ...(detail.file
+        ? {}
+        : {
+            note: 'The skill folder is missing. Saving will recreate these instructions with no supporting files.',
+          }),
       initial: {
         slug: skill.slug,
         name: skill.name,
         description: skill.description,
         body: detail.file?.body ?? '',
+        files: detail.file ? detail.file.files : [],
       },
     });
   };
@@ -206,33 +217,58 @@ export function SkillsPage({
               }}
             />
           </label>
+          <label className="studio-tool-button skills-import">
+            Import skill folder
+            <input
+              type="file"
+              multiple
+              {...{ webkitdirectory: '' }}
+              className="skills-import-input"
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? []);
+                event.target.value = '';
+                if (files.length) {
+                  begin();
+                  void view.importFolder(files);
+                }
+              }}
+            />
+          </label>
         </div>
         {editing && (
-          <SkillEditor
-            initial={editing.initial}
-            slugLocked={editing.skill !== null}
-            saveLabel="Save skill"
-            checkProblem={
-              editing.skill === null
-                ? (value) =>
-                    view.skills.some((skill) => skill.slug === value.slug)
-                      ? skillExistsProblem(value.slug)
-                      : null
-                : undefined
-            }
-            onSave={async (value) => {
-              begin();
-              setSavedSlug(value.slug);
-              const kept = await view.save(value.slug, {
-                name: value.name,
-                description: value.description,
-                body: value.body,
-              });
-              if (kept) setEditing(null);
-              return kept;
-            }}
-            onCancel={() => setEditing(null)}
-          />
+          <>
+            {editing.note && (
+              <p className="skill-draft-warning" role="note">
+                {editing.note}
+              </p>
+            )}
+            <SkillEditor
+              initial={editing.initial}
+              slugLocked={editing.skill !== null}
+              saveLabel="Save skill"
+              checkProblem={
+                editing.skill === null
+                  ? (value) =>
+                      view.skills.some((skill) => skill.slug === value.slug)
+                        ? skillExistsProblem(value.slug)
+                        : null
+                  : undefined
+              }
+              onSave={async (value) => {
+                begin();
+                setSavedSlug(value.slug);
+                const kept = await view.save(value.slug, {
+                  name: value.name,
+                  description: value.description,
+                  body: value.body,
+                  ...(value.files !== undefined ? { files: value.files } : {}),
+                });
+                if (kept) setEditing(null);
+                return kept;
+              }}
+              onCancel={() => setEditing(null)}
+            />
+          </>
         )}
         {review && reviewed && (
           <section
@@ -270,6 +306,7 @@ export function SkillsPage({
                   </p>
                 )}
                 <pre className="skill-body">{reviewed.body.text}</pre>
+                <SkillSupportingFiles files={review.file.files} />
               </>
             )}
             <div className="skill-actions">

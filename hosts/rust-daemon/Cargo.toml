@@ -24,6 +24,7 @@ base64 = "0.22"
 hmac = "0.12"
 sha2 = "0.10"
 axum = "0.8"
+http-body-util = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = "0.10"
 iana-time-zone = "0.1"
@@ -61,7 +62,6 @@ rfd = "0.17.2"
 win-custody = "=0.1.1"
 
 [dev-dependencies]
-http-body-util = "0.1"
 tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring", "tls12"] }
 
 [[example]]

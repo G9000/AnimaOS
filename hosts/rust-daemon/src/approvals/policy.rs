@@ -42,6 +42,8 @@ const READ_TOOLS: &[&str] = &[
     "load_skill",
     "list_automations",
     "list_workflows",
+    "list_workflow_templates",
+    "read_tool_result",
     "check_automation_status",
 ];
 /// Tools that change files and records (spec §7.1). The mail draft and the
@@ -60,6 +62,7 @@ const WRITE_TOOLS: &[&str] = &[
     "memory_remove",
     "memory_consolidate",
     "propose_skill",
+    "save_workflow_template",
     crate::tools::PLAN_TOOL,
     "create_automation",
     "pause_automation",
@@ -77,6 +80,7 @@ const WRITE_TOOLS: &[&str] = &[
 ];
 const EXEC_TOOLS: &[&str] = &[
     "create_workflow",
+    "run_workflow_template",
     "execute_code",
     "bash",
     "bg_start",

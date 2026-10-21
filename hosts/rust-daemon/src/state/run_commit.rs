@@ -60,6 +60,7 @@ impl DaemonState {
                 .map(|workspace| workspace.root_path.clone()),
             self.calendar_manager.clone(),
         )
+        .with_tool_results(self.tool_result_store())
         .with_tool_rpc_service(self.tool_rpc_service.clone())
         .with_checkpoint_root(self.checkpoint_root.clone())
         .with_owner_time_zone(self.owner_time_zone.clone())

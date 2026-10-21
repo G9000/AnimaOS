@@ -154,13 +154,20 @@ fn scan_in(root: &Path, slug: &str, previous: Option<&ScannedFile>) -> Option<Sc
     };
     let modified = metadata.modified().ok();
     let len = metadata.len();
-    if let Some(previous) = previous {
-        if modified.is_some() && previous.modified == modified && previous.len == len {
-            return Some(previous.clone());
+    match super::package::read_package(root, slug) {
+        Ok(Some(package)) => {
+            if let Some(previous) = previous {
+                if package.files.is_empty()
+                    && previous.files.is_empty()
+                    && modified.is_some()
+                    && previous.modified == modified
+                    && previous.len == len
+                {
+                    return Some(previous.clone());
+                }
+            }
+            Some(ScannedFile::package(&package, modified))
         }
-    }
-    match read_in(root, slug) {
-        Ok(Some(bytes)) => Some(ScannedFile::read(&bytes, modified)),
         Ok(None) => None,
         Err(problem) => Some(ScannedFile::unreadable(
             problem.clone(),

@@ -16,7 +16,7 @@ use super::disk;
 use super::registry::{is_hex_hash, DraftView, ScannedFile, SkillRegistry};
 use super::service::{blocking, Change, SkillError, SkillService};
 use super::{
-    compose_skill_file, is_valid_slug, parse_skill_file, skill_hash, slugify, validate_body,
+    compose_skill_file, is_valid_slug, parse_skill_file, slugify, validate_body,
     validate_description, validate_name, DraftSource, DraftStatus, ProposedBy, SkillDraft,
     SkillFile, SkillRecord, FILE_DRAFT_ID_PREFIX, MAX_PENDING_DRAFTS_PER_AGENT,
     MAX_PENDING_IMPORT_DRAFTS, SKILL_DRAFT_DECIDED, SKILL_FILE_UNREVIEWED, SKILL_HASH_MISMATCH,
@@ -26,6 +26,7 @@ use super::{
 /// A companion's `propose_skill` call (spec §8.3).
 #[derive(Clone, Debug)]
 pub(crate) struct Proposal {
+    pub(crate) files: Vec<super::SkillSupportingFile>,
     pub(crate) by: ProposedBy,
     pub(crate) name: String,
     pub(crate) description: String,
@@ -37,6 +38,7 @@ pub(crate) struct Proposal {
 /// the `SKILL.md` they reviewed.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct DraftApproval {
+    pub(crate) files: Option<Vec<super::SkillSupportingFile>>,
     pub(crate) body: Option<String>,
     pub(crate) hash: Option<String>,
 }
@@ -122,6 +124,11 @@ impl SkillService {
     /// A companion proposes a skill (spec §8.3 `propose_skill`).
     pub(crate) async fn propose(&self, proposal: Proposal) -> Result<SkillDraft, SkillError> {
         let file = checked_file(&proposal.name, &proposal.description, proposal.body)?;
+        anima_core::skill_packages::validate_skill_package(
+            compose_skill_file(&file.name, &file.description, &file.body).as_bytes(),
+            &proposal.files,
+        )
+        .map_err(SkillError::invalid)?;
         let slug = draft_slug(proposal.slug.as_deref(), &file.name)?;
         let by = proposal.by;
         self.locked(move |service, root| async move {
@@ -139,7 +146,7 @@ impl SkillService {
                         );
                     }
                     let base_hash = skills.get(&slug).map(|record| record.approved_hash.clone());
-                    let draft = SkillDraft::new(
+                    let mut draft = SkillDraft::new(
                         &slug,
                         file,
                         DraftSource::Agent,
@@ -147,6 +154,7 @@ impl SkillService {
                         base_hash,
                         now_ms,
                     );
+                    draft.files = proposal.files;
                     Ok(add_draft(skills, draft, now_ms))
                 })
                 .await
@@ -160,7 +168,17 @@ impl SkillService {
         bytes: Vec<u8>,
         slug: Option<String>,
     ) -> Result<SkillDraft, SkillError> {
+        self.import_package(bytes, slug, Vec::new()).await
+    }
+    pub(crate) async fn import_package(
+        &self,
+        bytes: Vec<u8>,
+        slug: Option<String>,
+        files: Vec<super::SkillSupportingFile>,
+    ) -> Result<SkillDraft, SkillError> {
         let file = parse_skill_file(&bytes).map_err(SkillError::invalid)?;
+        anima_core::skill_packages::validate_skill_package(&bytes, &files)
+            .map_err(SkillError::invalid)?;
         let slug = draft_slug(slug.as_deref(), &file.name)?;
         self.locked(move |service, root| async move {
             service
@@ -169,8 +187,9 @@ impl SkillService {
                         return Err(SkillError::conflict(TOO_MANY_IMPORT_DRAFTS));
                     }
                     let base_hash = skills.get(&slug).map(|record| record.approved_hash.clone());
-                    let draft =
+                    let mut draft =
                         SkillDraft::new(&slug, file, DraftSource::Import, None, base_hash, now_ms);
+                    draft.files = files;
                     Ok(add_draft(skills, draft, now_ms))
                 })
                 .await
@@ -237,6 +256,10 @@ impl SkillService {
         if let Some(body) = &approval.body {
             validate_body(body).map_err(SkillError::invalid)?;
         }
+        if let Some(files) = &approval.files {
+            anima_core::skill_packages::validate_skill_package(&[], files)
+                .map_err(SkillError::invalid)?;
+        }
         if let Some(slug) = id.strip_prefix(FILE_DRAFT_ID_PREFIX) {
             return self.approve_file_draft(slug, approval).await;
         }
@@ -261,23 +284,24 @@ impl SkillService {
             if let Some(draft) = linked.as_ref().filter(|draft| draft.is_pending()) {
                 let guard = service.state.read().await;
                 crate::community_bundles::check_skill_edit(&guard, &draft.slug, true)?;
-                let canonical = skill_hash(
+                let canonical = anima_core::skill_packages::skill_package_hash(
                     compose_skill_file(
                         &draft.name,
                         &draft.description,
                         approval.body.as_deref().unwrap_or(&draft.body),
                     )
                     .as_bytes(),
+                    approval.files.as_deref().unwrap_or(&draft.files),
                 );
                 crate::community_bundles::check_draft(&guard, draft, Some(&canonical))?;
                 drop(guard);
                 if draft.bundle_source.is_some() {
                     let workspace = root.clone();
                     let slug = draft.slug.clone();
-                    let bytes = blocking(move || disk::read_skill_bytes(&workspace, &slug))
+                    let bytes = blocking(move || super::package::read_package(&workspace, &slug))
                         .await?
                         .map_err(SkillError::Unavailable)?;
-                    if bytes.as_deref().map(skill_hash) != draft.base_hash {
+                    if bytes.as_ref().map(|p| p.hash()) != draft.base_hash {
                         return Err(SkillError::conflict("Community bundle skill base changed"));
                     }
                 }
@@ -287,10 +311,10 @@ impl SkillService {
             {
                 let read_root = root.clone();
                 let read_slug = draft.slug.clone();
-                let bytes = blocking(move || disk::read_skill_bytes(&read_root, &read_slug))
+                let bytes = blocking(move || super::package::read_package(&read_root, &read_slug))
                     .await?
                     .map_err(SkillError::Unavailable)?;
-                let actual_hash = bytes.as_deref().map(skill_hash);
+                let actual_hash = bytes.as_ref().map(|p| p.hash());
                 crate::learning::validate_skill_source(
                     &service.state,
                     draft.learning_source.as_ref().expect("linked draft"),
@@ -336,15 +360,23 @@ impl SkillService {
                     };
                     let bytes =
                         compose_skill_file(&file.name, &file.description, &file.body).into_bytes();
+                    let files = approval
+                        .files
+                        .unwrap_or_else(|| previous_draft.files.clone());
+                    anima_core::skill_packages::validate_skill_package(&bytes, &files)
+                        .map_err(SkillError::invalid)?;
+                    let package = super::package::SkillPackage { bytes, files };
                     let slug = previous_draft.slug.clone();
                     let previous_record = skills.get(&slug).cloned();
-                    let mut record =
-                        SkillRecord::approved(&slug, &file, skill_hash(&bytes), now_ms);
+                    let mut record = SkillRecord::approved(&slug, &file, package.hash(), now_ms);
                     if let Some(previous) = &previous_record {
                         record.enabled = previous.enabled;
                     }
                     skills.put(record).map_err(SkillError::conflict)?;
                     let mut draft = previous_draft.clone();
+                    // Keep the original proposal as its durable provenance and
+                    // idempotent handoff identity. Edited approved content is
+                    // pinned by the installed package and skill record.
                     draft.decide(DraftStatus::Approved, now_ms);
                     draft.decided_by = decided_by;
                     skills.put_draft(draft.clone());
@@ -356,7 +388,7 @@ impl SkillService {
                             skills.restore(&undo_slug, previous_record);
                             skills.put_draft(previous_draft);
                         }),
-                        write: Some((slug.clone(), bytes)),
+                        write: Some((slug.clone(), package)),
                         slug: Some(slug),
                         draft_id: Some(id),
                     })
@@ -385,15 +417,15 @@ impl SkillService {
         let slug = slug.to_string();
         let (read_root, seen) = self.read_start(&slug).await?;
         let (workspace, target) = (read_root.clone(), slug.clone());
-        let bytes = blocking(move || disk::read_skill_bytes(&workspace, &target))
+        let package = blocking(move || super::package::read_package(&workspace, &target))
             .await?
             .map_err(SkillError::Unavailable)?
             .ok_or(SkillError::NotFound)?;
-        if skill_hash(&bytes) != reviewed {
+        if package.hash() != reviewed {
             return Err(SkillError::conflict(SKILL_HASH_MISMATCH));
         }
-        let parsed = parse_skill_file(&bytes).map_err(SkillError::invalid)?;
-        let edited = approval.body.is_some();
+        let parsed = parse_skill_file(&package.bytes).map_err(SkillError::invalid)?;
+        let edited = approval.body.is_some() || approval.files.is_some();
         let file = SkillFile {
             body: approval.body.unwrap_or_else(|| parsed.body.clone()),
             ..parsed
@@ -401,10 +433,18 @@ impl SkillService {
         let approved_bytes = if edited {
             compose_skill_file(&file.name, &file.description, &file.body).into_bytes()
         } else {
-            bytes.clone()
+            package.bytes.clone()
         };
-        let approved_hash = skill_hash(&approved_bytes);
-        let scanned = (!edited).then(|| ScannedFile::read(&bytes, None));
+        let files = approval.files.unwrap_or_else(|| package.files.clone());
+        anima_core::skill_packages::validate_skill_package(&approved_bytes, &files)
+            .map_err(SkillError::invalid)?;
+        let approved_package = super::package::SkillPackage {
+            bytes: approved_bytes,
+            files,
+        };
+        let approved_hash = approved_package.hash();
+        let approved_files = approved_package.files.clone();
+        let scanned = (!edited).then(|| ScannedFile::package(&package, None));
         self.locked(move |service, root| async move {
             if root != read_root {
                 return Err(SkillError::conflict(SKILL_HASH_MISMATCH));
@@ -433,7 +473,7 @@ impl SkillService {
                         undo: Box::new(move |skills: &mut SkillRegistry| {
                             skills.restore(&undo_slug, None)
                         }),
-                        write: edited.then(|| (target.clone(), approved_bytes)),
+                        write: edited.then(|| (target.clone(), approved_package)),
                         draft_id: Some(file_draft_id(&target)),
                         slug: Some(target),
                     })
@@ -449,6 +489,7 @@ impl SkillService {
                 skill.approved_at_ms,
             );
             draft.id = file_draft_id(&slug);
+            draft.files = approved_files;
             draft.file_hash = Some(reviewed);
             draft.decide(DraftStatus::Approved, skill.approved_at_ms);
             Ok(ApprovedDraft { skill, draft })
@@ -531,6 +572,7 @@ impl SkillService {
                     });
                     let mut draft =
                         SkillDraft::new(&slug, file, DraftSource::File, None, None, now_ms);
+                    draft.files = scanned.files.clone();
                     draft.file_hash = scanned.hash.clone();
                     draft.decide(DraftStatus::Rejected, now_ms);
                     skills.set_scanned(&slug, Some(scanned));
@@ -583,6 +625,7 @@ mod tests {
 
     fn proposal(agent: &str, name: &str) -> Proposal {
         Proposal {
+            files: Vec::new(),
             by: ProposedBy {
                 agent_id: agent.into(),
                 session_id: "chat:1".into(),
@@ -597,9 +640,92 @@ mod tests {
 
     fn reviewed(hash: &str) -> DraftApproval {
         DraftApproval {
+            files: None,
             body: None,
             hash: Some(hash.into()),
         }
+    }
+
+    #[tokio::test]
+    async fn package_proposal_review_survives_restart_and_approves_only_reviewed_files() {
+        let (state, root) = daemon("package-proposal");
+        let skills = service(&state);
+        let mut proposal = proposal("agent-1", "Packaged notes");
+        proposal.files = vec![super::super::SkillSupportingFile {
+            path: "templates/note.md".into(),
+            content: "Original proposed template".into(),
+        }];
+        let draft = skills.propose(proposal).await.unwrap();
+        assert!(!root.join("skills/packaged-notes").exists());
+        let json = serde_json::to_value(state.read().await.control_plane_snapshot()).unwrap();
+        assert_eq!(
+            json["skillDrafts"][0]["files"][0]["content"],
+            "Original proposed template"
+        );
+        let mut restarted = with_workspace(DaemonState::new(), &root);
+        restarted
+            .restore_control_plane_snapshot(serde_json::from_value(json).unwrap())
+            .unwrap();
+        let restored = service(&Arc::new(RwLock::new(restarted)));
+        let found = restored.drafts(false).await.unwrap();
+        assert_eq!(found[0].draft.files, draft.files);
+        let files = vec![super::super::SkillSupportingFile {
+            path: "templates/note.md".into(),
+            content: "Owner reviewed edit".into(),
+        }];
+        let approved = restored
+            .approve_draft(
+                &draft.id,
+                DraftApproval {
+                    files: Some(files.clone()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(approved.draft.files, draft.files);
+        assert_eq!(approved.draft.body, draft.body);
+        assert!(restored
+            .load_file("packaged-notes", Some("templates/note.md"))
+            .await
+            .unwrap()
+            .body
+            .ends_with("Owner reviewed edit"));
+        assert!(restored
+            .approve_draft(&draft.id, DraftApproval::default())
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn package_file_draft_hash_rejects_a_supporting_file_changed_after_review() {
+        let (state, root) = daemon("package-file-draft");
+        let skills = service(&state);
+        write_skill(&root, "notes", &skill_text("notes"));
+        std::fs::create_dir_all(root.join("skills/notes/references")).unwrap();
+        std::fs::write(root.join("skills/notes/references/guide.md"), "First guide").unwrap();
+        let drafts = skills.drafts(false).await.unwrap();
+        let reviewed = drafts[0].draft.file_hash.clone().unwrap();
+        assert_eq!(drafts[0].draft.files.len(), 1);
+        std::fs::write(
+            root.join("skills/notes/references/guide.md"),
+            "Changed guide",
+        )
+        .unwrap();
+        assert_eq!(
+            skills
+                .approve_draft(
+                    "file:notes",
+                    DraftApproval {
+                        hash: Some(reviewed),
+                        ..Default::default()
+                    }
+                )
+                .await
+                .unwrap_err(),
+            SkillError::Conflict(SKILL_HASH_MISMATCH.into())
+        );
+        assert!(state.read().await.skills.get("notes").is_none());
     }
 
     #[tokio::test]
@@ -816,6 +942,7 @@ mod tests {
             .approve_draft(
                 &draft.id,
                 DraftApproval {
+                    files: None,
                     body: Some("Edited by the owner.".into()),
                     hash: None,
                 },
@@ -943,6 +1070,7 @@ mod tests {
             .approve_draft(
                 "file:found",
                 DraftApproval {
+                    files: None,
                     body: Some("Edited by the owner.".into()),
                     hash: Some(skill_hash(skill_text("found").as_bytes())),
                 },

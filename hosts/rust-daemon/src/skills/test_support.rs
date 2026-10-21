@@ -52,6 +52,7 @@ pub(crate) fn service(state: &SharedDaemonState) -> SkillService {
 
 pub(crate) fn content(name: &str) -> SkillContent {
     SkillContent {
+        files: None,
         name: name.into(),
         description: format!("About {name}"),
         body: format!("Do {name}."),

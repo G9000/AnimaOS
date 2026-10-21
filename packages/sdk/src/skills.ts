@@ -3,6 +3,15 @@ import type { DaemonClient } from './client.js';
 /** What the owner can rely on (spec §8.1): only `active` skills load. */
 export type SkillStatus = 'active' | 'changed' | 'missing' | 'invalid';
 
+/** Inert UTF-8 text, reviewed and pinned with SKILL.md. */
+export interface SkillSupportingFile {
+  path: string;
+  content: string;
+}
+export const MAX_SKILL_SUPPORTING_FILES = 32;
+export const MAX_SKILL_SUPPORTING_FILE_BYTES = 64 * 1024;
+export const MAX_SKILL_PACKAGE_BYTES = 512 * 1024;
+
 /** A registered skill, pinned to the hash the owner approved. */
 export interface Skill {
   slug: string;
@@ -18,6 +27,7 @@ export interface Skill {
 
 /** What a SKILL.md holds now. Not approved: show it as text only. */
 export interface SkillFile {
+  files?: SkillSupportingFile[];
   /** Send it back to approve exactly this content; null when unreadable. */
   hash: string | null;
   name: string | null;
@@ -43,6 +53,7 @@ export interface SkillDraftProposer {
 /** A draft waiting for the owner, or decided (spec §8.2). Untrusted: the
  *  model or a file wrote it, so show it as text, never as markup. */
 export interface SkillDraft {
+  files?: SkillSupportingFile[];
   /** `skd_<uuid>`, or `file:<slug>` for a SKILL.md without a record. */
   id: string;
   slug: string;
@@ -75,6 +86,8 @@ export interface SkillDraft {
 }
 
 export interface SkillInput {
+  /** Absent keeps existing supporting files; [] removes them. */
+  files?: SkillSupportingFile[];
   name: string;
   description: string;
   body: string;
@@ -83,6 +96,7 @@ export interface SkillInput {
 }
 
 export interface SkillDraftApproval {
+  files?: SkillSupportingFile[];
   /** The owner's edit of the body. */
   body?: string;
   /** Required for a file draft: the `fileHash` the owner reviewed. */
@@ -138,6 +152,7 @@ export class SkillsClient {
       body: input.body,
     };
     if (input.enabled !== undefined) body.enabled = input.enabled;
+    if (input.files !== undefined) body.files = input.files;
     const response = await this.client.requestJson<{ skill: Skill }>(
       skillPath(slug),
       { method: 'PUT', body },
@@ -192,6 +207,7 @@ export class SkillsClient {
     const body: SkillDraftApproval = {};
     if (approval.body !== undefined) body.body = approval.body;
     if (approval.hash !== undefined) body.hash = approval.hash;
+    if (approval.files !== undefined) body.files = approval.files;
     return this.client.requestJson<ApprovedSkillDraft>(
       `${draftPath(id)}/approve`,
       { method: 'POST', body },
@@ -209,11 +225,17 @@ export class SkillsClient {
   /** Imports a SKILL.md as a pending draft (spec §8.4). */
   async importFile(
     file: Blob,
-    options: { filename?: string; slug?: string } = {},
+    options: {
+      filename?: string;
+      slug?: string;
+      files?: SkillSupportingFile[];
+    } = {},
   ): Promise<SkillDraft> {
     const form = new FormData();
     form.append('file', file, options.filename ?? 'SKILL.md');
     if (options.slug) form.append('slug', options.slug);
+    if (options.files !== undefined)
+      form.append('files', JSON.stringify(options.files));
     const response = await this.client.requestJson<{ draft: SkillDraft }>(
       '/api/skills/import',
       { method: 'POST', body: form },

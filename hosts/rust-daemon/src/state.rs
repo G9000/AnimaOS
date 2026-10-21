@@ -1672,6 +1672,7 @@ pub(crate) struct DaemonState {
     pub(crate) jobs: HashMap<String, crate::jobs::AgentJobRecord>,
     pub(crate) goals: HashMap<String, crate::jobs::GoalRecord>,
     pub(crate) workflows: HashMap<String, anima_core::workflows::WorkflowRun>,
+    pub(crate) workflow_templates: HashMap<String, anima_core::workflow_templates::WorkflowTemplate>,
     pub(crate) runs: crate::runs::RunLedger,
     pub(crate) learning: crate::learning::LearningRegistry,
     pub(crate) clarifications: crate::clarifications::ClarificationRegistry,
@@ -2300,6 +2301,7 @@ impl DaemonState {
             schedules: HashMap::new(),
             jobs: HashMap::new(),
             workflows: HashMap::new(),
+            workflow_templates: HashMap::new(),
             goals: HashMap::new(),
             runs: crate::runs::RunLedger::default(),
             learning: crate::learning::LearningRegistry::default(),
@@ -2557,6 +2559,8 @@ impl DaemonState {
         snapshot.goals.sort_by(|left, right| left.id.cmp(&right.id));
         snapshot.workflows = self.workflows.values().cloned().collect();
         snapshot.workflows.sort_by(|left, right| left.id.cmp(&right.id));
+        snapshot.workflow_templates = self.workflow_templates.values().cloned().collect();
+        snapshot.workflow_templates.sort_by(|a, b| (&a.agent_id, &a.slug).cmp(&(&b.agent_id, &b.slug)));
         snapshot.runs = self
             .runs
             .snapshot_records(&self.live_agent_ids())
@@ -2762,6 +2766,7 @@ impl DaemonState {
             .into_iter()
             .map(|run| (run.id.clone(), run))
             .collect();
+        self.workflow_templates = snapshot.workflow_templates.into_iter().map(|template| (crate::jobs::workflow_templates::template_key(&template.agent_id, &template.slug), template)).collect();
         self.mail_records = snapshot
             .mail_records
             .into_iter()
@@ -2957,6 +2962,7 @@ impl DaemonState {
 
         crate::jobs::validate_goals(&snapshot.goals, &snapshot.jobs)?;
         crate::jobs::workflows::validate_snapshot(&snapshot.workflows, &snapshot.jobs)?;
+        crate::jobs::workflow_templates::validate_snapshot(&snapshot.workflow_templates, &snapshot.workflows)?;
         crate::clarifications::ClarificationRegistry::validate(&snapshot.clarifications)?;
         crate::schedules::event::EventRegistry::restore(
             snapshot.automation_events.clone(),
@@ -3470,6 +3476,21 @@ impl DaemonState {
 
     pub(crate) fn database_configured(&self) -> bool {
         self.db.is_some()
+    }
+
+    pub(crate) fn tool_result_store(&self) -> Option<crate::tool_results::ToolResultStore> {
+        let config = self.control_plane_store.as_ref()?;
+        let root = if let Some(root) = std::env::var_os("ANIMAOS_RS_TOOL_RESULTS_DIR") {
+            let root = std::path::PathBuf::from(root);
+            if !root.is_absolute() { return None; }
+            root
+        } else {
+            let file = config.file_path()?;
+            let mut name = file.file_name()?.to_os_string();
+            name.push(".tool-results");
+            file.with_file_name(name)
+        };
+        Some(crate::tool_results::ToolResultStore::new(root))
     }
 
     pub(crate) fn control_plane_durability(&self) -> String {

@@ -13,6 +13,7 @@ import {
   revealInvisible,
 } from '../../lib/skills';
 import { SkillEditor } from './SkillEditor';
+import { SkillSupportingFiles } from './SkillSupportingFiles';
 
 const DIFF_PREFIX: Record<DiffLine['kind'], string> = {
   same: '  ',
@@ -149,9 +150,15 @@ export function SkillDraftCard({
             name: draft.name,
             description: draft.description,
             body: draft.body,
+            files: draft.files,
           }}
           saveLabel="Approve edited version"
-          onSave={(value) => approve({ body: value.body })}
+          onSave={(value) =>
+            approve({
+              body: value.body,
+              ...(value.files !== undefined ? { files: value.files } : {}),
+            })
+          }
           onCancel={() => setEditing(false)}
         />
       ) : (
@@ -174,6 +181,7 @@ export function SkillDraftCard({
               {body.text}
             </pre>
           )}
+          <SkillSupportingFiles files={draft.files} />
           <div className="skill-actions">
             <button
               type="button"

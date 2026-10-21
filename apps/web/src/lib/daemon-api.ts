@@ -67,6 +67,9 @@ import {
   type StartRunInput,
   type UsageQuery,
   type UsageRecordsQuery,
+  type WorkflowTemplateInput,
+  type WorkflowTemplateRunInput,
+  type SkillSupportingFile,
   type WorkflowInput,
   type WorkflowResumeInput,
 } from '@animaOS-SWARM/sdk';
@@ -585,8 +588,11 @@ export const daemon = {
     setupClient.agents.createJob(id, input),
   listWorkflows: (agentId: string, options: { signal?: AbortSignal } = {}) =>
     setupClient.workflows.list(agentId, options),
-  getWorkflow: (agentId: string, id: string, options: { signal?: AbortSignal } = {}) =>
-    setupClient.workflows.get(agentId, id, options),
+  getWorkflow: (
+    agentId: string,
+    id: string,
+    options: { signal?: AbortSignal } = {},
+  ) => setupClient.workflows.get(agentId, id, options),
   createWorkflow: (agentId: string, input: WorkflowInput) =>
     setupClient.workflows.create(agentId, input),
   resumeWorkflow: (agentId: string, id: string, input: WorkflowResumeInput) =>
@@ -723,11 +729,8 @@ export const daemon = {
     setupClient.memories.facts(options),
   coreMemory: (agentId: string, options: { signal?: AbortSignal } = {}) =>
     setupClient.memories.coreMemory(agentId, options),
-  addCoreEntry: (
-    agentId: string,
-    block: CoreMemoryBlockName,
-    text: string,
-  ) => setupClient.memories.addCoreEntry(agentId, block, text),
+  addCoreEntry: (agentId: string, block: CoreMemoryBlockName, text: string) =>
+    setupClient.memories.addCoreEntry(agentId, block, text),
   updateCoreEntry: (
     agentId: string,
     block: CoreMemoryBlockName,
@@ -752,6 +755,28 @@ export const daemon = {
   deleteMemoryEntity: (kind: RelationshipEndpointKind, id: string) =>
     setupClient.memories.deleteEntity(kind, id),
 
+  listWorkflowTemplates: (
+    agentId: string,
+    options: { signal?: AbortSignal } = {},
+  ) => setupClient.workflowTemplates.list(agentId, options),
+  getWorkflowTemplate: (
+    agentId: string,
+    slug: string,
+    options: { signal?: AbortSignal } = {},
+  ) => setupClient.workflowTemplates.get(agentId, slug, options),
+  saveWorkflowTemplate: (agentId: string, input: WorkflowTemplateInput) =>
+    setupClient.workflowTemplates.save(agentId, input),
+  deleteWorkflowTemplate: (
+    agentId: string,
+    slug: string,
+    input: { revision: number },
+  ) => setupClient.workflowTemplates.delete(agentId, slug, input),
+  runWorkflowTemplate: (
+    agentId: string,
+    slug: string,
+    input: WorkflowTemplateRunInput,
+  ) => setupClient.workflowTemplates.run(agentId, slug, input),
+  toolResults: setupClient.toolResults,
   /** Skills (spec §8.4); the daemon rescans the folder on these reads. */
   listSkills: (options: { signal?: AbortSignal } = {}) =>
     setupClient.skills.list(options),
@@ -771,8 +796,8 @@ export const daemon = {
   approveSkillDraft: (id: string, approval: SkillDraftApproval = {}) =>
     setupClient.skills.approveDraft(id, approval),
   rejectSkillDraft: (id: string) => setupClient.skills.rejectDraft(id),
-  importSkill: (file: File) =>
-    setupClient.skills.importFile(file, { filename: file.name }),
+  importSkill: (file: File, files?: SkillSupportingFile[]) =>
+    setupClient.skills.importFile(file, { filename: file.name, files }),
   /** Usage (spec §11, §15.4). */
   usageSummary: (query: UsageQuery) => setupClient.usage.summary(query),
   usageRecords: (query: UsageRecordsQuery) => setupClient.usage.records(query),
@@ -852,14 +877,12 @@ export const daemon = {
     ),
   /** How much the agent asks; owner-only. A helper's answer is 409. */
   autonomy: (agentId: string) =>
-    request<AgentAutonomy>(
-      `/agents/${encodeURIComponent(agentId)}/autonomy`,
-    ),
+    request<AgentAutonomy>(`/agents/${encodeURIComponent(agentId)}/autonomy`),
   setAutonomy: (agentId: string, patch: AutonomyPatch) =>
-    request<AgentAutonomy>(
-      `/agents/${encodeURIComponent(agentId)}/autonomy`,
-      { method: 'PUT', body: JSON.stringify(patch) },
-    ),
+    request<AgentAutonomy>(`/agents/${encodeURIComponent(agentId)}/autonomy`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
   codingKeys: (agentId: string) =>
     request<{ keys: CodingKey[] }>(
       `/agents/${encodeURIComponent(agentId)}/coding-keys`,
@@ -892,8 +915,7 @@ export const daemon = {
   listProviders: () => request<{ providers: DaemonProvider[] }>('/providers'),
 
   /** The key pool per provider; keys only ever come back masked. */
-  providerKeys: () =>
-    request<{ providers: ProviderKeys[] }>('/provider-keys'),
+  providerKeys: () => request<{ providers: ProviderKeys[] }>('/provider-keys'),
   /** 201 with the masked key; 400 and 409 carry the daemon's reason. */
   addProviderKey: (provider: string, input: AddProviderKeyInput) =>
     request<ProviderKey>(`/provider-keys/${encodeURIComponent(provider)}`, {

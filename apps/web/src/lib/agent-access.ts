@@ -16,6 +16,20 @@ export const WORKFLOW_TOOL_ACCESS = {
   label: 'Allow workflows in chat',
 } as const;
 
+export const WORKFLOW_TEMPLATE_TOOL_ACCESS = {
+  tools: [
+    'save_workflow_template',
+    'list_workflow_templates',
+    'run_workflow_template',
+  ],
+  label: 'Allow workflow templates in chat',
+} as const;
+
+export const TOOL_RESULT_ACCESS = {
+  name: 'read_tool_result',
+  label: 'Allow saved tool result reads',
+} as const;
+
 export const BROWSER_TOOL_ACCESS = [
   { name: 'browser_navigate', label: 'Allow browser navigation' },
   { name: 'browser_observe', label: 'Allow browser observation' },

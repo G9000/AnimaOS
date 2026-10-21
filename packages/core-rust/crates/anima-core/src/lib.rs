@@ -34,7 +34,9 @@ pub mod primitives;
 pub mod runtime;
 mod runtime_serde;
 pub mod structured_tasks;
+pub mod skill_packages;
 pub mod tool_rpc;
+pub mod workflow_templates;
 pub mod workflows;
 pub use workflows::{
     WorkflowDecision, WorkflowInput, WorkflowResumeAction, WorkflowResumeRequest, WorkflowRun,

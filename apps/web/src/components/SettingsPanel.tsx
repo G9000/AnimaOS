@@ -5,6 +5,8 @@ import {
   isBrowserTool,
   PROGRAMMATIC_TOOL_ACCESS,
   WORKFLOW_TOOL_ACCESS,
+  WORKFLOW_TEMPLATE_TOOL_ACCESS,
+  TOOL_RESULT_ACCESS,
   deriveAccessProfile,
   toolNamesForProfile,
   type AccessProfile,
@@ -126,6 +128,10 @@ export function SettingsPanel({
   const hasWorkflows = WORKFLOW_TOOL_ACCESS.tools.every((tool) =>
     agent.toolNames.includes(tool),
   );
+  const hasWorkflowTemplates = WORKFLOW_TEMPLATE_TOOL_ACCESS.tools.every(
+    (tool) => agent.toolNames.includes(tool),
+  );
+  const hasToolResultRead = agent.toolNames.includes(TOOL_RESULT_ACCESS.name);
   const derivedAccess = deriveAccessProfile(
     agent.toolNames.filter(
       (tool) =>
@@ -137,6 +143,8 @@ export function SettingsPanel({
         tool !== 'web_search' &&
         tool !== 'web_fetch' &&
         !WORKFLOW_TOOL_ACCESS.tools.some((name) => name === tool) &&
+        !WORKFLOW_TEMPLATE_TOOL_ACCESS.tools.some((name) => name === tool) &&
+        tool !== TOOL_RESULT_ACCESS.name &&
         tool !== 'execute_code',
     ),
   );
@@ -168,6 +176,11 @@ export function SettingsPanel({
   const [allowWorkflows, setAllowWorkflows] = useState(hasWorkflows);
   // A partial legacy grant stays unchanged until the owner uses this toggle.
   const [workflowsChanged, setWorkflowsChanged] = useState(false);
+  const [allowWorkflowTemplates, setAllowWorkflowTemplates] =
+    useState(hasWorkflowTemplates);
+  const [templatesChanged, setTemplatesChanged] = useState(false);
+  const [allowToolResultRead, setAllowToolResultRead] =
+    useState(hasToolResultRead);
   const [toolChainStatus, setToolChainStatus] = useState('loading');
   const [savedFlash, setSavedFlash] = useState(false);
   const saveErrorRef = useRef<HTMLDivElement>(null);
@@ -218,6 +231,9 @@ export function SettingsPanel({
     setAllowToolChains(hasToolChains);
     setAllowWorkflows(hasWorkflows);
     setWorkflowsChanged(false);
+    setAllowWorkflowTemplates(hasWorkflowTemplates);
+    setTemplatesChanged(false);
+    setAllowToolResultRead(hasToolResultRead);
   }, [
     agent.id,
     agent.name,
@@ -233,6 +249,8 @@ export function SettingsPanel({
     hasWebFetch,
     hasToolChains,
     hasWorkflows,
+    hasWorkflowTemplates,
+    hasToolResultRead,
     derivedAccess,
   ]);
 
@@ -259,6 +277,11 @@ export function SettingsPanel({
       WORKFLOW_TOOL_ACCESS.tools.some(
         (tool) => agent.toolNames.includes(tool) !== allowWorkflows,
       )) ||
+    (templatesChanged &&
+      WORKFLOW_TEMPLATE_TOOL_ACCESS.tools.some(
+        (tool) => agent.toolNames.includes(tool) !== allowWorkflowTemplates,
+      )) ||
+    allowToolResultRead !== hasToolResultRead ||
     BROWSER_TOOL_ACCESS.some(
       ({ name }) =>
         browserGrants.includes(name) !== agent.toolNames.includes(name),
@@ -302,6 +325,12 @@ export function SettingsPanel({
           (!workflowsChanged ||
             allowWorkflows ||
             !WORKFLOW_TOOL_ACCESS.tools.some((name) => name === tool)) &&
+          (!templatesChanged ||
+            allowWorkflowTemplates ||
+            !WORKFLOW_TEMPLATE_TOOL_ACCESS.tools.some(
+              (name) => name === tool,
+            )) &&
+          (tool !== TOOL_RESULT_ACCESS.name || allowToolResultRead) &&
           (tool !== 'execute_code' || allowToolChains),
       );
       if (allowMemoryRemove && !patch.tools.includes('memory_remove')) {
@@ -340,6 +369,16 @@ export function SettingsPanel({
           patch.tools.push(tool);
         }
       }
+      for (const tool of WORKFLOW_TEMPLATE_TOOL_ACCESS.tools) {
+        if (
+          (allowWorkflowTemplates ||
+            (!templatesChanged && agent.toolNames.includes(tool))) &&
+          !patch.tools.includes(tool)
+        )
+          patch.tools.push(tool);
+      }
+      if (allowToolResultRead && !patch.tools.includes(TOOL_RESULT_ACCESS.name))
+        patch.tools.push(TOOL_RESULT_ACCESS.name);
       patch.tools.push(
         ...BROWSER_TOOL_ACCESS.filter(({ name }) =>
           browserGrants.includes(name),
@@ -364,7 +403,25 @@ export function SettingsPanel({
         setWorkflowsChanged(true);
       },
       disabled: agent.workspaceRole === 'helper',
-      help: 'Allows this agent to create and list reusable workflows from chat. Existing tool permissions and approval rules still apply when a workflow runs.',
+      help: 'Allows this agent to create and list workflows from chat. Existing tool permissions and approval rules still apply when a workflow runs.',
+    },
+    {
+      id: 'workflow-templates',
+      label: WORKFLOW_TEMPLATE_TOOL_ACCESS.label,
+      checked: allowWorkflowTemplates,
+      setChecked: (checked: boolean) => {
+        setAllowWorkflowTemplates(checked);
+        setTemplatesChanged(true);
+      },
+      disabled: agent.workspaceRole === 'helper',
+      help: 'Allows saving, listing, and starting reusable workflow templates from chat. Every start creates a separate run; owner checkpoints and tool permissions still apply.',
+    },
+    {
+      id: 'tool-result-read',
+      label: TOOL_RESULT_ACCESS.label,
+      checked: allowToolResultRead,
+      setChecked: setAllowToolResultRead,
+      help: 'Allows bounded reads of this agent’s saved tool results in the current workspace. Results remain local and are treated as reference data.',
     },
     {
       id: 'tool-chains',

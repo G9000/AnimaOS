@@ -395,6 +395,13 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `PUT`    | `/api/workspace`                                                                             |
 | `PUT`    | `/api/workspace/avatar`                                                                      |
 
+| `GET` | `/api/agents/{agent_id}/workflow-templates` | List reusable workflow templates |
+| `POST` | `/api/agents/{agent_id}/workflow-templates` | Save a revision-checked template |
+| `GET` | `/api/agents/{agent_id}/workflow-templates/{slug}` | Read a saved template |
+| `DELETE` | `/api/agents/{agent_id}/workflow-templates/{slug}` | Remove a template from the picker, retain pinned runs |
+| `POST` | `/api/agents/{agent_id}/workflow-templates/{slug}/run` | Start a fresh run or recover an exact retry |
+| `GET` | `/api/agents/{agent_id}/tool-results/{artifact_id}` | Read a bounded saved-result page |
+| `GET` | `/api/agents/{agent_id}/tool-results/{artifact_id}/download` | Download a saved result |
 <!-- openapi-route-inventory:end -->
 
 ### Current workspace report downloads

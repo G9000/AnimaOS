@@ -125,6 +125,8 @@ pub struct WorkflowRun {
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_template: Option<crate::workflow_templates::WorkflowTemplateSource>,
 }
 
 impl WorkflowRun {
@@ -162,6 +164,7 @@ impl WorkflowRun {
             created_at_ms: now,
             updated_at_ms: now,
             error: None,
+            source_template: None,
         };
         run.activate_current_step();
         run.validate()?;
@@ -181,6 +184,9 @@ impl WorkflowRun {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(source) = &self.source_template {
+            source.validate(&self.request_key)?;
+        }
         validate_reference(&self.id, "workflow ID")?;
         validate_reference(&self.agent_id, "agent ID")?;
         validate_definition(&WorkflowInput {

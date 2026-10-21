@@ -53,6 +53,47 @@ async fn send(
 }
 
 #[tokio::test]
+async fn skill_package_routes_review_full_files_and_validate_paths() {
+    let (state, root) = daemon("package-routes");
+    let app = router(state, DaemonConfig::default());
+    let mut input = notes();
+    input["files"] =
+        json!([{"path":"templates/note.md","content":"<script>literal reviewed text</script>"}]);
+    let saved = send(&app, "PUT", "/api/skills/notes", Some(input.clone())).await;
+    assert_eq!(saved.status(), StatusCode::CREATED);
+    let hash = json_body(saved).await["skill"]["approvedHash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let detail = json_body(send(&app, "GET", "/api/skills/notes", None).await).await;
+    assert_eq!(detail["file"]["files"], input["files"]);
+    assert_eq!(detail["file"]["hash"], hash);
+    input["files"][0]["path"] = json!("../outside.md");
+    assert_eq!(
+        send(&app, "PUT", "/api/skills/notes", Some(input))
+            .await
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    std::fs::write(
+        root.join("skills/notes/templates/note.md"),
+        "Changed after review",
+    )
+    .unwrap();
+    assert_eq!(
+        send(
+            &app,
+            "POST",
+            "/api/skills/notes/approve",
+            Some(json!({"hash":hash}))
+        )
+        .await
+        .status(),
+        StatusCode::CONFLICT
+    );
+}
+
+#[tokio::test]
 async fn the_skill_routes_require_the_owner_and_a_workspace() {
     let (state, _) = daemon("routes-auth");
     let app = router(state, DaemonConfig::default());
@@ -345,6 +386,7 @@ async fn a_failed_save_answers_503_and_keeps_the_old_skill() {
 
 fn proposal(name: &str) -> crate::skills::Proposal {
     crate::skills::Proposal {
+        files: Vec::new(),
         by: crate::skills::ProposedBy {
             agent_id: "agent-1".into(),
             session_id: "chat:1".into(),

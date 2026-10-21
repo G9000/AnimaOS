@@ -333,6 +333,7 @@ impl<F: McpTransportFactory + 'static> Fixture<F> {
                 .approve_draft(
                     skill.draft_id.as_deref().unwrap(),
                     DraftApproval {
+                        files: None,
                         body: None,
                         hash: None,
                     },

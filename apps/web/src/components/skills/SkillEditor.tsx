@@ -1,4 +1,6 @@
 import { useState, type FormEvent } from 'react';
+import type { SkillSupportingFile } from '@animaOS-SWARM/sdk';
+import { SkillSupportingFiles } from './SkillSupportingFiles';
 
 import {
   invisibleNote,
@@ -12,6 +14,7 @@ export interface SkillEditorValue {
   name: string;
   description: string;
   body: string;
+  files?: SkillSupportingFile[];
 }
 
 /** Writes or edits a skill's content (spec §15.4). The preview shows the
@@ -44,6 +47,10 @@ export function SkillEditor({
   const [name, setName] = useState(initial?.name ?? '');
   const [description, setDescription] = useState(initial?.description ?? '');
   const [body, setBody] = useState(initial?.body ?? '');
+  const [files, setFiles] = useState<SkillSupportingFile[]>(
+    initial?.files ?? [],
+  );
+  const [filesEdited, setFilesEdited] = useState(initial?.files !== undefined);
   const [slug, setSlug] = useState(initial?.slug ?? '');
   const [slugEdited, setSlugEdited] = useState(Boolean(initial?.slug));
   const [preview, setPreview] = useState(false);
@@ -55,8 +62,16 @@ export function SkillEditor({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const value = { slug: folder, name, description, body };
-    const found = skillInputProblem(value) ?? checkProblem?.(value) ?? null;
+    const value = {
+      slug: folder,
+      name,
+      description,
+      body,
+      ...(filesEdited ? { files } : {}),
+    };
+    const fileProblem = supportingFilesProblem(body, files);
+    const found =
+      skillInputProblem(value) ?? fileProblem ?? checkProblem?.(value) ?? null;
     setProblem(found);
     if (found) return;
     setSaving(true);
@@ -118,6 +133,75 @@ export function SkillEditor({
           {bodyNote}
         </p>
       )}
+      {preview ? (
+        <SkillSupportingFiles files={files} />
+      ) : (
+        <section aria-label="Supporting file editor">
+          <p>
+            Supporting files are reviewed with these instructions. Scripts stay
+            inert until separately run.
+          </p>
+          {files.map((file, index) => (
+            <div key={index}>
+              <label className="skill-field">
+                <span>File path {index + 1}</span>
+                <input
+                  value={file.path}
+                  placeholder="templates/note.md"
+                  onChange={(event) => {
+                    setFilesEdited(true);
+                    setFiles(
+                      files.map((item, i) =>
+                        i === index
+                          ? { ...item, path: event.target.value }
+                          : item,
+                      ),
+                    );
+                  }}
+                />
+              </label>
+              <label className="skill-field">
+                <span>File content {index + 1}</span>
+                <textarea
+                  rows={6}
+                  value={file.content}
+                  onChange={(event) => {
+                    setFilesEdited(true);
+                    setFiles(
+                      files.map((item, i) =>
+                        i === index
+                          ? { ...item, content: event.target.value }
+                          : item,
+                      ),
+                    );
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className="studio-tool-button"
+                onClick={() => {
+                  setFilesEdited(true);
+                  setFiles(files.filter((_, i) => i !== index));
+                }}
+              >
+                Remove file {index + 1}
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="studio-tool-button"
+            disabled={files.length >= 32}
+            onClick={() => {
+              setFilesEdited(true);
+              setFiles([...files, { path: '', content: '' }]);
+            }}
+          >
+            Add supporting file
+          </button>
+        </section>
+      )}
       {problem && (
         <p className="skills-error" role="alert">
           {problem}
@@ -140,4 +224,43 @@ export function SkillEditor({
       </div>
     </form>
   );
+}
+
+function supportingFilesProblem(
+  body: string,
+  files: SkillSupportingFile[],
+): string | null {
+  const seen = new Set<string>();
+  let total = new TextEncoder().encode(body).length + 4096;
+  for (const file of files) {
+    const parts = file.path.split('/');
+    if (
+      parts.length < 2 ||
+      parts.length > 8 ||
+      file.path.length > 240 ||
+      !['references', 'templates', 'scripts', 'examples', 'assets'].includes(
+        parts[0],
+      ) ||
+      parts.some(
+        (part) =>
+          !part ||
+          part.startsWith('.') ||
+          /[. ]$/.test(part) ||
+          !/^[a-zA-Z0-9_.-]+$/.test(part) ||
+          /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\.|$)/i.test(part),
+      )
+    )
+      return 'Use a relative text file path such as templates/note.md.';
+    if (seen.has(file.path.toLowerCase()))
+      return 'Each supporting file needs a unique path.';
+    seen.add(file.path.toLowerCase());
+    const bytes = new TextEncoder().encode(file.content).length;
+    if (bytes > 65536) return 'A supporting file must be at most 64 KiB.';
+    total += bytes;
+  }
+  return files.length > 32
+    ? 'A package supports at most 32 supporting files.'
+    : total > 524288
+      ? 'A complete skill package must be at most 512 KiB.'
+      : null;
 }

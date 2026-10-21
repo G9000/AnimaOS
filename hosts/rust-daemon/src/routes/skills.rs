@@ -31,7 +31,7 @@ use crate::skills::{
 /// Bodies the skill routes read, or the daemon-wide limit when larger: a
 /// 32 KiB body can take six bytes a character once JSON-escaped, and the
 /// body check must answer, not the body limit (as M3's run route).
-pub(super) const MAX_SKILL_REQUEST_BYTES: usize = 256 * 1024;
+pub(super) const MAX_SKILL_REQUEST_BYTES: usize = 3 * 1024 * 1024 + 16 * 1024;
 
 pub(super) fn skill_error(error: SkillError) -> Response {
     rejected(match error {
@@ -59,6 +59,9 @@ pub(super) fn answer<T: Serialize>(status: StatusCode, body: &T) -> Response {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct SkillContentRequest {
+    #[serde(default)]
+    #[schema(value_type = Option<Vec<super::contracts::SkillSupportingFileSchema>>)]
+    files: Option<Vec<crate::skills::SkillSupportingFile>>,
     /// 1–64 characters on one line.
     name: String,
     /// 1–300 characters on one line.
@@ -157,6 +160,7 @@ pub(super) async fn put_skill(
         Err(response) => return response,
     };
     let content = SkillContent {
+        files: input.files,
         name: input.name,
         description: input.description,
         body: input.body,
@@ -358,19 +362,22 @@ pub(super) async fn revert_last_skill_change(
 }
 
 /// An imported file plus its multipart framing.
-const MAX_IMPORT_REQUEST_BYTES: usize = MAX_SKILL_IMPORT_BYTES + 16 * 1024;
+const MAX_IMPORT_REQUEST_BYTES: usize = MAX_SKILL_REQUEST_BYTES;
 
 /// The import form: a `file` and a `slug`, with room for a few more fields.
 const IMPORT_FORM_LIMITS: FormLimits = FormLimits {
     max_total_bytes: MAX_IMPORT_REQUEST_BYTES,
     max_parts: MAX_FORM_PARTS,
     max_header_bytes: MAX_FORM_HEADER_BYTES,
-    max_part_bytes: MAX_SKILL_IMPORT_BYTES,
+    max_part_bytes: MAX_SKILL_REQUEST_BYTES,
 };
 
 #[derive(Debug, Default, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct DraftApprovalRequest {
+    #[serde(default)]
+    #[schema(value_type = Option<Vec<super::contracts::SkillSupportingFileSchema>>)]
+    files: Option<Vec<crate::skills::SkillSupportingFile>>,
     /// The owner's edit of the body; the draft's body when absent.
     #[serde(default)]
     body: Option<String>,
@@ -444,6 +451,7 @@ pub(super) async fn approve_skill_draft(
         }
     };
     let approval = DraftApproval {
+        files: input.files,
         body: input.body,
         hash: input.hash,
     };
@@ -533,10 +541,26 @@ pub(super) async fn import_skill(State(state): State<AppState>, request: Request
             Err(_) => return skill_error(SkillError::Invalid(SKILL_SLUG_INVALID.to_string())),
         },
     };
+    let files = match parts.iter().find(|part| part.name == "files") {
+        None => Vec::new(),
+        Some(part) => {
+            match serde_json::from_slice::<Vec<crate::skills::SkillSupportingFile>>(&part.bytes) {
+                Ok(files) => files,
+                Err(_) => {
+                    return skill_error(SkillError::Invalid(
+                        "files must be a JSON array of supporting path/content pairs".into(),
+                    ))
+                }
+            }
+        }
+    };
+    if file.bytes.len() > MAX_SKILL_IMPORT_BYTES {
+        return rejected(ApiError::bad_request_static(IMPORT_TOO_LARGE));
+    }
     match state
         .agent_runs
         .skills()
-        .import(file.bytes.clone(), slug)
+        .import_package(file.bytes.clone(), slug, files)
         .await
     {
         Ok(draft) => answer(

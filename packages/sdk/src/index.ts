@@ -57,8 +57,12 @@ export { ConnectorsClient } from './connectors.js';
 export { DaemonTooOldError, SessionsClient } from './sessions.js';
 export { InteractionsClient } from './interactions.js';
 export type {
-  ClarificationChoice, ClarificationQuestion, ClarificationAnswer,
-  ClarificationResponse, ClarificationRequest, ClarificationAnswerInput,
+  ClarificationChoice,
+  ClarificationQuestion,
+  ClarificationAnswer,
+  ClarificationResponse,
+  ClarificationRequest,
+  ClarificationAnswerInput,
   SideQuestionAnswer,
 } from './interactions.js';
 export type {
@@ -94,7 +98,9 @@ export type {
   SessionUpdateInput,
 } from './sessions.js';
 export { RunsClient, isTerminalRunStatus } from './runs.js';
-export { WorkflowsClient } from './workflows.js';
+export { WorkflowsClient, WorkflowTemplatesClient } from './workflows.js';
+export { ToolResultsClient } from './tool-results.js';
+export type { ToolResultArtifact, ToolResultPage } from './tool-results.js';
 export type {
   WorkflowStatus,
   WorkflowStepKind,
@@ -105,6 +111,11 @@ export type {
   WorkflowStep,
   WorkflowDecision,
   WorkflowRun,
+  WorkflowTemplate,
+  WorkflowTemplateInput,
+  WorkflowTemplateRunInput,
+  WorkflowTemplateParameter,
+  WorkflowTemplateSource,
 } from './workflows.js';
 export type { RunRecoverySummary, ContinueRecoveryInput } from './runs.js';
 export type {
@@ -222,6 +233,9 @@ export type {
 } from './approvals.js';
 export {
   MAX_SKILL_BODY_BYTES,
+  MAX_SKILL_SUPPORTING_FILES,
+  MAX_SKILL_SUPPORTING_FILE_BYTES,
+  MAX_SKILL_PACKAGE_BYTES,
   MAX_SKILL_DESCRIPTION_CHARS,
   MAX_SKILL_NAME_CHARS,
   SKILL_SLUG_PATTERN,
@@ -239,6 +253,7 @@ export type {
   SkillFile,
   SkillInput,
   SkillStatus,
+  SkillSupportingFile,
 } from './skills.js';
 export { automationMessageMeta } from './automation-messages.js';
 export type {

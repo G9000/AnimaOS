@@ -5,6 +5,13 @@ use utoipa::ToSchema;
 
 use crate::skills::{DraftSource, DraftView, ScannedFile, SkillDraft, SkillRecord};
 
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+#[allow(dead_code)]
+pub(crate) struct SkillSupportingFileSchema {
+    pub(crate) path: String,
+    pub(crate) content: String,
+}
+
 /// A registered skill (spec §8.1).
 #[derive(Clone, Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -52,7 +59,9 @@ pub(crate) struct SkillEnvelope {
 #[derive(Clone, Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SkillFileResponse {
-    /// The file's hash; send it back to approve exactly this content.
+    #[schema(value_type = Vec<SkillSupportingFileSchema>)]
+    pub(crate) files: Vec<crate::skills::SkillSupportingFile>,
+    /// The complete package hash; send it back to approve all these files.
     /// `null` when the file could not be read whole.
     pub(crate) hash: Option<String>,
     pub(crate) name: Option<String>,
@@ -66,6 +75,7 @@ impl From<&ScannedFile> for SkillFileResponse {
     fn from(file: &ScannedFile) -> Self {
         let parsed = file.parsed.as_ref().ok();
         Self {
+            files: file.files.clone(),
             hash: file.hash.clone(),
             name: parsed.map(|parsed| parsed.name.clone()),
             description: parsed.map(|parsed| parsed.description.clone()),
@@ -102,6 +112,8 @@ pub(crate) struct ProposedByResponse {
 #[derive(Clone, Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SkillDraftResponse {
+    #[schema(value_type = Vec<SkillSupportingFileSchema>)]
+    pub(crate) files: Vec<crate::skills::SkillSupportingFile>,
     /// `skd_<uuid>`, or `file:<slug>` for a `SKILL.md` without a record.
     pub(crate) id: String,
     pub(crate) slug: String,
@@ -135,6 +147,7 @@ impl From<&DraftView> for SkillDraftResponse {
     fn from(view: &DraftView) -> Self {
         let draft = &view.draft;
         Self {
+            files: draft.files.clone(),
             id: draft.id.clone(),
             slug: draft.slug.clone(),
             name: draft.name.clone(),

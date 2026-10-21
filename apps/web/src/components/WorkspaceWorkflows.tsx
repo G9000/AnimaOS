@@ -8,6 +8,7 @@ import {
 } from '@animaOS-SWARM/sdk';
 import { daemon } from '../lib/daemon-api';
 import type { AgentDetail } from '../lib/types';
+import { WorkflowTemplates } from './WorkflowTemplates';
 
 const buttonClass =
   'rounded-xl border border-line px-4 py-3 text-sm disabled:opacity-50';
@@ -172,6 +173,7 @@ export function WorkflowAgentView({
     stored<Command>(commandKey),
   );
   const [refresh, setRefresh] = useState(0);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   const contextKey = JSON.stringify([agentId, membership, online]);
   const contextRef = useRef<Context>({ key: contextKey, active: true });
   if (contextRef.current.key !== contextKey) {
@@ -340,6 +342,22 @@ export function WorkflowAgentView({
 
   return (
     <div className="space-y-5">
+      <details onToggle={(event) => setTemplatesOpen(event.currentTarget.open)}>
+        <summary className="cursor-pointer rounded-xl border border-line px-4 py-3 text-sm font-semibold">
+          Reusable templates
+        </summary>
+        {templatesOpen && (
+          <div className="pt-4">
+            <WorkflowTemplates
+              agentId={agentId}
+              online={online}
+              workflows={current?.workflows ?? []}
+              refreshKey={refreshKey}
+              onRun={() => setRefresh((value) => value + 1)}
+            />
+          </div>
+        )}
+      </details>
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
@@ -596,6 +614,17 @@ function WorkflowCard({
         Revision {workflow.revision} · Updated{' '}
         {new Date(workflow.updatedAtMs).toLocaleString()}
       </p>
+      {workflow.sourceTemplate && (
+        <details className="text-xs text-ink-3">
+          <summary className="cursor-pointer">
+            Template {workflow.sourceTemplate.slug} · revision{' '}
+            {workflow.sourceTemplate.revision}
+          </summary>
+          <pre className="whitespace-pre-wrap break-words pt-2">
+            {JSON.stringify(workflow.sourceTemplate.inputs, null, 2)}
+          </pre>
+        </details>
+      )}
       {workflow.error && (
         <p className="whitespace-pre-wrap break-words text-sm text-danger">
           {workflow.error}

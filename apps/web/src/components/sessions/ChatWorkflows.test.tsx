@@ -117,6 +117,52 @@ it('keeps saved owner controls after either chat creation grant is revoked', asy
   );
 });
 
+it('explains the independent template permission and keeps owner controls available', async () => {
+  vi.spyOn(daemon, 'listWorkflows').mockResolvedValue([run()]);
+  const view = render(
+    <ChatWorkflows
+      agent={{
+        ...agent,
+        toolNames: [
+          ...agent.toolNames,
+          'save_workflow_template',
+          'list_workflow_templates',
+        ],
+      }}
+      online
+    />,
+  );
+  expect(
+    screen.getByText(/Enable “Allow workflow templates in chat”/),
+  ).toBeVisible();
+  expect(
+    await screen.findByRole('button', { name: 'Approve checkpoint' }),
+  ).toBeEnabled();
+  view.rerender(
+    <ChatWorkflows
+      agent={{
+        ...agent,
+        toolNames: [
+          ...agent.toolNames,
+          'save_workflow_template',
+          'list_workflow_templates',
+          'run_workflow_template',
+        ],
+      }}
+      online
+    />,
+  );
+  expect(
+    screen.queryByText(/Enable “Allow workflow templates in chat”/),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByText(/Ask in chat to save a reusable template/),
+  ).toBeVisible();
+  expect(
+    screen.getByText('Reusable templates', { selector: 'summary' }),
+  ).toBeVisible();
+});
+
 it('refreshes an initially empty list when chat activity changes', async () => {
   const list = vi
     .spyOn(daemon, 'listWorkflows')

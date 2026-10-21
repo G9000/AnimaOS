@@ -50,6 +50,27 @@ const draft: SkillDraft = {
 };
 
 describe('skills client', () => {
+  it('preserves supporting files on saves and draft approvals', async () => {
+    const { skills, requests } = transport(() =>
+      Response.json({ skill, draft }),
+    );
+    const files = [
+      { path: 'templates/note.md', content: '<p>literal template</p>' },
+    ];
+    await skills.save('notes', {
+      name: 'Notes',
+      description: 'Take notes',
+      body: 'Use template',
+      files,
+    } as never);
+    await skills.approveDraft('skd_1', {
+      body: 'Reviewed body',
+      files,
+    } as never);
+    expect(JSON.parse(String(requests[0].init?.body)).files).toEqual(files);
+    expect(JSON.parse(String(requests[1].init?.body)).files).toEqual(files);
+  });
+
   it('lists, reads, saves, toggles, removes, and approves skills', async () => {
     const { skills, requests } = transport((url, init) => {
       if (init?.method === 'DELETE')
@@ -136,7 +157,11 @@ describe('skills client', () => {
 
     const imported = await skills.importFile(
       new Blob(['---\nname: n\n---\n\nb'], { type: 'text/markdown' }),
-      { filename: 'SKILL.md', slug: 'chosen' },
+      {
+        filename: 'SKILL.md',
+        slug: 'chosen',
+        files: [{ path: 'templates/note.md', content: 'Reviewed template' }],
+      },
     );
 
     expect(imported.source).toBe('import');
@@ -146,6 +171,9 @@ describe('skills client', () => {
     const form = body as FormData;
     expect((form.get('file') as File).name).toBe('SKILL.md');
     expect(form.get('slug')).toBe('chosen');
+    expect(JSON.parse(String(form.get('files')))).toEqual([
+      { path: 'templates/note.md', content: 'Reviewed template' },
+    ]);
     expect(
       new Headers(requests[0].init?.headers).get('content-type'),
     ).toBeNull();

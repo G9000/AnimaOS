@@ -24,9 +24,9 @@ use tracing::warn;
 use super::disk;
 use super::registry::{is_hex_hash, ScannedFile, SkillRegistry};
 use super::{
-    compose_skill_file, is_valid_slug, parse_skill_file, skill_hash, skill_not_found,
-    validate_body, validate_description, validate_name, DraftSource, DraftStatus, SkillFile,
-    SkillRecord, SKILLS_NEED_WORKSPACE, SKILL_CHANGED, SKILL_DISABLED, SKILL_FILE_UNREVIEWED,
+    compose_skill_file, is_valid_slug, parse_skill_file, skill_not_found, validate_body,
+    validate_description, validate_name, DraftSource, DraftStatus, SkillFile, SkillRecord,
+    SKILLS_NEED_WORKSPACE, SKILL_CHANGED, SKILL_DISABLED, SKILL_FILE_UNREVIEWED,
     SKILL_HASH_MISMATCH, SKILL_HASH_REQUIRED, SKILL_IO_SLOW_MS, SKILL_IO_TIMED_OUT,
     SKILL_IO_TIMEOUT_MS, SKILL_MISSING, SKILL_NOT_CHANGED, SKILL_NOT_RUNNABLE, SKILL_SLUG_INVALID,
     UNKNOWN_SKILL,
@@ -72,6 +72,8 @@ impl SkillError {
 /// The owner's content for `PUT /api/skills/{slug}`.
 #[derive(Clone, Debug)]
 pub(crate) struct SkillContent {
+    /// None preserves existing supporting files; Some([]) removes them.
+    pub(crate) files: Option<Vec<super::SkillSupportingFile>>,
     pub(crate) name: String,
     pub(crate) description: String,
     pub(crate) body: String,
@@ -99,7 +101,7 @@ pub(super) struct Change<T> {
     pub(super) value: T,
     pub(super) undo: Box<dyn FnOnce(&mut SkillRegistry) + Send>,
     /// Written to `skills/<slug>/SKILL.md` after the registry change.
-    pub(super) write: Option<(String, Vec<u8>)>,
+    pub(super) write: Option<(String, super::package::SkillPackage)>,
     /// What `skill.updated` names.
     pub(super) slug: Option<String>,
     pub(super) draft_id: Option<String>,
@@ -266,10 +268,10 @@ impl SkillService {
             slug,
             draft_id,
         } = change;
-        if let Some((written, bytes)) = write {
+        if let Some((written, package)) = write {
             let (workspace, target) = (root.to_path_buf(), written.clone());
             let outcome = blocking(move || {
-                disk::write_skill_file(&workspace, &target, &bytes)?;
+                super::package::write_package(&workspace, &target, &package)?;
                 disk::scan_skill(&workspace, &target, None)
             })
             .await
@@ -381,9 +383,9 @@ impl SkillService {
             None
         } else {
             let (workspace, target) = (root.clone(), slug.to_string());
-            let read = blocking(move || disk::read_skill_bytes(&workspace, &target)).await?;
+            let read = blocking(move || super::package::read_package(&workspace, &target)).await?;
             Some(
-                read.map(|bytes| bytes.map(|bytes| skill_hash(&bytes)))
+                read.map(|package| package.map(|package| package.hash()))
                     .map_err(|_| ()),
             )
         };
@@ -501,12 +503,67 @@ impl SkillService {
         let review = self.review_file(&slug).await?;
         self.locked(move |service, root| async move {
             let bytes = compose_skill_file(&file.name, &file.description, &file.body).into_bytes();
+            let files = match content.files {
+                Some(files) => files,
+                None => {
+                    let (workspace, target) = (root.clone(), slug.clone());
+                    let existing =
+                        match blocking(move || super::package::read_package(&workspace, &target))
+                            .await
+                            .and_then(|result| result.map_err(SkillError::Unavailable))
+                        {
+                            Ok(existing) => existing,
+                            Err(error) => {
+                                // A preflight failure bypasses apply's write
+                                // rollback; discard the old scan here too.
+                                service.state.write().await.skills.set_scanned(&slug, None);
+                                return Err(error);
+                            }
+                        };
+                    let approved_hash = service
+                        .state
+                        .read()
+                        .await
+                        .skills
+                        .get(&slug)
+                        .map(|record| record.approved_hash.clone());
+                    if let Some(approved_hash) = approved_hash {
+                        if existing.as_ref().map(|package| package.hash()).as_deref()
+                            != Some(approved_hash.as_str())
+                        {
+                            service.state.write().await.skills.set_scanned(&slug, None);
+                            return Err(SkillError::conflict(SKILL_HASH_MISMATCH));
+                        }
+                    } else if existing
+                        .as_ref()
+                        .is_some_and(|package| !package.files.is_empty())
+                    {
+                        // Rejecting a file draft authorizes replacing it with
+                        // explicit owner content; its supporting files remain
+                        // unapproved and cannot be inherited implicitly.
+                        return Err(SkillError::conflict(SKILL_FILE_UNREVIEWED));
+                    }
+                    if existing.is_none() {
+                        let (workspace, target) = (root.clone(), slug.clone());
+                        if blocking(move || super::package::folder_has_content(&workspace, &target))
+                            .await?
+                            .map_err(SkillError::Unavailable)?
+                        {
+                            return Err(SkillError::conflict(SKILL_FILE_UNREVIEWED));
+                        }
+                    }
+                    existing.map(|package| package.files).unwrap_or_default()
+                }
+            };
+            anima_core::skill_packages::validate_skill_package(&bytes, &files)
+                .map_err(SkillError::invalid)?;
+            let package = super::package::SkillPackage { bytes, files };
             crate::community_bundles::check_skill_edit(
                 &*service.state.read().await,
                 &slug,
                 enabled.unwrap_or(true),
             )?;
-            let hash = skill_hash(&bytes);
+            let hash = package.hash();
             let (target, written_root) = (slug.clone(), root.clone());
             let created = service
                 .apply(&root, move |skills, now_ms| {
@@ -523,7 +580,7 @@ impl SkillService {
                         undo: Box::new(move |skills: &mut SkillRegistry| {
                             skills.restore(&undo_slug, previous)
                         }),
-                        write: Some((target.clone(), bytes)),
+                        write: Some((target.clone(), package)),
                         slug: Some(target),
                         draft_id: None,
                     })
@@ -676,16 +733,16 @@ impl SkillService {
         let slug = slug.to_string();
         let (read_root, seen) = self.read_start(&slug).await?;
         let (workspace, target) = (read_root.clone(), slug.clone());
-        let bytes = blocking(move || disk::read_skill_bytes(&workspace, &target))
+        let package = blocking(move || super::package::read_package(&workspace, &target))
             .await?
             .map_err(SkillError::Unavailable)?
             .ok_or(SkillError::NotFound)?;
-        let current = skill_hash(&bytes);
+        let current = package.hash();
         if current != reviewed {
             return Err(SkillError::conflict(SKILL_HASH_MISMATCH));
         }
-        let file = parse_skill_file(&bytes).map_err(SkillError::invalid)?;
-        let scanned = ScannedFile::read(&bytes, None);
+        let file = parse_skill_file(&package.bytes).map_err(SkillError::invalid)?;
+        let scanned = ScannedFile::package(&package, None);
         self.locked(move |service, root| async move {
             if root != read_root {
                 return Err(SkillError::conflict(SKILL_HASH_MISMATCH));
@@ -725,6 +782,14 @@ impl SkillService {
     /// An enabled skill's instructions (spec §8.3), found by slug (with or
     /// without `/`) or by name, as the model's `load_skill { name }` asks.
     pub(crate) async fn load(&self, name: &str) -> Result<LoadedSkill, String> {
+        self.load_file(name, None).await
+    }
+
+    pub(crate) async fn load_file(
+        &self,
+        name: &str,
+        file_path: Option<&str>,
+    ) -> Result<LoadedSkill, String> {
         let (root, record) = {
             let guard = self.state.read().await;
             let Some(root) = guard
@@ -746,7 +811,7 @@ impl SkillService {
         let Some(record) = record else {
             return Err(skill_not_found(name.trim()));
         };
-        load_record(root, record).await
+        load_record_file(root, record, file_path).await
     }
 
     /// An enabled skill's instructions by exact slug, with no name fallback
@@ -811,26 +876,48 @@ impl SkillService {
 /// Reads `record`'s `SKILL.md` now and checks it against the approved hash:
 /// a file changed since is refused, whatever the last scan said.
 async fn load_record(root: PathBuf, record: SkillRecord) -> Result<LoadedSkill, String> {
+    load_record_file(root, record, None).await
+}
+async fn load_record_file(
+    root: PathBuf,
+    record: SkillRecord,
+    file_path: Option<&str>,
+) -> Result<LoadedSkill, String> {
+    if let Some(path) = file_path {
+        anima_core::skill_packages::validate_supporting_path(path).map_err(str::to_string)?;
+    }
     if !record.enabled {
         return Err(SKILL_DISABLED.to_string());
     }
     let slug = record.slug.clone();
-    let read = blocking(move || disk::read_skill_bytes(&root, &slug))
+    let read = blocking(move || super::package::read_package(&root, &slug))
         .await
         .map_err(|error| error.message())?;
-    let bytes = match read {
-        Ok(Some(bytes)) => bytes,
+    let package = match read {
+        Ok(Some(package)) => package,
         Ok(None) => return Err(SKILL_MISSING.to_string()),
         Err(_) => return Err(SKILL_CHANGED.to_string()),
     };
-    if skill_hash(&bytes) != record.approved_hash {
+    if package.hash() != record.approved_hash {
         return Err(SKILL_CHANGED.to_string());
     }
-    let file = parse_skill_file(&bytes).map_err(|_| SKILL_CHANGED.to_string())?;
+    let file = parse_skill_file(&package.bytes).map_err(|_| SKILL_CHANGED.to_string())?;
+    let body = if let Some(path) = file_path {
+        package
+            .files
+            .iter()
+            .find(|f| f.path == path)
+            .map(|f| format!("Reviewed supporting file: {path}\n\n{}", f.content))
+            .ok_or_else(|| "No reviewed supporting file has this path".to_string())?
+    } else if package.files.is_empty() {
+        file.body
+    } else {
+        format!("{}\n\nSupporting files (reviewed; use load_skill with name and filePath to read one):\n{}\nScripts remain inert and require existing execution permissions to run.",file.body,package.files.iter().map(|f|format!("- {} ({} bytes)",f.path,f.content.len())).collect::<Vec<_>>().join("\n"))
+    };
     Ok(LoadedSkill {
         slug: record.slug,
         name: record.name,
-        body: file.body,
+        body,
     })
 }
 
@@ -864,6 +951,247 @@ mod tests {
             .state
             .id;
         (Arc::new(RwLock::new(state)), root, agent_id)
+    }
+
+    #[tokio::test]
+    async fn package_supporting_change_invalidates_approval_even_without_rescan() {
+        let (state, root, _) = daemon("package-change").await;
+        let skills = service(&state);
+        skills.save("notes", content("notes")).await.unwrap();
+        std::fs::create_dir_all(root.join("skills/notes/templates")).unwrap();
+        std::fs::write(
+            root.join("skills/notes/templates/note.md"),
+            "First template",
+        )
+        .unwrap();
+        skills.scan().await.unwrap();
+        assert_eq!(
+            skills.record("notes").await.unwrap().status,
+            SkillStatus::Changed
+        );
+        assert_eq!(skills.load("notes").await.unwrap_err(), SKILL_CHANGED);
+    }
+
+    #[tokio::test]
+    async fn package_rejects_unsupported_files_instead_of_silently_approving_them() {
+        let (state, root, _) = daemon("package-unsupported").await;
+        write_skill(&root, "notes", &skill_text("notes"));
+        std::fs::write(root.join("skills/notes/hidden.exe"), "inert test").unwrap();
+        let detail = service(&state).detail("notes").await.unwrap();
+        assert!(detail.file.unwrap().problem().is_some());
+    }
+
+    #[tokio::test]
+    async fn package_save_load_review_and_restart_pin_all_files() {
+        let (state, root, _) = daemon("package-roundtrip").await;
+        let skills = service(&state);
+        let mut input = content("notes");
+        input.files = Some(vec![
+            super::super::SkillSupportingFile {
+                path: "templates/note.md".into(),
+                content: "Reviewed template".into(),
+            },
+            super::super::SkillSupportingFile {
+                path: "scripts/example.py".into(),
+                content: "print('inert')".into(),
+            },
+        ]);
+        let (record, _) = skills.save("notes", input).await.unwrap();
+        let default = skills.load("notes").await.unwrap();
+        assert!(default.body.contains("templates/note.md (17 bytes)"));
+        assert!(!default.body.contains("Reviewed template"));
+        let loaded = skills
+            .load_file("notes", Some("templates/note.md"))
+            .await
+            .unwrap();
+        assert!(loaded.body.ends_with("Reviewed template"));
+        assert!(skills
+            .load_file("notes", Some("../outside.md"))
+            .await
+            .is_err());
+        assert!(skills
+            .load_file("notes", Some("references/missing.md"))
+            .await
+            .is_err());
+        let snapshot = state.read().await.control_plane_snapshot();
+        let mut restarted = with_workspace(DaemonState::new(), &root);
+        restarted.restore_control_plane_snapshot(snapshot).unwrap();
+        let restored = service(&Arc::new(RwLock::new(restarted)));
+        assert_eq!(
+            restored
+                .load_file("notes", Some("templates/note.md"))
+                .await
+                .unwrap(),
+            loaded
+        );
+        std::fs::write(
+            root.join("skills/notes/templates/note.md"),
+            "Changed template",
+        )
+        .unwrap();
+        assert_eq!(
+            restored
+                .load_file("notes", Some("scripts/example.py"))
+                .await
+                .unwrap_err(),
+            SKILL_CHANGED
+        );
+        let detail = restored.detail("notes").await.unwrap();
+        let new_hash = detail.file.unwrap().hash.unwrap();
+        assert_ne!(new_hash, record.approved_hash);
+        assert!(restored
+            .approve_changed("notes", &record.approved_hash)
+            .await
+            .is_err());
+        restored.approve_changed("notes", &new_hash).await.unwrap();
+        assert!(restored
+            .load_file("notes", Some("templates/note.md"))
+            .await
+            .unwrap()
+            .body
+            .ends_with("Changed template"));
+        let mut remove = content("notes");
+        remove.files = Some(Vec::new());
+        let (single, _) = restored.save("notes", remove).await.unwrap();
+        assert_eq!(
+            single.approved_hash,
+            skill_hash(&std::fs::read(root.join("skills/notes/SKILL.md")).unwrap())
+        );
+        assert!(!root.join("skills/notes/templates/note.md").exists());
+        assert!(root.join(".anima-skill-transactions").exists());
+    }
+
+    #[tokio::test]
+    async fn package_failed_persistence_keeps_new_package_unapproved() {
+        let (state, root, _) = daemon("package-save-failure").await;
+        let skills = service(&state);
+        let (original, _) = skills.save("notes", content("notes")).await.unwrap();
+        state
+            .write()
+            .await
+            .set_control_plane_store(Some(broken_store()));
+        let mut next = content("notes");
+        next.files = Some(vec![super::super::SkillSupportingFile {
+            path: "templates/note.md".into(),
+            content: "Uncommitted template".into(),
+        }]);
+        assert!(matches!(
+            skills.save("notes", next).await,
+            Err(SkillError::Unavailable(_))
+        ));
+        assert_eq!(
+            state
+                .read()
+                .await
+                .skills
+                .get("notes")
+                .unwrap()
+                .approved_hash,
+            original.approved_hash
+        );
+        assert_eq!(skills.load("notes").await.unwrap_err(), SKILL_CHANGED);
+        assert_eq!(
+            std::fs::read_to_string(root.join("skills/notes/templates/note.md")).unwrap(),
+            "Uncommitted template"
+        );
+    }
+
+    #[tokio::test]
+    async fn owner_body_save_cannot_implicitly_approve_unreviewed_supporting_changes() {
+        let (state, root, _) = daemon("package-implicit-review").await;
+        let skills = service(&state);
+        let mut original = content("notes");
+        original.files = Some(vec![crate::skills::SkillSupportingFile {
+            path: "templates/note.md".into(),
+            content: "Reviewed template".into(),
+        }]);
+        let (record, _) = skills.save("notes", original).await.unwrap();
+        std::fs::write(
+            root.join("skills/notes/templates/note.md"),
+            "Unreviewed replacement",
+        )
+        .unwrap();
+        assert_eq!(
+            skills.save("notes", content("notes")).await.unwrap_err(),
+            SkillError::Conflict(SKILL_HASH_MISMATCH.into())
+        );
+        assert_eq!(
+            state
+                .read()
+                .await
+                .skills
+                .get("notes")
+                .unwrap()
+                .approved_hash,
+            record.approved_hash
+        );
+        assert_eq!(skills.load("notes").await.unwrap_err(), SKILL_CHANGED);
+    }
+
+    #[tokio::test]
+    async fn implicit_create_preserves_an_unregistered_partial_package_until_explicit_save() {
+        let (state, root, _) = daemon("package-partial-create").await;
+        let skills = service(&state);
+        std::fs::create_dir_all(root.join("skills/notes/templates")).unwrap();
+        std::fs::write(
+            root.join("skills/notes/templates/note.md"),
+            "Existing local template",
+        )
+        .unwrap();
+        assert_eq!(
+            skills.save("notes", content("notes")).await.unwrap_err(),
+            SkillError::Conflict(SKILL_FILE_UNREVIEWED.into())
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("skills/notes/templates/note.md")).unwrap(),
+            "Existing local template"
+        );
+        let mut explicit = content("notes");
+        explicit.files = Some(Vec::new());
+        skills.save("notes", explicit).await.unwrap();
+        assert!(skills.load("notes").await.is_ok());
+        assert!(root.join(".anima-skill-transactions").exists());
+    }
+
+    #[tokio::test]
+    async fn rejected_complete_package_cannot_supply_implicit_supporting_files() {
+        let (state, root, _) = daemon("package-rejected-implicit").await;
+        let skills = service(&state);
+        write_skill(&root, "notes", &skill_text("Unregistered notes"));
+        std::fs::create_dir_all(root.join("skills/notes/templates")).unwrap();
+        std::fs::write(
+            root.join("skills/notes/templates/note.md"),
+            "Rejected supporting instructions",
+        )
+        .unwrap();
+        skills.reject_draft("file:notes").await.unwrap();
+
+        assert_eq!(
+            skills.save("notes", content("notes")).await.unwrap_err(),
+            SkillError::Conflict(SKILL_FILE_UNREVIEWED.into())
+        );
+        assert!(state.read().await.skills.get("notes").is_none());
+        assert_eq!(
+            std::fs::read_to_string(root.join("skills/notes/templates/note.md")).unwrap(),
+            "Rejected supporting instructions"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("skills/notes/SKILL.md")).unwrap(),
+            skill_text("Unregistered notes")
+        );
+
+        let mut explicit = content("notes");
+        explicit.files = Some(vec![crate::skills::SkillSupportingFile {
+            path: "templates/note.md".into(),
+            content: "Explicit owner replacement".into(),
+        }]);
+        skills.save("notes", explicit).await.unwrap();
+        assert!(skills
+            .load_file("notes", Some("templates/note.md"))
+            .await
+            .unwrap()
+            .body
+            .ends_with("Explicit owner replacement"));
     }
 
     #[tokio::test]

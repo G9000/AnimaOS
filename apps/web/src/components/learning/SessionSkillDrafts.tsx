@@ -3,6 +3,7 @@ import type { SkillDraft } from '@animaOS-SWARM/sdk';
 
 import { daemon } from '../../lib/daemon-api';
 import { revealInvisible } from '../../lib/skills';
+import { SkillSupportingFiles } from '../skills/SkillSupportingFiles';
 
 type Outcome = 'kept' | 'discarded';
 
@@ -104,42 +105,51 @@ export function SessionSkillDrafts({
                   : 'Discarded.'}
               </p>
             ) : (
-              <div className="learned-skill-actions">
-                <button
-                  type="button"
-                  className="learned-skill-keep"
-                  disabled={busy !== null}
-                  onClick={() => void decide(draft, 'kept')}
-                >
-                  {busy === draft.id ? 'Saving…' : 'Keep skill'}
-                </button>
-                {onReview && (
+              <>
+                <details open={Boolean(draft.files?.length)}>
+                  <summary>Review full skill</summary>
+                  <pre className="skill-body">
+                    {revealInvisible(draft.body).text}
+                  </pre>
+                  <SkillSupportingFiles files={draft.files} />
+                </details>
+                <div className="learned-skill-actions">
+                  <button
+                    type="button"
+                    className="learned-skill-keep"
+                    disabled={busy !== null}
+                    onClick={() => void decide(draft, 'kept')}
+                  >
+                    {busy === draft.id ? 'Saving…' : 'Keep skill'}
+                  </button>
+                  {onReview && (
+                    <button
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={onReview}
+                    >
+                      Review in Skills
+                    </button>
+                  )}
                   <button
                     type="button"
                     disabled={busy !== null}
-                    onClick={onReview}
+                    onClick={() =>
+                      setHidden((current) => new Set(current).add(draft.id))
+                    }
                   >
-                    Review in Skills
+                    Not now
                   </button>
-                )}
-                <button
-                  type="button"
-                  disabled={busy !== null}
-                  onClick={() =>
-                    setHidden((current) => new Set(current).add(draft.id))
-                  }
-                >
-                  Not now
-                </button>
-                <button
-                  type="button"
-                  className="learned-skill-discard"
-                  disabled={busy !== null}
-                  onClick={() => void decide(draft, 'discarded')}
-                >
-                  Discard
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    className="learned-skill-discard"
+                    disabled={busy !== null}
+                    onClick={() => void decide(draft, 'discarded')}
+                  >
+                    Discard
+                  </button>
+                </div>
+              </>
             )}
           </section>
         );

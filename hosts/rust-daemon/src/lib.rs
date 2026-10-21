@@ -43,6 +43,7 @@ mod state;
 pub mod system;
 mod threat_scan;
 mod tool_rpc;
+pub(crate) mod tool_results;
 mod tools;
 mod usage;
 mod voice;

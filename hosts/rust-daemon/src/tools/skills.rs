@@ -49,7 +49,12 @@ pub(super) fn load_skill(
         let Some(coordinator) = context.team.clone() else {
             return TaskResult::error(SKILLS_UNAVAILABLE, 0);
         };
-        match coordinator.skills().load(&name).await {
+        let file_path = match call.args.get("filePath") {
+            None => None,
+            Some(DataValue::String(path)) => Some(path.as_str()),
+            Some(_) => return TaskResult::error("load_skill filePath must be a string", 0),
+        };
+        match coordinator.skills().load_file(&name, file_path).await {
             Ok(skill) => text(format!("{SKILL_INSTRUCTIONS_HEADER}\n\n{}", skill.body)),
             Err(message) => TaskResult::error(message, 0),
         }
@@ -80,6 +85,10 @@ pub(super) fn propose_skill(
             return TaskResult::error(SKILLS_UNAVAILABLE, 0);
         };
         let proposal = Proposal {
+            files: match supporting_files(&call) {
+                Ok(files) => files,
+                Err(error) => return TaskResult::error(error, 0),
+            },
             by: ProposedBy {
                 agent_id: agent.id.clone(),
                 session_id: link.session_id,
@@ -101,4 +110,38 @@ pub(super) fn propose_skill(
             Err(error) => TaskResult::error(error.message(), 0),
         }
     })
+}
+
+fn supporting_files(
+    call: &ToolCall,
+) -> Result<Vec<crate::skills::SkillSupportingFile>, &'static str> {
+    let Some(value) = call.args.get("files") else {
+        return Ok(Vec::new());
+    };
+    let DataValue::Array(values) = value else {
+        return Err("propose_skill files must be an array of path/content objects");
+    };
+    if values.len() > 32 {
+        return Err("A skill package supports at most 32 supporting files");
+    }
+    values
+        .iter()
+        .map(|value| {
+            let DataValue::Object(fields) = value else {
+                return Err("Each supporting file needs path and content strings");
+            };
+            if fields.len() != 2 {
+                return Err("Each supporting file needs only path and content strings");
+            }
+            match (fields.get("path"), fields.get("content")) {
+                (Some(DataValue::String(path)), Some(DataValue::String(content))) => {
+                    Ok(crate::skills::SkillSupportingFile {
+                        path: path.clone(),
+                        content: content.clone(),
+                    })
+                }
+                _ => Err("Each supporting file needs path and content strings"),
+            }
+        })
+        .collect()
 }

@@ -13,7 +13,8 @@ import { SwarmsClient } from './swarms.js';
 import { SessionsClient } from './sessions.js';
 import { InteractionsClient } from './interactions.js';
 import { RunsClient } from './runs.js';
-import { WorkflowsClient } from './workflows.js';
+import { WorkflowsClient, WorkflowTemplatesClient } from './workflows.js';
+import { ToolResultsClient } from './tool-results.js';
 import { LearningClient } from './learning.js';
 import { McpClient } from './mcp.js';
 import { CommunityBundlesClient } from './community-bundles.js';
@@ -97,6 +98,8 @@ export class DaemonClient {
   readonly interactions: InteractionsClient;
   readonly runs: RunsClient;
   readonly workflows: WorkflowsClient;
+  readonly workflowTemplates: WorkflowTemplatesClient;
+  readonly toolResults: ToolResultsClient;
   readonly learning: LearningClient;
   readonly mcp: McpClient;
   readonly communityBundles: CommunityBundlesClient;
@@ -138,6 +141,8 @@ export class DaemonClient {
     this.interactions = new InteractionsClient(this);
     this.runs = new RunsClient(this);
     this.workflows = new WorkflowsClient(this);
+    this.workflowTemplates = new WorkflowTemplatesClient(this);
+    this.toolResults = new ToolResultsClient(this);
     this.learning = new LearningClient(this);
     this.mcp = new McpClient(this);
     this.communityBundles = new CommunityBundlesClient(this);
