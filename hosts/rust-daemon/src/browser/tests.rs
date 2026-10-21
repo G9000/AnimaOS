@@ -52,6 +52,7 @@ pub(crate) fn policies(scope_ms: u32) -> InstalledBrowserPolicies {
                 revision: 1,
                 origin: "http://127.0.0.1:43220".into(),
                 public_ipv4_pin: None,
+                authenticated: false,
                 routes: vec![BrowserRoute {
                     id: "page".into(),
                     method: BrowserMethod::Get,
@@ -181,6 +182,7 @@ impl Fixture {
     }
     fn input(enabled: bool, version: Option<u64>) -> SaveBrowserScope {
         SaveBrowserScope {
+            profile_id: None,
             policy_id: "controlled-operator-policy".into(),
             selected_input_ids: vec![],
             enabled,
@@ -699,6 +701,7 @@ async fn m63_public_metadata_does_not_grant_browser_tools_or_accept_inputs() {
         f.port.clone(),
     );
     let input = SaveBrowserScope {
+        profile_id: None,
         policy_id: "public-operator-policy".into(),
         selected_input_ids: vec![],
         enabled: true,

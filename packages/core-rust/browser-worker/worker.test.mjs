@@ -3131,3 +3131,610 @@ test('m46_protocol_output_failure_is_static_and_joins_the_owned_adapter', async 
   assert.equal(cancelled >= 1, true);
   assert.equal(closed >= 1, true);
 });
+
+// Authenticated custody regression: the sealed state must survive a fresh worker
+// and remain unusable for another exact origin. No secret enters observations.
+test('profile state seals cookies and rejects foreign origins and tampering', async () => {
+  const profile = {
+    id: 'profile-test',
+    revision: 1,
+    digest: 'a'.repeat(64),
+    origin: 'https://owner.example',
+    keyHex: 'b'.repeat(64),
+  };
+  const state = {
+    cookies: [
+      {
+        name: 'session',
+        value: 'unique-private-oracle',
+        domain: 'owner.example',
+        path: '/',
+        expires: -1,
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Lax',
+      },
+    ],
+    origins: [],
+  };
+  const sealed = worker.sealProfileState(profile, state);
+  assert.equal(JSON.stringify(sealed).includes('unique-private-oracle'), false);
+  assert.deepEqual(worker.openProfileState(profile, sealed), state);
+  assert.throws(() =>
+    worker.openProfileState(
+      { ...profile, origin: 'https://foreign.example' },
+      sealed,
+    ),
+  );
+  assert.throws(() =>
+    worker.sealProfileState(profile, {
+      ...state,
+      cookies: [{ ...state.cookies[0], domain: '.example' }],
+    }),
+  );
+  assert.throws(() =>
+    worker.openProfileState(profile, { ...sealed, tag: '0'.repeat(32) }),
+  );
+});
+
+test('authenticated cookie transport binds Cookie and Set-Cookie to the exact origin', async () => {
+  const origin = 'https://owner.example';
+  assert.equal(
+    worker.profileCookieHeader(origin, origin + '/protected', [
+      {
+        name: 'session',
+        value: 'private',
+        domain: 'owner.example',
+        path: '/',
+        secure: true,
+        expires: -1,
+      },
+    ]),
+    'session=private',
+  );
+  assert.throws(() =>
+    worker.profileCookieHeader(origin, 'https://foreign.example/protected', []),
+  );
+  assert.deepEqual(
+    worker.profileResponseCookies(origin, origin + '/login', [
+      'session=private; Path=/; HttpOnly; Secure; SameSite=Lax',
+    ]),
+    [
+      {
+        name: 'session',
+        value: 'private',
+        domain: 'owner.example',
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Lax',
+      },
+    ],
+  );
+  assert.throws(() =>
+    worker.profileResponseCookies(origin, origin + '/login', [
+      'session=private; Domain=.example; Path=/',
+    ]),
+  );
+  assert.throws(() =>
+    worker.profileResponseCookies(origin, origin + '/login', [
+      'session=private; Domain=foreign.example; Path=/',
+    ]),
+  );
+});
+
+test('authenticated scope is a separate explicit lane while ordinary public remains GET only', () => {
+  const ordinary = publicScope();
+  ordinary.routes.push({ id: 'sign-in', method: 'POST', path: '/login' });
+  assert.throws(() => validateScope(ordinary));
+  const authenticated = { ...ordinary, authenticated: true };
+  assert.equal(validateScope(authenticated), authenticated);
+});
+
+test(
+  'authenticated persistent profile logs in on controlled site then a fresh worker sees the protected oracle',
+  { timeout: 30000 },
+  async (t) => {
+    const browserExecutable =
+      process.env.ANIMAOS_BROWSER_TEST_EXECUTABLE ??
+      path.join(
+        process.env.LOCALAPPDATA ?? '',
+        'ms-playwright',
+        'chromium_headless_shell-1217',
+        'chrome-headless-shell-win64',
+        'chrome-headless-shell.exe',
+      );
+    try {
+      await filesystem.access(browserExecutable);
+    } catch {
+      t.skip('Pinned Chromium 1217 is not installed');
+      return;
+    }
+    const profileRequire = createRequire(import.meta.url);
+    const { chromium } = profileRequire('playwright-core');
+    const { yaml } = profileRequire('playwright-core/lib/utilsBundle');
+    const directory = await filesystem.mkdtemp(
+      path.join(tmpdir(), 'anima-profile-acceptance-'),
+    );
+    const server = createHttpServer((request, response) => {
+      response.setHeader('content-type', 'text/html');
+      if (request.url === '/login') {
+        response.setHeader(
+          'set-cookie',
+          'session=protected-unique-session; Path=/; HttpOnly; SameSite=Strict',
+        );
+        response.end('<h1>Owner signed in</h1>');
+      } else
+        response.end(
+          request.headers.cookie === 'session=protected-unique-session'
+            ? '<button>PROTECTED-ORACLE-83fc7</button>'
+            : '<h1>Sign in required</h1>',
+        );
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const origin = 'http://127.0.0.1:' + server.address().port;
+    const profile = {
+      id: 'owner-test',
+      revision: 1,
+      digest: 'd'.repeat(64),
+      origin,
+      keyHex: 'a'.repeat(64),
+      sealedPath: path.join(directory, 'state.sealed'),
+      ownerLogin: true,
+      loginRouteId: 'login',
+    };
+    const make = async (ownerLogin) => {
+      const privateRoot = await filesystem.mkdtemp(
+        path.join(directory, 'worker-'),
+      );
+      const supplied = {
+        ...bootstrap(),
+        scope: {
+          ...scope(),
+          origin,
+          authenticated: true,
+          inputIds: [],
+          routes: [
+            { id: 'login', method: 'GET', path: '/login' },
+            { id: 'protected', method: 'GET', path: '/protected' },
+          ],
+        },
+        inputs: [],
+        outputs: [],
+        privateRoot,
+        expiresAtMs: Date.now() + 120000,
+        installation: {
+          id: 'installed-1',
+          browserExecutable,
+          browserSha256: createHash('sha256')
+            .update(await filesystem.readFile(browserExecutable))
+            .digest('hex'),
+        },
+        profile: { ...profile, ownerLogin },
+      };
+      const session = await createMaintainedSession(supplied, {
+        chromium,
+        yaml,
+        environment: {
+          SystemRoot: 'C:\\Windows',
+          WINDIR: 'C:\\Windows',
+          TEMP: privateRoot,
+          TMP: privateRoot,
+        },
+        profileHeadlessForTests: true,
+      });
+      return { session, supplied, privateRoot };
+    };
+    let first, second;
+    try {
+      first = await make(true);
+      await first.session.close();
+      await assert.rejects(filesystem.access(profile.sealedPath));
+      first = await make(true);
+      await filesystem.writeFile(
+        path.join(first.privateRoot, 'profile.finish'),
+        'finish',
+      );
+      await first.session.close();
+      const sealed = await filesystem.readFile(profile.sealedPath, 'utf8');
+      assert.equal(sealed.includes('protected-unique-session'), false);
+      second = await make(false);
+      const message = executeMessage({
+        kind: 'navigate',
+        routeId: 'protected',
+      });
+      message.payload.scopeId = second.supplied.scope.id;
+      message.payload.contextId = second.session.contextId;
+      const result = await second.session.execute(message);
+      assert.ok(
+        result.observation.nodes.some(
+          (node) => node.label === 'PROTECTED-ORACLE-83fc7',
+        ),
+      );
+      assert.equal(
+        JSON.stringify(result).includes('protected-unique-session'),
+        false,
+      );
+      await second.session.close();
+      await filesystem.rm(profile.sealedPath);
+      await assert.rejects(
+        make(false),
+        (error) => error instanceof BrowserWorkerError,
+      );
+      await assert.rejects(filesystem.access(profile.sealedPath));
+    } finally {
+      await first?.session.close();
+      await second?.session.close();
+      await new Promise((resolve) => server.close(resolve));
+      await filesystem.rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'authenticated pinned HTTPS sends exact-origin cookies and bounded POST without weakening ordinary GET',
+  { timeout: 4000 },
+  async (t) => {
+    let received;
+    const peer = await m63TlsPeer(
+      t,
+      'server.pem',
+      async (request, response) => {
+        let body = '';
+        for await (const chunk of request) body += chunk;
+        received = {
+          method: request.method,
+          cookie: request.headers.cookie,
+          origin: request.headers.origin,
+          body,
+        };
+        response.writeHead(200, {
+          'content-type': 'text/html',
+          'set-cookie': 'session=next-private; Path=/; Secure; HttpOnly',
+        });
+        response.end('Signed in');
+      },
+    );
+    const supplied = {
+      ...publicScope(),
+      authenticated: true,
+      routes: [{ id: 'login', method: 'POST', path: '/login' }],
+    };
+    const cookie = worker.profileCookieHeader(
+      supplied.origin,
+      supplied.origin + '/login',
+      [
+        {
+          name: 'session',
+          value: 'prior-private',
+          domain: 'm63-browser.anima.tools',
+          path: '/',
+          secure: true,
+          expires: -1,
+        },
+      ],
+    );
+    const owner = m63Owner(supplied, {
+      requestImpl: peer.requestImpl,
+      cookie,
+      contentType: 'application/x-www-form-urlencoded',
+      body: Buffer.from('code=synthetic-fixture'),
+    });
+    try {
+      const response = await owner.response;
+      await m63Read({ response: Promise.resolve(response) });
+      assert.deepEqual(received, {
+        method: 'POST',
+        cookie: 'session=prior-private',
+        origin: supplied.origin,
+        body: 'code=synthetic-fixture',
+      });
+      assert.equal(
+        worker.profileResponseCookies(
+          supplied.origin,
+          supplied.origin + '/login',
+          response.headers.getSetCookie(),
+        )[0].value,
+        'next-private',
+      );
+    } finally {
+      await owner.close();
+    }
+    assert.throws(() =>
+      worker.createPinnedHttpsRequest(
+        { ...supplied, authenticated: undefined },
+        supplied.routes[0],
+      ),
+    );
+  },
+);
+
+test('authenticated profile key travels only on the private stdin Open handshake', () => {
+  const supplied = bootstrap();
+  supplied.scope.authenticated = true;
+  supplied.profile = {
+    id: 'owner-profile',
+    revision: 1,
+    digest: 'c'.repeat(64),
+    origin: supplied.scope.origin,
+    sealedPath: 'C:\\Users\\owner\\private-profile.sealed',
+    ownerLogin: true,
+    loginRouteId: 'index',
+  };
+  const decoded = parseBootstrap(
+    Buffer.from(JSON.stringify(supplied)),
+    supplied.privateRoot,
+  );
+  assert.equal(Object.hasOwn(decoded.profile, 'keyHex'), false);
+  const opening = openMessage(supplied);
+  opening.payload.profileKey = 'a'.repeat(64);
+  assert.equal(
+    validateOpen(decoded, opening, supplied.expiresAtMs - 1),
+    opening.payload,
+  );
+  const missing = structuredClone(opening);
+  delete missing.payload.profileKey;
+  assert.throws(() => validateOpen(decoded, missing, supplied.expiresAtMs - 1));
+  const diskKey = structuredClone(supplied);
+  diskKey.profile.keyHex = 'a'.repeat(64);
+  assert.throws(() =>
+    parseBootstrap(Buffer.from(JSON.stringify(diskKey)), supplied.privateRoot),
+  );
+  const ordinary = openMessage();
+  ordinary.payload.profileKey = 'a'.repeat(64);
+  assert.throws(() =>
+    validateOpen(bootstrap(), ordinary, bootstrap().expiresAtMs - 1),
+  );
+});
+
+test(
+  'authenticated profiles isolate same-origin login and persist default-path form logout across fresh contexts',
+  { timeout: 30000 },
+  async (t) => {
+    const browserExecutable =
+      process.env.ANIMAOS_BROWSER_TEST_EXECUTABLE ??
+      path.join(
+        process.env.LOCALAPPDATA ?? '',
+        'ms-playwright',
+        'chromium_headless_shell-1217',
+        'chrome-headless-shell-win64',
+        'chrome-headless-shell.exe',
+      );
+    try {
+      await filesystem.access(browserExecutable);
+    } catch {
+      t.skip('Pinned Chromium 1217 is not installed');
+      return;
+    }
+    const profileRequire = createRequire(import.meta.url);
+    const { chromium } = profileRequire('playwright-core');
+    const { yaml } = profileRequire('playwright-core/lib/utilsBundle');
+    const directory = await filesystem.mkdtemp(
+      path.join(tmpdir(), 'anima-profile-isolation-'),
+    );
+    const oracle = 'PROTECTED-ORACLE-profile-isolation-6b381';
+    const sessionSecret = 'private-same-origin-session-53da7';
+    let loginPosts = 0,
+      logoutPosts = 0;
+    const server = createHttpServer((request, response) => {
+      response.setHeader('content-type', 'text/html');
+      if (request.method === 'GET' && request.url === '/app/sign-in')
+        response.end(
+          '<form action="/app/login" method="post"><button>Sign in fixture</button></form>',
+        );
+      else if (request.method === 'POST' && request.url === '/app/login') {
+        loginPosts++;
+        response.setHeader(
+          'set-cookie',
+          'session=' + sessionSecret + '; HttpOnly; SameSite=Strict',
+        );
+        response.end('<h1>Owner signed in</h1>');
+      } else if (request.method === 'POST' && request.url === '/app/logout') {
+        logoutPosts++;
+        assert.equal(request.headers.cookie, 'session=' + sessionSecret);
+        response.setHeader(
+          'set-cookie',
+          'session=; Max-Age=0; HttpOnly; SameSite=Strict',
+        );
+        response.end('<h1>Signed out</h1>');
+      } else if (request.method === 'GET' && request.url === '/app')
+        response.end(
+          request.headers.cookie === 'session=' + sessionSecret
+            ? '<button disabled>' +
+                oracle +
+                '</button><form action="/app/logout" method="post"><button>Sign out fixture</button></form>'
+            : '<h1>Sign in required</h1>',
+        );
+      else {
+        response.statusCode = 404;
+        response.end('Unavailable');
+      }
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const origin = 'http://127.0.0.1:' + server.address().port;
+    const profileA = {
+      id: 'profile-a',
+      revision: 1,
+      digest: 'a'.repeat(64),
+      origin,
+      keyHex: '1'.repeat(64),
+      sealedPath: path.join(directory, 'a.sealed'),
+      loginRouteId: 'sign-in',
+    };
+    const profileB = {
+      id: 'profile-b',
+      revision: 1,
+      digest: 'b'.repeat(64),
+      origin,
+      keyHex: '2'.repeat(64),
+      sealedPath: path.join(directory, 'b.sealed'),
+      loginRouteId: 'sign-in',
+    };
+    const active = [];
+    const make = async (profile, ownerLogin) => {
+      const privateRoot = await filesystem.mkdtemp(
+        path.join(directory, 'context-'),
+      );
+      const supplied = {
+        ...bootstrap(),
+        scope: {
+          ...scope(),
+          origin,
+          authenticated: true,
+          inputIds: [],
+          routes: [
+            { id: 'sign-in', method: 'GET', path: '/app/sign-in' },
+            { id: 'login', method: 'POST', path: '/app/login' },
+            { id: 'protected', method: 'GET', path: '/app' },
+            { id: 'logout', method: 'POST', path: '/app/logout' },
+          ],
+        },
+        inputs: [],
+        outputs: [],
+        privateRoot,
+        expiresAtMs: Date.now() + 120000,
+        installation: {
+          id: 'installed-1',
+          browserExecutable,
+          browserSha256: createHash('sha256')
+            .update(await filesystem.readFile(browserExecutable))
+            .digest('hex'),
+        },
+        profile: { ...profile, ownerLogin },
+      };
+      const session = await createMaintainedSession(supplied, {
+        chromium,
+        yaml,
+        environment: {
+          SystemRoot: 'C:\\Windows',
+          WINDIR: 'C:\\Windows',
+          TEMP: privateRoot,
+          TMP: privateRoot,
+        },
+        profileHeadlessForTests: true,
+      });
+      let id = 0;
+      const context = {
+        session,
+        privateRoot,
+        async execute(operation, prior) {
+          const message = executeMessage(operation, ++id);
+          message.payload.contextId = session.contextId;
+          message.payload.scopeId = supplied.scope.id;
+          if (prior) message.payload.documentWitness = prior.document;
+          return session.execute(message);
+        },
+        async finish() {
+          await filesystem.writeFile(
+            path.join(privateRoot, 'profile.finish'),
+            'finish',
+          );
+          await session.close();
+        },
+      };
+      active.push(context);
+      return context;
+    };
+    const labels = (result) =>
+      result.observation.nodes.map((node) => node.label);
+    try {
+      const setupA = await make(profileA, true);
+      const signIn = await setupA.execute({
+        kind: 'observe',
+        screenshot: false,
+      });
+      const signInButton = signIn.observation.nodes.find(
+        (node) => node.label === 'Sign in fixture',
+      );
+      assert.ok(signInButton);
+      await setupA.execute({ kind: 'click', node: signInButton.node }, signIn);
+      await setupA.finish();
+      assert.equal(loginPosts, 1);
+      const setupB = await make(profileB, true);
+      await setupB.finish();
+      assert.equal(loginPosts, 1);
+      const b = await make(profileB, false);
+      const bResult = await b.execute({
+        kind: 'navigate',
+        routeId: 'protected',
+      });
+      assert.ok(labels(bResult).includes('Sign in required'));
+      assert.equal(labels(bResult).includes(oracle), false);
+      await b.session.close();
+      const freshA = await make(profileA, false);
+      const protectedA = await freshA.execute({
+        kind: 'navigate',
+        routeId: 'protected',
+      });
+      assert.ok(labels(protectedA).includes(oracle));
+      assert.equal(JSON.stringify(protectedA).includes(sessionSecret), false);
+      const signOut = protectedA.observation.nodes.find(
+        (node) => node.label === 'Sign out fixture',
+      );
+      assert.ok(signOut);
+      const signedOut = await freshA.execute(
+        { kind: 'click', node: signOut.node },
+        protectedA,
+      );
+      assert.ok(labels(signedOut).includes('Signed out'));
+      assert.equal(logoutPosts, 1);
+      await freshA.session.close();
+      const afterLogout = await make(profileA, false);
+      const refused = await afterLogout.execute({
+        kind: 'navigate',
+        routeId: 'protected',
+      });
+      assert.ok(labels(refused).includes('Sign in required'));
+      assert.equal(labels(refused).includes(oracle), false);
+      const sealedA = JSON.parse(
+        await filesystem.readFile(profileA.sealedPath, 'utf8'),
+      );
+      assert.equal(
+        worker
+          .openProfileState(profileA, sealedA)
+          .cookies.some((cookie) => cookie.name === 'session'),
+        false,
+      );
+      assert.equal(loginPosts, 1);
+      assert.equal(logoutPosts, 1);
+    } finally {
+      await Promise.allSettled(
+        active.map((context) => context.session.close()),
+      );
+      await new Promise((resolve) => server.close(resolve));
+      await filesystem.rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test('authenticated default cookie path excludes the rightmost slash and matches the exact directory', () => {
+  const origin = 'https://owner.example';
+  for (const [requestPath, defaultPath] of [
+    ['/app/login', '/app'],
+    ['/app/', '/app'],
+    ['/login', '/'],
+    ['/', '/'],
+  ]) {
+    const [cookie] = worker.profileResponseCookies(
+      origin,
+      origin + requestPath,
+      ['session=directory-session; HttpOnly; Secure'],
+    );
+    assert.equal(cookie.path, defaultPath, requestPath);
+    assert.equal(
+      worker.profileCookieHeader(origin, origin + defaultPath, [cookie]),
+      'session=directory-session',
+      requestPath,
+    );
+  }
+  const [expired] = worker.profileResponseCookies(
+    origin,
+    origin + '/app/logout',
+    ['session=; Max-Age=0; HttpOnly; Secure'],
+  );
+  assert.equal(expired.path, '/app');
+  assert.equal(
+    worker.profileCookieHeader(origin, origin + '/app', [expired]),
+    '',
+  );
+});

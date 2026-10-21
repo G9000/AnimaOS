@@ -398,6 +398,7 @@ async fn m46_chat_selection_changed_workspace_fails_before_any_model_or_open() {
             &f.run.agent_id,
             session,
             BrowserSelection {
+                profile_id: None,
                 policy_id: "controlled-operator-policy".into(),
                 selected_input_ids: vec![],
             },

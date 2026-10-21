@@ -24,8 +24,8 @@ fn free_port() -> u16 {
 
 /// `anima <args>` for `home`, without the caller's Anima variables and never
 /// touching the real keychain items.
-fn anima_command(home: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_anima"));
+fn anima_command(executable: &Path, home: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new(executable);
     command.args(args);
     for (key, _) in std::env::vars_os() {
         let key = key.to_string_lossy().into_owned();
@@ -52,6 +52,7 @@ fn anima_command(home: &Path, args: &[&str]) -> Command {
 /// process outlives the test.
 struct Home {
     dir: tempfile::TempDir,
+    executable: PathBuf,
     server_port: u16,
     control_port: u16,
     supervisor: Option<Child>,
@@ -76,6 +77,13 @@ impl Home {
     /// Before `anima setup`: ports, but no workspace.
     fn not_set_up() -> Self {
         let dir = tempfile::tempdir().unwrap();
+        // Update recovery may replace the running binary. Never let one test
+        // move or delete Cargo's shared executable, used by the other tests.
+        let source = Path::new(env!("CARGO_BIN_EXE_anima"));
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let executable = bin.join(source.file_name().unwrap());
+        std::fs::copy(source, &executable).unwrap();
         let (server_port, control_port) = (free_port(), free_port());
         let root = dir.path().join(".animaos-swarm");
         std::fs::create_dir_all(&root).unwrap();
@@ -86,6 +94,7 @@ impl Home {
         .unwrap();
         Self {
             dir,
+            executable,
             server_port,
             control_port,
             supervisor: None,
@@ -106,17 +115,25 @@ impl Home {
     }
 
     fn anima(&self, args: &[&str]) -> Output {
-        common::output(&mut anima_command(self.dir.path(), args), self.dir.path()).unwrap()
+        common::output(
+            &mut anima_command(&self.executable, self.dir.path(), args),
+            self.dir.path(),
+        )
+        .unwrap()
     }
 
     /// Starts `anima supervise --no-tray` and waits until the server runs.
     fn start_supervisor(&mut self) {
         self.supervisor = Some(
-            anima_command(self.dir.path(), &["supervise", "--no-tray"])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .unwrap(),
+            anima_command(
+                &self.executable,
+                self.dir.path(),
+                &["supervise", "--no-tray"],
+            )
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
         );
         self.wait_for_kind("running");
     }
@@ -498,7 +515,7 @@ fn logs_follow_prints_new_lines() {
     std::fs::create_dir_all(&logs).unwrap();
     let file = logs.join("anima.log");
     std::fs::write(&file, "first\n").unwrap();
-    let mut follower = anima_command(home.dir.path(), &["logs", "--follow"])
+    let mut follower = anima_command(&home.executable, home.dir.path(), &["logs", "--follow"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -560,6 +577,7 @@ fn a_pending_update_for_this_version_is_confirmed_once_running() {
     let pending = home.root().join("run").join("update-pending.json");
     std::fs::create_dir_all(pending.parent().unwrap()).unwrap();
     let old = home.root().join("anima.old");
+    std::fs::copy(&home.executable, &old).unwrap();
     std::fs::write(
         &pending,
         json!({ "from": "0.0.1", "to": env!("CARGO_PKG_VERSION"), "old": old }).to_string(),

@@ -55,6 +55,8 @@ struct StartupInput {
     schema_version: u8,
     installation: InstallationInput,
     policies: Vec<PolicyInput>,
+    #[serde(default)]
+    authenticated_policies: Vec<PolicyInput>,
 }
 
 #[derive(Clone)]
@@ -65,7 +67,16 @@ pub(crate) struct VerifiedBrowserSetup {
 pub(crate) fn load_startup_setup(path: &Path) -> Result<VerifiedBrowserSetup, BrowserError> {
     absolute_file(path)?;
     let bytes = read_small(path, 64 * 1024)?;
-    let input: StartupInput = strict_decode(&bytes)?;
+    let mut input: StartupInput = strict_decode(&bytes)?;
+    if input.policies.iter().any(|p| p.template.authenticated)
+        || input
+            .authenticated_policies
+            .iter()
+            .any(|p| !p.template.authenticated)
+    {
+        return Err(error(BrowserErrorCode::Invalid));
+    }
+    input.policies.append(&mut input.authenticated_policies);
     if input.schema_version != 1
         || !valid_id(&input.installation.id)
         || input.policies.is_empty()

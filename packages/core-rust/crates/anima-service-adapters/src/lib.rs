@@ -8,6 +8,7 @@ pub mod connectors;
 pub mod context;
 pub mod document_content;
 pub mod email;
+pub mod paired_devices;
 pub mod speech;
 pub use audio_content::{
     validate_transcript_text, AudioValidationError, TranscriptionAvailability, TranscriptionError,

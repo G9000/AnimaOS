@@ -1,6 +1,11 @@
+#[cfg(test)]
+mod bounded_tests;
 mod edit;
 #[cfg(test)]
 mod edit_tests;
+mod reversible;
+#[cfg(test)]
+mod reversible_tests;
 #[cfg(test)]
 mod tests;
 mod types;
@@ -14,6 +19,7 @@ pub use self::edit::{
     EntityDeletion, MemoryConsolidation, MemoryConsolidationError, MemoryConsolidationSource,
     MemoryDeletion, MemoryPatch,
 };
+pub use self::reversible::{MemoryConsolidationState, PreparedMemoryConsolidation};
 pub use self::types::{
     AgentRelationship, AgentRelationshipOptions, Memory, MemoryContextOptions, MemoryEntity,
     MemoryEntityOptions, MemoryError, MemoryEvaluation, MemoryEvaluationDecision,
@@ -1327,6 +1333,49 @@ impl MemoryManager {
                 });
             }
         }
+    }
+
+    /// Clone only canonical memory records after checking record and total string-byte bounds.
+    /// Graphs and recall statistics are not copied. Used for bounded derived-index work.
+    pub fn bounded_memories(&self, max_records: usize, max_bytes: usize) -> Option<Vec<Memory>> {
+        if self.memories.len() > max_records
+            || self.memories.capacity() > max_records.saturating_mul(8).max(16)
+        {
+            return None;
+        }
+        let mut bytes = 0usize;
+        for m in self.memories.values() {
+            let tag_bytes = m
+                .tags
+                .as_ref()
+                .map_or(0, |tags| tags.len())
+                .checked_mul(std::mem::size_of::<String>())?;
+            bytes = bytes
+                .checked_add(std::mem::size_of::<Memory>())?
+                .checked_add(tag_bytes)?;
+            if bytes > max_bytes {
+                return None;
+            }
+            for text in [&m.id, &m.agent_id, &m.agent_name, &m.content]
+                .into_iter()
+                .chain(m.tags.iter().flatten())
+                .chain(m.room_id.iter())
+                .chain(m.world_id.iter())
+                .chain(m.session_id.iter())
+            {
+                bytes = bytes.checked_add(text.len())?;
+                if bytes > max_bytes {
+                    return None;
+                }
+            }
+        }
+        let mut rows: Vec<_> = self.memories.values().cloned().collect();
+        rows.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        Some(rows)
     }
 
     pub fn snapshot(&self) -> MemoryManagerSnapshot {

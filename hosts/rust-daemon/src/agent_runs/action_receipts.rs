@@ -273,6 +273,48 @@ impl RunActionJournal {
         }
     }
 
+    /// Recheck current execution authority at the actual selected transport boundary.
+    pub(crate) async fn execution_authority(
+        &self,
+        call: &ToolCall,
+        approved: bool,
+    ) -> Result<(), String> {
+        self.check_liveness()?;
+        let shared = self
+            .state
+            .upgrade()
+            .ok_or("Native action owner is unavailable")?;
+        let guard = shared.read().await;
+        self.check_owner(&guard, true)?;
+        let record = guard
+            .runs
+            .get(&self.run.run_id)
+            .ok_or("Execution source run is unavailable")?;
+        let current = guard
+            .get_agent(&self.run.agent_id)
+            .ok_or("Execution owner is unavailable")?
+            .state;
+        if call.name != "execution_run"
+            || record.status != RunStatus::Running
+            || record.parent_run_id.is_some()
+            || record.source == crate::runs::RunSource::Delegation
+            || super::is_helper_config(&current.config)
+            || !current.config.allows_tool("execution_run")
+        {
+            return Err("Selected execution requires a currently granted ordinary run".into());
+        }
+        if !record.action_receipts.iter().any(|r| {
+            r.tool_call_id == call.id && r.name == call.name && r.status == ActionStatus::Started
+        }) {
+            return Err("Execution native action intent is unavailable".into());
+        }
+        match guard.approval_verdict(&current, &self.run.session_id, call) {
+            crate::approvals::Verdict::Allow => Ok(()),
+            crate::approvals::Verdict::Ask if approved => Ok(()),
+            _ => Err("Selected execution is no longer approved".into()),
+        }
+    }
+
     /// One authoritative snapshot for the stricter RPC grant intersection.
     /// No model input supplies the run, wrapper call or captured grant set.
     pub(crate) async fn rpc_authority(

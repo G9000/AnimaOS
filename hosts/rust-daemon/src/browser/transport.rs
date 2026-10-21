@@ -57,6 +57,7 @@ fn now() -> u64 {
 
 #[derive(Clone)]
 pub(crate) struct PreparedBrowserTask {
+    pub(crate) profile: Option<Arc<super::profiles::ProfileSession>>,
     pub(crate) scope: BrowserScope,
     pub(crate) policy_id: String,
     pub(crate) policy_digest: String,
@@ -132,6 +133,9 @@ pub(crate) trait BrowserTransportHandle: Send + Sync {
     ) -> Result<BrowserTransportReply, BrowserError>;
     async fn read_output(&self, artifact: &BrowserArtifact)
         -> Result<VerifiedOutput, BrowserError>;
+    async fn finish_profile_login(&self) -> Result<(), BrowserError> {
+        Err(error(BrowserErrorCode::Denied))
+    }
     async fn close(&self) -> BrowserClose;
 }
 pub(crate) struct BrowserPhysicalRuntime {
@@ -170,6 +174,15 @@ impl PlaywrightTransportFactory {
 impl BrowserTransportFactory for PlaywrightTransportFactory {
     fn bind(&self, task: PreparedBrowserTask) -> Result<BoundBrowserTask, BrowserError> {
         validate_scope(&task.scope)?;
+        if task.scope.authenticated != task.profile.is_some()
+            || task.profile.as_ref().is_some_and(|p| {
+                p.view.origin != task.scope.origin
+                    || p.view.policy_id != task.policy_id
+                    || p.view.revoked
+            })
+        {
+            return Err(error(BrowserErrorCode::Denied));
+        }
         if !valid_id(&task.policy_id)
             || !digest_valid(&task.policy_digest)
             || task.installation_id != self.installation.id
@@ -235,6 +248,11 @@ impl Inner {
         state.view.physical_lease_held = held;
         state.sender = None;
         if close == BrowserClose::Closed {
+            if !held {
+                if let Some(profile) = &self.task.profile {
+                    profile.release();
+                }
+            }
             state.files = None;
         }
         drop(state);
@@ -340,6 +358,28 @@ impl BrowserSession for Session {
 }
 #[async_trait]
 impl BrowserTransportHandle for Handle {
+    async fn finish_profile_login(&self) -> Result<(), BrowserError> {
+        if !self.0.task.profile.as_ref().is_some_and(|p| p.owner_login) {
+            return Err(error(BrowserErrorCode::Denied));
+        }
+        let files = {
+            let state = lock(&self.0.state);
+            if state.view.close.is_some() {
+                return Err(error(BrowserErrorCode::Stale));
+            }
+            state
+                .files
+                .clone()
+                .ok_or_else(|| error(BrowserErrorCode::Unavailable))?
+        };
+        tokio::task::spawn_blocking(move || {
+            crate::tools::workspace_bytes::WorkspaceBytes::open(files.root())
+                .and_then(|root| root.create_new_bytes("profile.finish", b"finish"))
+                .map_err(|_| error(BrowserErrorCode::Unavailable))
+        })
+        .await
+        .map_err(|_| error(BrowserErrorCode::Unavailable))?
+    }
     fn snapshot(&self) -> BrowserTransportSnapshot {
         self.0.snapshot()
     }
@@ -1026,10 +1066,9 @@ async fn actor(
 ) {
     let mut next_id = 1u64;
     let opening = async {
-        let bytes = encoded(next_id, "open", json!({
-            "scope":inner.task.scope,"policyId":inner.task.policy_id,"policyDigest":inner.task.policy_digest,
-            "installationId":inner.task.installation_id,"expiresAtMs":inner.task.expires_at_ms
-        }), inner.task.scope.limits.frame_bytes)?;
+        let mut opening=json!({"scope":inner.task.scope,"policyId":inner.task.policy_id,"policyDigest":inner.task.policy_digest,"installationId":inner.task.installation_id,"expiresAtMs":inner.task.expires_at_ms});
+        if let Some(profile)=&inner.task.profile {opening["profileKey"]=json!(profile.expose_key());}
+        let bytes = encoded(next_id, "open", opening, inner.task.scope.limits.frame_bytes)?;
         write_frame(&mut stdin, &budget, bytes).await?;
         let message = receive(&mut frames, &inner).await?;
         let value = reply_payload(message, next_id, "open", &inner.task.scope, BrowserCounters::default(), &budget)?;
@@ -1146,6 +1185,8 @@ async fn actor(
 struct Reservation {
     _permit: OwnedSemaphorePermit,
     files: Arc<PrivateFiles>,
+    // Quarantine owns this lease until physical shutdown has been proven.
+    _profile: Option<Arc<super::profiles::ProfileSession>>,
 }
 struct Quarantine {
     _reservation: Reservation,
@@ -1258,6 +1299,7 @@ async fn start_windows(inner: Arc<Inner>, control: BrowserControl) -> Result<(),
         reservation: Some(Reservation {
             _permit: permit,
             files: files.clone(),
+            _profile: inner.task.profile.clone(),
         }),
         inner: Arc::downgrade(&inner),
     };
@@ -1267,12 +1309,15 @@ async fn start_windows(inner: Arc<Inner>, control: BrowserControl) -> Result<(),
         state.view.physical_lease_held = true;
         state.operation_deadline = Some(opening_deadline);
     }
-    let bootstrap = json!({
+    let mut bootstrap = json!({
         "protocol":1,"policyId":inner.task.policy_id,"policyDigest":inner.task.policy_digest,
         "scope":inner.task.scope,"expiresAtMs":inner.task.expires_at_ms,
         "installation":{"id":inner.installation.id,"browserExecutable":inner.installation.browser_executable,"browserSha256":inner.installation.browser_sha256},
         "privateRoot":super::files::path_text(files.root())?,"inputs":files.inputs,"outputs":files.outputs
     });
+    if let Some(profile) = &inner.task.profile {
+        bootstrap["profile"] = profile.bootstrap();
+    }
     let bytes = serde_json::to_vec(&bootstrap).map_err(|_| error(BrowserErrorCode::Invalid))?;
     let bootstrap_path = match files.write_bootstrap(&bytes) {
         Ok(path) => path,

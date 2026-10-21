@@ -17,6 +17,7 @@ mod connectors;
 mod contracts;
 mod core_memory;
 mod discord;
+mod doctor;
 mod events;
 mod folder_picker;
 mod foreign_sessions;
@@ -36,7 +37,10 @@ mod mcp_tests;
 mod memories;
 mod memory_edits;
 mod memory_export;
+mod memory_maintenance;
 mod multipart;
+mod paired_devices;
+mod standing_intents;
 pub(crate) use multipart::MAX_FORM_HEADER_BYTES;
 mod oauth_apps;
 mod profile;
@@ -119,6 +123,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         api_health_entry,
         capabilities_entry,
         browser::get,browser::save,browser::stop,browser::list,browser::policies,
+        browser::profiles,browser::create_profile,browser::start_profile_login,browser::finish_profile_login,browser::revoke_profile,
         community_bundles::review,community_bundles::install,community_bundles::list,community_bundles::get,
         community_bundles::update,community_bundles::set_enabled,community_bundles::remove,
         mcp::list, mcp::create, mcp::get, mcp::update, mcp::connect,
@@ -236,6 +241,11 @@ use crate::runtime_model::provider_summaries_with_pool;
         learning_reviews::request_review, learning_reviews::list_reviews,
         learning_reviews::get_review, learning_reviews::cancel_review,
         learning_reviews::decide_proposal, learning_reviews::undo_lesson, learning_reviews::adopt_skill, learning_reviews::get_policy, learning_reviews::set_policy,
+        paired_devices::list, paired_devices::pair, paired_devices::revoke,
+        standing_intents::list, standing_intents::create, standing_intents::update, standing_intents::cancel, standing_intents::undo,
+        doctor::report, doctor::repairs, doctor::repair, doctor::undo, doctor::index, doctor::rebuild,
+        memory_maintenance::policy, memory_maintenance::set_policy, memory_maintenance::sources,
+        memory_maintenance::list, memory_maintenance::review, memory_maintenance::decide, memory_maintenance::undo,
         approvals::list_approvals, approvals::decide_approval, approvals::get_approval_policy,
         approvals::put_approval_policy, autonomy::get_autonomy, autonomy::put_autonomy, coding::stop_app_session, coding::stop_acp_session, coding::cancel_acp_session,
         coding::get_coding_keys, coding::put_coding_keys, coding::list_coding_apps,
@@ -276,6 +286,8 @@ use crate::runtime_model::provider_summaries_with_pool;
         self::contracts::mcp::McpCredentialRequest,
         crate::browser::BrowserSelection,crate::browser::SaveBrowserScope,crate::browser::StopBrowserScope,crate::browser::BrowserScopeEnvelope,crate::browser::BrowserSavedScopeEnvelope,
         crate::browser::BrowserScopesEnvelope,crate::browser::BrowserPoliciesEnvelope,crate::browser::BrowserScopeView,
+        crate::browser::BrowserProfileView,crate::browser::BrowserProfileMutation,crate::browser::CreateBrowserProfile,
+        crate::browser::StartBrowserLogin,crate::browser::BrowserProfileEnvelope,crate::browser::BrowserProfilesEnvelope,
         crate::browser::BrowserScopeState,crate::browser::BrowserPolicyView,crate::browser::BrowserPolicyRouteView,
         crate::browser::BrowserDocumentView,crate::browser::BrowserArtifactView,crate::browser::BrowserArtifactKindView,crate::browser::BrowserLimitsView,
         crate::community_bundles::ReviewRequest,crate::community_bundles::InstallRequest,crate::community_bundles::UpdateRequest,
@@ -845,6 +857,7 @@ fn router_with_services_with_policies_and_integrations(
         guard.browser_service = Some(browser.clone());
         browser
     };
+    browser.set_work_admission_probe(agent_runs.work_admission_probe());
     let agent_runs = agent_runs.with_browser(browser.clone());
     // Background mail installation may acquire the daemon state immediately.
     // Finish synchronous runtime installation before starting that work.
@@ -932,11 +945,25 @@ fn router_with_services_with_policies_and_integrations(
             "/api/agents/{agent_id}/connectors/discord/{connector_id}/outbound/suppress",
             axum::routing::post(discord::suppress),
         )
+        .route("/api/agents/{agent_id}/standing-intents", get(standing_intents::list).post(standing_intents::create))
+        .route("/api/agents/{agent_id}/standing-intents/{intent_id}",axum::routing::put(standing_intents::update))
+        .route("/api/agents/{agent_id}/standing-intents/{intent_id}/cancel",axum::routing::post(standing_intents::cancel))
+        .route("/api/agents/{agent_id}/standing-intents/undo",axum::routing::post(standing_intents::undo))
+        .route("/api/agents/{agent_id}/paired-devices",get(paired_devices::list).post(paired_devices::pair))
+        .route("/api/agents/{agent_id}/paired-devices/{device_id}/revoke",axum::routing::post(paired_devices::revoke))
+        .route("/api/doctor", get(doctor::report))
+        .route("/api/doctor/memory-index",get(doctor::index).post(doctor::rebuild))
+        .route("/api/agents/{agent_id}/doctor/repairs",get(doctor::repairs).post(doctor::repair))
+        .route("/api/agents/{agent_id}/doctor/undo",axum::routing::post(doctor::undo))
         .route("/api/agents/{agent_id}/mcp-connections", get(mcp::list).post(mcp::create))
         .route("/api/agents/{agent_id}/runs/{run_id}/browser-scope",get(browser::get).put(browser::save))
         .route("/api/agents/{agent_id}/runs/{run_id}/browser-scope/stop",axum::routing::post(browser::stop))
         .route("/api/agents/{agent_id}/browser-scopes",get(browser::list))
         .route("/api/agents/{agent_id}/browser-policies",get(browser::policies))
+        .route("/api/agents/{agent_id}/browser-profiles",get(browser::profiles).post(browser::create_profile))
+        .route("/api/agents/{agent_id}/browser-profiles/{profile_id}/sign-in/start",axum::routing::post(browser::start_profile_login))
+        .route("/api/agents/{agent_id}/browser-profiles/{profile_id}/sign-in/finish",axum::routing::post(browser::finish_profile_login))
+        .route("/api/agents/{agent_id}/browser-profiles/{profile_id}/revoke",axum::routing::post(browser::revoke_profile))
         .route("/api/agents/{agent_id}/community-bundles",get(community_bundles::list).post(community_bundles::install))
         .route("/api/agents/{agent_id}/community-bundles/reviews",axum::routing::post(community_bundles::review))
         .route("/api/agents/{agent_id}/community-bundles/{bundle_id}",get(community_bundles::get).patch(community_bundles::set_enabled).delete(community_bundles::remove))
@@ -1064,6 +1091,12 @@ fn router_with_services_with_policies_and_integrations(
             "/api/agents/{agent_id}/learning-policy",
             get(learning_reviews::get_policy).patch(learning_reviews::set_policy),
         )
+        .route("/api/agents/{agent_id}/memory-maintenance/policy", get(memory_maintenance::policy).patch(memory_maintenance::set_policy))
+        .route("/api/agents/{agent_id}/memory-maintenance/sources", axum::routing::post(memory_maintenance::sources))
+        .route("/api/agents/{agent_id}/memory-maintenance/operations", get(memory_maintenance::list))
+        .route("/api/agents/{agent_id}/memory-maintenance/review", axum::routing::post(memory_maintenance::review))
+        .route("/api/agents/{agent_id}/memory-maintenance/operations/{operation_id}", axum::routing::patch(memory_maintenance::decide))
+        .route("/api/agents/{agent_id}/memory-maintenance/operations/{operation_id}/undo", axum::routing::post(memory_maintenance::undo))
         .route(
             "/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}/undo",
             axum::routing::post(learning_reviews::undo_lesson),

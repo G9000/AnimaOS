@@ -54,6 +54,9 @@ pub struct BrowserScope {
         deserialize_with = "present_string"
     )]
     pub public_ipv4_pin: Option<String>,
+    /// Separate owner-authenticated lane; hosts must require a profile witness.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub authenticated: bool,
     pub routes: Vec<BrowserRoute>,
     pub input_ids: Vec<String>,
     pub limits: BrowserLimits,
@@ -428,10 +431,11 @@ pub fn validate_scope(scope: &BrowserScope) -> Result<(), BrowserError> {
             public_hostname(&scope.origin)?;
             public_ipv4_pin(pin)?;
             if !scope.input_ids.is_empty()
-                || scope
-                    .routes
-                    .iter()
-                    .any(|route| route.method != BrowserMethod::Get)
+                || (!scope.authenticated
+                    && scope
+                        .routes
+                        .iter()
+                        .any(|route| route.method != BrowserMethod::Get))
             {
                 return Err(invalid());
             }
@@ -765,6 +769,7 @@ mod tests {
             revision: 1,
             origin: "http://127.0.0.1:41873".into(),
             public_ipv4_pin: None,
+            authenticated: false,
             routes: vec![
                 BrowserRoute {
                     id: "offers".into(),
@@ -818,6 +823,7 @@ mod tests {
             revision: 1,
             origin: "http://127.0.0.1:41873".into(),
             public_ipv4_pin: None,
+            authenticated: false,
             routes: vec![
                 BrowserRoute {
                     id: "offers".into(),

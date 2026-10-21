@@ -31,10 +31,14 @@ use crate::schedules::ScheduledPromptRecord;
 /// execution bounds (FP05); 21 adds bounded pending-origin/final-output evidence
 /// on exact source attempts; 22 adds Discord conversation destinations, response
 /// policy and durable thread-creation claims; 23 adds durable clarification,
-/// recovery lineage and event occurrences; 24 adds workflows, and 25 adds reusable workflow templates. Runtime transport sessions/processes are never persisted. Older
+/// recovery lineage and event occurrences; 24 adds workflows, 25 adds reusable
+/// workflow templates, and 26 adds opt-in memory maintenance with per-cohort
+/// recovery journals, Doctor repair images, standing intentions and paired-node
+/// identity records. Runtime transport sessions/processes are never persisted. Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 25;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 26;
+pub(crate) const PRE_MEMORY_MAINTENANCE_BACKUP_SUFFIX: &str = ".pre-memory-maintenance.bak";
 pub(crate) const PRE_WORKFLOW_TEMPLATES_BACKUP_SUFFIX: &str = ".pre-workflow-templates.bak";
 pub(crate) const PRE_WORKFLOWS_BACKUP_SUFFIX: &str = ".pre-workflows.bak";
 pub(crate) const PRE_COMPANION_INTERACTION_BACKUP_SUFFIX: &str = ".pre-companion-interaction.bak";
@@ -186,6 +190,14 @@ pub(crate) struct ControlPlaneSnapshot {
     pub(crate) learning_reviews: Vec<crate::learning::LearningReviewRecord>,
     #[serde(default)]
     pub(crate) learning_policies: Vec<crate::learning::LearningPolicy>,
+    #[serde(default)]
+    pub(crate) memory_maintenance: crate::memory_maintenance::MaintenanceRegistry,
+    #[serde(default)]
+    pub(crate) doctor: crate::doctor::DoctorRegistry,
+    #[serde(default)]
+    pub(crate) standing_intents: crate::standing_intents::StandingIntentRegistry,
+    #[serde(default)]
+    pub(crate) paired_devices: crate::paired_devices::PairedDevicesSnapshot,
     #[serde(default)]
     pub(crate) clarifications: Vec<crate::clarifications::ClarificationRequest>,
     #[serde(default)]
@@ -479,8 +491,10 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
                 PRE_COMPANION_INTERACTION_BACKUP_SUFFIX
             } else if loaded_version < 24 {
                 PRE_WORKFLOWS_BACKUP_SUFFIX
-            } else {
+            } else if loaded_version < 25 {
                 PRE_WORKFLOW_TEMPLATES_BACKUP_SUFFIX
+            } else {
+                PRE_MEMORY_MAINTENANCE_BACKUP_SUFFIX
             }
         });
         path.with_file_name(name)
@@ -733,6 +747,10 @@ impl ControlPlaneSnapshot {
             side_model: None,
             learning_reviews: vec![],
             learning_policies: vec![],
+            memory_maintenance: crate::memory_maintenance::MaintenanceRegistry::default(),
+            doctor: crate::doctor::DoctorRegistry::default(),
+            standing_intents: crate::standing_intents::StandingIntentRegistry::default(),
+            paired_devices: crate::paired_devices::PairedDevicesSnapshot::default(),
             clarifications: vec![],
             automation_events: vec![],
             conversation_counts: Default::default(),

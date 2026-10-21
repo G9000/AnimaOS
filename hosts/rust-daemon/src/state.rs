@@ -1676,6 +1676,13 @@ pub(crate) struct DaemonState {
         HashMap<String, anima_core::workflow_templates::WorkflowTemplate>,
     pub(crate) runs: crate::runs::RunLedger,
     pub(crate) learning: crate::learning::LearningRegistry,
+    pub(crate) memory_maintenance: crate::memory_maintenance::MaintenanceRegistry,
+    pub(crate) doctor: crate::doctor::DoctorRegistry,
+    pub(crate) standing_intents: crate::standing_intents::StandingIntentRegistry,
+    pub(crate) paired_devices: crate::paired_devices::PairedDevicesSnapshot,
+    pub(crate) standing_intent_slots: Arc<tokio::sync::Semaphore>,
+    pub(crate) doctor_slots: Arc<tokio::sync::Semaphore>,
+    pub(crate) execution: Arc<crate::execution_backends::ExecutionService>,
     pub(crate) clarifications: crate::clarifications::ClarificationRegistry,
     pub(crate) automation_events: crate::schedules::event::EventRegistry,
     /// One actual learning transport worker, shared across coordinators.
@@ -1849,6 +1856,7 @@ impl ControlPlanePersistRequest {
         rows: Vec<crate::mcp::McpConnectionRecord>,
         remove_grants: Option<(String, Vec<String>)>,
     ) -> Option<Self> {
+        self.snapshot.paired_devices.reconcile_mcp(&rows);
         self.snapshot.mcp_connections = rows;
         if let Some((agent_id, aliases)) = &remove_grants {
             let agent = self
@@ -1956,6 +1964,9 @@ impl ControlPlanePersistRequest {
                     })
                     .cloned()
                     .collect();
+                self.snapshot
+                    .paired_devices
+                    .reconcile_mcp(&self.snapshot.mcp_connections);
                 // A later candidate can supersede the last deletion patch.
                 // Derive revocations from the complete settled catalog so an
                 // older prepared configuration cannot resurrect any alias.
@@ -2311,6 +2322,13 @@ impl DaemonState {
             goals: HashMap::new(),
             runs: crate::runs::RunLedger::default(),
             learning: crate::learning::LearningRegistry::default(),
+            memory_maintenance: crate::memory_maintenance::MaintenanceRegistry::default(),
+            doctor: crate::doctor::DoctorRegistry::default(),
+            standing_intents: crate::standing_intents::StandingIntentRegistry::default(),
+            paired_devices: crate::paired_devices::PairedDevicesSnapshot::default(),
+            standing_intent_slots: Arc::new(tokio::sync::Semaphore::new(1)),
+            doctor_slots: Arc::new(tokio::sync::Semaphore::new(1)),
+            execution: Arc::new(crate::execution_backends::ExecutionService::default()),
             clarifications: crate::clarifications::ClarificationRegistry::default(),
             automation_events: crate::schedules::event::EventRegistry::default(),
             learning_slots: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -2608,6 +2626,14 @@ impl DaemonState {
         let learning = self.learning.snapshot();
         snapshot.learning_reviews = learning.reviews;
         snapshot.learning_policies = learning.policies;
+        snapshot.memory_maintenance = self.memory_maintenance.clone();
+        snapshot.doctor = self.doctor.clone();
+        snapshot.standing_intents = self.standing_intents.clone();
+        snapshot.paired_devices = self.paired_devices.clone();
+        snapshot
+            .paired_devices
+            .records
+            .retain(|r| self.agents.contains_key(&r.agent_id));
         snapshot.conversation_counts = learning.conversation_counts;
         snapshot.conversation_turns = learning.conversation_turns;
         snapshot
@@ -2866,6 +2892,10 @@ impl DaemonState {
             &self.live_agent_ids(),
             anima_core::primitives::now_millis(),
         );
+        self.memory_maintenance = snapshot.memory_maintenance;
+        self.doctor = snapshot.doctor;
+        self.standing_intents = snapshot.standing_intents;
+        self.paired_devices = snapshot.paired_devices;
         // Spec §4.8: the runs that waited are interrupted above; the
         // approvals they waited on expire next to them.
         self.approvals = crate::approvals::ApprovalRegistry::restored(
@@ -3004,6 +3034,12 @@ impl DaemonState {
             policies: snapshot.learning_policies.clone(),
             ..crate::learning::LearningSnapshot::default()
         })?;
+        snapshot.memory_maintenance.validate()?;
+        snapshot.doctor.validate()?;
+        snapshot.standing_intents.validate()?;
+        snapshot
+            .paired_devices
+            .validate(&snapshot.mcp_connections, &mcp_owners)?;
         if snapshot.jobs.len() > 200 {
             return Err("job snapshot exceeds the record limit".into());
         }
@@ -3877,6 +3913,9 @@ impl DaemonState {
         if self.agents.contains_key(agent_id) {
             return;
         }
+        self.paired_devices
+            .records
+            .retain(|r| r.agent_id != agent_id);
         self.mcp_registry
             .connections
             .retain(|_, row| row.agent_id != agent_id);

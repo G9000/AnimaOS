@@ -3,11 +3,16 @@ mod browser;
 #[cfg(test)]
 mod browser_tests;
 pub(crate) mod calendar;
+pub(crate) mod catalog;
+#[cfg(test)]
+mod catalog_tests;
 mod checkpoints;
 mod clarify;
 pub(crate) mod completion;
 mod conversations;
+mod doctor;
 mod drive;
+mod execution;
 mod filesystem;
 mod mail;
 mod mcp;
@@ -16,6 +21,7 @@ mod mcp_tests;
 mod memory;
 pub(crate) mod process;
 mod skills;
+mod standing_intents;
 mod team;
 #[cfg(test)]
 mod tests;
@@ -79,11 +85,15 @@ struct ToolRegistration {
 #[derive(Clone)]
 pub(crate) struct ToolExecutionContext {
     pub(super) mcp: Option<crate::mcp::McpManager>,
+    pub(super) tool_catalog: Option<Arc<catalog::RunToolCatalog>>,
+    pub(super) execution: Arc<crate::execution_backends::ExecutionService>,
     pub(super) mcp_stamp: Option<crate::mcp::McpDispatchStamp>,
     pub(super) browser: Option<crate::browser::BrowserService>,
     pub(super) browser_stamp: Option<crate::browser::BrowserDispatchStamp>,
     pub(super) team: Option<crate::agent_runs::AgentRunCoordinator>,
     pub(super) can_delegate: bool,
+    /// Host-proven local owner turn; caller metadata cannot establish this.
+    pub(super) standing_owner_turn: bool,
     pub(super) helper_starts: Arc<AtomicUsize>,
     delegated_parent: Option<String>,
     pub(super) peer_route: Option<anima_core::AgentCommunicationRoute>,
@@ -187,11 +197,14 @@ impl ToolExecutionContext {
     ) -> Self {
         Self {
             mcp: None,
+            tool_catalog: None,
+            execution: Arc::new(crate::execution_backends::ExecutionService::default()),
             mcp_stamp: None,
             browser: None,
             browser_stamp: None,
             team: None,
             can_delegate: false,
+            standing_owner_turn: false,
             helper_starts: Arc::new(AtomicUsize::new(0)),
             delegated_parent: None,
             peer_route: None,
@@ -229,6 +242,11 @@ impl ToolExecutionContext {
             tool_rpc_service: crate::tool_rpc::ToolRpcService::disabled(),
             owner_time_zone: crate::clock::OwnerTimeZone::default(),
         }
+    }
+
+    pub(crate) fn with_standing_owner_turn(mut self, owner: bool) -> Self {
+        self.standing_owner_turn = owner;
+        self
     }
 
     pub(crate) fn with_owner_time_zone(mut self, zone: crate::clock::OwnerTimeZone) -> Self {
@@ -353,6 +371,22 @@ impl ToolExecutionContext {
 
     pub(crate) fn with_rpc_fence(mut self, fence: crate::tool_rpc::RpcGrantFence) -> Self {
         self.rpc_fence = Some(fence);
+        self
+    }
+
+    pub(crate) fn with_execution_service(
+        mut self,
+        execution: Arc<crate::execution_backends::ExecutionService>,
+    ) -> Self {
+        self.execution = execution;
+        self
+    }
+
+    pub(crate) fn with_tool_catalog(
+        mut self,
+        catalog: Option<Arc<catalog::RunToolCatalog>>,
+    ) -> Self {
+        self.tool_catalog = catalog;
         self
     }
 
@@ -563,6 +597,9 @@ impl ToolExecutionContext {
                     journal.arm_test_final_rpc_authority_read();
                     self.live_checks(&agent, &tool_call).await?;
                 }
+                // Catalog source grants are captured at run construction, so
+                // recheck them after the final awaited ownership/receipt fence.
+                self.revalidate_catalog(&agent, &tool_call).await?;
                 Ok::<(), TaskResult<Content>>(())
             }
             .await;
@@ -608,6 +645,24 @@ impl ToolExecutionContext {
         result
     }
 
+    async fn revalidate_catalog(
+        &self,
+        agent: &AgentState,
+        call: &ToolCall,
+    ) -> Result<(), TaskResult<Content>> {
+        if let Some(catalog) = &self.tool_catalog {
+            let run = self
+                .run_link
+                .as_ref()
+                .ok_or_else(|| TaskResult::error("Run tool catalog scope is unavailable", 0))?;
+            catalog
+                .check(agent, run, &call.name)
+                .await
+                .map_err(|error| TaskResult::error(error, 0))?;
+        }
+        Ok(())
+    }
+
     /// The checks every call passes before it may run, and again after an
     /// approval: the tool is configured, a helper runs no process tool, and a
     /// delegating manager or peer still permits it.
@@ -616,6 +671,16 @@ impl ToolExecutionContext {
         agent: &AgentState,
         tool_call: &ToolCall,
     ) -> Result<(), TaskResult<Content>> {
+        self.revalidate_catalog(agent, tool_call).await?;
+        // The catalog bounds these read controls by the captured opt-in and
+        // upstream identities; every discovered target retains live source grants.
+        let derived_discovery_control = self.tool_catalog.as_ref().is_some_and(|catalog| {
+            catalog.derived_control(
+                &tool_call.name,
+                self.delegated_parent.as_deref(),
+                &self.peer_sources,
+            )
+        });
         if let Some(fence) = &self.rpc_fence {
             let (Some(run), Some(journal), Some(gate), Some(cancel)) = (
                 &self.run_link,
@@ -681,9 +746,10 @@ impl ToolExecutionContext {
                     0,
                 ));
             };
-            if !coordinator
-                .parent_allows_tool(parent_id, &tool_call.name)
-                .await
+            if !derived_discovery_control
+                && !coordinator
+                    .parent_allows_tool(parent_id, &tool_call.name)
+                    .await
             {
                 return Err(TaskResult::error(
                     "The manager no longer has permission for this delegated tool",
@@ -698,7 +764,9 @@ impl ToolExecutionContext {
                     0,
                 ));
             };
-            if !coordinator.peer_allows_tool(source, &tool_call.name).await {
+            if !derived_discovery_control
+                && !coordinator.peer_allows_tool(source, &tool_call.name).await
+            {
                 return Err(TaskResult::error(
                     "An originating agent no longer permits this peer tool action",
                     0,
@@ -736,6 +804,7 @@ pub(crate) fn is_process_tool(name: &str) -> bool {
     matches!(
         name,
         "execute_code"
+            | "execution_run"
             | "bash"
             | "bg_start"
             | "bg_output"
@@ -1775,6 +1844,10 @@ impl ToolRegistry {
             optional_parameter("limit", bounded_integer_parameter("Page byte limit, 1 to 8192", 1, 8192)),
         ])), tool_results::handle);
         browser::register(&mut registry);
+        catalog::register(&mut registry);
+        doctor::register(&mut registry);
+        standing_intents::register(&mut registry);
+        execution::register(&mut registry);
         registry
     }
 

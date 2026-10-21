@@ -194,6 +194,17 @@ impl std::fmt::Debug for KeyPool {
 }
 
 impl KeyPool {
+    /// Nonblocking, redacted configuration observation; never opens a credential vault.
+    pub(crate) fn configured_provider_count(&self) -> Option<usize> {
+        self.inner.try_lock().ok().map(|inner| {
+            inner
+                .providers
+                .values()
+                .filter(|s| !s.keys.is_empty())
+                .count()
+        })
+    }
+
     /// Opens the pool. `env` maps provider id to the key read from the environment.
     /// A malformed key file is an error rather than being overwritten.
     pub(crate) fn open(

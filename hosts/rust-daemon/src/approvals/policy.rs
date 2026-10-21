@@ -13,6 +13,13 @@ use super::{
 /// arrive in M5 and M6.
 const READ_TOOLS: &[&str] = &[
     "clarify",
+    "search_tools",
+    "describe_tool",
+    "doctor_report",
+    "doctor_repairs",
+    "list_standing_intents",
+    "execution_targets",
+    "execution_status",
     "read_file",
     "checkpoint_list",
     "read_document",
@@ -51,6 +58,12 @@ const READ_TOOLS: &[&str] = &[
 /// Connectors.
 const WRITE_TOOLS: &[&str] = &[
     "write_file",
+    "doctor_repair",
+    "doctor_undo",
+    "create_standing_intent",
+    "update_standing_intent",
+    "cancel_standing_intent",
+    "undo_standing_intent",
     "checkpoint_restore",
     "edit_file",
     "multi_edit",
@@ -82,6 +95,7 @@ const EXEC_TOOLS: &[&str] = &[
     "create_workflow",
     "run_workflow_template",
     "execute_code",
+    "execution_run",
     "bash",
     "bg_start",
     "bg_stop",

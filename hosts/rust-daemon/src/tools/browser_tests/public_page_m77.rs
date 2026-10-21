@@ -529,6 +529,7 @@ async fn m77_windows_public_page_content_oracle() {
                     &agent_id,
                     &base.run.run_id,
                     SaveBrowserScope {
+                        profile_id: None,
                         policy_id: "m77-public-page".into(),
                         selected_input_ids: vec![],
                         enabled: true,

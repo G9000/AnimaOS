@@ -143,3 +143,90 @@ pub(super) async fn policies(
         Err(e) => error(e),
     }
 }
+
+fn profile_result(result: Result<BrowserProfileView, BrowserServiceError>) -> Response {
+    match result {
+        Ok(profile) => no_store(json_response(
+            StatusCode::OK,
+            &BrowserProfileEnvelope { profile },
+        )),
+        Err(e) => error(e),
+    }
+}
+#[utoipa::path(get,path="/api/agents/{agent_id}/browser-profiles",tag="browser",params(("agent_id"=String,Path)),responses((status=200,description="Owner dedicated browser profiles; credentials are never returned",body=BrowserProfilesEnvelope)))]
+pub(super) async fn profiles(
+    State(state): State<AppState>,
+    Path(agent): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(r) = authorize(&state, &request, true) {
+        return r;
+    }
+    match state.browser.list_profiles(&agent).await {
+        Ok(profiles) => no_store(json_response(
+            StatusCode::OK,
+            &BrowserProfilesEnvelope { profiles },
+        )),
+        Err(e) => error(e),
+    }
+}
+#[utoipa::path(post,path="/api/agents/{agent_id}/browser-profiles",tag="browser",params(("agent_id"=String,Path)),request_body=CreateBrowserProfile,responses((status=200,description="Dedicated exact-origin profile created without opening a browser",body=BrowserProfileEnvelope)))]
+pub(super) async fn create_profile(
+    State(state): State<AppState>,
+    Path(agent): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(r) = authorize(&state, &request, false) {
+        return r;
+    }
+    let input = match body::<CreateBrowserProfile>(&state, request).await {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    profile_result(state.browser.create_profile(&agent, input).await)
+}
+#[utoipa::path(post,path="/api/agents/{agent_id}/browser-profiles/{profile_id}/sign-in/start",tag="browser",params(("agent_id"=String,Path),("profile_id"=String,Path)),request_body=StartBrowserLogin,responses((status=200,description="Dedicated visible owner sign-in browser opened",body=BrowserProfileEnvelope)))]
+pub(super) async fn start_profile_login(
+    State(state): State<AppState>,
+    Path((agent, id)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(r) = authorize(&state, &request, false) {
+        return r;
+    }
+    let input = match body::<StartBrowserLogin>(&state, request).await {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    profile_result(state.browser.start_profile_login(&agent, &id, input).await)
+}
+#[utoipa::path(post,path="/api/agents/{agent_id}/browser-profiles/{profile_id}/sign-in/finish",tag="browser",params(("agent_id"=String,Path),("profile_id"=String,Path)),request_body=BrowserProfileMutation,responses((status=200,description="Owner confirmed sign-in sealed and browser physically closed",body=BrowserProfileEnvelope)))]
+pub(super) async fn finish_profile_login(
+    State(state): State<AppState>,
+    Path((agent, id)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(r) = authorize(&state, &request, false) {
+        return r;
+    }
+    let input = match body::<BrowserProfileMutation>(&state, request).await {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    profile_result(state.browser.finish_profile_login(&agent, &id, input).await)
+}
+#[utoipa::path(post,path="/api/agents/{agent_id}/browser-profiles/{profile_id}/revoke",tag="browser",params(("agent_id"=String,Path),("profile_id"=String,Path)),request_body=BrowserProfileMutation,responses((status=200,description="Profile revoked and all owned browser workers closed",body=BrowserProfileEnvelope)))]
+pub(super) async fn revoke_profile(
+    State(state): State<AppState>,
+    Path((agent, id)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(r) = authorize(&state, &request, false) {
+        return r;
+    }
+    let input = match body::<BrowserProfileMutation>(&state, request).await {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    profile_result(state.browser.revoke_profile(&agent, &id, input).await)
+}

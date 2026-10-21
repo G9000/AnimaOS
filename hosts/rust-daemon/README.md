@@ -131,6 +131,8 @@ returns `{ sessionId, title, messageCount, alreadyImported }` (`201` new,
 `200` already imported; `404` unknown agent or handle, `409` helper agent,
 `422` no readable messages). All three are owner-only and `no-store`.
 
+The [native runtime capability guide](../../docs/companion/runtime-capabilities.md) covers memory maintenance, authenticated profiles, deferred discovery, selected execution, Doctor, standing intentions and paired nodes.
+
 ## API route inventory
 
 This marked inventory follows `ApiDoc::openapi()`. Detailed authorization and limits
@@ -195,6 +197,9 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/events`                                                              |
 | `GET`    | `/api/agents/{agent_id}/jobs`                                                                |
 | `GET`    | `/api/agents/{agent_id}/learning-policy`                                                     |
+| `GET`    | `/api/agents/{agent_id}/memory-maintenance/policy` |
+| `GET`    | `/api/agents/{agent_id}/browser-profiles` |
+| `GET`    | `/api/agents/{agent_id}/memory-maintenance/operations` |
 | `GET`    | `/api/agents/{agent_id}/learning-reviews`                                                    |
 | `GET`    | `/api/agents/{agent_id}/learning-reviews/{review_id}`                                        |
 | `GET`    | `/api/agents/{agent_id}/mcp-connections`                                                     |
@@ -273,6 +278,8 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `PATCH`  | `/api/agents/{agent_id}/connectors/discord/{connector_id}`                                   |
 | `PATCH`  | `/api/agents/{agent_id}/core-memory/{block}/{entry_id}`                                      |
 | `PATCH`  | `/api/agents/{agent_id}/learning-policy`                                                     |
+| `PATCH`  | `/api/agents/{agent_id}/memory-maintenance/policy` |
+| `PATCH`  | `/api/agents/{agent_id}/memory-maintenance/operations/{operation_id}` |
 | `PATCH`  | `/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}`                |
 | `PATCH`  | `/api/agents/{agent_id}/mcp-connections/{connection_id}`                                     |
 | `PATCH`  | `/api/agents/{agent_id}/mcp-connections/{connection_id}/grants/{alias}`                      |
@@ -319,6 +326,13 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/jobs/{job_id}/retry`                                                 |
 | `POST`   | `/api/agents/{agent_id}/jobs/{job_id}/review`                                                |
 | `POST`   | `/api/agents/{agent_id}/learning-reviews/{review_id}/cancel`                                 |
+| `POST`   | `/api/agents/{agent_id}/memory-maintenance/sources` |
+| `POST`   | `/api/agents/{agent_id}/browser-profiles` |
+| `POST`   | `/api/agents/{agent_id}/browser-profiles/{profile_id}/sign-in/start` |
+| `POST`   | `/api/agents/{agent_id}/browser-profiles/{profile_id}/sign-in/finish` |
+| `POST`   | `/api/agents/{agent_id}/browser-profiles/{profile_id}/revoke` |
+| `POST`   | `/api/agents/{agent_id}/memory-maintenance/review` |
+| `POST`   | `/api/agents/{agent_id}/memory-maintenance/operations/{operation_id}/undo` |
 | `POST`   | `/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}/skill-draft`    |
 | `POST`   | `/api/agents/{agent_id}/learning-reviews/{review_id}/proposals/{proposal_id}/undo`           |
 | `POST`   | `/api/agents/{agent_id}/main-chat`                                                           |
@@ -404,6 +418,21 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET` | `/api/agents/{agent_id}/tool-results/{artifact_id}/download` | Download a saved result |
 | `GET` | `/api/skills/{slug}/learning` |
 | `POST` | `/api/skills/{slug}/feedback` |
+| `GET` | `/api/doctor` |
+| `GET` | `/api/doctor/memory-index` |
+| `POST` | `/api/doctor/memory-index` |
+| `GET` | `/api/agents/{agent_id}/doctor/repairs` |
+| `POST` | `/api/agents/{agent_id}/doctor/repairs` |
+| `POST` | `/api/agents/{agent_id}/doctor/undo` |
+| `GET` | `/api/agents/{agent_id}/standing-intents` |
+| `POST` | `/api/agents/{agent_id}/standing-intents` |
+| `PUT` | `/api/agents/{agent_id}/standing-intents/{intent_id}` |
+| `POST` | `/api/agents/{agent_id}/standing-intents/{intent_id}/cancel` |
+| `POST` | `/api/agents/{agent_id}/standing-intents/undo` |
+| `GET` | `/api/agents/{agent_id}/paired-devices` |
+| `POST` | `/api/agents/{agent_id}/paired-devices` |
+| `POST` | `/api/agents/{agent_id}/paired-devices/{device_id}/revoke` |
+
 <!-- openapi-route-inventory:end -->
 
 ### Current workspace report downloads
@@ -618,7 +647,7 @@ Refresh has a ten-second total bound, returns `409` while another refresh is act
 and reports metadata failure as unavailable/stale without changing saved agents.
 Catalog presence is metadata, not proof of model/tool acceptance. New selection is
 deliberate; existing/custom model strings and grants remain unchanged until Save.
-The registered OpenAPI inventory now contains 259 operations, including explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
+The registered OpenAPI inventory now contains 285 operations, including dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
 
 ### Agents
 

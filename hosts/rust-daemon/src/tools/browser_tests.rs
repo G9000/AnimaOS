@@ -293,6 +293,7 @@ impl ExecutorFixture {
                 &base.run.agent_id,
                 &base.run.run_id,
                 SaveBrowserScope {
+                    profile_id: None,
                     policy_id: "controlled-operator-policy".into(),
                     selected_input_ids: vec![],
                     enabled: true,
@@ -388,6 +389,7 @@ impl ExecutorFixture {
                 &self.agent.id,
                 session,
                 browser::BrowserSelection {
+                    profile_id: None,
                     policy_id: "controlled-operator-policy".into(),
                     selected_input_ids: vec![],
                 },
@@ -1085,6 +1087,7 @@ async fn m46_normal_chat_terminal_retires_browser_and_retains_accepted_csv() {
             agent,
             session,
             browser::BrowserSelection {
+                profile_id: None,
                 policy_id: "controlled-operator-policy".into(),
                 selected_input_ids: vec![],
             },
@@ -1532,6 +1535,7 @@ async fn m46_windows_real_browser_quote_oracle() {
                 &agent_id,
                 &base.run.run_id,
                 SaveBrowserScope {
+                    profile_id: None,
                     policy_id: "controlled-operator-policy".into(),
                     selected_input_ids: vec![criteria.id.clone()],
                     enabled: true,
@@ -1787,6 +1791,7 @@ async fn m46_windows_real_browser_quote_oracle() {
                     &agent_id,
                     &link.run_id,
                     SaveBrowserScope {
+                        profile_id: None,
                         policy_id: "controlled-operator-policy".into(),
                         selected_input_ids: vec![],
                         enabled: true,
@@ -2038,6 +2043,7 @@ fn m64_public_scope(pin: &str) -> BrowserScope {
         revision: 1,
         origin: "https://example.com".into(),
         public_ipv4_pin: Some(pin.into()),
+        authenticated: false,
         routes: vec![BrowserRoute {
             id: "page".into(),
             method: BrowserMethod::Get,
@@ -2576,6 +2582,7 @@ async fn m64_windows_public_example_dom_oracle() {
                 &agent_id,
                 &base.run.run_id,
                 SaveBrowserScope {
+                    profile_id: None,
                     policy_id: "m64-public-example".into(),
                     selected_input_ids: vec![],
                     enabled: true,

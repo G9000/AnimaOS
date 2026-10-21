@@ -1,7 +1,12 @@
 // M46 bounded worker. Imports expose pure helpers; only the explicit CLI loads
 // the maintained engine. Physical process ownership remains with the native host.
 import { createRequire } from 'node:module';
-import { createHash } from 'node:crypto';
+import {
+  createHash,
+  createCipheriv,
+  createDecipheriv,
+  randomBytes,
+} from 'node:crypto';
 import { randomUUID } from 'node:crypto';
 import { win32 as windowsPath } from 'node:path';
 import path from 'node:path';
@@ -425,7 +430,9 @@ export function validateScope(scope) {
     'inputIds',
     'limits',
     ...(pinned ? ['publicIpv4Pin'] : []),
+    ...(Object.hasOwn(scope ?? {}, 'authenticated') ? ['authenticated'] : []),
   ]);
+  if (Object.hasOwn(scope, 'authenticated')) boolean(scope.authenticated);
   identifier(scope.id);
   integer(scope.revision);
   if (pinned) {
@@ -445,7 +452,7 @@ export function validateScope(scope) {
     exact(route, ['id', 'method', 'path']);
     identifier(route.id);
     if (route.method !== 'GET' && route.method !== 'POST') fail();
-    if (pinned && route.method !== 'GET') fail();
+    if (pinned && !scope.authenticated && route.method !== 'GET') fail();
     routePath(route.path);
     const pair = route.method + ' ' + route.path;
     if (routeIds.has(route.id) || pairs.has(pair)) fail();
@@ -588,7 +595,32 @@ export function parseBootstrap(input, privateCwd) {
     'privateRoot',
     'inputs',
     'outputs',
+    ...(Object.hasOwn(bootstrap, 'profile') ? ['profile'] : []),
   ]);
+  if (bootstrap.profile) {
+    const profile = bootstrap.profile;
+    exact(profile, [
+      'id',
+      'revision',
+      'digest',
+      'origin',
+      'sealedPath',
+      'ownerLogin',
+      'loginRouteId',
+    ]);
+    profileAad(profile);
+    absolutePath(profile.sealedPath);
+    boolean(profile.ownerLogin);
+    identifier(profile.loginRouteId);
+    if (
+      bootstrap.scope?.authenticated !== true ||
+      profile.origin !== bootstrap.scope.origin ||
+      !bootstrap.scope.routes.some(
+        (route) => route.id === profile.loginRouteId && route.method === 'GET',
+      )
+    )
+      fail('denied');
+  } else if (bootstrap.scope?.authenticated) fail('denied');
   if (bootstrap.protocol !== PROTOCOL_VERSION) fail('protocol');
   identifier(bootstrap.policyId);
   hash(bootstrap.policyDigest);
@@ -657,7 +689,9 @@ function request(message) {
       'policyDigest',
       'installationId',
       'expiresAtMs',
+      ...(payload.scope?.authenticated ? ['profileKey'] : []),
     ]);
+    if (payload.scope?.authenticated) hash(payload.profileKey);
     validateScope(payload.scope);
     identifier(payload.policyId);
     hash(payload.policyDigest);
@@ -1226,7 +1260,12 @@ export function guardRequest(scope, intercepted, window) {
     denied();
   // Only trusted navigation admission or the worker's typed download can issue
   // public requests. Listed page fetches/resources do not gain that authority.
-  if (scope.publicIpv4Pin && !intercepted.navigation && !intercepted.download)
+  if (
+    scope.publicIpv4Pin &&
+    !scope.authenticated &&
+    !intercepted.navigation &&
+    !intercepted.download
+  )
     denied();
   return freeze({ id: route.id, method: route.method, path: route.path });
 }
@@ -1529,6 +1568,203 @@ async function loadBootstrap(filePath, privateCwd) {
       true,
     );
   return bootstrap;
+}
+
+// Authentication is host-issued custody, never page or model data. Cookie domains
+// deliberately use exact host equality: parent-domain and sibling reuse is denied.
+export function profileCookieHeader(origin, target, cookies) {
+  const url = new URL(target);
+  if (url.origin !== origin) fail('denied');
+  const now = Date.now() / 1000;
+  return cookies
+    .filter((cookie) => {
+      if (cookie.domain !== url.hostname || !cookie.path?.startsWith('/'))
+        fail('denied');
+      if (
+        !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(cookie.name) ||
+        /[;\r\n\x00-\x20\x7f]/.test(cookie.value)
+      )
+        fail('denied');
+      return (
+        (!cookie.secure || url.protocol === 'https:') &&
+        (cookie.expires === undefined ||
+          cookie.expires === -1 ||
+          cookie.expires > now) &&
+        (url.pathname === cookie.path ||
+          url.pathname.startsWith(
+            cookie.path.endsWith('/') ? cookie.path : cookie.path + '/',
+          ))
+      );
+    })
+    .map((cookie) => cookie.name + '=' + cookie.value)
+    .join('; ');
+}
+export function profileResponseCookies(origin, target, values) {
+  const url = new URL(target);
+  if (url.origin !== origin) fail('denied');
+  cap(values.length, 64);
+  return values.map((value) => {
+    if (
+      typeof value !== 'string' ||
+      Buffer.byteLength(value) > 4096 ||
+      /[\r\n\x00]/.test(value)
+    )
+      fail('denied');
+    const [pair, ...attributes] = value.split(';');
+    const split = pair.indexOf('=');
+    if (split < 1) fail('denied');
+    const cookie = {
+      name: pair.slice(0, split).trim(),
+      value: pair.slice(split + 1).trim(),
+      domain: url.hostname,
+      // RFC 6265 section 5.1.4 excludes the rightmost slash.
+      path: url.pathname.slice(0, url.pathname.lastIndexOf('/')) || '/',
+      httpOnly: false,
+      secure: false,
+      sameSite: 'Lax',
+    };
+    let maxAge;
+    for (const attribute of attributes) {
+      const [rawName, ...parts] = attribute.trim().split('=');
+      const item = parts.join('=').trim();
+      switch (rawName.toLowerCase()) {
+        case 'domain':
+          if (item.toLowerCase() !== url.hostname) fail('denied');
+          break;
+        case 'path':
+          if (!item.startsWith('/')) fail('denied');
+          cookie.path = item;
+          break;
+        case 'httponly':
+          cookie.httpOnly = true;
+          break;
+        case 'secure':
+          cookie.secure = true;
+          break;
+        case 'samesite': {
+          const match = ['Strict', 'Lax', 'None'].find(
+            (x) => x.toLowerCase() === item.toLowerCase(),
+          );
+          if (!match) fail('denied');
+          cookie.sameSite = match;
+          break;
+        }
+        case 'max-age':
+          if (!/^-?[0-9]+$/.test(item)) fail('denied');
+          maxAge = Number(item);
+          if (!Number.isSafeInteger(maxAge)) fail('denied');
+          break;
+        case 'expires': {
+          const expiry = Date.parse(item);
+          if (!Number.isFinite(expiry)) fail('denied');
+          cookie.expires = Math.max(1, expiry / 1000);
+          break;
+        }
+        case 'partitioned':
+          fail('denied');
+      }
+    }
+    if (maxAge !== undefined)
+      cookie.expires = Math.max(1, Date.now() / 1000 + maxAge);
+    profileCookieHeader(origin, target, [cookie]);
+    if (cookie.secure && url.protocol !== 'https:') fail('denied');
+    if (cookie.sameSite === 'None' && !cookie.secure) fail('denied');
+    if (cookie.name.startsWith('__Secure-') && !cookie.secure) fail('denied');
+    if (
+      cookie.name.startsWith('__Host-') &&
+      (!cookie.secure ||
+        cookie.path !== '/' ||
+        attributes.some((x) => /^domain=/i.test(x.trim())))
+    )
+      fail('denied');
+    return cookie;
+  });
+}
+function profileAad(profile) {
+  identifier(profile.id);
+  integer(profile.revision);
+  hash(profile.digest);
+  const url = new URL(profile.origin);
+  if (url.origin !== profile.origin) fail('denied');
+  return Buffer.from(
+    JSON.stringify({
+      id: profile.id,
+      revision: profile.revision,
+      digest: profile.digest,
+      origin: profile.origin,
+    }),
+  );
+}
+function validateProfileState(profile, state) {
+  exact(state, ['cookies', 'origins']);
+  array(state.cookies, 64);
+  array(state.origins, 1);
+  profileCookieHeader(profile.origin, profile.origin + '/', state.cookies);
+  for (const item of state.origins) {
+    if (item.origin !== profile.origin) fail('denied');
+    exact(item, ['origin', 'localStorage']);
+    array(item.localStorage, 64);
+  }
+  cap(Buffer.byteLength(JSON.stringify(state)), 32768);
+  return state;
+}
+export function sealProfileState(profile, state) {
+  hash(profile.keyHex);
+  validateProfileState(profile, state);
+  const iv = randomBytes(12),
+    cipher = createCipheriv(
+      'aes-256-gcm',
+      Buffer.from(profile.keyHex, 'hex'),
+      iv,
+    );
+  cipher.setAAD(profileAad(profile));
+  const plaintext = Buffer.from(JSON.stringify(state));
+  try {
+    return {
+      version: 1,
+      iv: iv.toString('hex'),
+      data: Buffer.concat([cipher.update(plaintext), cipher.final()]).toString(
+        'base64',
+      ),
+      ...{ tag: cipher.getAuthTag().toString('hex') },
+    };
+  } finally {
+    plaintext.fill(0);
+  }
+}
+export function openProfileState(profile, sealed) {
+  hash(profile.keyHex);
+  exact(sealed, ['version', 'iv', 'tag', 'data']);
+  if (
+    sealed.version !== 1 ||
+    !/^[a-f0-9]{24}$/.test(sealed.iv) ||
+    !/^[a-f0-9]{32}$/.test(sealed.tag) ||
+    typeof sealed.data !== 'string'
+  )
+    fail('denied');
+  cap(Buffer.byteLength(sealed.data), 48000);
+  const decipher = createDecipheriv(
+    'aes-256-gcm',
+    Buffer.from(profile.keyHex, 'hex'),
+    Buffer.from(sealed.iv, 'hex'),
+  );
+  decipher.setAAD(profileAad(profile));
+  decipher.setAuthTag(Buffer.from(sealed.tag, 'hex'));
+  let plaintext;
+  try {
+    plaintext = Buffer.concat([
+      decipher.update(Buffer.from(sealed.data, 'base64')),
+      decipher.final(),
+    ]);
+    return validateProfileState(
+      profile,
+      JSON.parse(plaintext.toString('utf8')),
+    );
+  } catch {
+    fail('denied');
+  } finally {
+    plaintext?.fill(0);
+  }
 }
 
 function snapshotKey(key) {
@@ -1908,7 +2144,7 @@ export async function createDenyProxy({ signal, onRequest, onFailure } = {}) {
 export function createPinnedHttpsRequest(
   scope,
   route,
-  { signal, requestImpl = httpsRequest } = {},
+  { signal, requestImpl = httpsRequest, cookie, contentType, body } = {},
 ) {
   validateScope(scope);
   if (
@@ -1916,7 +2152,8 @@ export function createPinnedHttpsRequest(
     !scope.routes.some(
       (candidate) =>
         candidate.id === route?.id &&
-        candidate.method === 'GET' &&
+        candidate.method === route.method &&
+        (scope.authenticated || candidate.method === 'GET') &&
         candidate.path === route.path,
     )
   )
@@ -2005,9 +2242,19 @@ export function createPinnedHttpsRequest(
       hostname: scope.publicIpv4Pin,
       port: 443,
       path: route.path,
-      method: 'GET',
+      method: route.method,
       servername: hostname,
-      headers: { Host: hostname, 'Accept-Encoding': 'identity' },
+      headers: {
+        Host: hostname,
+        'Accept-Encoding': 'identity',
+        ...(scope.authenticated && cookie ? { Cookie: cookie } : {}),
+        ...(scope.authenticated && contentType
+          ? { 'Content-Type': contentType }
+          : {}),
+        ...(scope.authenticated && route.method === 'POST'
+          ? { Origin: scope.origin }
+          : {}),
+      },
       rejectUnauthorized: true,
       agent: false,
       maxHeaderSize: 8192,
@@ -2052,7 +2299,9 @@ export function createPinnedHttpsRequest(
         void close();
       }
     });
-    request.end();
+    request.end(
+      scope.authenticated && route.method === 'POST' ? body : undefined,
+    );
   } catch {
     reject();
     void close();
@@ -2105,6 +2354,7 @@ export async function createMaintainedSession(bootstrap, dependencies) {
     fatal,
     expectPage = false,
     expectedNavigation;
+  let profileLoaded = false;
   let currentUrl = 'about:blank';
   let actionsUsed = 0,
     serial = 0,
@@ -2144,6 +2394,38 @@ export async function createMaintainedSession(bootstrap, dependencies) {
         await startup;
         await disposeTokens();
         let failed = false;
+        if (bootstrap.profile && context && profileLoaded && !fatal) {
+          try {
+            const profile = bootstrap.profile;
+            let save = !profile.ownerLogin;
+            if (profile.ownerLogin) {
+              try {
+                const marker = await filesystem.readFile(
+                  windowsPath.join(bootstrap.privateRoot, 'profile.finish'),
+                  'utf8',
+                );
+                save = marker === 'finish';
+              } catch {}
+            }
+            if (save) {
+              const sealed = sealProfileState(
+                profile,
+                await context.storageState(),
+              );
+              const stage = profile.sealedPath + '.' + randomUUID() + '.tmp';
+              const file = await filesystem.open(stage, 'wx', 0o600);
+              try {
+                await file.writeFile(JSON.stringify(sealed));
+                await file.sync();
+              } finally {
+                await file.close();
+              }
+              await filesystem.rename(stage, profile.sealedPath);
+            }
+          } catch {
+            failed = true;
+          }
+        }
         try {
           if (context)
             await context.close({ reason: 'Browser worker stopped' });
@@ -2226,7 +2508,27 @@ export async function createMaintainedSession(bootstrap, dependencies) {
   }
   async function guardedResponse(intercepted, headers = {}, body) {
     network.nowMs = now();
+    if (bootstrap.profile?.ownerLogin) {
+      network.effectActive = true;
+      if (intercepted.navigation) {
+        const candidate = scope.routes.find(
+          (route) =>
+            scope.origin + route.path === intercepted.url &&
+            route.method === intercepted.method,
+        );
+        network.navigationRouteId = candidate?.id;
+        network.navigationRemaining = 1;
+      }
+    }
     const target = guardRequest(scope, intercepted, network);
+    const targetUrl = scope.origin + target.path;
+    const cookie = bootstrap.profile
+      ? profileCookieHeader(
+          scope.origin,
+          targetUrl,
+          await context.cookies(targetUrl),
+        )
+      : undefined;
     if (intercepted.navigation) expectedNavigation = scope.origin + target.path;
     timeout();
     const controller = new AbortController();
@@ -2257,6 +2559,9 @@ export async function createMaintainedSession(bootstrap, dependencies) {
         publicOwner = createPinnedHttpsRequest(scope, target, {
           signal: controller.signal,
           requestImpl: dependencies.httpsRequestImpl,
+          cookie,
+          contentType: headers['content-type'],
+          body,
         });
         publicRequests.add(publicOwner); // No yield between dispatch and ownership.
         response = await publicOwner.response;
@@ -2267,6 +2572,10 @@ export async function createMaintainedSession(bootstrap, dependencies) {
           signal: controller.signal,
           headers: {
             'accept-encoding': 'identity',
+            ...(cookie ? { cookie } : {}),
+            ...(bootstrap.profile && target.method === 'POST'
+              ? { origin: scope.origin }
+              : {}),
             ...(headers['content-type']
               ? { 'content-type': headers['content-type'] }
               : {}),
@@ -2288,6 +2597,14 @@ export async function createMaintainedSession(bootstrap, dependencies) {
         responseControl,
       );
       timeout();
+      if (bootstrap.profile) {
+        const received = profileResponseCookies(
+          scope.origin,
+          targetUrl,
+          response.headers.getSetCookie(),
+        );
+        if (received.length) await context.addCookies(received);
+      }
       return bounded;
     } finally {
       clearTimeout(timer);
@@ -2676,7 +2993,7 @@ export async function createMaintainedSession(bootstrap, dependencies) {
         retire(failure.code);
       throw failure;
     } finally {
-      network.effectActive = false;
+      network.effectActive = bootstrap.profile?.ownerLogin === true;
       network.navigationRemaining = 0;
       network.navigationRouteId = undefined;
       network.downloadRouteId = undefined;
@@ -2721,25 +3038,51 @@ export async function createMaintainedSession(bootstrap, dependencies) {
       },
     });
     timeout();
-    browser = await chromium.launch({
+    const launchOptions = {
       executablePath: bootstrap.installation.browserExecutable,
       chromiumSandbox: true,
-      headless: true,
+      headless: bootstrap.profile?.ownerLogin
+        ? dependencies.profileHeadlessForTests === true
+        : true,
       env: environment,
       downloadsPath: downloadDirectory,
       proxy: { server: denyProxy.server },
       timeout: Math.min(10000, remaining),
-    });
-    timeout();
-    context = await browser.newContext({
+    };
+    const contextOptions = {
       serviceWorkers: 'block',
       acceptDownloads: false,
       viewport: { width: 1024, height: 768 },
       permissions: [],
       ignoreHTTPSErrors: false,
       bypassCSP: false,
-      ...(scope.publicIpv4Pin ? { javaScriptEnabled: false } : {}),
-    });
+      ...(scope.publicIpv4Pin && !scope.authenticated
+        ? { javaScriptEnabled: false }
+        : {}),
+    };
+    if (bootstrap.profile) {
+      context = await chromium.launchPersistentContext(
+        windowsPath.join(bootstrap.privateRoot, 'profile-context'),
+        { ...launchOptions, ...contextOptions },
+      );
+      try {
+        const sealed = JSON.parse(
+          await filesystem.readFile(bootstrap.profile.sealedPath, 'utf8'),
+        );
+        await context.setStorageState(
+          openProfileState(bootstrap.profile, sealed),
+        );
+      } catch (error) {
+        if (!(bootstrap.profile.ownerLogin && error.code === 'ENOENT'))
+          throw error;
+      }
+      profileLoaded = true;
+      for (const startupPage of context.pages()) await startupPage.close();
+    } else {
+      browser = await chromium.launch(launchOptions);
+      timeout();
+      context = await browser.newContext(contextOptions);
+    }
     timeout();
     context.setDefaultTimeout(10000);
     await context.exposeBinding(report, () => retire('denied'));
@@ -2778,6 +3121,21 @@ export async function createMaintainedSession(bootstrap, dependencies) {
     if (page !== created || expectPage) fail('unavailable');
     timeout();
     await documentMarker();
+    if (bootstrap.profile?.ownerLogin) {
+      const login = scope.routes.find(
+        (route) =>
+          route.id === bootstrap.profile.loginRouteId && route.method === 'GET',
+      );
+      if (!login) fail('denied');
+      network.effectActive = true;
+      network.navigationRouteId = login.id;
+      network.navigationRemaining = 1;
+      expectedNavigation = scope.origin + login.path;
+      await page.goto(expectedNavigation, {
+        waitUntil: 'domcontentloaded',
+        timeout: timeout(),
+      });
+    }
     finishStartup();
     return {
       contextId,
@@ -2882,6 +3240,7 @@ export async function runProtocol(bootstrap, input, output, createSession) {
         session = await createSession(
           (failure) => stop(failure),
           cancellation.signal,
+          message.payload.profileKey,
         );
         if (publicationStopped || closeRequested) {
           await session.close();
@@ -2968,10 +3327,16 @@ export async function runCli(options = {}) {
     const bootstrapPath = parseCliArguments(argv, cwd);
     const browserEnvironment = validateWorkerEnvironment(environment, cwd);
     const bootstrap = await loadBootstrap(bootstrapPath, cwd);
-    const runtime = async (onFatal, signal) => {
+    const runtime = async (onFatal, signal, profileKey) => {
       const { chromium } = await import('playwright-core');
       const { yaml } = require('playwright-core/lib/utilsBundle');
-      return createMaintainedSession(bootstrap, {
+      const authenticatedBootstrap = bootstrap.profile
+        ? {
+            ...bootstrap,
+            profile: { ...bootstrap.profile, keyHex: profileKey },
+          }
+        : bootstrap;
+      return createMaintainedSession(authenticatedBootstrap, {
         chromium,
         yaml,
         environment: browserEnvironment,

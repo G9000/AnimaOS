@@ -1,6 +1,9 @@
 //! End-to-end executor witnesses for owner-reviewed MCP tools, using both a
 //! fake transport and a controlled native stdio peer at the approval boundary.
 
+#[path = "catalog_mcp_tests.rs"]
+mod tool_discovery_catalog_tests;
+
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -55,6 +58,7 @@ fn descriptor() -> anima_core::ExternalToolDescriptor {
 
 #[derive(Default)]
 struct FakeFactory {
+    discovery_descriptor: Arc<StdMutex<Option<anima_core::ExternalToolDescriptor>>>,
     calls: Arc<AtomicUsize>,
     hold_calls: AtomicBool,
     is_error: AtomicBool,
@@ -62,6 +66,7 @@ struct FakeFactory {
 }
 
 struct FakeSession {
+    discovery_descriptor: Arc<StdMutex<Option<anima_core::ExternalToolDescriptor>>>,
     calls: Arc<AtomicUsize>,
     hold_calls: bool,
     is_error: bool,
@@ -76,6 +81,7 @@ impl McpTransportFactory for FakeFactory {
     ) -> BoxFuture<'static, Result<Arc<dyn McpTransportSession>, McpTransportError>> {
         assert!(matches!(launch, ValidatedMcpLaunch::Http(_)));
         let session = Arc::new(FakeSession {
+            discovery_descriptor: self.discovery_descriptor.clone(),
             calls: self.calls.clone(),
             hold_calls: self.hold_calls.load(Ordering::SeqCst),
             is_error: self.is_error.load(Ordering::SeqCst),
@@ -91,10 +97,16 @@ impl McpTransportSession for FakeSession {
         &self,
         _control: TransportControl,
     ) -> BoxFuture<'static, Result<McpDiscovery, McpTransportError>> {
-        Box::pin(async {
+        let descriptor = self
+            .discovery_descriptor
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(descriptor);
+        Box::pin(async move {
             Ok(McpDiscovery {
                 protocol_version: "2025-11-25".into(),
-                tools: vec![descriptor()],
+                tools: vec![descriptor],
             })
         })
     }
@@ -154,6 +166,7 @@ struct BundleWitness {
 impl Fixture {
     async fn new(policy: PolicyAction, hold_calls: bool, is_error: bool) -> Self {
         let factory = Arc::new(FakeFactory {
+            discovery_descriptor: Arc::new(StdMutex::new(None)),
             calls: Arc::new(AtomicUsize::new(0)),
             hold_calls: AtomicBool::new(hold_calls),
             is_error: AtomicBool::new(is_error),

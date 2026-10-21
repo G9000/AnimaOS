@@ -138,6 +138,35 @@ describe('AnimaAppCard', () => {
     expect(screen.queryByRole('button', { name: 'Restart' })).toBeNull();
   });
 
+  it('counts native learning, repair, command, and sign-in work during a drain', async () => {
+    await renderCard(
+      mockClient(
+        draining({
+          memoryReviews: 1,
+          doctorRepairs: 1,
+          standingIntentChanges: 1,
+          executionJobs: 1,
+          mcpOperations: 1,
+          browserProfileLogins: 1,
+        }),
+      ),
+    );
+
+    expect(screen.getByText('Waiting for 6 tasks to finish')).toBeVisible();
+    for (const label of [
+      'Learning reviews',
+      'Repairs',
+      'Saved instruction changes',
+      'Commands',
+      'Connected tool operations',
+      'Browser sign-ins',
+    ]) {
+      expect(screen.getByText(`${label}: 1`)).toBeVisible();
+    }
+    expect(screen.getByRole('button', { name: 'Stop now' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeVisible();
+  });
+
   it('names what happens after the drain', async () => {
     await renderCard(mockClient(draining({ jobs: 1 })));
 

@@ -23,6 +23,7 @@ pub use external_tools::{
     ExternalToolError, ExternalToolResult,
 };
 pub mod filesystem_checkpoints;
+pub mod guarded_repair;
 pub mod interaction;
 pub mod learn;
 pub mod memory;
@@ -35,8 +36,11 @@ pub mod runtime;
 mod runtime_serde;
 pub mod skill_learning;
 pub mod skill_packages;
+pub mod standing_intents;
 pub mod structured_tasks;
 pub mod tool_rpc;
+pub mod tool_selection;
+pub use tool_selection::ModelToolSelector;
 pub mod workflow_templates;
 pub mod workflows;
 pub use workflows::{

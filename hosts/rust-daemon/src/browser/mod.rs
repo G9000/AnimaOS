@@ -11,3 +11,9 @@ pub(crate) use records::*;
 pub(crate) use service::{
     BrowserDispatchStamp, BrowserService, PreparedBrowserSelection, UnavailableBrowserPort,
 };
+
+mod profiles;
+pub(crate) use profiles::{
+    BrowserProfileEnvelope, BrowserProfileMutation, BrowserProfileView, BrowserProfilesEnvelope,
+    CreateBrowserProfile, StartBrowserLogin,
+};

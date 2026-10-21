@@ -17,12 +17,24 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
-use cli::{Cli, Command};
+use cli::{Cli, Command, NodeAction};
 use supervisor::Action;
 
 fn main() -> ExitCode {
     // Worker re-exec must be recognised before clap sees the arguments.
     let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    if arguments
+        .iter()
+        .any(|a| a.to_string_lossy().starts_with("--execution-worker-"))
+    {
+        if arguments.len() != 1 || arguments[0] != "--execution-worker-v1" {
+            return report(Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "execution worker requires exactly --execution-worker-v1",
+            )));
+        }
+        return report(anima_daemon::execution_worker_entry());
+    }
     if arguments
         .iter()
         .any(|argument| argument.to_string_lossy().starts_with("--document-worker-"))
@@ -37,6 +49,9 @@ fn main() -> ExitCode {
     }
 
     match Cli::parse().command {
+        Some(Command::Node {
+            action: NodeAction::Serve { config },
+        }) => report(anima_daemon::node_serve(&config)),
         Some(Command::BuildInfo) => {
             println!(
                 "{}",

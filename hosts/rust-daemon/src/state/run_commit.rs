@@ -62,6 +62,7 @@ impl DaemonState {
         )
         .with_tool_results(self.tool_result_store())
         .with_tool_rpc_service(self.tool_rpc_service.clone())
+        .with_execution_service(self.execution.clone())
         .with_checkpoint_root(self.checkpoint_root.clone())
         .with_owner_time_zone(self.owner_time_zone.clone())
         .with_mail(self.mail_manager.as_ref().and_then(|mail| mail.upgrade()))

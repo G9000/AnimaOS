@@ -20,7 +20,30 @@ No-op patches, ambiguous replacements and duplicate new procedures are refused. 
 
 Completed reviews with an unfinished handoff are reconciled after restart. A linked pending Free draft can resume through the same fresh checks; a rejected/approved draft is never recreated. Review dismissal and version changes continue to fence installation.
 
-The owner can inspect and approve/reject drafts in **Skills** and use the existing undo action for automatic changes. Maintenance never deletes, archives, disables or changes permissions automatically.
+The owner can inspect and approve/reject drafts in **Skills** and use the existing undo action for automatic changes. Skill observations never delete, archive, disable or change permissions automatically.
+
+## Background memory maintenance
+
+Memory maintenance has a separate default-off policy, including in Free autonomy. It reviews one bounded group of two to eight same-scope Facts, with at most two attempts per rolling 24 hours and a six-hour automatic cadence. Failed, cancelled and interrupted attempts still consume their reservation. One physical model slot is shared with learning reviews. The reviewer has no tools, receives at most 12 KiB of source evidence, and may return no change. Later eligible groups take priority over groups already reviewed.
+
+Only the authenticated owner can approve exact source records for background use. Model tags, imported and legacy records establish no provenance. Editing an approved record changes its semantic fingerprint and removes its eligibility until the owner approves that version. Core-tagged memories, world/session records, hidden or flagged text, and oversized metadata are excluded. An explicit manual preview can select legacy sources without granting them automatic trust.
+
+Strict and Custom leave a proposal pending. Free applies only when its separately enabled policy, source provenance and current autonomy still permit it. Applying adds one summary Fact and retains the source IDs and text as Reflections. This is a model-generated summary, not independently verified truth. The owner can dismiss a pending review or undo an applied consolidation, including after restarting the daemon.
+
+The owner API is rooted at `/api/agents/{agent_id}/memory-maintenance`:
+
+| Operation | Request |
+| --- | --- |
+| Inspect or change opt-in | `GET /policy`; `PATCH /policy` with `enabled` and `expectedRevision` |
+| Approve current source records | `POST /sources` with `memoryIds` (one to eight IDs) |
+| Inspect review and Undo history | `GET /operations` |
+| Request a bounded review | `POST /review` with `{}` or `sourceIds` for a manual legacy preview |
+| Accept or dismiss a proposal | `PATCH /operations/{id}` with `expectedRevision` and `decision: "accept"` or `"dismiss"` |
+| Reverse an applied consolidation | `POST /operations/{id}/undo` with `expectedRevision` |
+
+Use each returned operation's current revision for the next decision. Disabling the policy dismisses running and pending reviews and prevents late results from applying. It does not discard Undo records. All these routes require local owner authorization and return `Cache-Control: no-store`.
+
+The control plane saves exact before/after images before either apply or Undo writes the memory store. Restart compares only that operation's records and never replays an uncertain mutation: unchanged records become interrupted, exact applied records are finalized, and changed records require review. Undo preserves unrelated memories and recall statistics, and refuses intervening edits or new graph citations to the summary. Persistence errors return an unavailable result; inspect the journal before retrying. Version 26 backs up a version-25 JSON control plane as `.pre-memory-maintenance.bak` before upgrading it.
 
 ## Explicit learning and packages
 

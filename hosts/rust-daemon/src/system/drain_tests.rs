@@ -55,14 +55,21 @@ fn in_flight_totals_every_category_and_serializes_camel_case() {
         background_processes: 6,
         app_sessions: 7,
         acp_sessions: 8,
+        memory_reviews: 9,
+        doctor_repairs: 10,
+        standing_intent_changes: 11,
+        execution_jobs: 12,
+        mcp_operations: 13,
+        browser_profile_logins: 14,
     };
-    assert_eq!(in_flight.total(), 36);
+    assert_eq!(in_flight.total(), 105);
     assert_eq!(InFlight::default().total(), 0);
     assert_eq!(
         serde_json::to_value(in_flight).unwrap(),
         serde_json::json!({
             "chatRuns": 1, "queuedRuns": 2, "swarmRuns": 3, "helperRuns": 4,
             "jobs": 5, "backgroundProcesses": 6, "appSessions": 7, "acpSessions": 8,
+            "memoryReviews": 9, "doctorRepairs": 10, "standingIntentChanges": 11, "executionJobs": 12, "mcpOperations": 13, "browserProfileLogins": 14,
         })
     );
 }

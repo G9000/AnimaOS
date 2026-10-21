@@ -48,6 +48,7 @@ tower-http = { version = "0.6", features = ["request-id", "timeout", "trace"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time", "process", "io-util"] }
 tempfile = "=3.27.0"
 tokio-util = { version = "=0.7.18", features = ["rt"] }
+tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring", "tls12"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4"] }
@@ -60,9 +61,6 @@ twilight-model = "=0.17.1"
 [target.'cfg(windows)'.dependencies]
 rfd = "0.17.2"
 win-custody = "=0.1.1"
-
-[dev-dependencies]
-tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring", "tls12"] }
 
 [[example]]
 name = "document_worker_peer"
@@ -78,3 +76,11 @@ workspace = true
 # Only `anima` ships in releases (dist-workspace.toml).
 [package.metadata.dist]
 dist = false
+
+[[example]]
+name = "execution_backend_peer"
+path = "tests/fixtures/execution_backend_peer.rs"
+
+[[example]]
+name = "paired_node_peer"
+path = "tests/fixtures/paired_node_peer.rs"

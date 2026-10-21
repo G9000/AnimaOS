@@ -33,6 +33,12 @@ const IN_FLIGHT_LABELS: [keyof SystemInFlight, string][] = [
   ['backgroundProcesses', 'Background processes'],
   ['appSessions', 'App sessions'],
   ['acpSessions', 'Coding-agent sessions'],
+  ['memoryReviews', 'Learning reviews'],
+  ['doctorRepairs', 'Repairs'],
+  ['standingIntentChanges', 'Saved instruction changes'],
+  ['executionJobs', 'Commands'],
+  ['mcpOperations', 'Connected tool operations'],
+  ['browserProfileLogins', 'Browser sign-ins'],
 ];
 
 const NOW_LABELS: Partial<Record<SystemAction, string>> = {
@@ -55,7 +61,7 @@ const withV = (version: string) =>
   version.startsWith('v') ? version : `v${version}`;
 
 const total = (inFlight: SystemInFlight) =>
-  IN_FLIGHT_LABELS.reduce((sum, [key]) => sum + inFlight[key], 0);
+  IN_FLIGHT_LABELS.reduce((sum, [key]) => sum + (inFlight[key] ?? 0), 0);
 
 function stateLabel(status: SupervisorStatusJson): string {
   const { state } = status;
@@ -276,7 +282,7 @@ export function AnimaAppCard({
                 } to finish`}
           </p>
           <ul className="system-card-details">
-            {IN_FLIGHT_LABELS.filter(([key]) => state.inFlight[key] > 0).map(
+            {IN_FLIGHT_LABELS.filter(([key]) => (state.inFlight[key] ?? 0) > 0).map(
               ([key, label]) => (
                 <li key={key}>
                   {label}: {state.inFlight[key]}

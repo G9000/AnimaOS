@@ -1140,3 +1140,99 @@ async fn m47_coding_unproven_effects_keep_started_and_block_later_dispatch() {
         "physical uncertainty must not forge a saved owner Stop"
     );
 }
+
+#[cfg(windows)]
+#[tokio::test]
+async fn execution_current_journal_refuses_revoke_and_stop_after_waiting_for_authority_lock() {
+    use crate::execution_backends::{ExecutionRequest, ExecutionScope, ExecutionService};
+    for stopped in [false, true] {
+        let f = ActionFixture::new("execution-current-authority", true).await;
+        {
+            let mut g = f.coordinator.state.write().await;
+            let runtime = g.agents.get_mut(&f.agent.id).unwrap();
+            let mut config = runtime.config().clone();
+            config.tools = Some(
+                crate::tools::ToolRegistry::new()
+                    .resolve_descriptors(["execution_run"])
+                    .unwrap(),
+            );
+            runtime.replace_config(config);
+            g.approvals.set_policy(
+                &f.agent.id,
+                ApprovalPolicy::default().with(RiskClass::Exec, PolicyAction::Allow),
+            );
+        }
+        let call = ToolCall {
+            id: "execution-delayed-authority".into(),
+            name: "execution_run".into(),
+            args: BTreeMap::from([
+                (
+                    "targetId".into(),
+                    DataValue::String("selected-local".into()),
+                ),
+                (
+                    "command".into(),
+                    DataValue::String("echo should-never-run>execution-authority.txt".into()),
+                ),
+            ]),
+        };
+        f.journal.begin(&call).await.unwrap();
+        let entered = Arc::new(Semaphore::new(0));
+        let journal = f.journal.clone();
+        let reached = entered.clone();
+        let scope = ExecutionScope {
+            agent_id: f.agent.id.clone(),
+            authority: Arc::new(move || {
+                let journal = journal.clone();
+                let call = call.clone();
+                let reached = reached.clone();
+                Box::pin(async move {
+                    reached.add_permits(1);
+                    journal.execution_authority(&call, true).await
+                })
+            }),
+        };
+        let executable = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32")
+            .join("cmd.exe");
+        let service=ExecutionService::from_json(&serde_json::json!({"version":1,"targets":[{"id":"selected-local","label":"Controlled local authority witness","backend":{"kind":"local","executable":executable,"arguments":["/d","/s","/c"],"workspaceRoot":f.root}}]}).to_string()).unwrap();
+        let mut guard = f.coordinator.state.write().await;
+        let runner = service.clone();
+        let pending = tokio::spawn(async move {
+            runner
+                .execute_scoped(
+                    ExecutionRequest {
+                        target_id: "selected-local".into(),
+                        command: "echo should-never-run>execution-authority.txt".into(),
+                        cwd: ".".into(),
+                        timeout_ms: 1000,
+                    },
+                    None,
+                    scope,
+                )
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), entered.acquire())
+            .await
+            .unwrap()
+            .unwrap()
+            .forget();
+        if stopped {
+            guard.runs.get_mut(&f.run.run_id).unwrap().stop =
+                Some(crate::runs::RunStopRequest { requested_at_ms: 1 });
+        } else {
+            let runtime = guard.agents.get_mut(&f.agent.id).unwrap();
+            let mut config = runtime.config().clone();
+            config.tools = Some(vec![]);
+            runtime.replace_config(config);
+        }
+        drop(guard);
+        assert!(tokio::time::timeout(Duration::from_secs(5), pending)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err());
+        assert!(!f.root.join("execution-authority.txt").exists());
+        assert_eq!(service.in_flight_count(), 0);
+    }
+}

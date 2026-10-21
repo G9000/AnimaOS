@@ -42,7 +42,81 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 259, "complete registered operation count");
+    assert_eq!(actual.len(), 285, "complete registered operation count");
+    let runtime_capability_additions = [
+        ("GET", "/api/doctor"),
+        ("GET", "/api/doctor/memory-index"),
+        ("POST", "/api/doctor/memory-index"),
+        ("GET", "/api/agents/{agent_id}/doctor/repairs"),
+        ("POST", "/api/agents/{agent_id}/doctor/repairs"),
+        ("POST", "/api/agents/{agent_id}/doctor/undo"),
+        ("GET", "/api/agents/{agent_id}/standing-intents"),
+        ("POST", "/api/agents/{agent_id}/standing-intents"),
+        ("PUT", "/api/agents/{agent_id}/standing-intents/{intent_id}"),
+        (
+            "POST",
+            "/api/agents/{agent_id}/standing-intents/{intent_id}/cancel",
+        ),
+        ("POST", "/api/agents/{agent_id}/standing-intents/undo"),
+        ("GET", "/api/agents/{agent_id}/paired-devices"),
+        ("POST", "/api/agents/{agent_id}/paired-devices"),
+        (
+            "POST",
+            "/api/agents/{agent_id}/paired-devices/{device_id}/revoke",
+        ),
+    ];
+    for (method, path) in runtime_capability_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "runtime capability operation must be registered"
+        );
+    }
+    let browser_profile_additions = [
+        ("GET", "/api/agents/{agent_id}/browser-profiles"),
+        ("POST", "/api/agents/{agent_id}/browser-profiles"),
+        (
+            "POST",
+            "/api/agents/{agent_id}/browser-profiles/{profile_id}/sign-in/start",
+        ),
+        (
+            "POST",
+            "/api/agents/{agent_id}/browser-profiles/{profile_id}/sign-in/finish",
+        ),
+        (
+            "POST",
+            "/api/agents/{agent_id}/browser-profiles/{profile_id}/revoke",
+        ),
+    ];
+    for (method, path) in browser_profile_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "browser profile operation must be registered"
+        );
+    }
+    let maintenance_additions = [
+        ("GET", "/api/agents/{agent_id}/memory-maintenance/policy"),
+        ("PATCH", "/api/agents/{agent_id}/memory-maintenance/policy"),
+        (
+            "GET",
+            "/api/agents/{agent_id}/memory-maintenance/operations",
+        ),
+        ("POST", "/api/agents/{agent_id}/memory-maintenance/sources"),
+        ("POST", "/api/agents/{agent_id}/memory-maintenance/review"),
+        (
+            "PATCH",
+            "/api/agents/{agent_id}/memory-maintenance/operations/{operation_id}",
+        ),
+        (
+            "POST",
+            "/api/agents/{agent_id}/memory-maintenance/operations/{operation_id}/undo",
+        ),
+    ];
+    for (method, path) in maintenance_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "memory maintenance operation must be registered"
+        );
+    }
     let skill_learning_additions = [
         ("GET", "/api/skills/{slug}/learning"),
         ("POST", "/api/skills/{slug}/feedback"),
@@ -337,6 +411,9 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             .iter()
             .filter(|(method, path)| {
                 !skill_learning_additions.contains(&(method.as_str(), path.as_str()))
+                    && !maintenance_additions.contains(&(method.as_str(), path.as_str()))
+                    && !browser_profile_additions.contains(&(method.as_str(), path.as_str()))
+                    && !runtime_capability_additions.contains(&(method.as_str(), path.as_str()))
                     && !reusable_additions.contains(&(method.as_str(), path.as_str()))
                     && !workflow_additions.contains(&(method.as_str(), path.as_str()))
                     && !coding_additions.contains(&(method.as_str(), path.as_str()))
@@ -406,7 +483,10 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                 && !memory_export_additions.contains(&(method.as_str(), path.as_str()))
                 && !discord_interaction_additions.contains(&(method.as_str(), path.as_str()))
                 && !durable_work_additions.contains(&(method.as_str(), path.as_str()))
-                && !reminder_additions.contains(&(method.as_str(), path.as_str())))
+                && !reminder_additions.contains(&(method.as_str(), path.as_str()))
+                && !maintenance_additions.contains(&(method.as_str(), path.as_str()))
+                && !browser_profile_additions.contains(&(method.as_str(), path.as_str()))
+                && !runtime_capability_additions.contains(&(method.as_str(), path.as_str())))
             .count(),
         188,
         "pre-M49 registered operations remain present"

@@ -94,6 +94,7 @@ pub(crate) struct TransportControl {
     pub(crate) cancel: CancellationToken,
     pub(crate) wire_budget: Arc<WireBudget>,
     pub(super) dispatched: Arc<AtomicBool>,
+    pub(crate) node_invocation: Option<anima_service_adapters::paired_devices::NodeInvocation>,
 }
 impl TransportControl {
     pub(crate) fn new(deadline: Instant, cancel: CancellationToken) -> Self {
@@ -102,6 +103,7 @@ impl TransportControl {
             cancel,
             wire_budget: Arc::new(WireBudget(AtomicUsize::new(0))),
             dispatched: Arc::new(AtomicBool::new(false)),
+            node_invocation: None,
         }
     }
     pub(super) fn check(&self) -> Result<(), McpTransportError> {
@@ -919,14 +921,21 @@ pub(super) async fn request_sdk<F>(
 where
     F: Fn(McpTransportError) -> McpTransportError,
 {
-    let request = ClientRequest::CallToolRequest(CallToolRequest::new(
-        CallToolRequestParams::new(remote_name).with_arguments(
-            arguments
-                .as_object()
-                .cloned()
-                .ok_or(McpTransportError::SchemaRejected)?,
-        ),
-    ));
+    let mut params = CallToolRequestParams::new(remote_name).with_arguments(
+        arguments
+            .as_object()
+            .cloned()
+            .ok_or(McpTransportError::SchemaRejected)?,
+    );
+    if let Some(invocation) = &control.node_invocation {
+        let mut meta = rmcp::model::RequestMetaObject::new();
+        meta.insert(
+            anima_service_adapters::paired_devices::NODE_META_KEY.into(),
+            serde_json::to_value(invocation).map_err(|_| McpTransportError::SchemaRejected)?,
+        );
+        params.meta = Some(meta);
+    }
+    let request = ClientRequest::CallToolRequest(CallToolRequest::new(params));
     let remaining = control.deadline.saturating_duration_since(Instant::now());
     let options = PeerRequestOptions::with_timeout(remaining).with_max_total_timeout(remaining);
     let response = control
@@ -1093,6 +1102,13 @@ impl McpTransportSession for HttpSession {
     }
 }
 impl DefaultMcpTransportFactory {
+    #[cfg(test)]
+    pub(crate) fn with_http_client(http: reqwest::Client) -> Self {
+        Self {
+            http: Some(http),
+            ..Default::default()
+        }
+    }
     #[cfg(test)]
     pub(crate) fn stdio_child_count(&self) -> usize {
         self.stdio.child_count()

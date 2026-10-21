@@ -466,6 +466,37 @@ impl MemoryEmbeddingRuntime {
         Ok(report)
     }
 
+    /// Rebuild a small local RAM index without reading, deleting or rewriting the on-disk cache.
+    pub(crate) fn rebuild_bounded_local_runtime_index(
+        &mut self,
+        memories: &[Memory],
+    ) -> Result<(), String> {
+        if !self.enabled
+            || self.embedder.provider() != LOCAL_PROVIDER
+            || self.load != MemoryEmbeddingLoad::Ready
+            || memories.len() > 256
+            || self.index.len() > 512
+            || memories.iter().map(|m| m.content.len()).sum::<usize>() > 1024 * 1024
+        {
+            return Err("Local runtime index repair is unavailable or exceeds its budget".into());
+        }
+        let mut index = InMemoryVectorIndex::new(self.embedder.clone());
+        let mut content = HashMap::new();
+        for memory in memories {
+            let vector = self
+                .embedder
+                .embed(&memory.content)
+                .map_err(|e| e.message().to_string())?;
+            index
+                .upsert_embedding(memory.id.clone(), vector)
+                .map_err(|e| e.message().to_string())?;
+            content.insert(memory.id.clone(), content_digest(&memory.content));
+        }
+        self.index = index;
+        self.indexed_content = content;
+        Ok(())
+    }
+
     pub(crate) fn upsert_memory(&mut self, memory: &Memory) -> Result<(), String> {
         if !self.enabled {
             return Ok(());

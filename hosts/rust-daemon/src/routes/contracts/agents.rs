@@ -436,6 +436,13 @@ impl AgentSettingsRequest {
         let mut settings = AgentSettings::default();
         if self
             .additional
+            .get("toolDiscovery")
+            .is_some_and(|value| !value.is_boolean())
+        {
+            return Err("toolDiscovery must be a boolean");
+        }
+        if self
+            .additional
             .get("agentFilesProfileEnabled")
             .is_some_and(|value| !value.is_boolean())
         {

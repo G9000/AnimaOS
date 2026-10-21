@@ -19,6 +19,13 @@ export interface SystemInFlight {
   backgroundProcesses: number;
   appSessions: number;
   acpSessions: number;
+  /** Additional native work categories are absent on older daemons. */
+  memoryReviews?: number;
+  doctorRepairs?: number;
+  standingIntentChanges?: number;
+  executionJobs?: number;
+  mcpOperations?: number;
+  browserProfileLogins?: number;
 }
 
 /** What the server is doing, tagged by `kind`. */

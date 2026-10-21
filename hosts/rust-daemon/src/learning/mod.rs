@@ -15,5 +15,6 @@ pub(crate) use records::{
     LearningRegistry, LearningReviewRecord, LearningReviewState, LearningSkillDraftRequest,
     LearningSkillSource, LearningSnapshot, LearningTrigger,
 };
+pub(crate) use service::shadow_config;
 pub(crate) use service::LearningService;
 pub(crate) use skill_source::validate_skill_source;

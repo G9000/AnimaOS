@@ -99,6 +99,8 @@ pub struct AgentRuntime {
     providers: Vec<Arc<dyn Provider>>,
     evaluators: Vec<Arc<dyn Evaluator>>,
     model_adapter: Arc<dyn ModelAdapter>,
+    /// Per-run request selection, never persisted or used as execution authority.
+    model_tool_selector: Option<Arc<dyn crate::ModelToolSelector>>,
     db: Option<Arc<dyn DatabaseAdapter>>,
     persistence_agent_id: Option<String>,
     step_counter: u64,
@@ -150,6 +152,7 @@ impl AgentRuntime {
             providers: Vec::new(),
             evaluators: Vec::new(),
             model_adapter,
+            model_tool_selector: None,
             db: None,
             persistence_agent_id: None,
             step_counter: 0,
@@ -194,6 +197,7 @@ impl AgentRuntime {
             providers: Vec::new(),
             evaluators: Vec::new(),
             model_adapter,
+            model_tool_selector: None,
             db: None,
             persistence_agent_id: None,
             step_counter: snapshot.step_count,
@@ -204,6 +208,11 @@ impl AgentRuntime {
             host_guidance: String::new(),
             host_tool_iterations: None,
         }
+    }
+
+    /// Restricts only tools advertised on each subsequent model request.
+    pub fn set_model_tool_selector(&mut self, selector: Option<Arc<dyn crate::ModelToolSelector>>) {
+        self.model_tool_selector = selector;
     }
 
     /// Applies one accepted run snapshot; never mutates canonical configuration.
@@ -531,15 +540,24 @@ impl AgentRuntime {
             let budget_wrapup = iterations >= max_tool_iterations;
             let failure_wrapup = exact_failures.exhausted();
             let wrapup = budget_wrapup || failure_wrapup;
-            let call_config = wrapup.then(|| {
+            let call_config = if wrapup {
                 let mut config = self.state.config.clone();
                 config.tools = Some(Vec::new());
                 config
                     .settings
                     .get_or_insert_with(Default::default)
                     .max_retries = Some(0);
-                config
-            });
+                Some(config)
+            } else {
+                self.model_tool_selector.as_ref().map(|selector| {
+                    let selected = selector.visible_tool_names();
+                    let mut config = self.state.config.clone();
+                    if let Some(tools) = &mut config.tools {
+                        tools.retain(|tool| selected.contains(&tool.name));
+                    }
+                    config
+                })
+            };
             let context_parts = match self
                 .build_provider_context(&user_message, &mut provider_snapshots)
                 .await

@@ -220,6 +220,14 @@ pub async fn app_with_configured_persistence(config: DaemonConfig) -> io::Result
     skip_memory_model_load(&state).await;
     state.write().await.chatgpt_auth = crate::chatgpt_auth::ChatGptAuth::new();
     let runtime = daemon_runtime(Arc::clone(&state), &config)?;
+    let maintenance = runtime.agent_runs.memory_maintenance();
+    maintenance.recover().await.map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Memory maintenance recovery could not be persisted",
+        )
+    })?;
+    runtime.agent_runs.learning().recover_skill_work();
     state
         .write()
         .await
@@ -241,7 +249,8 @@ pub async fn app_with_configured_persistence(config: DaemonConfig) -> io::Result
     discord.start_restored().await;
     drive.start_restored().await;
     scheduler.start().await;
-    Ok(router)
+    let maintenance_worker = Arc::new(maintenance.start());
+    Ok(router.layer(axum::Extension(maintenance_worker)))
 }
 
 pub async fn serve(listener: TcpListener, config: DaemonConfig) -> io::Result<()> {
@@ -307,6 +316,12 @@ pub async fn serve_with(
         guard.provider_keys = provider_keys;
         guard.browser_setup = browser_setup;
         guard.tool_rpc_service = crate::tool_rpc::ToolRpcService::new(tool_rpc_config);
+        guard.execution = Arc::new(
+            crate::execution_backends::ExecutionService::from_environment(
+                guard.workspace.as_ref().map(|w| w.root_path.as_path()),
+            )
+            .map_err(io::Error::other)?,
+        );
         guard.checkpoint_root = checkpoint_root;
         // AI titles for new chats (spec §12.3): only the real daemon turns
         // them on, so test and embedding states never see an unscripted
@@ -314,7 +329,8 @@ pub async fn serve_with(
         guard.set_generated_titles(true);
     }
     let ServeOptions { ui, shutdown } = options;
-    serve_with_state_and_voice(
+    // Keep the composed lifecycle future off the native host entry stack.
+    Box::pin(serve_with_state_and_voice(
         listener,
         state,
         config,
@@ -323,7 +339,7 @@ pub async fn serve_with(
         crate::runtime_model::transcription_service_from_env(),
         crate::runtime_model::speech_service_from_env(),
         ui,
-    )
+    ))
     .await
 }
 
@@ -385,6 +401,14 @@ async fn serve_with_state_and_voice(
     let drive = runtime.drive.clone();
     let scheduler = runtime.scheduler.clone();
     let agent_runs = runtime.agent_runs.clone();
+    let maintenance = agent_runs.memory_maintenance();
+    maintenance.recover().await.map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Memory maintenance recovery could not be persisted",
+        )
+    })?;
+    agent_runs.learning().recover_skill_work();
     let mail = runtime.mail.clone();
     let jobs = runtime.jobs.clone();
     let history = runtime.history.clone();
@@ -411,10 +435,12 @@ async fn serve_with_state_and_voice(
     scheduler.start().await;
     // Spec §8.1: the startup rescan, then one every 60 seconds.
     skills.start();
+    let maintenance_worker = maintenance.start();
     // Stale helper worktrees are swept off the request path.
     tokio::spawn(crate::agent_runs::worktrees::startup_sweep(Arc::clone(
         &browser_state,
     )));
+    let browser = browser_state.read().await.browser_service.clone();
     let shutdown_live = live.clone();
     let drain_expired = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let workflow_expired = Arc::clone(&drain_expired);
@@ -429,6 +455,13 @@ async fn serve_with_state_and_voice(
             lifecycle::producer_first_shutdown(
                 async {
                     agent_runs.request_shutdown();
+                    if let Some(browser) = &browser {
+                        browser.request_shutdown();
+                    }
+                    maintenance_worker.request_shutdown();
+                    browser_state.read().await.execution.request_shutdown();
+                    agent_runs.doctor().request_shutdown().await;
+                    agent_runs.standing_intents().request_shutdown().await;
                     mail.request_shutdown();
                     jobs.request_shutdown().await;
                     scheduler.request_shutdown().await;
@@ -438,9 +471,13 @@ async fn serve_with_state_and_voice(
                 },
                 async {
                     agent_runs.shutdown().await;
+                    maintenance_worker.shutdown().await;
+                    let execution = browser_state.read().await.execution.clone();
+                    execution.shutdown().await;
+                    agent_runs.doctor().shutdown().await;
+                    agent_runs.standing_intents().shutdown().await;
                     mail.shutdown().await;
-                    let browser = browser_state.read().await.browser_service.clone();
-                    if let Some(browser) = browser {
+                    if let Some(browser) = &browser {
                         browser.shutdown().await;
                     }
                     jobs.shutdown().await;
@@ -487,7 +524,6 @@ fn daemon_runtime(state: SharedDaemonState, config: &DaemonConfig) -> io::Result
     let run_limiter = Arc::new(Semaphore::new(config.max_concurrent_runs));
     let agent_runs = AgentRunCoordinator::new(Arc::clone(&state), Arc::clone(&run_limiter))
         .with_max_runs_per_agent(config.max_runs_per_agent);
-    agent_runs.learning().recover_skill_work();
     let agent_runs = coordinator_with_mcp_credentials(
         &state,
         agent_runs,

@@ -21,7 +21,7 @@ pub(crate) fn valid_id(value: &str) -> bool {
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_'))
 }
-fn positive<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
+pub(super) fn positive<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
     let value = u64::deserialize(deserializer)?;
     if value == 0 || value > MAX_BROWSER_SAFE_INTEGER {
         return Err(serde::de::Error::custom("invalid version"));
@@ -35,6 +35,8 @@ fn optional_positive<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Optio
 #[derive(Clone, Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SaveBrowserScope {
+    #[serde(default)]
+    pub(crate) profile_id: Option<String>,
     pub(crate) policy_id: String,
     pub(crate) selected_input_ids: Vec<String>,
     pub(crate) enabled: bool,
@@ -44,6 +46,8 @@ pub(crate) struct SaveBrowserScope {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct BrowserSelection {
+    #[serde(default)]
+    pub(crate) profile_id: Option<String>,
     pub(crate) policy_id: String,
     pub(crate) selected_input_ids: Vec<String>,
 }
@@ -98,13 +102,16 @@ impl InstalledBrowserPolicies {
                 return Err(BrowserServiceError::Invalid);
             }
             if policy.template.public_ipv4_pin.is_some() {
-                public_policies += 1;
-                if public_policies > 1
+                if !policy.template.authenticated {
+                    public_policies += 1;
+                }
+                if (public_policies > 1 && !policy.template.authenticated)
                     || !policy.template.origin.starts_with("https://")
                     || !policy.template.input_ids.is_empty()
-                    || policy.template.routes.iter().any(|route| {
-                        route.method != anima_service_adapters::browser::BrowserMethod::Get
-                    })
+                    || (!policy.template.authenticated
+                        && policy.template.routes.iter().any(|route| {
+                            route.method != anima_service_adapters::browser::BrowserMethod::Get
+                        }))
                 {
                     return Err(BrowserServiceError::Invalid);
                 }
@@ -139,6 +146,7 @@ pub(super) fn digest_valid(value: &str) -> bool {
 pub(super) fn validate_save(input: &SaveBrowserScope) -> Result<(), BrowserServiceError> {
     let mut ids = HashSet::new();
     if !valid_id(&input.policy_id)
+        || input.profile_id.as_ref().is_some_and(|id| !valid_id(id))
         || input.selected_input_ids.len() > 16
         || input
             .selected_input_ids
@@ -188,6 +196,7 @@ pub(crate) struct BrowserArtifactView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BrowserScopeView {
+    pub(crate) profile: Option<super::profiles::BrowserProfileView>,
     pub(crate) id: String,
     pub(crate) agent_id: String,
     pub(crate) run_id: String,
@@ -251,6 +260,7 @@ impl From<&anima_service_adapters::browser::BrowserLimits> for BrowserLimitsView
 #[derive(Clone, Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BrowserPolicyView {
+    pub(crate) authenticated: bool,
     pub(crate) id: String,
     pub(crate) origin: String,
     pub(crate) routes: Vec<BrowserPolicyRouteView>,

@@ -30,7 +30,22 @@ pub enum ConfigAction {
 
 #[derive(Debug, PartialEq, Eq, Subcommand)]
 #[command(rename_all = "kebab-case")]
+pub enum NodeAction {
+    /// Serve the owner-selected read-only root over verified TLS.
+    Serve {
+        #[arg(long)]
+        config: PathBuf,
+    },
+}
+
+#[derive(Debug, PartialEq, Eq, Subcommand)]
+#[command(rename_all = "kebab-case")]
 pub enum Command {
+    /// Run a separately configured paired remote node.
+    Node {
+        #[command(subcommand)]
+        action: NodeAction,
+    },
     /// Machine-readable packaging capabilities; never opens a profile.
     #[command(hide = true)]
     BuildInfo,
@@ -108,6 +123,14 @@ mod tests {
 
     #[test]
     fn subcommands_and_flags_parse() {
+        assert_eq!(
+            parse(&["node", "serve", "--config", "/node.json"]),
+            Some(Command::Node {
+                action: NodeAction::Serve {
+                    config: PathBuf::from("/node.json")
+                }
+            })
+        );
         assert_eq!(parse(&["run"]), Some(Command::Run));
         assert_eq!(
             parse(&["supervise", "--background", "--no-tray"]),

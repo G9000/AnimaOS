@@ -71,3 +71,12 @@ target/
 # Isolated skill-learning validation state and local evidence
 /.tmp/skill-learning*
 /.tmp/anima-skills-ledger-*/
+
+# Controlled authenticated browser validation fixture and local evidence
+/.tmp/browser-auth-tdd/
+
+# Controlled execution worker validation state
+/.tmp/execution-worker-probe/
+
+# Controlled tool-discovery validation evidence
+/.tmp/tool-discovery-review-green.log

@@ -910,7 +910,7 @@ pub(super) fn unavailable() -> ApiError {
     ApiError::service_unavailable("Learning review storage or dispatch is unavailable")
 }
 
-fn shadow_config(source: &AgentConfig) -> AgentConfig {
+pub(crate) fn shadow_config(source: &AgentConfig) -> AgentConfig {
     AgentConfig {
         name: "Learning reviewer".into(),
         model: source.model.clone(),

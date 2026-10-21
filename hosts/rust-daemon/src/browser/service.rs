@@ -1,3 +1,5 @@
+#[path = "service_profiles.rs"]
+mod service_profiles;
 use super::transport::{
     BoundBrowserTask, BrowserDocumentWitness, BrowserTransportFactory, OutputSlot,
     PreparedBrowserTask, VerifiedInput,
@@ -20,7 +22,10 @@ use async_trait::async_trait;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex as StdMutex, Weak};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex as StdMutex, Weak,
+};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{Mutex, RwLock};
 
@@ -54,6 +59,7 @@ struct Admission {
 }
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct PreparedBrowserSelection {
+    profile: Option<super::profiles::BrowserProfileView>,
     agent: String,
     session: String,
     selection: BrowserSelection,
@@ -63,6 +69,7 @@ pub(crate) struct PreparedBrowserSelection {
 }
 #[derive(Clone)]
 pub(crate) struct BrowserDispatchStamp {
+    profile: Option<super::profiles::BrowserProfileView>,
     pub(crate) agent_id: String,
     pub(crate) run_id: String,
     pub(crate) session_id: String,
@@ -75,6 +82,7 @@ pub(crate) struct BrowserDispatchStamp {
     expected: Option<BrowserDocumentWitness>,
 }
 struct ScopeRecord {
+    profile: Option<super::profiles::BrowserProfileView>,
     view: BrowserScopeView,
     workspace: WorkspaceConfig,
     identity: WorkspaceIdentity,
@@ -91,6 +99,14 @@ struct ScopeRecord {
     action: Arc<Mutex<()>>,
 }
 struct Inner {
+    profile_store: super::profiles::ProfileStore,
+    profile_versions: StdMutex<BTreeMap<String, super::profiles::BrowserProfileView>>,
+    profile_setups: StdMutex<BTreeMap<String, service_profiles::ProfileSetup>>,
+    profile_mutations: Mutex<()>,
+    profile_admission_closed: AtomicBool,
+    work_admission_probe: StdMutex<Option<Arc<dyn Fn() -> bool + Send + Sync>>>,
+    // None is an admitted owner start preparing or waiting for its mutation gate.
+    profile_work: StdMutex<BTreeMap<String, Option<Arc<BoundBrowserTask>>>>,
     state: Weak<RwLock<crate::state::DaemonState>>,
     transactions: Arc<Mutex<()>>,
     policies: InstalledBrowserPolicies,
@@ -207,6 +223,7 @@ impl BrowserService {
         selection: BrowserSelection,
     ) -> Result<PreparedBrowserSelection, BrowserServiceError> {
         records::validate_save(&SaveBrowserScope {
+            profile_id: selection.profile_id.clone(),
             policy_id: selection.policy_id.clone(),
             selected_input_ids: selection.selected_input_ids.clone(),
             enabled: true,
@@ -230,6 +247,14 @@ impl BrowserService {
             )
         };
         let identity = Self::identity(admission.workspace.root_path.clone()).await?;
+        let profile = self
+            .profile_for_policy(
+                &admission.workspace.root_path,
+                agent,
+                policy,
+                selection.profile_id.as_deref(),
+            )
+            .await?;
         let mut inputs = Vec::new();
         let mut total = 0u64;
         for id in &selection.selected_input_ids {
@@ -262,6 +287,7 @@ impl BrowserService {
             return Err(BrowserServiceError::Conflict);
         }
         Ok(PreparedBrowserSelection {
+            profile,
             agent: agent.into(),
             session: session.into(),
             selection,
@@ -277,7 +303,8 @@ impl BrowserService {
         session: &str,
         p: &PreparedBrowserSelection,
     ) -> bool {
-        p.agent == agent
+        self.profile_current(&p.profile)
+            && p.agent == agent
             && p.session == session
             && Self::selection_admission(state, agent, session).is_ok_and(|a| a == p.admission)
     }
@@ -288,6 +315,7 @@ impl BrowserService {
         p: PreparedBrowserSelection,
     ) -> Result<BrowserScopeView, BrowserServiceError> {
         let input = SaveBrowserScope {
+            profile_id: p.selection.profile_id.clone(),
             policy_id: p.selection.policy_id.clone(),
             selected_input_ids: p.selection.selected_input_ids.clone(),
             enabled: true,
@@ -303,6 +331,13 @@ impl BrowserService {
     ) -> Self {
         Self {
             inner: Arc::new(Inner {
+                profile_store: super::profiles::ProfileStore::default(),
+                profile_versions: StdMutex::new(BTreeMap::new()),
+                profile_setups: StdMutex::new(BTreeMap::new()),
+                profile_mutations: Mutex::new(()),
+                profile_admission_closed: AtomicBool::new(false),
+                work_admission_probe: StdMutex::new(None),
+                profile_work: StdMutex::new(BTreeMap::new()),
                 state: Arc::downgrade(state),
                 transactions,
                 policies,
@@ -518,6 +553,7 @@ impl BrowserService {
             .values()
             .map(|p| {
                 Ok(BrowserPolicyView {
+                    authenticated: p.template.authenticated,
                     id: p.id.clone(),
                     origin: p.template.origin.clone(),
                     routes: p
@@ -582,6 +618,14 @@ impl BrowserService {
             (Self::admission(&guard, agent, run)?, guard.history.store())
         };
         let identity = Self::identity(admission.workspace.root_path.clone()).await?;
+        let profile = self
+            .profile_for_policy(
+                &admission.workspace.root_path,
+                agent,
+                policy,
+                input.profile_id.as_deref(),
+            )
+            .await?;
         let mut inputs = Vec::new();
         let mut input_bytes = 0u64;
         for id in &input.selected_input_ids {
@@ -620,6 +664,7 @@ impl BrowserService {
                 || p.admission != admission
                 || p.identity != identity
                 || p.inputs != inputs
+                || p.profile != profile
         }) {
             return Err(BrowserServiceError::Conflict);
         }
@@ -690,6 +735,7 @@ impl BrowserService {
         anima_service_adapters::browser::validate_scope(&scope)
             .map_err(|_| BrowserServiceError::Invalid)?;
         let view = BrowserScopeView {
+            profile: profile.clone(),
             id,
             agent_id: agent.into(),
             run_id: run.into(),
@@ -728,6 +774,7 @@ impl BrowserService {
         scopes.insert(
             run.into(),
             ScopeRecord {
+                profile,
                 view: view.clone(),
                 workspace: admission.workspace,
                 identity,
@@ -910,7 +957,42 @@ impl BrowserService {
         })
         .await;
     }
+    pub(crate) fn request_shutdown(&self) {
+        self.inner
+            .profile_admission_closed
+            .store(true, Ordering::Release);
+    }
     pub(crate) async fn shutdown(&self) {
+        self.request_shutdown();
+        // An owner sign-in may still be opening before it enters the setup table.
+        // Join that mutation first so shutdown also owns its physical retirement.
+        let profile_shutdown_gate = self.inner.profile_mutations.lock().await;
+        let profiles = self
+            .inner
+            .profile_setups
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        for id in profiles {
+            self.retire_profile(&id).await;
+        }
+        // A failed finish may remove setup metadata before physical closure.
+        // Retire retained bound owners too; uncertain closes stay drain-visible.
+        let tracked_owners = self
+            .inner
+            .profile_work
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+            .filter_map(Clone::clone)
+            .collect::<Vec<_>>();
+        for task in tracked_owners {
+            task.handle.close().await;
+        }
+        self.profile_in_flight_count();
+        drop(profile_shutdown_gate);
         let ids = {
             self.inner
                 .scopes
@@ -1013,7 +1095,11 @@ impl BrowserService {
             .get(&run.run_id)
             .ok_or_else(|| browser_error(BrowserErrorCode::Unavailable))?;
         validate_operation(&row._scope, &operation)?;
+        if !self.profile_current(&row.profile) {
+            return Err(browser_error(BrowserErrorCode::Stale));
+        }
         let stamp = BrowserDispatchStamp {
+            profile: row.profile.clone(),
             agent_id: run.agent_id.clone(),
             run_id: run.run_id.clone(),
             session_id: run.session_id.clone(),
@@ -1032,7 +1118,8 @@ impl BrowserService {
         if row.cancel.is_cancelled() || !row.view.enabled || Instant::now() >= row.deadline {
             return Err(browser_error(BrowserErrorCode::Cancelled));
         }
-        if row.view.agent_id != stamp.agent_id
+        if row.profile != stamp.profile
+            || row.view.agent_id != stamp.agent_id
             || row.view.session_id != stamp.session_id
             || row.view.id != stamp.scope_id
             || row.view.version != stamp.version
@@ -1072,7 +1159,7 @@ impl BrowserService {
         let row = scopes
             .get(&stamp.run_id)
             .ok_or_else(|| browser_error(BrowserErrorCode::Stale))?;
-        if admission.workspace != row.workspace {
+        if !self.profile_current(&row.profile) || admission.workspace != row.workspace {
             return Err(browser_error(BrowserErrorCode::Stale));
         }
         Self::check_row(row, stamp)
@@ -1084,7 +1171,7 @@ impl BrowserService {
         let state = self
             .state()
             .map_err(|_| browser_error(BrowserErrorCode::Unavailable))?;
-        let (workspace, identity, inputs) = {
+        let (workspace, identity, inputs, profile) = {
             let _transaction = self.inner.transactions.lock().await;
             let guard = state.read().await;
             let admission = Self::admission(&guard, &stamp.agent_id, &stamp.run_id)
@@ -1108,6 +1195,7 @@ impl BrowserService {
                 row.workspace.clone(),
                 row.identity.clone(),
                 row._inputs.clone(),
+                row.profile.clone(),
             )
         };
         if Self::identity(workspace.root_path.clone())
@@ -1117,6 +1205,8 @@ impl BrowserService {
         {
             return Err(browser_error(BrowserErrorCode::Stale));
         }
+        self.revalidate_profile_disk(workspace.root_path.clone(), profile)
+            .await?;
         for input in inputs {
             let root = workspace.root_path.clone();
             tokio::task::spawn_blocking(move || read_attachment_bytes(&root, &input))
@@ -1221,7 +1311,30 @@ impl BrowserService {
                 kind,
             })
             .collect();
+            let profile = if let Some(view) = &view.profile {
+                let store = self.inner.profile_store.clone();
+                let workspace = workspace.root_path.clone();
+                let captured = view.clone();
+                let login_route = scope
+                    .routes
+                    .iter()
+                    .find(|r| r.method == BrowserMethod::Get)
+                    .ok_or_else(|| browser_error(BrowserErrorCode::Invalid))?
+                    .id
+                    .clone();
+                Some(
+                    tokio::task::spawn_blocking(move || {
+                        store.acquire(&workspace, &captured, false, login_route)
+                    })
+                    .await
+                    .map_err(|_| browser_error(BrowserErrorCode::Unavailable))?
+                    .map_err(|_| browser_error(BrowserErrorCode::Unavailable))?,
+                )
+            } else {
+                None
+            };
             let task = Arc::new(factory.bind(PreparedBrowserTask {
+                profile,
                 scope: scope.clone(),
                 policy_id: view.policy_id.clone(),
                 policy_digest: view.policy_digest.clone(),
@@ -1306,7 +1419,7 @@ impl BrowserService {
                     row.admitted_actions=reply.counters.actions_used;row.view.actions_used=row.view.actions_used.max(reply.counters.actions_used);row.view.requests_used=row.view.requests_used.max(reply.counters.requests_used);row.view.wire_bytes_used=row.view.wire_bytes_used.max(reply.counters.wire_bytes_used);row.view.document=Some(document_view(&reply.document));row.view.physical_lease_held=task.handle.snapshot().physical_lease_held;
                 }
                 let route=scope.routes.iter().find(|r|r.id==reply.observation.route_id).ok_or_else(||browser_error(BrowserErrorCode::Protocol))?;
-                let provenance=serde_json::json!({"scopeId":scope.id,"scopeRevision":scope.revision,"runId":stamp.run_id,"policyId":view.policy_id,"policyDigest":view.policy_digest,"installationId":view.installation_id,"contextId":reply.context_id,"pageId":reply.page_id,"document":reply.document,"currentUrl":format!("{}{}",scope.origin,route.path),"artifacts":accepted});
+                let provenance=serde_json::json!({"scopeId":scope.id,"scopeRevision":scope.revision,"runId":stamp.run_id,"policyId":view.policy_id,"policyDigest":view.policy_digest,"installationId":view.installation_id,"profile":view.profile,"contextId":reply.context_id,"pageId":reply.page_id,"document":reply.document,"currentUrl":format!("{}{}",scope.origin,route.path),"artifacts":accepted});
                 let mut public_observation=reply.observation.clone();for (raw,public) in public_observation.artifacts.iter_mut().zip(&accepted){raw.id=public.id.clone();}
                 Ok(anima_core::Content{text:format!("Browser provenance: {}\nUntrusted page evidence: {}",provenance,serde_json::to_string(&public_observation).map_err(|_|browser_error(BrowserErrorCode::Protocol))?),..Default::default()})
             }.await;

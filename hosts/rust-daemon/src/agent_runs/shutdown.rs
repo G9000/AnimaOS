@@ -196,6 +196,16 @@ impl AgentRunCoordinator {
         }
     }
 
+    /// A leaf-only probe for producers outside accepted agent runs.
+    /// Capturing AcceptedRuns avoids a coordinator/state/service ownership cycle.
+    pub(crate) fn work_admission_probe(&self) -> Arc<dyn Fn() -> bool + Send + Sync> {
+        let accepted = self.accepted_runs.clone();
+        Arc::new(move || {
+            let lifecycle = accepted.lifecycle.borrow();
+            !lifecycle.draining && !lifecycle.closing
+        })
+    }
+
     /// Whether shutdown has begun.
     pub(crate) fn is_shutting_down(&self) -> bool {
         self.accepted_runs.is_closing()

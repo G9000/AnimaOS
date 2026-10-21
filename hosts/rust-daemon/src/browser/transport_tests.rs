@@ -12,6 +12,7 @@ fn scope() -> BrowserScope {
         revision: 1,
         origin: "http://127.0.0.1:43220".into(),
         public_ipv4_pin: None,
+        authenticated: false,
         routes: vec![BrowserRoute {
             id: "home".into(),
             method: BrowserMethod::Get,
@@ -35,6 +36,7 @@ fn scope() -> BrowserScope {
 fn prepared(installation: &VerifiedBrowserInstallation) -> PreparedBrowserTask {
     let bytes: Arc<[u8]> = Arc::from(&b"quantity,max_delivery_days\n3,2\n"[..]);
     PreparedBrowserTask {
+        profile: None,
         scope: scope(),
         policy_id: "policy_1".into(),
         policy_digest: "a".repeat(64),
@@ -373,6 +375,7 @@ fn m46_transport_synthetic_quarantine_keeps_the_shared_slot_and_owned_directory(
         reservation: Some(Reservation {
             _permit: permit,
             files,
+            _profile: None,
         }),
         inner: Weak::new(),
     });
@@ -380,6 +383,92 @@ fn m46_transport_synthetic_quarantine_keeps_the_shared_slot_and_owned_directory(
     assert!(runtime.permit.clone().try_acquire_owned().is_err());
     assert!(path.is_dir());
 }
+#[cfg(windows)]
+#[test]
+fn browser_profile_quarantine_keeps_os_lease_after_all_transport_owners_drop() {
+    for explicit_quarantine in [true, false] {
+        let directory = tempfile::tempdir().unwrap();
+        let workspace = directory.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        let store =
+            super::super::profiles::ProfileStore::for_test(directory.path().join("profiles"));
+        let install = installation(directory.path());
+        let mut task = prepared(&install);
+        task.scope.authenticated = true;
+        let created = store
+            .create(&workspace, "owner", &task.policy_id, &task.scope.origin)
+            .unwrap();
+        // This fixture tests real exclusive OS handle lifetime, not authentication.
+        std::fs::write(
+            directory
+                .path()
+                .join("profiles")
+                .join(format!("{}.sealed", created.id)),
+            b"sealed-fixture",
+        )
+        .unwrap();
+        let ready = store.finish(&workspace, &created).unwrap();
+        let profile = store
+            .acquire(&workspace, &ready, false, "home".into())
+            .unwrap();
+        let profile_weak = Arc::downgrade(&profile);
+        task.profile = Some(profile.clone());
+        let runtime = Arc::new(BrowserPhysicalRuntime::default());
+        let files =
+            Arc::new(PrivateFiles::create(&task.scope, &task.inputs, &task.outputs).unwrap());
+        let private_path = files.root().to_owned();
+        let inner = Arc::new(Inner {
+            digest: scope_digest(&task.scope).unwrap(),
+            task: task.clone(),
+            installation: Arc::new(install),
+            runtime: runtime.clone(),
+            state: StdMutex::new(State::default()),
+            opened: AtomicBool::new(true),
+            stop: CancellationToken::new(),
+            closed: Notify::new(),
+        });
+        let bound = BoundBrowserTask {
+            port: Arc::new(BoundPort(inner.clone())),
+            handle: Arc::new(Handle(inner.clone())),
+        };
+        let lease = Lease {
+            runtime: runtime.clone(),
+            reservation: Some(Reservation {
+                _permit: runtime.permit.clone().try_acquire_owned().unwrap(),
+                files,
+                _profile: task.profile.clone(),
+            }),
+            inner: Arc::downgrade(&inner),
+        };
+        if explicit_quarantine {
+            lease.quarantine(None, Vec::new());
+        } else {
+            drop(lease);
+        }
+        assert_eq!(
+            bound.handle.snapshot().close,
+            Some(BrowserClose::Quarantined)
+        );
+        drop(bound);
+        drop(inner);
+        drop(task);
+        drop(profile);
+        assert!(private_path.is_dir());
+        assert_eq!(runtime.child_count(), 1);
+        // A fresh factory has its own free global permit. It must still be
+        // unable to reuse this profile while the original owner is quarantined.
+        let independent_runtime = BrowserPhysicalRuntime::default();
+        assert_eq!(independent_runtime.child_count(), 0);
+        let independent_store = store.clone();
+        let competing = independent_store.acquire(&workspace, &ready, false, "home".into());
+        assert!(
+            matches!(competing, Err(super::super::BrowserServiceError::Busy)),
+            "profile OS lease escaped quarantine after transport owners dropped (explicit={explicit_quarantine})"
+        );
+        assert!(profile_weak.upgrade().is_some());
+    }
+}
+
 #[test]
 fn m46_transport_startup_config_is_strict_explicit_and_verifies_exact_program_hashes() {
     let root = tempfile::tempdir().unwrap();
@@ -439,7 +528,10 @@ async fn m46_windows_owned_node_helper_drop_and_descendant_held_pipes_join_the_j
         let marker = root.path().join("pid.json");
         let heartbeat = root.path().join("heartbeat");
         let executed = root.path().join("executed.json");
-        let child=format!("const fs=require('node:fs');let n=0;setInterval(()=>fs.writeFileSync({},String(++n)),20);",serde_json::to_string(&heartbeat).unwrap());
+        let child = format!(
+            "const fs=require('node:fs');let n=0;setInterval(()=>fs.writeFileSync({},String(++n)),20);",
+            serde_json::to_string(&heartbeat).unwrap()
+        );
         let script = format!(
             r#"import fs from 'node:fs';import {{spawn}} from 'node:child_process';
 const child=spawn(process.execPath,['-e',{}],{{stdio:['ignore','inherit','inherit']}});

@@ -415,6 +415,28 @@ fn registry_rejects_duplicate_registration() {
 fn registry_defines_every_registered_tool_schema() {
     let registry = ToolRegistry::new();
     let expectations = [
+        ("doctor_report", &[][..], &[][..]),
+        ("doctor_repairs", &[][..], &[][..]),
+        ("doctor_repair", &["id", "fingerprint"][..], &[][..]),
+        ("doctor_undo", &["id", "fingerprint"][..], &[][..]),
+        ("search_tools", &["query"][..], &["limit"][..]),
+        ("describe_tool", &["name"][..], &[][..]),
+        ("execution_targets", &[][..], &[][..]),
+        ("execution_status", &["executionId"][..], &[][..]),
+        (
+            "execution_run",
+            &["targetId", "command"][..],
+            &["cwd", "timeoutMs"][..],
+        ),
+        ("list_standing_intents", &[][..], &[][..]),
+        ("create_standing_intent", &["spec"][..], &[][..]),
+        (
+            "update_standing_intent",
+            &["id", "revision", "spec"][..],
+            &[][..],
+        ),
+        ("cancel_standing_intent", &["id", "revision"][..], &[][..]),
+        ("undo_standing_intent", &["change_id"][..], &[][..]),
         ("clarify", &["questions"][..], &[][..]),
         (
             "create_workflow",

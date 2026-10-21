@@ -364,6 +364,24 @@ impl McpManager {
     pub(crate) fn control_plane_transactions(&self) -> Arc<Mutex<()>> {
         self.inner.transactions.clone()
     }
+    pub(crate) fn pending_work_count(&self) -> usize {
+        self.inner.pending.load(Ordering::SeqCst)
+    }
+    pub(crate) async fn paired_bearer(
+        &self,
+        agent: &str,
+        id: &str,
+    ) -> Result<Option<McpBearerToken>, McpServiceError> {
+        let row = self.record(agent, id, None).await?;
+        let Some(reference) = row.bearer_credential_ref else {
+            return Ok(None);
+        };
+        self.inner
+            .credentials
+            .load(id, &row.endpoint, &reference)
+            .await
+            .map_err(|_| McpServiceError::Unavailable)
+    }
     fn owner(state: &DaemonState, agent: &str) -> Result<(), McpServiceError> {
         match state.agents.get(agent) {
             Some(runtime) if !crate::agent_runs::is_helper_config(runtime.config()) => Ok(()),
@@ -392,12 +410,14 @@ impl McpManager {
             })
             .map_err(|_| McpServiceError::Unavailable)
     }
-    async fn owned<T: Send + 'static>(
+    pub(crate) async fn owned<T: Send + 'static>(
         &self,
         future: impl Future<Output = Result<T, McpServiceError>> + Send + 'static,
     ) -> Result<T, McpServiceError> {
+        self.running()?;
         self.inner.pending.fetch_add(1, Ordering::SeqCst);
         let work = Work(self.inner.clone());
+        self.running()?;
         tokio::spawn(async move {
             let _work = work;
             future.await
@@ -961,6 +981,7 @@ impl McpManager {
         let mut guard = state.write().await;
         Self::owner(&guard, agent)?;
         self.same_publication(&guard)?;
+        guard.paired_devices.reconcile_mcp(&next.snapshot());
         guard.mcp_registry = next;
         if let Some((mut bundles, generation, drafts, affected_bundle_id)) = bundle_patch {
             if uncertain {
@@ -1730,6 +1751,18 @@ impl McpManager {
         Self::owner(&guard, &stamp.agent_id)?;
         self.same_publication(&guard)?;
         let runtime = &guard.agents[&stamp.agent_id];
+        if guard.paired_devices.records.iter().any(|device| {
+            device.mcp_connection_id == stamp.connection_id
+                && (device.revoked
+                    || device.agent_id != stamp.agent_id
+                    || guard
+                        .mcp_registry
+                        .connections
+                        .get(&stamp.connection_id)
+                        .is_none_or(|row| row.endpoint != device.endpoint || row.stdio.is_some()))
+        }) {
+            return Err(McpServiceError::Revoked);
+        }
         crate::community_bundles::check_mcp_edit(&guard, &stamp.connection_id, true, false)
             .map_err(|_| McpServiceError::Revoked)?;
         let run = guard
@@ -1847,7 +1880,38 @@ impl McpManager {
             return Err(McpServiceError::Cancelled);
         }
         let session = connection.session.clone().ok_or(McpServiceError::Revoked)?;
-        let control = TransportControl::new(deadline, connection.cancel.child_token());
+        let mut control = TransportControl::new(deadline, connection.cancel.child_token());
+        {
+            let state = self.state()?;
+            let guard = state.read().await;
+            if let Some(device) = guard
+                .paired_devices
+                .records
+                .iter()
+                .find(|device| device.mcp_connection_id == stamp.connection_id)
+            {
+                if device.revoked {
+                    return Err(McpServiceError::Revoked);
+                }
+                control.node_invocation =
+                    Some(anima_service_adapters::paired_devices::NodeInvocation {
+                        identity: device.node_identity.clone(),
+                        manifest_digest: device.manifest_digest.clone(),
+                        generation: device.generation,
+                        agent_id: stamp.agent_id.clone(),
+                        run_id: stamp.run_id.clone(),
+                        session_id: stamp.session_id.clone(),
+                        tool_call_id: stamp.tool_call_id.clone(),
+                        descriptor_digest: stamp.descriptor_digest.clone(),
+                        deadline_unix_ms: crate::paired_devices::node::now_ms().saturating_add(
+                            deadline
+                                .saturating_duration_since(Instant::now())
+                                .as_millis()
+                                .min(u64::MAX as u128) as u64,
+                        ),
+                    });
+            }
+        }
         let operation = std::panic::AssertUnwindSafe(session.call_once(
             McpCall {
                 remote_name: binding.tool.descriptor.remote_name.clone(),

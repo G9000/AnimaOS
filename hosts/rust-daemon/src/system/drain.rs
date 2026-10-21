@@ -28,6 +28,19 @@ pub struct InFlight {
     pub background_processes: u32,
     pub app_sessions: u32,
     pub acp_sessions: u32,
+    #[serde(default)]
+    pub memory_reviews: u32,
+    #[serde(default)]
+    pub doctor_repairs: u32,
+    #[serde(default)]
+    pub standing_intent_changes: u32,
+    #[serde(default)]
+    pub execution_jobs: u32,
+    #[serde(default)]
+    pub mcp_operations: u32,
+    /// Pending, active or physically quarantined owner sign-in workflows.
+    #[serde(default)]
+    pub browser_profile_logins: u32,
 }
 
 impl InFlight {
@@ -40,6 +53,12 @@ impl InFlight {
             + self.background_processes
             + self.app_sessions
             + self.acp_sessions
+            + self.memory_reviews
+            + self.doctor_repairs
+            + self.standing_intent_changes
+            + self.execution_jobs
+            + self.mcp_operations
+            + self.browser_profile_logins
     }
 }
 
@@ -106,6 +125,24 @@ impl DrainController {
         let mut in_flight = InFlight {
             chat_runs: count(occurrences),
             jobs: count(jobs),
+            memory_reviews: u32::from(guard.learning_slots.available_permits() == 0),
+            doctor_repairs: u32::from(guard.doctor_slots.available_permits() == 0),
+            standing_intent_changes: u32::from(
+                guard.standing_intent_slots.available_permits() == 0,
+            ),
+            execution_jobs: count(guard.execution.in_flight_count()),
+            mcp_operations: count(
+                guard
+                    .mcp_manager
+                    .as_ref()
+                    .map_or(0, |m| m.pending_work_count()),
+            ),
+            browser_profile_logins: count(
+                guard
+                    .browser_service
+                    .as_ref()
+                    .map_or(0, |browser| browser.profile_in_flight_count()),
+            ),
             swarm_runs: count(guard.running_swarm_count()),
             background_processes: match guard.background_process_count() {
                 Ok(running) => count(running),
