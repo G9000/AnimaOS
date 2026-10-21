@@ -10,6 +10,12 @@ export const PROGRAMMATIC_TOOL_ACCESS = {
   requires: 'bash',
 } as const;
 
+/** Workflow creation and inspection are one explicit chat permission. */
+export const WORKFLOW_TOOL_ACCESS = {
+  tools: ['create_workflow', 'list_workflows'],
+  label: 'Allow workflows in chat',
+} as const;
+
 export const BROWSER_TOOL_ACCESS = [
   { name: 'browser_navigate', label: 'Allow browser navigation' },
   { name: 'browser_observe', label: 'Allow browser observation' },

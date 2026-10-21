@@ -134,14 +134,18 @@ export function WorkspaceWorkflows({
   );
 }
 
-function WorkflowAgentView({
+export function WorkflowAgentView({
   agentId,
   membership,
   online,
+  surface = 'work',
+  refreshKey,
 }: {
   agentId: string;
   membership: string;
   online: boolean;
+  surface?: 'work' | 'chat';
+  refreshKey?: string | number;
 }) {
   const draftKey = `anima:workflow-draft:${agentId}`;
   const commandKey = `anima:workflow-command:${agentId}`;
@@ -272,7 +276,7 @@ function WorkflowAgentView({
       controller.abort();
       if (timer) clearTimeout(timer);
     };
-  }, [agentId, online, context, refresh]);
+  }, [agentId, online, context, refresh, refreshKey]);
 
   const remember = (command: Command | null) => {
     save(commandKey, command);
@@ -389,130 +393,132 @@ function WorkflowAgentView({
           </button>
         </div>
       )}
-      <form
-        className="space-y-4 rounded-2xl border border-line bg-surface p-5"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!validation && !pending)
-            void mutate({ type: 'create', input: draft });
-        }}
-      >
-        <h3 className="text-lg font-semibold">New workflow</h3>
-        <fieldset
-          disabled={disabled || !!pending}
-          className="space-y-4 disabled:opacity-60"
+      {surface === 'work' && (
+        <form
+          className="space-y-4 rounded-2xl border border-line bg-surface p-5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!validation && !pending)
+              void mutate({ type: 'create', input: draft });
+          }}
         >
-          <label className="block space-y-2 text-sm">
-            Workflow title
-            <input
-              className="field"
-              value={draft.title}
-              maxLength={320}
-              onChange={(event) => edit({ title: event.target.value })}
-            />
-          </label>
-          {draft.steps.map((step, index) => (
-            <div
-              key={step.id}
-              className="space-y-3 rounded-xl border border-line p-4"
-            >
-              <p className="text-sm font-semibold">Step {index + 1}</p>
-              <label className="block space-y-2 text-sm">
-                Step {index + 1} kind
-                <select
-                  className="field"
-                  value={step.kind}
-                  onChange={(event) =>
-                    stepEdit(index, {
-                      kind: event.target.value as WorkflowStepInput['kind'],
-                    })
-                  }
-                >
-                  <option value="task">Task</option>
-                  <option value="approval">Approval checkpoint</option>
-                  <option value="input">Question</option>
-                </select>
-              </label>
-              <label className="block space-y-2 text-sm">
-                Step {index + 1} title
-                <input
-                  className="field"
-                  value={step.title}
-                  maxLength={320}
-                  onChange={(event) =>
-                    stepEdit(index, { title: event.target.value })
-                  }
-                />
-              </label>
-              <label className="block space-y-2 text-sm">
-                Step {index + 1} prompt
-                <textarea
-                  className="field min-h-24"
-                  value={step.prompt}
-                  onChange={(event) =>
-                    stepEdit(index, { prompt: event.target.value })
-                  }
-                />
-              </label>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className={buttonClass}
-                  disabled={index === 0}
-                  aria-label={`Move step ${index + 1} up`}
-                  onClick={() => moveStep(index, -1)}
-                >
-                  Move up
-                </button>
-                <button
-                  type="button"
-                  className={buttonClass}
-                  disabled={index === draft.steps.length - 1}
-                  aria-label={`Move step ${index + 1} down`}
-                  onClick={() => moveStep(index, 1)}
-                >
-                  Move down
-                </button>
-                <button
-                  type="button"
-                  className={buttonClass}
-                  disabled={draft.steps.length === 1}
-                  aria-label={`Remove step ${index + 1}`}
-                  onClick={() =>
-                    edit({
-                      steps: draft.steps.filter(
-                        (_, position) => position !== index,
-                      ),
-                    })
-                  }
-                >
-                  Remove
-                </button>
-              </div>
-            </div>
-          ))}
-          <button
-            type="button"
-            className={buttonClass}
-            disabled={draft.steps.length >= 16}
-            onClick={() => edit({ steps: [...draft.steps, newStep()] })}
+          <h3 className="text-lg font-semibold">New workflow</h3>
+          <fieldset
+            disabled={disabled || !!pending}
+            className="space-y-4 disabled:opacity-60"
           >
-            Add step
+            <label className="block space-y-2 text-sm">
+              Workflow title
+              <input
+                className="field"
+                value={draft.title}
+                maxLength={320}
+                onChange={(event) => edit({ title: event.target.value })}
+              />
+            </label>
+            {draft.steps.map((step, index) => (
+              <div
+                key={step.id}
+                className="space-y-3 rounded-xl border border-line p-4"
+              >
+                <p className="text-sm font-semibold">Step {index + 1}</p>
+                <label className="block space-y-2 text-sm">
+                  Step {index + 1} kind
+                  <select
+                    className="field"
+                    value={step.kind}
+                    onChange={(event) =>
+                      stepEdit(index, {
+                        kind: event.target.value as WorkflowStepInput['kind'],
+                      })
+                    }
+                  >
+                    <option value="task">Task</option>
+                    <option value="approval">Approval checkpoint</option>
+                    <option value="input">Question</option>
+                  </select>
+                </label>
+                <label className="block space-y-2 text-sm">
+                  Step {index + 1} title
+                  <input
+                    className="field"
+                    value={step.title}
+                    maxLength={320}
+                    onChange={(event) =>
+                      stepEdit(index, { title: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="block space-y-2 text-sm">
+                  Step {index + 1} prompt
+                  <textarea
+                    className="field min-h-24"
+                    value={step.prompt}
+                    onChange={(event) =>
+                      stepEdit(index, { prompt: event.target.value })
+                    }
+                  />
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className={buttonClass}
+                    disabled={index === 0}
+                    aria-label={`Move step ${index + 1} up`}
+                    onClick={() => moveStep(index, -1)}
+                  >
+                    Move up
+                  </button>
+                  <button
+                    type="button"
+                    className={buttonClass}
+                    disabled={index === draft.steps.length - 1}
+                    aria-label={`Move step ${index + 1} down`}
+                    onClick={() => moveStep(index, 1)}
+                  >
+                    Move down
+                  </button>
+                  <button
+                    type="button"
+                    className={buttonClass}
+                    disabled={draft.steps.length === 1}
+                    aria-label={`Remove step ${index + 1}`}
+                    onClick={() =>
+                      edit({
+                        steps: draft.steps.filter(
+                          (_, position) => position !== index,
+                        ),
+                      })
+                    }
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+            <button
+              type="button"
+              className={buttonClass}
+              disabled={draft.steps.length >= 16}
+              onClick={() => edit({ steps: [...draft.steps, newStep()] })}
+            >
+              Add step
+            </button>
+          </fieldset>
+          <p className="text-xs text-ink-3">
+            Up to 16 steps; titles up to 160 characters; prompts up to 8192
+            UTF-8 bytes each and 32768 bytes total.
+          </p>
+          {validation && <p className="text-sm text-ink-3">{validation}</p>}
+          <button
+            type="submit"
+            className={buttonClass}
+            disabled={disabled || !!pending || !!validation}
+          >
+            Create workflow
           </button>
-        </fieldset>
-        <p className="text-xs text-ink-3">
-          Up to 16 steps; titles up to 160 characters; prompts up to 8192 UTF-8
-          bytes each and 32768 bytes total.
-        </p>
-        {validation && <p className="text-sm text-ink-3">{validation}</p>}
-        <button
-          type="submit"
-          className={buttonClass}
-          disabled={disabled || !!pending || !!validation}
-        >
-          Create workflow
-        </button>
-      </form>
+        </form>
+      )}
       {online && current?.workflows?.length === 0 && !current.loading && (
         <p className="rounded-2xl border border-dashed border-line p-8 text-sm text-ink-3">
           No workflows yet for this agent.
@@ -523,6 +529,7 @@ function WorkflowAgentView({
           <WorkflowCard
             key={`${workflow.id}:${workflow.revision}`}
             workflow={workflow}
+            collapseTerminal={surface === 'chat'}
             disabled={disabled || !!pending}
             onResume={(input) =>
               void mutate({ type: 'resume', id: workflow.id, input })
@@ -542,11 +549,13 @@ function WorkflowAgentView({
 
 function WorkflowCard({
   workflow,
+  collapseTerminal = false,
   disabled,
   onResume,
   onCancel,
 }: {
   workflow: WorkflowRun;
+  collapseTerminal?: boolean;
   disabled: boolean;
   onResume: (input: WorkflowResumeInput) => void;
   onCancel: () => void;
@@ -556,6 +565,24 @@ function WorkflowCard({
   const step = workflow.steps[workflow.currentStep];
   const terminal =
     workflow.status === 'completed' || workflow.status === 'cancelled';
+  if (collapseTerminal && terminal) {
+    return (
+      <details className="rounded-2xl border border-line bg-surface p-5">
+        <summary className="cursor-pointer text-sm font-semibold">
+          {workflow.title} ·{' '}
+          <span className="text-ink-3">{labels[workflow.status]}</span>
+        </summary>
+        <div className="pt-4">
+          <WorkflowCard
+            workflow={workflow}
+            disabled={disabled}
+            onResume={onResume}
+            onCancel={onCancel}
+          />
+        </div>
+      </details>
+    );
+  }
   return (
     <article
       aria-label={workflow.title}

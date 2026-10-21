@@ -290,6 +290,82 @@ function settledReceipts(count: number): NonNullable<Run['actionReceipts']> {
 }
 
 describe('MessageList', () => {
+  it.each([true, false])('excludes tail growth from older-history scroll preservation (resize delivered: %s)', (deliverResize) => {
+    let resized!: ResizeObserverCallback;
+    const previous = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      constructor(callback: ResizeObserverCallback) { resized = callback; }
+      observe = vi.fn();
+      unobserve = vi.fn();
+      disconnect = vi.fn();
+    } as unknown as typeof ResizeObserver;
+    try {
+      const scrollerRef = { current: null as HTMLDivElement | null };
+      const props = { sending: false, scrollerRef, onSuggestion: vi.fn(), tail: <div>Resizing workflow</div> };
+      const view = render(<MessageList {...props} agent={agent} />);
+      const scroller = scrollerRef.current!;
+      const tail = screen.getByText('Resizing workflow').parentElement!;
+      let height = 2000;
+      let tailHeight = 100;
+      Object.defineProperties(scroller, { scrollHeight: { configurable: true, get: () => height }, clientHeight: { configurable: true, value: 500 } });
+      Object.defineProperty(tail, 'offsetHeight', { configurable: true, get: () => tailHeight });
+      scroller.scrollTop = 100;
+      fireEvent.scroll(scroller);
+      view.rerender(<MessageList {...props} agent={{ ...agent, messages: [...messages] }} />);
+      tailHeight = 600;
+      height = 2500;
+      if (deliverResize) act(() => resized([], {} as ResizeObserver));
+      expect(scroller.scrollTop).toBe(100);
+      height = 2700;
+      view.rerender(<MessageList {...props} agent={{ ...agent, messages: [{ ...messages[0], id: 'older' }, ...messages] }} />);
+      expect(scroller.scrollTop).toBe(300);
+    } finally { globalThis.ResizeObserver = previous; }
+  });
+  it('follows asynchronous tail sizing only while the reader is at the bottom and disconnects its observer', () => {
+    let resized!: ResizeObserverCallback;
+    const disconnect = vi.fn();
+    const previous = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      constructor(callback: ResizeObserverCallback) {
+        resized = callback;
+      }
+      observe = vi.fn();
+      unobserve = vi.fn();
+      disconnect = disconnect;
+    } as unknown as typeof ResizeObserver;
+    try {
+      const scrollerRef = { current: null as HTMLDivElement | null };
+      const view = render(
+        <MessageList
+          agent={agent}
+          sending={false}
+          scrollerRef={scrollerRef}
+          onSuggestion={vi.fn()}
+          tail={<div>Workflow tail</div>}
+        />,
+      );
+      const scroller = scrollerRef.current!;
+      expect(scroller).toContainElement(screen.getByText('Workflow tail'));
+      Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, value: 2000 },
+        clientHeight: { configurable: true, value: 500 },
+      });
+      act(() => resized([], {} as ResizeObserver));
+      expect(scroller.scrollTop).toBe(2000);
+      scroller.scrollTop = 100;
+      fireEvent.scroll(scroller);
+      Object.defineProperty(scroller, 'scrollHeight', {
+        configurable: true,
+        value: 2500,
+      });
+      act(() => resized([], {} as ResizeObserver));
+      expect(scroller.scrollTop).toBe(100);
+      view.unmount();
+      expect(disconnect).toHaveBeenCalledOnce();
+    } finally {
+      globalThis.ResizeObserver = previous;
+    }
+  });
   const ineligibleCompletedRuns: Array<[string, Partial<Run>]> = [
     ['legacy missing receipt data', { actionReceipts: undefined }],
     ['short task (two tool calls)', { actionReceipts: settledReceipts(2) }],

@@ -77,6 +77,94 @@ beforeEach(() => {
   // The header reads the session's usage; most tests have none.
   vi.spyOn(daemon, 'getSession').mockResolvedValue(sessionFixture('room-7'));
   vi.spyOn(daemon.interactions, 'list').mockResolvedValue([]);
+  vi.spyOn(daemon, 'listWorkflows').mockImplementation(
+    () => new Promise(() => {}),
+  );
+});
+
+describe('chat workflows integration', () => {
+  it.each([null, sessionFixture('helper-chat')])('does not mount workflows for a helper agent with session %s', async (session) => {
+    renderView({ agent: { ...agent, workspaceRole: 'helper' }, session });
+    await act(async () => {});
+    expect(screen.queryByRole('region', { name: /Workflows for/ })).not.toBeInTheDocument();
+    expect(daemon.listWorkflows).not.toHaveBeenCalled();
+  });
+  it('places agent workflows inside the empty chat scroller and keeps its composer available', async () => {
+    vi.mocked(daemon.listWorkflows).mockResolvedValue([]);
+    const scrollerRef = createRef<HTMLDivElement>();
+    renderView({ scrollerRef });
+    const workflows = await screen.findByRole('region', {
+      name: 'Workflows for Nova',
+    });
+    expect(scrollerRef.current).toContainElement(workflows);
+    expect(screen.getByRole('textbox', { name: /Message/ })).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Create workflow' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('refreshes the initially empty workflow list after new messages and run status activity', async () => {
+    const list = vi.mocked(daemon.listWorkflows);
+    list.mockResolvedValue([]);
+    const view = renderView({ session: sessionFixture('chat:workflows') });
+    await screen.findByText('No workflows yet for this agent.');
+    expect(list).toHaveBeenCalledTimes(1);
+    view.rerender({
+      messages: [
+        {
+          id: 'created',
+          role: 'Assistant',
+          content: { text: 'Created your workflow' },
+          created_at_ms: 2,
+        },
+      ],
+    });
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    const liveRun = emptyLiveRun(
+      runFixture('workflow-chat-run', { status: 'running' }),
+    );
+    view.rerender({ runs: [liveRun] });
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(3));
+    view.rerender({
+      runs: [{ ...liveRun, run: { ...liveRun.run, status: 'completed' } }],
+    });
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(4));
+    view.rerender({ contextRefreshKey: 'activity-outside-history' });
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(5));
+  });
+
+  it.each([
+    'helper',
+    'job',
+    'checkin',
+    'telegram',
+    'discord',
+    'email',
+  ] as const)('does not mount workflows in %s sessions', async (kind) => {
+    renderView({ session: sessionFixture('other', { kind }) });
+    await act(async () => {});
+    expect(
+      screen.queryByRole('region', { name: /Workflows for/ }),
+    ).not.toBeInTheDocument();
+    expect(daemon.listWorkflows).not.toHaveBeenCalled();
+  });
+
+  it('does not load workflows for a deleted or mismatched agent session', async () => {
+    const view = renderView({
+      session: sessionFixture('deleted'),
+      missing: true,
+    });
+    expect(daemon.listWorkflows).not.toHaveBeenCalled();
+    view.rerender({
+      missing: false,
+      session: sessionFixture('wrong', { agentId: 'helper-other' }),
+    });
+    await act(async () => {});
+    expect(
+      screen.queryByRole('region', { name: /Workflows for/ }),
+    ).not.toBeInTheDocument();
+    expect(daemon.listWorkflows).not.toHaveBeenCalled();
+  });
 });
 
 afterEach(() => {

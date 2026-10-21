@@ -493,6 +493,7 @@ export const MessageList = memo(function MessageList({
   loadingOlder = false,
   onLoadOlder,
   emptyState,
+  tail,
   items,
   actions,
   readAloud,
@@ -513,6 +514,8 @@ export const MessageList = memo(function MessageList({
   onLoadOlder?: () => void;
   /** Replaces the welcome screen for sessions that are not new chats. */
   emptyState?: ReactNode;
+  /** Agent-scoped controls rendered after the transcript inside its scroller. */
+  tail?: ReactNode;
   /** The session's transcript with its live runs and sends (spec §15.2);
    *  built from `agent.messages` when absent. */
   items?: readonly TranscriptItem[];
@@ -537,6 +540,19 @@ export const MessageList = memo(function MessageList({
   const highlightedMessageId =
     highlight ?? (jumpReady ? highlightMessageId : null);
   const atBottom = useRef(true);
+  const tailRef = useRef<HTMLDivElement>(null);
+  const hasTail = tail != null;
+  useLayoutEffect(() => {
+    const element = tailRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      const scroller = scrollerRef.current;
+      if (atBottom.current && scroller)
+        scroller.scrollTop = scroller.scrollHeight;
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [hasTail, scrollerRef]);
   const messageElements = useRef(new Map<string, HTMLDivElement>());
   const firstMessageId = agent.messages[0]?.id;
   const anchor = useRef<{ firstId: string | undefined; height: number }>({
@@ -613,7 +629,9 @@ export const MessageList = memo(function MessageList({
     // position we just chose when the anchor window replaced the page.
     anchor.current = {
       firstId: firstMessageId,
-      height: scrollerRef.current?.scrollHeight ?? 0,
+      height:
+        (scrollerRef.current?.scrollHeight ?? 0) -
+        (tailRef.current?.offsetHeight ?? 0),
     };
   }, [
     highlightMessageId,
@@ -634,15 +652,18 @@ export const MessageList = memo(function MessageList({
   useLayoutEffect(() => {
     const element = scrollerRef.current;
     if (!element) return;
+    // Workflow cards resize independently of history. Only transcript growth
+    // above the reading position belongs in the prepend adjustment.
+    const height = element.scrollHeight - (tailRef.current?.offsetHeight ?? 0);
     const previous = anchor.current;
     if (
       previous.firstId !== undefined &&
       previous.firstId !== firstMessageId &&
       !atBottom.current
     ) {
-      element.scrollTop += element.scrollHeight - previous.height;
+      element.scrollTop += height - previous.height;
     }
-    anchor.current = { firstId: firstMessageId, height: element.scrollHeight };
+    anchor.current = { firstId: firstMessageId, height };
   }, [firstMessageId, agent.messages, scrollerRef]);
 
   return (
@@ -750,6 +771,14 @@ export const MessageList = memo(function MessageList({
                 {sending && <ThinkingIndicator name={agent.name} />}
               </div>
             </TaskReviewProvider>
+          )}
+          {tail != null && (
+            <div
+              ref={tailRef}
+              className="mx-auto w-full max-w-3xl px-4 pb-6 sm:px-6"
+            >
+              {tail}
+            </div>
           )}
         </div>
         {awayFromBottom && (

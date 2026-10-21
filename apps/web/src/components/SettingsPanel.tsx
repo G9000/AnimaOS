@@ -4,6 +4,7 @@ import {
   BROWSER_TOOL_ACCESS,
   isBrowserTool,
   PROGRAMMATIC_TOOL_ACCESS,
+  WORKFLOW_TOOL_ACCESS,
   deriveAccessProfile,
   toolNamesForProfile,
   type AccessProfile,
@@ -122,6 +123,9 @@ export function SettingsPanel({
   const hasWebSearch = agent.toolNames.includes('web_search');
   const hasWebFetch = agent.toolNames.includes('web_fetch');
   const hasToolChains = agent.toolNames.includes('execute_code');
+  const hasWorkflows = WORKFLOW_TOOL_ACCESS.tools.every((tool) =>
+    agent.toolNames.includes(tool),
+  );
   const derivedAccess = deriveAccessProfile(
     agent.toolNames.filter(
       (tool) =>
@@ -132,6 +136,7 @@ export function SettingsPanel({
         tool !== 'read_document' &&
         tool !== 'web_search' &&
         tool !== 'web_fetch' &&
+        !WORKFLOW_TOOL_ACCESS.tools.some((name) => name === tool) &&
         tool !== 'execute_code',
     ),
   );
@@ -160,6 +165,9 @@ export function SettingsPanel({
   const [allowWebSearch, setAllowWebSearch] = useState(hasWebSearch);
   const [allowWebFetch, setAllowWebFetch] = useState(hasWebFetch);
   const [allowToolChains, setAllowToolChains] = useState(hasToolChains);
+  const [allowWorkflows, setAllowWorkflows] = useState(hasWorkflows);
+  // A partial legacy grant stays unchanged until the owner uses this toggle.
+  const [workflowsChanged, setWorkflowsChanged] = useState(false);
   const [toolChainStatus, setToolChainStatus] = useState('loading');
   const [savedFlash, setSavedFlash] = useState(false);
   const saveErrorRef = useRef<HTMLDivElement>(null);
@@ -208,6 +216,8 @@ export function SettingsPanel({
     setAllowWebSearch(hasWebSearch);
     setAllowWebFetch(hasWebFetch);
     setAllowToolChains(hasToolChains);
+    setAllowWorkflows(hasWorkflows);
+    setWorkflowsChanged(false);
   }, [
     agent.id,
     agent.name,
@@ -222,6 +232,7 @@ export function SettingsPanel({
     hasWebSearch,
     hasWebFetch,
     hasToolChains,
+    hasWorkflows,
     derivedAccess,
   ]);
 
@@ -244,6 +255,10 @@ export function SettingsPanel({
     accessSelection !== derivedAccess;
   const toolsDirty =
     accessDirty ||
+    (workflowsChanged &&
+      WORKFLOW_TOOL_ACCESS.tools.some(
+        (tool) => agent.toolNames.includes(tool) !== allowWorkflows,
+      )) ||
     BROWSER_TOOL_ACCESS.some(
       ({ name }) =>
         browserGrants.includes(name) !== agent.toolNames.includes(name),
@@ -284,6 +299,9 @@ export function SettingsPanel({
           (tool !== 'read_document' || allowDocumentRead) &&
           (tool !== 'web_search' || allowWebSearch) &&
           (tool !== 'web_fetch' || allowWebFetch) &&
+          (!workflowsChanged ||
+            allowWorkflows ||
+            !WORKFLOW_TOOL_ACCESS.tools.some((name) => name === tool)) &&
           (tool !== 'execute_code' || allowToolChains),
       );
       if (allowMemoryRemove && !patch.tools.includes('memory_remove')) {
@@ -313,6 +331,15 @@ export function SettingsPanel({
       if (allowToolChains && !patch.tools.includes('execute_code')) {
         patch.tools.push('execute_code');
       }
+      for (const tool of WORKFLOW_TOOL_ACCESS.tools) {
+        if (
+          (allowWorkflows ||
+            (!workflowsChanged && agent.toolNames.includes(tool))) &&
+          !patch.tools.includes(tool)
+        ) {
+          patch.tools.push(tool);
+        }
+      }
       patch.tools.push(
         ...BROWSER_TOOL_ACCESS.filter(({ name }) =>
           browserGrants.includes(name),
@@ -328,6 +355,17 @@ export function SettingsPanel({
   };
 
   const abilities = [
+    {
+      id: 'workflows',
+      label: WORKFLOW_TOOL_ACCESS.label,
+      checked: allowWorkflows,
+      setChecked: (checked: boolean) => {
+        setAllowWorkflows(checked);
+        setWorkflowsChanged(true);
+      },
+      disabled: agent.workspaceRole === 'helper',
+      help: 'Allows this agent to create and list reusable workflows from chat. Existing tool permissions and approval rules still apply when a workflow runs.',
+    },
     {
       id: 'tool-chains',
       label: PROGRAMMATIC_TOOL_ACCESS.label,

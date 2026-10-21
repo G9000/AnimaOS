@@ -42,6 +42,7 @@ import { ContextNote, SessionContinuity } from './SessionContinuity';
 import { useSessionInteractions } from '../../hooks/useSessionInteractions';
 import { ClarificationCard, SideQuestionCard } from './InteractionCards';
 import { daemon } from '../../lib/daemon-api';
+import { ChatWorkflows } from './ChatWorkflows';
 
 export interface SessionComposerState {
   draft: string;
@@ -563,6 +564,18 @@ export function SessionView({
         }
         onJumpToLatest={historyAnchor?.onReturnToLatest}
         onAtBottomChange={onAtBottomChange}
+        tail={
+          agent.workspaceRole !== 'helper' &&
+          (!session ||
+            (session.kind === 'chat' && session.agentId === agent.id)) ? (
+            <ChatWorkflows
+              key={`${agent.id}:${session?.id ?? 'new'}`}
+              agent={agent}
+              online={!composer.offline}
+              refreshKey={`${messages.length}:${messages.at(-1)?.id ?? ''}:${runs.map(({ run }) => `${run.id}:${run.status}`).join(',')}:${session?.activeRuns ?? 0}:${composer.sending}:${contextRefreshKey ?? ''}`}
+            />
+          ) : undefined
+        }
       />
       {session?.kind === 'chat' && skillDrafts && (
         <SessionSkillDrafts

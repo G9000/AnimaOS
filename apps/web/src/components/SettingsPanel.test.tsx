@@ -159,6 +159,204 @@ function renderPanel(
   return { ...render(<SettingsPanel {...props} />), props };
 }
 
+describe('workflow chat permissions', () => {
+  const workflowTools = ['create_workflow', 'list_workflows'];
+  const workflowToggle = () =>
+    screen.getByRole('checkbox', { name: 'Allow workflows in chat' });
+
+  it('defaults off and grants exactly the workflow pair while preserving custom permissions', async () => {
+    const original = ['read_file', 'legacy_custom', 'web_search'];
+    const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+    renderPanel(agent({ toolNames: original }), {
+      saveSettings,
+      sections: ['access'],
+    });
+    expect(workflowToggle()).not.toBeChecked();
+    fireEvent.click(workflowToggle());
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith({
+        tools: [...original, ...workflowTools],
+      }),
+    );
+    for (const profile of ['observe', 'collaborate', 'operate'] as const) {
+      expect(toolNamesForProfile(profile)).not.toContain('create_workflow');
+      expect(toolNamesForProfile(profile)).not.toContain('list_workflows');
+    }
+  });
+
+  it('revokes both workflow grants and preserves unrelated grants', async () => {
+    const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+    renderPanel(
+      agent({ toolNames: ['legacy_custom', ...workflowTools, 'read_file'] }),
+      {
+        saveSettings,
+        sections: ['access'],
+      },
+    );
+    expect(workflowToggle()).toBeChecked();
+    fireEvent.click(workflowToggle());
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith({
+        tools: ['legacy_custom', 'read_file'],
+      }),
+    );
+  });
+
+  it.each([false, true])(
+    'keeps an explicitly enabled workflow grant through profile selection (stored: %s)',
+    async (stored) => {
+      const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+      renderPanel(
+        agent({
+          toolNames: [
+            ...toolNamesForProfile('collaborate'),
+            ...(stored ? workflowTools : []),
+          ],
+        }),
+        {
+          saveSettings,
+          sections: ['access'],
+        },
+      );
+      expect(screen.getByRole('radio', { name: /^Collaborate/ })).toBeChecked();
+      if (!stored) fireEvent.click(workflowToggle());
+      fireEvent.click(screen.getByRole('radio', { name: /^Observe/ }));
+      expect(workflowToggle()).toBeChecked();
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() =>
+        expect(saveSettings).toHaveBeenCalledWith({
+          tools: [...toolNamesForProfile('observe'), ...workflowTools],
+        }),
+      );
+    },
+  );
+
+  it.each(workflowTools)(
+    'preserves a partial %s grant on unrelated saves without completing the pair',
+    async (partial) => {
+      const original = [
+        ...toolNamesForProfile('collaborate'),
+        partial,
+        'legacy_custom',
+      ];
+      const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+      renderPanel(agent({ toolNames: original }), { saveSettings });
+      expect(workflowToggle()).not.toBeChecked();
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Workflow Nova' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() =>
+        expect(saveSettings).toHaveBeenLastCalledWith({
+          name: 'Workflow Nova',
+        }),
+      );
+      fireEvent.click(
+        screen.getByRole('checkbox', { name: 'Allow removing saved facts' }),
+      );
+      fireEvent.click(
+        screen.getByRole('button', { name: /^(Save changes|Saved ✓)$/ }),
+      );
+      await waitFor(() =>
+        expect(saveSettings).toHaveBeenLastCalledWith({
+          name: 'Workflow Nova',
+          tools: [...original, 'memory_remove'],
+        }),
+      );
+    },
+  );
+
+  it.each(workflowTools)(
+    'preserves a partial %s grant through profile changes until the workflow toggle is changed',
+    async (partial) => {
+      const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+      renderPanel(
+        agent({ toolNames: [...toolNamesForProfile('collaborate'), partial] }),
+        { saveSettings, sections: ['access'] },
+      );
+      expect(workflowToggle()).not.toBeChecked();
+      fireEvent.click(screen.getByRole('radio', { name: /^Observe/ }));
+      expect(workflowToggle()).not.toBeChecked();
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() =>
+        expect(saveSettings).toHaveBeenCalledWith({
+          tools: [...toolNamesForProfile('observe'), partial],
+        }),
+      );
+    },
+  );
+
+  it.each(workflowTools)(
+    'completes a partial %s grant only after opting in',
+    async (partial) => {
+      const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+      renderPanel(agent({ toolNames: ['legacy_custom', partial] }), {
+        saveSettings,
+        sections: ['access'],
+      });
+      expect(workflowToggle()).not.toBeChecked();
+      fireEvent.click(workflowToggle());
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() =>
+        expect(saveSettings).toHaveBeenCalledWith({
+          tools: [
+            'legacy_custom',
+            partial,
+            ...workflowTools.filter((tool) => tool !== partial),
+          ],
+        }),
+      );
+    },
+  );
+
+  it('can revoke a partial grant by toggling on and back off', async () => {
+    const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+    renderPanel(agent({ toolNames: ['legacy_custom', 'create_workflow'] }), {
+      saveSettings,
+      sections: ['access'],
+    });
+    fireEvent.click(workflowToggle());
+    fireEvent.click(workflowToggle());
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith({ tools: ['legacy_custom'] }),
+    );
+  });
+
+  it('disables workflow permissions for helpers', () => {
+    renderPanel(agent({ workspaceRole: 'helper' }), { sections: ['access'] });
+    expect(workflowToggle()).toBeDisabled();
+  });
+
+  it('reseeds workflow drafts on stored tool changes and agent changes', () => {
+    const original = agent({ toolNames: ['read_file'] });
+    const view = renderPanel(original, { sections: ['access'] });
+    fireEvent.click(workflowToggle());
+    view.rerender(
+      <SettingsPanel
+        {...view.props}
+        agent={{ ...original, toolNames: ['read_file', 'create_workflow'] }}
+      />,
+    );
+    expect(workflowToggle()).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'No changes' })).toBeDisabled();
+    view.rerender(
+      <SettingsPanel
+        {...view.props}
+        agent={agent({
+          id: 'another-agent',
+          toolNames: [...toolNamesForProfile('observe'), ...workflowTools],
+        })}
+      />,
+    );
+    expect(workflowToggle()).toBeChecked();
+    expect(screen.getByRole('radio', { name: /^Observe/ })).toBeChecked();
+    expect(screen.getByRole('button', { name: 'No changes' })).toBeDisabled();
+  });
+});
+
 describe('model resilience settings', () => {
   it('saves fallback models through the agent update, and shows keys and the side-task model', async () => {
     const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
