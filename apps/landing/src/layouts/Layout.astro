@@ -16,6 +16,9 @@ const description = 'A personal agent that runs on your machine. It plans, works
     <meta property="og:image" content="/img/keyart.webp" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <meta name="theme-color" content="#0B0B0A" />
+    {import.meta.env.PROD && (
+      <script defer src="https://cloud.umami.is/script.js" data-website-id="92475600-9412-4389-b186-9bd33160041d" is:inline></script>
+    )}
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;1,9..144,400;1,9..144,500&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">

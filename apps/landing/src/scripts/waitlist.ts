@@ -36,6 +36,11 @@ form.addEventListener('submit', async (e) => {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Couldn’t save that just now. Try again in a moment.');
     remember(email); say(''); showJoined(email);
+    // Analytics must never turn an accepted signup into an error.
+    try {
+      const umami = (window as Window & { umami?: { track: (name: string) => unknown } }).umami;
+      Promise.resolve(umami?.track('waitlist-signup')).catch(() => {});
+    } catch {}
   } catch (err) {
     submit.disabled = false;
     say(err instanceof Error && err.message !== 'Failed to fetch' ? err.message : 'Couldn’t reach the server. Try again in a moment.', true);
