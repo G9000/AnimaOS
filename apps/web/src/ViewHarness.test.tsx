@@ -1398,10 +1398,42 @@ describe('ViewHarness workspace controller', () => {
     render(<ViewHarness />);
 
     expect(
-      await screen.findByRole('heading', { name: 'Meet anima.' }),
+      await screen.findByRole('heading', { name: "I'm at your command" }),
     ).toBeVisible();
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
     expect(screen.queryByText('Welcome back')).not.toBeInTheDocument();
+  });
+
+  it('sends in Plan mode only while Plan is chosen', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+    vi.spyOn(daemon, 'listAgents').mockResolvedValue({
+      agents: [snapshot('agent-a', 'Alpha', 10)],
+    });
+    mockProviders();
+    const startRun = vi.mocked(daemon.startRun);
+
+    render(<ViewHarness />);
+    await openChat();
+    await screen.findByRole('heading', { name: 'Say something to Alpha' });
+
+    await user.click(screen.getByRole('button', { name: /^Do, gpt-4\.1/ }));
+    await user.click(screen.getByRole('menuitemradio', { name: /^Plan/ }));
+    await user.type(screen.getByPlaceholderText('Message Alpha…'), 'Trip');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() =>
+      expect(startRun).toHaveBeenCalledWith(
+        'agent-a',
+        expect.any(String),
+        {
+          text: 'Trip',
+          mode: 'queue',
+          plan: true,
+          timeZone: expect.any(String),
+        },
+        expect.any(String),
+      ),
+    );
   });
 
   it('selects the oldest agent by creation time then id for chat, settings, and Main', async () => {
@@ -1711,7 +1743,7 @@ describe('ViewHarness workspace controller', () => {
       await deletion.promise;
     });
     expect(
-      await screen.findByRole('heading', { name: 'Meet anima.' }),
+      await screen.findByRole('heading', { name: "I'm at your command" }),
     ).toBeVisible();
   });
 
@@ -1983,7 +2015,7 @@ describe('ViewHarness workspace controller', () => {
     await user.click(screen.getByRole('button', { name: 'Reset' }));
 
     expect(
-      await screen.findByRole('heading', { name: 'Meet anima.' }),
+      await screen.findByRole('heading', { name: "I'm at your command" }),
     ).toBeVisible();
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
   });
@@ -2009,7 +2041,7 @@ describe('ViewHarness workspace controller', () => {
     await user.click(screen.getByRole('button', { name: 'Reset' }));
 
     expect(
-      await screen.findByRole('heading', { name: 'Meet anima.' }),
+      await screen.findByRole('heading', { name: "I'm at your command" }),
     ).toBeVisible();
     expect(removeItem).toHaveBeenCalledWith('animaos.checkins.agent-only');
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
@@ -2053,14 +2085,16 @@ describe('ViewHarness workspace controller', () => {
       await deletion.promise;
     });
     expect(
-      await screen.findByRole('heading', { name: 'Meet anima.' }),
+      await screen.findByRole('heading', { name: "I'm at your command" }),
     ).toBeVisible();
 
     await act(async () => {
       stalePoll.resolve({ agents: [nova] });
       await stalePoll.promise;
     });
-    expect(screen.getByRole('heading', { name: 'Meet anima.' })).toBeVisible();
+    expect(
+      screen.getByRole('heading', { name: "I'm at your command" }),
+    ).toBeVisible();
     expect(
       screen.queryByRole('heading', { name: 'Say something to Nova' }),
     ).not.toBeInTheDocument();

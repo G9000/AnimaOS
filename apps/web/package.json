@@ -10,6 +10,7 @@
   "dependencies": {
     "@animaOS-SWARM/sdk": "workspace:*",
     "@animaOS-SWARM/ui": "workspace:*",
+    "@fontsource-variable/fraunces": "^5.3.0",
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
     "prism-react-renderer": "^2.4.1",

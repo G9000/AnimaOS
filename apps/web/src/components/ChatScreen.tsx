@@ -28,6 +28,11 @@ import { MarkdownMessage } from './MarkdownMessage';
 import { ErrorBanner, formatTime } from './ui-bits';
 import { isMacPlatform } from '../lib/platform';
 import {
+  ComposerMode,
+  type ComposerModeState,
+  type ComposerModelState,
+} from './ComposerMode';
+import {
   buildTranscript,
   isAcceptedBudgetWrapupMessage,
   type TranscriptActions,
@@ -346,6 +351,19 @@ function dayLabel(ms: number, now = new Date()): string {
   });
 }
 
+/** Short names for the day rail: Today, a weekday this week, then "Last wk"
+ *  and months. */
+function railLabel(ms: number, now = new Date()): string {
+  const day = new Date(ms);
+  const startOf = (d: Date) =>
+    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diff = Math.round((startOf(now) - startOf(day)) / 86_400_000);
+  if (diff === 0) return 'Today';
+  if (diff < 7) return day.toLocaleDateString([], { weekday: 'short' });
+  if (diff < 14) return 'Last wk';
+  return day.toLocaleDateString([], { month: 'short' });
+}
+
 /** The main chat runs for days: a divider marks where each new day starts. */
 function dayDividers(transcript: readonly TranscriptItem[]): (string | null)[] {
   let previous: string | null = null;
@@ -580,6 +598,21 @@ export const MessageList = memo(function MessageList({
     [transcript],
   );
   const days = useMemo(() => dayDividers(transcript), [transcript]);
+  /** Where each loaded day begins, for the rail beside the transcript. */
+  const dayStops = useMemo(() => {
+    const stops: { key: string; label: string; id: string }[] = [];
+    let previous: string | null = null;
+    transcript.forEach((item, index) => {
+      const ms = itemTime(item);
+      const id = anchorsByItem[index]?.[0];
+      if (ms === null || !id) return;
+      const day = new Date(ms).toDateString();
+      if (day === previous) return;
+      previous = day;
+      stops.push({ key: day, label: railLabel(ms), id });
+    });
+    return stops;
+  }, [transcript, anchorsByItem]);
   const jumpToMessage = useCallback((id: string) => {
     atBottom.current = false;
     setAwayFromBottom(true);
@@ -676,6 +709,22 @@ export const MessageList = memo(function MessageList({
         />
       )}
       <div className="studio-conversation-body">
+        {dayStops.length > 1 && (
+          <nav className="day-rail" aria-label="Jump to a day">
+            {dayStops.map((stop, index) => (
+              <button
+                key={stop.key}
+                type="button"
+                className="day-rail-stop"
+                data-current={index === dayStops.length - 1 || undefined}
+                onClick={() => jumpToMessage(stop.id)}
+              >
+                {stop.label}
+                <i aria-hidden />
+              </button>
+            ))}
+          </nav>
+        )}
         <div
           ref={scrollerRef}
           className="studio-message-scroller relative z-[1] min-h-0 flex-1 overflow-y-auto"
@@ -818,6 +867,8 @@ export function Composer({
   voiceDisabled = false,
   nativeVoice,
   tools,
+  mode,
+  model,
 }: {
   agentName: string;
   /** The textarea's name and placeholder; defaults to "Message <agent>". */
@@ -851,6 +902,10 @@ export function Composer({
   /** The session's own input tools (browser task, spoken replies), kept
    *  with Attach and Record behind the composer's + button. */
   tools?: ReactNode;
+  /** Plan or Do for what is sent next; with `model`, the chip under the
+   *  message. */
+  mode?: ComposerModeState;
+  model?: ComposerModelState;
   attachments?: {
     items: readonly AttachmentDraft[];
     onAdd(files: readonly File[]): void;
@@ -1052,114 +1107,128 @@ export function Composer({
           </div>
         )}
         <AttachmentDropZone disabled={!canPick} onAdd={attachments?.onAdd}>
-          <div className="studio-composer-box composer-bar glass-strong focus-glow flex items-end gap-1 p-1.5 transition-all duration-200">
-            {/* The agent's orb lives in the composer: it brightens while you
+          <div className="studio-composer-box composer-bar glass-strong focus-glow flex flex-col gap-1 p-1.5 transition-all duration-200">
+            <div className="composer-row">
+              {/* The agent's orb lives in the composer: it brightens while you
                 write and while the agent works. */}
-            <span className="composer-orb" aria-hidden>
-              <HaloOrb
-                energy={runActive || sending ? 0.8 : draft.trim() ? 0.6 : 0.35}
-                className="composer-orb-canvas"
-              />
-            </span>
-            <textarea
-              data-workspace-composer
-              ref={taRef}
-              value={draft}
-              disabled={disabled}
-              onChange={(e) => changeDraft(e.target.value)}
-              onKeyDown={(e) => {
-                const composing =
-                  e.nativeEvent.isComposing || e.keyCode === 229;
-                if (selected) {
-                  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    const step = e.key === 'ArrowDown' ? 1 : -1;
-                    setActiveIndex(
-                      (index) =>
-                        (Math.min(index, suggestions.length - 1) +
-                          step +
-                          suggestions.length) %
-                        suggestions.length,
-                    );
-                    return;
+              <span className="composer-orb" aria-hidden>
+                <HaloOrb
+                  energy={
+                    runActive || sending ? 0.8 : draft.trim() ? 0.6 : 0.35
                   }
-                  if (e.key === 'Escape') {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setDismissedFor(draft);
-                    return;
+                  className="composer-orb-canvas"
+                />
+              </span>
+              <textarea
+                data-workspace-composer
+                ref={taRef}
+                value={draft}
+                disabled={disabled}
+                onChange={(e) => changeDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  const composing =
+                    e.nativeEvent.isComposing || e.keyCode === 229;
+                  if (selected) {
+                    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      const step = e.key === 'ArrowDown' ? 1 : -1;
+                      setActiveIndex(
+                        (index) =>
+                          (Math.min(index, suggestions.length - 1) +
+                            step +
+                            suggestions.length) %
+                          suggestions.length,
+                      );
+                      return;
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDismissedFor(draft);
+                      return;
+                    }
+                    if (
+                      (e.key === 'Tab' && !e.shiftKey) ||
+                      (e.key === 'Enter' && !e.shiftKey && !composing)
+                    ) {
+                      e.preventDefault();
+                      pick(selected, e.key === 'Tab');
+                      return;
+                    }
                   }
-                  if (
-                    (e.key === 'Tab' && !e.shiftKey) ||
-                    (e.key === 'Enter' && !e.shiftKey && !composing)
-                  ) {
+                  if (e.key === 'Enter' && !e.shiftKey && !composing) {
                     e.preventDefault();
-                    pick(selected, e.key === 'Tab');
-                    return;
+                    if (!canSend) return;
+                    if ((e.metaKey || e.ctrlKey) && steerable) onSteer?.();
+                    else onSend();
                   }
+                }}
+                onFocus={() => setBlurred(false)}
+                onBlur={() => setBlurred(true)}
+                rows={1}
+                aria-label={inputLabel}
+                aria-autocomplete={commands ? 'list' : undefined}
+                aria-controls={menuOpen ? menuId : undefined}
+                aria-activedescendant={
+                  selected ? `${menuId}-${selected.name}` : undefined
                 }
-                if (e.key === 'Enter' && !e.shiftKey && !composing) {
-                  e.preventDefault();
-                  if (!canSend) return;
-                  if ((e.metaKey || e.ctrlKey) && steerable) onSteer?.();
-                  else onSend();
-                }
-              }}
-              onFocus={() => setBlurred(false)}
-              onBlur={() => setBlurred(true)}
-              rows={1}
-              aria-label={inputLabel}
-              aria-autocomplete={commands ? 'list' : undefined}
-              aria-controls={menuOpen ? menuId : undefined}
-              aria-activedescendant={
-                selected ? `${menuId}-${selected.name}` : undefined
-              }
-              placeholder={`${inputLabel}…`}
-              className="max-h-48 flex-1 resize-none bg-transparent px-2 py-[7px] text-[15px] leading-6 text-ink placeholder-ink-3 outline-none"
-            />
-            {hasTray && (
-              <button
-                ref={moreButton}
-                type="button"
-                className="composer-icon composer-more"
-                aria-label="More input options"
-                aria-expanded={moreOpen}
-                aria-controls={trayId}
-                title="Attach files, record audio, and more"
-                onClick={() => setMoreOpen((open) => !open)}
-              >
-                <PlusIcon size={16} />
-              </button>
-            )}
-            {runActive && onStop ? (
-              <button
-                type="button"
-                onClick={onStop}
-                aria-label="Stop"
-                className="composer-send flex shrink-0 cursor-pointer items-center justify-center transition active:scale-95"
-              >
-                <StopIcon size={14} />
-              </button>
-            ) : !showSend ? (
-              <DictationControl
-                compact
-                disabled={!canPick || voiceDisabled}
-                conversationKey={conversationKey}
-                onTranscript={appendDictation}
+                placeholder={`${inputLabel}…`}
+                className="max-h-48 flex-1 resize-none bg-transparent px-2 py-[7px] text-[15px] leading-6 text-ink placeholder-ink-3 outline-none"
               />
-            ) : (
-              <button
-                type="button"
-                onClick={() => onSend()}
-                disabled={!canSend}
-                aria-label="Send"
-                className="composer-send flex shrink-0 cursor-pointer items-center justify-center transition active:scale-95 disabled:cursor-not-allowed disabled:active:scale-100"
-              >
-                <SendIcon size={14} />
-              </button>
-            )}
+            </div>
+            <div className="composer-controls">
+              {hasTray && (
+                <button
+                  ref={moreButton}
+                  type="button"
+                  className="composer-icon composer-more"
+                  aria-label="More input options"
+                  aria-expanded={moreOpen}
+                  aria-controls={trayId}
+                  title="Attach files, record audio, and more"
+                  onClick={() => setMoreOpen((open) => !open)}
+                >
+                  <PlusIcon size={16} />
+                </button>
+              )}
+              <ComposerMode mode={mode} model={model} />
+              <span className="composer-spacer" />
+              {runActive && onStop ? (
+                <button
+                  type="button"
+                  onClick={onStop}
+                  aria-label="Stop"
+                  className="composer-send flex shrink-0 cursor-pointer items-center justify-center transition active:scale-95"
+                >
+                  <StopIcon size={14} />
+                </button>
+              ) : !showSend ? (
+                <DictationControl
+                  compact
+                  disabled={!canPick || voiceDisabled}
+                  conversationKey={conversationKey}
+                  onTranscript={appendDictation}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onSend()}
+                  disabled={!canSend}
+                  aria-label="Send"
+                  className="composer-send flex shrink-0 cursor-pointer items-center justify-center transition active:scale-95 disabled:cursor-not-allowed disabled:active:scale-100"
+                >
+                  <SendIcon size={14} />
+                </button>
+              )}
+            </div>
           </div>
         </AttachmentDropZone>
+        {commands && (
+          <p className="composer-keys" aria-hidden>
+            <span>/ commands</span>
+            <span>{isMacPlatform() ? '⌘K' : 'Ctrl K'} search</span>
+          </p>
+        )}
         {/* A hint only when there is something to know. */}
         {(steerable || offline || sending || runActive) && (
           <div className="composer-hints">

@@ -1024,6 +1024,12 @@ export function ViewHarness() {
     };
   };
 
+  // Plan mode is the owner's choice for the chats they send from now on;
+  // each message tells the daemon which it is.
+  const [planMode, setPlanMode] = useState(false);
+  const planModeRef = useRef(planMode);
+  planModeRef.current = planMode;
+
   const queueSend = (
     target: Pick<Session, 'agentId' | 'id' | 'kind'>,
     conversation: string,
@@ -1056,6 +1062,11 @@ export function ViewHarness() {
       text,
       mode,
       ...(skill ? { skill } : {}),
+      ...(target.kind === 'chat' &&
+      planModeRef.current &&
+      agent?.toolNames.includes('propose_plan')
+        ? { plan: true }
+        : {}),
       ...(attachmentInput ?? {}),
       telegram: target.kind === 'telegram',
       discord: target.kind === 'discord',
@@ -1509,6 +1520,21 @@ export function ViewHarness() {
           error: attachments.error,
         },
         savedAttachmentCount: savedAttachmentIds.length,
+        mode: {
+          plan: planMode,
+          canPlan: Boolean(agent?.toolNames.includes('propose_plan')),
+          onChange: setPlanMode,
+        },
+        model: agent
+          ? {
+              provider: agent.provider,
+              current: agent.model,
+              busy: savingSettings,
+              error: settingsSaveError,
+              onPick: (model: string) => void saveSettings({ model }),
+              onMore: () => navigate({ kind: 'page', page: 'model' }),
+            }
+          : undefined,
         setDraft,
         sending,
         // Usable while the companion works: messages queue (spec §15.3).

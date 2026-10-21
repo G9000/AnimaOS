@@ -1155,6 +1155,9 @@ describe('SettingsPanel access', () => {
     expect(screen.queryByRole('button', { name: 'Reset' })).toBeNull();
 
     view.rerender(<SettingsPanel {...view.props} sections={['model']} />);
+    // The main model shows as one item; its controls open under Change model.
+    expect(screen.getByTestId('main-model')).toBeVisible();
+    fireEvent.click(screen.getByText('Change model'));
     expect(screen.getByRole('combobox', { name: 'Provider' })).toBeVisible();
     expect(screen.queryByRole('radio')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Reset' })).toBeNull();

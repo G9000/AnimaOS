@@ -24,6 +24,7 @@ import type { SlashCommand } from '../../lib/slash-commands';
 import { sessionUsageLine } from '../../lib/usage';
 import type { AgentDetail, ChatMessage } from '../../lib/types';
 import { Composer, MessageList } from '../ChatScreen';
+import type { ComposerModeState, ComposerModelState } from '../ComposerMode';
 import {
   buildHistory,
   placeRuns,
@@ -74,6 +75,10 @@ export interface SessionComposerState {
     onRemove(localId: string): void;
     error?: string | null;
   };
+  /** Plan or Do for what is sent next. */
+  mode?: ComposerModeState;
+  /** The model the companion thinks with, and a way to change it. */
+  model?: ComposerModelState;
 }
 
 export interface SessionViewProps {
@@ -680,6 +685,10 @@ export function SessionView({
             session?.kind === 'discord' ? undefined : composer.attachments
           }
           savedAttachmentCount={composer.savedAttachmentCount}
+          mode={
+            session?.kind === 'chat' || !session ? composer.mode : undefined
+          }
+          model={composer.model}
           tools={
             <>
               {sessionTools}

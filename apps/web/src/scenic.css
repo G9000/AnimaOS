@@ -7,7 +7,7 @@
  * owner talks it comes forward with their words and the chat blurs back. */
 
 .scenic-shell .studio-main {
-  background: #050608;
+  background: #0b0b0a;
 }
 
 .halo-backdrop {
@@ -18,8 +18,8 @@
   pointer-events: none;
   background: radial-gradient(
     ellipse 70% 80% at 50% 50%,
-    #101820 0%,
-    #050608 70%
+    #141211 0%,
+    #0b0b0a 70%
   );
 }
 
@@ -83,8 +83,8 @@
   background: linear-gradient(
     to right,
     transparent calc(50% - 600px),
-    rgb(7 9 12 / 0.55) calc(50% - 400px),
-    rgb(7 9 12 / 0.55) calc(50% + 400px),
+    rgb(11 11 10 / 0.6) calc(50% - 400px),
+    rgb(11 11 10 / 0.6) calc(50% + 400px),
     transparent calc(50% + 600px)
   );
   transition: opacity 500ms ease;
@@ -348,7 +348,7 @@ button.scenic-thread[aria-expanded='true'] {
   overflow: hidden;
   border: 1px solid rgb(255 255 255 / 0.12);
   border-radius: 4px;
-  background: #0d1013;
+  background: #121211;
   box-shadow: 0 30px 80px rgb(0 0 0 / 0.6);
 }
 
@@ -1303,7 +1303,7 @@ button.scenic-thread[aria-expanded='true'] {
   margin-inline: -24px;
   padding: 12px 24px;
   border-top: 1px solid rgb(255 255 255 / 0.08);
-  background: rgb(13 16 19 / 0.97);
+  background: rgb(18 18 17 / 0.97);
 }
 
 .approvals-page .settings-save.is-dirty {
@@ -1770,18 +1770,42 @@ button.scenic-thread[aria-expanded='true'] {
  * the bar is 50px tall in all. */
 .scenic-shell .studio-composer-box.composer-bar {
   position: relative;
-  align-items: flex-end;
+  align-items: stretch;
   min-height: 0;
   padding: 5px;
-  border: 1px solid rgb(255 255 255 / 0.14);
-  border-radius: 4px;
-  background: rgb(18 22 26 / 0.82);
-  box-shadow: 0 12px 36px rgb(0 0 0 / 0.35);
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 2px;
+  background: rgb(20 20 19 / 0.72);
+  box-shadow: 0 16px 44px rgb(0 0 0 / 0.5);
   backdrop-filter: blur(24px);
 }
 
+/* The composer you are writing in is the live item: pink edge, square
+ * handles on its corners. */
 .scenic-shell .studio-composer-box.composer-bar:focus-within {
-  border-color: rgb(255 255 255 / 0.3);
+  border-color: var(--color-accent);
+}
+
+.scenic-shell .studio-composer-box.composer-bar:focus-within::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  pointer-events: none;
+  background:
+    linear-gradient(#0b0b0a, #0b0b0a) 1px 1px / 5px 5px,
+    linear-gradient(#0b0b0a, #0b0b0a) calc(100% - 1px) 1px / 5px 5px,
+    linear-gradient(#0b0b0a, #0b0b0a) 1px calc(100% - 1px) / 5px 5px,
+    linear-gradient(#0b0b0a, #0b0b0a) calc(100% - 1px) calc(100% - 1px) / 5px
+      5px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 0 0 / 7px 7px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 100% 0 / 7px 7px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 0 100% / 7px 7px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 100% 100% / 7px
+      7px;
+  background-repeat: no-repeat;
 }
 
 .scenic-shell .composer-bar textarea {
@@ -1843,6 +1867,221 @@ button.scenic-thread[aria-expanded='true'] {
   background: var(--color-accent);
   color: #fff;
   box-shadow: none;
+}
+
+/* Two rows: the message (with the orb), then what is sent with it. */
+.scenic-shell .composer-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.scenic-shell .composer-row textarea {
+  min-width: 0;
+}
+
+.scenic-shell .composer-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 0 0 1px;
+}
+
+.scenic-shell .composer-controls .composer-icon {
+  width: 28px;
+  height: 28px;
+}
+
+/* The studio sheet sizes every box button 43px square; these are not. */
+.scenic-shell .studio-composer-box .composer-chip {
+  width: auto;
+  height: 28px;
+}
+
+.scenic-shell .studio-composer-box .composer-menu-item {
+  width: 100%;
+  height: auto;
+}
+
+.scenic-shell .composer-bar .composer-controls .composer-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.scenic-shell .composer-bar .composer-controls .composer-send {
+  width: 32px;
+  height: 32px;
+}
+
+.scenic-shell .composer-spacer {
+  flex: 1;
+}
+
+.scenic-shell .composer-mode {
+  position: relative;
+}
+
+.scenic-shell .composer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 2px;
+  background: rgb(236 230 218 / 0.04);
+  color: var(--color-ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.scenic-shell .composer-chip:hover,
+.scenic-shell .composer-chip[aria-expanded='true'] {
+  border-color: rgb(236 230 218 / 0.28);
+}
+
+.scenic-shell .composer-chip > svg:first-child {
+  color: var(--color-accent);
+}
+
+.scenic-shell .composer-chip[data-plan] {
+  border-color: rgb(233 77 171 / 0.5);
+  background: rgb(233 77 171 / 0.08);
+}
+
+.scenic-shell .composer-chip i {
+  font-style: normal;
+  color: rgb(236 230 218 / 0.35);
+}
+
+.scenic-shell .composer-chip-model {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgb(236 230 218 / 0.6);
+}
+
+.scenic-shell .composer-chip > svg:last-child {
+  color: rgb(236 230 218 / 0.4);
+}
+
+.scenic-shell .composer-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 300px;
+  max-height: 340px;
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid rgb(236 230 218 / 0.14);
+  border-radius: 2px;
+  background: rgb(20 20 19 / 0.97);
+  box-shadow: 0 16px 44px rgb(0 0 0 / 0.6);
+  backdrop-filter: blur(24px);
+}
+
+.scenic-shell .composer-menu > [role='group'] {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scenic-shell .composer-menu-label {
+  display: block;
+  padding: 8px 8px 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.35);
+}
+
+.scenic-shell .composer-menu-item {
+  display: flex;
+  flex: none;
+  height: auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  color: var(--color-ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.scenic-shell .composer-menu-item > svg:first-child {
+  flex: none;
+  color: rgb(236 230 218 / 0.6);
+}
+
+.scenic-shell .composer-menu-item > span {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.scenic-shell .composer-menu-item strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.scenic-shell .composer-menu-item small {
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgb(236 230 218 / 0.55);
+}
+
+.scenic-shell .composer-menu-item[aria-checked='true'] {
+  background: rgb(233 77 171 / 0.1);
+}
+
+.scenic-shell .composer-menu-item[aria-checked='true'] svg {
+  color: var(--color-accent);
+}
+
+.scenic-shell .composer-menu-item:hover:not(:disabled),
+.scenic-shell .composer-menu-item:focus-visible {
+  background: rgb(236 230 218 / 0.08);
+}
+
+.scenic-shell .composer-menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.scenic-shell .composer-menu-item--model strong {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.scenic-shell .composer-menu-more {
+  color: rgb(236 230 218 / 0.6);
+  font-size: 12px;
+}
+
+.scenic-shell .composer-menu-error {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--color-danger);
+}
+
+@media (max-width: 480px) {
+  .scenic-shell .composer-chip-model {
+    display: none;
+  }
 }
 
 /* The agent's orb, live, at the start of the composer. */
@@ -1988,6 +2227,72 @@ button.scenic-thread[aria-expanded='true'] {
   padding-inline: 0;
 }
 
+/* A rail of days at the right edge: jump back to where one began. */
+.scenic-shell .studio-conversation-body {
+  position: relative;
+}
+
+.scenic-shell .day-rail {
+  position: absolute;
+  top: 80px;
+  right: 24px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 22px;
+}
+
+.scenic-shell .day-rail-stop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  color: rgb(236 230 218 / 0.35);
+  cursor: pointer;
+}
+
+.scenic-shell .day-rail-stop i {
+  width: 8px;
+  height: 2px;
+  background: currentColor;
+}
+
+.scenic-shell .day-rail-stop:hover,
+.scenic-shell .day-rail-stop:focus-visible {
+  color: rgb(236 230 218 / 0.8);
+}
+
+.scenic-shell .day-rail-stop[data-current] {
+  color: var(--color-accent);
+}
+
+.scenic-shell .day-rail-stop[data-current] i {
+  width: 14px;
+}
+
+@media (max-width: 1100px) {
+  .scenic-shell .day-rail {
+    display: none;
+  }
+}
+
+.scenic-shell .studio-composer > div > p.composer-keys {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin: 10px 0 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.35);
+}
+
 .scenic-shell .composer-hints {
   display: flex;
   justify-content: space-between;
@@ -1995,8 +2300,10 @@ button.scenic-thread[aria-expanded='true'] {
   margin-top: 8px;
   padding: 0 4px;
   font-family: var(--font-mono);
-  font-size: 10px;
-  color: rgb(255 255 255 / 0.5);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.35);
 }
 
 @media (max-width: 767px) {
@@ -2689,9 +2996,9 @@ button.scenic-thread[aria-expanded='true'] {
 .plan-card {
   display: flex;
   flex-direction: column;
-  border: 1px solid rgb(242 180 75 / 0.35);
-  border-radius: 6px;
-  background: rgb(12 16 21 / 0.94);
+  border: 1px solid rgb(236 230 218 / 0.13);
+  border-radius: 2px;
+  background: rgb(20 20 19 / 0.88);
   backdrop-filter: blur(24px);
   color: #fff;
 }
@@ -2714,8 +3021,10 @@ button.scenic-thread[aria-expanded='true'] {
 
 .plan-card-head > span {
   font-family: var(--font-mono);
-  font-size: 11px;
-  color: rgb(255 255 255 / 0.45);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.4);
 }
 
 .plan-card-steps {
@@ -3412,6 +3721,7 @@ button.scenic-thread[aria-expanded='true'] {
 .settings-window-nav .studio-navigation {
   flex: 1;
   min-height: 0;
+  padding-inline: 5px;
 }
 .settings-window-nav .studio-nav-group {
   flex: none;
@@ -3461,4 +3771,279 @@ button.scenic-thread[aria-expanded='true'] {
   .settings-workspace-identity {
     margin-inline: 24px;
   }
+}
+
+/* The agent's status under its name: a small mono label, as in the design. */
+.scenic-shell .agent-switch-trigger .companion-status {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.45);
+}
+
+/* A plan or an approval that is waiting on you (or running) is the live item:
+ * pink edge, square handles on its corners. */
+.plan-card:not(.plan-card-note):has(.plan-card-actions, .plan-card-status),
+.approval-card:not(:has(.approval-card-sent)) {
+  position: relative;
+  overflow: visible;
+  border-color: var(--color-accent);
+}
+
+.plan-card:not(.plan-card-note):has(
+    .plan-card-actions,
+    .plan-card-status
+  )::after,
+.approval-card:not(:has(.approval-card-sent))::after,
+.tool-block[data-active] .tool-block-card::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  pointer-events: none;
+  background:
+    linear-gradient(#0b0b0a, #0b0b0a) 1px 1px / 5px 5px,
+    linear-gradient(#0b0b0a, #0b0b0a) calc(100% - 1px) 1px / 5px 5px,
+    linear-gradient(#0b0b0a, #0b0b0a) 1px calc(100% - 1px) / 5px 5px,
+    linear-gradient(#0b0b0a, #0b0b0a) calc(100% - 1px) calc(100% - 1px) / 5px
+      5px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 0 0 / 7px 7px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 100% 0 / 7px 7px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 0 100% / 7px 7px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 100% 100% / 7px
+      7px;
+  background-repeat: no-repeat;
+}
+
+/* Work in progress is the live item too. */
+.tool-block[data-active] .tool-block-card {
+  position: relative;
+  overflow: visible;
+  border-color: var(--color-accent);
+}
+
+.tool-block-label,
+.tool-block-toggle {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* ── Settings, V2 ──
+ * Serif page titles, mono section headers, and a pink handle frame on the
+ * page you are on. */
+.settings-window-head strong {
+  font-family: var(--font-serif);
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+.settings-window[data-page='profile'] .settings-window-head strong {
+  font-size: 30px;
+  letter-spacing: -0.03em;
+}
+
+.settings-group-title,
+.runtime-section h2,
+.settings-advanced > summary {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.85);
+}
+
+.settings-window-nav .studio-nav-item.is-row[aria-current='page'] {
+  position: relative;
+  background: rgb(233 77 171 / 0.1);
+}
+
+.settings-window-nav .studio-nav-item.is-row[aria-current='page'] > svg {
+  color: var(--color-accent);
+}
+
+.settings-window-nav .studio-nav-item.is-row[aria-current='page']::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  pointer-events: none;
+  background:
+    linear-gradient(#121211, #121211) 1px 1px / 5px 5px,
+    linear-gradient(#121211, #121211) calc(100% - 1px) 1px / 5px 5px,
+    linear-gradient(#121211, #121211) 1px calc(100% - 1px) / 5px 5px,
+    linear-gradient(#121211, #121211) calc(100% - 1px) calc(100% - 1px) / 5px
+      5px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 0 0 / 7px 7px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 100% 0 / 7px 7px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 0 100% / 7px 7px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 100% 100% / 7px
+      7px;
+  background-repeat: no-repeat;
+}
+
+.settings-window h2,
+.approvals-section h2 {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.85);
+}
+
+/* The mode you have chosen is the live item. */
+.autonomy-mode[data-selected] {
+  border-color: var(--color-accent);
+  background: rgb(233 77 171 / 0.08);
+}
+
+.autonomy-mode[data-selected]::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  pointer-events: none;
+  background:
+    linear-gradient(#121211, #121211) 1px 1px / 5px 5px,
+    linear-gradient(#121211, #121211) calc(100% - 1px) 1px / 5px 5px,
+    linear-gradient(#121211, #121211) 1px calc(100% - 1px) / 5px 5px,
+    linear-gradient(#121211, #121211) calc(100% - 1px) calc(100% - 1px) / 5px
+      5px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 0 0 / 7px 7px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 100% 0 / 7px 7px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 0 100% / 7px 7px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 100% 100% / 7px
+      7px;
+  background-repeat: no-repeat;
+}
+
+/* ── Model page, V2: the main model reads as one item you can change. ── */
+.settings-model-summary {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-accent);
+  border-radius: 2px;
+  background: rgb(233 77 171 / 0.08);
+}
+
+.settings-model-mark {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  background: var(--color-accent);
+}
+
+.settings-model-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.settings-model-text strong {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+
+.settings-model-text span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.5);
+}
+
+.settings-model-summary::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  pointer-events: none;
+  background:
+    linear-gradient(#121211, #121211) 1px 1px / 5px 5px,
+    linear-gradient(#121211, #121211) calc(100% - 1px) 1px / 5px 5px,
+    linear-gradient(#121211, #121211) 1px calc(100% - 1px) / 5px 5px,
+    linear-gradient(#121211, #121211) calc(100% - 1px) calc(100% - 1px) / 5px
+      5px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 0 0 / 7px 7px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 100% 0 / 7px 7px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 0 100% / 7px 7px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 100% 100% / 7px
+      7px;
+  background-repeat: no-repeat;
+}
+
+/* The fallback order reads as a hairline list, numbered in square boxes. */
+.fallback-list {
+  gap: 0;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 2px;
+}
+
+.fallback-row {
+  padding: 10px 12px;
+}
+
+.fallback-row + .fallback-row {
+  border-top: 1px solid rgb(236 230 218 / 0.08);
+}
+
+.fallback-number {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgb(236 230 218 / 0.2);
+  border-radius: 2px;
+}
+
+.settings-model-more {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-model-more > summary {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border: 1px solid rgb(236 230 218 / 0.2);
+  border-radius: 2px;
+  font-size: 12px;
+  color: var(--color-ink);
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-model-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-model-more[open] > summary {
+  margin-bottom: 12px;
+  border-color: var(--color-accent);
+}
+
+.settings-model-more[open] {
+  gap: 0;
+}
+.settings-model-more > :not(summary) {
+  margin-bottom: 12px;
 }

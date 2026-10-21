@@ -1,3 +1,4 @@
+import { isMacPlatform } from '../lib/platform';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type {
   Session,
@@ -600,8 +601,10 @@ export function WorkspaceShell({
                   aria-label="Open command menu"
                 >
                   <SearchIcon size={14} />
-                  <span className="studio-command-trigger-label">Search</span>
-                  <kbd>Ctrl K</kbd>
+                  <span className="studio-command-trigger-label">
+                    Search or do anything
+                  </span>
+                  <kbd>{isMacPlatform() ? '⌘K' : 'Ctrl K'}</kbd>
                 </button>
                 <button
                   type="button"

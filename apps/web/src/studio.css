@@ -43,7 +43,7 @@
   min-height: 44px;
   width: 100%;
   padding: 8px 10px;
-  border-radius: 9px;
+  border-radius: 2px;
   color: #f4f4f5;
   text-align: left;
   cursor: pointer;
@@ -66,7 +66,7 @@
   flex-shrink: 0;
   width: 28px;
   height: 28px;
-  border-radius: 7px;
+  border-radius: 2px;
   background: #ffffff12;
   font-size: 12px;
   font-weight: 600;
@@ -177,7 +177,7 @@
   min-height: 45px;
   padding: 12px 15px;
   font-size: 13px;
-  border-radius: 10px;
+  border-radius: 2px;
   gap: 12px;
 }
 .studio-navigation .studio-nav-item[aria-current='page'] {
@@ -438,7 +438,7 @@
   padding: 19px 18px 21px;
   border: 1px solid #303038;
   background: #1c1c20;
-  border-radius: 12px;
+  border-radius: 2px;
   transition:
     transform 0.18s,
     box-shadow 0.18s,
@@ -472,7 +472,7 @@
   width: 28px;
   height: 28px;
   border: 1px solid #30303866;
-  border-radius: 8px;
+  border-radius: 2px;
 }
 .studio-suggestion-arrow {
   margin-left: auto;
@@ -498,7 +498,7 @@
   max-width: 976px;
 }
 .studio-composer-box {
-  border-radius: 16px;
+  border-radius: 2px;
   padding: 12px;
   box-shadow: 0 5px 20px #11111408;
 }
@@ -509,7 +509,7 @@
 .studio-composer-box button {
   width: 43px;
   height: 43px;
-  border-radius: 12px;
+  border-radius: 2px;
   margin-bottom: 2px;
 }
 .studio-messages {
@@ -543,7 +543,7 @@
 }
 .studio-stat {
   padding: 24px;
-  border-radius: 14px;
+  border-radius: 2px;
   background: #1c1c20;
 }
 .studio-stat:nth-child(2) {
@@ -562,7 +562,7 @@
 }
 .studio-agent-card {
   padding: 25px;
-  border-radius: 16px;
+  border-radius: 2px;
 }
 .studio-agent-card h3 {
   font-size: 20px;
@@ -595,7 +595,7 @@
   background: #1c1c20;
   padding: 22px;
   border: 1px solid var(--color-line);
-  border-radius: 14px;
+  border-radius: 2px;
 }
 .studio-settings > :first-child {
   min-height: 100px;
@@ -619,7 +619,7 @@
 }
 .studio-onboarding .glass-strong {
   box-shadow: 0 20px 60px -40px #11111440;
-  border-radius: 18px;
+  border-radius: 2px;
 }
 .studio-onboarding-brand {
   display: inline-flex;
@@ -843,7 +843,7 @@
     font-size: 8px;
   }
   .studio-shell .safe-bottom-dock {
-    border-radius: 17px;
+    border-radius: 2px;
     background: #111114;
     --color-ink: #f4f4f5;
     --color-ink-3: #a4a4b1;

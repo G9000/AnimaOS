@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import {
   daemon,
   installKnowHow,
@@ -11,17 +17,35 @@ import {
   type WorkspaceInspectFound,
 } from '../../lib/daemon-api';
 import {
-  ACCESS_PROFILES,
   toolNamesForProfile,
   type AccessProfile,
 } from '../../lib/agent-access';
 import { savePreferredVoice } from '../../lib/voice-preference';
 import { ChatGptConnection } from '../ChatGptConnection';
 import { ChatGptModelSelect } from '../ChatGptModelSelect';
+import {
+  ArrowRightIcon,
+  BoltIcon,
+  ChevronIcon,
+  EyeIcon,
+  FolderIcon,
+  GlobeIcon,
+  HardDriveIcon,
+  KeyRoundIcon,
+  MoonIcon,
+  PencilIcon,
+  RocketIcon,
+  ShieldCheckIcon,
+  SlidersIcon,
+  SquareDotIcon,
+  SquareIcon,
+  TerminalIcon,
+  UserRoundIcon,
+} from '../icons';
 import { AddKeyForm } from '../models/AddKeyForm';
 import { ResumeCard } from './ResumeCard';
-import { VoiceCheck } from './VoiceCheck';
-import { HaloOrb } from '../halo/HaloOrb';
+import { MicCheck, VoiceCheck } from './VoiceCheck';
+import { OnboardingScene } from './OnboardingScene';
 import './companion-onboarding.css';
 
 export interface CompanionSetupProps {
@@ -36,12 +60,108 @@ type ModelSource = 'chatgpt' | 'key' | 'local';
 type Personality = 'quiet' | 'balanced' | 'driven';
 
 const FLOW: readonly Step[] = ['model', 'you', 'access', 'voice'];
+const FLOW_LABEL: Record<string, string> = {
+  model: 'Brain',
+  you: 'You',
+  access: 'Access',
+  voice: 'Voice',
+};
 const ACCESS_ORDER: readonly AccessProfile[] = [
   'observe',
   'collaborate',
   'operate',
 ];
-const WEB_READ_TOOLS = ['browser_navigate', 'browser_observe'];
+type BrowserLevel = 'off' | 'read' | 'act' | 'files';
+const BROWSER_LEVELS: readonly {
+  value: BrowserLevel;
+  title: string;
+  summary: string;
+  tools: readonly string[];
+}[] = [
+  { value: 'off', title: 'Off', summary: 'No web at all.', tools: [] },
+  {
+    value: 'read',
+    title: 'Read pages',
+    summary: 'Search and read. The default.',
+    tools: ['browser_navigate', 'browser_observe'],
+  },
+  {
+    value: 'act',
+    title: 'Click and type',
+    summary: 'Fill forms, press buttons. Asks before submitting.',
+    tools: ['browser_navigate', 'browser_observe', 'browser_act'],
+  },
+  {
+    value: 'files',
+    title: 'Files too',
+    summary: 'Download and upload files.',
+    tools: [
+      'browser_navigate',
+      'browser_observe',
+      'browser_act',
+      'browser_transfer',
+    ],
+  },
+];
+const BROWSER_SUMMARY: Record<BrowserLevel, string> = {
+  off: 'No web access.',
+  read: 'Reads web pages. Can’t click or download.',
+  act: 'Click and type · asks before submitting.',
+  files: 'Click, type, download and upload files.',
+};
+
+/** What each level lets anima do, in plain words, before the owner picks. */
+const ACCESS_LEVELS: Record<
+  AccessProfile,
+  {
+    title: string;
+    summary: string;
+    icon: ReactNode;
+    can: readonly string[];
+    cannot: readonly string[];
+    warning?: string;
+  }
+> = {
+  observe: {
+    title: 'Look only',
+    summary: 'Reads, never touches.',
+    icon: <EyeIcon size={16} />,
+    can: [
+      'Read files in its home folder',
+      'Search its memory and your past chats',
+      'Read your todos',
+    ],
+    cannot: ['Change or delete any file', 'Run programs or commands'],
+  },
+  collaborate: {
+    title: 'Edit files',
+    summary: 'Reads and writes in its folder. Runs nothing.',
+    icon: <PencilIcon size={16} />,
+    can: [
+      'Everything in Look only',
+      'Create and edit files in its home folder',
+      'Keep todos, reminders and automations',
+      'Remember things about you',
+    ],
+    cannot: ['Run commands or programs', 'Touch files outside its folder'],
+  },
+  operate: {
+    title: 'Run commands',
+    summary: 'Full hands on this computer.',
+    icon: <TerminalIcon size={16} />,
+    can: [
+      'Everything in Edit files',
+      'Run terminal commands',
+      'Start background jobs and apps',
+      'Hand work to coding agents like Claude Code or Codex',
+    ],
+    cannot: ['Ignore your ground rules'],
+    warning:
+      'Commands can do anything you can. Pick this if you’d hand a capable intern your terminal.',
+  },
+};
+const ACCESS_NOTE =
+  'Always asks before deleting things, going outside its folder, or sending anything as you.';
 
 /** The "Coder" starting point: Operate, the coding apps' know-how, and a
  *  persona that hands implementation to them and verifies their work. */
@@ -61,43 +181,85 @@ function codingAppState(app: CodingApp): string {
   return app.problem ? 'Needs reinstall' : 'Not found';
 }
 
-const SOURCES: Record<ModelSource, { title: string; summary: string }> = {
+const SOURCES: Record<
+  ModelSource,
+  { title: string; summary: string; icon: ReactNode }
+> = {
+  local: {
+    title: 'Run it locally',
+    summary: 'Ollama, vLLM, LM Studio, anything OpenAI-compatible.',
+    icon: <HardDriveIcon size={15} />,
+  },
   chatgpt: {
     title: 'Use my ChatGPT plan',
-    summary: 'Sign in with your account. No keys to manage.',
+    summary: 'Sign in with the plan you already pay for.',
+    icon: <UserRoundIcon size={15} />,
   },
   key: {
-    title: 'Use an API key',
-    summary:
-      'OpenAI, Anthropic, Google and more. Keys live on the server running anima.',
-  },
-  local: {
-    title: 'Run a local model',
-    summary: 'Ollama or another model on that server. Private, works offline.',
+    title: 'Paste an API key',
+    summary: 'OpenAI, Anthropic, Google, OpenRouter. They bill you, not us.',
+    icon: <KeyRoundIcon size={15} />,
   },
 };
+const SOURCE_GROUPS: readonly {
+  label: string;
+  sources: readonly ModelSource[];
+}[] = [
+  { label: 'Total freedom · your machine', sources: ['local'] },
+  { label: 'Join the corpo · cloud', sources: ['chatgpt', 'key'] },
+];
 
 const PERSONALITIES: Record<
   Personality,
-  { label: string; summary: string; instruction: string }
+  {
+    label: string;
+    summary: string;
+    instruction: string;
+    icon: ReactNode;
+    traits: readonly (readonly [string, string])[];
+    reply: string;
+  }
 > = {
   quiet: {
     label: 'Quiet',
     summary: 'Waits for you. Short answers.',
     instruction:
       'Wait for the owner to ask before suggesting more work. Keep answers short.',
+    icon: <MoonIcon size={15} />,
+    traits: [
+      ['Starts things', 'Only when you ask'],
+      ['Answers', 'A line or two'],
+      ['Explains its thinking', 'Only if you ask'],
+    ],
+    reply: 'Deploy failed: migration 0042 timed out. Want me to retry it?',
   },
   balanced: {
     label: 'Balanced',
     summary: 'Suggests next steps when useful.',
     instruction:
       'Suggest a useful next step when it helps, and keep answers concise.',
+    icon: <SlidersIcon size={15} />,
+    traits: [
+      ['Starts things', 'When it’s clearly useful'],
+      ['Answers', 'Short, longer when needed'],
+      ['Explains its thinking', 'When it matters'],
+    ],
+    reply:
+      'Migration 0042 timed out again, same as Tuesday. I can retry with a longer timeout or roll back. Retry?',
   },
   driven: {
     label: 'Driven',
     summary: 'Takes the lead and explains its thinking.',
     instruction:
       'Take the lead on clearly useful next steps and briefly explain your reasoning, while staying within granted permissions.',
+    icon: <RocketIcon size={15} />,
+    traits: [
+      ['Starts things', 'Takes the next step itself'],
+      ['Answers', 'As long as it’s useful'],
+      ['Explains its thinking', 'Always, briefly'],
+    ],
+    reply:
+      'Migration 0042 timed out again, second time this week, so I raised the timeout to 120 s and reran it. The real cause looks like the missing index on events. Want a fix for that?',
   },
 };
 
@@ -132,6 +294,8 @@ function errorText(caught: unknown): string {
   return caught instanceof Error ? caught.message : String(caught);
 }
 
+/** One choice in a list. The chosen one is the live item: tinted, with square
+ *  handles, and it can open a panel of its own right underneath. */
 function Option({
   name,
   checked,
@@ -139,7 +303,9 @@ function Option({
   onChange,
   title,
   summary,
-  children,
+  icon,
+  mark,
+  detail,
 }: {
   name: string;
   checked: boolean;
@@ -147,26 +313,36 @@ function Option({
   onChange(): void;
   title: ReactNode;
   summary?: string;
-  children?: ReactNode;
+  icon?: ReactNode;
+  /** A square radio on the right; choices with an icon go without. */
+  mark?: ReactNode;
+  detail?: ReactNode;
 }) {
   return (
-    <label className="onboarding__option">
-      <input
-        type="radio"
-        name={name}
-        checked={checked}
-        disabled={disabled}
-        onChange={onChange}
-      />
-      <span className="onboarding__option-text">
-        <span className="onboarding__option-title">{title}</span>
-        {summary ? (
-          <span className="onboarding__option-desc">{summary}</span>
+    <div className="onboarding__choice" data-checked={checked || undefined}>
+      <label className="onboarding__option">
+        <input
+          type="radio"
+          name={name}
+          checked={checked}
+          disabled={disabled}
+          onChange={onChange}
+        />
+        {icon ? (
+          <span className="onboarding__icon" aria-hidden="true">
+            {icon}
+          </span>
         ) : null}
-      </span>
-      {children}
-      <span className="onboarding__mark" aria-hidden="true" />
-    </label>
+        <span className="onboarding__option-text">
+          <span className="onboarding__option-title">{title}</span>
+          {summary ? (
+            <span className="onboarding__option-desc">{summary}</span>
+          ) : null}
+        </span>
+        {mark ?? (icon ? null : <span className="onboarding__mark" />)}
+      </label>
+      {detail ? <div className="onboarding__detail">{detail}</div> : null}
+    </div>
   );
 }
 
@@ -202,7 +378,24 @@ export function CompanionSetup({
     note: string;
     agent: DaemonSnapshot;
   } | null>(null);
-  const [browseWeb, setBrowseWeb] = useState(false);
+  // Small windows have no stage, so the approval choice sits in the card.
+  const [narrow, setNarrow] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(max-width: 900px)').matches,
+  );
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia('(max-width: 900px)');
+    const update = () => setNarrow(query.matches);
+    query.addEventListener?.('change', update);
+    return () => query.removeEventListener?.('change', update);
+  }, []);
+  // Personality opens to show how it answers once the owner picks one.
+  const [personalityOpen, setPersonalityOpen] = useState(false);
+  const [browser, setBrowser] = useState<BrowserLevel>('read');
+  const [browserOpen, setBrowserOpen] = useState(false);
   const [voiceURI, setVoiceURI] = useState<string | null>(null);
   const [speakingVoice, setSpeakingVoice] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<DaemonWorkspaceState | null>(null);
@@ -281,9 +474,12 @@ export function CompanionSetup({
       setCustomModel('');
     }
   }, [providers, source, provider]);
-  useEffect(() => () => {
-    if (avatar) URL.revokeObjectURL(avatar.url);
-  }, [avatar]);
+  useEffect(
+    () => () => {
+      if (avatar) URL.revokeObjectURL(avatar.url);
+    },
+    [avatar],
+  );
   useEffect(() => {
     headingRef.current?.focus();
   }, [step]);
@@ -340,7 +536,12 @@ export function CompanionSetup({
   const chooseSource = (value: ModelSource) => {
     sourceChosen.current = true;
     setSource(value);
-    if (provider && providers?.some((item) => item.id === provider && sourceOf(item) === value))
+    if (
+      provider &&
+      providers?.some(
+        (item) => item.id === provider && sourceOf(item) === value,
+      )
+    )
       return;
     const first = (providers ?? [])
       .filter((item) => sourceOf(item) === value && item.configured)
@@ -486,7 +687,8 @@ export function CompanionSetup({
         system,
         tools: [
           ...toolNamesForProfile(access),
-          ...(browseWeb ? WEB_READ_TOOLS : []),
+          ...(BROWSER_LEVELS.find((level) => level.value === browser)?.tools ??
+            []),
         ],
       };
       const result = workspace?.configured
@@ -514,7 +716,9 @@ export function CompanionSetup({
       const agentId = result.agent?.state?.id;
       if (avatar && agentId) {
         // The companion exists either way; a failed upload keeps the default orb.
-        await daemon.setAgentAvatar(agentId, avatar.file).catch(() => undefined);
+        await daemon
+          .setAgentAvatar(agentId, avatar.file)
+          .catch(() => undefined);
       }
       if (agentId) {
         // The daemon starts new agents Free; the choice is saved either way,
@@ -549,7 +753,12 @@ export function CompanionSetup({
     const bundles = [
       ...found.map((app) => ({ label: app.name, manifest: app.manifestText })),
       ...(codingApps?.handoff
-        ? [{ label: 'handing off work', manifest: codingApps.handoff.manifestText }]
+        ? [
+            {
+              label: 'handing off work',
+              manifest: codingApps.handoff.manifestText,
+            },
+          ]
         : []),
     ];
     const missed: string[] = [];
@@ -595,7 +804,9 @@ export function CompanionSetup({
     providers?.some((item) => sourceOf(item) === value),
   );
   const sourceProviders = (providers ?? [])
-    .filter((item) => source && item.id !== 'chatgpt' && sourceOf(item) === source)
+    .filter(
+      (item) => source && item.id !== 'chatgpt' && sourceOf(item) === source,
+    )
     .sort((left, right) => Number(right.configured) - Number(left.configured));
   // Providers that only need a key from the owner.
   const keyProviders = sourceProviders.filter(
@@ -618,15 +829,18 @@ export function CompanionSetup({
         Home folder
       </label>
       <div className="onboarding__row">
-        <input
-          id="companion-folder"
-          className="onboarding__input onboarding__input--mono"
-          value={rootPath}
-          readOnly={workspace?.configured}
-          disabled={busy}
-          onChange={(event) => changeRootPath(event.target.value)}
-          spellCheck={false}
-        />
+        <span className="onboarding__field">
+          <FolderIcon size={15} aria-hidden="true" />
+          <input
+            id="companion-folder"
+            className="onboarding__input onboarding__input--mono"
+            value={rootPath}
+            readOnly={workspace?.configured}
+            disabled={busy}
+            onChange={(event) => changeRootPath(event.target.value)}
+            spellCheck={false}
+          />
+        </span>
         {!workspace?.configured && (
           <button
             type="button"
@@ -634,7 +848,7 @@ export function CompanionSetup({
             disabled={browsing || inspecting || busy}
             className="onboarding__button onboarding__button--secondary"
           >
-            {browsing ? 'Choosing…' : 'Browse…'}
+            {browsing ? 'Choosing…' : 'Browse'}
           </button>
         )}
         {!workspace?.configured && allowCheck && (
@@ -677,6 +891,7 @@ export function CompanionSetup({
 
   let body: ReactNode;
   let footer: ReactNode;
+  let extras: ReactNode = null;
   const primary = (label: string, enabled: boolean) => (
     <button
       type="submit"
@@ -684,7 +899,7 @@ export function CompanionSetup({
       className="onboarding__button onboarding__button--primary"
     >
       {label}
-      <span aria-hidden="true">→</span>
+      <ArrowRightIcon size={15} />
     </button>
   );
   const back = (target: Step, label = 'Back') => (
@@ -697,6 +912,177 @@ export function CompanionSetup({
       {label}
     </button>
   );
+
+  const autonomyChoice = (
+    <div className="onboarding__section">
+      <span
+        id="onboarding-autonomy-label"
+        className="onboarding__mono onboarding__mono--lead"
+      >
+        When it checks with you
+      </span>
+      <div
+        role="radiogroup"
+        aria-labelledby="onboarding-autonomy-label"
+        className="onboarding__options"
+      >
+        {(
+          [
+            {
+              value: 'free',
+              icon: <BoltIcon size={16} />,
+              title: (
+                <>
+                  Only for risky things
+                  <span className="onboarding__tag">Recommended</span>
+                </>
+              ),
+              summary:
+                'Works on its own and tells you what it did. Risky things still ask.',
+            },
+            {
+              value: 'strict',
+              icon: <ShieldCheckIcon size={16} />,
+              title: 'Before every change',
+              summary: 'Asks before it changes or runs anything.',
+            },
+          ] as const
+        ).map((choice) => (
+          <Option
+            key={choice.value}
+            name="onboarding-autonomy"
+            checked={autonomy === choice.value}
+            onChange={() => setAutonomy(choice.value)}
+            title={choice.title}
+            summary={choice.summary}
+            icon={choice.icon}
+            mark={
+              <span className="onboarding__square" aria-hidden="true">
+                {autonomy === choice.value ? (
+                  <SquareDotIcon size={16} />
+                ) : (
+                  <SquareIcon size={16} />
+                )}
+              </span>
+            }
+          />
+        ))}
+      </div>
+    </div>
+  );
+
+  /** What opens under the chosen way of reaching a model. */
+  const sourceDetail = (value: ModelSource): ReactNode => {
+    if (value === 'chatgpt') {
+      return chatGpt ? (
+        <div className="onboarding__section">
+          <ChatGptConnection
+            compact
+            onConnectionChange={refreshProviders}
+            onModelScopeChange={(pending) =>
+              setModelScope((current) => ({
+                revision: current.revision + 1,
+                pending,
+              }))
+            }
+          />
+          {provider === 'chatgpt' && (
+            <ChatGptModelSelect
+              id="onboarding-model"
+              scopeKey={`onboarding:${modelScope.revision}`}
+              connectionPending={modelScope.pending}
+              model={model}
+              customModel={customModel}
+              onModelChange={setModel}
+              onCustomModelChange={setCustomModel}
+              modelSelectRef={modelSelectRef}
+              customModelInputRef={customModelInputRef}
+            />
+          )}
+        </div>
+      ) : null;
+    }
+    return (
+      <>
+        <div className="onboarding__section">
+          <span id="onboarding-provider-label" className="onboarding__mono">
+            Provider
+          </span>
+          <div
+            role="radiogroup"
+            aria-labelledby="onboarding-provider-label"
+            className="onboarding__options onboarding__options--inner"
+          >
+            {sourceProviders.map((item) => (
+              <Option
+                key={item.id}
+                name="onboarding-provider"
+                checked={provider === item.id}
+                disabled={!item.configured}
+                onChange={() => changeProvider(item.id)}
+                title={item.label}
+                summary={providerGuidance(item)}
+              />
+            ))}
+          </div>
+          {value === 'key' && keyProviders.length > 0 && (
+            <>
+              <span className="onboarding__mono">Add API key</span>
+              <AddKeyForm
+                providers={keyProviders}
+                buttonLabel="Add API key"
+                variant="onboarding"
+                warnIfNotPersisted
+                onAdded={refreshProviders}
+              />
+            </>
+          )}
+        </div>
+        {provider && (
+          <div className="onboarding__section">
+            <label htmlFor="onboarding-model" className="onboarding__mono">
+              Model
+            </label>
+            <select
+              ref={modelSelectRef}
+              id="onboarding-model"
+              className="onboarding__input"
+              value={model}
+              onChange={(event) => setModel(event.target.value)}
+            >
+              <option value="" disabled>
+                Choose a model
+              </option>
+              {(MODEL_SUGGESTIONS[provider] ?? []).map((suggestion) => (
+                <option key={suggestion} value={suggestion}>
+                  {suggestion}
+                </option>
+              ))}
+              <option value="__custom__">Custom model</option>
+            </select>
+            {model === '__custom__' && (
+              <>
+                <label
+                  htmlFor="onboarding-custom-model"
+                  className="onboarding__mono"
+                >
+                  Custom model
+                </label>
+                <input
+                  ref={customModelInputRef}
+                  id="onboarding-custom-model"
+                  className="onboarding__input onboarding__input--mono"
+                  value={customModel}
+                  onChange={(event) => setCustomModel(event.target.value)}
+                  placeholder="Provider model identifier"
+                />
+              </>
+            )}
+          </div>
+        )}
+      </>
+    );
+  };
 
   if (knowHowNote) {
     body = (
@@ -714,35 +1100,21 @@ export function CompanionSetup({
         onClick={() => onCreated(knowHowNote.agent)}
       >
         Continue
-        <span aria-hidden="true">→</span>
+        <ArrowRightIcon size={15} />
       </button>
     );
   } else if (step === 'welcome') {
+    const host = typeof window === 'undefined' ? null : window.location;
+    const onThisComputer =
+      !host || ['localhost', '127.0.0.1', '[::1]'].includes(host.hostname);
     body = (
       <>
         {heading(
-          'Meet anima.',
-          'A personal agent you own. Run it on your computer or your own server, and talk to it here or from the chat apps you already use.',
+          "I'm at your command",
+          "It runs on your own machine and answers to you. No account with us, no data sold, no rules you didn't set. Call it whatever you want.",
           true,
         )}
-        <ul className="onboarding__options" aria-label="What anima does">
-          {[
-            ['Yours to host', 'On this computer, or a server you own.'],
-            ['Talk or type', 'Here, or from Telegram, WhatsApp and Discord.'],
-            [
-              'Gets better with use',
-              'Learns skills from what works, and asks before keeping them.',
-            ],
-          ].map(([title, summary]) => (
-            <li key={title} className="onboarding__option">
-              <span className="onboarding__option-text">
-                <span className="onboarding__option-title">{title}</span>
-                <span className="onboarding__option-desc">{summary}</span>
-              </span>
-            </li>
-          ))}
-        </ul>
-        {workspaceError ? (
+        {workspaceError && (
           <div role="alert" className="onboarding__section">
             <p className="onboarding__alert">{workspaceError}</p>
             <button
@@ -753,34 +1125,50 @@ export function CompanionSetup({
               Retry workspace
             </button>
           </div>
-        ) : workspace ? (
-          <p className="onboarding__status">
-            {workspace.configured
-              ? 'Runtime connected. Your workspace is ready for a new companion.'
-              : 'Runtime connected'}
-          </p>
-        ) : (
-          <p role="status" className="onboarding__status" data-tone="pending">
-            Loading your workspace…
-          </p>
         )}
       </>
     );
     footer = (
       <>
-        {workspace?.configured ? (
+        {workspaceError ? (
           <span />
+        ) : workspace ? (
+          <div className="ob-runtime" role="status">
+            <span className="ob-runtime__label">
+              {onThisComputer
+                ? 'Running on this computer'
+                : 'Running on your server'}
+            </span>
+            {host && <span className="ob-runtime__addr">{host.host}</span>}
+          </div>
         ) : (
+          <p role="status" className="onboarding__status" data-tone="pending">
+            Loading your workspace…
+          </p>
+        )}
+        {primary('Set it up', workspaceReady)}
+      </>
+    );
+    extras = (
+      <>
+        <div className="ob-import" aria-disabled="true">
+          <div>
+            <strong>Leaving OpenClaw or Hermes?</strong>
+            <span>Bring its memory, skills and chats.</span>
+          </div>
+          <em>Soon</em>
+        </div>
+        {!workspace?.configured && (
           <button
             type="button"
-            className="onboarding__link"
+            className="ob-open"
             disabled={!workspaceReady}
             onClick={() => goTo('existing')}
           >
             Open an existing workspace
+            <ArrowRightIcon size={11} />
           </button>
         )}
-        {primary('Get started', workspaceReady)}
       </>
     );
   } else if (step === 'existing') {
@@ -804,8 +1192,8 @@ export function CompanionSetup({
     body = (
       <>
         {heading(
-          'Choose a model',
-          'This is what anima thinks with. You can switch anytime.',
+          'Choose a brain.',
+          'Total freedom on your own machine, or join the corpo in the cloud. Swap it whenever.',
         )}
         {catalogState === 'loading' ||
         (catalogState === 'retrying' && !providers?.length) ? (
@@ -834,7 +1222,11 @@ export function CompanionSetup({
             {/* Keep the choices (and the ChatGPT connection) mounted while the
                 catalog refreshes; remounting the connection would refresh again. */}
             {catalogState === 'retrying' && (
-              <p role="status" className="onboarding__status" data-tone="pending">
+              <p
+                role="status"
+                className="onboarding__status"
+                data-tone="pending"
+              >
                 Refreshing providers…
               </p>
             )}
@@ -843,128 +1235,38 @@ export function CompanionSetup({
               aria-label="Model source"
               className="onboarding__options"
             >
-              {sources.map((value) => (
-                <Option
-                  key={value}
-                  name="onboarding-model-source"
-                  checked={source === value}
-                  onChange={() => chooseSource(value)}
-                  title={SOURCES[value].title}
-                  summary={SOURCES[value].summary}
-                />
-              ))}
-            </div>
-            {provider && selectedProvider && !selectedProvider.configured && (
-              <p role="status" className="onboarding__notice">
-                {selectedProvider.label} is unavailable right now. Reconnect
-                it, or choose another option to continue.
-              </p>
-            )}
-            {source === 'chatgpt' && chatGpt ? (
-              <div className="onboarding__section">
-                <ChatGptConnection
-                  onConnectionChange={refreshProviders}
-                  onModelScopeChange={(pending) =>
-                    setModelScope((current) => ({
-                      revision: current.revision + 1,
-                      pending,
-                    }))
-                  }
-                />
-                {provider === 'chatgpt' && (
-                  <ChatGptModelSelect
-                    id="onboarding-model"
-                    scopeKey={`onboarding:${modelScope.revision}`}
-                    connectionPending={modelScope.pending}
-                    model={model}
-                    customModel={customModel}
-                    onModelChange={setModel}
-                    onCustomModelChange={setCustomModel}
-                    modelSelectRef={modelSelectRef}
-                    customModelInputRef={customModelInputRef}
-                  />
-                )}
-              </div>
-            ) : source ? (
-              <>
-                <div className="onboarding__section">
-                  <span id="onboarding-provider-label" className="onboarding__label">
-                    Provider
-                  </span>
-                  <div
-                    role="radiogroup"
-                    aria-labelledby="onboarding-provider-label"
-                    className="onboarding__options"
-                  >
-                    {sourceProviders.map((item) => (
+              {SOURCE_GROUPS.map((group) => {
+                const available = group.sources.filter((value) =>
+                  sources.includes(value),
+                );
+                if (!available.length) return null;
+                return (
+                  <div key={group.label} className="onboarding__group">
+                    <span className="onboarding__group-label">
+                      {group.label}
+                    </span>
+                    {available.map((value) => (
                       <Option
-                        key={item.id}
-                        name="onboarding-provider"
-                        checked={provider === item.id}
-                        disabled={!item.configured}
-                        onChange={() => changeProvider(item.id)}
-                        title={item.label}
-                        summary={providerGuidance(item)}
+                        key={value}
+                        name="onboarding-model-source"
+                        checked={source === value}
+                        onChange={() => chooseSource(value)}
+                        title={SOURCES[value].title}
+                        summary={SOURCES[value].summary}
+                        icon={SOURCES[value].icon}
+                        detail={source === value ? sourceDetail(value) : null}
                       />
                     ))}
                   </div>
-                  {source === 'key' && keyProviders.length > 0 && (
-                    <>
-                      <span className="onboarding__label">Add API key</span>
-                      <AddKeyForm
-                        providers={keyProviders}
-                        buttonLabel="Add API key"
-                        variant="onboarding"
-                        warnIfNotPersisted
-                        onAdded={refreshProviders}
-                      />
-                    </>
-                  )}
-                </div>
-                {provider && (
-                  <div className="onboarding__section">
-                    <label htmlFor="onboarding-model" className="onboarding__label">
-                      Model
-                    </label>
-                    <select
-                      ref={modelSelectRef}
-                      id="onboarding-model"
-                      className="onboarding__input"
-                      value={model}
-                      onChange={(event) => setModel(event.target.value)}
-                    >
-                      <option value="" disabled>
-                        Choose a model
-                      </option>
-                      {(MODEL_SUGGESTIONS[provider] ?? []).map((suggestion) => (
-                        <option key={suggestion} value={suggestion}>
-                          {suggestion}
-                        </option>
-                      ))}
-                      <option value="__custom__">Custom model</option>
-                    </select>
-                    {model === '__custom__' && (
-                      <>
-                        <label
-                          htmlFor="onboarding-custom-model"
-                          className="onboarding__label"
-                        >
-                          Custom model
-                        </label>
-                        <input
-                          ref={customModelInputRef}
-                          id="onboarding-custom-model"
-                          className="onboarding__input onboarding__input--mono"
-                          value={customModel}
-                          onChange={(event) => setCustomModel(event.target.value)}
-                          placeholder="Provider model identifier"
-                        />
-                      </>
-                    )}
-                  </div>
-                )}
-              </>
-            ) : null}
+                );
+              })}
+            </div>
+            {provider && selectedProvider && !selectedProvider.configured && (
+              <p role="status" className="onboarding__notice">
+                {selectedProvider.label} is unavailable right now. Reconnect it,
+                or choose another option to continue.
+              </p>
+            )}
           </>
         )}
       </>
@@ -1023,7 +1325,7 @@ export function CompanionSetup({
         </div>
         <div className="onboarding__section">
           <span className="onboarding__label">Your agent</span>
-          <div className="onboarding__row">
+          <div className="onboarding__row onboarding__row--agent">
             <span className="onboarding__avatar">
               {avatar ? <img src={avatar.url} alt="" /> : null}
             </span>
@@ -1041,7 +1343,7 @@ export function CompanionSetup({
                 <span className="onboarding__hint">
                   {avatar ? avatar.file.name : 'Default orb'} ·
                 </span>
-                <label className="onboarding__link" style={{ fontSize: 12 }}>
+                <label className="onboarding__link onboarding__link--small">
                   {avatar ? 'Change image' : 'Upload an image'}
                   <input
                     type="file"
@@ -1058,8 +1360,7 @@ export function CompanionSetup({
                 {avatar && (
                   <button
                     type="button"
-                    className="onboarding__link"
-                    style={{ fontSize: 12 }}
+                    className="onboarding__link onboarding__link--small"
                     onClick={() => setAvatar(null)}
                   >
                     Use the orb
@@ -1093,16 +1394,51 @@ export function CompanionSetup({
             aria-labelledby="onboarding-personality-label"
             className="onboarding__options"
           >
-            {(Object.keys(PERSONALITIES) as Personality[]).map((value) => (
-              <Option
-                key={value}
-                name="onboarding-personality"
-                checked={personality === value}
-                onChange={() => setPersonality(value)}
-                title={PERSONALITIES[value].label}
-                summary={PERSONALITIES[value].summary}
-              />
-            ))}
+            {(Object.keys(PERSONALITIES) as Personality[]).map((value) => {
+              const trait = PERSONALITIES[value];
+              return (
+                <Option
+                  key={value}
+                  name="onboarding-personality"
+                  checked={personality === value}
+                  onChange={() => {
+                    setPersonality(value);
+                    setPersonalityOpen(true);
+                  }}
+                  title={trait.label}
+                  summary={trait.summary}
+                  icon={trait.icon}
+                  detail={
+                    personality === value && personalityOpen ? (
+                      <>
+                        <dl className="ob-traits">
+                          {trait.traits.map(([label, text]) => (
+                            <div key={label}>
+                              <dt>{label}</dt>
+                              <dd>{text}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                        <span className="onboarding__mono">
+                          Sample · you say
+                        </span>
+                        <p className="ob-bubble">The deploy failed again.</p>
+                        <span className="onboarding__mono">It answers</span>
+                        <p className="ob-bubble ob-bubble--reply">
+                          {trait.reply}
+                        </p>
+                        {value === 'driven' && (
+                          <p className="onboarding__hint">
+                            Still only does what Access allows. Risky steps
+                            still ask.
+                          </p>
+                        )}
+                      </>
+                    ) : null
+                  }
+                />
+              );
+            })}
           </div>
         </div>
       </>
@@ -1125,25 +1461,59 @@ export function CompanionSetup({
           <>
             <div className="onboarding__section">
               <span id="onboarding-access-label" className="onboarding__label">
-                Permissions
+                What it can do
               </span>
               <div
                 role="radiogroup"
                 aria-labelledby="onboarding-access-label"
                 className="onboarding__options"
               >
-                {ACCESS_ORDER.map((value) => (
-                  <Option
-                    key={value}
-                    name="onboarding-access"
-                    checked={access === value}
-                    onChange={() => setAccess(value)}
-                    title={ACCESS_PROFILES[value].label}
-                    summary={ACCESS_PROFILES[value].summary}
-                  />
-                ))}
+                {ACCESS_ORDER.map((value) => {
+                  const level = ACCESS_LEVELS[value];
+                  return (
+                    <Option
+                      key={value}
+                      name="onboarding-access"
+                      checked={access === value}
+                      onChange={() => setAccess(value)}
+                      title={
+                        <>
+                          {level.title}
+                          {value === 'collaborate' && (
+                            <span className="onboarding__tag">Recommended</span>
+                          )}
+                        </>
+                      }
+                      summary={level.summary}
+                      icon={level.icon}
+                      detail={
+                        access === value ? (
+                          <>
+                            <span className="onboarding__mono">Can</span>
+                            <ul className="ob-list" data-kind="can">
+                              {level.can.map((line) => (
+                                <li key={line}>{line}</li>
+                              ))}
+                            </ul>
+                            <span className="onboarding__mono">Can’t</span>
+                            <ul className="ob-list" data-kind="cannot">
+                              {level.cannot.map((line) => (
+                                <li key={line}>{line}</li>
+                              ))}
+                            </ul>
+                            {level.warning && (
+                              <p className="onboarding__notice">
+                                {level.warning}
+                              </p>
+                            )}
+                            <p className="onboarding__hint">{ACCESS_NOTE}</p>
+                          </>
+                        ) : null
+                      }
+                    />
+                  );
+                })}
               </div>
-              <p className="onboarding__hint">{ACCESS_PROFILES[access].risk}</p>
             </div>
             {coder && (
               <div className="onboarding__section">
@@ -1197,52 +1567,64 @@ export function CompanionSetup({
                 )}
               </div>
             )}
-            <label className="onboarding__option onboarding__options">
-              <input
-                type="checkbox"
-                checked={browseWeb}
-                onChange={(event) => setBrowseWeb(event.target.checked)}
-              />
-              <span className="onboarding__option-text">
-                <span className="onboarding__option-title">
-                  Let anima read the web
-                </span>
-                <span className="onboarding__option-desc">
-                  Open and read pages. Clicking and downloads stay off.
-                </span>
-              </span>
-              <span className="onboarding__switch" aria-hidden="true" />
-            </label>
-            <div className="onboarding__section">
-              <span id="onboarding-autonomy-label" className="onboarding__label">
-                How much should it ask?
-              </span>
+            <div className="onboarding__options">
               <div
-                role="radiogroup"
-                aria-labelledby="onboarding-autonomy-label"
-                className="onboarding__options onboarding__options--pair"
+                className="onboarding__choice onboarding__choice--browser"
+                data-open={browserOpen || undefined}
               >
-                <Option
-                  name="onboarding-autonomy"
-                  checked={autonomy === 'free'}
-                  onChange={() => setAutonomy('free')}
-                  title={
-                    <>
-                      Free{' '}
-                      <span className="onboarding__tag">Recommended</span>
-                    </>
-                  }
-                  summary="Works on its own and tells you what it did. Dangerous things still ask."
-                />
-                <Option
-                  name="onboarding-autonomy"
-                  checked={autonomy === 'strict'}
-                  onChange={() => setAutonomy('strict')}
-                  title="Strict"
-                  summary="Asks before it changes or runs anything."
-                />
+                <div className="onboarding__option">
+                  <span className="onboarding__icon" aria-hidden="true">
+                    <GlobeIcon size={16} />
+                  </span>
+                  <span className="onboarding__option-text">
+                    <span className="onboarding__option-title">Browser</span>
+                    <span className="onboarding__option-desc">
+                      {BROWSER_SUMMARY[browser]}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    className="onboarding__action"
+                    aria-expanded={browserOpen}
+                    aria-controls="onboarding-browser-levels"
+                    onClick={() => setBrowserOpen((open) => !open)}
+                  >
+                    Customize
+                    {browserOpen && <ChevronIcon size={13} />}
+                  </button>
+                </div>
+                {browserOpen && (
+                  <div
+                    id="onboarding-browser-levels"
+                    className="onboarding__detail"
+                  >
+                    <span
+                      id="onboarding-browser-label"
+                      className="onboarding__mono"
+                    >
+                      What it can do online
+                    </span>
+                    <div
+                      role="radiogroup"
+                      aria-labelledby="onboarding-browser-label"
+                      className="onboarding__options onboarding__options--inner"
+                    >
+                      {BROWSER_LEVELS.map((level) => (
+                        <Option
+                          key={level.value}
+                          name="onboarding-browser"
+                          checked={browser === level.value}
+                          onChange={() => setBrowser(level.value)}
+                          title={level.title}
+                          summary={level.summary}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
+            {narrow && autonomyChoice}
           </>
         )}
       </>
@@ -1250,16 +1632,16 @@ export function CompanionSetup({
     footer = (
       <>
         {back('you')}
-        {primary(inspecting ? 'Checking…' : 'Continue', accessReady && !preview)}
+        {primary(
+          inspecting ? 'Checking…' : 'Continue',
+          accessReady && !preview,
+        )}
       </>
     );
   } else {
     body = (
       <>
-        {heading(
-          'Talk out loud?',
-          'Pick a voice and check your mic. You can always type instead.',
-        )}
+        {heading('Give it a voice.', "Or don't. Typing works just as well.")}
         <VoiceCheck
           voiceURI={voiceURI}
           onVoiceChange={setVoiceURI}
@@ -1278,72 +1660,103 @@ export function CompanionSetup({
         >
           Skip, I'll type
         </button>
-        {primary(creating ? 'Setting things up…' : 'Finish setup', ready)}
+        {primary(creating ? 'Setting things up…' : 'Finish', ready)}
       </>
     );
   }
 
   return (
-    <main className="onboarding">
-      <section className="onboarding__panel">
-        <header>
-          <div className="onboarding__brand">
-            <span className="onboarding__wordmark">anima</span>
-            {flowIndex >= 0 && (
-              <span className="onboarding__counter">
-                Step {flowIndex + 1} of {FLOW.length}
+    <main className="onboarding" data-step={step}>
+      <span className="onboarding__wordmark">anima</span>
+      <div className="onboarding__dock">
+        <section className="onboarding__panel">
+          <header>
+            <div className="onboarding__steps">
+              <span className="onboarding__trail" aria-hidden="true">
+                {FLOW.map((item, index) => (
+                  <span
+                    key={item}
+                    data-state={
+                      index < flowIndex
+                        ? 'complete'
+                        : index === flowIndex
+                          ? 'current'
+                          : 'upcoming'
+                    }
+                  >
+                    {index > 0 && <i>/</i>}
+                    {FLOW_LABEL[item]}
+                  </span>
+                ))}
               </span>
+              <span className="onboarding__counter">
+                {String(Math.max(flowIndex + 1, 0)).padStart(2, '0')} /{' '}
+                {String(FLOW.length).padStart(2, '0')}
+                {flowIndex >= 0 && (
+                  <span className="sr-only">
+                    Step {flowIndex + 1} of {FLOW.length}
+                  </span>
+                )}
+              </span>
+            </div>
+            {flowIndex >= 0 && (
+              <ol className="onboarding__progress" aria-label="Setup progress">
+                {FLOW.map((item, index) => (
+                  <li
+                    key={item}
+                    data-state={
+                      index < flowIndex
+                        ? 'complete'
+                        : index === flowIndex
+                          ? 'current'
+                          : 'upcoming'
+                    }
+                    aria-current={index === flowIndex ? 'step' : undefined}
+                  >
+                    <span className="sr-only">{item}</span>
+                  </li>
+                ))}
+              </ol>
             )}
-          </div>
-          {flowIndex >= 0 && (
-            <ol className="onboarding__progress" aria-label="Setup progress">
-              {FLOW.map((item, index) => (
-                <li
-                  key={item}
-                  data-state={
-                    index < flowIndex
-                      ? 'complete'
-                      : index === flowIndex
-                        ? 'current'
-                        : 'upcoming'
-                  }
-                  aria-current={index === flowIndex ? 'step' : undefined}
-                >
-                  <span className="sr-only">{item}</span>
-                </li>
-              ))}
-            </ol>
-          )}
-        </header>
-        <form
-          className="onboarding__form"
-          aria-labelledby="onboarding-step-heading"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void next();
-          }}
-        >
-          <fieldset
-            disabled={creating}
-            className="onboarding__body"
-            style={{ border: 0, margin: 0, minWidth: 0 }}
+          </header>
+          <form
+            className="onboarding__form"
+            aria-labelledby="onboarding-step-heading"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void next();
+            }}
           >
-            {body}
-            {error && !preview && (
-              <p role="alert" className="onboarding__alert">
-                {error}
-              </p>
-            )}
-          </fieldset>
-          <div className="onboarding__footer">{footer}</div>
-        </form>
-      </section>
-      <div className="onboarding__scene" aria-hidden="true">
-        <HaloOrb energy={0.45} className="onboarding__orb" />
+            <fieldset
+              disabled={creating}
+              className="onboarding__body"
+              style={{ border: 0, margin: 0, minWidth: 0 }}
+            >
+              {body}
+              {error && !preview && (
+                <p role="alert" className="onboarding__alert">
+                  {error}
+                </p>
+              )}
+            </fieldset>
+            <div className="onboarding__footer">{footer}</div>
+          </form>
+        </section>
+        {extras}
+      </div>
+      <OnboardingScene
+        step={step}
+        modelLabel={resolvedModel}
+        sourceLabel={selectedProvider?.label ?? ''}
+        rootPath={rootPath}
+      >
         {step === 'you' && (
-          <div className="onboarding__preview">
+          <div
+            className="ob-float ob-preview"
+            style={{ '--x': 968, '--y': 610, '--w': 300 } as CSSProperties}
+          >
             <span className="onboarding__kicker">Preview</span>
-            <div className="onboarding__preview-message">
+            <div className="ob-preview__message">
               <span className="onboarding__avatar">
                 {avatar ? <img src={avatar.url} alt="" /> : null}
               </span>
@@ -1356,18 +1769,47 @@ export function CompanionSetup({
             </div>
           </div>
         )}
-        {step === 'voice' && speakingVoice && (
-          <div className="onboarding__preview">
-            <span className="onboarding__kicker">Now playing · {speakingVoice}</span>
-            <div className="onboarding__preview-message">
-              <span className="onboarding__avatar">
-                {avatar ? <img src={avatar.url} alt="" /> : null}
-              </span>
-              <p>“Hi{ownerName.trim() ? ` ${ownerName.trim()}` : ''}. This is how I'll sound.”</p>
-            </div>
+        {step === 'access' && !narrow && !preview && (
+          <div
+            className="ob-float ob-approval"
+            style={{ '--x': 938, '--y': 540, '--w': 340 } as CSSProperties}
+          >
+            {autonomyChoice}
           </div>
         )}
-      </div>
+        {step === 'voice' && (
+          <>
+            {speakingVoice && (
+              <div
+                className="ob-float ob-playing"
+                style={{ '--x': 242, '--y': 684, '--w': 330 } as CSSProperties}
+              >
+                <div className="ob-playing__row">
+                  <span>✦ Speaking · {speakingVoice}</span>
+                </div>
+                <span className="ob-wave" aria-hidden="true">
+                  {Array.from({ length: 70 }, (_, index) => (
+                    <i
+                      key={index}
+                      style={
+                        {
+                          '--i': index,
+                          '--h': 4 + ((index * 37) % 17),
+                        } as CSSProperties
+                      }
+                    />
+                  ))}
+                </span>
+                <p>
+                  “Hi{ownerName.trim() ? ` ${ownerName.trim()}` : ''}. This is
+                  how I'll sound.”
+                </p>
+              </div>
+            )}
+            <MicCheck />
+          </>
+        )}
+      </OnboardingScene>
     </main>
   );
 }

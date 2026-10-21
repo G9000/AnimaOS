@@ -1,8 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { MicIcon, PauseIcon, PlayIcon } from '../icons';
 
-type MicState = 'idle' | 'starting' | 'live' | 'blocked' | 'missing' | 'unsupported';
+type MicState =
+  | 'idle'
+  | 'starting'
+  | 'live'
+  | 'blocked'
+  | 'missing'
+  | 'unsupported';
 
-const METER_SEGMENTS = 10;
+const METER_TICKS = 38;
+const LIT_FULL = 20;
 
 function speechSynthesisOrNull(): SpeechSynthesis | null {
   if (
@@ -41,6 +49,16 @@ function shortlist(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice[] {
   return (local.length ? local : voices).slice(0, 4);
 }
 
+/** A small stable bar shape per voice, so each row reads as its own sound. */
+function waveHeights(seed: string, count = 16): number[] {
+  let state = 0;
+  for (const char of seed) state = (state * 31 + char.charCodeAt(0)) >>> 0;
+  return Array.from({ length: count }, () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return 2 + ((state >>> 24) % 12);
+  });
+}
+
 export interface VoiceCheckProps {
   voiceURI: string | null;
   onVoiceChange(voiceURI: string | null): void;
@@ -56,26 +74,12 @@ export function VoiceCheck({
 }: VoiceCheckProps) {
   const voices = shortlist(useBrowserVoices());
   const [playing, setPlaying] = useState<string | null>(null);
-  const [mic, setMic] = useState<MicState>('idle');
-  const [level, setLevel] = useState(0);
-  const micRef = useRef<{
-    stream: MediaStream;
-    context: AudioContext;
-    frame: number;
-  } | null>(null);
   const speakingRef = useRef(onSpeakingChange);
   speakingRef.current = onSpeakingChange;
 
   useEffect(
     () => () => {
       speechSynthesisOrNull()?.cancel();
-      const owned = micRef.current;
-      micRef.current = null;
-      if (owned) {
-        cancelAnimationFrame(owned.frame);
-        owned.stream.getTracks().forEach((track) => track.stop());
-        void owned.context.close().catch(() => undefined);
-      }
     },
     [],
   );
@@ -102,6 +106,91 @@ export function VoiceCheck({
     onVoiceChange(voice.voiceURI);
     synthesis.speak(utterance);
   };
+
+  return voices.length ? (
+    <div
+      role="radiogroup"
+      aria-label="Voice for reading replies aloud"
+      className="onboarding__options"
+    >
+      {voices.map((voice) => {
+        const active = playing === voice.voiceURI;
+        return (
+          <div
+            key={voice.voiceURI}
+            className="onboarding__choice"
+            data-checked={voiceURI === voice.voiceURI || undefined}
+          >
+            <div className="onboarding__option">
+              <button
+                type="button"
+                className="onboarding__play"
+                aria-label={`${active ? 'Stop' : 'Play'} ${voice.name}`}
+                onClick={() => preview(voice)}
+              >
+                {active ? <PauseIcon size={14} /> : <PlayIcon size={14} />}
+              </button>
+              <label className="onboarding__option-text">
+                <input
+                  type="radio"
+                  name="onboarding-voice"
+                  value={voice.voiceURI}
+                  checked={voiceURI === voice.voiceURI}
+                  onChange={() => onVoiceChange(voice.voiceURI)}
+                />
+                <span className="onboarding__option-title onboarding__option-title--clip">
+                  {voice.name}
+                </span>
+                <span className="onboarding__option-desc">{voice.lang}</span>
+              </label>
+              <span
+                className="ob-wave ob-wave--small"
+                data-live={active || undefined}
+                aria-hidden="true"
+              >
+                {waveHeights(voice.voiceURI).map((height, index) => (
+                  <i
+                    key={index}
+                    style={{ '--h': height, '--i': index } as CSSProperties}
+                  />
+                ))}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  ) : (
+    <p className="onboarding__hint">
+      This browser has no voices to read replies aloud. You can still type and
+      talk.
+    </p>
+  );
+}
+
+/** The microphone check: a card on the stage with a live level. */
+export function MicCheck() {
+  const [mic, setMic] = useState<MicState>('idle');
+  const [level, setLevel] = useState(0);
+  const [device, setDevice] = useState('');
+  const micRef = useRef<{
+    stream: MediaStream;
+    context: AudioContext;
+    frame: number;
+  } | null>(null);
+
+  useEffect(
+    () => () => {
+      const owned = micRef.current;
+      micRef.current = null;
+      if (owned) {
+        cancelAnimationFrame(owned.frame);
+        owned.stream.getTracks().forEach((track) => track.stop());
+        void owned.context.close().catch(() => undefined);
+      }
+    },
+    [],
+  );
 
   const checkMicrophone = async () => {
     if (micRef.current || mic === 'starting') return;
@@ -130,6 +219,7 @@ export function VoiceCheck({
       };
       micRef.current = { stream, context, frame: 0 };
       micRef.current.frame = requestAnimationFrame(tick);
+      setDevice(stream.getAudioTracks()[0]?.label ?? '');
       setMic('live');
     } catch (caught) {
       const name = caught instanceof DOMException ? caught.name : '';
@@ -137,8 +227,8 @@ export function VoiceCheck({
     }
   };
 
-  const lit = Math.min(METER_SEGMENTS, Math.round(level * 40));
-  const micStatus: Record<MicState, string> = {
+  const lit = Math.min(METER_TICKS, Math.round((level * METER_TICKS) / 0.25));
+  const status: Record<MicState, string> = {
     idle: 'Check that anima can hear you.',
     starting: 'Asking for your microphone…',
     live: lit > 0 ? 'Hearing you.' : 'Listening. Say something.',
@@ -148,81 +238,39 @@ export function VoiceCheck({
   };
 
   return (
-    <>
-      <div className="onboarding__section">
-        <span id="onboarding-voice-label" className="onboarding__label">
-          Voice for reading replies aloud
+    <div
+      className="ob-float ob-mic"
+      style={{ '--x': 760, '--y': 640, '--w': 340 } as CSSProperties}
+    >
+      <div className="ob-mic__row">
+        <span className="ob-mic__device">
+          <MicIcon size={14} aria-hidden="true" />
+          <span>{device || 'Microphone'}</span>
         </span>
-        {voices.length ? (
-          <div
-            role="radiogroup"
-            aria-labelledby="onboarding-voice-label"
-            className="onboarding__options"
-          >
-            {voices.map((voice) => (
-              <div key={voice.voiceURI} className="onboarding__option">
-                <label className="onboarding__option-text">
-                  <input
-                    type="radio"
-                    name="onboarding-voice"
-                    value={voice.voiceURI}
-                    checked={voiceURI === voice.voiceURI}
-                    onChange={() => onVoiceChange(voice.voiceURI)}
-                  />
-                  <span className="onboarding__option-title">{voice.name}</span>
-                  <span className="onboarding__option-desc">{voice.lang}</span>
-                </label>
-                <button
-                  type="button"
-                  className="onboarding__button onboarding__button--secondary onboarding__button--small"
-                  aria-label={`${playing === voice.voiceURI ? 'Stop' : 'Play'} ${voice.name}`}
-                  onClick={() => preview(voice)}
-                >
-                  {playing === voice.voiceURI ? 'Stop' : 'Play'}
-                </button>
-                <span className="onboarding__mark" aria-hidden="true" />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="onboarding__hint">
-            This browser has no voices to read replies aloud. You can still
-            type and talk.
-          </p>
-        )}
+        <button
+          type="button"
+          className="ob-mic__check"
+          disabled={mic === 'starting' || mic === 'live'}
+          onClick={() => void checkMicrophone()}
+        >
+          {mic === 'live' ? 'On' : 'Check'}
+        </button>
       </div>
-      <div className="onboarding__section">
-        <span className="onboarding__label">Microphone</span>
-        <div className="onboarding__row">
-          <button
-            type="button"
-            className="onboarding__button onboarding__button--secondary"
-            disabled={mic === 'starting' || mic === 'live'}
-            onClick={() => void checkMicrophone()}
-          >
-            {mic === 'live' ? 'Microphone on' : 'Check microphone'}
-          </button>
-          <div
-            className="onboarding__meter"
-            role="meter"
-            aria-label="Microphone level"
-            aria-valuemin={0}
-            aria-valuemax={METER_SEGMENTS}
-            aria-valuenow={lit}
-          >
-            {Array.from({ length: METER_SEGMENTS }, (_, index) => (
-              <span
-                key={index}
-                data-on={index < lit}
-                data-hot={index >= 6}
-              />
-            ))}
-          </div>
-        </div>
-        <p role="status" className="onboarding__hint">
-          {micStatus[mic]}
-        </p>
+      <div
+        className="ob-mic__level"
+        role="meter"
+        aria-label="Microphone level"
+        aria-valuemin={0}
+        aria-valuemax={METER_TICKS}
+        aria-valuenow={lit}
+      >
+        {Array.from({ length: METER_TICKS }, (_, index) => (
+          <i key={index} data-on={index < lit} data-hot={index >= LIT_FULL} />
+        ))}
       </div>
-    </>
+      <p aria-live="polite" className="ob-mic__status">
+        {status[mic]}
+      </p>
+    </div>
   );
 }

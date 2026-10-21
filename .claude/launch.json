@@ -21,6 +21,13 @@
       "runtimeExecutable": "bun",
       "runtimeArgs": ["x", "astro", "dev", "--root", "apps/landing", "--port", "4330"],
       "port": 4330
+    },
+    {
+      "name": "web-local",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["x", "nx", "run", "@animaOS-SWARM/web:serve"],
+      "env": { "UI_BACKEND_ORIGIN": "http://127.0.0.1:8080" },
+      "port": 4200
     }
   ]
 }

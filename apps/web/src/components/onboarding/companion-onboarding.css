@@ -1,70 +1,141 @@
+/*
+ * Onboarding. The stage behind the card is drawn in design pixels (a
+ * 1408 x 868 canvas); --u is one design pixel at the current window size.
+ */
 .onboarding {
+  --ob-serif: 'Fraunces Variable', Georgia, serif;
+  --ob-ink: #ece6da;
+  --ob-hair: rgb(236 230 218 / 0.13);
+  --ob-muted: rgb(236 230 218 / 0.35);
+  --ob-card: rgb(20 20 19 / 0.72);
+  --u: min(100cqw / 1408, 100cqh / 868);
+  /* Where the card's top edge sits on the stage, in design pixels. */
+  --ob-top: 96;
   position: relative;
   display: flex;
   flex: 1;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: #0d1013;
+  container-type: size;
+  background: #0b0b0a;
   color: var(--color-ink);
 }
 
-.onboarding__panel {
-  position: relative;
+.onboarding[data-step='welcome'],
+.onboarding[data-step='existing'],
+.onboarding[data-step='model'] {
+  --ob-top: 150;
+}
+
+/* The dock gives the card a definite box to sit and scroll within. */
+.onboarding__dock {
+  position: absolute;
+  inset: 0;
   z-index: 1;
   display: flex;
   flex-direction: column;
-  width: min(560px, 100%);
-  min-height: 0;
-  overflow-y: auto;
-  padding: 36px 56px 40px;
-  background: #0d1013;
-  border-right: 1px solid rgb(255 255 255 / 0.08);
+  align-items: flex-start;
+  gap: 12px;
+  padding-top: max(
+    56px,
+    calc(50cqh - 434 * var(--u) + var(--ob-top) * var(--u))
+  );
+  padding-bottom: 24px;
+  padding-left: max(16px, calc(50cqw - 528 * var(--u)));
+  pointer-events: none;
 }
 
-.onboarding__brand {
+.onboarding[data-step='voice'] .onboarding__dock {
+  align-items: flex-end;
+  padding-right: max(16px, calc(50cqw - 586 * var(--u)));
+  padding-left: 16px;
+}
+
+/* A floating card over a full-width stage: blurred, hairline, shadowed. */
+.onboarding__panel {
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  flex: 0 1 auto;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: min(420px, calc(100% - 32px));
+  min-height: 0;
+  overflow: hidden;
+  padding: 28px 28px 24px;
+  background: var(--ob-card);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 2px;
+  box-shadow: 0 24px 64px rgb(0 0 0 / 0.6);
+}
+
+.onboarding[data-step='voice'] .onboarding__panel {
+  width: min(440px, calc(100% - 32px));
 }
 
 .onboarding__wordmark {
-  font-family: var(--font-display);
+  position: absolute;
+  top: max(20px, calc(50cqh - 434 * var(--u) + 52 * var(--u)));
+  left: max(28px, calc(50cqw - 704 * var(--u) + 64 * var(--u)));
+  z-index: 2;
+  font-family: var(--font-sans);
   font-size: 20px;
   font-weight: 600;
   letter-spacing: -0.03em;
+  color: var(--ob-ink);
+}
+
+.onboarding__steps {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.onboarding__trail {
+  display: flex;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.25);
+}
+
+.onboarding__trail i {
+  margin-right: 8px;
+  font-style: normal;
+  color: rgb(236 230 218 / 0.2);
+}
+
+.onboarding__trail [data-state='complete'] {
+  color: rgb(236 230 218 / 0.6);
+}
+
+.onboarding__trail [data-state='current'] {
+  color: var(--color-accent);
 }
 
 .onboarding__counter,
 .onboarding__kicker {
   font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.14em;
+  font-size: 9px;
+  letter-spacing: 0.13em;
   text-transform: uppercase;
-  color: var(--color-ink-3);
+  color: rgb(236 230 218 / 0.35);
 }
 
 .onboarding__progress {
-  display: flex;
-  gap: 4px;
-  margin: 18px 0 0;
-  padding: 0;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
   list-style: none;
-}
-
-.onboarding__progress li {
-  flex: 1;
-  height: 2px;
-  background: rgb(255 255 255 / 0.1);
-}
-
-.onboarding__progress li[data-state='complete'] {
-  background: rgb(255 255 255 / 0.7);
-}
-
-.onboarding__progress li[data-state='current'] {
-  background: var(--color-accent);
 }
 
 .onboarding__form {
@@ -78,75 +149,127 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  justify-content: center;
-  gap: 28px;
-  padding: 40px 0;
+  gap: 24px;
+  min-height: 0;
+  /* Only the middle scrolls; the way forward stays in view. The side room is
+   * for the handles on a chosen row. */
+  margin: 0 -8px;
+  padding: 20px 8px 24px;
+  overflow-y: auto;
 }
 
 .onboarding__heading h1 {
   margin: 0;
-  font-family: var(--font-display);
-  font-size: 32px;
+  font-family: var(--ob-serif);
+  font-size: 46px;
   font-weight: 500;
-  line-height: 1.1;
-  letter-spacing: -0.025em;
+  line-height: 0.98;
+  letter-spacing: -0.034em;
+  color: var(--ob-ink);
 }
 
 .onboarding__heading--hero h1 {
-  font-size: 44px;
-  letter-spacing: -0.035em;
+  font-size: 64px;
 }
 
 .onboarding__heading p {
   margin: 10px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: rgb(236 230 218 / 0.6);
+}
+
+.onboarding__heading--hero p {
+  margin-top: 20px;
   font-size: 15px;
-  line-height: 1.55;
-  color: var(--color-ink-2);
 }
 
 .onboarding__section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .onboarding__label {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
-  color: var(--color-ink-2);
+  color: rgb(236 230 218 / 0.6);
+}
+
+/* Small mono captions: group names, field names inside an opened choice. */
+.onboarding__mono {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.35);
+}
+
+.onboarding__mono--lead {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ob-ink);
 }
 
 .onboarding__hint {
   margin: 0;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--color-ink-3);
+  color: rgb(236 230 218 / 0.35);
 }
 
 .onboarding__input {
   width: 100%;
   min-width: 0;
   height: 44px;
-  padding: 0 14px;
-  border: 1px solid rgb(255 255 255 / 0.12);
+  padding: 0 12px;
+  border: 1px solid var(--ob-hair);
   border-radius: 2px;
-  background: rgb(255 255 255 / 0.03);
-  color: var(--color-ink);
+  background: rgb(236 230 218 / 0.02);
+  color: var(--ob-ink);
   font-size: 15px;
   outline: none;
 }
 
+textarea.onboarding__input {
+  height: auto;
+  padding: 10px 12px;
+}
+
 .onboarding__input:focus-visible {
-  border-color: rgb(255 255 255 / 0.55);
+  border-color: var(--color-accent);
 }
 
 .onboarding__input[readonly] {
-  color: var(--color-ink-2);
+  color: rgb(236 230 218 / 0.6);
 }
 
 .onboarding__input--mono {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 12px;
+}
+
+/* A path field with its icon inside. */
+.onboarding__field {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  color: rgb(255 255 255 / 0.5);
+}
+
+.onboarding__field svg {
+  position: absolute;
+  top: 14px;
+  left: 10px;
+  pointer-events: none;
+}
+
+.onboarding__field .onboarding__input {
+  padding-left: 33px;
 }
 
 .onboarding__row {
@@ -155,13 +278,44 @@
   align-items: center;
 }
 
+.onboarding__row--agent {
+  align-items: flex-start;
+}
+
 .onboarding__options {
   display: flex;
   flex-direction: column;
   margin: 0;
   padding: 0;
-  border: 1px solid rgb(255 255 255 / 0.1);
-  border-radius: 2px;
+  border-block: 1px solid var(--ob-hair);
+}
+
+.onboarding__options--inner {
+  border-block: 0;
+  border-top: 1px solid var(--ob-hair);
+}
+
+.onboarding__group-label {
+  display: block;
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--ob-hair);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.35);
+}
+
+.onboarding__group + .onboarding__group > .onboarding__group-label {
+  border-top: 1px solid var(--ob-hair);
+}
+
+.onboarding__choice {
+  position: relative;
+}
+
+.onboarding__choice + .onboarding__choice {
+  border-top: 1px solid var(--ob-hair);
 }
 
 .onboarding__option {
@@ -169,31 +323,16 @@
   display: flex;
   gap: 14px;
   align-items: center;
-  padding: 14px 16px;
+  padding: 13px 12px;
   cursor: pointer;
-}
-
-.onboarding__option + .onboarding__option {
-  border-top: 1px solid rgb(255 255 255 / 0.07);
 }
 
 .onboarding__options--pair {
   flex-direction: row;
 }
 
-.onboarding__options--pair .onboarding__option {
-  flex: 1 1 0;
-  align-items: flex-start;
-  min-width: 0;
-}
-
-.onboarding__options--pair .onboarding__option + .onboarding__option {
-  border-top: 0;
-  border-left: 1px solid rgb(255 255 255 / 0.07);
-}
-
 .onboarding__tag {
-  margin-left: 6px;
+  margin-left: 8px;
   padding: 2px 6px;
   border-radius: 2px;
   background: rgb(233 77 171 / 0.15);
@@ -203,27 +342,44 @@
   vertical-align: 1px;
 }
 
-@media (max-width: 480px) {
-  .onboarding__options--pair {
-    flex-direction: column;
-  }
-
-  .onboarding__options--pair .onboarding__option + .onboarding__option {
-    border-top: 1px solid rgb(255 255 255 / 0.07);
-    border-left: 0;
-  }
+/* The chosen option is the live item: tinted, square handles on its corners. */
+.onboarding__choice[data-checked] {
+  background: rgb(233 77 171 / 0.08);
 }
 
-.onboarding__option:has(input:checked) {
-  background: rgb(255 255 255 / 0.06);
+.onboarding__choice[data-checked]::before {
+  content: '';
+  position: absolute;
+  top: -3.5px;
+  left: -3.5px;
+  z-index: 1;
+  width: calc(100% + 7px);
+  height: calc(100% + 7px);
+  pointer-events: none;
+  background:
+    linear-gradient(#0b0b0a, #0b0b0a) 1px 1px / 5px 5px,
+    linear-gradient(#0b0b0a, #0b0b0a) calc(100% - 1px) 1px / 5px 5px,
+    linear-gradient(#0b0b0a, #0b0b0a) 1px calc(100% - 1px) / 5px 5px,
+    linear-gradient(#0b0b0a, #0b0b0a) calc(100% - 1px) calc(100% - 1px) / 5px
+      5px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 0 0 / 7px 7px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 100% 0 / 7px 7px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 0 100% / 7px 7px,
+    linear-gradient(var(--color-accent), var(--color-accent)) 100% 100% / 7px
+      7px;
+  background-repeat: no-repeat;
 }
 
-.onboarding__option:has(input:disabled) {
+.onboarding__options--inner .onboarding__choice[data-checked]::before {
+  display: none;
+}
+
+.onboarding__choice:has(input:disabled) {
   cursor: not-allowed;
   opacity: 0.55;
 }
 
-.onboarding__option:has(input:focus-visible) {
+.onboarding__choice:has(input:focus-visible) {
   outline: 1px solid rgb(255 255 255 / 0.55);
   outline-offset: -1px;
 }
@@ -233,6 +389,18 @@
   position: absolute;
   opacity: 0;
   pointer-events: none;
+}
+
+.onboarding__icon {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  flex: none;
+  color: rgb(236 230 218 / 0.5);
+}
+
+.onboarding__choice[data-checked] > .onboarding__option > .onboarding__icon {
+  color: var(--color-accent);
 }
 
 .onboarding__option-text {
@@ -246,11 +414,27 @@
 .onboarding__option-title {
   font-size: 14px;
   font-weight: 500;
+  color: var(--ob-ink);
+}
+
+.onboarding__option-title--clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .onboarding__option-desc {
-  font-size: 13px;
-  color: var(--color-ink-3);
+  font-size: 12px;
+  line-height: 1.4;
+  color: rgb(236 230 218 / 0.55);
+}
+
+/* What opens under the chosen option. */
+.onboarding__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 12px 14px 42px;
 }
 
 .onboarding__mark {
@@ -261,43 +445,69 @@
   border-radius: 2px;
 }
 
-.onboarding__option:has(input:checked) .onboarding__mark {
+.onboarding__choice[data-checked] .onboarding__mark {
   border-color: var(--color-accent);
-  background: radial-gradient(
-    var(--color-accent) 0 3px,
-    transparent 3.5px
-  );
+  background: radial-gradient(var(--color-accent) 0 3px, transparent 3.5px);
 }
 
-.onboarding__switch {
-  display: flex;
-  width: 32px;
-  height: 18px;
+.onboarding__square {
+  display: grid;
   flex: none;
-  padding: 2px;
-  border-radius: 2px;
-  background: rgb(255 255 255 / 0.16);
+  color: rgb(255 255 255 / 0.3);
 }
 
-.onboarding__switch::after {
-  content: '';
-  width: 14px;
-  height: 14px;
-  background: #fff;
+.onboarding__choice[data-checked] .onboarding__square {
+  color: var(--color-accent);
 }
 
-.onboarding__option:has(input:checked) .onboarding__switch {
-  justify-content: flex-end;
-  background: var(--color-accent);
+.onboarding__action {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: rgb(255 255 255 / 0.8);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.onboarding__action:hover,
+.onboarding__action:focus-visible {
+  color: #fff;
+}
+
+.onboarding__choice--browser[data-open] {
+  background: rgb(233 77 171 / 0.08);
+}
+
+.onboarding__choice--browser[data-open] .onboarding__icon {
+  color: var(--color-accent);
+}
+
+.onboarding__play {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: rgb(236 230 218 / 0.35);
+  cursor: pointer;
+}
+
+.onboarding__choice[data-checked] .onboarding__play {
+  color: var(--color-accent);
 }
 
 .onboarding__button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  height: 44px;
-  padding: 0 20px;
+  gap: 10px;
+  height: 42px;
+  padding: 0 18px;
   border: 1px solid transparent;
   border-radius: 2px;
   font-size: 14px;
@@ -312,14 +522,18 @@
 }
 
 .onboarding__button--primary {
-  background: #f4f3ef;
+  background: #ece6da;
   color: #121212;
 }
 
 .onboarding__button--secondary {
-  border-color: rgb(255 255 255 / 0.18);
+  height: 44px;
+  padding: 0 12px;
+  border-color: rgb(236 230 218 / 0.2);
   background: transparent;
-  color: var(--color-ink);
+  color: var(--ob-ink);
+  font-size: 13px;
+  font-weight: 400;
 }
 
 .onboarding__button--small {
@@ -332,14 +546,19 @@
   padding: 0;
   border: 0;
   background: none;
-  color: var(--color-ink-2);
-  font-size: 14px;
+  color: rgb(236 230 218 / 0.6);
+  font-size: 13px;
   cursor: pointer;
+}
+
+.onboarding__link--small {
+  font-size: 12px;
+  color: var(--ob-ink);
 }
 
 .onboarding__link:hover,
 .onboarding__link:focus-visible {
-  color: var(--color-ink);
+  color: var(--ob-ink);
   text-decoration: underline;
 }
 
@@ -376,6 +595,106 @@
   background: rgb(255 255 255 / 0.35);
 }
 
+/* The welcome card's runtime line: where anima is running. */
+.ob-runtime {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.ob-runtime__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-mint, #6fd69a);
+}
+
+.ob-runtime__label::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.ob-runtime__addr {
+  color: rgb(236 230 218 / 0.35);
+  text-transform: none;
+  letter-spacing: 0.06em;
+}
+
+/* Under the welcome card: bringing an older agent along, and reopening a
+ * workspace that already exists. */
+.ob-import {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  width: min(420px, calc(100% - 32px));
+  padding: 14px 16px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 2px;
+  background: var(--ob-card);
+  backdrop-filter: blur(24px);
+}
+
+.ob-import div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ob-import strong {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ob-ink);
+}
+
+.ob-import span {
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.55);
+}
+
+.ob-import em {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: normal;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.35);
+}
+
+.ob-open {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.5);
+  cursor: pointer;
+}
+
+.ob-open:hover:not(:disabled),
+.ob-open:focus-visible {
+  color: var(--ob-ink);
+}
+
+.ob-open:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
 .onboarding__alert {
   margin: 0;
   font-size: 13px;
@@ -384,10 +703,10 @@
 
 .onboarding__notice {
   margin: 0;
-  padding: 12px 14px;
+  padding: 10px 12px;
   border: 1px solid rgb(227 187 112 / 0.35);
   border-radius: 2px;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--color-ink-2);
 }
@@ -395,12 +714,12 @@
 .onboarding__avatar {
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 56px;
+  width: 44px;
+  height: 44px;
   flex: none;
   overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 0.14);
-  border-radius: 4px;
+  border: 1px solid var(--ob-hair);
+  border-radius: 2px;
   background:
     radial-gradient(circle at 50% 50%, #f4f3ef 0 9%, transparent 22%),
     radial-gradient(
@@ -418,92 +737,525 @@
   object-fit: cover;
 }
 
-.onboarding__meter {
+.onboarding__connection {
   display: flex;
-  align-items: center;
-  gap: 3px;
-  height: 44px;
-  padding: 0 14px;
-  border: 1px solid rgb(255 255 255 / 0.12);
-  border-radius: 2px;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.onboarding__meter span {
-  width: 4px;
-  height: 16px;
-  background: rgb(255 255 255 / 0.12);
+.onboarding__detail label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.35);
 }
 
-.onboarding__meter span[data-on='true'] {
-  background: var(--color-mint, #6fd69a);
+/* Personality, opened: what it does and how it would answer. */
+.ob-traits {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
 }
 
-.onboarding__meter span[data-on='true'][data-hot='true'] {
-  background: var(--color-accent);
+.ob-traits div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
 }
+
+.ob-traits dt {
+  color: rgb(236 230 218 / 0.45);
+}
+
+.ob-traits dd {
+  margin: 0;
+  text-align: right;
+  color: var(--ob-ink);
+}
+
+.ob-bubble {
+  margin: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--ob-hair);
+  background: rgb(236 230 218 / 0.06);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ob-ink);
+}
+
+.ob-bubble--reply {
+  background: #0b0b0a;
+}
+
+/* Access, opened: what it can and can't do. */
+.ob-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--ob-ink);
+}
+
+.ob-list li {
+  display: flex;
+  gap: 8px;
+}
+
+.ob-list li::before {
+  flex: none;
+  width: 10px;
+  content: '✓';
+  color: var(--color-mint, #6fd69a);
+}
+
+.ob-list[data-kind='cannot'] li {
+  color: rgb(236 230 218 / 0.55);
+}
+
+.ob-list[data-kind='cannot'] li::before {
+  content: '✕';
+  color: rgb(236 230 218 / 0.35);
+}
+
+/* ------------------------------------------------------------------ stage */
 
 .onboarding__scene {
-  position: relative;
-  flex: 1;
-  min-width: 0;
+  position: absolute;
+  inset: 0;
   overflow: hidden;
-  background: radial-gradient(
-    ellipse 80% 80% at 50% 50%,
-    #101820 0%,
-    #050608 72%
-  );
+  background: #0b0b0a;
+  --orb: min(72%, 560px);
 }
 
-/* anima's orb fills the free side while you set it up. */
-.onboarding__orb {
+.ob-stage {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: min(80%, 560px);
-  aspect-ratio: 1;
+  width: calc(1408 * var(--u));
+  height: calc(868 * var(--u));
   translate: -50% -50%;
-  opacity: 0.8;
 }
 
-.onboarding__orb::before {
-  content: '';
-  position: absolute;
-  inset: -40%;
-  z-index: -1;
-  background: radial-gradient(circle, rgb(233 77 171 / 0.2) 0%, transparent 60%);
+.ob-deco {
+  display: contents;
 }
 
-.onboarding__preview {
+/* Anything placed with --x/--y/--w/--h sits on the design canvas. */
+.ob-stage .ob-window,
+.ob-stage .ob-caption,
+.ob-stage .ob-mono,
+.ob-stage .ob-note,
+.ob-stage .ob-frame,
+.ob-stage .ob-float,
+.ob-stage .ob-stage__orb,
+.ob-stage .ob-stage__glow {
   position: absolute;
-  right: 48px;
-  bottom: 48px;
-  left: 48px;
-  max-width: 440px;
-  margin: 0 auto;
-  padding: 18px;
-  border: 1px solid rgb(255 255 255 / 0.12);
-  border-radius: 4px;
-  background: rgb(13 16 19 / 0.85);
+  left: calc(var(--x) * var(--u));
+  top: calc(var(--y) * var(--u));
+  width: calc(var(--w) * var(--u));
+  height: calc(var(--h) * var(--u));
+}
+
+.ob-stage .ob-stage__glow {
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgb(233 77 171 / 0.19) 0%,
+    rgb(233 77 171 / 0) 70%
+  );
+}
+
+.ob-stage .ob-stage__orb {
+  opacity: 0.95;
+}
+
+.ob-lens__clip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* The orb thinking, in its own hairline frame. */
+.ob-stage .ob-frame {
+  border: 1px solid var(--ob-hair);
+}
+
+.ob-frame .ob-frame__orb {
+  position: absolute;
+  inset: 0;
+}
+
+/* Square windows onto anima, with handles on the corners. */
+.ob-window {
+  position: absolute;
+  border: 1px solid #ece6da;
+  background: #0b0b0a;
+}
+
+.ob-window--accent {
+  border-color: var(--color-accent);
+}
+
+.ob-window--accent .ob-handle {
+  border-color: var(--color-accent);
+}
+
+.ob-window .ob-window__orb {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.ob-handle {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  box-sizing: border-box;
+  border: 1px solid #ece6da;
+  background: #0b0b0a;
+}
+.ob-handle[data-corner='tl'] {
+  top: -4px;
+  left: -4px;
+}
+.ob-handle[data-corner='tr'] {
+  top: -4px;
+  right: -4px;
+}
+.ob-handle[data-corner='bl'] {
+  bottom: -4px;
+  left: -4px;
+}
+.ob-handle[data-corner='br'] {
+  right: -4px;
+  bottom: -4px;
+}
+
+.ob-caption,
+.ob-mono,
+.ob-note .onboarding__kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.ob-caption {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 6px;
+  background: #0b0b0a;
+  white-space: nowrap;
+}
+
+.ob-caption i {
+  font-style: normal;
+  color: rgb(236 230 218 / 0.35);
+}
+
+.ob-caption b {
+  font-weight: 400;
+  color: var(--ob-ink);
+}
+
+.ob-caption b[data-hot] {
+  color: var(--color-accent);
+}
+
+.ob-mono {
+  white-space: nowrap;
+  color: rgb(236 230 218 / 0.35);
+}
+
+.ob-tag {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+.ob-tag__path {
+  text-transform: none;
+  letter-spacing: 0.02em;
+  color: rgb(236 230 218 / 0.7);
+}
+.ob-tag i {
+  width: 6px;
+  height: 6px;
+  background: var(--color-accent);
+}
+
+.ob-stage .ob-note {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-sizing: border-box;
+  height: auto;
+  padding: 14px;
+  border: 1px solid var(--ob-hair);
+  background: #0b0b0a;
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.55);
+}
+.ob-note strong {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--ob-ink);
+}
+.ob-note .onboarding__kicker {
+  font-size: 9px;
+  color: var(--color-accent);
+}
+
+/* Cards that sit on the stage and are part of the step. */
+.ob-stage .ob-float {
+  box-sizing: border-box;
+  height: auto;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  background: var(--ob-card);
   backdrop-filter: blur(24px);
 }
 
-.onboarding__preview-message {
+.ob-playing {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.ob-playing__row {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+.ob-playing p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ob-ink);
+}
+
+.ob-wave {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 22px;
+}
+
+.ob-wave i {
+  display: block;
+  flex: 1;
+  min-width: 1px;
+  max-width: 2px;
+  height: calc(var(--h) * 1px);
+  background: var(--color-accent);
+  animation: ob-wave 900ms ease-in-out infinite alternate;
+  animation-delay: calc(var(--i) * -53ms);
+}
+
+.ob-wave--small {
+  width: 62px;
+  height: 14px;
+  flex: none;
+}
+
+.ob-wave--small i {
+  flex: none;
+  width: 2px;
+  height: calc(var(--h) * 1px);
+  background: rgb(236 230 218 / 0.25);
+  animation: none;
+}
+
+.onboarding__choice[data-checked] .ob-wave--small i {
+  background: var(--color-accent);
+}
+
+.ob-wave--small[data-live] i {
+  animation: ob-wave 700ms ease-in-out infinite alternate;
+  animation-delay: calc(var(--i) * -61ms);
+}
+
+@keyframes ob-wave {
+  from {
+    transform: scaleY(0.35);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ob-wave i {
+    animation: none;
+  }
+}
+
+.ob-mic {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+}
+
+.ob-mic__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ob-mic__device {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--ob-ink);
+}
+
+.ob-mic__device span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ob-mic__device svg {
+  flex: none;
+  color: rgb(236 230 218 / 0.6);
+}
+
+.ob-mic__check {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.5);
+  cursor: pointer;
+}
+
+.ob-mic__check:hover:not(:disabled),
+.ob-mic__check:focus-visible {
+  color: var(--ob-ink);
+}
+
+.ob-mic__check:disabled {
+  cursor: default;
+  color: var(--color-mint, #6fd69a);
+}
+
+.ob-mic__level {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  height: 12px;
+}
+
+.ob-mic__level i {
+  width: 2px;
+  height: 6px;
+  background: rgb(236 230 218 / 0.18);
+}
+
+.ob-mic__level i[data-on='true'] {
+  height: 12px;
+  background: var(--color-mint, #6fd69a);
+}
+
+.ob-mic__level i[data-on='true'][data-hot='true'] {
+  background: var(--color-accent);
+}
+
+.ob-mic__status {
+  margin: 0;
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.55);
+}
+
+.ob-stage .ob-frame--accent {
+  border-color: var(--color-accent);
+  background: rgb(233 77 171 / 0.04);
+}
+
+.ob-frame--accent .ob-tag {
+  top: 14px;
+  left: 14px;
+  max-width: calc(100% - 28px);
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.ob-frame--accent .ob-handle {
+  border-color: var(--color-accent);
+}
+
+.ob-stage .ob-outside {
+  margin: 0;
+  line-height: 1.7;
+  white-space: normal;
+  width: auto;
+}
+
+.ob-approval {
+  padding: 20px;
+}
+
+.ob-approval .onboarding__option {
+  gap: 8px;
+  padding: 12px 10px;
+}
+
+.ob-approval .onboarding__detail {
+  padding-left: 10px;
+}
+
+.ob-frame--accent .ob-tag__path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ob-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.ob-preview__message {
   display: flex;
   gap: 12px;
-  margin-top: 12px;
 }
 
-.onboarding__preview-message .onboarding__avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 2px;
-}
-
-.onboarding__preview-message p {
+.ob-preview__message p {
   margin: 4px 0 0;
   font-size: 14px;
   line-height: 1.5;
-  color: var(--color-ink-2);
+  color: rgb(236 230 218 / 0.85);
+}
+
+.ob-preview__message .onboarding__avatar {
+  width: 28px;
+  height: 28px;
 }
 
 /* Shared setup pieces were drawn with rounded cards; keep them square here. */
@@ -515,18 +1267,40 @@
 }
 
 @media (max-width: 900px) {
+  .onboarding__dock,
+  .onboarding[data-step='voice'] .onboarding__dock {
+    align-items: stretch;
+    padding: 56px 16px 16px;
+    overflow-y: auto;
+  }
+  .onboarding__panel,
+  .onboarding[data-step='voice'] .onboarding__panel,
+  .ob-import {
+    width: auto;
+  }
   .onboarding__panel {
-    width: 100%;
-    padding: 28px 24px 32px;
-    border-right: 0;
+    flex: none;
+    padding: 24px 20px 28px;
+  }
+  .onboarding__wordmark {
+    top: 20px;
+    left: 20px;
   }
 
   .onboarding__scene {
+    opacity: 0.35;
+  }
+  .ob-window,
+  .ob-caption,
+  .ob-note,
+  .ob-mono,
+  .ob-outside,
+  .ob-float {
     display: none;
   }
 
   .onboarding__heading--hero h1 {
-    font-size: 36px;
+    font-size: 48px;
   }
 }
 

@@ -45,6 +45,8 @@ export interface SessionSend {
   skill?: string;
   /** One in-memory owner selection; never restored from sessionStorage. */
   browserSelection?: BrowserSelection;
+  /** Plan mode when this message was sent; not restored after a reload. */
+  plan?: boolean;
   /** Telegram errors are scrubbed of bot tokens before they are shown. */
   telegram: boolean;
   /** Native Discord setup errors use static safe UI messages. */
@@ -406,6 +408,7 @@ export class SendQueue {
             : {}),
           mode: send.mode,
           ...(send.skill ? { skill: send.skill } : {}),
+          ...(send.plan !== undefined ? { plan: send.plan } : {}),
           ...(send.browserSelection
             ? { browserSelection: send.browserSelection }
             : {}),

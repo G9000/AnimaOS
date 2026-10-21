@@ -24,7 +24,7 @@
 .tool-step,
 .helper-card {
   border: 1px solid var(--color-line);
-  border-radius: 10px;
+  border-radius: 2px;
   background: rgb(255 255 255 / 0.02);
 }
 .tool-step-toggle {
@@ -159,7 +159,7 @@
   gap: 6px;
   align-self: flex-start;
   border: 1px solid var(--color-line);
-  border-radius: 12px;
+  border-radius: 2px;
   padding: 8px 12px;
   color: var(--color-ink-2);
   font-size: 12px;
@@ -190,7 +190,7 @@
 }
 .delegated-turn {
   border: 1px solid var(--color-line);
-  border-radius: 12px;
+  border-radius: 2px;
   background: rgb(255 255 255 / 0.02);
   padding: 10px 14px;
   color: var(--color-ink);
@@ -227,7 +227,7 @@
   margin-bottom: 8px;
   overflow: hidden;
   border: 1px solid var(--color-line);
-  border-radius: 12px;
+  border-radius: 2px;
   background: var(--color-panel);
   box-shadow: 0 12px 32px rgb(0 0 0 / 0.4);
 }

@@ -671,115 +671,139 @@ export function SettingsPanel({
       {shows('model') && (
         <section className="settings-group" aria-labelledby="settings-model">
           <h3 id="settings-model" className="settings-group-title">
-            Provider and model
+            Main model
           </h3>
           <p className="settings-group-help">
             The model {agent.name} thinks with. Switching keeps every
             conversation.
           </p>
-          <div>
-            <label className={labelCls} htmlFor="settings-provider">
-              Provider
-            </label>
-            <select
-              id="settings-provider"
-              aria-label="Provider"
-              value={provider}
-              disabled={controlsDisabled}
-              onChange={(e) => {
-                const next = e.target.value;
-                setProvider(next);
-                const options = MODEL_SUGGESTIONS[next] ?? [];
-                setModel(
-                  next === 'chatgpt' ? '' : (options[0] ?? '__custom__'),
-                );
-              }}
-              className="field"
-            >
-              {/* Keep the current provider selectable even if the daemon
-              catalog is still loading or lacks it. */}
-              {(providers ?? [])
-                .map((p) => p.id)
-                .concat(
-                  providers?.some((p) => p.id === agent.provider) ||
-                    !agent.provider
-                    ? []
-                    : [agent.provider],
-                )
-                .filter((id, i, all) => all.indexOf(id) === i)
-                .map((id) => (
-                  <option key={id} value={id}>
-                    {id === 'chatgpt'
-                      ? 'ChatGPT subscription'
-                      : (providers?.find((p) => p.id === id)?.label ?? id)}
-                  </option>
-                ))}
-            </select>
-            {providers && provider !== 'chatgpt' && (
-              <p className="settings-field-note">
-                {providers.find((p) => p.id === provider)?.configured
-                  ? 'Key configured on the server.'
-                  : 'No key configured for this provider on the server.'}
-              </p>
-            )}
+          <div className="settings-model-summary" data-testid="main-model">
+            <span className="settings-model-mark" aria-hidden="true" />
+            <div className="settings-model-text">
+              <strong>
+                {(model === '__custom__' ? customModel : model).trim() ||
+                  agent.model ||
+                  'No model chosen'}
+              </strong>
+              <span>
+                {provider === 'chatgpt'
+                  ? 'ChatGPT subscription'
+                  : (providers?.find((p) => p.id === provider)?.label ??
+                    provider)}
+                {providers
+                  ? providers.find((p) => p.id === provider)?.configured
+                    ? ' · ready'
+                    : ' · not connected'
+                  : ''}
+              </span>
+            </div>
           </div>
-          {provider === 'chatgpt' ? (
-            <ChatGptModelSelect
-              id="settings-chatgpt-model"
-              scopeKey={JSON.stringify([agent.id, modelScope.revision])}
-              connectionPending={modelScope.pending}
-              model={model}
-              customModel={customModel}
-              onModelChange={setModel}
-              onCustomModelChange={setCustomModel}
-              disabled={controlsDisabled}
-            />
-          ) : (
-            <>
-              <div>
-                <label className={labelCls} htmlFor="settings-model-id">
-                  Model
-                </label>
-                <select
-                  id="settings-model-id"
-                  aria-label="Model"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  disabled={controlsDisabled}
-                  className="field"
-                >
-                  {(MODEL_SUGGESTIONS[provider] ?? []).map((m) => (
-                    <option key={m} value={m}>
-                      {m}
+          <details className="settings-model-more">
+            <summary>Change model</summary>
+            <div className="settings-model-change">
+              <label className={labelCls} htmlFor="settings-provider">
+                Provider
+              </label>
+              <select
+                id="settings-provider"
+                aria-label="Provider"
+                value={provider}
+                disabled={controlsDisabled}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setProvider(next);
+                  const options = MODEL_SUGGESTIONS[next] ?? [];
+                  setModel(
+                    next === 'chatgpt' ? '' : (options[0] ?? '__custom__'),
+                  );
+                }}
+                className="field"
+              >
+                {/* Keep the current provider selectable even if the daemon
+              catalog is still loading or lacks it. */}
+                {(providers ?? [])
+                  .map((p) => p.id)
+                  .concat(
+                    providers?.some((p) => p.id === agent.provider) ||
+                      !agent.provider
+                      ? []
+                      : [agent.provider],
+                  )
+                  .filter((id, i, all) => all.indexOf(id) === i)
+                  .map((id) => (
+                    <option key={id} value={id}>
+                      {id === 'chatgpt'
+                        ? 'ChatGPT subscription'
+                        : (providers?.find((p) => p.id === id)?.label ?? id)}
                     </option>
                   ))}
-                  <option value="__custom__">custom…</option>
-                </select>
-              </div>
-              {model === '__custom__' && (
-                <input
-                  aria-label="Custom model"
-                  value={customModel}
-                  onChange={(e) => setCustomModel(e.target.value)}
-                  disabled={controlsDisabled}
-                  placeholder="model id, e.g. llama3.1"
-                  className="field animate-fade-in"
-                />
+              </select>
+              {providers && provider !== 'chatgpt' && (
+                <p className="settings-field-note">
+                  {providers.find((p) => p.id === provider)?.configured
+                    ? 'Key configured on the server.'
+                    : 'No key configured for this provider on the server.'}
+                </p>
               )}
-            </>
-          )}
-          {provider === 'chatgpt' && (
-            <ChatGptConnection
-              key={agent.id}
-              onConnectionChange={refreshProviders}
-              onModelScopeChange={(pending) =>
-                setModelScope((current) => ({
-                  revision: current.revision + 1,
-                  pending,
-                }))
-              }
-            />
-          )}
+            </div>
+            {provider === 'chatgpt' ? (
+              <ChatGptModelSelect
+                id="settings-chatgpt-model"
+                scopeKey={JSON.stringify([agent.id, modelScope.revision])}
+                connectionPending={modelScope.pending}
+                model={model}
+                customModel={customModel}
+                onModelChange={setModel}
+                onCustomModelChange={setCustomModel}
+                disabled={controlsDisabled}
+              />
+            ) : (
+              <>
+                <div>
+                  <label className={labelCls} htmlFor="settings-model-id">
+                    Model
+                  </label>
+                  <select
+                    id="settings-model-id"
+                    aria-label="Model"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    disabled={controlsDisabled}
+                    className="field"
+                  >
+                    {(MODEL_SUGGESTIONS[provider] ?? []).map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                    <option value="__custom__">custom…</option>
+                  </select>
+                </div>
+                {model === '__custom__' && (
+                  <input
+                    aria-label="Custom model"
+                    value={customModel}
+                    onChange={(e) => setCustomModel(e.target.value)}
+                    disabled={controlsDisabled}
+                    placeholder="model id, e.g. llama3.1"
+                    className="field animate-fade-in"
+                  />
+                )}
+              </>
+            )}
+            {provider === 'chatgpt' && (
+              <ChatGptConnection
+                key={agent.id}
+                onConnectionChange={refreshProviders}
+                onModelScopeChange={(pending) =>
+                  setModelScope((current) => ({
+                    revision: current.revision + 1,
+                    pending,
+                  }))
+                }
+              />
+            )}
+          </details>
           <FallbackModels
             key={agent.id}
             primary={{ provider: agent.provider, model: agent.model }}

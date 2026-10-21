@@ -238,3 +238,84 @@ export const ScrollTextIcon = (p: IconProps) =>
       <path d="M8 21h12a2 2 0 0 0 2-2v-2H10v2a2 2 0 0 1-4 0V5a2 2 0 0 0-4 0v3h4M4 3h13a2 2 0 0 1 2 2v12M10 7h5M10 11h5" />
     </>,
   );
+export const HardDriveIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <path d="M22 12H2" />
+      <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+      <path d="M6 16h.01M10 16h.01" />
+    </>,
+  );
+export const KeyRoundIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z" />
+      <circle cx="16.5" cy="7.5" r=".5" fill="currentColor" />
+    </>,
+  );
+export const MoonIcon = (p: IconProps) =>
+  base(p, <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />);
+export const SlidersIcon = (p: IconProps) =>
+  base(
+    p,
+    <path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4" />,
+  );
+export const RocketIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z" />
+      <path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z" />
+      <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" />
+    </>,
+  );
+export const EyeIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+      <circle cx="12" cy="12" r="3" />
+    </>,
+  );
+export const PencilIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
+      <path d="m15 5 4 4" />
+    </>,
+  );
+export const TerminalIcon = (p: IconProps) =>
+  base(p, <path d="m4 17 6-6-6-6M12 19h8" />);
+export const GlobeIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20" />
+    </>,
+  );
+export const ArrowRightIcon = (p: IconProps) =>
+  base(p, <path d="M5 12h14m-7-7 7 7-7 7" />);
+export const PlayIcon = (p: IconProps) =>
+  base(p, <path d="M6 3 20 12 6 21Z" />);
+export const PauseIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <rect x="14" y="4" width="4" height="16" rx="1" />
+      <rect x="6" y="4" width="4" height="16" rx="1" />
+    </>,
+  );
+export const SquareDotIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <circle cx="12" cy="12" r="1" />
+    </>,
+  );
+export const SquareIcon = (p: IconProps) =>
+  base(p, <rect x="3" y="3" width="18" height="18" rx="2" />);

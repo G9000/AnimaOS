@@ -5,11 +5,16 @@ const client = createDaemonClient({ baseUrl: '' }).chatgpt;
 const verificationUrl = 'https://auth.openai.com/codex/device';
 const buttonClass =
   'rounded-xl border border-line px-3 py-2 text-sm text-ink disabled:opacity-50';
+const compactButtonClass =
+  'onboarding__button onboarding__button--secondary onboarding__button--small';
 
 export function ChatGptConnection({
   onConnectionChange,
   onModelScopeChange,
+  compact = false,
 }: {
+  /** Drops the card chrome and the long explanation, for use inside a choice. */
+  compact?: boolean;
   onConnectionChange?: () => void | Promise<void>;
   /** Invalidates picker requests before auth work; settled events reconcile cache only. */
   onModelScopeChange?: (pending: boolean) => void;
@@ -103,16 +108,28 @@ export function ChatGptConnection({
   return (
     <section
       aria-label="ChatGPT subscription"
-      className="space-y-3 rounded-xl border border-line bg-white/[0.02] p-4"
+      className={
+        compact
+          ? 'onboarding__connection'
+          : 'space-y-3 rounded-xl border border-line bg-white/[0.02] p-4'
+      }
     >
-      <h3 className="text-sm font-semibold text-ink">ChatGPT subscription</h3>
-      <p className="text-xs leading-relaxed text-ink-2">
-        Use your ChatGPT plan. Subscription limits apply; model availability
-        depends on your account. This connection does not use API-key billing.
-      </p>
+      {compact ? null : (
+        <>
+          <h3 className="text-sm font-semibold text-ink">
+            ChatGPT subscription
+          </h3>
+          <p className="text-xs leading-relaxed text-ink-2">
+            Use your ChatGPT plan. Subscription limits apply; model availability
+            depends on your account. This connection does not use API-key
+            billing.
+          </p>
+        </>
+      )}
       <p className="text-xs leading-relaxed text-ink-3">
-        Enable device-code login in your ChatGPT security settings, or ask your
-        workspace administrator to allow it, before connecting.
+        {compact
+          ? 'Uses your plan’s limits, not API-key billing. Turn on device-code login in your ChatGPT security settings first, or ask your workspace administrator.'
+          : 'Enable device-code login in your ChatGPT security settings, or ask your workspace administrator to allow it, before connecting.'}
       </p>
       <p role="status" className="text-sm text-ink-2">
         {busy
@@ -167,7 +184,7 @@ export function ChatGptConnection({
         {status?.connected ? (
           <button
             type="button"
-            className={buttonClass}
+            className={compact ? compactButtonClass : buttonClass}
             disabled={busy}
             onClick={() => void request('disconnect')}
           >
@@ -176,7 +193,7 @@ export function ChatGptConnection({
         ) : !login || expired ? (
           <button
             type="button"
-            className={buttonClass}
+            className={compact ? compactButtonClass : buttonClass}
             disabled={busy}
             onClick={() => void request('login')}
           >
@@ -186,7 +203,7 @@ export function ChatGptConnection({
         {login && (
           <button
             type="button"
-            className={buttonClass}
+            className={compact ? compactButtonClass : buttonClass}
             disabled={busy}
             onClick={() => void request('cancel')}
           >
@@ -196,7 +213,7 @@ export function ChatGptConnection({
         {error && (
           <button
             type="button"
-            className={buttonClass}
+            className={compact ? compactButtonClass : buttonClass}
             disabled={busy}
             onClick={() => void request('status')}
           >
@@ -206,7 +223,7 @@ export function ChatGptConnection({
         {!status && error && (
           <button
             type="button"
-            className={buttonClass}
+            className={compact ? compactButtonClass : buttonClass}
             disabled={busy}
             onClick={() => void request('disconnect')}
           >

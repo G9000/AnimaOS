@@ -68,8 +68,8 @@ function renderSetup(
 const button = (name: string) => screen.getByRole('button', { name });
 
 async function start(user: UserEvent) {
-  await waitFor(() => expect(button('Get started')).toBeEnabled());
-  await user.click(button('Get started'));
+  await waitFor(() => expect(button('Set it up')).toBeEnabled());
+  await user.click(button('Set it up'));
 }
 
 async function toAccess(user: UserEvent) {
@@ -85,7 +85,7 @@ async function toVoice(user: UserEvent) {
   await toAccess(user);
   await user.click(button('Continue'));
   expect(
-    await screen.findByRole('heading', { name: 'Talk out loud?' }),
+    await screen.findByRole('heading', { name: 'Give it a voice.' }),
   ).toBeVisible();
 }
 
@@ -108,14 +108,12 @@ describe('CompanionSetup', () => {
     renderSetup();
     const user = userEvent.setup();
     await toAccess(user);
-    await user.click(button('Browse…'));
+    await user.click(button('Browse'));
     expect(screen.getByRole('textbox', { name: 'Home folder' })).toHaveValue(
       '/my/existing/files',
     );
     await user.click(button('Continue'));
-    await user.click(
-      await screen.findByRole('button', { name: 'Finish setup' }),
-    );
+    await user.click(await screen.findByRole('button', { name: 'Finish' }));
     await waitFor(() => expect(create).toHaveBeenCalledOnce());
     expect(daemon.inspectWorkspace).toHaveBeenCalledWith('/my/existing/files');
     expect(create.mock.calls[0][0].workspace.rootPath).toBe(
@@ -256,11 +254,11 @@ describe('CompanionSetup', () => {
     const user = userEvent.setup();
     await openExisting(user);
     const folder = screen.getByRole('textbox', { name: 'Home folder' });
-    await user.click(button('Browse…'));
+    await user.click(button('Browse'));
     await user.clear(folder);
     await user.type(folder, '/typed/folder');
     resolvePicker({ rootPath: '/old/picker/folder' });
-    await waitFor(() => expect(button('Browse…')).toBeEnabled());
+    await waitFor(() => expect(button('Browse')).toBeEnabled());
     expect(folder).toHaveValue('/typed/folder');
   });
 
@@ -335,7 +333,7 @@ describe('CompanionSetup', () => {
     });
     const user = userEvent.setup();
     await start(user);
-    await user.click(screen.getByRole('radio', { name: /Use an API key/ }));
+    await user.click(screen.getByRole('radio', { name: /Paste an API key/ }));
     expect(screen.queryByText(/ANTHROPIC_API_KEY/)).toBeNull();
     const field = screen.getByLabelText('API key for Anthropic');
     expect(field).toHaveAttribute('type', 'password');
@@ -368,7 +366,7 @@ describe('CompanionSetup', () => {
     });
     const user = userEvent.setup();
     await start(user);
-    await user.click(screen.getByRole('radio', { name: /Use an API key/ }));
+    await user.click(screen.getByRole('radio', { name: /Paste an API key/ }));
     expect(
       await screen.findByText(
         'Keys added here last until the daemon restarts. Set ANIMAOS_RS_PROVIDER_KEYS_FILE to keep them.',
@@ -492,9 +490,7 @@ describe('CompanionSetup', () => {
     await user.type(agentName, 'Kept name');
     await user.click(button('Continue'));
     await user.click(button('Continue'));
-    await user.click(
-      await screen.findByRole('button', { name: 'Finish setup' }),
-    );
+    await user.click(await screen.findByRole('button', { name: 'Finish' }));
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         agent: expect.objectContaining({
@@ -537,7 +533,7 @@ describe('CompanionSetup', () => {
       await start(user);
       if (configured) {
         await toVoiceFromModel(user);
-        await user.click(button('Finish setup'));
+        await user.click(button('Finish'));
         await waitFor(() => expect(create).toHaveBeenCalledOnce());
         expect(create.mock.calls[0][0].agent.provider).toBe('openai');
       } else {
@@ -558,7 +554,7 @@ describe('CompanionSetup', () => {
     const user = userEvent.setup();
     await toVoice(user);
     expect(screen.queryByText('Team')).not.toBeInTheDocument();
-    await user.click(button('Finish setup'));
+    await user.click(button('Finish'));
     await waitFor(() => expect(create).toHaveBeenCalledOnce());
     expect(create.mock.calls[0][0]).toMatchObject({
       workspace: {
@@ -572,9 +568,10 @@ describe('CompanionSetup', () => {
     expect(create.mock.calls[0][0].agent.system).toContain(
       'personal companion',
     );
-    expect(create.mock.calls[0][0].agent.tools).not.toContain(
-      'browser_navigate',
+    expect(create.mock.calls[0][0].agent.tools).toEqual(
+      expect.arrayContaining(['browser_navigate', 'browser_observe']),
     );
+    expect(create.mock.calls[0][0].agent.tools).not.toContain('browser_act');
     expect(generate).not.toHaveBeenCalled();
     expect(created).toHaveBeenCalledOnce();
   });
@@ -594,20 +591,44 @@ describe('CompanionSetup', () => {
       screen.getByText(/Good (morning|afternoon|evening), Sam\./),
     ).toBeInTheDocument();
     await user.click(button('Continue'));
-    await user.click(screen.getByRole('radio', { name: /Operate/ }));
-    await user.click(screen.getByRole('checkbox', { name: /read the web/ }));
+    await user.click(screen.getByRole('radio', { name: /Run commands/ }));
+    await user.click(button('Customize'));
+    await user.click(screen.getByRole('radio', { name: /Click and type/ }));
     await user.click(button('Continue'));
-    await user.click(
-      await screen.findByRole('button', { name: 'Finish setup' }),
-    );
+    await user.click(await screen.findByRole('button', { name: 'Finish' }));
     await waitFor(() => expect(create).toHaveBeenCalledOnce());
     const agent = create.mock.calls[0][0].agent;
     expect(agent.system).toContain("The owner's name is Sam.");
     expect(agent.system).toContain('Take the lead');
     expect(agent.tools).toEqual(
-      expect.arrayContaining(['bash', 'browser_navigate', 'browser_observe']),
+      expect.arrayContaining([
+        'bash',
+        'browser_navigate',
+        'browser_observe',
+        'browser_act',
+      ]),
     );
-    expect(agent.tools).not.toContain('browser_act');
+    expect(agent.tools).not.toContain('browser_transfer');
+  });
+
+  it('keeps the web off when the browser is set to Off', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
+    const create = vi
+      .spyOn(daemon, 'bootstrapWorkspace')
+      .mockResolvedValue({ agent: { state: { id: 'main' } } } as never);
+    renderSetup();
+    const user = userEvent.setup();
+    await start(user);
+    await user.click(button('Continue'));
+    await user.click(button('Continue'));
+    await user.click(button('Customize'));
+    await user.click(screen.getByRole('radio', { name: /^Off/ }));
+    await user.click(button('Continue'));
+    await user.click(await screen.findByRole('button', { name: 'Finish' }));
+    await waitFor(() => expect(create).toHaveBeenCalledOnce());
+    expect(create.mock.calls[0][0].agent.tools).not.toContain(
+      'browser_navigate',
+    );
   });
 
   it('starts Free, saves it after creating, and Operate no longer changes the class policy', async () => {
@@ -620,13 +641,15 @@ describe('CompanionSetup', () => {
     renderSetup({ onCreated });
     const user = userEvent.setup();
     await toAccess(user);
-    expect(screen.getByRole('radio', { name: /^Free/ })).toBeChecked();
-    expect(screen.getByRole('radio', { name: /^Strict/ })).not.toBeChecked();
-    await user.click(screen.getByRole('radio', { name: /Operate/ }));
+    expect(
+      screen.getByRole('radio', { name: /^Only for risky things/ }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole('radio', { name: /^Before every change/ }),
+    ).not.toBeChecked();
+    await user.click(screen.getByRole('radio', { name: /Run commands/ }));
     await user.click(button('Continue'));
-    await user.click(
-      await screen.findByRole('button', { name: 'Finish setup' }),
-    );
+    await user.click(await screen.findByRole('button', { name: 'Finish' }));
     await waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
     expect(setAutonomy).toHaveBeenCalledWith('main', { mode: 'free' });
     expect(setPolicy).not.toHaveBeenCalled();
@@ -642,11 +665,11 @@ describe('CompanionSetup', () => {
     renderSetup({ onCreated });
     const user = userEvent.setup();
     await toAccess(user);
-    await user.click(screen.getByRole('radio', { name: /^Strict/ }));
-    await user.click(button('Continue'));
     await user.click(
-      await screen.findByRole('button', { name: 'Finish setup' }),
+      screen.getByRole('radio', { name: /^Before every change/ }),
     );
+    await user.click(button('Continue'));
+    await user.click(await screen.findByRole('button', { name: 'Finish' }));
     await waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
     expect(setAutonomy).toHaveBeenCalledWith('main', { mode: 'strict' });
   });
@@ -718,8 +741,10 @@ describe('CompanionSetup', () => {
       'Hands coding work to the coding apps on this computer, then reads the changes and runs the checks itself.',
     );
     await user.click(button('Continue'));
-    expect(screen.getByRole('radio', { name: /Operate/ })).toBeChecked();
-    expect(screen.getByRole('radio', { name: /^Free/ })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /Run commands/ })).toBeChecked();
+    expect(
+      screen.getByRole('radio', { name: /^Only for risky things/ }),
+    ).toBeChecked();
     const chips = await screen.findByRole('list', {
       name: 'Coding apps on this computer',
     });
@@ -727,9 +752,7 @@ describe('CompanionSetup', () => {
     expect(chips).toHaveTextContent('CodexNeeds reinstall');
     expect(chips).toHaveTextContent('OpenCodeNot found');
     await user.click(button('Continue'));
-    await user.click(
-      await screen.findByRole('button', { name: 'Finish setup' }),
-    );
+    await user.click(await screen.findByRole('button', { name: 'Finish' }));
     expect(await screen.findByRole('status')).toHaveTextContent(
       "know-how for handing off work didn't install",
     );
@@ -777,15 +800,13 @@ describe('CompanionSetup', () => {
     expect(screen.getByText(/me\.png/)).toBeVisible();
     await user.click(button('Continue'));
     await user.click(button('Continue'));
-    await user.click(
-      await screen.findByRole('button', { name: 'Finish setup' }),
-    );
+    await user.click(await screen.findByRole('button', { name: 'Finish' }));
     await waitFor(() => expect(created).toHaveBeenCalledOnce());
     expect(upload).toHaveBeenCalledWith('main', file);
   });
 
   it.each([
-    ['Finish setup', 'voice-ember'],
+    ['Finish', 'voice-ember'],
     ["Skip, I'll type", null],
   ])('keeps the chosen voice only on %s', async (action, stored) => {
     const voice = { voiceURI: 'voice-ember', name: 'Ember', lang: 'en-US' };
@@ -817,7 +838,7 @@ describe('CompanionSetup', () => {
     const create = vi.spyOn(daemon, 'bootstrapWorkspace');
     renderSetup();
     expect(await screen.findByText('Storage unavailable')).toBeVisible();
-    expect(button('Get started')).toBeDisabled();
+    expect(button('Set it up')).toBeDisabled();
     expect(create).not.toHaveBeenCalled();
     expect(button('Retry workspace')).toBeVisible();
   });
@@ -840,7 +861,7 @@ describe('CompanionSetup', () => {
       .mockResolvedValue({ agent: { state: { id: 'main' } } } as never);
     renderSetup();
     const user = userEvent.setup();
-    await waitFor(() => expect(button('Get started')).toBeEnabled());
+    await waitFor(() => expect(button('Set it up')).toBeEnabled());
     expect(
       screen.queryByRole('button', { name: 'Open an existing workspace' }),
     ).not.toBeInTheDocument();
@@ -849,9 +870,7 @@ describe('CompanionSetup', () => {
       screen.getByRole('textbox', { name: 'Home folder' }),
     ).toHaveAttribute('readonly');
     await user.click(button('Continue'));
-    await user.click(
-      await screen.findByRole('button', { name: 'Finish setup' }),
-    );
+    await user.click(await screen.findByRole('button', { name: 'Finish' }));
     await waitFor(() => expect(create).toHaveBeenCalledOnce());
     expect(bootstrap).not.toHaveBeenCalled();
     expect(daemon.inspectWorkspace).not.toHaveBeenCalled();
@@ -892,5 +911,5 @@ async function toVoiceFromModel(user: UserEvent) {
   await user.click(button('Continue'));
   await user.click(button('Continue'));
   await user.click(button('Continue'));
-  await screen.findByRole('heading', { name: 'Talk out loud?' });
+  await screen.findByRole('heading', { name: 'Give it a voice.' });
 }
