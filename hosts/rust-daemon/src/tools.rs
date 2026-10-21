@@ -20,15 +20,15 @@ mod team;
 #[cfg(test)]
 mod tests;
 pub(crate) mod todo;
+mod tool_results;
 mod utility;
 mod web;
 pub(crate) mod web_search;
+mod workflow_templates;
+mod workflows;
 mod workspace;
 pub(crate) mod workspace_bytes;
 mod workspace_document;
-mod workflows;
-mod workflow_templates;
-mod tool_results;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -135,8 +135,15 @@ pub(crate) struct ToolExecutionContext {
 }
 
 impl ToolExecutionContext {
-    pub(crate) fn with_tool_results(mut self, store: Option<crate::tool_results::ToolResultStore>) -> Self {
-        self.tool_result_workspace = self.workspace_root.as_deref().and_then(|root| workspace_bytes::WorkspaceBytes::open(root).ok()).map(|root|root.canonical_root);
+    pub(crate) fn with_tool_results(
+        mut self,
+        store: Option<crate::tool_results::ToolResultStore>,
+    ) -> Self {
+        self.tool_result_workspace = self
+            .workspace_root
+            .as_deref()
+            .and_then(|root| workspace_bytes::WorkspaceBytes::open(root).ok())
+            .map(|root| root.canonical_root);
         self.tool_results = store;
         self
     }
@@ -366,7 +373,13 @@ impl ToolExecutionContext {
         tool_call: ToolCall,
     ) -> TaskResult<Content> {
         let name = tool_call.name.clone();
-        let projection = (self.tool_results.clone(), agent.id.clone(), self.tool_result_workspace.clone(), self.run_link.clone(), tool_call.clone());
+        let projection = (
+            self.tool_results.clone(),
+            agent.id.clone(),
+            self.tool_result_workspace.clone(),
+            self.run_link.clone(),
+            tool_call.clone(),
+        );
         let completion = self.completion_review.clone().map(|review| {
             let checkpoint = review.checkpoint();
             (review, checkpoint, tool_call.clone())
@@ -381,7 +394,14 @@ impl ToolExecutionContext {
             completion::observe(&review, checkpoint, &call, &result);
         }
         let (store, agent, workspace, run, call) = projection;
-        let result = crate::tool_results::project_result(store.as_ref(), &agent, workspace.as_deref(), run.as_ref(), &call, result);
+        let result = crate::tool_results::project_result(
+            store.as_ref(),
+            &agent,
+            workspace.as_deref(),
+            run.as_ref(),
+            &call,
+            result,
+        );
         web_search::project_result(&name, result)
     }
 

@@ -189,7 +189,10 @@ async fn load_skill_returns_an_approved_skills_instructions() {
     let results = tool_results(&coordinator, &agent_id).await;
     assert_eq!(
         results.last().unwrap(),
-        &format!("{SKILL_INSTRUCTIONS_HEADER}\n\nDo notes.")
+        &format!(
+            "{SKILL_INSTRUCTIONS_HEADER}\n\nSkill version (SHA-256): {}\n\nDo notes.",
+            crate::skills::skill_hash(skill_text("notes").as_bytes())
+        )
     );
 }
 
@@ -690,4 +693,235 @@ async fn a_skill_message_does_not_fall_back_to_a_name() {
         "{system}"
     );
     assert!(!system.contains("Do notes."));
+}
+
+#[tokio::test]
+async fn skill_learning_refines_used_package_then_fresh_session_loads_exact_revision() {
+    use crate::approvals::autonomy::{AgentAutonomy, AutonomyMode};
+    use crate::control_plane_store::ControlPlaneStoreConfig;
+    use crate::learning::LearningReviewState;
+    for free in [false, true] {
+        let base = crate::skills::compose_skill_file("Notes", "About Notes", "Do Notes.");
+        let support = vec![crate::skills::SkillSupportingFile {
+            path: "templates/note.txt".into(),
+            content: "Preserved reviewed template".into(),
+        }];
+        let hash = anima_core::skill_packages::skill_package_hash(base.as_bytes(), &support);
+        let review=serde_json::json!({"proposals":[{"observation":"The owner corrected the verification step.","suggestion":"Read the saved file back before reporting it.","anchors":["input"],"skill":{"slug":"notes","expected_hash":hash,"patches":[{"old_text":"Do Notes.","new_text":"Write notes, then read the saved file back before reporting it."}]}}]}).to_string();
+        let review: &'static str = Box::leak(review.into_boxed_str());
+        let model = ScriptedModel::new(vec![
+            Step::Tools(vec![call("load_skill", &[("name", "notes")])]),
+            Step::Text(vec![
+                "The procedure needs the owner's corrected verification step.",
+            ]),
+            Step::Text(vec![review]),
+            Step::Tools(vec![call("load_skill", &[("name", "notes")])]),
+            Step::Text(vec!["The revised procedure was loaded."]),
+        ]);
+        let (coordinator, agent, root) =
+            skilled(model.clone(), &["load_skill"], "automatic-refinement").await;
+        let mut original = content("Notes");
+        original.files = Some(support.clone());
+        let (base_record, _) = coordinator.skills().save("notes", original).await.unwrap();
+        assert_eq!(base_record.approved_hash, hash);
+        {
+            let mut guard = coordinator.state.write().await;
+            guard.set_control_plane_store(Some(ControlPlaneStoreConfig::Json(
+                root.join("control-plane.json"),
+            )));
+            guard.autonomy.set(AgentAutonomy {
+                agent_id: agent.clone(),
+                mode: if free {
+                    AutonomyMode::Free
+                } else {
+                    AutonomyMode::Strict
+                },
+                ..Default::default()
+            });
+        }
+        if !free {
+            coordinator
+                .learning()
+                .set_policy(&agent, true)
+                .await
+                .unwrap();
+        }
+        add_chat(&coordinator, &agent, "chat:training").await;
+        let run = super::test_support::accept_web(
+            &coordinator,
+            &agent,
+            "chat:training",
+            "Correction: next time read the saved notes back before reporting them",
+        )
+        .await;
+        wait_for(&coordinator, &run, crate::runs::RunStatus::Completed).await;
+        let mut linked = None;
+        for _ in 0..500 {
+            let rows = coordinator.learning().list(&agent).await.unwrap();
+            if let Some(row) = rows.iter().find(|r| {
+                r.state == LearningReviewState::Completed
+                    && r.proposals
+                        .first()
+                        .is_some_and(|p| p.skill_draft_id.is_some())
+            }) {
+                let id = row.proposals[0].skill_draft_id.clone().unwrap();
+                let draft = coordinator
+                    .state
+                    .read()
+                    .await
+                    .skills
+                    .draft(&id)
+                    .cloned()
+                    .unwrap();
+                if !free || draft.status == crate::skills::DraftStatus::Approved {
+                    linked = Some((row.clone(), draft));
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let (review, draft) =
+            linked.expect("automatic skill refinement never reached its approval path");
+        assert!(
+            review.proposals[0].skill_error.is_none(),
+            "{:?}",
+            review.proposals[0].skill_error
+        );
+        if !free {
+            assert!(coordinator
+                .skills()
+                .load_slug("notes")
+                .await
+                .unwrap()
+                .body
+                .starts_with("Do Notes."));
+            assert_eq!(draft.status, crate::skills::DraftStatus::Pending);
+            coordinator
+                .skills()
+                .approve_draft(&draft.id, crate::skills::DraftApproval::default())
+                .await
+                .unwrap();
+            coordinator
+                .learning()
+                .set_policy(&agent, false)
+                .await
+                .unwrap();
+        }
+        let revised = coordinator.skills().load_slug("notes").await.unwrap();
+        assert_ne!(revised.approved_hash, hash);
+        assert!(revised.body.contains("read the saved file back"));
+        assert_eq!(
+            std::fs::read_to_string(root.join("skills/notes/templates/note.txt")).unwrap(),
+            support[0].content
+        );
+        {
+            let mut guard = coordinator.state.write().await;
+            guard.autonomy.set(AgentAutonomy {
+                agent_id: agent.clone(),
+                mode: AutonomyMode::Strict,
+                ..Default::default()
+            });
+        }
+        add_chat(&coordinator, &agent, "chat:fresh").await;
+        let fresh = super::test_support::accept_web(
+            &coordinator,
+            &agent,
+            "chat:fresh",
+            "Prepare another set of notes",
+        )
+        .await;
+        wait_for(&coordinator, &fresh, crate::runs::RunStatus::Completed).await;
+        let record = coordinator
+            .state
+            .read()
+            .await
+            .skills
+            .get("notes")
+            .cloned()
+            .unwrap();
+        assert!(record.experiences.iter().any(|e| e.run_id == fresh
+            && e.session_id == "chat:fresh"
+            && e.version == revised.approved_hash
+            && e.status == anima_core::skill_learning::SkillUseStatus::Completed
+            && e.verified_evidence.is_none()));
+        assert!(tool_results(&coordinator, &agent)
+            .await
+            .last()
+            .unwrap()
+            .contains("read the saved file back"));
+        assert_eq!(model.requests().len(), 5);
+        if free {
+            coordinator.skills().revert_last("notes").await.unwrap();
+            assert_eq!(
+                coordinator
+                    .skills()
+                    .load_slug("notes")
+                    .await
+                    .unwrap()
+                    .approved_hash,
+                hash
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn omitted_skill_files_preserve_approved_packages_and_support_normal_new_slugs() {
+    for scenario in 0..6 {
+        let mut proposal = call(
+            "propose_skill",
+            &[
+                ("name", "Notes"),
+                ("description", "Reusable note procedure"),
+                ("body", "Read back the saved notes."),
+            ],
+        );
+        if scenario > 0 {
+            proposal.args.insert(
+                "slug".into(),
+                DataValue::String(if scenario == 1 { "   " } else { "  notes  " }.into()),
+            );
+        }
+        let model = ScriptedModel::new(vec![Step::Tools(vec![proposal]), Step::Text(vec!["done"])]);
+        let (coordinator, agent, root) =
+            skilled(model, &["propose_skill"], "omitted-files-tool").await;
+        if scenario == 3 {
+            let mut approved = content("Notes");
+            approved.files = Some(vec![crate::skills::SkillSupportingFile {
+                path: "references/check.md".into(),
+                content: "Owner's approved reference".into(),
+            }]);
+            coordinator.skills().save("notes", approved).await.unwrap();
+        } else if scenario == 4 {
+            let folder = root.join("skills/notes/references");
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::write(folder.join("check.md"), "Owner's partial package").unwrap();
+        } else if scenario == 5 {
+            write_skill(&root, "notes", &skill_text("Unreviewed"));
+        }
+        coordinator
+            .run(chat_request(&agent, "chat:omission", "Save the procedure"))
+            .await
+            .unwrap();
+        let guard = coordinator.state.read().await;
+        let drafts = guard.skills.pending_drafts();
+        if scenario >= 4 {
+            assert!(
+                drafts.is_empty(),
+                "unreviewed or partial packages must fail closed ({scenario})"
+            );
+            assert!(root.join("skills/notes").exists());
+        } else {
+            assert_eq!(
+                drafts.len(),
+                1,
+                "new and existing approved packages must work ({scenario})"
+            );
+            assert_eq!(drafts[0].slug, "notes");
+            if scenario == 3 {
+                assert_eq!(drafts[0].files.len(), 1);
+                assert_eq!(drafts[0].files[0].content, "Owner's approved reference");
+            }
+        }
+    }
 }

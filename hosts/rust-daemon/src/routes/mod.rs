@@ -53,14 +53,14 @@ mod swarms;
 mod system;
 #[cfg(test)]
 mod system_tests;
+mod tool_results;
 mod usage;
 mod voice;
+mod workflow_templates;
+mod workflows;
 mod workspace;
 mod workspace_agent_yaml;
 mod workspace_files;
-mod workflows;
-mod workflow_templates;
-mod tool_results;
 
 use std::sync::Arc;
 
@@ -245,6 +245,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         skills::delete_skill, skills::approve_skill,
         skills::list_skill_drafts, skills::approve_skill_draft, skills::reject_skill_draft,
         skills::import_skill, skills::skill_ledger, skills::revert_last_skill_change,
+        skills::get_skill_learning, skills::post_skill_feedback,
         memory_edits::patch_memory, memory_edits::delete_memory, memory_export::export_memories,
         core_memory::get_core_memory, core_memory::add_entry, core_memory::replace_entry, core_memory::delete_entry,
         memory_edits::list_facts, memory_edits::patch_fact, memory_edits::delete_fact,
@@ -1134,6 +1135,8 @@ fn router_with_services_with_policies_and_integrations(
             axum::routing::delete(approvals::delete_approval_rule),
         )
         .route("/api/skills", get(skills::list_skills))
+        .route("/api/skills/{slug}/learning", get(skills::get_skill_learning))
+        .route("/api/skills/{slug}/feedback", axum::routing::post(skills::post_skill_feedback))
         .route("/api/agents/{agent_id}/core-memory", get(core_memory::get_core_memory))
         .route("/api/agents/{agent_id}/core-memory/{block}", axum::routing::post(core_memory::add_entry))
         .route(
@@ -2851,7 +2854,6 @@ mod tests {
     mod foreign_sessions;
     mod goals;
     mod jobs;
-    mod workflows;
     mod learning_reviews;
     mod logs;
     mod memory_edits;
@@ -2864,6 +2866,7 @@ mod tests {
     mod status;
     mod swarm_reliability;
     mod usage;
+    mod workflows;
     mod workspace_download;
 
     use super::{router, router_with_services, router_with_services_with_policies};

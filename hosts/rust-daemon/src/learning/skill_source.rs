@@ -38,6 +38,9 @@ pub(crate) async fn validate_skill_source(
         .find(|proposal| proposal.id == source.proposal_id)
         .ok_or_else(|| SkillError::Conflict("Lesson source changed; review again".into()))?;
     if captured.digest != source.evidence_digest
+        || (proposal.skill_candidate.is_some()
+            && !serde_json::from_str::<serde_json::Value>(&captured.brief)
+                .is_ok_and(|b| b["skillLearningAllowed"] == true))
         || captured.session_id != source.session_id
         || !guard.agents.contains_key(&source.agent_id)
         || guard

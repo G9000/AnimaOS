@@ -2,7 +2,9 @@ mod adoption;
 mod conversation;
 mod evidence;
 mod records;
+mod refinement;
 mod service;
+mod skill_evidence;
 mod skill_source;
 #[cfg(test)]
 mod tests;

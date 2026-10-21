@@ -22,8 +22,8 @@ mod goals;
 pub(crate) use goals::{validate_goals, GoalRecord, GoalStatus, GoalView};
 pub(crate) mod helper_completion;
 mod records;
-pub(crate) mod workflows;
 pub(crate) mod workflow_templates;
+pub(crate) mod workflows;
 pub(crate) use records::{
     AgentJobAttempt, AgentJobRecord, AgentJobStatus, JobOutputReview, JobReviewDecision,
 };

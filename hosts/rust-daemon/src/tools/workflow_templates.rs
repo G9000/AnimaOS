@@ -164,12 +164,25 @@ mod tests {
                 serde_json::Value::Bool(value) => DataValue::Bool(value),
                 serde_json::Value::Number(value) => DataValue::Number(value.as_f64().unwrap()),
                 serde_json::Value::String(value) => DataValue::String(value),
-                serde_json::Value::Array(values) => DataValue::Array(values.into_iter().map(argument).collect()),
-                serde_json::Value::Object(values) => DataValue::Object(values.into_iter().map(|(name,value)| (name,argument(value))).collect()),
+                serde_json::Value::Array(values) => {
+                    DataValue::Array(values.into_iter().map(argument).collect())
+                }
+                serde_json::Value::Object(values) => DataValue::Object(
+                    values
+                        .into_iter()
+                        .map(|(name, value)| (name, argument(value)))
+                        .collect(),
+                ),
             }
         }
-        let DataValue::Object(args) = argument(args) else { panic!("model arguments must be an object") };
-        ToolCall { id: "model-call".into(), name: name.into(), args }
+        let DataValue::Object(args) = argument(args) else {
+            panic!("model arguments must be an object")
+        };
+        ToolCall {
+            id: "model-call".into(),
+            name: name.into(),
+            args,
+        }
     }
 
     fn save_call() -> ToolCall {

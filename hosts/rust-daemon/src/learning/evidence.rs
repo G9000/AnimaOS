@@ -15,6 +15,7 @@ pub(super) struct CapturedSource {
     pub(super) anchors: Vec<String>,
     /// Settled tool calls in the source run, before the brief's bound.
     pub(super) action_count: usize,
+    pub(super) skill_signal: bool,
     pub(super) config: AgentConfig,
     pub(super) adapter: Arc<dyn ModelAdapter>,
 }
@@ -61,7 +62,8 @@ pub(super) async fn capture_source(
         || run.stop.is_some()
         || run.parent_run_id.is_some()
         || matches!(run.source, RunSource::Delegation | RunSource::Peer)
-        || run.action_receipts.is_empty()
+        || (run.action_receipts.is_empty()
+            && !super::skill_evidence::correction_signal(&run.input.text))
         || run.action_receipts.iter().any(|receipt| {
             receipt.status == ActionStatus::Started
                 || receipt.durability != ActionDurability::Persistent
@@ -146,8 +148,17 @@ pub(super) async fn capture_source(
         }
         actions.push(summary);
     }
-    let input = bounded_text(&run.input.text, 1536);
-    let reply_text = bounded_text(&reply.message.content.text, 3072);
+    let input = anima_core::skill_learning::safe_learning_excerpt(&run.input.text, 1536);
+    let reply_text =
+        anima_core::skill_learning::safe_learning_excerpt(&reply.message.content.text, 3072);
+    let (skill_learning_allowed, skill_signal, skills) =
+        super::skill_evidence::context(state, &run).await;
+    let procedure_evidence: Vec<_> = run
+        .action_receipts
+        .iter()
+        .take(8)
+        .filter_map(super::skill_evidence::procedure_evidence)
+        .collect();
     let step_refs: Vec<&str> = run
         .steps
         .iter()
@@ -156,6 +167,7 @@ pub(super) async fn capture_source(
         .map(|step| step.step_id.as_str())
         .collect();
     let mut brief = json!({"sourceRunId":run_id,"sessionId":run.session_id,
+        "skillLearningAllowed":skill_learning_allowed,"skills":skills,"procedureEvidence":procedure_evidence,
         "input":{"anchor":"input","text":input,"shortened":input.len()!=run.input.text.len()},
         "reply":{"anchor":"reply","messageId":reply_id,"text":reply_text,"shortened":reply_text.len()!=reply.message.content.text.len()},
         "actions":actions,"anchors":anchors,"receiptsShortened":run.action_receipts.len()>8,
@@ -173,6 +185,7 @@ pub(super) async fn capture_source(
     }
     Ok(CapturedSource {
         action_count: run.action_receipts.len(),
+        skill_signal,
         session_id: run.session_id,
         brief: rendered,
         digest,
@@ -369,6 +382,7 @@ pub(super) async fn capture_conversation(
     }
     Ok(CapturedSource {
         action_count: 0,
+        skill_signal: false,
         session_id,
         brief: rendered,
         digest,

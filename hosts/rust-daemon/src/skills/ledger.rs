@@ -24,8 +24,8 @@ pub(crate) const AUTONOMY_FREE_DECIDER: &str = "autonomy:free";
 pub(crate) const MAX_SKILL_LEDGER_ENTRIES: usize = 200;
 /// Entries one `GET /api/skill-ledger` returns at most.
 pub(crate) const MAX_SKILL_LEDGER_PAGE: usize = 100;
-/// The previous `SKILL.md` an entry keeps; a larger one is not kept (and
-/// that change cannot be undone).
+/// The previous `SKILL.md` an automatic update may retain. Larger changes
+/// remain pending so automatic activation always has a complete undo.
 pub(crate) const MAX_LEDGER_PREVIOUS_CONTENT_BYTES: usize = 36 * 1024;
 /// A ledger entry's id is this plus a v4 UUID.
 pub(crate) const LEDGER_ID_PREFIX: &str = "skl_";
@@ -138,90 +138,93 @@ impl SkillService {
         &self,
         proposal: Proposal,
     ) -> Result<ProposeOutcome, SkillError> {
-        let (agent_id, run_id) = (proposal.by.agent_id.clone(), proposal.by.run_id.clone());
-        let free = self.state.read().await.agent_autonomy(&agent_id).is_free();
-        let draft = self.propose(proposal).await?;
-        if !free {
-            return Ok(ProposeOutcome::Drafted(draft));
-        }
-        let previous_package = match &draft.base_hash {
-            Some(base) => self.approved_package(&draft.slug, base).await,
-            None => None,
-        };
-        let previous_content = previous_package
-            .as_ref()
-            .and_then(|p| String::from_utf8(p.bytes.clone()).ok());
-        let previous_files = previous_package.map(|p| p.files).unwrap_or_default();
-        let approved = match self
-            .approve_draft_by(
-                &draft.id,
-                DraftApproval::default(),
-                Some(AUTONOMY_FREE_DECIDER.to_string()),
-            )
-            .await
-        {
-            Ok(approved) => approved,
+        self.propose_from_agent_with_base(proposal, None).await
+    }
+
+    pub(crate) async fn propose_from_agent_with_base(
+        &self,
+        proposal: Proposal,
+        expected_base: Option<Option<String>>,
+    ) -> Result<ProposeOutcome, SkillError> {
+        let draft = self.propose_with_base(proposal, expected_base).await?;
+        match self.activate_learning_draft(draft.clone()).await {
+            Ok(outcome) => Ok(outcome),
             Err(error) => {
                 warn!(
                     skill = %draft.slug,
                     error = %error.message(),
                     "an agent's skill could not be approved automatically; it waits for the owner"
                 );
+                Ok(ProposeOutcome::Drafted(draft))
+            }
+        }
+    }
+
+    /// Activate this exact reviewed draft through the same automatic approval
+    /// path as an ordinary agent proposal. Strict and Custom retain it for
+    /// owner review. Approval rechecks Free while holding the transaction.
+    pub(crate) async fn activate_learning_draft(
+        &self,
+        draft: SkillDraft,
+    ) -> Result<ProposeOutcome, SkillError> {
+        {
+            let guard = self.state.read().await;
+            if guard.skills.draft(&draft.id) != Some(&draft) || !draft.is_pending() {
+                return Err(SkillError::conflict(
+                    "The reviewed skill draft changed before automatic activation",
+                ));
+            }
+            let by = draft.proposed_by.as_ref().ok_or_else(|| {
+                SkillError::conflict("Only agent-proposed drafts can activate automatically")
+            })?;
+            if !guard.agents.contains_key(&by.agent_id) {
+                return Err(SkillError::NotFound);
+            }
+            if !guard.agent_autonomy(&by.agent_id).is_free() {
                 return Ok(ProposeOutcome::Drafted(draft));
             }
-        };
+        }
         let action = if draft.base_hash.is_some() {
             SkillLedgerAction::Updated
         } else {
             SkillLedgerAction::Created
         };
-        let entry = SkillLedgerEntry {
-            previous_files,
-            id: format!("{LEDGER_ID_PREFIX}{}", uuid::Uuid::new_v4()),
-            agent_id,
-            skill_slug: approved.skill.slug.clone(),
-            action,
-            previous_content,
-            previous_content_hash: draft.base_hash.clone(),
-            content_hash: approved.skill.approved_hash.clone(),
-            at: approved.skill.approved_at_ms,
-            run_id: Some(run_id),
-            reverted_at: None,
-        };
-        self.change_ledger(move |ledger| push_entry(ledger, entry))
+        let approved = self
+            .approve_draft_by_exact(
+                &draft.id,
+                DraftApproval::default(),
+                Some(AUTONOMY_FREE_DECIDER.to_string()),
+                Some(draft.clone()),
+            )
             .await;
-        Ok(ProposeOutcome::Activated { approved, action })
+        Ok(ProposeOutcome::Activated {
+            approved: approved?,
+            action,
+        })
     }
 
-    /// The skill's `SKILL.md` as text when it is still the approved content
-    /// (`base`) and at most 36 KiB.
-    async fn approved_package(
+    /// Serializes bookkeeping with activation and rolls it back on a definite
+    /// save failure. An uncertain acknowledgement retains the recoverable
+    /// candidate rather than discarding a ledger that may already be on disk.
+    async fn change_ledger(
         &self,
-        slug: &str,
-        base: &str,
-    ) -> Option<super::package::SkillPackage> {
-        let root = self.workspace().await.ok()?;
-        let target = slug.to_string();
-        let package = blocking(move || super::package::read_package(&root, &target))
-            .await
-            .ok()?
-            .ok()??;
-        (package.bytes.len() <= MAX_LEDGER_PREVIOUS_CONTENT_BYTES && package.hash() == base)
-            .then_some(package)
-    }
-
-    /// Changes the ledger in memory now and saves it under the control-plane
-    /// transaction. A failed save is logged; the entry stays in memory and is
-    /// saved with the next change.
-    async fn change_ledger(&self, change: impl FnOnce(&mut Vec<SkillLedgerEntry>)) {
-        change(&mut self.state.write().await.skill_ledger);
+        change: impl FnOnce(&mut Vec<SkillLedgerEntry>) + Send + 'static,
+    ) {
         let saved = self
-            .locked(|service, _root| async move {
-                let persist = service.state.write().await.control_plane_persist_request();
-                persist
-                    .save()
-                    .await
-                    .map_err(|error| SkillError::Unavailable(error.to_string()))
+            .locked(move |service, _root| async move {
+                let (previous, persist) = {
+                    let mut guard = service.state.write().await;
+                    let previous = guard.skill_ledger.clone();
+                    change(&mut guard.skill_ledger);
+                    (previous, guard.control_plane_persist_request())
+                };
+                if let Err(error) = persist.save().await {
+                    if !crate::control_plane_store::is_durability_uncertain(&error) {
+                        service.state.write().await.skill_ledger = previous;
+                    }
+                    return Err(SkillError::Unavailable(error.to_string()));
+                }
+                Ok(())
             })
             .await;
         if let Err(error) = saved {
@@ -372,6 +375,356 @@ mod tests {
             ProposeOutcome::Activated { approved, action } => (approved, action),
             ProposeOutcome::Drafted(draft) => panic!("expected an active skill, got {draft:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn automatic_approval_persists_its_full_undo_package_in_the_activation_snapshot() {
+        let (state, agent, root) = daemon("ledger-atomic", AutonomyMode::Free).await;
+        let path = root.join("control-plane.json");
+        state.write().await.set_control_plane_store(Some(
+            crate::control_plane_store::ControlPlaneStoreConfig::Json(path.clone()),
+        ));
+        let skills = service(&state);
+        let files = vec![crate::skills::SkillSupportingFile {
+            path: "references/check.md".into(),
+            content: "Check the output independently.".into(),
+        }];
+        let mut initial = content("Notes");
+        initial.files = Some(files.clone());
+        let (before, _) = skills.save("notes", initial).await.unwrap();
+        let mut update = proposal(&agent, "Notes", "Use the corrected workflow.");
+        update.files = files.clone();
+        let draft = skills.propose(update).await.unwrap();
+        let gate = state
+            .write()
+            .await
+            .install_test_control_plane_save_gate(false);
+        let approving = skills.clone();
+        let id = draft.id.clone();
+        let task = tokio::spawn(async move {
+            approving
+                .approve_draft_by(
+                    &id,
+                    DraftApproval::default(),
+                    Some(AUTONOMY_FREE_DECIDER.into()),
+                )
+                .await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(10), gate.entered.acquire())
+            .await
+            .unwrap()
+            .unwrap()
+            .forget();
+        let snapshot = state.read().await.control_plane_snapshot();
+        gate.release.add_permits(1);
+        let approved = task.await.unwrap().unwrap();
+        assert_eq!(
+            snapshot.skill_ledger.len(),
+            1,
+            "activation snapshot must already include Undo"
+        );
+        let entry = &snapshot.skill_ledger[0];
+        assert_eq!(
+            entry.previous_content_hash.as_deref(),
+            Some(before.approved_hash.as_str())
+        );
+        assert_eq!(
+            entry.previous_content.as_deref(),
+            Some(skill_text("Notes").as_str())
+        );
+        assert_eq!(entry.previous_files, files);
+        assert_eq!(entry.content_hash, approved.skill.approved_hash);
+        let persisted: crate::control_plane_store::ControlPlaneSnapshot =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(persisted.skill_ledger, snapshot.skill_ledger);
+        assert_eq!(
+            persisted
+                .skills
+                .iter()
+                .find(|skill| skill.slug == "notes")
+                .unwrap()
+                .approved_hash,
+            entry.content_hash
+        );
+    }
+
+    #[tokio::test]
+    async fn automatic_approval_rechecks_free_policy_before_changing_files() {
+        let (state, agent, root) = daemon("ledger-policy", AutonomyMode::Free).await;
+        let skills = service(&state);
+        let draft = skills
+            .propose(proposal(&agent, "Notes", "Do Notes."))
+            .await
+            .unwrap();
+        let held = skills.transactions.clone().lock_owned().await;
+        let approving = skills.clone();
+        let id = draft.id.clone();
+        let held_count = Arc::strong_count(&skills.transactions);
+        let task = tokio::spawn(async move {
+            approving
+                .approve_draft_by(
+                    &id,
+                    DraftApproval::default(),
+                    Some(AUTONOMY_FREE_DECIDER.into()),
+                )
+                .await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while Arc::strong_count(&skills.transactions) <= held_count {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        state.write().await.autonomy.set(AgentAutonomy {
+            agent_id: agent,
+            mode: AutonomyMode::Strict,
+            ..Default::default()
+        });
+        drop(held);
+        let refused = task.await.unwrap();
+        assert!(
+            matches!(refused, Err(SkillError::Conflict(_))),
+            "{refused:?}"
+        );
+        assert!(!root.join("skills/notes/SKILL.md").exists());
+        assert!(state
+            .read()
+            .await
+            .skills
+            .draft(&draft.id)
+            .unwrap()
+            .is_pending());
+        assert!(skills.ledger(10).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn automatic_approval_refuses_a_stale_base_on_disk() {
+        let (state, agent, root) = daemon("ledger-base", AutonomyMode::Free).await;
+        let skills = service(&state);
+        let (before, _) = skills.save("notes", content("Notes")).await.unwrap();
+        let draft = skills
+            .propose(proposal(&agent, "Notes", "Do it better."))
+            .await
+            .unwrap();
+        write_skill(&root, "notes", &skill_text("Owner changed it"));
+        let refused = skills
+            .approve_draft_by(
+                &draft.id,
+                DraftApproval::default(),
+                Some(AUTONOMY_FREE_DECIDER.into()),
+            )
+            .await;
+        assert!(
+            matches!(refused, Err(SkillError::Conflict(_))),
+            "{refused:?}"
+        );
+        assert_eq!(
+            state
+                .read()
+                .await
+                .skills
+                .get("notes")
+                .unwrap()
+                .approved_hash,
+            before.approved_hash
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("skills/notes/SKILL.md")).unwrap(),
+            skill_text("Owner changed it")
+        );
+        assert!(skills.ledger(10).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn automatic_approval_save_failure_restores_the_registry_and_undo_ledger() {
+        let (state, agent, root) = daemon("ledger-failed-save", AutonomyMode::Free).await;
+        let path = root.join("control-plane.json");
+        state.write().await.set_control_plane_store(Some(
+            crate::control_plane_store::ControlPlaneStoreConfig::Json(path.clone()),
+        ));
+        let skills = service(&state);
+        let (before, _) = activated(
+            skills
+                .propose_from_agent(proposal(&agent, "Notes", "Do Notes."))
+                .await
+                .unwrap(),
+        );
+        let old_ledger = skills.ledger(10).await;
+        let draft = skills
+            .propose(proposal(&agent, "Notes", "Corrected workflow."))
+            .await
+            .unwrap();
+        let gate = state
+            .write()
+            .await
+            .install_test_control_plane_save_gate(true);
+        gate.release.add_permits(1);
+        let refused = skills.activate_learning_draft(draft.clone()).await;
+        assert!(
+            matches!(refused, Err(SkillError::Unavailable(_))),
+            "{refused:?}"
+        );
+        assert_eq!(skills.ledger(10).await, old_ledger);
+        assert_eq!(
+            state
+                .read()
+                .await
+                .skills
+                .get("notes")
+                .unwrap()
+                .approved_hash,
+            before.skill.approved_hash
+        );
+        assert!(state
+            .read()
+            .await
+            .skills
+            .draft(&draft.id)
+            .unwrap()
+            .is_pending());
+        assert_eq!(
+            skills.load("notes").await,
+            Err(crate::skills::SKILL_CHANGED.into())
+        );
+        let persisted: crate::control_plane_store::ControlPlaneSnapshot =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(persisted.skill_ledger, old_ledger);
+    }
+
+    #[tokio::test]
+    async fn automatic_approval_with_uncertain_ack_recovers_the_full_undo_after_restart() {
+        let (state, agent, root) = daemon("ledger-uncertain", AutonomyMode::Free).await;
+        let path = root.join("control-plane.json");
+        state.write().await.set_control_plane_store(Some(
+            crate::control_plane_store::ControlPlaneStoreConfig::Json(path.clone()),
+        ));
+        let skills = service(&state);
+        let files = vec![crate::skills::SkillSupportingFile {
+            path: "references/check.md".into(),
+            content: "Keep the reviewed supporting file.".into(),
+        }];
+        let mut initial = content("Notes");
+        initial.files = Some(files.clone());
+        let (before, _) = skills.save("notes", initial).await.unwrap();
+        let mut update = proposal(&agent, "Notes", "A corrected workflow.");
+        update.files = files.clone();
+        let draft = skills.propose(update).await.unwrap();
+        let gate = state
+            .write()
+            .await
+            .install_test_control_plane_uncertain_save_gate();
+        gate.release.add_permits(1);
+        let refused = skills.activate_learning_draft(draft).await;
+        assert!(
+            matches!(refused, Err(SkillError::Unavailable(_))),
+            "{refused:?}"
+        );
+        let persisted: crate::control_plane_store::ControlPlaneSnapshot =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let activated_hash = persisted.skill_ledger[0].content_hash.clone();
+        let mut restarted = DaemonState::new();
+        restarted.restore_control_plane_snapshot(persisted).unwrap();
+        let restored = service(&Arc::new(RwLock::new(restarted)));
+        let loaded = restored.load("notes").await.unwrap();
+        assert!(loaded.body.starts_with("A corrected workflow."));
+        assert_eq!(loaded.approved_hash, activated_hash);
+        let RevertOutcome::Restored(record) = restored.revert_last("notes").await.unwrap() else {
+            panic!("an acknowledged disk snapshot must retain the previous package");
+        };
+        assert_eq!(record.approved_hash, before.approved_hash);
+        assert_eq!(
+            std::fs::read_to_string(root.join("skills/notes/SKILL.md")).unwrap(),
+            skill_text("Notes")
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("skills/notes/references/check.md")).unwrap(),
+            files[0].content
+        );
+    }
+
+    #[tokio::test]
+    async fn an_automatic_handoff_refuses_a_changed_reviewed_draft() {
+        let (state, agent, root) = daemon("ledger-draft-changed", AutonomyMode::Free).await;
+        let skills = service(&state);
+        let draft = skills
+            .propose(proposal(&agent, "Notes", "Reviewed steps."))
+            .await
+            .unwrap();
+        let held = skills.transactions.clone().lock_owned().await;
+        let approving = skills.clone();
+        let mut changed = draft.clone();
+        changed.body = "Different steps.".into();
+        let held_count = Arc::strong_count(&skills.transactions);
+        let task = tokio::spawn(async move { approving.activate_learning_draft(draft).await });
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while Arc::strong_count(&skills.transactions) <= held_count {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        state.write().await.skills.put_draft(changed);
+        drop(held);
+        let refused = task.await.unwrap();
+        assert!(
+            matches!(refused, Err(SkillError::Conflict(_))),
+            "{refused:?}"
+        );
+        assert!(!root.join("skills/notes/SKILL.md").exists());
+        assert!(skills.ledger(10).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ledger_bookkeeping_waits_for_the_shared_transaction() {
+        let (state, agent, _) = daemon("ledger-bookkeeping", AutonomyMode::Free).await;
+        let skills = service(&state);
+        skills
+            .propose_from_agent(proposal(&agent, "Notes", "Do Notes."))
+            .await
+            .unwrap();
+        let held = skills.transactions.clone().lock_owned().await;
+        let changing = skills.clone();
+        let held_count = Arc::strong_count(&skills.transactions);
+        let task = tokio::spawn(async move {
+            changing
+                .change_ledger(|ledger| ledger[0].reverted_at = Some(42))
+                .await;
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while Arc::strong_count(&skills.transactions) <= held_count {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let during = skills.ledger(1).await[0].reverted_at;
+        drop(held);
+        task.await.unwrap();
+        assert_eq!(
+            during, None,
+            "bookkeeping must not race an activation rollback"
+        );
+        assert_eq!(skills.ledger(1).await[0].reverted_at, Some(42));
+    }
+
+    #[tokio::test]
+    async fn ledger_bookkeeping_restores_previous_entries_on_a_definite_save_failure() {
+        let (state, agent, _) = daemon("ledger-bookkeeping-failed", AutonomyMode::Free).await;
+        let skills = service(&state);
+        skills
+            .propose_from_agent(proposal(&agent, "Notes", "Do Notes."))
+            .await
+            .unwrap();
+        let before = skills.ledger(1).await;
+        state
+            .write()
+            .await
+            .set_control_plane_store(Some(crate::skills::test_support::broken_store()));
+        skills
+            .change_ledger(|ledger| ledger[0].reverted_at = Some(42))
+            .await;
+        assert_eq!(skills.ledger(1).await, before);
     }
 
     #[tokio::test]

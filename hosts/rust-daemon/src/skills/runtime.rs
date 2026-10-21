@@ -145,6 +145,7 @@ mod tests {
     #[test]
     fn a_requested_skill_is_its_instructions_or_why_it_is_missing() {
         let loaded = crate::skills::LoadedSkill {
+            approved_hash: "a".repeat(64),
             slug: "notes".into(),
             name: "Notes".into(),
             body: "Write it down.".into(),

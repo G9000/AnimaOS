@@ -123,6 +123,42 @@ fn file_draft_id(slug: &str) -> String {
 impl SkillService {
     /// A companion proposes a skill (spec §8.3 `propose_skill`).
     pub(crate) async fn propose(&self, proposal: Proposal) -> Result<SkillDraft, SkillError> {
+        self.propose_with_base(proposal, None).await
+    }
+
+    /// Resolve omitted files from a complete approved package; absent partial
+    /// folders and failed reads never become an implicit empty file list.
+    pub(crate) async fn supporting_files_for_proposal(
+        &self,
+        name: &str,
+        slug: Option<&str>,
+    ) -> Result<(String, Option<String>, Vec<super::SkillSupportingFile>), SkillError> {
+        let slug = draft_slug(slug, name)?;
+        let (root, _) = self.read_start(&slug).await?;
+        let target = slug.clone();
+        let (package, partial) = blocking(move || {
+            let package = super::package::read_package(&root, &target)?;
+            let partial = package.is_none() && super::package::folder_has_content(&root, &target)?;
+            Ok::<_, String>((package, partial))
+        })
+        .await?
+        .map_err(SkillError::Unavailable)?;
+        let record = self.state.read().await.skills.get(&slug).cloned();
+        match (record, package) {
+            (Some(record), Some(package)) if record.approved_hash == package.hash() => {
+                Ok((slug, Some(record.approved_hash), package.files))
+            }
+            (None, None) if !partial => Ok((slug, None, Vec::new())),
+            _ => Err(SkillError::conflict(SKILL_FILE_UNREVIEWED)),
+        }
+    }
+
+    /// A preservation read pins both supporting files and the draft's base.
+    pub(crate) async fn propose_with_base(
+        &self,
+        proposal: Proposal,
+        expected_base: Option<Option<String>>,
+    ) -> Result<SkillDraft, SkillError> {
         let file = checked_file(&proposal.name, &proposal.description, proposal.body)?;
         anima_core::skill_packages::validate_skill_package(
             compose_skill_file(&file.name, &file.description, &file.body).as_bytes(),
@@ -146,6 +182,14 @@ impl SkillService {
                         );
                     }
                     let base_hash = skills.get(&slug).map(|record| record.approved_hash.clone());
+                    if expected_base
+                        .as_ref()
+                        .is_some_and(|expected| expected != &base_hash)
+                    {
+                        return Err(SkillError::conflict(
+                            "Skill changed after preserving its supporting files; read it again",
+                        ));
+                    }
                     let mut draft = SkillDraft::new(
                         &slug,
                         file,
@@ -253,6 +297,20 @@ impl SkillService {
         approval: DraftApproval,
         decided_by: Option<String>,
     ) -> Result<ApprovedDraft, SkillError> {
+        self.approve_draft_by_exact(id, approval, decided_by, None)
+            .await
+    }
+
+    /// An automatic handoff may only activate the exact persisted draft it
+    /// reviewed, even if another caller changed that draft while it waited.
+    pub(super) async fn approve_draft_by_exact(
+        &self,
+        id: &str,
+        approval: DraftApproval,
+        decided_by: Option<String>,
+        expected: Option<SkillDraft>,
+    ) -> Result<ApprovedDraft, SkillError> {
+        let automatic = decided_by.as_deref() == Some(super::ledger::AUTONOMY_FREE_DECIDER);
         if let Some(body) = &approval.body {
             validate_body(body).map_err(SkillError::invalid)?;
         }
@@ -261,6 +319,11 @@ impl SkillService {
                 .map_err(SkillError::invalid)?;
         }
         if let Some(slug) = id.strip_prefix(FILE_DRAFT_ID_PREFIX) {
+            if automatic {
+                return Err(SkillError::conflict(
+                    "Only agent-proposed drafts can activate automatically",
+                ));
+            }
             return self.approve_file_draft(slug, approval).await;
         }
         let id = id.to_string();
@@ -281,6 +344,14 @@ impl SkillService {
         self.locked(move |service, root| async move {
             let reviewed_root = root.clone();
             let linked = service.state.read().await.skills.draft(&id).cloned();
+            if expected
+                .as_ref()
+                .is_some_and(|expected| linked.as_ref() != Some(expected))
+            {
+                return Err(SkillError::conflict(
+                    "The reviewed skill draft changed before automatic activation",
+                ));
+            }
             if let Some(draft) = linked.as_ref().filter(|draft| draft.is_pending()) {
                 let guard = service.state.read().await;
                 crate::community_bundles::check_skill_edit(&guard, &draft.slug, true)?;
@@ -306,8 +377,9 @@ impl SkillService {
                     }
                 }
             }
-            if let Some(draft) =
-                linked.filter(|draft| draft.is_pending() && draft.learning_source.is_some())
+            if let Some(draft) = linked
+                .as_ref()
+                .filter(|draft| draft.is_pending() && draft.learning_source.is_some())
             {
                 let read_root = root.clone();
                 let read_slug = draft.slug.clone();
@@ -332,13 +404,89 @@ impl SkillService {
                     ));
                 }
             }
+            let ledger = if automatic {
+                let draft = linked.as_ref().ok_or(SkillError::NotFound)?;
+                if !draft.is_pending() {
+                    return Err(SkillError::conflict(SKILL_DRAFT_DECIDED));
+                }
+                let by = draft.proposed_by.as_ref().ok_or_else(|| {
+                    SkillError::conflict("Only agent-proposed drafts can activate automatically")
+                })?;
+                let read_root = root.clone();
+                let read_slug = draft.slug.clone();
+                let previous =
+                    blocking(move || super::package::read_package(&read_root, &read_slug))
+                        .await?
+                        .map_err(SkillError::Unavailable)?;
+                let current_hash = service
+                    .state
+                    .read()
+                    .await
+                    .skills
+                    .get(&draft.slug)
+                    .map(|record| record.approved_hash.clone());
+                if current_hash != draft.base_hash
+                    || previous.as_ref().map(|p| p.hash()) != draft.base_hash
+                {
+                    return Err(SkillError::conflict(
+                        "Skill base changed; review a fresh draft before replacing it",
+                    ));
+                }
+                if previous.as_ref().is_some_and(|package| {
+                    package.bytes.len() > super::ledger::MAX_LEDGER_PREVIOUS_CONTENT_BYTES
+                }) {
+                    return Err(SkillError::conflict(
+                        "The previous skill package exceeds the automatic undo bound",
+                    ));
+                }
+                let (previous_content, previous_files) = match previous {
+                    Some(package) => (
+                        Some(String::from_utf8(package.bytes).map_err(|_| {
+                            SkillError::conflict("The previous skill package is not valid text")
+                        })?),
+                        package.files,
+                    ),
+                    None => (None, Vec::new()),
+                };
+                Some(super::ledger::SkillLedgerEntry {
+                    previous_files,
+                    id: format!(
+                        "{}{}",
+                        super::ledger::LEDGER_ID_PREFIX,
+                        uuid::Uuid::new_v4()
+                    ),
+                    agent_id: by.agent_id.clone(),
+                    skill_slug: draft.slug.clone(),
+                    action: if draft.base_hash.is_some() {
+                        super::ledger::SkillLedgerAction::Updated
+                    } else {
+                        super::ledger::SkillLedgerAction::Created
+                    },
+                    previous_content,
+                    previous_content_hash: draft.base_hash.clone(),
+                    content_hash: anima_core::skill_packages::skill_package_hash(
+                        compose_skill_file(
+                            &draft.name,
+                            &draft.description,
+                            approval.body.as_deref().unwrap_or(&draft.body),
+                        )
+                        .as_bytes(),
+                        approval.files.as_deref().unwrap_or(&draft.files),
+                    ),
+                    at: 0, // Filled with the approval timestamp under the same write guard.
+                    run_id: Some(by.run_id.clone()),
+                    reverted_at: None,
+                })
+            } else {
+                None
+            };
             let (slug, draft) = service
-                .apply(&root, move |skills, now_ms| {
+                .apply_with_ledger(&root, ledger, move |skills, now_ms| {
                     let previous_draft = skills.draft(&id).cloned().ok_or(SkillError::NotFound)?;
                     if !previous_draft.is_pending() {
                         return Err(SkillError::conflict(SKILL_DRAFT_DECIDED));
                     }
-                    if previous_draft.learning_source.is_some()
+                    if (automatic || previous_draft.learning_source.is_some())
                         && previous_draft.base_hash
                             != skills
                                 .get(&previous_draft.slug)
@@ -1175,5 +1323,47 @@ mod tests {
             skills.load("notes").await,
             Err(message) if message.starts_with("No owner-approved skill")
         ));
+    }
+    #[tokio::test]
+    async fn inferred_supporting_files_cannot_replace_a_newer_owner_package() {
+        let (state, root) = daemon("inferred-files-base");
+        let skills = service(&state);
+        let mut first = content("Notes");
+        first.files = Some(vec![super::super::SkillSupportingFile {
+            path: "references/check.md".into(),
+            content: "Version one".into(),
+        }]);
+        let (original, _) = skills.save("notes", first.clone()).await.unwrap();
+        let mut inferred = proposal("agent-1", "Notes");
+        inferred.files = first.files.unwrap();
+        let mut next = content("Notes");
+        next.files = Some(vec![super::super::SkillSupportingFile {
+            path: "references/check.md".into(),
+            content: "Owner's newer version".into(),
+        }]);
+        let (updated, _) = skills.save("notes", next).await.unwrap();
+        let result = skills
+            .propose_with_base(inferred.clone(), Some(Some(original.approved_hash)))
+            .await;
+        assert!(
+            matches!(result, Err(SkillError::Conflict(_))),
+            "a stale inferred package must not be drafted"
+        );
+        assert_eq!(state.read().await.skills.pending_from("agent-1"), 0);
+        assert_eq!(
+            std::fs::read_to_string(root.join("skills/notes/references/check.md")).unwrap(),
+            "Owner's newer version"
+        );
+        assert!(
+            matches!(
+                skills.propose_with_base(inferred, Some(None)).await,
+                Err(SkillError::Conflict(_))
+            ),
+            "a concurrent creation also changes the inferred base"
+        );
+        assert_eq!(
+            skills.record("notes").await.unwrap().approved_hash,
+            updated.approved_hash
+        );
     }
 }

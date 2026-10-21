@@ -42,18 +42,37 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 257, "complete registered operation count");
+    assert_eq!(actual.len(), 259, "complete registered operation count");
+    let skill_learning_additions = [
+        ("GET", "/api/skills/{slug}/learning"),
+        ("POST", "/api/skills/{slug}/feedback"),
+    ];
+    for (method, path) in skill_learning_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "skill learning operations must be registered"
+        );
+    }
     let reusable_additions = [
         ("GET", "/api/agents/{agent_id}/workflow-templates"),
         ("POST", "/api/agents/{agent_id}/workflow-templates"),
         ("GET", "/api/agents/{agent_id}/workflow-templates/{slug}"),
         ("DELETE", "/api/agents/{agent_id}/workflow-templates/{slug}"),
-        ("POST", "/api/agents/{agent_id}/workflow-templates/{slug}/run"),
+        (
+            "POST",
+            "/api/agents/{agent_id}/workflow-templates/{slug}/run",
+        ),
         ("GET", "/api/agents/{agent_id}/tool-results/{artifact_id}"),
-        ("GET", "/api/agents/{agent_id}/tool-results/{artifact_id}/download"),
+        (
+            "GET",
+            "/api/agents/{agent_id}/tool-results/{artifact_id}/download",
+        ),
     ];
     for (method, path) in reusable_additions {
-        assert!(actual.contains(&(method.to_string(), path.to_string())), "reusable work operations must be registered");
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "reusable work operations must be registered"
+        );
     }
     let workflow_additions = [
         ("GET", "/api/agents/{agent_id}/workflows"),
@@ -317,7 +336,8 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         actual
             .iter()
             .filter(|(method, path)| {
-                !reusable_additions.contains(&(method.as_str(), path.as_str()))
+                !skill_learning_additions.contains(&(method.as_str(), path.as_str()))
+                    && !reusable_additions.contains(&(method.as_str(), path.as_str()))
                     && !workflow_additions.contains(&(method.as_str(), path.as_str()))
                     && !coding_additions.contains(&(method.as_str(), path.as_str()))
                     && !autonomy_additions.contains(&(method.as_str(), path.as_str()))
@@ -364,8 +384,10 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
     assert_eq!(
         actual
             .iter()
-            .filter(|(method, path)| !reusable_additions.contains(&(method.as_str(), path.as_str())) && !workflow_additions
+            .filter(|(method, path)| !skill_learning_additions
                 .contains(&(method.as_str(), path.as_str()))
+                && !reusable_additions.contains(&(method.as_str(), path.as_str()))
+                && !workflow_additions.contains(&(method.as_str(), path.as_str()))
                 && !additions.contains(&(method.as_str(), path.as_str()))
                 && !coding_additions.contains(&(method.as_str(), path.as_str()))
                 && !autonomy_additions.contains(&(method.as_str(), path.as_str()))

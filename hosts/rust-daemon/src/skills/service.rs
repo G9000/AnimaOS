@@ -94,6 +94,7 @@ pub(crate) struct LoadedSkill {
     pub(crate) slug: String,
     pub(crate) name: String,
     pub(crate) body: String,
+    pub(crate) approved_hash: String,
 }
 
 /// A registry change `apply` makes, and how to undo it.
@@ -242,8 +243,28 @@ impl SkillService {
         root: &Path,
         change: impl FnOnce(&mut SkillRegistry, u64) -> Result<Change<T>, SkillError>,
     ) -> Result<T, SkillError> {
+        self.apply_with_ledger(root, None, change).await
+    }
+
+    /// Automatic activation and its complete undo record share this save.
+    /// Call inside `locked`, as for ordinary registry changes.
+    pub(super) async fn apply_with_ledger<T>(
+        &self,
+        root: &Path,
+        ledger: Option<super::ledger::SkillLedgerEntry>,
+        change: impl FnOnce(&mut SkillRegistry, u64) -> Result<Change<T>, SkillError>,
+    ) -> Result<T, SkillError> {
         let mut guard = self.state.write().await;
-        let change = change(&mut guard.skills, now_millis())?;
+        if ledger.as_ref().is_some_and(|entry| {
+            !guard.agents.contains_key(&entry.agent_id)
+                || !guard.agent_autonomy(&entry.agent_id).is_free()
+        }) {
+            return Err(SkillError::conflict(
+                "Automatic skill activation requires the originating agent to remain in Free mode",
+            ));
+        }
+        let now_ms = now_millis();
+        let change = change(&mut guard.skills, now_ms)?;
         let managed = change
             .slug
             .as_ref()
@@ -256,9 +277,18 @@ impl SkillService {
         }
         let prior_generation = guard.community_generation;
         if managed {
-            guard.community_generation = prior_generation
-                .checked_add(1)
-                .ok_or_else(|| SkillError::conflict("Community bundle generation exhausted"))?;
+            let Some(next_generation) = prior_generation.checked_add(1) else {
+                (change.undo)(&mut guard.skills);
+                return Err(SkillError::conflict(
+                    "Community bundle generation exhausted",
+                ));
+            };
+            guard.community_generation = next_generation;
+        }
+        let prior_ledger = ledger.as_ref().map(|_| guard.skill_ledger.clone());
+        if let Some(mut entry) = ledger {
+            entry.at = now_ms;
+            super::ledger::push_entry(&mut guard.skill_ledger, entry);
         }
         drop(guard);
         let Change {
@@ -289,6 +319,9 @@ impl SkillService {
                     // the next scan.
                     let mut guard = self.state.write().await;
                     undo(&mut guard.skills);
+                    if let Some(previous) = prior_ledger {
+                        guard.skill_ledger = previous;
+                    }
                     guard.community_generation = prior_generation;
                     guard.skills.set_scanned(&written, None);
                     return Err(error);
@@ -303,9 +336,17 @@ impl SkillService {
             let skills = guard.skills.snapshot();
             let request = guard.control_plane_persist_request();
             if managed {
+                let Some(request) =
+                    request.with_bundle_candidate(bundles, generation, rows, skills, None)
+                else {
+                    undo(&mut guard.skills);
+                    if let Some(previous) = prior_ledger {
+                        guard.skill_ledger = previous;
+                    }
+                    guard.community_generation = prior_generation;
+                    return Err(SkillError::conflict("Community bundle owner changed"));
+                };
                 request
-                    .with_bundle_candidate(bundles, generation, rows, skills, None)
-                    .ok_or_else(|| SkillError::conflict("Community bundle owner changed"))?
             } else {
                 request
             }
@@ -329,6 +370,9 @@ impl SkillService {
                 }
             } else {
                 undo(&mut guard.skills);
+                if let Some(previous) = prior_ledger {
+                    guard.skill_ledger = previous;
+                }
                 guard.community_generation = prior_generation;
             }
             return Err(SkillError::Unavailable(error.to_string()));
@@ -918,6 +962,7 @@ async fn load_record_file(
         slug: record.slug,
         name: record.name,
         body,
+        approved_hash: record.approved_hash,
     })
 }
 

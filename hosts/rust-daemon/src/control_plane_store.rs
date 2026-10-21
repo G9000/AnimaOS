@@ -1652,7 +1652,8 @@ mod learning_snapshot_tests {
 
     #[tokio::test]
     async fn version_twenty_four_templates_default_empty_and_keep_workflow_backup() {
-        let directory = std::env::temp_dir().join(format!("anima-template-migration-{}", uuid::Uuid::new_v4()));
+        let directory =
+            std::env::temp_dir().join(format!("anima-template-migration-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&directory).unwrap();
         let path = directory.join("control-plane.json");
         let original = "{\"version\":24,\"agents\":[],\"workflows\":[]}";
@@ -1660,16 +1661,26 @@ mod learning_snapshot_tests {
         let prior = super::pre_upgrade_backup_path(&path, 23);
         std::fs::write(&prior, "prior workflow backup").unwrap();
         let config = super::ControlPlaneStoreConfig::Json(path.clone());
-        let loaded = super::load_control_plane_snapshot(&config).await.unwrap().unwrap();
+        let loaded = super::load_control_plane_snapshot(&config)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(loaded.workflow_templates.is_empty());
         let backup = super::pre_upgrade_backup_path(&path, 24);
         assert_ne!(backup, prior);
-        assert!(backup.to_string_lossy().ends_with(".pre-workflow-templates.bak"));
+        assert!(backup
+            .to_string_lossy()
+            .ends_with(".pre-workflow-templates.bak"));
         super::write_pre_upgrade_backup(&config, 24).await.unwrap();
         assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
-        assert_eq!(std::fs::read_to_string(&prior).unwrap(), "prior workflow backup");
+        assert_eq!(
+            std::fs::read_to_string(&prior).unwrap(),
+            "prior workflow backup"
+        );
         assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 3);
-        for file in [path, prior, backup] { std::fs::remove_file(file).unwrap(); }
+        for file in [path, prior, backup] {
+            std::fs::remove_file(file).unwrap();
+        }
         std::fs::remove_dir(directory).unwrap();
     }
 }

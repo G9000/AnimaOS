@@ -402,6 +402,8 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST` | `/api/agents/{agent_id}/workflow-templates/{slug}/run` | Start a fresh run or recover an exact retry |
 | `GET` | `/api/agents/{agent_id}/tool-results/{artifact_id}` | Read a bounded saved-result page |
 | `GET` | `/api/agents/{agent_id}/tool-results/{artifact_id}/download` | Download a saved result |
+| `GET` | `/api/skills/{slug}/learning` |
+| `POST` | `/api/skills/{slug}/feedback` |
 <!-- openapi-route-inventory:end -->
 
 ### Current workspace report downloads
@@ -616,7 +618,7 @@ Refresh has a ten-second total bound, returns `409` while another refresh is act
 and reports metadata failure as unavailable/stale without changing saved agents.
 Catalog presence is metadata, not proof of model/tool acceptance. New selection is
 deliberate; existing/custom model strings and grants remain unchanged until Save.
-The registered OpenAPI inventory now contains 250 operations, including explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
+The registered OpenAPI inventory now contains 259 operations, including explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
 
 ### Agents
 

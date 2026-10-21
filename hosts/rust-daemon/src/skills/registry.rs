@@ -226,6 +226,11 @@ impl SkillRegistry {
             return Err(TOO_MANY_SKILLS);
         }
         record.status = self.status_now(&record);
+        if record.experiences.is_empty() {
+            if let Some(previous) = self.records.get(&record.slug) {
+                record.experiences.clone_from(&previous.experiences);
+            }
+        }
         self.generation += 1;
         Ok(self.records.insert(record.slug.clone(), record))
     }
@@ -463,6 +468,30 @@ impl SkillRegistry {
     pub(crate) fn validate(skills: &[SkillRecord], drafts: &[SkillDraft]) -> Result<(), String> {
         let mut slugs = HashSet::new();
         for skill in skills {
+            use anima_core::skill_learning::{SkillUseStatus, MAX_SKILL_EXPERIENCES};
+            let mut observed = HashSet::new();
+            if skill.experiences.len() > MAX_SKILL_EXPERIENCES
+                || skill.experiences.iter().any(|entry| {
+                    !is_hex_hash(&entry.version)
+                        || [&entry.agent_id, &entry.session_id, &entry.run_id]
+                            .iter()
+                            .any(|s| s.is_empty() || s.len() > 300)
+                        || !observed.insert((&entry.agent_id, &entry.run_id, &entry.version))
+                        || entry.loaded_at_ms == 0
+                        || (entry.status == SkillUseStatus::Loaded)
+                            != entry.finished_at_ms.is_none()
+                        || entry
+                            .finished_at_ms
+                            .is_some_and(|at| at < entry.loaded_at_ms)
+                        || entry.verified_evidence.as_ref().is_some_and(|text| {
+                            entry.status != SkillUseStatus::Completed
+                                || text.is_empty()
+                                || text.len() > 1024
+                        })
+                })
+            {
+                return Err("invalid skill experience observations".into());
+            }
             if !is_valid_slug(&skill.slug) || !slugs.insert(skill.slug.as_str()) {
                 return Err(format!(
                     "invalid or duplicate skill slug in snapshot: {}",

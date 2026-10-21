@@ -1,0 +1,5 @@
+id,kind,amount_cents
+b1,sale,10000
+b2,refund,1500
+b3,sale,4500
+b4,refund,500

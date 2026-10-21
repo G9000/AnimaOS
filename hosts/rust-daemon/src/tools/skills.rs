@@ -34,7 +34,7 @@ fn text(text: String) -> TaskResult<Content> {
 
 pub(super) fn load_skill(
     context: ToolExecutionContext,
-    _agent: AgentState,
+    agent: AgentState,
     _user_message: Message,
     call: ToolCall,
 ) -> BoxFuture<'static, TaskResult<Content>> {
@@ -55,7 +55,29 @@ pub(super) fn load_skill(
             Some(_) => return TaskResult::error("load_skill filePath must be a string", 0),
         };
         match coordinator.skills().load_file(&name, file_path).await {
-            Ok(skill) => text(format!("{SKILL_INSTRUCTIONS_HEADER}\n\n{}", skill.body)),
+            Ok(skill) => {
+                if let Some(link) = context.run_link {
+                    if let Err(error) = coordinator
+                        .skills()
+                        .record_use(
+                            &skill.slug,
+                            &skill.approved_hash,
+                            ProposedBy {
+                                agent_id: agent.id,
+                                session_id: link.session_id,
+                                run_id: link.run_id,
+                            },
+                        )
+                        .await
+                    {
+                        tracing::warn!(reason = %error.message(), "skill use observation could not be saved");
+                    }
+                }
+                text(format!(
+                    "{SKILL_INSTRUCTIONS_HEADER}\n\nSkill version (SHA-256): {}\n\n{}",
+                    skill.approved_hash, skill.body
+                ))
+            }
             Err(message) => TaskResult::error(message, 0),
         }
     })
@@ -84,11 +106,30 @@ pub(super) fn propose_skill(
         else {
             return TaskResult::error(SKILLS_UNAVAILABLE, 0);
         };
+        let mut files = match supporting_files(&call) {
+            Ok(files) => files,
+            Err(error) => return TaskResult::error(error, 0),
+        };
+        let mut expected_base = None;
+        let mut slug = text_arg(&call, "slug").map(str::to_string);
+        // Omission preserves a freshly read approved package, pinned to its base.
+        // An explicit [] requests removal for the owner's ordinary review.
+        if !call.args.contains_key("files") {
+            match coordinator
+                .skills()
+                .supporting_files_for_proposal(name, slug.as_deref())
+                .await
+            {
+                Ok((normalized_slug, base, preserved)) => {
+                    slug = Some(normalized_slug);
+                    expected_base = Some(base);
+                    files = preserved;
+                }
+                Err(error) => return TaskResult::error(error.message(), 0),
+            }
+        }
         let proposal = Proposal {
-            files: match supporting_files(&call) {
-                Ok(files) => files,
-                Err(error) => return TaskResult::error(error, 0),
-            },
+            files,
             by: ProposedBy {
                 agent_id: agent.id.clone(),
                 session_id: link.session_id,
@@ -97,11 +138,15 @@ pub(super) fn propose_skill(
             name: name.to_string(),
             description: description.to_string(),
             body: body.to_string(),
-            slug: text_arg(&call, "slug").map(str::to_string),
+            slug,
         };
         // Autonomy spec 2026-10-19: in Free the skill is approved at once
         // (marked `autonomy:free`, logged for the owner's undo).
-        match coordinator.skills().propose_from_agent(proposal).await {
+        match coordinator
+            .skills()
+            .propose_from_agent_with_base(proposal, expected_base)
+            .await
+        {
             Ok(ProposeOutcome::Drafted(draft)) => text(proposed_reply(&draft)),
             Ok(ProposeOutcome::Activated { approved, action }) => {
                 text(activated_reply(&approved, action))

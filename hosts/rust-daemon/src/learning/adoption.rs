@@ -182,7 +182,11 @@ impl LearningService {
             timestamp,
         );
         // A lesson edits instructions; preserve every reviewed supporting file.
-        draft.files = bytes.map(|package| package.files).unwrap_or_default();
+        draft.files = input
+            .skill
+            .files
+            .clone()
+            .unwrap_or_else(|| bytes.map(|package| package.files).unwrap_or_default());
         draft.learning_source = Some(LearningSkillSource {
             agent_id: agent_id.into(),
             review_id: review.id.clone(),
@@ -243,6 +247,13 @@ fn checked_content(input: &LearningSkillDraftRequest) -> Result<SkillFile, ApiEr
     let description =
         validate_description(&input.skill.description).map_err(ApiError::bad_request)?;
     validate_body(&input.skill.body).map_err(ApiError::bad_request)?;
+    if let Some(files) = &input.skill.files {
+        anima_core::skill_packages::validate_skill_package(
+            compose_skill_file(&name, &description, &input.skill.body).as_bytes(),
+            files,
+        )
+        .map_err(ApiError::bad_request)?;
+    }
     Ok(SkillFile {
         name,
         description,
@@ -300,6 +311,11 @@ fn same_handoff(
     file: &SkillFile,
 ) -> bool {
     draft.slug == input.skill.slug
+        && input
+            .skill
+            .files
+            .as_ref()
+            .is_none_or(|files| files == &draft.files)
         && draft.base_hash == input.skill.expected_hash
         && compose_skill_file(&draft.name, &draft.description, &draft.body)
             == compose_skill_file(&file.name, &file.description, &file.body)

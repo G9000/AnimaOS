@@ -20,7 +20,13 @@ impl AgentRunCoordinator {
     /// Adds the skills index and a `/skill` message's instructions to this
     /// run's isolated runtime (spec §8.3). Neither ever fails the run: a
     /// skill that cannot be loaded is logged and noted for the model.
-    pub(super) async fn apply_skills(&self, runtime: &mut AgentRuntime, content: &Content) {
+    pub(super) async fn apply_skills(
+        &self,
+        runtime: &mut AgentRuntime,
+        content: &Content,
+        run_id: &str,
+        session_id: &str,
+    ) {
         if let Some(guidance) = anima_core::learn::learn_guidance(&content.text) {
             runtime.register_provider(Arc::new(SkillContextProvider::learn(guidance.into())));
         }
@@ -31,10 +37,30 @@ impl AgentRunCoordinator {
                 runtime.register_provider(Arc::new(SkillContextProvider::index(text)));
             }
         }
+        if runtime.config().allows_tool("propose_skill")
+            && anima_core::learn::learn_guidance(&content.text).is_none()
+        {
+            runtime.register_provider(Arc::new(SkillContextProvider::learn(
+                anima_core::learn::skill_authoring_guidance().into(),
+            )));
+        }
         if let Some(slug) = requested_skill(content) {
             // By exact slug, reread and rehashed now: the route's check at
             // acceptance is advisory.
             let loaded = skills.load_slug(&slug).await;
+            if let Ok(skill) = &loaded {
+                let by = crate::skills::ProposedBy {
+                    agent_id: runtime.id().to_owned(),
+                    session_id: session_id.into(),
+                    run_id: run_id.into(),
+                };
+                if let Err(error) = skills
+                    .record_use(&skill.slug, &skill.approved_hash, by)
+                    .await
+                {
+                    warn!(reason=%error.message(), "explicit skill use observation could not be saved");
+                }
+            }
             if let Err(problem) = &loaded {
                 warn!(skill = %slug, problem = %problem, "a skill message's skill could not be loaded");
             }

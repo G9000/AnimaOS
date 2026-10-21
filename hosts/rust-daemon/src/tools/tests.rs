@@ -416,12 +416,28 @@ fn registry_defines_every_registered_tool_schema() {
     let registry = ToolRegistry::new();
     let expectations = [
         ("clarify", &["questions"][..], &[][..]),
-        ("create_workflow", &["title", "requestKey", "steps"][..], &[][..]),
+        (
+            "create_workflow",
+            &["title", "requestKey", "steps"][..],
+            &[][..],
+        ),
         ("list_workflows", &[][..], &[][..]),
         ("list_workflow_templates", &[][..], &[][..]),
-        ("save_workflow_template", &["slug", "revision", "title", "parameters", "steps"][..], &[][..]),
-        ("run_workflow_template", &["slug", "revision", "requestKey", "inputs"][..], &[][..]),
-        ("read_tool_result", &["artifact_id"][..], &["offset", "limit"][..]),
+        (
+            "save_workflow_template",
+            &["slug", "revision", "title", "parameters", "steps"][..],
+            &[][..],
+        ),
+        (
+            "run_workflow_template",
+            &["slug", "revision", "requestKey", "inputs"][..],
+            &[][..],
+        ),
+        (
+            "read_tool_result",
+            &["artifact_id"][..],
+            &["offset", "limit"][..],
+        ),
         ("execute_code", &["code"][..], &["reset"][..]),
         ("list_workspace_agents", &[][..], &[][..]),
         ("delegate_to_agent", &["agent_id", "task"][..], &[][..]),

@@ -509,11 +509,19 @@ impl AgentRunCoordinator {
         })
     }
 
-    pub(crate) async fn tool_result_read_workspace(&self, agent_id: &str) -> Option<std::path::PathBuf> {
+    pub(crate) async fn tool_result_read_workspace(
+        &self,
+        agent_id: &str,
+    ) -> Option<std::path::PathBuf> {
         let state = self.state.read().await;
         let agent = state.get_agent(agent_id)?;
-        if !agent.state.config.allows_tool("read_tool_result") { return None; }
-        state.workspace.as_ref().map(|workspace| workspace.root_path.clone())
+        if !agent.state.config.allows_tool("read_tool_result") {
+            return None;
+        }
+        state
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.root_path.clone())
     }
 
     pub(crate) async fn peer_allows_tool(&self, source_id: &str, tool: &str) -> bool {
@@ -2062,7 +2070,13 @@ impl AgentRunCoordinator {
                     ))
         });
         if is_workflow_job {
-            tools.retain(|tool| !is_coordination_tool(&tool.name) && !matches!(tool.name.as_str(), "create_workflow" | "save_workflow_template" | "run_workflow_template"));
+            tools.retain(|tool| {
+                !is_coordination_tool(&tool.name)
+                    && !matches!(
+                        tool.name.as_str(),
+                        "create_workflow" | "save_workflow_template" | "run_workflow_template"
+                    )
+            });
         }
         if is_helper_completion {
             tools.retain(|tool| {
@@ -2155,7 +2169,8 @@ impl AgentRunCoordinator {
             runtime.register_evaluator(Arc::new(review.clone()));
         }
         // Spec §8.3: the skills index and a `/skill` message's instructions.
-        self.apply_skills(&mut runtime, &content).await;
+        self.apply_skills(&mut runtime, &content, &run_id, &session_id)
+            .await;
         runtime.set_run_id(run_id.clone());
         runtime.set_run_observer(live_run.observer());
         runtime.set_run_control(live_run.control());
@@ -2357,6 +2372,7 @@ impl AgentRunCoordinator {
             finished,
             counted_turn,
             previous_automation_events,
+            previous_skills,
             memory,
             memory_embeddings,
             memory_store,
@@ -2446,6 +2462,10 @@ impl AgentRunCoordinator {
                 .get_agent(&agent_id)
                 .expect("a committed agent stays registered");
             let finished = guard.runs.get(&run_id).cloned();
+            let previous_skills = guard.skills.clone();
+            if let Some(run) = &finished {
+                crate::skills::experience::settle_registry_run(&mut guard.skills, run);
+            }
             // An owner chat turn counts toward the next conversation review.
             // The count is saved with this commit and taken back without it.
             let counted_turn = finished
@@ -2476,6 +2496,7 @@ impl AgentRunCoordinator {
                 finished,
                 counted_turn,
                 previous_automation_events,
+                previous_skills,
                 guard.memory_handle(),
                 guard.memory_embeddings_handle(),
                 guard.memory_store_config(),
@@ -2489,6 +2510,7 @@ impl AgentRunCoordinator {
         if let Err(error) = persist_request.save().await {
             let mut guard = self.state.write().await;
             guard.automation_events = previous_automation_events;
+            guard.skills = previous_skills;
             if let Some(counted) = counted_turn {
                 guard.learning.uncount_turn(counted);
             }

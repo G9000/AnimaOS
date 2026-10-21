@@ -487,6 +487,7 @@ fn daemon_runtime(state: SharedDaemonState, config: &DaemonConfig) -> io::Result
     let run_limiter = Arc::new(Semaphore::new(config.max_concurrent_runs));
     let agent_runs = AgentRunCoordinator::new(Arc::clone(&state), Arc::clone(&run_limiter))
         .with_max_runs_per_agent(config.max_runs_per_agent);
+    agent_runs.learning().recover_skill_work();
     let agent_runs = coordinator_with_mcp_credentials(
         &state,
         agent_runs,

@@ -113,6 +113,10 @@ pub(crate) struct LearningFailure {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LearningProposal {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) skill_candidate: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) skill_error: Option<String>,
     pub(crate) id: String,
     pub(crate) observation: String,
     pub(crate) suggestion: String,
@@ -515,6 +519,14 @@ impl LearningRegistry {
             let mut proposal_ids = HashSet::new();
             for proposal in &record.proposals {
                 if proposal.id.is_empty()
+                    || proposal
+                        .skill_candidate
+                        .as_ref()
+                        .is_some_and(|value| !super::refinement::valid_candidate(value))
+                    || proposal
+                        .skill_error
+                        .as_ref()
+                        .is_some_and(|text| text.len() > 512 || !valid_advice_text(text))
                     || proposal.skill_draft_id.as_ref().is_some_and(|id| {
                         !id.starts_with(crate::skills::DRAFT_ID_PREFIX)
                             || id.len() > 100
@@ -743,6 +755,9 @@ pub(crate) struct LearningSkillDraftRequest {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct LearningSkillContent {
+    #[serde(default)]
+    #[schema(value_type = Option<Vec<serde_json::Value>>)]
+    pub(crate) files: Option<Vec<crate::skills::SkillSupportingFile>>,
     pub(crate) slug: String,
     pub(crate) name: String,
     pub(crate) description: String,

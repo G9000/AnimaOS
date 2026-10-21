@@ -1,0 +1,6 @@
+id,kind,amount_cents
+f1,refund,1250
+f2,sale,3100
+f3,sale,9900
+f4,refund,775
+f5,sale,4000

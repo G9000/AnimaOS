@@ -156,6 +156,8 @@ fn m38_snapshot_validation_rejects_duplicate_attempts_unknown_anchors_and_hidden
         skill_draft_id: None,
         memory_id: None,
         core_edit: None,
+        skill_candidate: None,
+        skill_error: None,
     });
     assert!(LearningRegistry::validate(&snapshot).is_err());
     snapshot.reviews[0].proposals[0].anchors = vec!["reply".into()];
@@ -744,6 +746,8 @@ fn pending_lesson() -> LearningProposal {
         skill_draft_id: None,
         memory_id: None,
         core_edit: None,
+        skill_candidate: None,
+        skill_error: None,
     }
 }
 
@@ -858,5 +862,17 @@ fn a_rolled_back_turn_takes_back_only_itself() {
     assert_eq!(
         registry.conversation_turns("owner"),
         vec!["run-b".to_string()]
+    );
+}
+
+#[test]
+fn skill_learning_review_accepts_an_anchored_targeted_skill_patch() {
+    let response = response(
+        r#"{"proposals":[{"observation":"The procedure omitted checking the saved result.","suggestion":"Read back the output before reporting success.","anchors":["input"],"skill":{"slug":"notes","expected_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","patches":[{"old_text":"Write the file.","new_text":"Write the file, then read it back."}]}}]}"#,
+    );
+    let proposals = super::service::parse_proposals(&response, &["input".into()], false);
+    assert!(
+        proposals.is_ok(),
+        "a bounded skill patch must survive the reviewer parser"
     );
 }

@@ -5,6 +5,7 @@
 
 pub(crate) mod disk;
 pub(crate) mod drafts;
+pub(crate) mod experience;
 pub(crate) mod file;
 pub(crate) mod ledger;
 pub(crate) mod package;
@@ -322,6 +323,9 @@ impl SkillStatus {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SkillRecord {
+    /// Observations are independent of approved package content and survive edits.
+    #[serde(default)]
+    pub(crate) experiences: Vec<anima_core::skill_learning::SkillExperience>,
     pub(crate) slug: String,
     /// The approved front matter's, never a changed file's.
     pub(crate) name: String,
@@ -339,6 +343,7 @@ impl SkillRecord {
     /// Content the owner just approved: enabled and active.
     pub(crate) fn approved(slug: &str, file: &SkillFile, hash: String, now_ms: u64) -> Self {
         Self {
+            experiences: Vec::new(),
             slug: slug.to_string(),
             name: file.name.clone(),
             description: file.description.clone(),

@@ -107,6 +107,49 @@ pub(super) async fn list_skills(State(state): State<AppState>, request: Request)
     }
 }
 
+#[utoipa::path(get, path = "/api/skills/{slug}/learning", tag = "skills",
+    params(("slug" = String, Path)),
+    responses((status = 200, description = "Bounded per-version observations and non-mutating maintenance suggestions", body = serde_json::Value), (status = 403, description = "Local owner required", body = ErrorBody)))]
+pub(super) async fn get_skill_learning(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, true) {
+        return response;
+    }
+    match state.agent_runs.skills().learning_report(&slug).await {
+        Ok(report) => answer(StatusCode::OK, &report),
+        Err(error) => skill_error(error),
+    }
+}
+
+#[utoipa::path(post, path = "/api/skills/{slug}/feedback", tag = "skills",
+    params(("slug" = String, Path)), request_body = crate::skills::experience::SkillFeedback,
+    responses((status = 200, description = "Owner feedback attached to an exact observed skill use", body = SkillEnvelope), (status = 403, description = "Local owner required", body = ErrorBody), (status = 409, description = "No matching completed observation", body = ErrorBody)))]
+pub(super) async fn post_skill_feedback(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, false) {
+        return response;
+    }
+    let input: crate::skills::experience::SkillFeedback = match skill_body(&state, request).await {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    match state.agent_runs.skills().skill_feedback(&slug, input).await {
+        Ok(record) => answer(
+            StatusCode::OK,
+            &SkillEnvelope {
+                skill: SkillResponse::from(&record),
+            },
+        ),
+        Err(error) => skill_error(error),
+    }
+}
+
 #[utoipa::path(get, path = "/api/skills/{slug}", tag = "skills",
     params(("slug" = String, Path)),
     responses(
