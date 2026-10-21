@@ -42,13 +42,15 @@ export interface AutomationsPageProps {
   onShowInChat: ShowInChat;
 }
 
-const CHIP_LABELS: Record<Exclude<DestinationChip['kind'], 'discord'>, string> =
-  {
-    main: 'Main chat',
-    telegram: 'Telegram',
-    note: '+ note in main chat',
-    connector: 'Connected channel',
-  };
+const CHIP_LABELS: Record<
+  Exclude<DestinationChip['kind'], 'discord'>,
+  string
+> = {
+  main: 'Main chat',
+  telegram: 'Telegram',
+  note: '+ note in main chat',
+  connector: 'Connected channel',
+};
 
 function chipLabel(chip: DestinationChip): string {
   return chip.kind === 'discord'
@@ -326,7 +328,9 @@ export function AutomationsPage({
         aria-labelledby="automations-heading"
       >
         <div className="automations-header">
-          <h2 id="automations-heading">Automations</h2>
+          <h2 id="automations-heading" className="sr-only">
+            Automations
+          </h2>
           <button
             type="button"
             className="studio-tool-button"
@@ -344,11 +348,6 @@ export function AutomationsPage({
             Add heartbeat
           </button>
         </div>
-        <p className="automations-group-note">
-          Things your companion does on a schedule, without being asked. Each
-          one leaves a card or a note in the main chat; where else it goes is
-          shown on its row.
-        </p>
         {editing && (
           <AutomationEditor
             key={editing.automation?.id ?? 'new'}

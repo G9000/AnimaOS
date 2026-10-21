@@ -5358,3 +5358,197 @@ details.settings-item > :not(summary) {
 .work-toolbar input.field {
   padding-block: 0;
 }
+
+/* ── Automations ── */
+
+.settings-window .automations-page {
+  padding: 28px 32px 32px;
+  gap: 28px;
+}
+
+.settings-window .automations-header {
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.settings-window .automations-header .studio-tool-button {
+  height: 30px;
+  min-height: 0;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.automations-group-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+.automations-group-note {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.5);
+}
+
+.settings-window .automations-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-window .automations-list {
+  gap: 0;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+  list-style: none;
+}
+
+.settings-window .automations-list > li + li {
+  border-top: 1px solid rgb(236 230 218 / 0.1);
+}
+
+.settings-window .automation-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 2px 20px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.settings-window .automation-row > * {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.settings-window .automation-row-header {
+  grid-column: 1;
+  grid-row: 1;
+  gap: 8px;
+}
+
+.settings-window .automation-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-window .automation-schedule {
+  grid-column: 1;
+  grid-row: 2;
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.5);
+}
+
+.settings-window .automation-meta {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  max-width: 240px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-align: right;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.45);
+}
+
+.settings-window .automation-actions {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+
+.settings-window .automation-actions .studio-tool-button {
+  height: 28px;
+  min-height: 0;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.settings-window .automation-note,
+.settings-window .automation-prompt {
+  grid-row: auto;
+}
+
+.settings-window .automation-prompt {
+  max-height: 2.8em;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  overflow: hidden;
+}
+
+.settings-window .automation-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-window .automation-chip,
+.settings-window .automation-badge {
+  padding: 1px 8px;
+  border: 1px solid rgb(236 230 218 / 0.14);
+  border-radius: 999px;
+  background: none;
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.6);
+}
+
+.settings-window .automation-chip[data-kind='telegram'],
+.settings-window .automation-chip[data-kind='discord'] {
+  border-color: rgb(233 77 171 / 0.4);
+  color: var(--color-ink);
+}
+
+.settings-window .automation-editor,
+.settings-window .automation-history {
+  padding: 16px 18px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+  background: none;
+}
+
+.settings-window .automation-field {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgb(236 230 218 / 0.55);
+}
+
+.settings-window .automation-field input,
+.settings-window .automation-field textarea,
+.settings-window .automation-field select {
+  border: 1px solid rgb(236 230 218 / 0.14);
+  border-radius: 6px;
+  background: rgb(236 230 218 / 0.025);
+  font-size: 13px;
+  color: var(--color-ink);
+}
+
+.settings-window .automation-fieldset {
+  border: 0;
+  padding: 0;
+}
+
+.settings-window .automation-fieldset legend {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+.settings-window .automation-editor .studio-tool-button,
+.settings-window .automation-history .studio-tool-button {
+  height: 30px;
+  min-height: 0;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 12px;
+}
