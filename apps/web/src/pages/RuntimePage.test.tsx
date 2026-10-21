@@ -46,6 +46,15 @@ describe('RuntimePage', () => {
     expect(screen.queryByRole('button')).toBeNull();
   });
 
+  it('shows the server as running and lists the real anima commands', () => {
+    render(<RuntimePage agent={agent} workspace={configured} online />);
+    expect(screen.getByText('Running')).toBeVisible();
+    const cli = screen.getByRole('heading', { name: 'Command line' });
+    expect(cli).toBeVisible();
+    expect(screen.getByText('anima logs --follow')).toBeVisible();
+    expect(screen.getByText('anima update')).toBeVisible();
+  });
+
   it('shows the configured workspace read-only', () => {
     render(<RuntimePage agent={agent} workspace={configured} online />);
     expect(screen.getByRole('heading', { name: 'Workspace' })).toBeVisible();

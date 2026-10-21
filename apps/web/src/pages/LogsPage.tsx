@@ -1,12 +1,7 @@
-import {
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ChangeEvent,
-  type FormEvent,
-} from 'react';
-import { LOG_LEVELS, type LogLevel } from '@animaOS-SWARM/sdk';
+import { useLayoutEffect, useRef, useState, type FormEvent } from 'react';
+import type { LogLevel } from '@animaOS-SWARM/sdk';
 
+import { PauseIcon, PlayIcon } from '../components/icons';
 import { LogLine } from '../components/system/LogLine';
 import { useLogs } from '../hooks/useLogs';
 import { COMPANION_UNREACHABLE } from '../lib/approvals';
@@ -18,7 +13,6 @@ import {
   LOGS_PAUSED_NOTE,
   LOGS_RECONNECTING,
   LOGS_TOO_OLD,
-  LOG_LEVEL_LABELS,
   logsAsText,
 } from '../lib/logs';
 
@@ -28,6 +22,14 @@ export interface LogsPageProps {
 
 type LevelChoice = LogLevel | 'all';
 type CopyState = 'copied' | 'failed' | null;
+
+/** "At least" levels the owner can pick: everything, warnings and worse, or
+ *  errors only. */
+const LEVEL_CHOICES: readonly { id: LevelChoice; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'warn', label: 'Warnings' },
+  { id: 'error', label: 'Errors' },
+];
 
 /** The log region counts as "at the bottom" within this many pixels. */
 const STICK_SLACK_PX = 24;
@@ -79,10 +81,11 @@ export function LogsPage({ online }: LogsPageProps) {
     );
   }
 
-  const chooseLevel = (event: ChangeEvent<HTMLSelectElement>) => {
-    setLevel(event.target.value as LevelChoice);
+  const chooseLevel = (choice: LevelChoice) => {
+    setLevel(choice);
     setCopy(null);
   };
+  const errorCount = view.lines.filter((line) => line.level === 'error').length;
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
     setQuery(draft.trim());
@@ -107,37 +110,64 @@ export function LogsPage({ online }: LogsPageProps) {
   return (
     <div className="system-page system-logs-page">
       <div className="system-header">
-        <h2>What the daemon is saying</h2>
+        <h2 className="sr-only">What the daemon is saying</h2>
       </div>
-      <div className="system-toolbar">
-        <label className="system-field">
-          <span>Show at least</span>
-          <select value={level} onChange={chooseLevel}>
-            <option value="all">All</option>
-            {LOG_LEVELS.map((option) => (
-              <option key={option} value={option}>
-                {LOG_LEVEL_LABELS[option]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <form className="system-search" role="search" onSubmit={submitSearch}>
+      <div className="system-toolbar logs-toolbar">
+        <div
+          className="logs-levels"
+          role="radiogroup"
+          aria-label="Show at least"
+        >
+          {LEVEL_CHOICES.map((choice) => (
+            <button
+              key={choice.id}
+              type="button"
+              role="radio"
+              aria-checked={level === choice.id}
+              onClick={() => chooseLevel(choice.id)}
+            >
+              {choice.label}{' '}
+              {choice.id === 'error' && errorCount > 0 && (
+                <span className="logs-levels-count">· {errorCount}</span>
+              )}
+            </button>
+          ))}
+        </div>
+        <form
+          className="system-search logs-search"
+          role="search"
+          onSubmit={submitSearch}
+        >
           <input
             type="search"
             aria-label="Search logs"
+            placeholder="Filter lines"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
           />
-          <button type="submit" className="studio-tool-button">
+          <button type="submit" className="sr-only">
             Search
           </button>
         </form>
+        <span
+          className="logs-live"
+          data-state={paused ? 'paused' : view.connected ? 'live' : 'wait'}
+        >
+          {paused
+            ? 'Paused'
+            : view.connected
+              ? 'Live'
+              : view.retrying
+                ? 'Reconnecting'
+                : 'Connecting'}
+        </span>
         <button
           type="button"
-          className="studio-tool-button"
+          className="logs-action"
           aria-pressed={paused}
           onClick={() => setPaused((value) => !value)}
         >
+          {paused ? <PlayIcon size={12} /> : <PauseIcon size={12} />}
           {paused ? 'Resume' : 'Pause'}
         </button>
         {paused && view.held > 0 && (
@@ -145,7 +175,7 @@ export function LogsPage({ online }: LogsPageProps) {
         )}
         <button
           type="button"
-          className="studio-tool-button"
+          className="logs-action"
           disabled={view.lines.length === 0}
           onClick={() => void copyLines()}
         >

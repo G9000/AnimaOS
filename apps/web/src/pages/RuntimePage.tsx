@@ -1,3 +1,4 @@
+import { GlobeIcon, HardDriveIcon, TerminalIcon } from '../components/icons';
 import type { DaemonWorkspaceState } from '../lib/daemon-api';
 import type { AgentDetail } from '../lib/types';
 import { formatTokens } from '../components/ui-bits';
@@ -6,6 +7,7 @@ interface RuntimeOption {
   id: string;
   title: string;
   detail: string;
+  icon: typeof HardDriveIcon;
   current?: boolean;
 }
 
@@ -17,6 +19,7 @@ const HOME_OPTIONS: readonly RuntimeOption[] = [
     title: 'This computer',
     detail:
       'Memory, skills, and connections live in the workspace folder here. Telegram and Discord answer while this computer is awake.',
+    icon: HardDriveIcon,
     current: true,
   },
   {
@@ -24,6 +27,7 @@ const HOME_OPTIONS: readonly RuntimeOption[] = [
     title: 'A server you own',
     detail:
       'Move the companion to a VPS so chats, check-ins, and connections keep running when this computer sleeps. This app then connects to it.',
+    icon: GlobeIcon,
   },
 ];
 
@@ -33,6 +37,7 @@ const COMMAND_OPTIONS: readonly RuntimeOption[] = [
     title: 'In the workspace folder',
     detail:
       'Commands and file edits run on the same machine, inside the workspace folder, within the access set in Permissions.',
+    icon: TerminalIcon,
     current: true,
   },
   {
@@ -40,38 +45,59 @@ const COMMAND_OPTIONS: readonly RuntimeOption[] = [
     title: 'In an isolated sandbox',
     detail:
       'Run commands in a disposable container, so nothing outside it can change.',
+    icon: HardDriveIcon,
   },
   {
     id: 'remote',
     title: 'On another machine over SSH',
     detail: 'Run commands on a build box or server you choose.',
+    icon: GlobeIcon,
   },
+];
+
+/** The `anima` commands the installed program really has. */
+const COMMANDS: readonly { command: string; note: string }[] = [
+  { command: 'anima', note: 'open the app' },
+  { command: 'anima status', note: 'see whether it is running' },
+  { command: 'anima logs --follow', note: 'watch the server log' },
+  { command: 'anima update', note: 'install the latest release' },
 ];
 
 function OptionList({
   label,
   options,
+  running,
 }: {
   label: string;
   options: readonly RuntimeOption[];
+  running?: boolean;
 }) {
   return (
     <ul className="runtime-options" aria-label={label}>
-      {options.map((option) => (
-        <li
-          key={option.id}
-          className={`runtime-option${option.current ? ' is-current' : ''}`}
-          aria-current={option.current ? 'true' : undefined}
-        >
-          <div>
+      {options.map((option) => {
+        const Icon = option.icon;
+        return (
+          <li
+            key={option.id}
+            className={`runtime-option${option.current ? ' is-current' : ''}`}
+            aria-current={option.current ? 'true' : undefined}
+          >
+            <span className="runtime-option-head">
+              <Icon size={14} />
+              <span className="runtime-option-state">
+                {option.current ? 'Current' : 'Not available yet'}
+              </span>
+            </span>
             <strong>{option.title}</strong>
             <p>{option.detail}</p>
-          </div>
-          <span className="runtime-option-state">
-            {option.current ? 'In use' : 'Not available yet'}
-          </span>
-        </li>
-      ))}
+            {option.current && running !== undefined && (
+              <span className="runtime-option-running" data-running={running}>
+                {running ? 'Running' : 'Not reachable'}
+              </span>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -109,12 +135,28 @@ export function RuntimePage({
         <OptionList
           label={`Where ${agent.name} lives`}
           options={HOME_OPTIONS}
+          running={online}
         />
       </section>
 
       <section className="runtime-section" aria-labelledby="runtime-commands">
         <h2 id="runtime-commands">Where commands run</h2>
+        <p className="runtime-help">
+          Shell commands and code from {agent.name} and its helpers run here.
+        </p>
         <OptionList label="Where commands run" options={COMMAND_OPTIONS} />
+      </section>
+
+      <section className="runtime-section" aria-labelledby="runtime-cli">
+        <h2 id="runtime-cli">Command line</h2>
+        <pre className="runtime-cli">
+          {COMMANDS.map(({ command, note }) => (
+            <code key={command}>
+              <span className="runtime-cli-prompt">$</span> {command}
+              <span className="runtime-cli-note"> # {note}</span>
+            </code>
+          ))}
+        </pre>
       </section>
 
       {configured && (

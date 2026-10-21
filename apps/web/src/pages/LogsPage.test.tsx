@@ -77,11 +77,13 @@ describe('LogsPage', () => {
       paused: false,
     });
 
-    await user.selectOptions(
-      screen.getByRole('combobox', { name: 'Show at least' }),
-      'warn',
-    );
+    const levels = screen.getByRole('radiogroup', { name: 'Show at least' });
+    expect(within(levels).getByRole('radio', { name: 'All' })).toBeChecked();
+    await user.click(within(levels).getByRole('radio', { name: 'Warnings' }));
     expect(lastOptions()?.level).toBe('warn');
+    expect(
+      within(levels).getByRole('radio', { name: 'Warnings' }),
+    ).toBeChecked();
 
     await user.type(
       screen.getByRole('searchbox', { name: 'Search logs' }),
@@ -148,11 +150,25 @@ describe('LogsPage', () => {
     expect(screen.queryByText(LOGS_COPIED)).not.toBeInTheDocument();
 
     // The message stays until the filter changes.
-    await user.selectOptions(
-      screen.getByRole('combobox', { name: 'Show at least' }),
-      'error',
-    );
+    await user.click(screen.getByRole('radio', { name: /^Errors/ }));
     expect(screen.queryByText(LOGS_COPY_FAILED)).not.toBeInTheDocument();
+  });
+
+  it('counts the errors on the Errors choice and shows the stream state', async () => {
+    const user = userEvent.setup();
+    vi.mocked(useLogs).mockReturnValue(
+      view({
+        lines: [
+          logLineFixture(1, { level: 'error' }),
+          logLineFixture(2, { level: 'info' }),
+        ],
+      }),
+    );
+    render(<LogsPage online />);
+    expect(screen.getByRole('radio', { name: 'Errors · 1' })).toBeVisible();
+    expect(screen.getByText('Live')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Pause' }));
+    expect(screen.getByText('Paused')).toBeVisible();
   });
 
   it('shows hidden characters as markers', () => {

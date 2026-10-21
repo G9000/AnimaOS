@@ -5737,3 +5737,307 @@ details.settings-item > :not(summary) {
   border-radius: 6px;
   font-size: 12px;
 }
+
+/* ── Runtime and Logs, as the frames draw them ── */
+
+.settings-window .runtime-page {
+  max-width: none;
+  gap: 32px;
+  padding: 20px 0 0;
+}
+
+.settings-window .runtime-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  border: 0;
+}
+
+.settings-window .runtime-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 14px 16px 16px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.settings-window .runtime-option + .runtime-option {
+  border-top: 1px solid rgb(236 230 218 / 0.12);
+}
+
+.settings-window .runtime-option strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-window .runtime-option p {
+  margin: 0;
+  max-width: none;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.settings-window .runtime-option.is-current {
+  border-color: rgb(233 77 171 / 0.55);
+  background: rgb(233 77 171 / 0.07);
+  box-shadow: none;
+}
+
+.runtime-option-head {
+  display: flex;
+  align-self: stretch;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  color: var(--color-ink-3);
+}
+
+.runtime-option.is-current .runtime-option-head {
+  color: var(--color-accent);
+}
+
+.settings-window .runtime-option-state {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: rgb(236 230 218 / 0.4);
+}
+
+.settings-window .runtime-option.is-current .runtime-option-state {
+  color: var(--color-accent);
+}
+
+.runtime-option-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: rgb(236 230 218 / 0.6);
+}
+
+.runtime-option-running::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgb(236 230 218 / 0.3);
+}
+
+.runtime-option-running[data-running='true']::before {
+  background: #62d393;
+}
+
+.runtime-cli {
+  margin: 0;
+  padding: 16px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+  background: rgb(0 0 0 / 0.35);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.9;
+  overflow-x: auto;
+}
+
+.runtime-cli code {
+  display: block;
+  font: inherit;
+  white-space: pre;
+  color: rgb(236 230 218 / 0.85);
+}
+
+.runtime-cli-prompt {
+  color: rgb(236 230 218 / 0.45);
+}
+
+.runtime-cli-note {
+  color: rgb(236 230 218 / 0.38);
+}
+
+.settings-window .runtime-facts {
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+}
+
+.settings-window .runtime-fact + .runtime-fact {
+  border-top: 1px solid rgb(236 230 218 / 0.08);
+}
+
+/* Logs */
+
+.settings-window .system-logs-page {
+  padding: 20px 0 0;
+  gap: 14px;
+}
+
+.logs-toolbar {
+  flex-wrap: nowrap;
+  gap: 10px;
+}
+
+.logs-levels {
+  display: inline-flex;
+  flex: none;
+  padding: 3px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+}
+
+.logs-levels button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: rgb(236 230 218 / 0.5);
+  cursor: pointer;
+}
+
+.logs-levels button[aria-checked='true'] {
+  background: rgb(233 77 171 / 0.16);
+  color: var(--color-ink);
+}
+
+.logs-levels-count {
+  color: var(--color-accent);
+}
+
+.settings-window .logs-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-window .logs-search input {
+  height: 36px;
+  min-width: 0;
+  padding: 0 12px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.logs-live {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.7);
+}
+
+.logs-live::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgb(236 230 218 / 0.3);
+}
+
+.logs-live[data-state='live']::before {
+  background: #62d393;
+}
+
+.logs-live[data-state='paused']::before {
+  background: #f2b44b;
+}
+
+.logs-action {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.75);
+  cursor: pointer;
+}
+
+.logs-action:hover:not(:disabled) {
+  background: rgb(236 230 218 / 0.06);
+}
+
+.logs-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.settings-window .system-log {
+  padding: 12px 6px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+  background: rgb(0 0 0 / 0.35);
+  font-size: 11px;
+}
+
+.settings-window .system-log-row {
+  display: grid;
+  grid-template-columns: 88px 72px 96px minmax(0, 1fr);
+  gap: 0 12px;
+  padding: 5px 12px;
+}
+
+.settings-window .system-log-time {
+  color: rgb(236 230 218 / 0.4);
+}
+
+.settings-window .system-log-level {
+  min-width: 0;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #62d393;
+}
+
+.settings-window .system-log-level-warn {
+  color: #f2b44b;
+}
+
+.settings-window .system-log-level-error {
+  color: #ff6b5b;
+}
+
+.settings-window .system-log-level-debug,
+.settings-window .system-log-level-trace {
+  color: rgb(236 230 218 / 0.4);
+}
+
+.settings-window .system-log-target {
+  color: var(--color-accent);
+  overflow-wrap: anywhere;
+}
+
+.settings-window .system-log-message {
+  color: rgb(236 230 218 / 0.7);
+}
+
+@media (max-width: 640px) {
+  .logs-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .settings-window .system-log-row {
+    grid-template-columns: 88px 1fr;
+  }
+
+  .settings-window .system-log-message {
+    grid-column: 1 / -1;
+  }
+}
