@@ -1,0 +1,87 @@
+---
+import Layout from '../layouts/Layout.astro';
+import slide1 from '../slides/01-plans-then-does-it.html?raw';
+import slide2 from '../slides/02-a-swarm-on-one-job.html?raw';
+import slide3 from '../slides/03-runs-itself.html?raw';
+import slide4 from '../slides/04-gets-better-as-it-works.html?raw';
+import slide5 from '../slides/05-drives-your-coding-agents.html?raw';
+import slide6 from '../slides/06-survives-restarts.html?raw';
+import slide7 from '../slides/07-lives-in-your-chat-apps.html?raw';
+---
+<Layout>
+
+<a class="corner l" href="#top">anima</a>
+<a class="corner r gh" href="https://github.com/G9000/animaOS-SWARM" target="_blank" rel="noopener" aria-label="anima on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.06-.49.06-.49.8.06 1.23.83 1.23.83.71 1.23 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.65-.89-3.65-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.66 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0Z"/></svg></a>
+
+<main id="top">
+  <section class="hero" aria-label="Introduction">
+    <div class="stage" id="stage" aria-hidden="true">
+      <div class="win strip pinkf drag"><canvas id="det2"></canvas><i class="h tl"></i><i class="h tr"></i><i class="h bl"></i><i class="h br"></i><span class="cap">EYES · 4.6×</span></div>
+      <div class="win think drag"><canvas id="face"></canvas><i class="h tl"></i><i class="h tr"></i><i class="h bl"></i><i class="h br"></i></div>
+      <div class="win det pinkf drag"><canvas id="det1"></canvas><i class="h tl"></i><i class="h tr"></i><i class="h bl"></i><i class="h br"></i></div>
+      <div class="win tiny drag"><canvas id="det4"></canvas><i class="h tl"></i><i class="h tr"></i><i class="h bl"></i><i class="h br"></i></div>
+      <div class="preview drag"><span class="mono">Preview</span><div class="msg"><span class="av"></span><div><b>anima</b><p id="pv"></p></div></div></div>
+      <span class="hint mono">drag us around</span>
+    </div>
+    <div class="pitch">
+      <h1>I’m at your <em>command.</em></h1>
+      <div class="ctas">
+        <a class="btn bone" href="#waitlist">Get early access <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.3 3.3l4.7 4.7-4.7 4.7-1.1-1.1 2.8-2.8H2V7.2h9l-2.8-2.8z"/></svg></a>
+        <a class="btn" href="https://github.com/G9000/animaOS-SWARM" target="_blank" rel="noopener">Self-host today</a>
+      </div>
+    </div>
+  </section>
+
+  <div class="marquee" aria-hidden="true"><div class="track">
+    <span>plans before it acts</span><span>runs for days</span><span>asks only when it matters</span><span>helpers for the slow parts</span><span>receipts and undo</span><span>remembers how</span>
+    <span>plans before it acts</span><span>runs for days</span><span>asks only when it matters</span><span>helpers for the slow parts</span><span>receipts and undo</span><span>remembers how</span>
+  </div></div>
+
+  <section id="demo" aria-labelledby="demo-h">
+    <div class="wrap"><div class="head rv"><span class="mono pink">See it work</span><h2 id="demo-h">What it does <em>while you’re away.</em></h2></div></div>
+    <div class="cr" id="cr" tabindex="0" aria-roledescription="carousel" aria-label="anima, working">
+      <div class="cr-view" id="cr-view">
+<Fragment set:html={slide1} />
+<Fragment set:html={slide2} />
+<Fragment set:html={slide3} />
+<Fragment set:html={slide4} />
+<Fragment set:html={slide5} />
+<Fragment set:html={slide6} />
+<Fragment set:html={slide7} />
+      </div>
+      <div class="wrap">
+        <div class="cr-cap"><h3 id="cr-title"></h3><p id="cr-text"></p></div>
+        <div class="cr-ctrl">
+          <button class="cr-arrow" type="button" id="cr-prev" aria-label="Previous"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.4 2.6L5 8l5.4 5.4 1.1-1.1L7.2 8l4.3-4.3z"/></svg></button>
+          <div class="cr-tabs" role="tablist" id="cr-tabs" aria-label="Choose a screen"></div>
+          <span class="mono" id="cr-count"></span>
+          <button class="cr-arrow" type="button" id="cr-next" aria-label="Next"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.6 2.6L11 8l-5.4 5.4-1.1-1.1L8.8 8 4.5 3.7z"/></svg></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="waitlist" aria-labelledby="w-h" style="padding-top:0;padding-bottom:clamp(100px,12vw,180px)">
+    <div class="wrap wl-grid">
+      <div class="obcard rv" id="wl-slot">
+        <form id="wl-form" novalidate style="display:flex;flex-direction:column;gap:18px">
+          <div class="top"><div class="steps"><span class="on">WAITLIST</span></div><span class="mono" style="font-size:9px">EARLY ACCESS</span></div>
+          <h2 id="w-h">Join the waitlist.</h2>
+          <p class="desc">One email when the desktop app is ready for you.</p>
+          <div class="inline"><label for="wl-email" class="sr">Your email</label><input id="wl-email" type="email" autocomplete="email" placeholder="you@domain.com" required><button class="btn bone" type="submit" id="wl-submit">Join <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.3 3.3l4.7 4.7-4.7 4.7-1.1-1.1 2.8-2.8H2V7.2h9l-2.8-2.8z"/></svg></button></div>
+          <div class="hp" aria-hidden="true"><label for="wl-website">Website</label><input id="wl-website" name="website" type="text" tabindex="-1" autocomplete="off"></div>
+          <p class="status" id="wl-status" role="status" aria-live="polite"></p>
+        </form>
+      </div>
+      <div class="stage2" aria-hidden="true">
+        <div class="win big"><canvas id="orb2"></canvas><i class="h tl"></i><i class="h tr"></i><i class="h bl"></i><i class="h br"></i></div>
+        <div class="win det2 pinkf"><canvas id="det3"></canvas><i class="h tl"></i><i class="h tr"></i><i class="h bl"></i><i class="h br"></i></div>
+        <div class="preview"><span class="mono">Preview</span><div class="msg"><span class="av"></span><div><b>anima</b><p>I’ll message you the moment your invite is ready. Then hand me something long.</p></div></div></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+
+
+</Layout>

@@ -15,6 +15,12 @@
       "runtimeExecutable": "bun",
       "runtimeArgs": ["x", "nx", "run", "@animaOS-SWARM/web:serve"],
       "port": 4200
+    },
+    {
+      "name": "landing",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["x", "astro", "dev", "--root", "apps/landing", "--port", "4330"],
+      "port": 4330
     }
   ]
 }
