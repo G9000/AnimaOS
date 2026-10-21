@@ -148,28 +148,14 @@ export function WorkspaceFiles({ online }: { online: boolean }) {
     ) ?? [];
 
   return (
-    <section
-      className="mx-auto h-full w-full max-w-7xl space-y-6 overflow-y-auto p-4 pb-28 sm:p-7 md:pb-7"
-      aria-labelledby="workspace-files-heading"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-widest text-ink-3">
-            Workspace
-          </p>
-          <h1
-            id="workspace-files-heading"
-            className="mt-2 font-display text-3xl font-semibold text-ink"
-          >
-            Files
-          </h1>
-          <p className="mt-2 text-sm text-ink-2">
-            Browse your workspace and preview text files.
-          </p>
-        </div>
+    <section className="files-page" aria-labelledby="workspace-files-heading">
+      <div className="files-head">
+        <h1 id="workspace-files-heading" className="sr-only">
+          Files
+        </h1>
         <button
           type="button"
-          className="rounded-xl border border-line px-4 py-2 text-sm text-ink disabled:opacity-50"
+          className="settings-item-action"
           disabled={!online || loading}
           onClick={() => setRefresh((value) => value + 1)}
         >
@@ -185,11 +171,10 @@ export function WorkspaceFiles({ online }: { online: boolean }) {
         </p>
       ) : (
         <>
-          <label className="block text-sm text-ink-2">
-            Search files
+          <label className="files-search">
+            <span className="sr-only">Search files</span>
             <input
               type="search"
-              className="field mt-2 w-full"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search by name or path"
@@ -215,27 +200,23 @@ export function WorkspaceFiles({ online }: { online: boolean }) {
               here.
             </p>
           )}
-          <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(240px,1fr)_minmax(0,2fr)]">
-            <div className="min-w-0 overflow-hidden rounded-2xl border border-line">
-              <div className="border-b border-line px-4 py-3 text-xs text-ink-3">
+          <div className="files-split">
+            <div className="settings-list files-list">
+              <div className="files-count">
                 {files.length} {files.length === 1 ? 'file' : 'files'} shown
               </div>
-              <div className="max-h-[55vh] overflow-y-auto">
+              <div className="files-scroll">
                 {files.map((file) => (
                   <button
                     key={file.path}
                     type="button"
                     aria-pressed={selected === file.path}
                     onClick={() => void read(file.path)}
-                    className={`block w-full border-b border-line p-4 text-left last:border-0 ${selected === file.path ? 'bg-accent/10' : 'hover:bg-white/[0.04]'}`}
+                    className="files-row"
                   >
-                    <span className="block break-words text-sm font-medium text-ink">
-                      {file.name}
-                    </span>
-                    <span className="mt-1 block break-all text-xs text-ink-3">
-                      {file.path}
-                    </span>
-                    <span className="mt-2 block text-xs text-ink-3">
+                    <span className="files-row-name">{file.name}</span>
+                    <span className="files-row-path">{file.path}</span>
+                    <span className="files-row-meta">
                       {sizeLabel(file.sizeBytes)} ·{' '}
                       {file.modifiedAtMs === null
                         ? 'Date unavailable'
@@ -252,15 +233,10 @@ export function WorkspaceFiles({ online }: { online: boolean }) {
                 )}
               </div>
             </div>
-            <section
-              aria-label="File preview"
-              className="min-w-0 rounded-2xl border border-line"
-            >
-              <div className="flex flex-wrap justify-between gap-2 border-b border-line p-4">
-                <h2 className="break-all text-sm font-medium text-ink">
-                  {selected ?? 'File preview'}
-                </h2>
-                <span className="text-xs text-ink-3">Read only</span>
+            <section aria-label="File preview" className="files-preview">
+              <div className="files-preview-head">
+                <h2>{selected ?? 'File preview'}</h2>
+                <span>Read only</span>
               </div>
               {selected && selectedSupportsDownload && (
                 <div className="space-y-2 p-4">
@@ -323,7 +299,7 @@ export function WorkspaceFiles({ online }: { online: boolean }) {
                         : 'Open the file locally to see its full contents.'}
                     </p>
                   )}
-                  <pre className="max-h-[65vh] overflow-auto whitespace-pre-wrap break-words p-5 font-mono text-xs leading-relaxed text-ink-2">
+                  <pre className="files-preview-body">
                     {preview.content || '(Empty file)'}
                   </pre>
                 </>

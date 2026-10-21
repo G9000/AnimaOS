@@ -213,18 +213,9 @@ export function WorkspaceHub({
   );
 
   return (
-    <section
-      className="h-full min-w-0 overflow-y-auto p-5 pb-28 sm:p-8 md:pb-8"
-      aria-label="Work"
-    >
-      <div className="mx-auto max-w-4xl space-y-7">
-        <header className="space-y-2">
-          <h2 className="text-2xl font-semibold">Work</h2>
-          <p className="text-sm leading-relaxed text-ink-3">
-            Your team’s notes, tasks, schedules, runs, and workflows in one
-            place.
-          </p>
-        </header>
+    <section className="work-page" aria-label="Work">
+      <div className="work-stack">
+        <h2 className="sr-only">Work</h2>
         {managed && section !== 'Notes' ? (
           <div className="space-y-6">
             <button
@@ -264,60 +255,67 @@ export function WorkspaceHub({
             <div
               role="tablist"
               aria-label="Work categories"
-              className="flex flex-wrap gap-2 border-b border-line pb-3"
+              className="work-tabs"
             >
-              {(['Notes', 'Tasks', 'Schedules', 'Runs', 'Workflows', 'Goals'] as const).map(
-                (item) => (
-                  <button
-                    key={item}
-                    id={`hub-tab-${item}`}
-                    type="button"
-                    role="tab"
-                    tabIndex={section === item ? 0 : -1}
-                    onKeyDown={(event) => {
-                      const tabs: Section[] = [
-                        'Notes',
-                        'Tasks',
-                        'Schedules',
-                        'Runs',
-                        'Workflows',
-                        'Goals',
-                      ];
-                      const offset =
-                        event.key === 'ArrowRight'
-                          ? 1
-                          : event.key === 'ArrowLeft'
-                            ? -1
-                            : 0;
-                      const next =
-                        event.key === 'Home'
-                          ? tabs[0]
-                          : event.key === 'End'
-                            ? tabs[tabs.length - 1]
-                            : offset
-                              ? tabs[
-                                  (tabs.indexOf(item) + offset + tabs.length) %
-                                    tabs.length
-                                ]
-                              : null;
-                      if (!next) return;
-                      event.preventDefault();
-                      setSection(next);
-                      setQuery('');
-                      document.getElementById(`hub-tab-${next}`)?.focus();
-                    }}
-                    aria-selected={section === item}
-                    aria-controls="hub-panel"
-                    className={`rounded-xl px-4 py-3 text-sm ${section === item ? 'bg-accent/15 font-semibold text-accent' : 'text-ink-3 hover:bg-accent/5'}`}
-                    onClick={() => {
-                      setSection(item);
-                      setQuery('');
-                    }}
-                  >
-                    {item}
-                  </button>
-                ),
-              )}
+              {(
+                [
+                  'Notes',
+                  'Tasks',
+                  'Schedules',
+                  'Runs',
+                  'Workflows',
+                  'Goals',
+                ] as const
+              ).map((item) => (
+                <button
+                  key={item}
+                  id={`hub-tab-${item}`}
+                  type="button"
+                  role="tab"
+                  tabIndex={section === item ? 0 : -1}
+                  onKeyDown={(event) => {
+                    const tabs: Section[] = [
+                      'Notes',
+                      'Tasks',
+                      'Schedules',
+                      'Runs',
+                      'Workflows',
+                      'Goals',
+                    ];
+                    const offset =
+                      event.key === 'ArrowRight'
+                        ? 1
+                        : event.key === 'ArrowLeft'
+                          ? -1
+                          : 0;
+                    const next =
+                      event.key === 'Home'
+                        ? tabs[0]
+                        : event.key === 'End'
+                          ? tabs[tabs.length - 1]
+                          : offset
+                            ? tabs[
+                                (tabs.indexOf(item) + offset + tabs.length) %
+                                  tabs.length
+                              ]
+                            : null;
+                    if (!next) return;
+                    event.preventDefault();
+                    setSection(next);
+                    setQuery('');
+                    document.getElementById(`hub-tab-${next}`)?.focus();
+                  }}
+                  aria-selected={section === item}
+                  aria-controls="hub-panel"
+                  className="work-tab"
+                  onClick={() => {
+                    setSection(item);
+                    setQuery('');
+                  }}
+                >
+                  {item}
+                </button>
+              ))}
             </div>
             <div
               role="tabpanel"
@@ -363,7 +361,7 @@ export function WorkspaceHub({
                         ? 'Each agent keeps their own task list. Choose an agent below to add tasks or update progress.'
                         : 'Schedules run through the daemon, even when this page is closed. Choose an agent to create, pause, or remove a schedule.'}
                   </p>
-                  <div className="flex flex-wrap items-end gap-4">
+                  <div className="work-toolbar">
                     <label className="min-w-40 flex-1 space-y-2 text-sm">
                       Agent
                       <select
@@ -461,7 +459,7 @@ export function WorkspaceHub({
                               : `No ${section.toLowerCase()} yet${selectedId ? ' for this agent' : ''}.`}
                         </p>
                       )}
-                      <div className="space-y-4">
+                      <div className="settings-list work-list">
                         {entries?.map((entry) => {
                           const agent = agents.find(
                             (item) => item.id === entry.agentId,
@@ -469,9 +467,20 @@ export function WorkspaceHub({
                           return (
                             <article
                               key={`${entry.agentId}:${entry.id}`}
-                              className="space-y-4 rounded-2xl border border-line bg-surface p-5 sm:p-6"
+                              className="work-row"
+                              data-section={section}
                             >
-                              <div className="flex flex-wrap items-center gap-3">
+                              {section === 'Tasks' && (
+                                <span
+                                  className="work-status"
+                                  data-status={entry.detail
+                                    .toLowerCase()
+                                    .replace(' ', '-')}
+                                >
+                                  {entry.detail}
+                                </span>
+                              )}
+                              <div className="work-row-who">
                                 <AgentAvatar
                                   id={entry.agentId}
                                   name={agent?.name ?? entry.agentId}
@@ -489,15 +498,16 @@ export function WorkspaceHub({
                                   </button>
                                 )}
                               </div>
-                              <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-                                {entry.content}
-                              </p>
-                              <p className="break-words text-xs leading-relaxed text-ink-3">
-                                {entry.detail}
-                                {section === 'Notes' && entry.timestamp != null
-                                  ? ` · ${new Date(entry.timestamp).toLocaleString()}`
-                                  : ''}
-                              </p>
+                              <p className="work-row-text">{entry.content}</p>
+                              {section !== 'Tasks' && (
+                                <p className="work-row-detail">
+                                  {entry.detail}
+                                  {section === 'Notes' &&
+                                  entry.timestamp != null
+                                    ? ` · ${new Date(entry.timestamp).toLocaleString()}`
+                                    : ''}
+                                </p>
+                              )}
                             </article>
                           );
                         })}
