@@ -53,6 +53,7 @@ export function UsageChart({
           <g key={day.key}>
             <rect
               className="usage-bar"
+              data-peak={day === busiest || undefined}
               x={x}
               y={TOP + PLOT - height}
               width={barWidth}

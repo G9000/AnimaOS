@@ -5552,3 +5552,188 @@ details.settings-item > :not(summary) {
   border-radius: 6px;
   font-size: 12px;
 }
+
+/* ── Usage and Diagnostics ── */
+
+.settings-window .usage-page,
+.settings-window .system-page {
+  padding: 28px 32px 32px;
+  gap: 24px;
+}
+
+.settings-window .usage-header,
+.settings-window .system-header {
+  justify-content: flex-end;
+}
+
+.settings-window .usage-header .studio-tool-button,
+.settings-window .system-header .studio-tool-button {
+  height: 30px;
+  min-height: 0;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.settings-window .usage-ranges button[aria-pressed='true'] {
+  border-color: rgb(233 77 171 / 0.5);
+  background: rgb(233 77 171 / 0.12);
+}
+
+.settings-window .usage-chart-section h3,
+.settings-window .usage-table-section h3 {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.settings-window .usage-cards,
+.settings-window .system-cards {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.settings-window .usage-card,
+.settings-window .system-card {
+  gap: 6px;
+  padding: 16px 18px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+  background: none;
+}
+
+.settings-window .usage-card-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.45);
+}
+
+.settings-window .usage-card-value {
+  font-family: var(--font-serif);
+  font-size: 28px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--color-ink);
+}
+
+.settings-window .usage-card small {
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.5);
+}
+
+.settings-window .usage-chart {
+  box-sizing: border-box;
+  padding: 16px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+}
+
+.settings-window .usage-bar {
+  fill: rgb(233 77 171 / 0.35);
+}
+
+.settings-window .usage-bar[data-peak] {
+  fill: var(--color-accent);
+}
+
+.settings-window .usage-bar:hover {
+  fill: rgb(233 77 171 / 0.7);
+}
+
+.settings-window .usage-table-section {
+  gap: 10px;
+}
+
+.settings-window .usage-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+}
+
+.settings-window .usage-table th,
+.settings-window .usage-table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid rgb(236 230 218 / 0.1);
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.6);
+}
+
+.settings-window .usage-table tr:last-child > * {
+  border-bottom: 0;
+}
+
+.settings-window .usage-table thead th {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.4);
+}
+
+.settings-window .usage-table tbody th:first-child {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-window .system-card-head {
+  justify-content: space-between;
+}
+
+.settings-window .system-card h3 {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.45);
+}
+
+.settings-window .system-card-state {
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.5);
+}
+
+.settings-window .system-card-summary {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+.settings-window .system-card-details {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgb(236 230 218 / 0.5);
+}
+
+.settings-window .system-card-warn {
+  border-color: rgb(242 180 75 / 0.5);
+}
+
+.settings-window .system-card-warn .system-card-summary {
+  color: #f2b44b;
+}
+
+.settings-window .system-card-bad {
+  border-color: rgb(255 107 91 / 0.5);
+}
+
+.settings-window .system-card-bad .system-card-summary {
+  color: #ff6b5b;
+}
+
+.settings-window .system-card .studio-tool-button {
+  align-self: flex-start;
+  height: 28px;
+  min-height: 0;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}

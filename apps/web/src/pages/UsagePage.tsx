@@ -114,7 +114,7 @@ export function UsagePage({
   return (
     <div className="usage-page">
       <div className="usage-header">
-        <h2>What your companion costs</h2>
+        <h2 className="sr-only">What your companion costs</h2>
         <div className="usage-ranges" role="group" aria-label="Range">
           {USAGE_RANGES_DAYS.map((option) => (
             <button

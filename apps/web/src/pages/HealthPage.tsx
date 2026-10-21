@@ -39,7 +39,7 @@ export function HealthPage({ online, epoch }: HealthPageProps) {
     <div className="system-page">
       <AnimaAppCard />
       <div className="system-header">
-        <h2>How the daemon is doing</h2>
+        <h2 className="sr-only">How the daemon is doing</h2>
         <button
           type="button"
           className="studio-tool-button"
