@@ -93,18 +93,7 @@ section{padding-block:clamp(88px,11vw,150px)}
 .cr-cap{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;margin-top:26px;min-height:76px}
 .cr-cap h3{font-size:clamp(22px,2vw,28px)}
 .cr-cap p{color:var(--bone-2);font-size:15px;max-width:520px}
-.cr-tabs{display:flex;gap:6px;align-items:center}
-.cr-tab{position:relative;width:30px;height:16px;padding:0;border:0;background:transparent;cursor:pointer}
-.cr-tab::before{content:"";position:absolute;left:0;right:0;top:7px;height:2px;background:#ECE6DA26;transition:background .3s}
-.cr-tab:hover::before{background:#ECE6DA59}
-.cr-tab i{position:absolute;left:0;top:7px;height:2px;width:0;background:var(--pink)}
-.cr-tab.on{width:48px}
-.cr-tab:focus-visible{outline:2px solid var(--pink);outline-offset:2px}
-#cr-count{min-width:54px;text-align:center;white-space:nowrap}
-@media (max-width:600px){.cr-arrow{display:none}.cr-tab{width:18px}.cr-tab.on{width:30px}.cr-ctrl{gap:10px}.slide-clock{display:none}#cr-count{min-width:0}}
-.cr-arrow{width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--line-2);background:transparent;border-radius:2px;cursor:pointer;transition:border-color .2s}
-.cr-arrow:hover{border-color:var(--pink)}
-.cr-arrow svg{width:13px;height:13px;fill:var(--bone)}
+@media (max-width:600px){.slide-clock{display:none}}
 .ss [data-pencil-name="Scroll"]{min-height:0 !important;overflow:hidden !important}
 .ss [data-pencil-name="Composer Area"]{flex-shrink:0 !important}
 .cr-slide:not(.active){filter:grayscale(.4) brightness(.8)}

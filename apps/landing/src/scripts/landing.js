@@ -303,8 +303,8 @@ GL.add(document.getElementById('det3'), { image: true, reveal: 1, pixel: 3, ener
     { title: 'Survives restarts', text: 'Long jobs save every step. If the daemon restarts, it picks up where it left off.', ms: 8000 },
     { title: 'Lives in your chat apps', text: 'Message it from Telegram or Discord. Groups get their own thread; your main chat stays private.', ms: 8000 },
   ];
-  const view = document.getElementById('cr-view'), tabs = document.getElementById('cr-tabs');
-  const titleEl = document.getElementById('cr-title'), textEl = document.getElementById('cr-text'), countEl = document.getElementById('cr-count');
+  const view = document.getElementById('cr-view');
+  const titleEl = document.getElementById('cr-title'), textEl = document.getElementById('cr-text');
   const slides = [...view.querySelectorAll('.cr-slide')], n = slides.length;
   let i = 0, timer = null, paused = false, inView = false, dx = 0, W = 0, GAP = 28;
   const prevOff = new Array(n).fill(0);
@@ -329,9 +329,6 @@ GL.add(document.getElementById('det3'), { image: true, reveal: 1, pixel: 3, ener
     });
   }
 
-  SLIDES.forEach((d, k) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'cr-tab'; b.setAttribute('role', 'tab'); b.setAttribute('aria-label', d.title); b.title = d.title; b.append(document.createElement('i')); b.addEventListener('click', () => go(k)); tabs.append(b); });
-  const tabEls = [...tabs.children];
-
   const reveal = (s) => {
     if (REDUCE) return;
     const parts = [...s.querySelectorAll('[data-pencil-name="Scroll"] > *, [data-pencil-name$="Sheet"] > *, [data-pencil-name$="Dialog"] > *, [data-pencil-name$="Banner"]')];
@@ -341,31 +338,26 @@ GL.add(document.getElementById('det3'), { image: true, reveal: 1, pixel: 3, ener
   function go(k) {
     i = ((k % n) + n) % n; dx = 0;
     layout(true);
-    tabEls.forEach((t, j) => { t.classList.toggle('on', j === i); t.setAttribute('aria-selected', j === i ? 'true' : 'false'); const bar = t.querySelector('i'); bar.style.transition = 'none'; bar.style.width = '0%'; });
-    titleEl.textContent = SLIDES[i].title; textEl.textContent = SLIDES[i].text; countEl.textContent = `${String(i + 1).padStart(2, '0')} / ${String(n).padStart(2, '0')}`;
+    titleEl.textContent = SLIDES[i].title; textEl.textContent = SLIDES[i].text;
     if (SLIDES[i].script) window.__demoPlay && window.__demoPlay(); else { window.__demoStop && window.__demoStop(); reveal(slides[i]); }
     schedule();
   }
   function schedule() {
     clearTimeout(timer);
-    const bar = tabEls[i].querySelector('i');
     if (REDUCE || paused || !inView) return;
     const ms = SLIDES[i].ms;
-    requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.transition = `width ${ms}ms linear`; bar.style.width = '100%'; }));
     timer = setTimeout(() => go(i + 1), ms);
   }
-  const pause = () => { paused = true; clearTimeout(timer); const bar = tabEls[i].querySelector('i'); const w = getComputedStyle(bar).width; bar.style.transition = 'none'; bar.style.width = w; };
+  const pause = () => { paused = true; clearTimeout(timer); };
   const resume = () => { if (!paused) return; paused = false; schedule(); };
   view.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') pause(); });
   view.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') resume(); });
-  document.getElementById('cr-prev').addEventListener('click', () => go(i - 1));
-  document.getElementById('cr-next').addEventListener('click', () => go(i + 1));
   document.getElementById('cr').addEventListener('keydown', (e) => { if (e.key === 'ArrowRight') go(i + 1); if (e.key === 'ArrowLeft') go(i - 1); });
   slides.forEach((s, k) => s.addEventListener('click', () => { if (Math.abs(dxEnd) < 6 && offOf(k) !== 0) go(k); }));
 
   // swipe
   let sx = null, pid = null, dxEnd = 0;
-  view.addEventListener('pointerdown', (e) => { if (e.target.closest('.cr-arrow')) return; sx = e.clientX; dx = 0; dxEnd = 0; pid = e.pointerId; view.classList.add('grab'); });
+  view.addEventListener('pointerdown', (e) => { sx = e.clientX; dx = 0; dxEnd = 0; pid = e.pointerId; view.classList.add('grab'); });
   view.addEventListener('pointermove', (e) => { if (sx == null || e.pointerId !== pid) return; dx = e.clientX - sx; if (Math.abs(dx) > 4) { try { view.setPointerCapture(pid); } catch {} } layout(false); });
   const up = (e) => { if (sx == null || e.pointerId !== pid) return; sx = null; view.classList.remove('grab'); dxEnd = dx; const d = dx; dx = 0; if (Math.abs(d) > W * .12) go(i + (d < 0 ? 1 : -1)); else layout(true); setTimeout(() => { dxEnd = 0; }, 0); };
   view.addEventListener('pointerup', up); view.addEventListener('pointercancel', up);
