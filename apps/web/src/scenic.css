@@ -2773,9 +2773,9 @@ button.scenic-thread[aria-expanded='true'] {
 }
 
 .scenic-shell .studio-tool-button.needs-you-button.has-items {
-  border-color: rgb(242 180 75 / 0.55);
-  background: rgb(242 180 75 / 0.14);
-  color: #ffe3b0;
+  border-color: rgb(233 77 171 / 0.6);
+  background: rgb(233 77 171 / 0.12);
+  color: var(--color-ink);
   font-weight: 500;
 }
 
@@ -2783,7 +2783,7 @@ button.scenic-thread[aria-expanded='true'] {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #f2b44b;
+  background: var(--color-accent);
 }
 
 .needs-you-popover {
@@ -4046,4 +4046,89 @@ button.scenic-thread[aria-expanded='true'] {
 }
 .settings-model-more > :not(summary) {
   margin-bottom: 12px;
+}
+
+/* ── Command menu ──
+ * Grouped under mono headings; the chosen row is the live item. */
+
+.studio-command-backdrop {
+  background: rgb(11 11 10 / 0.7);
+}
+
+.studio-command-backdrop .studio-command-menu {
+  border: 1px solid rgb(236 230 218 / 0.14);
+  border-radius: 2px;
+  background: rgb(20 20 19 / 0.96);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.6);
+  backdrop-filter: blur(24px);
+}
+
+.studio-command-backdrop .studio-command-search {
+  border-bottom: 1px solid rgb(236 230 218 / 0.1);
+}
+
+.studio-command-backdrop .studio-command-results {
+  padding: 4px 8px 8px;
+}
+
+.studio-command-heading {
+  padding: 12px 10px 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.35);
+}
+
+.studio-command-backdrop .studio-command-option {
+  gap: 12px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 2px;
+}
+
+.studio-command-backdrop .studio-command-option[aria-selected='true'] {
+  background: rgb(233 77 171 / 0.14);
+  border: 0;
+}
+
+.studio-command-backdrop .studio-command-symbol {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: 14px;
+  color: rgb(236 230 218 / 0.5);
+}
+
+.studio-command-backdrop
+  .studio-command-option[aria-selected='true']
+  .studio-command-symbol {
+  color: var(--color-accent);
+}
+
+.studio-command-backdrop .studio-command-option strong {
+  font-size: 14px;
+}
+
+.studio-command-backdrop .studio-command-group {
+  display: none;
+}
+
+.studio-command-enter {
+  margin-left: auto;
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.4);
+  visibility: hidden;
+}
+
+.studio-command-option[aria-selected='true'] .studio-command-enter {
+  visibility: visible;
+}
+
+.studio-command-backdrop .studio-command-menu footer {
+  border-top: 1px solid rgb(236 230 218 / 0.1);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }

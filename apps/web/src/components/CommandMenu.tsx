@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import type {
   SessionMessageSearchHit,
   SessionMessageSearchPage,
@@ -219,26 +219,35 @@ export function CommandMenu({
           aria-label={searchMessages ? 'Commands and messages' : 'Commands'}
         >
           {results.map((command, index) => (
-            <button
-              key={command.id}
-              type="button"
-              role="option"
-              tabIndex={-1}
-              aria-selected={selected === index}
-              id={`${id}-${index}`}
-              className="studio-command-option"
-              onMouseMove={() => setActive(index)}
-              onClick={() => choose(command)}
-            >
-              <span className="studio-command-symbol" aria-hidden>
-                {command.group === 'Navigate' ? '↗' : '✳'}
-              </span>
-              <span>
-                <strong>{command.title}</strong>
-                <small>{command.description}</small>
-              </span>
-              <span className="studio-command-group">{command.group}</span>
-            </button>
+            <Fragment key={command.id}>
+              {results[index - 1]?.group !== command.group && (
+                <div className="studio-command-heading" aria-hidden>
+                  {command.group === 'Navigate' ? 'Go to' : command.group}
+                </div>
+              )}
+              <button
+                type="button"
+                role="option"
+                tabIndex={-1}
+                aria-selected={selected === index}
+                id={`${id}-${index}`}
+                className="studio-command-option"
+                onMouseMove={() => setActive(index)}
+                onClick={() => choose(command)}
+              >
+                <span className="studio-command-symbol" aria-hidden>
+                  {command.group === 'Navigate' ? '↗' : '✳'}
+                </span>
+                <span>
+                  <strong>{command.title}</strong>
+                  <small>{command.description}</small>
+                </span>
+                <span className="studio-command-group">{command.group}</span>
+                <span className="studio-command-enter" aria-hidden>
+                  ↵
+                </span>
+              </button>
+            </Fragment>
           ))}
           {searchMessages && trimmedQuery && (
             <div role="group" aria-labelledby={`${id}-messages-heading`}>
@@ -320,7 +329,7 @@ export function CommandMenu({
           </div>
         )}
         <footer>
-          <span>↑ ↓ to explore · Enter to select</span>
+          <span>↑↓ move · ↵ run</span>
           <span>Prompts fill your draft. You decide when to send.</span>
         </footer>
       </div>

@@ -841,7 +841,7 @@ function InboxButton({
         {waiting ? (
           <>
             <i aria-hidden />
-            {inbox.count} need you
+            Needs you · {inbox.count}
           </>
         ) : (
           <InboxIcon size={15} />
