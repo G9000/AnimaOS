@@ -496,7 +496,27 @@ describe('WorkspaceShell', () => {
       within(nav)
         .getAllByRole('group')
         .map((group) => group.getAttribute('aria-label')),
-    ).toEqual(['Agent', 'Learning', 'Abilities', 'Activity', 'System']);
+    ).toEqual([
+      'Agent',
+      'Learning',
+      'Abilities',
+      'Activity',
+      'App · all agents',
+    ]);
+  });
+
+  it('says whose a page is under its title', () => {
+    const { unmount } = render(
+      <Shell initialRoute={{ kind: 'page', page: 'model' }} />,
+    );
+    expect(screen.getByText('only this agent')).toBeInTheDocument();
+    expect(
+      screen.getByText(/what to fall back on\. Each agent has its own\./),
+    ).toBeInTheDocument();
+    unmount();
+    render(<Shell initialRoute={{ kind: 'page', page: 'runtime' }} />);
+    expect(screen.getByText('All agents')).toBeInTheDocument();
+    expect(screen.queryByText('only this agent')).not.toBeInTheDocument();
   });
 
   it('opens the companion pages from the window', async () => {

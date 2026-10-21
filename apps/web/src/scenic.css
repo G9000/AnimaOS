@@ -3454,12 +3454,12 @@ button.scenic-thread[aria-expanded='true'] {
 }
 
 /* Profile follows Settings · Profile in design/design.pen. */
-.settings-window[data-page='profile'] .settings-window-head {
+.settings-window .settings-window-head {
   align-items: flex-start;
-  padding: 28px 40px 0;
+  padding: 28px 32px 0;
   border-bottom: 0;
 }
-.settings-window[data-page='profile'] .settings-window-head strong {
+.settings-window .settings-window-head strong {
   font-size: 24px;
   font-weight: 500;
   letter-spacing: -0.5px;
@@ -3473,7 +3473,7 @@ button.scenic-thread[aria-expanded='true'] {
 .settings-form.settings-profile {
   width: 100%;
   max-width: none;
-  padding: 28px 40px 32px;
+  padding: 28px 32px 32px;
 }
 .profile-identity {
   display: flex;
@@ -3644,7 +3644,7 @@ button.scenic-thread[aria-expanded='true'] {
   padding-inline: 40px;
 }
 @media (max-width: 900px) {
-  .settings-window[data-page='profile'] .settings-window-head {
+  .settings-window .settings-window-head {
     padding: 24px 24px 0;
   }
   .settings-form.settings-profile {
@@ -3843,7 +3843,7 @@ button.scenic-thread[aria-expanded='true'] {
   letter-spacing: -0.03em;
 }
 
-.settings-window[data-page='profile'] .settings-window-head strong {
+.settings-window .settings-window-head strong {
   font-size: 30px;
   letter-spacing: -0.03em;
 }
@@ -3851,12 +3851,12 @@ button.scenic-thread[aria-expanded='true'] {
 .settings-group-title,
 .runtime-section h2,
 .settings-advanced > summary {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 400;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: rgb(236 230 218 / 0.85);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-ink);
 }
 
 .settings-window-nav .studio-nav-item.is-row[aria-current='page'] {
@@ -3892,12 +3892,12 @@ button.scenic-thread[aria-expanded='true'] {
 
 .settings-window h2,
 .approvals-section h2 {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 400;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: rgb(236 230 218 / 0.85);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-ink);
 }
 
 /* The mode you have chosen is the live item. */
@@ -4131,4 +4131,35 @@ button.scenic-thread[aria-expanded='true'] {
   border-top: 1px solid rgb(236 230 218 / 0.1);
   letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+
+/* Whose a page is: the agent it changes, or every agent. */
+.settings-window-head .settings-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  margin-bottom: 14px;
+  padding: 0 10px;
+  border: 1px solid rgb(236 230 218 / 0.14);
+  border-radius: 12px;
+  background: rgb(236 230 218 / 0.04);
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.55);
+}
+
+.settings-window-head .settings-scope strong {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--color-ink);
+}
+
+.settings-window-head .settings-scope i {
+  font-style: normal;
+}
+
+.settings-window-head .settings-page-title {
+  display: block;
 }

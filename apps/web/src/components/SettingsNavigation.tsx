@@ -76,7 +76,7 @@ const DESTINATION_GROUPS: DestinationGroup[] = [
     ],
   },
   {
-    label: 'System',
+    label: 'App · all agents',
     items: [
       { page: 'runtime', label: 'Runtime', icon: <ServerIcon size={15} /> },
       { page: 'usage', label: 'Usage', icon: <ChartIcon size={15} /> },
@@ -88,6 +88,79 @@ const DESTINATION_GROUPS: DestinationGroup[] = [
 export const SETTINGS_DESTINATIONS = DESTINATION_GROUPS.flatMap(
   (group) => group.items,
 );
+
+/** Whose a page is, and what it is for, under its title. */
+export const SETTINGS_PAGE_META: Partial<
+  Record<
+    AvailablePage,
+    { scope: 'agent' | 'all'; description: (agent: string) => string }
+  >
+> = {
+  profile: {
+    scope: 'agent',
+    description: (agent) =>
+      `Who ${agent} is, what it thinks with, and how it sounds.`,
+  },
+  model: {
+    scope: 'agent',
+    description: (agent) =>
+      `What powers ${agent}'s thinking, and what to fall back on. Each agent has its own.`,
+  },
+  approvals: {
+    scope: 'agent',
+    description: (agent) =>
+      `What ${agent} can do on its own, and when it has to ask you first.`,
+  },
+  skills: {
+    scope: 'agent',
+    description: (agent) => `What ${agent} has learned to do.`,
+  },
+  memory: {
+    scope: 'agent',
+    description: (agent) =>
+      `What ${agent} remembers about you. Edit or forget anything.`,
+  },
+  capabilities: {
+    scope: 'agent',
+    description: (agent) =>
+      `Everything ${agent} can use: built-in tool groups, and tools from servers you connect.`,
+  },
+  connectors: {
+    scope: 'agent',
+    description: (agent) =>
+      `Services ${agent} can work with, and the chat apps it can reach you on. Set up per agent.`,
+  },
+  automations: {
+    scope: 'agent',
+    description: (agent) =>
+      `Things ${agent} does on a schedule, without being asked. Everything lands in the main chat.`,
+  },
+  work: {
+    scope: 'all',
+    description: (agent) => `Tasks ${agent} is tracking, across every agent.`,
+  },
+  files: {
+    scope: 'agent',
+    description: (agent) => `Everything in ${agent}'s workspace folder.`,
+  },
+  runtime: {
+    scope: 'all',
+    description: (agent) => `Where ${agent} lives, and where its commands run.`,
+  },
+  usage: {
+    scope: 'all',
+    description: (agent) =>
+      `What ${agent} costs, by day, by agent and by chat.`,
+  },
+  health: {
+    scope: 'all',
+    description: () => `How the daemon is doing, and what it's saying.`,
+  },
+  logs: {
+    scope: 'all',
+    description: () => `What the daemon is saying, live.`,
+  },
+};
 
 export function DestinationNavigation({
   page,

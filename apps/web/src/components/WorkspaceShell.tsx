@@ -14,6 +14,7 @@ import {
   SettingsSidebar,
   DestinationNavigation,
   SETTINGS_DESTINATIONS,
+  SETTINGS_PAGE_META,
 } from './SettingsNavigation';
 import { AgentSwitcher } from './AgentSwitcher';
 import { AgentsView } from './AgentsView';
@@ -32,6 +33,7 @@ import { sessionKey, shouldShowSession } from '../lib/session-groups';
 import {
   ChevronIcon,
   GearIcon,
+  GlobeIcon,
   HistoryIcon,
   InboxIcon,
   SearchIcon,
@@ -643,11 +645,32 @@ export function WorkspaceShell({
                   <div className="settings-window-content">
                     <div className="settings-window-head">
                       <div>
-                        <strong>{pageLabel}</strong>
-                        {page === 'profile' && (
+                        {page && SETTINGS_PAGE_META[page] && (
+                          <span
+                            className="settings-scope"
+                            data-scope={SETTINGS_PAGE_META[page]?.scope}
+                          >
+                            {SETTINGS_PAGE_META[page]?.scope === 'agent' ? (
+                              <>
+                                <strong>{mainAgent.name}</strong>
+                                <i aria-hidden>·</i>only this agent
+                              </>
+                            ) : (
+                              <>
+                                <GlobeIcon size={12} />
+                                All agents
+                              </>
+                            )}
+                          </span>
+                        )}
+                        <strong className="settings-page-title">
+                          {pageLabel}
+                        </strong>
+                        {page && SETTINGS_PAGE_META[page] && (
                           <p className="settings-profile-description">
-                            Who {mainAgent.name} is, what it thinks with, and
-                            how it sounds.
+                            {SETTINGS_PAGE_META[page]?.description(
+                              mainAgent.name,
+                            )}
                           </p>
                         )}
                       </div>
@@ -666,9 +689,7 @@ export function WorkspaceShell({
                         disabled={locked}
                         onClick={openConversation}
                       >
-                        <span className="scenic-hide-narrow">
-                          {page === 'profile' ? 'ESC' : 'Back to chat'}
-                        </span>
+                        <span className="scenic-hide-narrow">ESC</span>
                         <XIcon size={14} />
                       </button>
                     </div>
