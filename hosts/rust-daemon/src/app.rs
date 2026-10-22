@@ -227,7 +227,7 @@ pub async fn app_with_configured_persistence(config: DaemonConfig) -> io::Result
             "Memory maintenance recovery could not be persisted",
         )
     })?;
-    runtime.agent_runs.learning().recover_skill_work();
+    let learning = runtime.agent_runs.learning();
     state
         .write()
         .await
@@ -239,6 +239,7 @@ pub async fn app_with_configured_persistence(config: DaemonConfig) -> io::Result
     let scheduler = runtime.scheduler.clone();
     // Install synchronous services before any producer can contend for state.
     let router = router_with_runtime(state, config, runtime, false);
+    learning.recover_skill_work();
     jobs.start().await.map_err(|error| {
         io::Error::new(
             io::ErrorKind::Other,
@@ -408,7 +409,6 @@ async fn serve_with_state_and_voice(
             "Memory maintenance recovery could not be persisted",
         )
     })?;
-    agent_runs.learning().recover_skill_work();
     let mail = runtime.mail.clone();
     let jobs = runtime.jobs.clone();
     let history = runtime.history.clone();
@@ -423,6 +423,7 @@ async fn serve_with_state_and_voice(
     };
     // Router installation uses uncontended construction-time state. Restored
     // workers and the scanner may acquire it immediately after being started.
+    agent_runs.learning().recover_skill_work();
     jobs.start().await.map_err(|error| {
         io::Error::new(
             io::ErrorKind::Other,
@@ -1167,6 +1168,46 @@ mod tests {
             subscription.next().await,
             Some(LiveDelivery::Lagged(3))
         ));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn repeated_daemon_startup_serves_health_without_lock_panics() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        for _ in 0..32 {
+            let state = Arc::new(RwLock::new(DaemonState::new()));
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+            let server = tokio::spawn(serve_with_state(
+                listener,
+                state,
+                DaemonConfig::default(),
+                async move {
+                    let _ = stopped.await;
+                },
+            ));
+            let response = tokio::time::timeout(Duration::from_secs(5), async {
+                let mut stream = tokio::net::TcpStream::connect(address).await?;
+                stream
+                    .write_all(
+                        b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+                    )
+                    .await?;
+                let mut response = String::new();
+                stream.read_to_string(&mut response).await?;
+                Ok::<_, io::Error>(response)
+            })
+            .await;
+            let _ = stop.send(());
+            tokio::time::timeout(Duration::from_secs(5), server)
+                .await
+                .expect("daemon shuts down")
+                .expect("startup does not panic")
+                .expect("daemon serves successfully");
+            let response = response.expect("health responds").unwrap();
+            assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]
