@@ -63,11 +63,6 @@
     },
     "test": {
       "dependsOn": ["^build"]
-    },
-    "@nx/esbuild:esbuild": {
-      "cache": true,
-      "dependsOn": ["^build"],
-      "inputs": ["production", "^production"]
     }
   },
   "generators": {
