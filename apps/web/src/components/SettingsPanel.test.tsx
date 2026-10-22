@@ -8,7 +8,7 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChatGptClient, type ChatGptModelsSnapshot } from '@animaOS-SWARM/sdk';
+import { ChatGptClient, type ChatGptModelsSnapshot } from '@animaos/sdk';
 
 import {
   ACCESS_PROFILES,

@@ -480,7 +480,7 @@ Test exact routes/payloads, connector status mapping, message pagination, schedu
 
 - [ ] **Step 2: Run focused web tests and confirm RED**
 
-Run: `bun x nx run @animaOS-SWARM/web:test -- --run src/lib/daemon-api.test.ts src/hooks/useAgentIntegrations.test.tsx`
+Run: `bun x nx run @animaos/web:test -- --run src/lib/daemon-api.test.ts src/hooks/useAgentIntegrations.test.tsx`
 
 Expected: missing methods/modules fail compilation.
 
@@ -494,7 +494,7 @@ Load state per agent, fence overlapping mutations with generations, expose trans
 
 - [ ] **Step 5: Run focused tests**
 
-Run: `bun x nx run @animaOS-SWARM/web:test -- --run src/lib/daemon-api.test.ts src/lib/telegram.test.ts src/hooks/useAgentIntegrations.test.tsx`
+Run: `bun x nx run @animaos/web:test -- --run src/lib/daemon-api.test.ts src/lib/telegram.test.ts src/hooks/useAgentIntegrations.test.tsx`
 
 Expected: all focused tests pass.
 
@@ -529,7 +529,7 @@ Cover a Telegram workspace destination appearing only when a connector exists, p
 
 - [ ] **Step 3: Run focused tests and confirm RED**
 
-Run: `bun x nx run @animaOS-SWARM/web:test -- --run src/components/TelegramSettings.test.tsx src/components/TelegramThread.test.tsx src/components/WorkspaceShell.test.tsx src/ViewHarness.test.tsx`
+Run: `bun x nx run @animaos/web:test -- --run src/components/TelegramSettings.test.tsx src/components/TelegramThread.test.tsx src/components/WorkspaceShell.test.tsx src/ViewHarness.test.tsx`
 
 Expected: missing components and navigation fail.
 
@@ -547,7 +547,7 @@ Make changes only in this isolated worktree. Preserve current Neon Rose tokens, 
 
 - [ ] **Step 7: Run focused UI tests**
 
-Run: `bun x nx run @animaOS-SWARM/web:test -- --run src/components/TelegramSettings.test.tsx src/components/TelegramThread.test.tsx src/components/SettingsPanel.test.tsx src/components/WorkspaceShell.test.tsx src/ViewHarness.test.tsx`
+Run: `bun x nx run @animaos/web:test -- --run src/components/TelegramSettings.test.tsx src/components/TelegramThread.test.tsx src/components/SettingsPanel.test.tsx src/components/WorkspaceShell.test.tsx src/ViewHarness.test.tsx`
 
 Expected: all focused tests pass.
 
@@ -578,7 +578,7 @@ Test daemon-loaded schedules, create/delete, workspace versus Telegram target se
 
 - [ ] **Step 3: Run focused tests and confirm RED**
 
-Run: `bun x nx run @animaOS-SWARM/web:test -- --run src/lib/checkins.test.ts src/ViewHarness.test.tsx`
+Run: `bun x nx run @animaos/web:test -- --run src/lib/checkins.test.ts src/ViewHarness.test.tsx`
 
 Expected: current browser timer/storage behavior fails the new assertions.
 
@@ -592,7 +592,7 @@ Import every valid legacy record with a deterministic key. Remove `animaos.check
 
 - [ ] **Step 6: Run check-in and harness tests**
 
-Run: `bun x nx run @animaOS-SWARM/web:test -- --run src/lib/checkins.test.ts src/ViewHarness.test.tsx src/components/CheckinsView.test.tsx`
+Run: `bun x nx run @animaos/web:test -- --run src/lib/checkins.test.ts src/ViewHarness.test.tsx src/components/CheckinsView.test.tsx`
 
 Expected: schedule/migration tests pass.
 
@@ -665,11 +665,11 @@ Expected: exit 0. On a Windows daemon lock, use the AGENTS.md isolated validatio
 
 - [ ] **Step 3: Run web verification**
 
-Run: `bun x nx run @animaOS-SWARM/web:test --skipNxCache`
+Run: `bun x nx run @animaos/web:test --skipNxCache`
 
-Run: `bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache`
+Run: `bun x nx run @animaos/web:typecheck --skipNxCache`
 
-Run: `bun x nx run @animaOS-SWARM/web:build --skipNxCache`
+Run: `bun x nx run @animaos/web:build --skipNxCache`
 
 Expected: all exit 0.
 

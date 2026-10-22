@@ -5,14 +5,14 @@ description: Every SDK client, method, helper, constant and core type
 
 import { Aside } from '@astrojs/starlight/components';
 
-The SDK is one `DaemonClient` with typed sub-clients, plus shared types. It is a client for the [Rust daemon](https://github.com/G9000/animaOS-SWARM/tree/main/hosts/rust-daemon) over HTTP and SSE; the daemon's own route inventory and OpenAPI document (`GET /openapi.json`, browsable at `/docs`) are the contract behind it. Methods marked **owner** use owner routes and need `Authorization: Bearer <ANIMA_LOCAL_ADMIN_TOKEN>` from a script ([Authentication](/sdk/client/#authentication)).
+The SDK is one `DaemonClient` with typed sub-clients, plus shared types. It is a client for the [Rust daemon](https://github.com/G9000/animaos/tree/main/hosts/rust-daemon) over HTTP and SSE; the daemon's own route inventory and OpenAPI document (`GET /openapi.json`, browsable at `/docs`) are the contract behind it. Methods marked **owner** use owner routes and need `Authorization: Bearer <ANIMA_LOCAL_ADMIN_TOKEN>` from a script ([Authentication](/sdk/client/#authentication)).
 
 All `signal` options are an `AbortSignal`. Unless noted, methods resolve to the unwrapped payload (for example `agents.get()` returns the `AgentSnapshot`, not `{ agent }`).
 
 ## `DaemonClient`
 
 ```typescript
-import { createDaemonClient, DaemonClient } from '@animaOS-SWARM/sdk';
+import { createDaemonClient, DaemonClient } from '@animaos/sdk';
 
 const client = createDaemonClient(options);
 ```
@@ -282,7 +282,7 @@ The daemon-health helpers `DAEMON_CONNECTION_LOST_MESSAGE`, `DAEMON_HEALTHY_MESS
 ## Example: structured error handling
 
 ```typescript
-import { DaemonHttpError, DaemonConnectionError } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError, DaemonConnectionError } from '@animaos/sdk';
 
 try {
   await client.agents.run(agentId, { text: 'Hello' });

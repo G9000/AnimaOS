@@ -3,7 +3,7 @@ import {
   MAX_APPROVAL_NOTE_CHARS,
   type Approval,
   type ApprovalDecision,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { revealHiddenCharacters, type ApprovalDecide } from '../../lib/approvals';
 import type { Plan } from '../../lib/plan';

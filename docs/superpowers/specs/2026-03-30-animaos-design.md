@@ -1,4 +1,4 @@
-# animaOS-SWARM Design Spec
+# animaos Design Spec
 
 **Date:** 2026-03-30
 **Status:** Approved
@@ -53,23 +53,23 @@ Three ways to control the swarm, all talking to the same runtime/server:
 
 ```bash
 # Run a swarm (launches TUI)
-animaos-swarm run "Write a blog post about AI agents"
-animaos-swarm run "do the thing" --strategy supervisor --model gpt-4o
-animaos-swarm run "do the thing" --agents ./my-swarm.yaml
+animaos run "Write a blog post about AI agents"
+animaos run "do the thing" --strategy supervisor --model gpt-4o
+animaos run "do the thing" --agents ./my-swarm.yaml
 
 # Management
-animaos-swarm status                    # show running swarms
-animaos-swarm agents list               # list active agents
-animaos-swarm stop <swarm-id>           # stop a swarm
-animaos-swarm logs <agent-id>           # view agent logs
+animaos status                    # show running swarms
+animaos agents list               # list active agents
+animaos stop <swarm-id>           # stop a swarm
+animaos logs <agent-id>           # view agent logs
 
 # Interactive
-animaos-swarm chat --model gpt-4o       # single agent chat (exists)
+animaos chat --model gpt-4o       # single agent chat (exists)
 ```
 
 #### TUI (Terminal Mission Control)
 
-Launches automatically with `animaos-swarm run`. Shows:
+Launches automatically with `animaos run`. Shows:
 
 ```
  SWARM -- supervisor -- 3 agents
@@ -115,12 +115,12 @@ Browser-based version of the TUI with richer visuals:
 ### Zero config
 
 ```bash
-animaos-swarm run "Write a blog post"
+animaos run "Write a blog post"
 ```
 
 - Uses a default supervisor strategy
 - Spawns agents dynamically based on the task
-- Requires only an API key (env var or `~/.animaos-swarm/config.yaml`)
+- Requires only an API key (env var or `~/.animaos/config.yaml`)
 - Default model: whatever is configured
 
 ### Config file
@@ -141,13 +141,13 @@ agents:
 ```
 
 ```bash
-animaos-swarm run "Write a blog post" --agents ./swarm.yaml
+animaos run "Write a blog post" --agents ./swarm.yaml
 ```
 
 ### Programmatic (SDK)
 
 ```ts
-import { agent, swarm, tools } from "@animaOS-SWARM/sdk"
+import { agent, swarm, tools } from "@animaos/sdk"
 
 const researcher = agent({
   name: "researcher",
@@ -228,7 +228,7 @@ await mySwarm.run("Write a blog post about AI agents")
 ### Phase 7: Auth + Polish
 
 - API key auth
-- Config file (`~/.animaos-swarm/config.yaml`) for API keys, default model
+- Config file (`~/.animaos/config.yaml`) for API keys, default model
 - Error handling and edge cases
 - Documentation
 

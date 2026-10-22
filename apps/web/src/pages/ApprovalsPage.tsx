@@ -7,7 +7,7 @@ import {
   type ApprovalPolicyAction,
   type PolicyClass,
   type Session,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { AutonomyCard } from '../components/autonomy/AutonomyCard';
 import { CodingKeys } from '../components/coding/CodingKeys';

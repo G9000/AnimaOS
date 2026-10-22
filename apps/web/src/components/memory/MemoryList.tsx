@@ -4,8 +4,8 @@ import type {
   MemoryEvidenceTrace,
   MemoryFact,
   MemoryPatch,
-} from '@animaOS-SWARM/sdk';
-import { MAX_MEMORY_EDIT_CHARS } from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
+import { MAX_MEMORY_EDIT_CHARS } from '@animaos/sdk';
 
 import { formatWhen } from '../../lib/approvals';
 import {

@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AutomationMessageMeta } from '@animaOS-SWARM/sdk';
+import type { AutomationMessageMeta } from '@animaos/sdk';
 
 import {
   TOAST_AUTO_DISMISS_MS,

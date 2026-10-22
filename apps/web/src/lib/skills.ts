@@ -6,7 +6,7 @@ import {
   type SkillDraft,
   type SkillDraftSource,
   type SkillStatus,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 export const STATUS_LABELS: Record<SkillStatus, string> = {
   active: 'Active',

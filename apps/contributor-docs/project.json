@@ -1,5 +1,5 @@
 {
-  "name": "@animaOS-SWARM/contributor-docs",
+  "name": "@animaos/contributor-docs",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/contributor-docs/src",
   "projectType": "application",

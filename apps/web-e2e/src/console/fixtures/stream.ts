@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 import type { Page } from '@playwright/test';
-import type { AgentEvent } from '@animaOS-SWARM/sdk';
+import type { AgentEvent } from '@animaos/sdk';
 import { AGENT, ORIGIN, snapshot, type ConsoleFixtureState } from './state';
 export interface BrowserStreams {
   emit(event: AgentEvent): void;

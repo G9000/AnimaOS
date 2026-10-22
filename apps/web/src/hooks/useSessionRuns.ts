@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Run } from '@animaOS-SWARM/sdk';
+import type { Run } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 

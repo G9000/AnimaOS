@@ -6,7 +6,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { DaemonHttpError, type WorkflowRun } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError, type WorkflowRun } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import type { AgentDetail } from '../lib/types';
 import { WorkspaceWorkflows } from './WorkspaceWorkflows';

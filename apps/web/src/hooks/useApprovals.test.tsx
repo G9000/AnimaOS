@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DaemonHttpError, DEFAULT_APPROVAL_POLICY } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError, DEFAULT_APPROVAL_POLICY } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import { approvalFixture } from '../test/live';

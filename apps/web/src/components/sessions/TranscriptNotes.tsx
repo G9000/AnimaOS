@@ -1,5 +1,5 @@
 import { MarkdownMessage } from '../MarkdownMessage';
-import type { SessionSummary } from '@animaOS-SWARM/sdk';
+import type { SessionSummary } from '@animaos/sdk';
 
 /** The persisted compaction result, available even outside the loaded page. */
 export function KeptSummary({ summary }: { summary: SessionSummary }) {

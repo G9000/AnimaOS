@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { LearningProposal, LearningReview, Run } from '@animaOS-SWARM/sdk';
+import type { LearningProposal, LearningReview, Run } from '@animaos/sdk';
 
 import { openInbox } from '../../lib/inbox-events';
 import {

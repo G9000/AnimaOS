@@ -119,7 +119,7 @@ async function downloadFile({ url, destination, force: forceDownload, validate }
   console.log(`Downloading ${url}`);
   const response = await fetch(url, {
     headers: {
-      'user-agent': 'animaOS-SWARM memory benchmark downloader',
+      'user-agent': 'animaos memory benchmark downloader',
     },
   });
 

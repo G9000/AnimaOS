@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Skill } from '@animaOS-SWARM/sdk';
+import type { Skill } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import {

@@ -41,7 +41,7 @@ The primary operator surface is the terminal UI exposed through `animaos launch`
 ## 4. Architecture
 
 ```text
-animaos-swarm/
+animaos/
 |-- packages/
 |   |-- core-rust/
 |   |   `-- crates/
@@ -144,7 +144,7 @@ animaos-swarm/
 ## 8. Developer Experience Target
 
 ```ts
-import { createDaemonClient, agent, swarm } from '@animaOS-SWARM/sdk';
+import { createDaemonClient, agent, swarm } from '@animaos/sdk';
 
 const client = createDaemonClient();
 const modelSettings = {

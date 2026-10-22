@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { DaemonHttpError } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError } from '@animaos/sdk';
 
 import {
   toolNamesForProfile,

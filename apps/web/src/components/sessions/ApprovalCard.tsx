@@ -5,7 +5,7 @@ import {
   type ApprovalDecision,
   type ApprovalMatcher,
   type ApprovalMatcherKind,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import {
   CLASS_LABELS,

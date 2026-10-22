@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { IEventBus } from '@animaOS-SWARM/tui';
+import type { IEventBus } from '@animaos/tui';
 
 import {
   emitLaunchTaskFailure,

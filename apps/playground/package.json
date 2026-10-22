@@ -1,8 +1,8 @@
 {
-  "name": "@animaOS-SWARM/playground",
+  "name": "@animaos/playground",
   "version": "0.0.1",
   "private": true,
   "dependencies": {
-    "@animaOS-SWARM/ui": "workspace:*"
+    "@animaos/ui": "workspace:*"
   }
 }

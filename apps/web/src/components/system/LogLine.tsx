@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import type { LogLine as LogLineData } from '@animaOS-SWARM/sdk';
+import type { LogLine as LogLineData } from '@animaos/sdk';
 
 import { LOG_LEVEL_LABELS, formatLogTime } from '../../lib/logs';
 import { RevealedText } from '../memory/RevealedText';

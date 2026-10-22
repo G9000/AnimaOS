@@ -92,7 +92,7 @@ Cargo rerun for byte-identical native inputs; preserve M59's gate/hash evidence.
 5. Format touched TS/TSX/Markdown, docs-code scans, diff/hash preservation, explicit
    unsigned commit/push/PR/attach and standing authorized merge with exact-tree proof.
 
-Known verified projects: @animaOS-SWARM/web, @animaOS-SWARM/sdk. Use bun --no-env-file
+Known verified projects: @animaos/web, @animaos/sdk. Use bun --no-env-file
 x nx run <project>:test --skipNxCache --args="run <existing targeted test paths>";
 full suites --args=run; run-many -t typecheck,build -p the two projects --parallel=1
 --skipNxCache. Clear provider/service env and keep NX_DAEMON=false,

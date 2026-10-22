@@ -132,7 +132,7 @@ permission, notice-retention and disclaimer, not a copyright line alone.
 - routes/workspace_files.rs is existing owner upload/file authority.
 - attachments/files.rs::save_upload stores uploads/{date}/{candidate}; root-only discovery does not probe that tree.
 - SettingsPanel.tsx is existing settings surface.
-- SDK package is @animaOS-SWARM/sdk.
+- SDK package is @animaos/sdk.
 - Initial read-only Nx inventory failed Missing Platform Dependency win32-x64.
 - Controller resolves through established M10 environment/escalation, not installation.
 
@@ -994,8 +994,8 @@ $env:NX_NO_CLOUD='true'
 $env:NX_NATIVE_FILE_CACHE_DIRECTORY=Join-Path (Get-Location) 'node_modules/.cache/nx-native-m11'
 bun x nx show projects --json
 bun x nx show project rust-daemon --json
-bun x nx show project '@animaOS-SWARM/sdk' --json
-bun x nx show project '@animaOS-SWARM/web' --json
+bun x nx show project '@animaos/sdk' --json
+bun x nx show project '@animaos/web' --json
 ```
 
 Confirm actual resolved targets before tests. Initial inventory failed existing native
@@ -1009,12 +1009,12 @@ Final gates:
 $env:CARGO_INCREMENTAL='0'
 $env:ANIMA_SKIP_SERVICE_TESTS='1'
 bun x nx run rust-daemon:test --skipNxCache
-bun x nx run '@animaOS-SWARM/sdk:test' --skipNxCache
-bun x nx run '@animaOS-SWARM/sdk:typecheck' --skipNxCache
-bun x nx run '@animaOS-SWARM/sdk:build' --skipNxCache
-bun x nx run '@animaOS-SWARM/web:test' --skipNxCache
-bun x nx run '@animaOS-SWARM/web:typecheck' --skipNxCache
-bun x nx run '@animaOS-SWARM/web:build' --skipNxCache
+bun x nx run '@animaos/sdk:test' --skipNxCache
+bun x nx run '@animaos/sdk:typecheck' --skipNxCache
+bun x nx run '@animaos/sdk:build' --skipNxCache
+bun x nx run '@animaos/web:test' --skipNxCache
+bun x nx run '@animaos/web:typecheck' --skipNxCache
+bun x nx run '@animaos/web:build' --skipNxCache
 ```
 
 Names reflect M10 gates but require current inventory. Report dependency tasks actually
@@ -1131,7 +1131,7 @@ Current functional gates: Nx Rust core627 + host1597 =2224passed,8ignored; SDK12
 
 Detailed commands, decisions and logs are retained in ignored `.superpowers/sdd/2026-10-12-hermes-agent-files-m11/`. Master/handover carry publication and exact resume state. M12 prepared plan is tracked separately; no connector implementation or M11 merge is authorized by this completion record.
 
-Publication: implementation `5c7c496` pushed; [PR #17](https://github.com/G9000/animaOS-SWARM/pull/17) is open against main. Final handover/status documentation follows that source commit. Await explicit owner merge authorization.
+Publication: implementation `5c7c496` pushed; [PR #17](https://github.com/G9000/animaos/pull/17) is open against main. Final handover/status documentation follows that source commit. Await explicit owner merge authorization.
 
 ## Owner naming correction (binding, 2026-10-12)
 

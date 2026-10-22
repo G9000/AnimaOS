@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DaemonHttpError, type UsageQuery } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError, type UsageQuery } from '@animaos/sdk';
 
 import { COMPANION_UNREACHABLE } from '../lib/approvals';
 import { daemon } from '../lib/daemon-api';

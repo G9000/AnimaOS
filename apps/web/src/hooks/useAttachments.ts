@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { UploadedAttachment } from '@animaOS-SWARM/sdk';
+import type { UploadedAttachment } from '@animaos/sdk';
 import {
   ATTACHMENT_ERRORS,
   IMAGE_ATTACHMENT_MIMES,

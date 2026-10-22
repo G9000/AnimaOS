@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { useSessionInteractions } from './useSessionInteractions';
-import type { ClarificationRequest } from '@animaOS-SWARM/sdk';
+import type { ClarificationRequest } from '@animaos/sdk';
 
 describe('useSessionInteractions', () => {
   it('discards a side answer from the session left behind', async () => {

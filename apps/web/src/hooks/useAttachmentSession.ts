@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import type { Session } from '@animaOS-SWARM/sdk';
+import type { Session } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 
 /** Uploads and first send share the caller's session resolution. */

@@ -356,7 +356,7 @@ mod tests {
             "python3 -m pytest -k report",
             "bun test tests/report.test.ts",
             "bun x nx run rust-daemon:test --skipNxCache",
-            "bun x nx run @animaOS-SWARM/docs:build",
+            "bun x nx run @animaos/docs:build",
             "pnpm exec nx run app:typecheck:production",
             "npx nx run app:lint",
         ] {

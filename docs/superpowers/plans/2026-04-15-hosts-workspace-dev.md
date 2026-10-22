@@ -94,7 +94,7 @@ Update `packages/sdk/tests/daemon-integration.spec.ts` first so it expects the d
 
 - [ ] **Step 2: Run the targeted SDK integration test to verify it fails**
 
-Run: `bun x nx test @animaOS-SWARM/sdk --runInBand --testPathPattern=daemon-integration`
+Run: `bun x nx test @animaos/sdk --runInBand --testPathPattern=daemon-integration`
 Expected: FAIL because the manifest path still points at the old location
 
 - [ ] **Step 3: Move the Rust workspace and create its Nx project**
@@ -127,7 +127,7 @@ Expected: PASS
 
 - [ ] **Step 6: Verify the updated SDK path assumption**
 
-Run: `bun x nx test @animaOS-SWARM/sdk --runInBand --testPathPattern=daemon-integration`
+Run: `bun x nx test @animaos/sdk --runInBand --testPathPattern=daemon-integration`
 Expected: PASS or, if the suite is intentionally slow/flaky in this environment, fail for runtime reasons other than missing manifest path
 
 - [ ] **Step 7: Commit**
@@ -214,10 +214,10 @@ Expected: PASS
 
 - [ ] **Step 5: Run the live UI build/test smoke checks**
 
-Run: `bun x nx build @animaOS-SWARM/ui`
+Run: `bun x nx build @animaos/ui`
 Expected: PASS
 
-Run: `bun x nx test @animaOS-SWARM/ui-e2e --runInBand`
+Run: `bun x nx test @animaos/ui-e2e --runInBand`
 Expected: PASS, or if the environment cannot run browsers, fail for browser/runtime reasons rather than configuration drift
 
 - [ ] **Step 6: Commit**
@@ -259,7 +259,7 @@ Expected: PASS
 Run: `bun x nx run rust-daemon:test`
 Expected: PASS
 
-Run: `bun x nx build @animaOS-SWARM/ui`
+Run: `bun x nx build @animaos/ui`
 Expected: PASS
 
 - [ ] **Step 5: Commit**

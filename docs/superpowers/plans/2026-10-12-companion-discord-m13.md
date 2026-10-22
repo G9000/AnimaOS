@@ -292,7 +292,7 @@ Commit suggestion: `feat(web): add Anima Discord connector setup and native sess
 
 ## Verification commands
 
-Planning inspected sources only; no tests were run here. Controller discovers resolved target names with `bun x nx show projects --json` and `bun x nx show project <name> --json` before executing unfamiliar target/flag. Existing confirmed project names: `core-rust`, `rust-daemon`, `@animaOS-SWARM/sdk`, `@animaOS-SWARM/web`, `workspace-dev`.
+Planning inspected sources only; no tests were run here. Controller discovers resolved target names with `bun x nx show projects --json` and `bun x nx show project <name> --json` before executing unfamiliar target/flag. Existing confirmed project names: `core-rust`, `rust-daemon`, `@animaos/sdk`, `@animaos/web`, `workspace-dev`.
 
 PowerShell, one cargo process at a time:
 
@@ -300,14 +300,14 @@ PowerShell, one cargo process at a time:
 $env:CARGO_INCREMENTAL = '0'
 bun x nx run rust-daemon:test --skipNxCache
 bun x nx run rust-daemon:lint --skipNxCache
-bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache
+bun x nx run-many -t test,typecheck,build -p @animaos/sdk @animaos/web --skipNxCache
 ```
 
 Host test target already includes core dependency; inspect both successful outputs rather than repeat full core tests. Expected: all required current-tree tests/checks pass; ignored PostgreSQL/live-provider/download cases remain explicitly unverified. Prefix isolated focused Cargo filters through existing Nx target's resolved forwarding syntax only after `--help` confirmation. No guessed flags, no new targets/deps.
 
 If existing daemon locks executable, AGENTS permits already-established `CI=1` and `CARGO_TARGET_DIR=target/validation-rust-daemon`; controller verifies this existing directory before use and records fallback. Do not start/kill a daemon during planning. Web browser tests require approved deterministic test server only; if no service execution authorization, component/SDK fakes suffice for implementation and browser/live evidence stays pending.
 
-Conditional docs: `bun x nx run @animaOS-SWARM/docs:build --skipNxCache` or contributor-docs target only for changed Astro sources. Launcher tests only if launcher changed (not expected). Required formatting checks use existing configured tools on explicit changed files. Do not claim live delivery or operational daily use from fake tests.
+Conditional docs: `bun x nx run @animaos/docs:build --skipNxCache` or contributor-docs target only for changed Astro sources. Launcher tests only if launcher changed (not expected). Required formatting checks use existing configured tools on explicit changed files. Do not claim live delivery or operational daily use from fake tests.
 
 ## M13 acceptance
 

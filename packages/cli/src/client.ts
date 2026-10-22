@@ -6,7 +6,7 @@ import {
   DaemonHttpError,
   type SwarmRunResponse,
   createDaemonClient,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 export type CliDaemonClient = DaemonClient;
 

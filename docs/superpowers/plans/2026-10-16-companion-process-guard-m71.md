@@ -70,8 +70,8 @@ Create apps/web-e2e/tools/windows_process_guard.py (new after publication) as an
 
 - Focused unit tests (new files only): `python -m unittest discover -s apps/web-e2e/tools -p test_windows_process_guard.py -v`.
 - Existing M69 offline policy and new M71 profile/browser spec through the confirmed Nx console target; consult Nx help/target config before adding a file filter, and do not guess argument syntax.
-- `bun x nx run @animaOS-SWARM/web-e2e:e2e-console --skipNxCache` for the full console gate.
-- `bun x nx run @animaOS-SWARM/web-e2e:typecheck --skipNxCache`.
+- `bun x nx run @animaos/web-e2e:e2e-console --skipNxCache` for the full console gate.
+- `bun x nx run @animaos/web-e2e:typecheck --skipNxCache`.
 - The real M71 run is not a routine test command; only a root-released no-argument single-use supervisor may launch the finite owned process tree.
 - Unit success requires retired/error31 narrowly accepted; every live/image/wait/time/identity/root violation rejected; constructor and cleanup handle order exact; all diagnostics bounded and preserve the native error observed at source. Browser success requires the unchanged 84-byte CSV oracle, exactly one workspace PUT and three actual ordered GETs, exact saved bytes/source hash, complete owned cleanup, and free ports.
 

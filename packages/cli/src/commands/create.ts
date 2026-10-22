@@ -312,7 +312,7 @@ export async function executeCreateCommand(
   nameArg: string | undefined,
   opts: CreateOptions
 ): Promise<void> {
-  clack.intro(pc.bgCyan(pc.black(' animaOS-SWARM ')));
+  clack.intro(pc.bgCyan(pc.black(' animaos ')));
 
   const target = resolveCreateTarget(kindOrName, nameArg, opts.kind);
   if (target.error) {

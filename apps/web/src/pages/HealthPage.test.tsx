@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { StatusTooOldError } from '@animaOS-SWARM/sdk';
+import { StatusTooOldError } from '@animaos/sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { COMPANION_UNREACHABLE } from '../lib/approvals';

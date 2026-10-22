@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { VoiceCapabilities } from '@animaOS-SWARM/sdk';
+import type { VoiceCapabilities } from '@animaos/sdk';
 import type { AttachmentDraft } from '../../lib/attachments';
 import { daemon } from '../../lib/daemon-api';
 import { revealInvisible } from '../../lib/skills';

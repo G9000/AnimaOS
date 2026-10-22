@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { SessionMessageAttachment } from '@animaOS-SWARM/sdk';
+import type { SessionMessageAttachment } from '@animaos/sdk';
 import { useAttachmentPreview } from '../../hooks/useAttachmentPreview';
 import { daemon } from '../../lib/daemon-api';
 import {

@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
-import { StatusTooOldError } from '@animaOS-SWARM/sdk';
+import { StatusTooOldError } from '@animaos/sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { COMPANION_UNREACHABLE } from '../lib/approvals';

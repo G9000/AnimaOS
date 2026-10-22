@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import type {
   SessionMessageSearchHit,
   SessionMessageSearchPage,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CommandMenu, type StudioCommand } from './CommandMenu';
 

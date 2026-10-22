@@ -4,7 +4,7 @@ import {
   type AgentJob,
   type AgentJobAttempt,
   type GoalView,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import {
   currentJobReview,

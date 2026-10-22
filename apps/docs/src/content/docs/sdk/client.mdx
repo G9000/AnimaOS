@@ -22,7 +22,7 @@ The SDK is organized around one `DaemonClient`. You create it once, point it at 
 ## Create a Client
 
 ```typescript
-import { createDaemonClient } from '@animaOS-SWARM/sdk';
+import { createDaemonClient } from '@animaos/sdk';
 
 // Defaults to http://127.0.0.1:8080
 const client = createDaemonClient();
@@ -93,7 +93,7 @@ The daemon distinguishes two kinds of access:
 The SDK has no auth option; supply headers through a custom `fetch`:
 
 ```typescript
-import { createDaemonClient } from '@animaOS-SWARM/sdk';
+import { createDaemonClient } from '@animaos/sdk';
 
 const withOwnerToken: typeof fetch = (input, init) => {
   const headers = new Headers(init?.headers);
@@ -104,7 +104,7 @@ const withOwnerToken: typeof fetch = (input, init) => {
 const client = createDaemonClient({ fetch: withOwnerToken });
 ```
 
-Keep the token out of logs and agent-visible text. See [`hosts/rust-daemon/README.md`](https://github.com/G9000/animaOS-SWARM/blob/main/hosts/rust-daemon/README.md) for the full authorization rules.
+Keep the token out of logs and agent-visible text. See [`hosts/rust-daemon/README.md`](https://github.com/G9000/animaos/blob/main/hosts/rust-daemon/README.md) for the full authorization rules.
 
 ## Generic Requests
 
@@ -136,7 +136,7 @@ for await (const event of client.subscribe('/api/swarms/SWARM_ID/events')) {
 An aborted request rethrows its `AbortError` unchanged.
 
 ```typescript
-import { DaemonConnectionError, DaemonHttpError } from '@animaOS-SWARM/sdk';
+import { DaemonConnectionError, DaemonHttpError } from '@animaos/sdk';
 
 try {
   await client.health();

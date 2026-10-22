@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { AgentMemory } from '@animaOS-SWARM/sdk';
+import type { AgentMemory } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import type { AgentDetail } from '../lib/types';
 import { AgentAvatar, refreshAgentAvatar } from './AgentAvatar';

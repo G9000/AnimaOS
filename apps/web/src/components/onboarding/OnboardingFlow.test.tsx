@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChatGptClient } from '@animaOS-SWARM/sdk';
+import { ChatGptClient } from '@animaos/sdk';
 
 import { toolNamesForProfile } from '../../lib/agent-access';
 import {

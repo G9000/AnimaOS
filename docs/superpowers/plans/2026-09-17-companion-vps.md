@@ -28,7 +28,7 @@
 
 ## Validation commands
 
-Discover resolved targets with `bun x nx show project @animaOS-SWARM/web --json` before running tests. Run the web test and build targets without cache. Deployment validation uses `docker compose --env-file <test-config> -f deploy/vps/compose.yaml config --quiet`, and an isolated local container smoke run. If Rust code is changed, run `bun x nx run rust-daemon:test --skipNxCache` with an isolated target when needed.
+Discover resolved targets with `bun x nx show project @animaos/web --json` before running tests. Run the web test and build targets without cache. Deployment validation uses `docker compose --env-file <test-config> -f deploy/vps/compose.yaml config --quiet`, and an isolated local container smoke run. If Rust code is changed, run `bun x nx run rust-daemon:test --skipNxCache` with an isolated target when needed.
 
 ## Implementation notes
 

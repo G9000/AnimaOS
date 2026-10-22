@@ -53,7 +53,7 @@ Install Bun and the Rust toolchain, then run from the repository root:
 
 ```bash
 bun install --frozen-lockfile
-bun x nx run @animaOS-SWARM/sdk:build
+bun x nx run @animaos/sdk:build
 bun dev --host rust
 ```
 
@@ -82,7 +82,7 @@ Reusable engine code lives in `packages/`; runnable backend processes live in `h
 
 More detail: [Rust daemon architecture](docs/rust-daemon-architecture.md), [swarm architecture](docs/swarm-architecture.md).
 
-Workspace and npm package names still use `animaOS-SWARM` / `@animaOS-SWARM`; use those names in the commands below.
+Workspace and npm package names use `animaos` / `@animaos`; use those names in the commands below.
 
 ## Design
 
@@ -113,7 +113,7 @@ bun run daemon             # the Rust daemon only
 bun run web                # the web console only (daemon must be running)
 ```
 
-Prefer Nx targets for focused work, for example `bun x nx run rust-daemon:test` or `bun x nx run-many -t typecheck,build,test -p @animaOS-SWARM/web`.
+Prefer Nx targets for focused work, for example `bun x nx run rust-daemon:test` or `bun x nx run-many -t typecheck,build,test -p @animaos/web`.
 
 ## CLI and SDK
 

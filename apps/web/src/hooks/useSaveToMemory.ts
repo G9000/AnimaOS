@@ -1,5 +1,5 @@
 import { useCallback, useRef } from 'react';
-import { DaemonHttpError, MAX_MEMORY_EDIT_CHARS } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError, MAX_MEMORY_EDIT_CHARS } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import type { ChatMessage } from '../lib/types';

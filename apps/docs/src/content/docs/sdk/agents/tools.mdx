@@ -42,7 +42,7 @@ type AgentToolInput =
 Ask the daemon which tool handlers it has registered:
 
 ```typescript
-import { createDaemonClient } from '@animaOS-SWARM/sdk';
+import { createDaemonClient } from '@animaos/sdk';
 
 const client = createDaemonClient();
 const capabilities = await client.capabilities();
@@ -61,7 +61,7 @@ Each `DaemonCapabilityTool` has a `name`, `description`, a `category` (`workspac
 ## Register Tools on an Agent
 
 ```typescript
-import { agent, createDaemonClient } from '@animaOS-SWARM/sdk';
+import { agent, createDaemonClient } from '@animaos/sdk';
 
 const client = createDaemonClient();
 

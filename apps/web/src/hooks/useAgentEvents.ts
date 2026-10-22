@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
-import { DaemonHttpError, type AgentEvent } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError, type AgentEvent } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import {

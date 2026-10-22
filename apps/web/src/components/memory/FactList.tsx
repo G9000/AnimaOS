@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import type { MemoryFact } from '@animaOS-SWARM/sdk';
-import { MAX_FACT_VALUE_CHARS } from '@animaOS-SWARM/sdk';
+import type { MemoryFact } from '@animaos/sdk';
+import { MAX_FACT_VALUE_CHARS } from '@animaos/sdk';
 
 import { formatWhen } from '../../lib/approvals';
 import {

@@ -13,7 +13,7 @@ import {
   type UploadedAttachment,
   type BrowserSelection,
   type SessionMessageSearchHit,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { AlertIcon } from './components/icons';
 import { CompanionSetup } from './components/onboarding/CompanionSetup';

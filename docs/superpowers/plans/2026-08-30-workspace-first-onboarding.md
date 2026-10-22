@@ -20,7 +20,7 @@
 - `hosts/rust-daemon/src/tools/workspace.rs:4` — `workspace_root_path(tool_name)` reads `ANIMAOS_WORKSPACE_ROOT` per call, falling back to `std::env::current_dir()`. Callers: `tools/filesystem.rs`, `tools/filesystem/search.rs`, `tools/todo.rs`, `routes/agencies.rs`. Do **not** use `std::env::set_var` at runtime (unsafe in edition 2024); thread the configured root through `ToolExecutionContext` instead.
 - `hosts/rust-daemon/src/routes/agencies.rs:35-77` — `AgencyYamlConfig` / `AgencyYamlAgent` are private serde structs that already model exactly the agency file bootstrap must write. Make them `pub(crate)` and reuse them.
 - Route handler pattern (`hosts/rust-daemon/src/routes/mod.rs:835`): an `async fn xxx_entry(State(state): State<AppState>, request: AxumRequest)` wrapper reads the limited body, takes `state.agent_runs.control_plane_transaction().await`, delegates to a `handle_xxx` function in a routes submodule, and maps `Ok` → `json_response(StatusCode::…)`, `Err` → `error.into_response()`. New endpoints follow this exactly, including a `#[utoipa::path]` annotation and registration in the OpenAPI doc (find the existing `create_agent_entry` annotation + the `openapi_entry` paths list and mirror them).
-- Web test command: `bun x nx test @animaOS-SWARM/web --skipNxCache`. **Erratum (vitest 4):** `--testFile` no longer exists — every `Run:` line below that uses it is stale. Focus one file with `cd apps/web && bun x vitest run <file>` (a unique basename substring works, e.g. `bun x vitest run OnboardingFlow`).
+- Web test command: `bun x nx test @animaos/web --skipNxCache`. **Erratum (vitest 4):** `--testFile` no longer exists — every `Run:` line below that uses it is stale. Focus one file with `cd apps/web && bun x vitest run <file>` (a unique basename substring works, e.g. `bun x vitest run OnboardingFlow`).
 - Rust test command (Windows, daemon binary may be locked): `CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache`. Rust integration tests live in `hosts/rust-daemon/tests/` and use `tests/support/mod.rs` helpers (`test_app`, `send_json_request`, `use_temp_workspace_root`).
 - The onboarding draft lives entirely in `OnboardingFlow` component state; step components are controlled (typed values + callbacks in, no network calls).
 
@@ -1345,7 +1345,7 @@ it('bootstrapWorkspace POSTs workspace and agent payloads', async () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=daemon-api.test.ts`
+Run: `bun x nx test @animaos/web --skipNxCache --testFile=daemon-api.test.ts`
 Expected: FAIL — methods do not exist.
 
 - [ ] **Step 3: Implement**
@@ -1449,7 +1449,7 @@ Add to the `daemon` object:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=daemon-api.test.ts`
+Run: `bun x nx test @animaos/web --skipNxCache --testFile=daemon-api.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -1511,7 +1511,7 @@ describe('agent presets', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=agent-presets.test.ts`
+Run: `bun x nx test @animaos/web --skipNxCache --testFile=agent-presets.test.ts`
 Expected: FAIL — module missing.
 
 - [ ] **Step 3: Implement**
@@ -1617,7 +1617,7 @@ export function presetTemplate(id: PresetId, context: PresetTemplateContext): Pr
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=agent-presets.test.ts`
+Run: `bun x nx test @animaos/web --skipNxCache --testFile=agent-presets.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -1653,7 +1653,7 @@ Change the grid class from `grid-cols-4` to `grid-cols-5`.
 
 - [ ] **Step 2: Verify existing suite impact**
 
-Run: `bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=OnboardingFlow.test.tsx`
+Run: `bun x nx test @animaos/web --skipNxCache --testFile=OnboardingFlow.test.tsx`
 Expected: FAIL — flow tests reference the old step order. That is expected; Task 13 rewrites them. Do not commit yet; fold this change into the Task 13 commit if you prefer green-at-every-commit. (Recommended: keep going, commit with Task 13.)
 
 ---
@@ -1722,7 +1722,7 @@ describe('WorkspaceStep', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=WorkspaceStep.test.tsx`
+Run: `bun x nx test @animaos/web --skipNxCache --testFile=WorkspaceStep.test.tsx`
 Expected: FAIL — component missing.
 
 - [ ] **Step 3: Implement**
@@ -1860,7 +1860,7 @@ export function WorkspaceStep({
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=WorkspaceStep.test.tsx`
+Run: `bun x nx test @animaos/web --skipNxCache --testFile=WorkspaceStep.test.tsx`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -1961,7 +1961,7 @@ describe('AgentStep', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=AgentStep.test.tsx`
+Run: `bun x nx test @animaos/web --skipNxCache --testFile=AgentStep.test.tsx`
 Expected: FAIL — component missing.
 
 - [ ] **Step 3: Implement**
@@ -2146,7 +2146,7 @@ export function AgentStep({
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=AgentStep.test.tsx`
+Run: `bun x nx test @animaos/web --skipNxCache --testFile=AgentStep.test.tsx`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -2184,7 +2184,7 @@ Mock `daemon.getWorkspace`, `daemon.validateWorkspace`, `daemon.generateProfile`
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=OnboardingFlow.test.tsx`
+Run: `bun x nx test @animaos/web --skipNxCache --testFile=OnboardingFlow.test.tsx`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement**
@@ -2274,7 +2274,7 @@ Keep the existing guards: `submitInFlightRef`, provider-catalog-changed redirect
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=OnboardingFlow.test.tsx`
+Run: `bun x nx test @animaos/web --skipNxCache --testFile=OnboardingFlow.test.tsx`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -2317,7 +2317,7 @@ Add a bio preview line under the agent name, and an atomicity note:
 
 - [ ] **Step 2: Run flow tests**
 
-Run: `bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=OnboardingFlow.test.tsx`
+Run: `bun x nx test @animaos/web --skipNxCache --testFile=OnboardingFlow.test.tsx`
 Expected: PASS (including the Review summary assertions).
 
 - [ ] **Step 3: Commit**
@@ -2348,7 +2348,7 @@ git commit -m "feat(web): add workspace summary to review step and five-step pro
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=useDaemonBootstrap.test.tsx --testFile=WorkspaceShell.test.tsx --testFile=SettingsPanel.test.tsx`
+Run: `bun x nx test @animaos/web --skipNxCache --testFile=useDaemonBootstrap.test.tsx --testFile=WorkspaceShell.test.tsx --testFile=SettingsPanel.test.tsx`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement**
@@ -2360,7 +2360,7 @@ Expected: FAIL.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `bun x nx test @animaOS-SWARM/web --skipNxCache`
+Run: `bun x nx test @animaos/web --skipNxCache`
 Expected: PASS — full web suite.
 
 - [ ] **Step 5: Commit**
@@ -2384,8 +2384,8 @@ Expected: both PASS.
 
 - [ ] **Step 2: Web suite + typecheck + build**
 
-Run: `bun x nx test @animaOS-SWARM/web --skipNxCache`
-Run: `bun x nx run @animaOS-SWARM/web:build --skipNxCache`
+Run: `bun x nx test @animaos/web --skipNxCache`
+Run: `bun x nx run @animaos/web:build --skipNxCache`
 Expected: PASS (build performs the Vite production build and type checking).
 
 - [ ] **Step 3: Manual browser pass**

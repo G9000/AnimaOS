@@ -12,13 +12,13 @@ Releases are built for **macOS on Apple Silicon** (`aarch64-apple-darwin`) and *
 macOS:
 
 ```bash
-curl -LsSf https://github.com/G9000/animaOS-SWARM/releases/latest/download/anima-installer.sh | sh
+curl -LsSf https://github.com/G9000/animaos/releases/latest/download/anima-installer.sh | sh
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://github.com/G9000/animaOS-SWARM/releases/latest/download/anima-installer.ps1 | iex
+irm https://github.com/G9000/animaos/releases/latest/download/anima-installer.ps1 | iex
 ```
 
 The installers come from cargo-dist and put `anima` in dist's default location (`~/.cargo/bin`). They cannot run commands afterwards, so they end with `Run 'anima setup' to finish installing Anima.`
@@ -117,7 +117,7 @@ Updates are disabled until the owner replaces the placeholder public key in `hos
 
 ## Releasing
 
-Push a tag such as `v0.2.0`. `dist-workspace.toml` configures cargo-dist 0.32.0; the Release workflow builds both targets (embedding the web console), signs the macOS binary, and after publishing, `.github/workflows/sign-release.yml` signs each archive with minisign using `tools/release/sign-assets.sh`. The pipeline, signing keys, repository secrets, signature convention, tag protection and the dry-release checklist are in [`tools/release/README.md`](https://github.com/G9000/animaOS-SWARM/blob/main/tools/release/README.md).
+Push a tag such as `v0.2.0`. `dist-workspace.toml` configures cargo-dist 0.32.0; the Release workflow builds both targets (embedding the web console), signs the macOS binary, and after publishing, `.github/workflows/sign-release.yml` signs each archive with minisign using `tools/release/sign-assets.sh`. The pipeline, signing keys, repository secrets, signature convention, tag protection and the dry-release checklist are in [`tools/release/README.md`](https://github.com/G9000/animaos/blob/main/tools/release/README.md).
 
 Not yet verified: Windows paths, and a real CI release run (the owner's dry release).
 

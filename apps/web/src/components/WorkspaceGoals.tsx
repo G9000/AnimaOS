@@ -5,7 +5,7 @@ import {
   type GoalInput,
   type GoalView,
   type GoalStatus,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import { currentJobReview, reviewMatchesAttempt } from '../lib/job-output';
 const fresh = (): GoalInput => ({

@@ -5,7 +5,7 @@ import {
   DaemonHttpError,
   type CoreMemory,
   type CoreMemoryEdit,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { daemon } from '../../lib/daemon-api';
 import { CoreMemoryPanel } from './CoreMemoryPanel';

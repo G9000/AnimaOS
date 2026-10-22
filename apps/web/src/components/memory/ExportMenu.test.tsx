@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DaemonHttpError } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError } from '@animaos/sdk';
 
 import { daemon } from '../../lib/daemon-api';
 import { ExportMenu, exportFilename } from './ExportMenu';

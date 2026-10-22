@@ -14,7 +14,7 @@ import type {
   Run,
   SessionMessage,
   SnapshotRun,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import { AGENT, ORIGIN, createState, queuedRun, session } from './state';
 import { staticAsset } from './static';
 import { disconnect, emit, installStreams } from './stream';
@@ -813,7 +813,7 @@ export async function installConsoleFixture(
       run.status = 'running';
       run.startedAtMs = 12;
     },
-    requestApproval(approval: import('@animaOS-SWARM/sdk').Approval) {
+    requestApproval(approval: import('@animaos/sdk').Approval) {
       state.approvals.push(approval);
       state.runs.find((r) => r.id === approval.runId)!.status =
         'awaiting_approval';

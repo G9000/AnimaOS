@@ -6,7 +6,7 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react';
-import type { Session, SessionKind } from '@animaOS-SWARM/sdk';
+import type { Session, SessionKind } from '@animaos/sdk';
 
 import {
   SESSION_KIND_FILTER_LABELS,

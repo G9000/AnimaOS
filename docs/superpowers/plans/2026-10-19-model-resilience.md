@@ -10,7 +10,7 @@
 - **Fallbacks:** a per-run fallback adapter in the daemon wraps the existing runtime adapter, tries an agent's fallbacks before any text has streamed, and reports which model served each step so usage is priced per step.
 - **Side tasks:** a workspace side-task model is swapped in at the four side-call sites.
 
-**Tech Stack:** Rust (anima-core, anima-model-adapters, hosts/rust-daemon), React + vitest (apps/web), `@animaOS-SWARM/sdk`.
+**Tech Stack:** Rust (anima-core, anima-model-adapters, hosts/rust-daemon), React + vitest (apps/web), `@animaos/sdk`.
 
 **Spec:** [`docs/superpowers/specs/2026-10-19-model-resilience-design.md`](../specs/2026-10-19-model-resilience-design.md)
 
@@ -24,8 +24,8 @@
 - **Verification:**
   - `bun x nx run rust-daemon:test --skipNxCache` (only the 16 known macOS failures: 14 `fp08_host_*`, 2 `m44_*`)
   - `bun x nx run core-rust:test --skipNxCache`
-  - `bun x nx run @animaOS-SWARM/web:test --skipNxCache`
-  - `bun x nx run @animaOS-SWARM/web:typecheck`
+  - `bun x nx run @animaos/web:test --skipNxCache`
+  - `bun x nx run @animaos/web:typecheck`
 
 ## Review Focus
 
@@ -307,7 +307,7 @@
   - `onboarding_accepts_a_key_instead_of_an_env_hint`
 - [ ] **Step 2: Run** `bun x vitest run src/components/models src/components/onboarding` (in apps/web). Expected: FAIL.
 - [ ] **Step 3: Implement** it.
-- [ ] **Step 4: Run** the same, plus `bun x nx run @animaOS-SWARM/web:typecheck`. Expected: PASS.
+- [ ] **Step 4: Run** the same, plus `bun x nx run @animaos/web:typecheck`. Expected: PASS.
 - [ ] **Step 5: Ledger it.**
 
 ### Task 9: Full verification and live check

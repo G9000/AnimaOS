@@ -5,8 +5,8 @@ import type {
   Skill,
   SkillDraft,
   SkillDraftStatus,
-} from '@animaOS-SWARM/sdk';
-import { DaemonHttpError } from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
+import { DaemonHttpError } from '@animaos/sdk';
 import type { LearningReviewApi } from './LearningReviewPanel';
 
 interface SkillFields {

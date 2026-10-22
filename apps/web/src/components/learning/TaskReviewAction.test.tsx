@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { LearningPolicy, LearningReview, Run } from '@animaOS-SWARM/sdk';
+import type { LearningPolicy, LearningReview, Run } from '@animaos/sdk';
 
 import type { AgentDetail } from '../../lib/types';
 import { buildTranscript } from '../../lib/transcript';

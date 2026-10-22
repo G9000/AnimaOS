@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { messageAttachment } from '../lib/attachments';
-import type { SessionMessage } from '@animaOS-SWARM/sdk';
+import type { SessionMessage } from '@animaos/sdk';
 
 import type { LiveRun } from '../lib/session-events';
 import type { PendingBubble } from '../lib/transcript';

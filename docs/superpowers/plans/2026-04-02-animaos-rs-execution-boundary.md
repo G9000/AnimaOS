@@ -524,7 +524,7 @@ At minimum cover:
 
 - [ ] **Step 2: Run the targeted SDK test and verify it fails**
 
-Run: `pnpm nx test @animaOS-SWARM/sdk`
+Run: `pnpm nx test @animaos/sdk`
 
 Expected: FAIL because the daemon client surface does not exist yet.
 
@@ -541,7 +541,7 @@ Preserve backward compatibility only where it is clearly necessary for migration
 
 - [ ] **Step 5: Run SDK tests**
 
-Run: `pnpm nx test @animaOS-SWARM/sdk`
+Run: `pnpm nx test @animaos/sdk`
 
 Expected: PASS.
 
@@ -575,7 +575,7 @@ Cover:
 
 - [ ] **Step 2: Run the targeted CLI verification and verify it fails**
 
-Run: `pnpm nx test @animaOS-SWARM/cli`
+Run: `pnpm nx test @animaos/cli`
 
 Expected: FAIL because commands still depend on embedded packages.
 
@@ -599,7 +599,7 @@ Leave unrelated commands alone until they need daemon access.
 
 - [ ] **Step 5: Run CLI tests**
 
-Run: `pnpm nx test @animaOS-SWARM/cli`
+Run: `pnpm nx test @animaos/cli`
 
 Expected: PASS.
 
@@ -651,9 +651,9 @@ Expected: PASS.
 
 Run:
 
-- `pnpm nx test @animaOS-SWARM/swarm`
-- `pnpm nx test @animaOS-SWARM/sdk`
-- `pnpm nx test @animaOS-SWARM/cli`
+- `pnpm nx test @animaos/swarm`
+- `pnpm nx test @animaos/sdk`
+- `pnpm nx test @animaos/cli`
 
 Expected: PASS.
 
@@ -662,7 +662,7 @@ Expected: PASS.
 Run:
 
 - `cargo fmt --manifest-path packages/animaos-rs/Cargo.toml --all --check`
-- `pnpm nx run-many -t lint --projects @animaOS-SWARM/swarm,@animaOS-SWARM/sdk,@animaOS-SWARM/cli`
+- `pnpm nx run-many -t lint --projects @animaos/swarm,@animaos/sdk,@animaos/cli`
 
 Expected: SUCCESS.
 
@@ -685,16 +685,16 @@ Run: `cargo test --manifest-path packages/animaos-rs/Cargo.toml`
 
 Run:
 
-- `pnpm nx test @animaOS-SWARM/swarm`
-- `pnpm nx test @animaOS-SWARM/sdk`
-- `pnpm nx test @animaOS-SWARM/cli`
+- `pnpm nx test @animaos/swarm`
+- `pnpm nx test @animaos/sdk`
+- `pnpm nx test @animaos/cli`
 
 - [ ] **Step 3: Run format/lint verification**
 
 Run:
 
 - `cargo fmt --manifest-path packages/animaos-rs/Cargo.toml --all --check`
-- `pnpm nx run-many -t lint --projects @animaOS-SWARM/swarm,@animaOS-SWARM/sdk,@animaOS-SWARM/cli`
+- `pnpm nx run-many -t lint --projects @animaos/swarm,@animaos/sdk,@animaos/cli`
 
 - [ ] **Step 4: Document known parity gaps before cutover**
 

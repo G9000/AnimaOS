@@ -6,7 +6,7 @@ import {
   type Automation,
   type AutomationTarget,
   type AutomationTrigger,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { COMPANION_UNREACHABLE, formatWhen } from '../../lib/approvals';
 import {

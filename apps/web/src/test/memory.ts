@@ -3,7 +3,7 @@ import type {
   Memory,
   MemoryEntity,
   MemoryFact,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 export function memoryFixture(
   id: string,

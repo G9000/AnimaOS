@@ -6,7 +6,7 @@ import {
   DEFAULT_APPROVAL_POLICY,
   type Approval,
   type ApprovalRule,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import { EMPTY_LIVE_STATE, type LiveState } from '../lib/session-events';

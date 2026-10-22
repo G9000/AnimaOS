@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { createCliDaemonClient, type CliDaemonClient } from '../client.js';
-import type { SwarmConfig } from '@animaOS-SWARM/sdk';
+import type { SwarmConfig } from '@animaos/sdk';
 import {
   DAEMON_PROVIDER_HELP,
   getErrorMessage,

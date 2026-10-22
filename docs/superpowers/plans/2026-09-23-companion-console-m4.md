@@ -36,7 +36,7 @@
 - **Concurrency, every task.** Lock order: control-plane transaction → state lock → live registry, fanout, or approval-waiters mutex (the waiters mutex is a leaf and is never held while taking the state lock). No `std::sync::Mutex` is held across `.await`. The waiting call holds no lock: it `select!`s (biased) on its oneshot, the run's `CancelSignal::cancelled()`, and `tokio::time::sleep_until(deadline)`. Every settlement (owner decision, timeout, stop) takes the control-plane transaction and flips `pending` exactly once under the state write lock, so exactly one wins; the loser sees the record already resolved. The owner's decision is saved before its waiter is woken; a failed save reverts it (503) and leaves the call waiting. A request is saved before it is announced; a failed save refuses the tool (fail closed).
 - **Snapshot version 7.** M4 adds `approvals`, `approvalPolicies`, `approvalRules`, and `SessionRecord.sessionAllowances` to the control plane; an M3 daemon would load a v7 file and silently drop the owner's policy and rules, so the version moves to 7 and the first start writes `<file>.pre-approvals.bak` (JSON) or the `control_plane.backup.6` row (Postgres) first, following M2's `.pre-sessions.bak` and M3's `.pre-live-runs.bak`.
 - Existing behavior stays except where a task's Interfaces block says so. Deliberate change: a coordinator run's `bash`, `bg_start`, and `bg_stop` now wait for the owner by default (`exec: ask`), including runs from the legacy `POST /api/agents/{id}/run`, the CLI, Telegram, schedules, and jobs. Swarm runs (`/api/swarms/...`) have no session or owner UI and are not gated.
-- Commands. Rust iteration: `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib -- <filter> <filter>` (filters after `--`). SDK: `bun x nx test @animaOS-SWARM/sdk`, and **every SDK-changing task ends with `bun x nx run @animaOS-SWARM/sdk:build`** so later direct web Vitest runs resolve the new exports. Web: `cd apps/web && bun x vitest run <files>`. The milestone gate (Task 14) runs `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache`.
+- Commands. Rust iteration: `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib -- <filter> <filter>` (filters after `--`). SDK: `bun x nx test @animaos/sdk`, and **every SDK-changing task ends with `bun x nx run @animaos/sdk:build`** so later direct web Vitest runs resolve the new exports. Web: `cd apps/web && bun x vitest run <files>`. The milestone gate (Task 14) runs `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run-many -t test,typecheck,build -p @animaos/sdk @animaos/web --skipNxCache`.
 - Formatting is clean at the start. Every task ends with `cargo fmt --all` when it touched Rust and `bun x nx format:write --files=<each changed TS/TSX/CSS/MD file>` when it touched TypeScript, CSS, or Markdown, then re-runs its tests, so every commit stays formatted.
 - Stage files by explicit path only; never `git add -A`, `git add .`, or `git commit -a`. Never stage anything under `docs/` or `.superpowers/` (the controller commits docs; Task 14's status-row commit is the controller's). Never use `git stash`, `git reset`, `git checkout -- <path>`, `git restore`, or `git worktree`. Do not start the daemon or a dev server; tests start what they need.
 - Disk is tight (about 13 GB free; the Nx Rust gate needs about 12): never set a new `CARGO_TARGET_DIR`. CI stops at `nx start-ci-run` (Nx Cloud), so the local commands are the verification. No Postgres is available: the Postgres conformance test stays `#[ignore]` and is hand-checked.
@@ -8224,7 +8224,7 @@ Recommended implementer tier: standard (route plumbing over tested state; the se
 **Interfaces:**
 
 - Consumes: Tasks 7–8 routes and JSON (`ApprovalResponse`, `{ approvals, nextCursor }`, `{ approval }`, `{ policy }`, `{ rules, tools }`, `{ rule }`, `{ deleted }`); Task 5 events `approval.requested` / `approval.resolved` with `approval`; `DaemonClient.requestJson<T>(path, { method?, body?, signal? })`.
-- Produces (exported from `@animaOS-SWARM/sdk`):
+- Produces (exported from `@animaos/sdk`):
   - Types: `RiskClass`, `PolicyClass`, `ApprovalPolicyAction`, `ApprovalPolicy`, `ApprovalMatcherKind`, `ApprovalMatcher`, `ApprovalStatus`, `ApprovalDecision`, `ApprovalResolvedBy`, `ApprovalResolution`, `Approval`, `ApprovalRule`, `ApprovalTool`, `ApprovalRules`, `ApprovalPage`, `ApprovalListOptions`, `ApprovalDecisionInput`, `ApprovalRuleInput`.
   - Values: `POLICY_CLASSES: readonly PolicyClass[]` (`['write', 'exec', 'network', 'delegate']`), `DEFAULT_APPROVAL_POLICY` (`exec: 'ask'`, others `'allow'`), `MAX_APPROVAL_NOTE_CHARS = 1_000`, `ApprovalsClient`, `isApprovalEvent(event)`.
   - `ApprovalsClient`: `list(options: ApprovalListOptions): Promise<ApprovalPage>`, `decide(approvalId: string, input: ApprovalDecisionInput): Promise<Approval>`, `policy(agentId: string, options?: { signal?: AbortSignal }): Promise<ApprovalPolicy>`, `setPolicy(agentId: string, policy: ApprovalPolicy): Promise<ApprovalPolicy>`, `rules(agentId: string, options?: { signal?: AbortSignal }): Promise<ApprovalRules>`, `addRule(agentId: string, input: ApprovalRuleInput): Promise<ApprovalRule>`, `removeRule(agentId: string, ruleId: string): Promise<void>`.
@@ -8483,7 +8483,7 @@ it('types approval events and the approvals a snapshot carries', async () => {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `bun x nx test @animaOS-SWARM/sdk`
+Run: `bun x nx test @animaos/sdk`
 Expected: FAIL — `client.approvals`, `DEFAULT_APPROVAL_POLICY`, `POLICY_CLASSES`, `MAX_APPROVAL_NOTE_CHARS`, and `isApprovalEvent` are not exported.
 
 - [ ] **Step 3: Implement the client and the event types**
@@ -8781,15 +8781,15 @@ export type {
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `bun x nx test @animaOS-SWARM/sdk`
+Run: `bun x nx test @animaos/sdk`
 Expected: PASS — 5 new approvals tests, the new events test, and the existing 56.
 
-Run: `bun x nx run @animaOS-SWARM/sdk:typecheck`
+Run: `bun x nx run @animaos/sdk:typecheck`
 Expected: PASS.
 
 - [ ] **Step 5: Format, build, and commit**
 
-Run: `bun x nx format:write --files=packages/sdk/src/approvals.ts,packages/sdk/src/approvals.spec.ts,packages/sdk/src/events.ts,packages/sdk/src/events.spec.ts,packages/sdk/src/client.ts,packages/sdk/src/index.ts && bun x nx test @animaOS-SWARM/sdk && bun x nx run @animaOS-SWARM/sdk:build`
+Run: `bun x nx format:write --files=packages/sdk/src/approvals.ts,packages/sdk/src/approvals.spec.ts,packages/sdk/src/events.ts,packages/sdk/src/events.spec.ts,packages/sdk/src/client.ts,packages/sdk/src/index.ts && bun x nx test @animaos/sdk && bun x nx run @animaos/sdk:build`
 Expected: PASS, and the build emits `dist/approvals.js` so the web's direct Vitest runs resolve the new exports.
 
 ```bash
@@ -8801,7 +8801,7 @@ Recommended implementer tier: cheap (typed wrappers over routes with request-sha
 
 #### Controller rulings from the pre-flight audit (binding)
 
-1. No audit finding changes this task. It ends with `bun x nx run @animaOS-SWARM/sdk:build` as planned.
+1. No audit finding changes this task. It ends with `bun x nx run @animaos/sdk:build` as planned.
 
 ---
 
@@ -8826,7 +8826,7 @@ Recommended implementer tier: cheap (typed wrappers over routes with request-sha
 
 In `apps/web/src/test/live.ts`:
 
-1. Add `Approval` to the `@animaOS-SWARM/sdk` type import.
+1. Add `Approval` to the `@animaos/sdk` type import.
 2. Replace `snapshotEvent` with:
 
 ```ts
@@ -9019,7 +9019,7 @@ Expected: FAIL — `pendingApprovals` is not exported, runs have no `approvals`,
 
 In `apps/web/src/lib/session-events.ts`:
 
-1. Add `type Approval,` to the `@animaOS-SWARM/sdk` import.
+1. Add `type Approval,` to the `@animaos/sdk` import.
 2. Add to `LiveRun`, after `steers`:
 
 ```text
@@ -9262,7 +9262,7 @@ Create `apps/web/src/lib/approvals.test.ts`:
 
 ```ts
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DaemonConnectionError, DaemonHttpError } from '@animaOS-SWARM/sdk';
+import { DaemonConnectionError, DaemonHttpError } from '@animaos/sdk';
 
 import { daemon } from './daemon-api';
 import { decideApproval, describeMatcher } from './approvals';
@@ -9508,7 +9508,7 @@ Expected: FAIL — `lib/approvals`, `ApprovalCard`, `daemon.decideApproval`, and
 
 - [ ] **Step 3: Add the helpers and the daemon call**
 
-In `apps/web/src/lib/daemon-api.ts`, add `type ApprovalDecisionInput,` to the `@animaOS-SWARM/sdk` import and, after `agentEvents`, add:
+In `apps/web/src/lib/daemon-api.ts`, add `type ApprovalDecisionInput,` to the `@animaos/sdk` import and, after `agentEvents`, add:
 
 ```ts
   /** The owner's decision on a pending approval (spec §7.3). */
@@ -9527,7 +9527,7 @@ import {
   type ApprovalMatcher,
   type ApprovalMatcherKind,
   type RiskClass,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { daemon } from './daemon-api';
 
@@ -9609,7 +9609,7 @@ import {
   type ApprovalDecision,
   type ApprovalMatcher,
   type ApprovalMatcherKind,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import {
   CLASS_LABELS,
@@ -10048,7 +10048,7 @@ Create `apps/web/src/hooks/useApprovals.test.tsx`:
 ```tsx
 import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_APPROVAL_POLICY } from '@animaOS-SWARM/sdk';
+import { DEFAULT_APPROVAL_POLICY } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import { approvalFixture } from '../test/live';
@@ -10135,7 +10135,7 @@ import {
   DEFAULT_APPROVAL_POLICY,
   type Approval,
   type ApprovalRule,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import { EMPTY_LIVE_STATE, type LiveState } from '../lib/session-events';
@@ -10414,7 +10414,7 @@ Expected: FAIL — `approvalOutcome`, `useApprovals`, `ApprovalsPage`, and the `
 
 - [ ] **Step 3: Add the daemon calls and the helpers**
 
-In `apps/web/src/lib/daemon-api.ts`, add `type ApprovalListOptions, type ApprovalPolicy, type ApprovalRuleInput,` to the `@animaOS-SWARM/sdk` import and, after `decideApproval`:
+In `apps/web/src/lib/daemon-api.ts`, add `type ApprovalListOptions, type ApprovalPolicy, type ApprovalRuleInput,` to the `@animaos/sdk` import and, after `decideApproval`:
 
 ```ts
   listApprovals: (options: ApprovalListOptions) =>
@@ -10486,7 +10486,7 @@ import {
   type ApprovalRule,
   type ApprovalTool,
   type PolicyClass,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import { pendingApprovals, type LiveState } from '../lib/session-events';
@@ -10689,7 +10689,7 @@ import {
   type ApprovalPolicyAction,
   type PolicyClass,
   type Session,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { ApprovalCard } from '../components/sessions/ApprovalCard';
 import { useApprovals, type ApprovalsView } from '../hooks/useApprovals';
@@ -11292,7 +11292,7 @@ Expected: FAIL — `pendingApprovalCount` is missing, there is no Approvals dest
 
 - [ ] **Step 3: Count pending approvals and badge the session rows**
 
-Add to `apps/web/src/lib/approvals.ts` (with `import type { Session } from '@animaOS-SWARM/sdk';` merged into the SDK import and `import type { LiveState } from './session-events';`):
+Add to `apps/web/src/lib/approvals.ts` (with `import type { Session } from '@animaos/sdk';` merged into the SDK import and `import type { LiveState } from './session-events';`):
 
 ```ts
 /** Approvals waiting for the owner: the stream's while it is open (every
@@ -11362,7 +11362,7 @@ Append to `apps/web/src/approvals.css`:
 
 In `apps/web/src/components/WorkspaceShell.tsx`:
 
-1. Add `import type { Session } from '@animaOS-SWARM/sdk';`, `import { sessionKey } from '../lib/session-groups';`, and `ShieldIcon` to the `./icons` import.
+1. Add `import type { Session } from '@animaos/sdk';`, `import { sessionKey } from '../lib/session-groups';`, and `ShieldIcon` to the `./icons` import.
 2. Replace `AVAILABLE_PAGES` and `PRIMARY_DESTINATIONS` with:
 
 ```tsx
@@ -11507,7 +11507,7 @@ In `apps/web/src/ViewHarness.tsx`:
 Run: `cd apps/web && bun x vitest run src/lib/approvals.test.ts src/components/WorkspaceShell.test.tsx src/components/sessions/SessionSidebar.test.tsx src/ViewHarness.test.tsx src/visual-tokens.test.ts`
 Expected: PASS, with no `act()` warnings or console noise.
 
-Run: `bun x nx run-many -t test,typecheck -p @animaOS-SWARM/web`
+Run: `bun x nx run-many -t test,typecheck -p @animaos/web`
 Expected: PASS — the whole web suite (703 tests at M3's end plus M4's).
 
 - [ ] **Step 6: Format and commit**
@@ -11559,7 +11559,7 @@ Run: `df -h /System/Volumes/Data`
 - With at least 12 GB available: run `bun x nx run rust-daemon:test --skipNxCache` (it also runs `core-rust:test`). Expected: PASS (M3 ended at 1,564 passed / 7 ignored; M4 adds about 75 tests and one more ignored Postgres case inside the existing ignored test).
 - Otherwise run the fallback in the shared `target/` (no new `CARGO_TARGET_DIR`): `CARGO_INCREMENTAL=0 cargo test -p anima-core --lib`, `CARGO_INCREMENTAL=0 cargo test -p anima-model-adapters --lib`, `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib`, `CARGO_INCREMENTAL=0 cargo test -p anima-core --tests`, then `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --tests`. Expected: PASS. The fallback does not satisfy AGENTS.md's completion rule; record that the Nx gate is pending disk space.
 
-Run: `bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache`
+Run: `bun x nx run-many -t test,typecheck,build -p @animaos/sdk @animaos/web --skipNxCache`
 Expected: every target succeeds.
 
 Run: `cargo fmt --all --check && bun x nx format:check --base=origin/main`

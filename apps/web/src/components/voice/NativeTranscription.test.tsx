@@ -8,7 +8,7 @@ import {
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
-import type { VoiceCapabilities, VoiceTranscription } from '@animaOS-SWARM/sdk';
+import type { VoiceCapabilities, VoiceTranscription } from '@animaos/sdk';
 import { Composer } from '../ChatScreen';
 import {
   NativeTranscription,

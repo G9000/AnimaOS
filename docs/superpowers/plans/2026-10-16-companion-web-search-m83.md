@@ -252,12 +252,12 @@ bun x nx run rust-daemon:test --skipNxCache --excludeTaskDependencies --args="--
 bun x nx run rust-daemon:test --skipNxCache
 bun x nx run rust-daemon:lint --skipNxCache
 bun x nx run rust-daemon:build --skipNxCache
-bun x nx run @animaOS-SWARM/sdk:test --skipNxCache
-bun x nx run @animaOS-SWARM/sdk:typecheck --skipNxCache
-bun x nx run @animaOS-SWARM/sdk:build --skipNxCache
-bun x nx run @animaOS-SWARM/web:test --skipNxCache
-bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache
-bun x nx run @animaOS-SWARM/web:build --skipNxCache
+bun x nx run @animaos/sdk:test --skipNxCache
+bun x nx run @animaos/sdk:typecheck --skipNxCache
+bun x nx run @animaos/sdk:build --skipNxCache
+bun x nx run @animaos/web:test --skipNxCache
+bun x nx run @animaos/web:typecheck --skipNxCache
+bun x nx run @animaos/web:build --skipNxCache
 ```
 
 SDK/web targets are inferred in this workspace; controller confirms available target names before execution and substitutes the repository's existing corresponding contract/type/build target if needed. Do not invent flags or run duplicate equivalent gates.

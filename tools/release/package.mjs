@@ -34,7 +34,7 @@ export function configuration(platform, arch, binary, output, assets) {
     name: 'anima-native', productName: 'Anima', identifier: 'dev.animaos.anima',
     version: version(), publisher: 'AnimaOS', authors: ['animaOS contributors'],
     description: 'Anima local agent runtime', category: 'Productivity',
-    homepage: 'https://github.com/G9000/animaOS-SWARM',
+    homepage: 'https://github.com/G9000/animaos',
     targetTriple: selected.target, formats: selected.formats,
     binaries: [{ path: basename(binary).replace(/\.exe$/i, ''), main: true }],
     binariesDir: dirname(binary), outDir: output,

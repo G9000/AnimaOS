@@ -17,7 +17,7 @@ import {
   type SessionMessage,
   type BrowserPolicy,
   type BrowserScope,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { toolNamesForProfile } from './lib/agent-access';
 import { deferred, snapshot } from './test/view-harness';

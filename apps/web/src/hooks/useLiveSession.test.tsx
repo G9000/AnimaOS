@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Run, SessionMessage } from '@animaOS-SWARM/sdk';
+import type { Run, SessionMessage } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import {

@@ -17,7 +17,7 @@ An **agent** in animaOS is a persistent, LLM-backed runtime registered with the 
 `AgentConfig` is what `client.agents.create()` accepts. The `agent()` helper only types it.
 
 ```typescript
-import { agent } from '@animaOS-SWARM/sdk';
+import { agent } from '@animaos/sdk';
 
 const config = agent({
   name: 'researcher',
@@ -223,7 +223,7 @@ The agents client also holds the agent's saved task list (`tasks()`, `updateTask
 ## Full Example
 
 ```typescript
-import { agent, createDaemonClient } from '@animaOS-SWARM/sdk';
+import { agent, createDaemonClient } from '@animaos/sdk';
 
 const client = createDaemonClient();
 

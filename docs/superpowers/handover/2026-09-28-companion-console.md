@@ -1272,7 +1272,7 @@ deployment. Historical resumes below are superseded here.
 ## Start here (2026-10-16): M54 merged; M55 bound tests-first PDF slice
 
 Continue `g9000/companion-pdf-understanding-m55` from verified
-[M54/PR60](https://github.com/G9000/animaOS-SWARM/pull/60) main
+[M54/PR60](https://github.com/G9000/animaos/pull/60) main
 `186446cfb996a8f6df085ab6e45eb24c5d0a0b16`. M54 source
 `c1d3a7b895f2eece8c35cf1c88d5f76a5e040fc6` matches tested/merged tree
 `60e2e5ada6e978fba1c71c95547d77ba1b30be05`; 51publication/44source/58boundary
@@ -1437,7 +1437,7 @@ superseded by this section and the private ledger.
 ## Start here (2026-10-16): M51 merged; M52 bound plan active
 
 Continue `g9000/companion-provider-task-acceptance-m52`, cut from verified
-[M51/PR57](https://github.com/G9000/animaOS-SWARM/pull/57) main
+[M51/PR57](https://github.com/G9000/animaos/pull/57) main
 `0e8118ca376354c9ff69d7110c43a0d78f75bab3`. Source
 `d53a1000ccbaa33638d549f988ae29b72636c7a5` shares gated tree
 `769db1d8c80031787f9773d8b8316b1d918ddb2b`; M51 is committed/pushed/merged.
@@ -1485,7 +1485,7 @@ are superseded here.
 ## Start here (2026-10-15): M51 gates pass; settle publication
 
 M51 is settled on `g9000/companion-catalog-budget-m51`, from verified
-[M50/PR56](https://github.com/G9000/animaOS-SWARM/pull/56) main
+[M50/PR56](https://github.com/G9000/animaos/pull/56) main
 `16a89eb4a857ec4c5898f7ff04179de8a153c086`. The
 [M51 plan](../plans/2026-10-15-companion-catalog-budget-m51.md) records the outcome.
 Exact committed source/PR/verified merge and authoritative resume are
@@ -1527,7 +1527,7 @@ are superseded here.
 ## Start here (2026-10-15): M50 merged; M51 bound plan active
 
 Continue `g9000/companion-catalog-budget-m51`, cut from verified
-[M50/PR56](https://github.com/G9000/animaOS-SWARM/pull/56) main
+[M50/PR56](https://github.com/G9000/animaos/pull/56) main
 `16a89eb4a857ec4c5898f7ff04179de8a153c086`. Source
 `64b19994de530129691ac8cca4944ee4122cc33e` shares gated tree
 `f3d4e4bab81d2e25b9186ebecc3ef534d5ebb210`; M50 is committed/pushed/merged.
@@ -1574,7 +1574,7 @@ are superseded here.
 ## Start here (2026-10-15): M50 gates pass; catalog body cap blocks availability
 
 M50 is settled on `g9000/companion-catalog-diagnostics-m50`, from verified
-[M49/PR55](https://github.com/G9000/animaOS-SWARM/pull/55) main
+[M49/PR55](https://github.com/G9000/animaos/pull/55) main
 `67f047d6d657145b57d8e22c75da216ae0e83e90`. The
 [M50 plan](../plans/2026-10-15-companion-catalog-diagnostics-m50.md) records its
 scoped outcome. Exact committed source/PR/verified merge and authoritative resume
@@ -1621,7 +1621,7 @@ are superseded here.
 ## Start here (2026-10-15): M49 merged; M50 bound plan active
 
 Continue `g9000/companion-catalog-diagnostics-m50`, cut from verified
-[M49/PR55](https://github.com/G9000/animaOS-SWARM/pull/55) main
+[M49/PR55](https://github.com/G9000/animaos/pull/55) main
 `67f047d6d657145b57d8e22c75da216ae0e83e90`. Source
 `621fac543114c5366f91fb37a85b0092f4701246` shares gated tree
 `fcf3c29a9256b7b96731f18c28893906b38052e1`; M49 is committed/pushed/merged.
@@ -1665,7 +1665,7 @@ are superseded here.
 ## Start here (2026-10-15): M49 local gates pass; actual metadata unavailable
 
 M49 is settled on `g9000/companion-subscription-models-m49`, cut from verified
-[M48/PR54](https://github.com/G9000/animaOS-SWARM/pull/54) main
+[M48/PR54](https://github.com/G9000/animaos/pull/54) main
 `317792304772f8cf203f6d6335a1d4a95d4c5cf1`. The
 [M49 plan](../plans/2026-10-15-companion-subscription-models-m49.md) records the
 scoped outcome. Exact committed source/PR/verified merge and current resume are
@@ -1715,7 +1715,7 @@ Retain MIT provenance and Anima naming. Historical resumes below are superseded 
 
 ## Start here (2026-10-15): M48 merged; M49 bound plan active
 
-Continue `g9000/companion-subscription-models-m49`, cut from verified [M48/PR54](https://github.com/G9000/animaOS-SWARM/pull/54) main `317792304772f8cf203f6d6335a1d4a95d4c5cf1`. Its source `cc5c2bba03323b2889c6132d1fbd681f4a72b4fc` shares tested tree `729a71aea0e8d5153142afa2fec0dbb049f4f19f`; M48 is committed/pushed/merged. All owned hashes and unrelated nx.json were preserved. Exact resume is `.superpowers/sdd/2026-10-15-companion-subscription-models-m49/progress.md`; authorized context-only status was sent to the other chat.
+Continue `g9000/companion-subscription-models-m49`, cut from verified [M48/PR54](https://github.com/G9000/animaos/pull/54) main `317792304772f8cf203f6d6335a1d4a95d4c5cf1`. Its source `cc5c2bba03323b2889c6132d1fbd681f4a72b4fc` shares tested tree `729a71aea0e8d5153142afa2fec0dbb049f4f19f`; M48 is committed/pushed/merged. All owned hashes and unrelated nx.json were preserved. Exact resume is `.superpowers/sdd/2026-10-15-companion-subscription-models-m49/progress.md`; authorized context-only status was sent to the other chat.
 
 The [M49 lean plan](../plans/2026-10-15-companion-subscription-models-m49.md) binds five controller risks and three disjoint test-first lanes. Reuse pinned public Hermes catalog behavior with notices: fixed single metadata GET, bounded parser and ephemeral auth-generation/vault-generation scoped cache. Cache-only owner GET and explicit owner POST Refresh, no retry/redirect/fallback/background fetch. New ChatGPT setup leaves model empty for deliberate selection; preserve saved/dirty/custom strings and grants, with unverified status when metadata is absent/stale. Existing inference, API-provider defaults, context/vision/pricing and auth contracts remain intact.
 
@@ -1729,7 +1729,7 @@ Root owns commands/fmt/Git/services/models with `CARGO_INCREMENTAL=0`/jobs1/two 
 
 ## Start here (2026-10-15): M48 gates pass; account model access blocks generation
 
-M48 is settled on `g9000/companion-provider-diagnostics-m48`, cut from verified [M47/PR53](https://github.com/G9000/animaOS-SWARM/pull/53) main `456149927c96e10f1b468e480042d14cb2f8f6e6`. The [M48 plan](../plans/2026-10-15-companion-provider-diagnostics-m48.md) records its scoped outcome. Exact source/PR/verified merge and authoritative continuation are `.superpowers/sdd/2026-10-15-companion-provider-diagnostics-m48/progress.md`; finish that publication settlement before cutting the next branch from main. Standing reviewed merge-and-continue applies.
+M48 is settled on `g9000/companion-provider-diagnostics-m48`, cut from verified [M47/PR53](https://github.com/G9000/animaos/pull/53) main `456149927c96e10f1b468e480042d14cb2f8f6e6`. The [M48 plan](../plans/2026-10-15-companion-provider-diagnostics-m48.md) records its scoped outcome. Exact source/PR/verified merge and authoritative continuation are `.superpowers/sdd/2026-10-15-companion-provider-diagnostics-m48/progress.md`; finish that publication settlement before cutting the next branch from main. Standing reviewed merge-and-continue applies.
 
 Required gates passed **2,681 Rust/core tests / 19 intentional ignores / 40 suites / lint / build**, with two full-suite test threads. Both native/core and final affected SDK/web reviews are clean. Six reviewed source files stayed frozen; SDK/web/contracts/manifests/lockfile are unchanged. Owned Prettier and document link/path checks pass. Actual coordinator capture handed the exact 10,376-byte, 14-tool synthetic request to the existing private ChatGPT serializer and joined loopback; this proves integration, not backend acceptance.
 
@@ -1782,7 +1782,7 @@ Root owns commands/services/models with `CARGO_INCREMENTAL=0`/jobs1. Codex deleg
 
 ## Start here (2026-10-14): M45 scoped acceptance complete; publish and verify merge
 
-- M44 [PR50](https://github.com/G9000/animaOS-SWARM/pull/50) is verified merged at `15e40c397a6ef961639e9375fe50ee513d09c9bf`, with the identical tested tree. M45 branch `g9000/companion-community-packages-m45` was cut from that exact main. Its [lean plan](../plans/2026-10-14-companion-community-packages-m45.md) has five binding controller risks and recorded refinements; implementation, review/fix wave, current local gates and scoped controlled acceptance are complete. Exact publication/head/PR/merge evidence belongs in `.superpowers/sdd/2026-10-14-companion-community-packages-m45/progress.md`.
+- M44 [PR50](https://github.com/G9000/animaos/pull/50) is verified merged at `15e40c397a6ef961639e9375fe50ee513d09c9bf`, with the identical tested tree. M45 branch `g9000/companion-community-packages-m45` was cut from that exact main. Its [lean plan](../plans/2026-10-14-companion-community-packages-m45.md) has five binding controller risks and recorded refinements; implementation, review/fix wave, current local gates and scoped controlled acceptance are complete. Exact publication/head/PR/merge evidence belongs in `.superpowers/sdd/2026-10-14-companion-community-packages-m45/progress.md`.
 - M45 installs strict reviewed declarative MCP/inline SKILL.md bundles as disabled external servers and pending skill drafts, through one coordinated durable candidate. It adds seven owner operations, typed SDK and Connectors controls. Separate exact MCP discovery/review/grants/Exec receipts and skill content approval remain required. Changed launch gets a fresh disabled connection with no authority transfer; retained disabled predecessors count toward existing capacity. Owned lifecycle preserves neighbors and trashes exact approved skill bytes. Workspace-global skill effects and executable/publisher integrity limits are explicit. No installer, registry, archive, auth/OAuth, secrets, native plugin loading, auto-start or new dependency.
 - Fresh current gates passed: Rust/core **2,619 tests / nine intentional ignores / 40 suites / lint/build**, **16 M45 native / 11 pure-core cases**, compiled README **187 operations**; SDK **145 tests / three intentional real-service skips / build/typecheck**; web **1,291 tests / 113 files / typecheck/build / 18 bundle-panel cases**. All 33 source hashes/UTC ticks and unrelated nx.json remain exact. One actual idle-scan acceptance failure justified a bounded real-scanner RED/fix and full native rerun: harmless scanner attempts no longer invalidate semantic review witnesses; actual metadata/content changes still conflict. SDK/web source and passing gates were unchanged.
 - Actual built console/current SDK/owner HTTP passed review/install, separate initial and updated skill approvals, enable without start, explicit MCP start/discover/full review/grant/Stop, changed configuration without grant transfer, quiet same-profile restart with exact metadata/approved bytes and no replay, then disable/remove. One actual peer recorded **1 initialize / 1 initialized / 1 list / 0 calls**; the separate native executor test proves Ask/AllowOnce with one call and disable fencing. Exact updated skill bytes moved to recoverable trash; `read_file` and the independent neighbor remained. All six captured processes stopped, ports4200/8081 free and created tab closed. Zero runtime model tasks/messages/tokens. Quiet forced stop is not graceful-shutdown proof.
@@ -2299,7 +2299,7 @@ The M43 resume below is retained as historical evidence; the active M44 resume i
   Portable text bounds are 1,048,576 Unicode scalars; excessive requests fail
   before transport, with a static native error. `attempt_id` is host correlation,
   not a provider deduplication promise. No new lifecycle or durable schema.
-- Source is committed and pushed at `76011cd`; [PR #18](https://github.com/G9000/animaOS-SWARM/pull/18)
+- Source is committed and pushed at `76011cd`; [PR #18](https://github.com/G9000/animaos/pull/18)
   is open against main and attached to the chat. Final publication documentation
   follows that source commit. Only unrelated `nx.json` remains dirty.
 - Resume: await explicit owner PR #18 merge authorization. After that merge,
@@ -2328,7 +2328,7 @@ This document is for the next agent picking up the companion console upgrade.
 - Owner clarified Markdown defines agents and instructed reuse of installed
   Hermes code/behavior ported to an independent Rust long-running runtime. M11
   implements the focused AGENTS/SOUL port on `g9000/hermes-agent-files-m11`, cut
-  from merged main `f80e653`. Implementation `5c7c496` is committed and pushed; [PR #17](https://github.com/G9000/animaOS-SWARM/pull/17) is OPEN against main and attached to the chat. Final publication documentation follows that source commit.
+  from merged main `f80e653`. Implementation `5c7c496` is committed and pushed; [PR #17](https://github.com/G9000/animaos/pull/17) is OPEN against main and attached to the chat. Final publication documentation follows that source commit.
 - Published lean plan: `docs/superpowers/plans/2026-10-12-anima-agent-files-m11.md`.
   Controller binding five-risk rulings, two daemon batch reviews, final web/SDK
   review and one fix wave are complete. A1 hard-link bypass and B1 summary reserve/
@@ -2392,7 +2392,7 @@ The following section retains M10 publication evidence.
   merge commit `647d606` includes final M9 handover `c9909df`.
 - Current branch `feat/companion-console-m10` was cut from that merged main.
   Implementation is committed through `f2d0814`, formatting/docs through `af2b5f8`, with web `9c3b298` and core
-  `bfc4d87`. [PR #16](https://github.com/G9000/animaOS-SWARM/pull/16) is OPEN against main and attached to the chat. All tracked M10 work is committed and pushed; do not repeat
+  `bfc4d87`. [PR #16](https://github.com/G9000/animaos/pull/16) is OPEN against main and attached to the chat. All tracked M10 work is committed and pushed; do not repeat
   implementation or reviews. **Resume: review/merge PR #16 only after a new explicit owner merge instruction.** Current local gates are finished. Live deployment/Unix signal/provider/restore acceptance is a separately authorized follow-up; do not start services under the existing constraint.
 - Published lean plan: `docs/superpowers/plans/2026-09-23-companion-console-m10.md`.
   Binding five-risk rulings plus the evidence-driven shared 40-second shutdown
@@ -2443,7 +2443,7 @@ The following sections retain historical M9 evidence.
 
 - M0–M8 are merged to `main`. The last merges were #12 (M6), #13 (M7) and #14 (M8); `main` is at `86cc87f`.
 - M9 (attachments and browser voice) implementation is complete on `feat/companion-console-m9`, cut from `main`. Lean plan: `docs/superpowers/plans/2026-09-23-companion-console-m9.md`; the owner authorized Codex subagents because Claude was signed out. Both daemon batch reviews, the final web/SDK review and one fix wave are finished. The full Rust gate caught old snapshot expectations; test-only corrections preserved historical migration coverage and passed the rerun.
-- M9 is signed and pushed through `9efe2d6`. [PR #15](https://github.com/G9000/animaOS-SWARM/pull/15) is OPEN against `main` and attached to the Codex chat; it is not merged. Both waiting daemon commits finished, and the latest implementation/documentation signatures were verified. Only unrelated `nx.json` remains locally modified.
+- M9 is signed and pushed through `9efe2d6`. [PR #15](https://github.com/G9000/animaos/pull/15) is OPEN against `main` and attached to the Codex chat; it is not merged. Both waiting daemon commits finished, and the latest implementation/documentation signatures were verified. Only unrelated `nx.json` remains locally modified.
 - The working tree uses snapshot **v11** with `.pre-attachments.bak` / `control_plane.backup.10`; merged `main` still uses v10.
 - Hermes image routing/provider formats were used as Rust porting references. `packages/core-rust/crates/anima-model-adapters/HERMES-NOTICE` retains the upstream MIT notice and revision `f3ef9db68332063a3625661f3a9b259f60abdb4e`. The owner clarified “remember” means reuse code/behavior, not a new memory feature.
 - The lean M10 plan draft (10 tasks, about 1,200 lines) and controller top-five binding risk rulings are ready in the ignored `.superpowers/sdd/2026-09-23-companion-console-m10/plan-draft.md`; its ledger records the precise resume point. No M10 branch or tracked implementation starts before the owner explicitly merges M9.
@@ -2480,7 +2480,7 @@ The following sections retain historical M9 evidence.
 5. Run the gates:
    - Use `NX_DAEMON=false`, `NX_ISOLATE_PLUGINS=false`, `NX_NO_CLOUD=true`, `CI=1`, `ANIMA_SKIP_SERVICE_TESTS=1`, and `NX_NATIVE_FILE_CACHE_DIRECTORY=node_modules/.cache/nx-native-m9`; set `CARGO_INCREMENTAL=0` before cargo or Rust Nx targets. Sandbox native-cache/realpath restrictions require escalated local checks; no dependency installation is needed.
    - `bun x nx run rust-daemon:test --skipNxCache`
-   - `bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache`
+   - `bun x nx run-many -t test,typecheck,build -p @animaos/sdk @animaos/web --skipNxCache`
    - `cargo fmt --all --check`
    - `bun x nx format:check --base=origin/main`
 6. Update the master-plan status row and this handover, push, and open a PR to `main`. Merge only when the owner says "merge".
@@ -2512,7 +2512,7 @@ The following sections retain historical M9 evidence.
 - **Line endings:** with `autocrlf`, git can check files out with CRLF, which `nx format:check` flags. `nx format:write` on those files fixes it, and nothing is committed if only line endings differ.
 - **Corrupted build artifacts:** errors such as "invalid metadata", "not found in rlib format" or an internal compiler error mean the build artifacts are corrupted. Fix them with `cargo clean -p anima-daemon -p anima-core -p anima-model-adapters -p anima-memory`, then rerun.
 - **CI:** it always fails at the Nx Cloud step. The local gates are the verification.
-- **`gh pr edit`:** it fails; use `gh api -X PATCH repos/G9000/animaOS-SWARM/pulls/N`.
+- **`gh pr edit`:** it fails; use `gh api -X PATCH repos/G9000/animaos/pulls/N`.
 - **Stacked PRs:** they don't retarget automatically. PATCH `base=main` before merging.
 
 **Open follow-ups**
@@ -2610,7 +2610,7 @@ The following sections retain historical M9 evidence.
 
 ## Update 2026-10-02: M4 done, PR open
 
-- **M4 (Approvals) is complete** on `feat/companion-console`, and [PR #9](https://github.com/G9000/animaOS-SWARM/pull/9) to `main` is ready for review.
+- **M4 (Approvals) is complete** on `feat/companion-console`, and [PR #9](https://github.com/G9000/animaos/pull/9) to `main` is ready for review.
   - All 13 tasks are done, then a whole-milestone final review (split into daemon and web+SDK reviewers) and one fix wave (`9de5ea3` web, `20c6221` daemon).
   - Gates at `20c6221`: `bun x nx run rust-daemon:test --skipNxCache` passed 1,654 with 7 ignored; SDK and web test, typecheck and build are green (web 751 tests, SDK 63); `cargo fmt --check` and `nx format:check` are clean.
   - Merge only when the owner says "merge".
@@ -2625,7 +2625,7 @@ The following sections retain historical M9 evidence.
 
 - **Done and merged to `main`:**
   - M0 (security groundwork), M1 (run coordinator), M2 (sessions), and M3 (live runs).
-  - PR [#6](https://github.com/G9000/animaOS-SWARM/pull/6) merged M0–M2; PR [#7](https://github.com/G9000/animaOS-SWARM/pull/7) merged M3 (merge commit `51f1f5b`).
+  - PR [#6](https://github.com/G9000/animaos/pull/6) merged M0–M2; PR [#7](https://github.com/G9000/animaos/pull/7) merged M3 (merge commit `51f1f5b`).
 - **In progress: M4 (Approvals).** The plan is written and committed, and its pre-flight audit is done. **No M4 code exists yet.**
 - **Branch:** keep working on `feat/companion-console`. Don't switch branches in the shared checkout. Open the next PR from this branch when M4 is done.
 - **M3 gates at its end:**
@@ -2672,9 +2672,9 @@ Decisions are recorded in the ledger as `Ruling: <what> — <why> — <cost if w
 
 - **Disk is tight** (about 13 GB free); the Nx Rust gate needs about 12 GB. Leftover rustc codegen files pile up in `target/debug/deps/*.rcgu.o`. When no cargo or rustc is running, deleting ones older than 30 minutes freed about 13 GB once. Don't add extra `CARGO_TARGET_DIR`s, and never delete anything outside the repo; the user frees space there.
 - **CI always fails** at `nx start-ci-run` (an Nx Cloud setup issue), including on `main`. The local gates are the verification.
-- **Merging PRs:** auto mode denies Claude's self-merge unless the user explicitly says "merge". `gh pr edit` fails (GraphQL Projects deprecation); use `gh api -X PATCH repos/G9000/animaOS-SWARM/pulls/N`, and `gh api -X PUT …/pulls/N/merge -f merge_method=merge` once the user says to merge.
+- **Merging PRs:** auto mode denies Claude's self-merge unless the user explicitly says "merge". `gh pr edit` fails (GraphQL Projects deprecation); use `gh api -X PATCH repos/G9000/animaos/pulls/N`, and `gh api -X PUT …/pulls/N/merge -f merge_method=merge` once the user says to merge.
 - **Subagent stalls** (the 600 s watchdog) happened on long single responses. Tell implementers to work one item at a time, commit after each, and pipe test output through `tail -30`. If an agent stalls twice, start a fresh one on the remaining items.
-- **Plans:** fence partial code fragments as `text`, because Prettier mangles partial JSX fenced as `tsx`. End every SDK-changing task with `bun x nx run @animaOS-SWARM/sdk:build`, so later web vitest runs resolve the new exports.
+- **Plans:** fence partial code fragments as `text`, because Prettier mangles partial JSX fenced as `tsx`. End every SDK-changing task with `bun x nx run @animaos/sdk:build`, so later web vitest runs resolve the new exports.
 - The model adapters' HTTP client has no request timeout, so every new long wait or model call needs its own bound.
 
 ## Next steps (M4)

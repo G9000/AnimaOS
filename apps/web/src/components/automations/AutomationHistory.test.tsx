@@ -2,7 +2,7 @@ import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Automation, AutomationRun } from '@animaOS-SWARM/sdk';
+import type { Automation, AutomationRun } from '@animaos/sdk';
 
 import { daemon } from '../../lib/daemon-api';
 import { AutomationHistory } from './AutomationHistory';

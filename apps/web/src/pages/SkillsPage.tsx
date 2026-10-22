@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
-import { DaemonHttpError } from '@animaOS-SWARM/sdk';
-import type { Skill, SkillDraftProposer, SkillFile } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError } from '@animaos/sdk';
+import type { Skill, SkillDraftProposer, SkillFile } from '@animaos/sdk';
 
 import { SkillDraftCard } from '../components/skills/SkillDraftCard';
 import { SkillSupportingFiles } from '../components/skills/SkillSupportingFiles';

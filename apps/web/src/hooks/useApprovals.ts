@@ -9,7 +9,7 @@ import {
   type ApprovalRule,
   type ApprovalTool,
   type PolicyClass,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { COMPANION_UNREACHABLE } from '../lib/approvals';
 import { daemon } from '../lib/daemon-api';

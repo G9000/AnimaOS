@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { DaemonHttpError, type AgentFilesPreview } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError, type AgentFilesPreview } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import { SectionTitle } from './ui-bits';
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Automation, Run, Session } from '@animaOS-SWARM/sdk';
+import type { Automation, Run, Session } from '@animaos/sdk';
 
 import {
   decideApproval as sendApprovalDecision,

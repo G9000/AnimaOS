@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from 'react';
-import type { MemoryType } from '@animaOS-SWARM/sdk';
+import type { MemoryType } from '@animaos/sdk';
 
 import { EntityList, entityKey } from '../components/memory/EntityList';
 import { ExportMenu } from '../components/memory/ExportMenu';

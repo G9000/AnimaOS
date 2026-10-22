@@ -2,7 +2,7 @@ import {
   DaemonHttpError,
   type UsageGroup,
   type UsageTotals,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { COMPANION_UNREACHABLE } from './approvals';
 

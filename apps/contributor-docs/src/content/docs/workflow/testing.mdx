@@ -18,8 +18,8 @@ Rust outputs share `target/cargo`. Run `bun run rust:cache:status` to check the 
 | Packaged program (`hosts/anima`) | `bun x nx run anima:test` |
 | Dev launcher | `bun x nx test workspace-dev --runInBand --skipNxCache` |
 | A TypeScript package | `bun x nx test <project>` plus `typecheck` and `build` |
-| Public docs | `bun x nx run @animaOS-SWARM/docs:build --skipNxCache` |
-| Contributor docs | `bun x nx run @animaOS-SWARM/contributor-docs:build --skipNxCache` |
+| Public docs | `bun x nx run @animaos/docs:build --skipNxCache` |
+| Contributor docs | `bun x nx run @animaos/contributor-docs:build --skipNxCache` |
 
 ## Rust Core
 
@@ -115,11 +115,11 @@ Daemon tests live in `hosts/rust-daemon/tests/` (HTTP-level: `agent_api`, `conne
 ## TypeScript Packages
 
 ```bash
-bun x nx test @animaOS-SWARM/sdk
-bun x nx test @animaOS-SWARM/tui
-bun x nx test @animaOS-SWARM/cli
-bun x nx test @animaOS-SWARM/web
-bun x nx typecheck @animaOS-SWARM/sdk
+bun x nx test @animaos/sdk
+bun x nx test @animaos/tui
+bun x nx test @animaos/cli
+bun x nx test @animaos/web
+bun x nx typecheck @animaos/sdk
 
 # Everything
 bun run test
@@ -132,7 +132,7 @@ The TUI exports `EventBus` and the `IEventBus` interface (`on`, `emit`, `clear`)
 
 ```typescript
 import { vi } from 'vitest';
-import type { IEventBus } from '@animaOS-SWARM/tui';
+import type { IEventBus } from '@animaos/tui';
 
 const bus: IEventBus = {
   on: vi.fn(() => () => {}),
@@ -146,9 +146,9 @@ const bus: IEventBus = {
 `apps/web-e2e` covers the console with Playwright. The offline journeys need no daemon, dev server or database: fake APIs fulfill routes and real SSE bytes go through the SDK parser.
 
 ```bash
-bun x nx run @animaOS-SWARM/web-e2e:e2e-console --skipNxCache
-bun x nx run @animaOS-SWARM/web-e2e:typecheck --skipNxCache
-bun x nx run @animaOS-SWARM/web-e2e:deployment-contracts --skipNxCache
+bun x nx run @animaos/web-e2e:e2e-console --skipNxCache
+bun x nx run @animaos/web-e2e:typecheck --skipNxCache
+bun x nx run @animaos/web-e2e:deployment-contracts --skipNxCache
 ```
 
 CI runs `e2e-ci` through `nx run-many`. The service-starting suites (`e2e`, companion configuration) use preview and dev servers and are kept for separately authorized runtime testing. Simulated passes do not establish real HTTP chunking, selected-model streaming, microphone behavior or container restarts; see `deploy/vps/README.md` for manual acceptance.
@@ -165,8 +165,8 @@ These tests cover host selection and argument parsing, the persistence environme
 
 ```bash
 # Catches MDX errors and broken sidebar links
-bun x nx run @animaOS-SWARM/docs:build --skipNxCache
-bun x nx run @animaOS-SWARM/contributor-docs:build --skipNxCache
+bun x nx run @animaos/docs:build --skipNxCache
+bun x nx run @animaos/contributor-docs:build --skipNxCache
 ```
 
 ## Diff Hygiene

@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ResultEntry } from '@animaOS-SWARM/tui';
+import type { ResultEntry } from '@animaos/tui';
 
 export const LAUNCH_HISTORY_FILENAME = 'anima-history.json';
 const MAX_HISTORY_ENTRIES = 100;

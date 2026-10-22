@@ -4,7 +4,7 @@ import type {
   AutomationOutcome,
   AutomationRunOutcome,
   AutomationTrigger,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { formatWhen } from './approvals';
 import type { ToolStep } from './transcript';

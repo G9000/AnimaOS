@@ -6,7 +6,7 @@ export default defineConfig(() => ({
   cacheDir: '../../node_modules/.vite/apps/web-vitest',
   plugins: [react()],
   test: {
-    name: '@animaOS-SWARM/web',
+    name: '@animaos/web',
     watch: false,
     globals: true,
     environment: 'jsdom',

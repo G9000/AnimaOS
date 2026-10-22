@@ -79,7 +79,7 @@ Fresh validation:
 
 - `CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache`: **889 passed**, four ignored (three Postgres tests and one model-download test). Core includes all six reusable crates; daemon includes six new swarm reliability regressions.
 - `bun x nx run-many -t build lint -p core-rust rust-daemon --skipNxCache`: passed with the same isolated Cargo target directory.
-- `bun x nx run-many -t test build typecheck -p @animaOS-SWARM/cli @animaOS-SWARM/sdk --skipNxCache`: passed, **15 SDK** and **111 CLI** tests, including real-daemon HTTP/SSE integration and compile-time contract assertions.
+- `bun x nx run-many -t test build typecheck -p @animaos/cli @animaos/sdk --skipNxCache`: passed, **15 SDK** and **111 CLI** tests, including real-daemon HTTP/SSE integration and compile-time contract assertions.
 - `git diff --check`: passed.
 
 Remaining limits: interrupted interactive work is not checkpoint-resumed or drained on daemon shutdown; persisted Running intent supports conservative interrupted recovery. Existing dead-code and transitive `nom` future-compatibility warnings remain. No scratchboard version exists in this checkout; this plan records completion instead.

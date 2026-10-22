@@ -57,17 +57,17 @@ The SDK is a client for the Rust daemon (`hosts/rust-daemon`). It does not embed
 
 ## Installation
 
-`@animaOS-SWARM/sdk` is a private workspace package in this repository; it is not published to npm. Build it, and depend on it from another workspace package:
+`@animaos/sdk` is a private workspace package in this repository; it is not published to npm. Build it, and depend on it from another workspace package:
 
 ```bash
 bun install --frozen-lockfile
-bun x nx run @animaOS-SWARM/sdk:build
+bun x nx run @animaos/sdk:build
 ```
 
 ```json
 {
   "dependencies": {
-    "@animaOS-SWARM/sdk": "workspace:*"
+    "@animaos/sdk": "workspace:*"
   }
 }
 ```
@@ -92,7 +92,7 @@ The package is ESM and needs a runtime with global `fetch` (or pass your own thr
 ## Single-Agent Flow
 
 ```typescript
-import { agent, createDaemonClient } from '@animaOS-SWARM/sdk';
+import { agent, createDaemonClient } from '@animaos/sdk';
 
 const client = createDaemonClient();
 
@@ -157,7 +157,7 @@ Memory `type` is one of `fact`, `observation`, `task_result` or `reflection`.
 ## Swarm Flow
 
 ```typescript
-import { agent, swarm } from '@animaOS-SWARM/sdk';
+import { agent, swarm } from '@animaos/sdk';
 
 const editorialSwarm = await client.swarms.create(
   swarm({
@@ -197,7 +197,7 @@ console.log(result.result.status, result.swarm.status);
 ## Error Handling
 
 ```typescript
-import { DaemonHttpError, DaemonConnectionError } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError, DaemonConnectionError } from '@animaos/sdk';
 
 try {
   await client.agents.run('AGENT_ID', { text: 'Hello' });

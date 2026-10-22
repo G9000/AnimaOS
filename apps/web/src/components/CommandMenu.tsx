@@ -2,7 +2,7 @@ import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import type {
   SessionMessageSearchHit,
   SessionMessageSearchPage,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import './sessions/session-continuity.css';
 
 export interface StudioCommand {

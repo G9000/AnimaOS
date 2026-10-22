@@ -60,8 +60,8 @@ Exact owner contract when bound:
 ## Commands for a future bound implementation
 
 - Focused Rust: `CARGO_INCREMENTAL=0 bun x nx run rust-daemon:test --skipNxCache` (serialize Cargo and use the repository's alternate target-dir instruction if the daemon binary is locked).
-- SDK: `bun x nx run @animaOS-SWARM/sdk:test --skipNxCache` and the repository's SDK typecheck target after confirming target names with Nx.
-- Web: `bun x nx run @animaOS-SWARM/web:test --skipNxCache` and web typecheck/build targets after confirming names with Nx.
+- SDK: `bun x nx run @animaos/sdk:test --skipNxCache` and the repository's SDK typecheck target after confirming target names with Nx.
+- Web: `bun x nx run @animaos/web:test --skipNxCache` and web typecheck/build targets after confirming names with Nx.
 - Formatting and final source gates: `bun x nx run rust-daemon:lint --skipNxCache`, owned Prettier on the exact changed TS files, then Rust/core, SDK and web gates on the final tree. No actual remote server or account is needed; use loopback-only fixture servers with synthetic tokens.
 
 ## Top five risks

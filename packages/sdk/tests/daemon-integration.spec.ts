@@ -30,7 +30,7 @@ const buildDaemon = promisify(execFile);
 
 describe
   .skipIf(process.env.ANIMA_SKIP_SERVICE_TESTS === '1')
-  .sequential('@animaOS-SWARM/sdk real daemon integration', () => {
+  .sequential('@animaos/sdk real daemon integration', () => {
     let daemonProcess: ChildProcess | null = null;
     let daemonOutput = '';
     let temporaryWorkspace: string | undefined;

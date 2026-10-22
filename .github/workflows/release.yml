@@ -148,8 +148,8 @@ jobs:
           "GH_TOKEN": ""
       - name: "Build the web console"
         run: |
-          bun x nx run @animaOS-SWARM/sdk:build
-          bun x nx run @animaOS-SWARM/web:build
+          bun x nx run @animaos/sdk:build
+          bun x nx run @animaos/web:build
         shell: "bash"
         env:
           "CODESIGN_CERTIFICATE": ""

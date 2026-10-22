@@ -1,4 +1,4 @@
-import type { AgentJob, AgentJobAttempt } from '@animaOS-SWARM/sdk';
+import type { AgentJob, AgentJobAttempt } from '@animaos/sdk';
 
 function validOutput(output: NonNullable<AgentJob['finalOutput']>) {
   return (

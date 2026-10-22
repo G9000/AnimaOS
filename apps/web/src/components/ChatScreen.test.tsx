@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentDetail, ChatMessage } from '../lib/types';
-import { createDaemonClient, type Run } from '@animaOS-SWARM/sdk';
+import { createDaemonClient, type Run } from '@animaos/sdk';
 import { toChatMessage } from '../lib/daemon-api';
 import { formatTime } from './ui-bits';
 import { Composer, MessageList } from './ChatScreen';

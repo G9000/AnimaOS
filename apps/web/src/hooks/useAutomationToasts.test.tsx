@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentEvent, SessionMessage } from '@animaOS-SWARM/sdk';
+import type { AgentEvent, SessionMessage } from '@animaos/sdk';
 
 import type { ChatAttention } from '../lib/automation-toasts';
 import { daemon } from '../lib/daemon-api';

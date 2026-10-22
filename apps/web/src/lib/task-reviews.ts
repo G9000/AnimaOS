@@ -3,7 +3,7 @@ import type {
   LearningProposal,
   LearningReview,
   Run,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 /** A finished task is worth looking back at from this many tool calls. */
 export const REVIEW_MIN_ACTIONS = 3;

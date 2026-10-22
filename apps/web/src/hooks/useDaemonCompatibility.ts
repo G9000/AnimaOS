@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { StatusTooOldError } from '@animaOS-SWARM/sdk';
+import { StatusTooOldError } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 
 /** One bounded status probe per connection/snapshot; never polls Health. */

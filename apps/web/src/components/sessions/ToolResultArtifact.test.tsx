@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { ToolResultPage } from '@animaOS-SWARM/sdk';
+import type { ToolResultPage } from '@animaos/sdk';
 import {
   savedToolResultId,
   ToolResultArtifact,

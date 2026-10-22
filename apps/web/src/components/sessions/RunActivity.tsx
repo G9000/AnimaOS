@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { isTerminalRunStatus, type Automation } from '@animaOS-SWARM/sdk';
+import { isTerminalRunStatus, type Automation } from '@animaos/sdk';
 
 import { isActiveRun, type LiveRun } from '../../lib/session-events';
 import {

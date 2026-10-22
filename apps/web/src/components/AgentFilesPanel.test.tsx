@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { DaemonHttpError, type AgentFilesPreview } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError, type AgentFilesPreview } from '@animaos/sdk';
 import { AgentFilesPanel } from './AgentFilesPanel';
 
 function preview(

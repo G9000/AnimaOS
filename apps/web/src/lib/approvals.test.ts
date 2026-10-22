@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DaemonConnectionError, DaemonHttpError } from '@animaOS-SWARM/sdk';
+import { DaemonConnectionError, DaemonHttpError } from '@animaos/sdk';
 
 import { daemon } from './daemon-api';
 import {

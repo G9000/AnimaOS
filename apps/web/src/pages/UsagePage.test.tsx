@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DaemonHttpError, type UsageQuery } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError, type UsageQuery } from '@animaos/sdk';
 
 import { COMPANION_UNREACHABLE } from '../lib/approvals';
 import { daemon } from '../lib/daemon-api';

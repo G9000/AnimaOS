@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type FormEvent } from 'react';
-import type { LogLevel } from '@animaOS-SWARM/sdk';
+import type { LogLevel } from '@animaos/sdk';
 
 import { PauseIcon, PlayIcon } from '../components/icons';
 import { LogLine } from '../components/system/LogLine';

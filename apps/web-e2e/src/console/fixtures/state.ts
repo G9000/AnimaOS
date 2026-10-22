@@ -8,7 +8,7 @@ import type {
   SessionMessage,
   SnapshotRun,
   UploadedAttachment,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 export const ORIGIN = 'http://anima-console.test';
 export const AGENT = 'companion';

@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DaemonHttpError } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import { runFixture } from '../test/live';

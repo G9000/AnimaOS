@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import type { Run } from '@animaOS-SWARM/sdk';
+import type { Run } from '@animaos/sdk';
 import { installConsoleFixture } from './api';
 export async function openConsole(page: Page) {
   const fixture = await installConsoleFixture(page);

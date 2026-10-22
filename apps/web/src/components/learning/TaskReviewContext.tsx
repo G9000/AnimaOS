@@ -13,7 +13,7 @@ import type {
   LearningProposal,
   LearningReview,
   Run,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { daemon } from '../../lib/daemon-api';
 import { learningReviewsChanged } from '../../lib/inbox-events';

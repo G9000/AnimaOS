@@ -45,7 +45,7 @@
 - **Untrusted and secret-bearing content.** Log lines can carry text the model or a provider wrote (error bodies, tool names) and must never carry secrets. Rules: (1) every captured line goes through `logs::redact` **before** it enters the buffer, so neither `GET /api/logs`, the stream, nor a copy in the UI can hold a secret; (2) the redactor is tested against every secret shape the daemon handles (API keys, `Authorization` and `Bearer` values, Telegram bot tokens including inside `/bot<token>/` URLs, OAuth `access_token`, `refresh_token`, `client_secret`, `code`, `state` query values, cookies, JWTs, and unlabeled long mixed-case tokens); (3) structured fields whose names look secret are replaced by value, not scanned; (4) the web shows every log line as a text node through `RevealedText` (spec §14), never `MarkdownMessage` or HTML. Task 12 greps for the last and reviews every `info!`/`warn!`/`error!` call site that mentions a credential-like word.
 - **Concurrency, every task.** Lock order: control-plane transaction → state lock → leaf mutexes (the outbox, the log buffer, the usage queue). No `std::sync::Mutex` is held across `.await`. The log buffer's `std::sync::Mutex` is taken only inside `Layer::on_event` and the read paths, holds no `.await`, and **the layer never logs while holding it** (no `tracing` macro and no call that can emit one inside the lock; the broadcast `send` does not log). The owner mutation (`PUT /api/usage/pricing`) runs its whole body, transaction included, in its own `tokio::spawn` (as `put_approval_policy` does), so a dropped request never leaves a half-applied change.
 - Existing behavior stays except where a task says so. Deliberate changes: a `ModelStreamFrame::Usage` variant (Task 1); a rollback keeps the failed run's steps (Task 4); steers count toward the 8-queue cap (Task 8); `GET session` gains `usage` (Task 5); `init_tracing` builds a layered subscriber (Task 6).
-- Commands. Rust iteration: `CARGO_INCREMENTAL=0 cargo test -p <crate> --lib -- <filter>` (crates `anima-core`, `anima-model-adapters`, `anima-daemon`); integration: `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --test <name> 2>&1 | tail -30` (pipe the others through `tail -30` too). SDK: `bun x nx test @animaOS-SWARM/sdk`, and **every SDK-changing task ends with `bun x nx run @animaOS-SWARM/sdk:build`** so later direct web Vitest runs resolve the new exports. Web: `cd apps/web && bun x vitest run <files>`. The milestone gate (Task 12): `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache`.
+- Commands. Rust iteration: `CARGO_INCREMENTAL=0 cargo test -p <crate> --lib -- <filter>` (crates `anima-core`, `anima-model-adapters`, `anima-daemon`); integration: `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --test <name> 2>&1 | tail -30` (pipe the others through `tail -30` too). SDK: `bun x nx test @animaos/sdk`, and **every SDK-changing task ends with `bun x nx run @animaos/sdk:build`** so later direct web Vitest runs resolve the new exports. Web: `cd apps/web && bun x vitest run <files>`. The milestone gate (Task 12): `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run-many -t test,typecheck,build -p @animaos/sdk @animaos/web --skipNxCache`.
 - Formatting. Every task ends with `cargo fmt --all` when it touched Rust (then `git diff --stat` must show only the task's files; if `cargo fmt` reformatted unrelated files, tell the controller instead of staging them) and `bun x nx format:write --files=<each changed TS/TSX/CSS/MD file>` when it touched TypeScript, CSS, or Markdown, then re-runs its tests. On Windows the working tree may carry CRLF: `nx format:write` fixes it, and `nx format:check --base=origin/main` in Task 12 is the arbiter.
 - Git. Stage files by explicit path only; never `git add -A`, `git add .`, or `git commit -a`. Never stage anything under `docs/` or `.superpowers/`, nor `nx.json` or `anima.yaml`. `hosts/rust-daemon/README.md` is staged with the task that changes it. Never use `git stash`, `git reset`, `git checkout -- <path>`, `git restore`, or `git worktree`, and never switch branches. Do not start the daemon, a dev server, a database, or a container; tests start what they need. Commits are GPG-signed on this machine and can block on a pinentry dialog until the owner answers it. End each commit message with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
 - Disk is tight: never set a new `CARGO_TARGET_DIR`. No Postgres is available (the Postgres history store's new SQL stays `#[ignore]`/untested here, as before; hand-check it against the SQLite twin).
@@ -908,9 +908,9 @@ export class StatusClient {
 
 **Steps:**
 
-- [ ] **Step 1:** Write the specs; `bun x nx test @animaOS-SWARM/sdk 2>&1 | tail -20`. Expected: FAIL.
-- [ ] **Step 2:** Implement; run again. Expected: PASS. `bun x nx run @animaOS-SWARM/sdk:typecheck 2>&1 | tail -10` if the target exists (`bun x nx show project @animaOS-SWARM/sdk` names it).
-- [ ] **Step 3:** `bun x nx format:write --files=<each changed file>`; re-run the SDK tests; then `bun x nx run @animaOS-SWARM/sdk:build 2>&1 | tail -10`. Expected: the build succeeds.
+- [ ] **Step 1:** Write the specs; `bun x nx test @animaos/sdk 2>&1 | tail -20`. Expected: FAIL.
+- [ ] **Step 2:** Implement; run again. Expected: PASS. `bun x nx run @animaos/sdk:typecheck 2>&1 | tail -10` if the target exists (`bun x nx show project @animaos/sdk` names it).
+- [ ] **Step 3:** `bun x nx format:write --files=<each changed file>`; re-run the SDK tests; then `bun x nx run @animaos/sdk:build 2>&1 | tail -10`. Expected: the build succeeds.
 - [ ] **Step 4:** Stage by path; commit:
 
 ```bash
@@ -1016,7 +1016,7 @@ export function useSessionUsage(target: { agentId: string; sessionId: string } |
 - [ ] **Step 1:** Write the tests; `cd apps/web && bun x vitest run src/lib/usage.test.ts src/lib/download.test.ts src/hooks/useUsage.test.tsx src/hooks/useSessionUsage.test.tsx src/components/usage src/pages/UsagePage.test.tsx src/components/WorkspaceShell.test.tsx src/components/sessions/SessionView.test.tsx src/lib/slash-commands.test.ts src/hooks/useSessionCommands.test.tsx src/ViewHarness.test.tsx src/lib/daemon-api.test.ts 2>&1 | tail -30`. Expected: FAIL.
 - [ ] **Step 2:** Implement. Re-run the same, then `bun x vitest run src/visual-tokens.test.ts 2>&1 | tail -10` (find its path with `find src -name "visual-tokens.test.ts"`). Expected: PASS and silent.
 - [ ] **Step 3:** `grep -rn "dangerouslySetInnerHTML\|MarkdownMessage\|innerHTML" apps/web/src/pages/UsagePage.tsx apps/web/src/components/usage` prints nothing; `git diff --stat -- apps/web/src/ViewHarness.tsx` shows a handful of added lines.
-- [ ] **Step 4:** `bun x nx format:write --files=<each changed file>`; re-run the tests; `bun x nx typecheck @animaOS-SWARM/web 2>&1 | tail -10` (confirm the target name with `bun x nx show project @animaOS-SWARM/web`).
+- [ ] **Step 4:** `bun x nx format:write --files=<each changed file>`; re-run the tests; `bun x nx typecheck @animaos/web 2>&1 | tail -10` (confirm the target name with `bun x nx show project @animaos/web`).
 - [ ] **Step 5:** Stage by path; commit:
 
 ```bash
@@ -1105,7 +1105,7 @@ export function useStatus(options: { enabled: boolean; epoch: number }): { statu
 - [ ] **Step 1:** Write the tests; `cd apps/web && bun x vitest run src/lib/logs.test.ts src/lib/status.test.ts src/hooks/useLogs.test.tsx src/hooks/useStatus.test.tsx src/pages/LogsPage.test.tsx src/pages/HealthPage.test.tsx src/components/WorkspaceShell.test.tsx src/ViewHarness.test.tsx src/lib/daemon-api.test.ts 2>&1 | tail -30`. Expected: FAIL.
 - [ ] **Step 2:** Implement. Re-run the same, then `bun x vitest run src/visual-tokens.test.ts 2>&1 | tail -10`, then the full web suite once: `bun x vitest run 2>&1 | tail -15`. Expected: PASS and silent.
 - [ ] **Step 3:** `grep -rn "dangerouslySetInnerHTML\|MarkdownMessage\|innerHTML" apps/web/src/pages/LogsPage.tsx apps/web/src/pages/HealthPage.tsx apps/web/src/components/system` prints nothing; `grep -L "RevealedText" apps/web/src/components/system/LogLine.tsx` prints nothing (the log row uses it).
-- [ ] **Step 4:** `bun x nx format:write --files=<each changed file>`; re-run the tests; `bun x nx typecheck @animaOS-SWARM/web 2>&1 | tail -10`.
+- [ ] **Step 4:** `bun x nx format:write --files=<each changed file>`; re-run the tests; `bun x nx typecheck @animaos/web 2>&1 | tail -10`.
 - [ ] **Step 5:** Stage by path; commit:
 
 ```bash
@@ -1168,7 +1168,7 @@ Run: `df -h .`
 - With at least 12 GB available: `bun x nx run rust-daemon:test --skipNxCache` (it also runs `core-rust:test`). Expected: PASS (M7 ended at 1,925 passed; M8 adds about 130 Rust tests).
 - Otherwise run the fallback in the shared `target/` (no new `CARGO_TARGET_DIR`): `CARGO_INCREMENTAL=0 cargo test -p anima-core`, `CARGO_INCREMENTAL=0 cargo test -p anima-model-adapters`, `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib`, then `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --tests`. Expected: PASS. The fallback does not satisfy AGENTS.md's completion rule; record that the Nx gate is pending disk space. On Windows, if a running daemon locks `target/debug/anima-daemon.exe`, use AGENTS.md's `CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon` rerun only with the owner's go-ahead.
 
-Run: `bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache`
+Run: `bun x nx run-many -t test,typecheck,build -p @animaos/sdk @animaos/web --skipNxCache`
 Expected: every target succeeds (M7 ended with the web at about 990 tests; M8 adds about 110 web and 25 SDK tests).
 
 Run: `cargo fmt --all --check && bun x nx format:check --base=origin/main`

@@ -39,7 +39,7 @@ Expected: `apps/web/package.json` lists all three packages under `dependencies`,
 Run:
 
 ```powershell
-bun x nx run '@animaOS-SWARM/web:typecheck' --skipNxCache
+bun x nx run '@animaos/web:typecheck' --skipNxCache
 ```
 
 Expected: PASS before the packages are imported by application code.
@@ -78,7 +78,7 @@ The tests must assert separately that:
 Run:
 
 ```powershell
-bun x nx test '@animaOS-SWARM/web' --run src/components/MarkdownMessage.test.tsx --skipNxCache
+bun x nx test '@animaos/web' --run src/components/MarkdownMessage.test.tsx --skipNxCache
 ```
 
 Expected: FAIL because `MarkdownMessage` does not exist.
@@ -184,7 +184,7 @@ Render `MessageList` with an `AgentDetail` containing User, Assistant, System, a
 Run:
 
 ```powershell
-bun x nx test '@animaOS-SWARM/web' --run src/components/ChatScreen.test.tsx --skipNxCache
+bun x nx test '@animaos/web' --run src/components/ChatScreen.test.tsx --skipNxCache
 ```
 
 Expected: FAIL because user and assistant bubbles still render plain text.
@@ -210,7 +210,7 @@ Remove `whitespace-pre-wrap` from the bubble container because block whitespace 
 Run:
 
 ```powershell
-bun x nx test '@animaOS-SWARM/web' --run src/components/MarkdownMessage.test.tsx src/components/ChatScreen.test.tsx --skipNxCache
+bun x nx test '@animaos/web' --run src/components/MarkdownMessage.test.tsx src/components/ChatScreen.test.tsx --skipNxCache
 ```
 
 Expected: both suites pass.
@@ -232,7 +232,7 @@ git commit -m "feat(web): render markdown in chat bubbles"
 Run:
 
 ```powershell
-bun x nx run-many -t test typecheck build -p '@animaOS-SWARM/web' --skipNxCache
+bun x nx run-many -t test typecheck build -p '@animaos/web' --skipNxCache
 ```
 
 Expected: all web tests pass, TypeScript emits no errors, and the Vite production build exits successfully.
@@ -253,7 +253,7 @@ Expected: no whitespace errors and only the intended plan/implementation files a
 Start the worktree web app on an unused local port if port 4200 is owned by the main checkout:
 
 ```powershell
-bun x nx run '@animaOS-SWARM/web:dev' -- --port 4201 --strictPort
+bun x nx run '@animaos/web:dev' -- --port 4201 --strictPort
 ```
 
 Open `http://localhost:4201/` in the in-app browser. Verify the existing Markdown-heavy assistant response renders semantic headings/lists, and use a controlled fixture or component test page only if persisted chat data is unavailable to the worktree host.

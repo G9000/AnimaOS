@@ -67,7 +67,7 @@ fields remove backup, downgrade, and future-version rejection obligations.
 
 Nx resolved project listing was verified with read-only escalation after
 sandbox-native loading failed. Relevant names are `core-rust`, `rust-daemon`,
-`@animaOS-SWARM/sdk`, `@animaOS-SWARM/web`, and `workspace-dev`.
+`@animaos/sdk`, `@animaos/web`, and `workspace-dev`.
 Resolved core-rust has build/test/lint; rust-daemon has dev/build/test/lint.
 SDK and web have test/build/typecheck targets. No new target is necessary.
 No tests were run during planning; task discovery is not validation evidence.
@@ -323,11 +323,11 @@ Check touched Rust formatting with cargo fmt --all --check before formatting
 only owned sources. Every cargo invocation gets CARGO_INCREMENTAL=0.
 
 Conditional SDK/web gates when touched:
-`bun x nx run @animaOS-SWARM/sdk:test --skipNxCache`
-`bun x nx run @animaOS-SWARM/sdk:typecheck --skipNxCache`
-`bun x nx run @animaOS-SWARM/web:test --skipNxCache`
-`bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache`
-`bun x nx run @animaOS-SWARM/web:build --skipNxCache`
+`bun x nx run @animaos/sdk:test --skipNxCache`
+`bun x nx run @animaos/sdk:typecheck --skipNxCache`
+`bun x nx run @animaos/web:test --skipNxCache`
+`bun x nx run @animaos/web:typecheck --skipNxCache`
+`bun x nx run @animaos/web:build --skipNxCache`
 Run relevant docs build if actual Astro docs sources change.
 workspace-dev tests only if launcher changes; launcher changes are not proposed.
 Do not run live E2E, deploy gateway service tests, provider requests, or installs.

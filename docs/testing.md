@@ -158,7 +158,7 @@ CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon NX_TUI=false bun x nx 
 TypeScript SDK tests:
 
 ```bash
-NX_TUI=false bun x nx run @animaOS-SWARM/sdk:test --skipNxCache
+NX_TUI=false bun x nx run @animaos/sdk:test --skipNxCache
 ```
 
 ## Browser playground validation
@@ -166,25 +166,25 @@ NX_TUI=false bun x nx run @animaOS-SWARM/sdk:test --skipNxCache
 Playground typecheck:
 
 ```bash
-NX_TUI=false bun x nx run @animaOS-SWARM/playground:typecheck --skipNxCache
+NX_TUI=false bun x nx run @animaos/playground:typecheck --skipNxCache
 ```
 
 Playground build:
 
 ```bash
-NX_TUI=false bun x nx run @animaOS-SWARM/playground:build --skipNxCache
+NX_TUI=false bun x nx run @animaos/playground:build --skipNxCache
 ```
 
 Web UI typecheck:
 
 ```bash
-NX_TUI=false bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache
+NX_TUI=false bun x nx run @animaos/web:typecheck --skipNxCache
 ```
 
 Web UI build:
 
 ```bash
-NX_TUI=false bun x nx run @animaOS-SWARM/web:build --skipNxCache
+NX_TUI=false bun x nx run @animaos/web:build --skipNxCache
 ```
 
 ## Diff hygiene

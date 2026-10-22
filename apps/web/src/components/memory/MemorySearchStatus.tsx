@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { MemoryReadiness } from '@animaOS-SWARM/sdk';
+import type { MemoryReadiness } from '@animaos/sdk';
 
 import { daemon } from '../../lib/daemon-api';
 

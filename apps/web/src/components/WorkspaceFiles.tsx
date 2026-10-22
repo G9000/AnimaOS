@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type {
   WorkspaceFileResponse,
   WorkspaceFilesResponse,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 
 const message = (error: unknown) =>

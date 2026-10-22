@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { AgentJob } from '@animaOS-SWARM/sdk';
+import type { AgentJob } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import { WorkspaceOperations } from './WorkspaceOperations';
 

@@ -43,7 +43,7 @@
 
 - [ ] **Step 1: Fix the import name**
 
-In `packages/sdk/src/index.ts`, the import `allToolActions` does not exist in `@animaOS-SWARM/tools`. The correct export name is `ALL_TOOL_ACTIONS`.
+In `packages/sdk/src/index.ts`, the import `allToolActions` does not exist in `@animaos/tools`. The correct export name is `ALL_TOOL_ACTIONS`.
 
 ```ts
 // packages/sdk/src/index.ts — replace lines 73-84
@@ -58,7 +58,7 @@ export {
 	listDirAction,
 	multiEditAction,
 	ALL_TOOL_ACTIONS,
-} from "@animaOS-SWARM/tools"
+} from "@animaos/tools"
 ```
 
 - [ ] **Step 2: Verify build passes**
@@ -243,7 +243,7 @@ git commit -m "feat(core): add generateStream to OpenAI adapter"
 
 ```json
 {
-  "name": "@animaOS-SWARM/tui",
+  "name": "@animaos/tui",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -261,8 +261,8 @@ git commit -m "feat(core): add generateStream to OpenAI adapter"
   "dependencies": {
     "ink": "^5.2.0",
     "react": "^19.0.0",
-    "@animaOS-SWARM/core": "workspace:*",
-    "@animaOS-SWARM/swarm": "workspace:*"
+    "@animaos/core": "workspace:*",
+    "@animaos/swarm": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
@@ -308,7 +308,7 @@ git commit -m "feat(core): add generateStream to OpenAI adapter"
 - [ ] **Step 4: Create src/types.ts**
 
 ```ts
-import type { EventType, Event, TaskResult } from "@animaOS-SWARM/core"
+import type { EventType, Event, TaskResult } from "@animaos/core"
 
 /** Agent status as tracked by the TUI */
 export type AgentDisplayStatus = "idle" | "thinking" | "running_tool" | "done" | "error"
@@ -396,7 +396,7 @@ This hook listens to the EventBus and maps raw events into the typed entries (Ag
 
 ```ts
 import { useState, useEffect, useRef } from "react"
-import type { IEventBus, Event } from "@animaOS-SWARM/core"
+import type { IEventBus, Event } from "@animaos/core"
 import type {
   AgentEntry,
   AgentDisplayStatus,
@@ -774,7 +774,7 @@ export function StatusBar({ stats, done }: StatusBarProps) {
 ```tsx
 import React from "react"
 import { Box, Text } from "ink"
-import type { IEventBus } from "@animaOS-SWARM/core"
+import type { IEventBus } from "@animaos/core"
 import { useEventLog } from "./hooks/use-event-log.js"
 import { Header } from "./components/header.js"
 import { AgentPanel } from "./components/agent-panel.js"
@@ -869,8 +869,8 @@ This is the task that produces the "wow" moment.
 Add to `dependencies` in `packages/cli/package.json`:
 
 ```json
-"@animaOS-SWARM/swarm": "workspace:*",
-"@animaOS-SWARM/tui": "workspace:*",
+"@animaos/swarm": "workspace:*",
+"@animaos/tui": "workspace:*",
 "ink": "^5.2.0",
 "react": "^19.0.0"
 ```
@@ -907,8 +907,8 @@ import {
   action,
   type AgentConfig,
   type IModelAdapter,
-} from "@animaOS-SWARM/core"
-import { SwarmCoordinator } from "@animaOS-SWARM/swarm"
+} from "@animaos/core"
+import { SwarmCoordinator } from "@animaos/swarm"
 
 const builtinTools = [
   action({
@@ -998,7 +998,7 @@ export const runCommand = new Command("run")
         // Dynamic import to keep non-TUI path fast
         const { render } = await import("ink")
         const React = await import("react")
-        const { App } = await import("@animaOS-SWARM/tui")
+        const { App } = await import("@animaos/tui")
 
         const instance = render(
           React.createElement(App, { eventBus: bus, strategy: opts.strategy, task }),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentEvent } from '@animaOS-SWARM/sdk';
+import type { AgentEvent } from '@animaos/sdk';
 
 import {
   EMPTY_LIVE_STATE,

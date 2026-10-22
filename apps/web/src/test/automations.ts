@@ -1,4 +1,4 @@
-import type { Automation, AutomationRun } from '@animaOS-SWARM/sdk';
+import type { Automation, AutomationRun } from '@animaos/sdk';
 
 export function automationFixture(
   id: string,

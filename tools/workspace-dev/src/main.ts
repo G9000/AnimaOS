@@ -50,9 +50,9 @@ export function buildWorkspaceDevPlan(
   }
 
   processes.push({
-    name: '@animaOS-SWARM/web',
+    name: '@animaos/web',
     command: 'bun',
-    args: ['x', 'nx', 'run', '@animaOS-SWARM/web:serve'],
+    args: ['x', 'nx', 'run', '@animaos/web:serve'],
     env: {
       UI_BACKEND_ORIGIN: host.baseUrl,
       VITE_HOST_KEY: host.key,
@@ -60,9 +60,9 @@ export function buildWorkspaceDevPlan(
   });
 
   processes.push({
-    name: '@animaOS-SWARM/playground',
+    name: '@animaos/playground',
     command: 'bun',
-    args: ['x', 'nx', 'run', '@animaOS-SWARM/playground:serve'],
+    args: ['x', 'nx', 'run', '@animaos/playground:serve'],
     env: {
       UI_BACKEND_ORIGIN: host.baseUrl,
       VITE_HOST_KEY: host.key,
@@ -70,15 +70,15 @@ export function buildWorkspaceDevPlan(
   });
 
   processes.push({
-    name: '@animaOS-SWARM/docs',
+    name: '@animaos/docs',
     command: 'bun',
-    args: ['x', 'nx', 'run', '@animaOS-SWARM/docs:dev'],
+    args: ['x', 'nx', 'run', '@animaos/docs:dev'],
   });
 
   processes.push({
-    name: '@animaOS-SWARM/contributor-docs',
+    name: '@animaos/contributor-docs',
     command: 'bun',
-    args: ['x', 'nx', 'run', '@animaOS-SWARM/contributor-docs:dev'],
+    args: ['x', 'nx', 'run', '@animaos/contributor-docs:dev'],
   });
 
   return {

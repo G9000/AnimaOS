@@ -102,7 +102,7 @@ Add a **"Using apps"** section to `hosts/rust-daemon/README.md`:
 - `bun x nx run core-rust:test` (includes `anima-process`).
 - Linux: WSL Ubuntu has Rust installed (`~/.cargo/bin/cargo`). Run `CARGO_TARGET_DIR=$HOME/anima-target cargo test --locked -p anima-process` from `/mnt/c/.../animaos-kit`. This WSL uses hybrid cgroup v1, so only the process-group path runs there. The cgroup v2 path needs a systemd-delegated Linux.
 - macOS: `cargo check --target x86_64-apple-darwin -p anima-process --tests` works from Windows (target installed). The owner runs the tests on a MacBook.
-- Web: `bun x nx run @animaOS-SWARM/web:typecheck` and `bun x nx run @animaOS-SWARM/web:test`.
+- Web: `bun x nx run @animaos/web:typecheck` and `bun x nx run @animaos/web:test`.
 - Manual: `bun dev --host rust`, with an Operate agent (no prompts):
   - Claude Code one-shot, then a resume follow-up
   - `claude` interactively in an app session, watched in chat

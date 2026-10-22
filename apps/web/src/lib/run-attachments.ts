@@ -1,4 +1,4 @@
-import type { Run, UploadedAttachment } from '@animaOS-SWARM/sdk';
+import type { Run, UploadedAttachment } from '@animaos/sdk';
 import { attachmentMetadata } from './attachments';
 
 /** Session-scoped public metadata retained while runs precede history. No bytes. */

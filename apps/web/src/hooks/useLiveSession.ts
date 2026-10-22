@@ -5,7 +5,7 @@ import {
   type AgentEvent,
   type Run,
   type SessionMessage,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import {
   MAX_FINISHED_LIVE_RUNS,

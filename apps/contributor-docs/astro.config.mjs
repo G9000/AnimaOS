@@ -2,7 +2,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import lucode from 'lucode-starlight';
 
-const site = process.env.ANIMAOS_CONTRIBUTOR_DOCS_SITE ?? 'https://g9000.github.io/animaOS-SWARM/contributor-docs';
+const site = process.env.ANIMAOS_CONTRIBUTOR_DOCS_SITE ?? 'https://g9000.github.io/animaos/contributor-docs';
 
 function contributorSidebarOverride() {
   return {
@@ -38,10 +38,10 @@ export default defineConfig({
       description: 'Contributor documentation for the animaOS monorepo',
       logo: { src: './src/assets/anima-mark.svg', replacesTitle: false },
       social: [
-        { icon: 'github', label: 'GitHub', href: 'https://github.com/G9000/animaOS-SWARM' },
+        { icon: 'github', label: 'GitHub', href: 'https://github.com/G9000/animaos' },
       ],
       plugins: [
-        lucode({ footerText: 'Built with [animaOS](https://github.com/G9000/animaOS-SWARM).' }),
+        lucode({ footerText: 'Built with [animaOS](https://github.com/G9000/animaos).' }),
         contributorSidebarOverride(),
       ],
       sidebar: [

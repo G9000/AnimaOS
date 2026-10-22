@@ -64,13 +64,13 @@ Root owns private short-runtime descriptor/layout validation, controller, UUID/m
 ### Task 3: Review and gates
 
 - [ ] One owner review of supervisor/profile paths and launch ownership; one final e2e review of the new M70 spec and reused M69 fixtures; one combined fix wave.
-- [ ] Run meaningful offline profile/layout tests and M69 policy tests, full web-console e2e, and `@animaOS-SWARM/web-e2e` typecheck. Use existing Nx targets and verify any focused argument syntax from target help before running it.
+- [ ] Run meaningful offline profile/layout tests and M69 policy tests, full web-console e2e, and `@animaos/web-e2e` typecheck. Use existing Nx targets and verify any focused argument syntax from target help before running it.
 - [ ] Root checks source hashes and runtime manifest, reviews final result schema, and alone decides whether to release the single M70 case. No new actual browser case before the offline gates and final reviews pass.
 
 ## Suggested verification commands (root executes)
 
-- `bun x nx run @animaOS-SWARM/web-e2e:e2e-console --skipNxCache`
-- `bun x nx run @animaOS-SWARM/web-e2e:typecheck --skipNxCache`
+- `bun x nx run @animaos/web-e2e:e2e-console --skipNxCache`
+- `bun x nx run @animaos/web-e2e:typecheck --skipNxCache`
 - For the focused profile-layout/policy test, confirm supported Nx `e2e-console` argument forwarding from the project target/help before using a file filter; do not guess a flag. The full console run remains required.
 - The M70 actual case is not a routine Nx test invocation: only the root-released, no-argument, single-use M70 supervisor may activate the finite owned process tree.
 

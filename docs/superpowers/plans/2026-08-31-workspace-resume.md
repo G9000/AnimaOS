@@ -17,8 +17,8 @@
 **Environment:**
 - bun is NOT on PATH: use `"$HOME/.bun/bin/bun"`. cargo is NOT on PATH: `export PATH="$HOME/.cargo/bin:$HOME/.bun/bin:$PATH"` before any nx/cargo command.
 - Rust gates: `CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache` and `... rust-daemon:lint --skipNxCache`.
-- Web full suite: `bun x nx test @animaOS-SWARM/web --skipNxCache`. Focused web tests: `cd apps/web && bun x vitest run <file-or-substring>` (vitest 4 has NO `--testFile` flag).
-- Web typecheck: `bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache`; build: `bun x nx run @animaOS-SWARM/web:build --skipNxCache`.
+- Web full suite: `bun x nx test @animaos/web --skipNxCache`. Focused web tests: `cd apps/web && bun x vitest run <file-or-substring>` (vitest 4 has NO `--testFile` flag).
+- Web typecheck: `bun x nx run @animaos/web:typecheck --skipNxCache`; build: `bun x nx run @animaos/web:build --skipNxCache`.
 - Commits are GPG-signed. The user may have unrelated uncommitted changes in the tree — NEVER `git add -A`/`git add .`; stage only the files each task lists.
 
 **Key existing code:**
@@ -958,7 +958,7 @@ git commit -m "feat(web): resume an existing workspace from onboarding"
 ### Task 10: Full verification
 
 - [ ] Rust: `CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache` + `... rust-daemon:lint --skipNxCache` — PASS
-- [ ] Web: `bun x nx test @animaOS-SWARM/web --skipNxCache` + `bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache` + `bun x nx run @animaOS-SWARM/web:build --skipNxCache` — PASS
+- [ ] Web: `bun x nx test @animaos/web --skipNxCache` + `bun x nx run @animaos/web:typecheck --skipNxCache` + `bun x nx run @animaos/web:build --skipNxCache` — PASS
 - [ ] Live E2E against a real daemon (fresh control-plane file under %TEMP%, `ANIMAOS_RS_PORT=8091` to isolate): write an `anima.yaml` (orchestrator + 1 worker) into a temp folder → `GET /api/workspace/inspect?rootPath=...` → 200 found:true with roster → `POST /api/workspace/resume` → 201 → `GET /api/agents` shows both agents → yaml byte-identical → restart daemon → agents + workspace survive. Kill the daemon and delete temp dirs afterward. (Send JSON bodies via `--data-binary @file` — Git Bash mangles inline backslash paths.)
 - [ ] Docs-only commit if the plan needed amendments:
 

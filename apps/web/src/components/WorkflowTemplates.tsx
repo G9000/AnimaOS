@@ -6,7 +6,7 @@ import {
   type WorkflowTemplate,
   type WorkflowTemplateInput,
   type WorkflowTemplateRunInput,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 
 const button =

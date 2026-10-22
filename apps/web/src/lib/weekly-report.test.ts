@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentMemory, Run, UsageSummary } from '@animaOS-SWARM/sdk';
+import type { AgentMemory, Run, UsageSummary } from '@animaos/sdk';
 
 import { buildWeeklyReport, formatMicros, reportWindow } from './weekly-report';
 

@@ -183,7 +183,7 @@ mod tests {
         assert!(matches!(error, UpdateError::ManagedInstallation));
         assert_eq!(
             error.to_string(),
-            "This installation is managed by an installer. Download and install the matching Anima package from https://github.com/G9000/animaOS-SWARM/releases"
+            "This installation is managed by an installer. Download and install the matching Anima package from https://github.com/G9000/animaos/releases"
         );
         assert!(error.is_permanent());
     }

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import type { SkillSupportingFile } from '@animaOS-SWARM/sdk';
+import type { SkillSupportingFile } from '@animaos/sdk';
 import { SkillSupportingFiles } from './SkillSupportingFiles';
 
 import {

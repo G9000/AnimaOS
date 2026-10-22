@@ -2,7 +2,7 @@ import type {
   DiscordConnector,
   DiscordConnectorStatus,
   DiscordConnectorSettings,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 const STATUS: Record<DiscordConnectorStatus, string> = {
   disabled: 'Saved · disabled',

@@ -26,9 +26,9 @@ Before each behavior change, add a meaningful failing regression and verify the 
 
 1. Focused core/daemon tests via Nx `--args=<test filter>` where supported by the inspected target.
 2. `bun x nx run rust-daemon:test --skipNxCache` (includes the reusable Rust test dependency).
-3. `bun x nx run @animaOS-SWARM/sdk:test --skipNxCache`, SDK typecheck/build.
-4. `bun x nx run @animaOS-SWARM/web:test --skipNxCache`, web typecheck/build.
-5. `bun x nx run rust-daemon:lint --skipNxCache` and `bun x nx run @animaOS-SWARM/docs:build --skipNxCache` after documentation changes.
+3. `bun x nx run @animaos/sdk:test --skipNxCache`, SDK typecheck/build.
+4. `bun x nx run @animaos/web:test --skipNxCache`, web typecheck/build.
+5. `bun x nx run rust-daemon:lint --skipNxCache` and `bun x nx run @animaos/docs:build --skipNxCache` after documentation changes.
 
 Do not mark a task complete based on design, compilation alone, or a delegated success report. Final report must identify any unverified live-provider or platform behavior.
 

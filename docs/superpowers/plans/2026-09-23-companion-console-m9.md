@@ -1097,7 +1097,7 @@ DaemonClient.attachments: AttachmentsClient
 - [ ] Report exact test counts and owned paths.
 
 ```powershell
-bun x nx run-many -t test,typecheck -p @animaOS-SWARM/sdk --skipNxCache
+bun x nx run-many -t test,typecheck -p @animaos/sdk --skipNxCache
 ```
 
 Use the common Nx environment and require_escalated shell mode.
@@ -1208,7 +1208,7 @@ useAttachments({ chatKey, agentId, sessionId, ensureSession, enabled }):
 - [ ] Run web test/typecheck via Nx; inspect warnings.
 
 ```powershell
-bun x nx run-many -t test,typecheck -p @animaOS-SWARM/web --skipNxCache
+bun x nx run-many -t test,typecheck -p @animaos/web --skipNxCache
 ```
 
 Expected: web tests/typecheck pass with pristine output.
@@ -1304,7 +1304,7 @@ useAttachmentPreview(agentId, attachmentId, mime, enabled):
 - [ ] Run web test/typecheck; preserve pristine console output.
 
 ```powershell
-bun x nx run-many -t test,typecheck -p @animaOS-SWARM/web --skipNxCache
+bun x nx run-many -t test,typecheck -p @animaos/web --skipNxCache
 ```
 
 Expected: component and existing console tests pass.
@@ -1399,7 +1399,7 @@ ReadAloud:
 - [ ] Wire props and run web tests/typecheck.
 
 ```powershell
-bun x nx run-many -t test,typecheck -p @animaOS-SWARM/web --skipNxCache
+bun x nx run-many -t test,typecheck -p @animaos/web --skipNxCache
 ```
 
 Expected: voice and existing onboarding/console tests pass without warnings.
@@ -1453,7 +1453,7 @@ $env:NX_ISOLATE_PLUGINS='false'
 $env:NX_NO_CLOUD='true'
 $env:NX_NATIVE_FILE_CACHE_DIRECTORY=(Join-Path (Get-Location) 'node_modules/.cache/nx-native-m9')
 $env:ANIMA_SKIP_SERVICE_TESTS='1'
-bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache
+bun x nx run-many -t test,typecheck,build -p @animaos/sdk @animaos/web --skipNxCache
 ```
 
 ```powershell

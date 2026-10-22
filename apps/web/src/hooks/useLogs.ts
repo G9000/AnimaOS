@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { LogLevel, LogLine } from '@animaOS-SWARM/sdk';
+import type { LogLevel, LogLine } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import {

@@ -4,7 +4,7 @@ export default defineConfig(() => ({
   root: __dirname,
   cacheDir: '../../node_modules/.vite/packages/cli',
   test: {
-    name: '@animaOS-SWARM/cli',
+    name: '@animaos/cli',
     watch: false,
     globals: true,
     environment: 'node',

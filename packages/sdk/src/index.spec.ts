@@ -49,7 +49,7 @@ function sseResponse(messages: string[]): Response {
   );
 }
 
-describe('@animaOS-SWARM/sdk daemon clients', () => {
+describe('@animaos/sdk daemon clients', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {

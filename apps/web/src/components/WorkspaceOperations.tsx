@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { AgentJob } from '@animaOS-SWARM/sdk';
+import type { AgentJob } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import { AgentRunsView } from './AgentRuns';
 import { currentJobReview } from '../lib/job-output';

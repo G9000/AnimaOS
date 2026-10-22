@@ -19,8 +19,8 @@
     "rust:cache:clean": "bun tools/workspace-dev/scripts/rust-cache.ts clean",
     "test": "bun x nx run-many -t test",
     "typecheck": "bun x nx run-many -t typecheck",
-    "web": "bun x nx dev @animaOS-SWARM/web",
-    "playground": "bun x nx dev @animaOS-SWARM/playground"
+    "web": "bun x nx dev @animaos/web",
+    "playground": "bun x nx dev @animaos/playground"
   },
   "private": true,
   "dependencies": {

@@ -11,7 +11,7 @@ import {
   ChatGptClient,
   DaemonHttpError,
   type ChatGptModelsSnapshot,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatGptModelSelect } from './ChatGptModelSelect';
 

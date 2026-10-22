@@ -1,6 +1,6 @@
-# @animaOS-SWARM/web
+# @animaos/web
 
-Anima's companion console talks to the Rust daemon through `@animaOS-SWARM/sdk`.
+Anima's companion console talks to the Rust daemon through `@animaos/sdk`.
 The chat front door presents one persistent companion; retained agents and bounded
 helpers remain behind it. The separate `apps/playground` is a different surface.
 
@@ -37,9 +37,9 @@ launcher. The console uses the loopback daemon on `127.0.0.1:8080`; the Rust hos
 wraps reusable `packages/core-rust` code. Elixir/Python hosts are placeholders.
 
 ```sh
-bun x nx run @animaOS-SWARM/web:build
-bun x nx run @animaOS-SWARM/web:typecheck
-bun x nx run @animaOS-SWARM/web:test
+bun x nx run @animaos/web:build
+bun x nx run @animaos/web:typecheck
+bun x nx run @animaos/web:test
 ```
 
 For offline browser evidence, see [web-e2e](../web-e2e/README.md). Its explicit

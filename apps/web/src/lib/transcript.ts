@@ -7,7 +7,7 @@ import {
   type Run,
   type SessionMessageAttachment,
   type WebSource,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import type { SaveOutcome, SavedState } from '../hooks/useSaveToMemory';
 import type { ApprovalDecide } from './approvals';

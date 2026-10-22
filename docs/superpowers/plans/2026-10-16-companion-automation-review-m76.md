@@ -46,7 +46,7 @@ In `AutomationsPage.test.tsx`, cover the review entry point for an interrupted o
 Use the existing Nx project target names and verify flags from project configuration/help before running:
 
 - focused automation history and page tests;
-- full `@animaOS-SWARM/web` test, typecheck, and build targets;
+- full `@animaos/web` test, typecheck, and build targets;
 - Prettier check for the four owned files;
 - scoped documentation link/path checks for the plan, master status, handover, parity roadmap and daily-use guidance.
 

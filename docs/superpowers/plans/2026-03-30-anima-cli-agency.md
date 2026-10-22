@@ -206,7 +206,7 @@ import {
 	OllamaAdapter,
 	type IModelAdapter,
 	type ModelConfig,
-} from "@animaOS-SWARM/core"
+} from "@animaos/core"
 import type { AgentDefinition } from "./types.js"
 
 export function createAdapter(provider: string, apiKey?: string): IModelAdapter {
@@ -441,8 +441,8 @@ import {
 	EventBus,
 	action,
 	type AgentConfig,
-} from "@animaOS-SWARM/core"
-import { SwarmCoordinator } from "@animaOS-SWARM/swarm"
+} from "@animaos/core"
+import { SwarmCoordinator } from "@animaos/swarm"
 import { loadAgency, agencyExists } from "../agency/loader.js"
 import { createAdapter } from "../agency/generator.js"
 
@@ -528,7 +528,7 @@ export const launchCommand = new Command("launch")
 		if (opts.tui !== false) {
 			const { render } = await import("ink")
 			const React = await import("react")
-			const { App } = await import("@animaOS-SWARM/tui")
+			const { App } = await import("@animaos/tui")
 
 			const instance = render(
 				React.createElement(App, { eventBus: bus, strategy: agency.strategy, task }),
@@ -601,7 +601,7 @@ const program = new Command()
 
 program
 	.name("anima")
-	.description("animaOS-SWARM — Command & control your AI agent swarms")
+	.description("animaos — Command & control your AI agent swarms")
 	.version("0.0.1")
 
 program.addCommand(createCommand)

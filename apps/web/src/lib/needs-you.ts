@@ -3,7 +3,7 @@ import type {
   Approval,
   LearningReview,
   Run,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { CLASS_LABELS, revealHiddenCharacters } from './approvals';
 import type { TelegramConnector } from './daemon-api';

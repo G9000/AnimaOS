@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import type { Approval } from '@animaOS-SWARM/sdk';
+import type { Approval } from '@animaos/sdk';
 import { openConsole, send, about } from './fixtures/journeys';
 
 for (const decision of ['Allow once', 'Deny'])

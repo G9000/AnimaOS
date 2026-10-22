@@ -10,7 +10,7 @@ The animaOS monorepo uses **Nx** for task orchestration, **Bun** for package man
 ## Directory Layout
 
 ```
-animaOS-SWARM/
+animaos/
 ├── apps/
 │   ├── web/                # Web console (React, thin client of the daemon)
 │   ├── web-e2e/            # Playwright journeys for the console
@@ -25,9 +25,9 @@ animaOS-SWARM/
 │   │   ├── crates/         # 11 Rust crates (below)
 │   │   ├── acceptance/     # Node oracle tests for coding/provider/research tasks
 │   │   └── browser-worker/ # Playwright worker used by the daemon's browser tools
-│   ├── sdk/                # @animaOS-SWARM/sdk, daemon client
-│   ├── cli/                # @animaOS-SWARM/cli, the `animaos` command
-│   ├── tui/                # @animaOS-SWARM/tui, Ink terminal UI
+│   ├── sdk/                # @animaos/sdk, daemon client
+│   ├── cli/                # @animaos/cli, the `animaos` command
+│   ├── tui/                # @animaos/tui, Ink terminal UI
 │   └── ui/                 # Shared React UI primitives
 ├── tools/
 │   ├── workspace-dev/      # Dev launcher (bun dev)
@@ -42,7 +42,7 @@ animaOS-SWARM/
 └── dist-workspace.toml     # cargo-dist release config (only `anima` ships)
 ```
 
-To see the Nx project names: `bun x nx show projects`. They are `core-rust`, `rust-daemon`, `anima`, `workspace-dev`, `@animaOS-SWARM/{sdk,cli,tui,ui,web,web-e2e,playground,docs,contributor-docs}`.
+To see the Nx project names: `bun x nx show projects`. They are `core-rust`, `rust-daemon`, `anima`, `workspace-dev`, `@animaos/{sdk,cli,tui,ui,web,web-e2e,playground,docs,contributor-docs}`.
 
 ## Rust Workspace
 
@@ -146,5 +146,5 @@ Prefer `bun x nx run <project>:<target>` over calling cargo or vitest directly w
 Nx handles build order through the dependency graph:
 
 - `rust-daemon:build` and `rust-daemon:test` first run `core-rust:build` / `core-rust:test`.
-- `@animaOS-SWARM/cli` depends on `@animaOS-SWARM/sdk` and `@animaOS-SWARM/tui`; `tui` depends on `sdk`.
+- `@animaos/cli` depends on `@animaos/sdk` and `@animaos/tui`; `tui` depends on `sdk`.
 - `workspace-dev` starts the apps; it does not build them first.

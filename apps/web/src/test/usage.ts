@@ -1,4 +1,4 @@
-import type { UsageGroup, UsageSummary, UsageTotals } from '@animaOS-SWARM/sdk';
+import type { UsageGroup, UsageSummary, UsageTotals } from '@animaos/sdk';
 
 export function totalsFixture(
   overrides: Partial<UsageTotals> = {},

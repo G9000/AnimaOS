@@ -4,7 +4,7 @@ import {
   type AutomationCardMeta,
   type AutomationMessageMeta,
   type AutomationNoteMeta,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { COMPANION_UNREACHABLE } from '../../lib/approvals';
 import {

@@ -7,7 +7,7 @@ import {
   within,
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { WorkflowRun } from '@animaOS-SWARM/sdk';
+import type { WorkflowRun } from '@animaos/sdk';
 import { daemon } from '../../lib/daemon-api';
 import type { AgentDetail } from '../../lib/types';
 import { ChatWorkflows } from './ChatWorkflows';

@@ -11,8 +11,8 @@ import {
   type AgentConfig,
   type SwarmConfig,
   type TaskResult,
-} from '@animaOS-SWARM/sdk';
-import type { IEventBus } from '@animaOS-SWARM/tui';
+} from '@animaos/sdk';
+import type { IEventBus } from '@animaos/tui';
 import { loadAgency, agencyExists } from '../agency/loader.js';
 import {
   loadSeedMemories,
@@ -22,7 +22,7 @@ import {
 } from '../agency/seed-memory.js';
 import { createCliDaemonClient, type CliDaemonClient } from '../client.js';
 import type { AgencyConfig, AgentDefinition } from '../agency/types.js';
-import type { AgentProfile, ResultEntry } from '@animaOS-SWARM/tui';
+import type { AgentProfile, ResultEntry } from '@animaos/tui';
 import {
   emitLaunchTaskFailure,
   emitLaunchTaskQueued,
@@ -729,7 +729,7 @@ async function loadDaemonTuiRuntime(): Promise<DaemonTuiRuntime> {
     await Promise.all([
       import('ink'),
       import('react'),
-      import('@animaOS-SWARM/tui'),
+      import('@animaos/tui'),
     ]);
 
   return {

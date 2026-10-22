@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { SessionContextUsage, UsageTotals } from '@animaOS-SWARM/sdk';
+import type { SessionContextUsage, UsageTotals } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 

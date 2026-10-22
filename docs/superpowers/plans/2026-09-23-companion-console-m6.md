@@ -41,7 +41,7 @@
 - **Snapshot version 9.** M6 adds `scheduleFires` and new schedule fields; an M5 daemon would load a v9 file, drop the names, active hours, creators, and counters, and refuse to deserialize a `cron` or `once` trigger. The version moves to 9, and the first start writes `<file>.pre-automations.bak` (JSON) or the `control_plane.backup.8` row (Postgres) first; `pre_upgrade_backup_path` gains a version-8 branch so the M6 upgrade never overwrites `.pre-skills.bak`.
 - **Tool grants (spec §13.3 step 5).** `sessions::migration::TOOL_GRANTS` appends `{ id: "m6-automations", read_class: ["list_automations"], write_class: ["create_automation", "pause_automation"] }`. The web's Observe, Collaborate, and Operate profiles add `list_automations`; Collaborate and Operate add `create_automation` and `pause_automation`. Helpers never get the three tools (`agent_runs::helper_config` filters them; each handler refuses a helper).
 - Existing behavior stays except where a task's Interfaces block says so. Deliberate changes: `GET …/schedules` needs owner read authorization; the schedule responses gain fields; agent deletion also deletes the agent's `schedule_runs` rows; silent check-in pairs leave the hot tail once mirrored and older than 24 hours, wherever they sit (Task 4; see Notes); schedule prompts refuse tag and direction-override characters on create and update.
-- Commands. Rust iteration: `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib -- <filter> <filter>` (filters after `--`), piped through `tail -30`; integration tests: `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --test schedule_api 2>&1 | tail -30`. SDK: `bun x nx test @animaOS-SWARM/sdk`, and **every SDK-changing task ends with `bun x nx run @animaOS-SWARM/sdk:build`** so later direct web Vitest runs resolve the new exports. Web: `cd apps/web && bun x vitest run <files>`. The milestone gate (Task 13) runs `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache`.
+- Commands. Rust iteration: `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib -- <filter> <filter>` (filters after `--`), piped through `tail -30`; integration tests: `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --test schedule_api 2>&1 | tail -30`. SDK: `bun x nx test @animaos/sdk`, and **every SDK-changing task ends with `bun x nx run @animaos/sdk:build`** so later direct web Vitest runs resolve the new exports. Web: `cd apps/web && bun x vitest run <files>`. The milestone gate (Task 13) runs `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run-many -t test,typecheck,build -p @animaos/sdk @animaos/web --skipNxCache`.
 - Formatting is clean at the start. Every task ends with `cargo fmt --all` when it touched Rust (then `git diff --stat` must show only the task's files; if `cargo fmt` reformatted unrelated files, tell the controller instead of staging them) and `bun x nx format:write --files=<each changed TS/TSX/CSS/MD file>` when it touched TypeScript, CSS, or Markdown, then re-runs its tests, so every commit stays formatted.
 - Stage files by explicit path only; never `git add -A`, `git add .`, or `git commit -a`. Never stage anything under `docs/` or `.superpowers/`, nor `nx.json` or `anima.yaml` (they show in `git status` and are not yours). `hosts/rust-daemon/README.md` is not under `docs/` and is staged with the task that changes it. Never use `git stash`, `git reset`, `git checkout -- <path>`, `git restore`, or `git worktree`, and never switch branches. Do not start the daemon, a dev server, a database, or a container; tests start what they need. Commits are GPG-signed on this machine: a commit can block on a pinentry dialog until the owner answers it.
 - Disk is tight (about 13 GB free; the Nx Rust gate needs about 12): never set a new `CARGO_TARGET_DIR`. CI stops at `nx start-ci-run` (Nx Cloud), so the local commands are the verification. No Postgres is available: Postgres tests stay `#[ignore]`.
@@ -7997,7 +7997,7 @@ describe('isAutomationEvent', () => {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `bun x nx test @animaOS-SWARM/sdk 2>&1 | tail -30`
+Run: `bun x nx test @animaos/sdk 2>&1 | tail -30`
 Expected: FAIL (`client.automations` and `isAutomationEvent` do not exist).
 
 - [ ] **Step 3: Write the client and the event**
@@ -8315,10 +8315,10 @@ If `packages/sdk/src/index.spec.ts` asserts the list of `DaemonClient` members o
 
 - [ ] **Step 4: Run the tests, then build**
 
-Run: `bun x nx test @animaOS-SWARM/sdk 2>&1 | tail -30`
+Run: `bun x nx test @animaos/sdk 2>&1 | tail -30`
 Expected: PASS (3 new client tests, the event test, every existing SDK test).
 
-Run: `bun x nx run @animaOS-SWARM/sdk:typecheck 2>&1 | tail -15 && bun x nx run @animaOS-SWARM/sdk:build 2>&1 | tail -15`
+Run: `bun x nx run @animaos/sdk:typecheck 2>&1 | tail -15 && bun x nx run @animaos/sdk:build 2>&1 | tail -15`
 Expected: both succeed (later web tasks resolve the new exports from the build).
 
 - [ ] **Step 5: Format and commit**
@@ -8359,7 +8359,7 @@ Recommended implementer tier: cheap (typed client with complete code and tests).
 Create `apps/web/src/test/automations.ts`:
 
 ```ts
-import type { Automation, AutomationRun } from '@animaOS-SWARM/sdk';
+import type { Automation, AutomationRun } from '@animaos/sdk';
 
 export function automationFixture(
   id: string,
@@ -8695,7 +8695,7 @@ Create `apps/web/src/hooks/useAutomations.test.tsx`:
 ```tsx
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DaemonHttpError } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import { automationFixture } from '../test/automations';
@@ -8839,7 +8839,7 @@ Expected: FAIL (the modules and `automationsVersion` do not exist; the access pr
 Create `apps/web/src/lib/schedule-parse.ts`:
 
 ```ts
-import type { AutomationTrigger } from '@animaOS-SWARM/sdk';
+import type { AutomationTrigger } from '@animaos/sdk';
 
 /** Spec §15.4: phrases the Automations page understands. The daemon
  *  previews and stores what they mean; the browser never computes fire
@@ -9096,7 +9096,7 @@ import type {
   AutomationOutcome,
   AutomationRunOutcome,
   AutomationTrigger,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { formatWhen } from './approvals';
 import type { ToolStep } from './transcript';
@@ -9230,7 +9230,7 @@ In `apps/web/src/lib/session-events.ts`:
 
 Run `cd apps/web && bun x tsc -p tsconfig.app.json --noEmit 2>&1 | tail -20`; add `automationsVersion: 0` to any other `LiveState` object literal the compiler names (test files included).
 
-In `apps/web/src/lib/daemon-api.ts`, add `type ActiveHours, type AutomationInput, type AutomationPatch, type AutomationTrigger, type HeartbeatInput,` to the `@animaOS-SWARM/sdk` import, and after `importSkill: …`:
+In `apps/web/src/lib/daemon-api.ts`, add `type ActiveHours, type AutomationInput, type AutomationPatch, type AutomationTrigger, type HeartbeatInput,` to the `@animaos/sdk` import, and after `importSkill: …`:
 
 ```ts
   /** Automations (spec §9.2, §15.4). */
@@ -9266,7 +9266,7 @@ import {
   type Automation,
   type AutomationInput,
   type AutomationPatch,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { COMPANION_UNREACHABLE } from '../lib/approvals';
 import { daemon } from '../lib/daemon-api';
@@ -9427,7 +9427,7 @@ In `apps/web/src/lib/agent-access.ts`, add `'list_automations',` after `'load_sk
 Run: `cd apps/web && bun x vitest run src/lib/schedule-parse.test.ts src/lib/automations.test.ts src/hooks/useAutomations.test.tsx src/lib/session-events.test.ts src/lib/agent-access.test.ts 2>&1 | tail -30`
 Expected: PASS, with no `act()` warnings or console noise.
 
-Run: `bun x nx run @animaOS-SWARM/web:typecheck 2>&1 | tail -15`
+Run: `bun x nx run @animaos/web:typecheck 2>&1 | tail -15`
 Expected: success.
 
 - [ ] **Step 6: Format and commit**
@@ -9469,7 +9469,7 @@ Create `apps/web/src/pages/AutomationsPage.test.tsx`:
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DaemonHttpError } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError } from '@animaos/sdk';
 
 import type { AutomationsView } from '../hooks/useAutomations';
 import {
@@ -9807,7 +9807,7 @@ import {
   type Automation,
   type AutomationTarget,
   type AutomationTrigger,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { COMPANION_UNREACHABLE, formatWhen } from '../../lib/approvals';
 import {
@@ -10125,7 +10125,7 @@ import {
   DaemonHttpError,
   type Automation,
   type AutomationRun,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { COMPANION_UNREACHABLE, formatWhen } from '../../lib/approvals';
 import { RUN_OUTCOME_LABELS } from '../../lib/automations';
@@ -10223,7 +10223,7 @@ Create `apps/web/src/pages/AutomationsPage.tsx`:
 
 ```tsx
 import { useEffect, useState } from 'react';
-import type { Automation } from '@animaOS-SWARM/sdk';
+import type { Automation } from '@animaos/sdk';
 
 import {
   AutomationEditor,
@@ -10644,7 +10644,7 @@ Add `@import './automations.css';` to `apps/web/src/styles.css` after `@import '
 Run: `cd apps/web && bun x vitest run src/pages/AutomationsPage.test.tsx src/visual-tokens.test.ts 2>&1 | tail -30`
 Expected: PASS (9 page tests and the visual-token test), with no `act()` warnings or console noise.
 
-Run: `bun x nx run @animaOS-SWARM/web:typecheck 2>&1 | tail -15`
+Run: `bun x nx run @animaos/web:typecheck 2>&1 | tail -15`
 Expected: success.
 
 - [ ] **Step 6: Format and commit**
@@ -10833,7 +10833,7 @@ Expected: FAIL (no notice card, no `automationNotice`, no header badge detail, n
 
 - [ ] **Step 3: The notice card and the transcript actions**
 
-In `apps/web/src/lib/transcript.ts`, add `import type { Automation } from '@animaOS-SWARM/sdk';` (merge with an existing SDK type import if there is one) and to `TranscriptActions`, after `companionAgentId?: string;`:
+In `apps/web/src/lib/transcript.ts`, add `import type { Automation } from '@animaos/sdk';` (merge with an existing SDK type import if there is one) and to `TranscriptActions`, after `companionAgentId?: string;`:
 
 ```text
   /** The automation a `create_automation` call made, for its notice card
@@ -10847,7 +10847,7 @@ Create `apps/web/src/components/sessions/AutomationNoticeCard.tsx`:
 
 ```tsx
 import { useState } from 'react';
-import type { Automation } from '@animaOS-SWARM/sdk';
+import type { Automation } from '@animaos/sdk';
 
 import { formatWhen } from '../../lib/approvals';
 import { describeActiveHours, describeTrigger } from '../../lib/automations';
@@ -10901,7 +10901,7 @@ export function AutomationNoticeCard({
 }
 ```
 
-In `apps/web/src/components/sessions/RunActivity.tsx`, add `import { AutomationNoticeCard } from './AutomationNoticeCard';` and `import type { Automation } from '@animaOS-SWARM/sdk';`, and in `ToolBlock`, after `const keys = stepKeys(steps);`:
+In `apps/web/src/components/sessions/RunActivity.tsx`, add `import { AutomationNoticeCard } from './AutomationNoticeCard';` and `import type { Automation } from '@animaos/sdk';`, and in `ToolBlock`, after `const keys = stepKeys(steps);`:
 
 ```tsx
 // Spec §15.2: an automation the companion created stays visible with
@@ -10930,7 +10930,7 @@ and as the last child of the `tool-block` `div` (after the `expanded && count > 
 
 In `apps/web/src/hooks/useTranscriptActions.ts`:
 
-1. Add `import type { Automation } from '@animaOS-SWARM/sdk';` (merge with the existing SDK type import) and `import { automationNoticeFor } from '../lib/automations';`.
+1. Add `import type { Automation } from '@animaos/sdk';` (merge with the existing SDK type import) and `import { automationNoticeFor } from '../lib/automations';`.
 2. Add to `TranscriptActionOptions`, after `companionId?`:
 
 ```text
@@ -11117,7 +11117,7 @@ Expected: PASS, with no `act()` warnings or console noise.
 Run: `cd apps/web && bun x vitest run 2>&1 | tail -15`
 Expected: the whole web suite passes (M5 ended at 807 tests; M6 adds about 40).
 
-Run: `bun x nx run @animaOS-SWARM/web:typecheck 2>&1 | tail -15`
+Run: `bun x nx run @animaos/web:typecheck 2>&1 | tail -15`
 Expected: success.
 
 - [ ] **Step 7: Format and commit**
@@ -11169,7 +11169,7 @@ Run: `df -h .`
 - With at least 12 GB available: run `bun x nx run rust-daemon:test --skipNxCache` (it also runs `core-rust:test`). Expected: PASS (M5 ended at 1,775 passed / 7 ignored; M6 adds about 90 tests).
 - Otherwise run the fallback in the shared `target/` (no new `CARGO_TARGET_DIR`): `CARGO_INCREMENTAL=0 cargo test -p anima-core --lib`, `CARGO_INCREMENTAL=0 cargo test -p anima-model-adapters --lib`, `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib`, then `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --tests`. Expected: PASS. The fallback does not satisfy AGENTS.md's completion rule; record that the Nx gate is pending disk space. On Windows, if a running daemon locks `target/debug/anima-daemon.exe`, use AGENTS.md's `CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon` rerun only with the owner's go-ahead (it is a second target directory on a tight disk).
 
-Run: `bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache`
+Run: `bun x nx run-many -t test,typecheck,build -p @animaos/sdk @animaos/web --skipNxCache`
 Expected: every target succeeds (M5 ended at web 807 tests; M6 adds about 45 web and 4 SDK tests).
 
 Run: `cargo fmt --all --check && bun x nx format:check --base=origin/main`

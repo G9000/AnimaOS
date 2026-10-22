@@ -5,7 +5,7 @@ import type {
   Run,
   RunLifecycleEventType,
   SnapshotRun,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 

@@ -8,7 +8,7 @@ import {
 } from '../../lib/daemon-api';
 import { OnboardingFlow } from './OnboardingFlow';
 import { AGENCY_TEMPLATES } from '../../lib/agency-templates';
-import { DaemonHttpError } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError } from '@animaos/sdk';
 
 it('renames full names and their short references, and repairs an already mismatched draft', async () => {
   const generate = vi.spyOn(daemon, 'generateAgency').mockResolvedValue({

@@ -11,7 +11,7 @@
 - **Embeddings:** the runtime starts on hashed vectors and swaps to fastembed in the background.
 - **External provider:** an `ExternalMemoryProvider` trait in `anima-memory` lets one external service run beside the local store, as in Hermes. It adds recall, receives turns, and mirrors writes. The default is `none`.
 
-**Tech Stack:** Rust (anima-memory, hosts/rust-daemon), React + vitest (apps/web), `@animaOS-SWARM/sdk`.
+**Tech Stack:** Rust (anima-memory, hosts/rust-daemon), React + vitest (apps/web), `@animaos/sdk`.
 
 **Spec:** [`docs/superpowers/specs/2026-10-19-memory-overhaul-design.md`](../specs/2026-10-19-memory-overhaul-design.md)
 
@@ -29,9 +29,9 @@
 - **Verification:**
   - `bun x nx run rust-daemon:test --skipNxCache` (only the 16 known macOS failures: 14 `fp08_host_*`, 2 `m44_*`. `stop_tests::a_stop_kills_the_bash_command_its_run_waits_for` is load-flaky; rerun it alone.)
   - `bun x nx run core-rust:test --skipNxCache`
-  - `bun x nx run @animaOS-SWARM/web:test --skipNxCache`
-  - `bun x nx run @animaOS-SWARM/web:typecheck`
-  - `bun x nx run @animaOS-SWARM/sdk:test --skipNxCache`
+  - `bun x nx run @animaos/web:test --skipNxCache`
+  - `bun x nx run @animaos/web:typecheck`
+  - `bun x nx run @animaos/sdk:test --skipNxCache`
 
 ## Review Focus
 
@@ -85,7 +85,7 @@
   - Log the count.
   - It runs every boot but is a no-op once clean.
   - Daemon test: seed such a fact, run the repair, and the context provider returns it for a matching message.
-- [ ] Run `bun x nx run core-rust:test --skipNxCache`, `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run @animaOS-SWARM/web:test --skipNxCache`.
+- [ ] Run `bun x nx run core-rust:test --skipNxCache`, `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run @animaos/web:test --skipNxCache`.
 - [ ] Commit (ledger): "saved-from-chat facts and lessons reach context".
 
 ### Task 3: Durable memory by default
@@ -235,7 +235,7 @@
   - Strict accept and reject.
   - An old control plane without counts loads.
   - Web: the card renders each edit kind.
-- [ ] Run `bun x nx run rust-daemon:test --skipNxCache`, `bun x nx run @animaOS-SWARM/web:test --skipNxCache` and `bun x nx run @animaOS-SWARM/sdk:test --skipNxCache`.
+- [ ] Run `bun x nx run rust-daemon:test --skipNxCache`, `bun x nx run @animaos/web:test --skipNxCache` and `bun x nx run @animaos/sdk:test --skipNxCache`.
 - [ ] Commit (ledger): "review conversations every 10 owner messages".
 
 ### Task 8: Real embeddings by default, loaded in the background
@@ -269,7 +269,7 @@
   - During `Rebuilding`, hashed vectors are never returned.
   - The web status text.
   - Use an injectable loader so tests never download.
-- [ ] Run `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run @animaOS-SWARM/web:test --skipNxCache`.
+- [ ] Run `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run @animaos/web:test --skipNxCache`.
 - [ ] Commit (ledger): "multilingual embeddings by default, loaded in the background".
 
 ### Task 9: Export, plus the core-memory console
@@ -294,7 +294,7 @@
   - A server error shows inline.
   - Scanner warnings show as a small notice naming the patterns.
 - [ ] **Export menu:** JSON or Markdown, for this agent or all agents. It downloads through the SDK's blob.
-- [ ] Run `bun x nx run @animaOS-SWARM/sdk:test --skipNxCache`, `bun x nx run @animaOS-SWARM/web:test --skipNxCache`, `bun x nx run @animaOS-SWARM/web:typecheck` and `bun x nx run rust-daemon:test --skipNxCache`.
+- [ ] Run `bun x nx run @animaos/sdk:test --skipNxCache`, `bun x nx run @animaos/web:test --skipNxCache`, `bun x nx run @animaos/web:typecheck` and `bun x nx run rust-daemon:test --skipNxCache`.
 - [ ] Commit (ledger): "memory export and core-memory console".
 
 ### Task 10: Plug-in point for an external memory provider
@@ -345,7 +345,7 @@
     - A failed persist sends nothing.
     - With `none` the snapshot diff never runs: assert through a counter in the dispatch.
 - [ ] **Status:** the readiness route includes the provider. The console shows "External memory: <id> — ready" or "… — unavailable: <reason>", and nothing when the provider is `none`.
-- [ ] Run `bun x nx run core-rust:test --skipNxCache`, `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run @animaOS-SWARM/web:test --skipNxCache`.
+- [ ] Run `bun x nx run core-rust:test --skipNxCache`, `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run @animaos/web:test --skipNxCache`.
 - [ ] Commit (ledger): "plug-in point for an external memory provider".
 
 ### Task 11: Full verification and live check

@@ -5,8 +5,8 @@ import type {
   CoreMemoryBlockName,
   CoreMemoryEdit,
   CoreMemoryEntry,
-} from '@animaOS-SWARM/sdk';
-import { DaemonHttpError } from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
+import { DaemonHttpError } from '@animaos/sdk';
 
 import { daemon } from '../../lib/daemon-api';
 import { COMPANION_UNREACHABLE } from '../../lib/approvals';

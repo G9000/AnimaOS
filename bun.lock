@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "animaOS-SWARM",
+      "name": "animaos",
       "dependencies": {
         "playwright-core": "1.64.1",
         "react": "^19.3.1",
@@ -46,7 +46,7 @@
       },
     },
     "apps/contributor-docs": {
-      "name": "@animaOS-SWARM/contributor-docs",
+      "name": "@animaos/contributor-docs",
       "version": "0.0.1",
       "dependencies": {
         "@astrojs/starlight": "^0.42.6",
@@ -62,7 +62,7 @@
       },
     },
     "apps/docs": {
-      "name": "@animaOS-SWARM/docs",
+      "name": "@animaos/docs",
       "version": "0.0.1",
       "dependencies": {
         "@astrojs/starlight": "^0.42.6",
@@ -80,7 +80,7 @@
       },
     },
     "apps/landing": {
-      "name": "@animaOS-SWARM/landing",
+      "name": "@animaos/landing",
       "version": "0.0.1",
       "dependencies": {
         "@astrojs/vercel": "^11.0.16",
@@ -92,18 +92,18 @@
       },
     },
     "apps/playground": {
-      "name": "@animaOS-SWARM/playground",
+      "name": "@animaos/playground",
       "version": "0.0.1",
       "dependencies": {
-        "@animaOS-SWARM/ui": "workspace:*",
+        "@animaos/ui": "workspace:*",
       },
     },
     "apps/web": {
-      "name": "@animaOS-SWARM/web",
+      "name": "@animaos/web",
       "version": "0.0.1",
       "dependencies": {
-        "@animaOS-SWARM/sdk": "workspace:*",
-        "@animaOS-SWARM/ui": "workspace:*",
+        "@animaos/sdk": "workspace:*",
+        "@animaos/ui": "workspace:*",
         "@fontsource-variable/fraunces": "^5.3.0",
         "@fontsource-variable/geist": "^5.3.0",
         "@fontsource-variable/geist-mono": "^5.3.0",
@@ -118,21 +118,21 @@
       },
     },
     "apps/web-e2e": {
-      "name": "@animaOS-SWARM/web-e2e",
+      "name": "@animaos/web-e2e",
       "version": "0.0.1",
       "devDependencies": {
-        "@animaOS-SWARM/sdk": "workspace:*",
+        "@animaos/sdk": "workspace:*",
       },
     },
     "packages/cli": {
-      "name": "@animaOS-SWARM/cli",
+      "name": "@animaos/cli",
       "version": "0.0.1",
       "bin": {
         "animaos": "./dist/index.js",
       },
       "dependencies": {
-        "@animaOS-SWARM/sdk": "workspace:*",
-        "@animaOS-SWARM/tui": "workspace:*",
+        "@animaos/sdk": "workspace:*",
+        "@animaos/tui": "workspace:*",
         "@clack/prompts": "^0.10.0",
         "commander": "^14.0.3",
         "ink": "^6.8.0",
@@ -147,17 +147,17 @@
       },
     },
     "packages/sdk": {
-      "name": "@animaOS-SWARM/sdk",
+      "name": "@animaos/sdk",
       "version": "0.0.1",
       "dependencies": {
         "tslib": "^2.3.0",
       },
     },
     "packages/tui": {
-      "name": "@animaOS-SWARM/tui",
+      "name": "@animaos/tui",
       "version": "0.0.1",
       "dependencies": {
-        "@animaOS-SWARM/sdk": "workspace:*",
+        "@animaos/sdk": "workspace:*",
         "ink": "^6.8.0",
         "react": "^19.3.1",
         "tslib": "^2.3.0",
@@ -168,7 +168,7 @@
       },
     },
     "packages/ui": {
-      "name": "@animaOS-SWARM/ui",
+      "name": "@animaos/ui",
       "version": "0.0.1",
     },
     "tools/workspace-dev": {
@@ -181,25 +181,25 @@
 
     "@alcalzone/ansi-tokenize": ["@alcalzone/ansi-tokenize@0.2.5", "", { "dependencies": { "ansi-styles": "^6.2.1", "is-fullwidth-code-point": "^5.0.0" } }, "sha512-3NX/MpTdroi0aKz134A6RC2Gb2iXVECN4QaAXnvCIxxIm3C3AVB1mkUe8NaaiyvOpDfsrqWhYtj+Q6a62RrTsw=="],
 
-    "@animaOS-SWARM/cli": ["@animaOS-SWARM/cli@workspace:packages/cli"],
+    "@animaos/cli": ["@animaos/cli@workspace:packages/cli"],
 
-    "@animaOS-SWARM/contributor-docs": ["@animaOS-SWARM/contributor-docs@workspace:apps/contributor-docs"],
+    "@animaos/contributor-docs": ["@animaos/contributor-docs@workspace:apps/contributor-docs"],
 
-    "@animaOS-SWARM/docs": ["@animaOS-SWARM/docs@workspace:apps/docs"],
+    "@animaos/docs": ["@animaos/docs@workspace:apps/docs"],
 
-    "@animaOS-SWARM/landing": ["@animaOS-SWARM/landing@workspace:apps/landing"],
+    "@animaos/landing": ["@animaos/landing@workspace:apps/landing"],
 
-    "@animaOS-SWARM/playground": ["@animaOS-SWARM/playground@workspace:apps/playground"],
+    "@animaos/playground": ["@animaos/playground@workspace:apps/playground"],
 
-    "@animaOS-SWARM/sdk": ["@animaOS-SWARM/sdk@workspace:packages/sdk"],
+    "@animaos/sdk": ["@animaos/sdk@workspace:packages/sdk"],
 
-    "@animaOS-SWARM/tui": ["@animaOS-SWARM/tui@workspace:packages/tui"],
+    "@animaos/tui": ["@animaos/tui@workspace:packages/tui"],
 
-    "@animaOS-SWARM/ui": ["@animaOS-SWARM/ui@workspace:packages/ui"],
+    "@animaos/ui": ["@animaos/ui@workspace:packages/ui"],
 
-    "@animaOS-SWARM/web": ["@animaOS-SWARM/web@workspace:apps/web"],
+    "@animaos/web": ["@animaos/web@workspace:apps/web"],
 
-    "@animaOS-SWARM/web-e2e": ["@animaOS-SWARM/web-e2e@workspace:apps/web-e2e"],
+    "@animaos/web-e2e": ["@animaos/web-e2e@workspace:apps/web-e2e"],
 
     "@asamuzakjp/css-color": ["@asamuzakjp/css-color@5.1.11", "", { "dependencies": { "@asamuzakjp/generational-cache": "^1.0.1", "@csstools/css-calc": "^3.2.0", "@csstools/css-color-parser": "^4.1.0", "@csstools/css-parser-algorithms": "^4.0.0", "@csstools/css-tokenizer": "^4.0.0" } }, "sha512-KVw6qIiCTUQhByfTd78h2yD1/00waTmm9uy/R7Ck/ctUyAPj+AEDLkQIdJW0T8+qGgj3j5bpNKK7Q3G+LedJWg=="],
 

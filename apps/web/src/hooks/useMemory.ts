@@ -6,8 +6,8 @@ import type {
   MemoryEvidenceTrace,
   MemoryFact,
   MemoryPatch,
-} from '@animaOS-SWARM/sdk';
-import { MAX_FACTS_SHOWN } from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
+import { MAX_FACTS_SHOWN } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import {

@@ -6,7 +6,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { AgentMemory } from '@animaOS-SWARM/sdk';
+import type { AgentMemory } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import { AgentMemoryView } from './AgentProfileDetails';
 

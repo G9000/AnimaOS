@@ -32,7 +32,7 @@ const api = vi.hoisted(() => ({
   configureOauthApp: vi.fn(),
   removeOauthApp: vi.fn(),
 }));
-vi.mock('@animaOS-SWARM/sdk', () => ({
+vi.mock('@animaos/sdk', () => ({
   createDaemonClient: () => ({ connectors: api }),
 }));
 const connector = {

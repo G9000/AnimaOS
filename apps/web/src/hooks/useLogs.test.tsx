@@ -5,7 +5,7 @@ import {
   type LogEvent,
   type LogLine,
   type LogStreamOptions,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import { LOGS_TOO_OLD } from '../lib/logs';

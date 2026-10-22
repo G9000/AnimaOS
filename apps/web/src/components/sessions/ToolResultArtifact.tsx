@@ -1,4 +1,4 @@
-import type { ToolResultPage } from '@animaOS-SWARM/sdk';
+import type { ToolResultPage } from '@animaos/sdk';
 import { useEffect, useRef, useState } from 'react';
 import { daemon } from '../../lib/daemon-api';
 

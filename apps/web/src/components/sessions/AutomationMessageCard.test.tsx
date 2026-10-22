@@ -5,7 +5,7 @@ import {
   DaemonHttpError,
   type AutomationCardMeta,
   type AutomationNoteMeta,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import type { AutomationCardActions } from '../../lib/automation-cards';
 import { automationFixture } from '../../test/automations';

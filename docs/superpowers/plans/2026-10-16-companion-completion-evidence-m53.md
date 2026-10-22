@@ -204,10 +204,10 @@ No command below has run for this held proposal. Resolve the current project tar
 
 ```powershell
 bun --no-env-file x nx show projects --json
-bun --no-env-file x nx show project @animaOS-SWARM/web --json
-bun --no-env-file x nx run @animaOS-SWARM/web:test --skipNxCache
-bun --no-env-file x nx run @animaOS-SWARM/web:typecheck --skipNxCache
-bun --no-env-file x nx run @animaOS-SWARM/web:build --skipNxCache
+bun --no-env-file x nx show project @animaos/web --json
+bun --no-env-file x nx run @animaos/web:test --skipNxCache
+bun --no-env-file x nx run @animaos/web:typecheck --skipNxCache
+bun --no-env-file x nx run @animaos/web:build --skipNxCache
 ```
 
 The test/typecheck/build lines are conditional on the resolved target names; use existing supported targets rather than adding targets to satisfy this draft.

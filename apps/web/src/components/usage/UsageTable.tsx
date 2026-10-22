@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { UsageGroup } from '@animaOS-SWARM/sdk';
+import type { UsageGroup } from '@animaos/sdk';
 
 import { costCell, formatTokens } from '../../lib/usage';
 

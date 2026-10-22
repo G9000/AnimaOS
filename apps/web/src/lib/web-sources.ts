@@ -1,4 +1,4 @@
-import type { WebSource } from '@animaOS-SWARM/sdk';
+import type { WebSource } from '@animaos/sdk';
 
 const utf8 = new TextEncoder();
 const byteLength = (value: string) => utf8.encode(value).length;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Approval, LearningReview, Session } from '@animaOS-SWARM/sdk';
+import type { Approval, LearningReview, Session } from '@animaos/sdk';
 
 import type { DoneToday } from '../components/inbox/NeedsYouPanel';
 import { daemon, type TelegramConnector } from '../lib/daemon-api';

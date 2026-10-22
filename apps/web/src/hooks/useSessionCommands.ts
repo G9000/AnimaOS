@@ -10,7 +10,7 @@ import type {
   RunMode,
   Session,
   UploadedAttachment,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import type { SendAttachments } from './useSessionSends';
 import { ATTACHMENT_ERRORS } from '../lib/attachments';
 

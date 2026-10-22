@@ -176,11 +176,11 @@ bun --no-env-file x nx show project rust-daemon --json
 bun --no-env-file x nx run rust-daemon:test --skipNxCache
 bun --no-env-file x nx run rust-daemon:lint --skipNxCache
 bun --no-env-file x nx run rust-daemon:build --skipNxCache
-bun --no-env-file x nx run @animaOS-SWARM/sdk:test --skipNxCache
-bun --no-env-file x nx run @animaOS-SWARM/sdk:build --skipNxCache
-bun --no-env-file x nx run @animaOS-SWARM/web:test --skipNxCache
-bun --no-env-file x nx run @animaOS-SWARM/web:typecheck --skipNxCache
-bun --no-env-file x nx run @animaOS-SWARM/web:build --skipNxCache
+bun --no-env-file x nx run @animaos/sdk:test --skipNxCache
+bun --no-env-file x nx run @animaos/sdk:build --skipNxCache
+bun --no-env-file x nx run @animaos/web:test --skipNxCache
+bun --no-env-file x nx run @animaos/web:typecheck --skipNxCache
+bun --no-env-file x nx run @animaos/web:build --skipNxCache
 ```
 
 Inspect target dependencies/forwarding; avoid duplicate core runs only with evidence.

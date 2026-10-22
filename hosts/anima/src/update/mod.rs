@@ -67,7 +67,7 @@ impl fmt::Display for UpdateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ManagedInstallation => f.write_str(
-                "This installation is managed by an installer. Download and install the matching Anima package from https://github.com/G9000/animaOS-SWARM/releases",
+                "This installation is managed by an installer. Download and install the matching Anima package from https://github.com/G9000/animaos/releases",
             ),
             Self::NotConfigured => f.write_str("Updates are not configured for this build"),
             Self::Unsupported => f.write_str("Updates are not published for this platform"),

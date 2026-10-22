@@ -54,9 +54,9 @@ Keep `MemoryOptions` and `MemoryView` unchanged. Preserve search text, include-r
 
 Root verifies focused-test forwarding against the existing web project configuration before choosing a filter. Run the two owned test files once for RED and focused GREEN; retain actual outputs. Final gates:
 
-- `bun x nx run @animaOS-SWARM/web:test --skipNxCache`
-- `bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache`
-- `bun x nx run @animaOS-SWARM/web:build --skipNxCache`
+- `bun x nx run @animaos/web:test --skipNxCache`
+- `bun x nx run @animaos/web:typecheck --skipNxCache`
+- `bun x nx run @animaos/web:build --skipNxCache`
 - `bun x prettier --check apps/web/src/hooks/useMemory.ts apps/web/src/hooks/useMemory.test.tsx apps/web/src/pages/MemoryPage.test.tsx`
 
 No Rust, SDK, E2E browser, provider or ordinary-service activation is required. Root owns formatting, commands, Git, the published plan/status links and private evidence. Record this as local deterministic UI behavior, with no model-quality or live-host claim.

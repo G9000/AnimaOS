@@ -307,7 +307,7 @@ it('builds a cache-busted workspace avatar URL', () => {
 Run:
 
 ```powershell
-bun x nx run @animaOS-SWARM/web:test --skipNxCache -- src/lib/daemon-api.test.ts
+bun x nx run @animaos/web:test --skipNxCache -- src/lib/daemon-api.test.ts
 ```
 
 Expected: FAIL because `hasAvatar`, URL helper, and upload method do not exist.
@@ -372,7 +372,7 @@ Render the component with `placement="sidebar"`, `hasAvatar={false}`, and a no-o
 Run:
 
 ```powershell
-bun x nx run @animaOS-SWARM/web:test --skipNxCache -- src/components/WorkspaceAvatar.test.tsx
+bun x nx run @animaos/web:test --skipNxCache -- src/components/WorkspaceAvatar.test.tsx
 ```
 
 Expected: FAIL because the component does not exist.
@@ -440,7 +440,7 @@ Extend the configured workspace fixture with `hasAvatar`. Assert the sidebar and
 Run:
 
 ```powershell
-bun x nx run @animaOS-SWARM/web:test --skipNxCache -- src/components/WorkspaceShell.test.tsx
+bun x nx run @animaos/web:test --skipNxCache -- src/components/WorkspaceShell.test.tsx
 ```
 
 Expected: FAIL because shell/presence do not accept avatar props.
@@ -476,7 +476,7 @@ Do not place file bytes in `ViewHarness` state. Add/adjust a controller test tha
 Run:
 
 ```powershell
-bun x nx run @animaOS-SWARM/web:test --skipNxCache -- src/components/WorkspaceShell.test.tsx src/ViewHarness.test.tsx
+bun x nx run @animaos/web:test --skipNxCache -- src/components/WorkspaceShell.test.tsx src/ViewHarness.test.tsx
 ```
 
 Expected: PASS.
@@ -486,7 +486,7 @@ Expected: PASS.
 Run:
 
 ```powershell
-bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache
+bun x nx run @animaos/web:typecheck --skipNxCache
 ```
 
 Expected: PASS. Fix avatar-specific errors only; report any unrelated baseline failure separately.
@@ -505,9 +505,9 @@ Inspect diffs for the five target files and confirm existing sidebar changes rem
 Run:
 
 ```powershell
-bun x nx run @animaOS-SWARM/web:test --skipNxCache
-bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache
-bun x nx run @animaOS-SWARM/web:build --skipNxCache
+bun x nx run @animaos/web:test --skipNxCache
+bun x nx run @animaos/web:typecheck --skipNxCache
+bun x nx run @animaos/web:build --skipNxCache
 ```
 
 Expected: all PASS.

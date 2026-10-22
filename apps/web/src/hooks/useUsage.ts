@@ -5,7 +5,7 @@ import {
   type UsageGroupBy,
   type UsageSummary,
   type UsageTotals,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import { downloadText } from '../lib/download';

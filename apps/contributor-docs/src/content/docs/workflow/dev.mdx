@@ -23,8 +23,8 @@ import { Aside, Steps } from '@astrojs/starlight/components';
 1. Clone the repo
 
    ```bash
-   git clone https://github.com/G9000/animaOS-SWARM.git
-   cd animaOS-SWARM
+   git clone https://github.com/G9000/animaos.git
+   cd animaos
    ```
 
 2. Install JavaScript dependencies
@@ -60,10 +60,10 @@ bun dev --host rust
 bun x nx run rust-daemon:dev      # same as: bun run daemon
 
 # One surface at a time
-bun x nx run @animaOS-SWARM/web:serve
-bun x nx run @animaOS-SWARM/playground:serve
-bun x nx run @animaOS-SWARM/docs:dev
-bun x nx run @animaOS-SWARM/contributor-docs:dev
+bun x nx run @animaos/web:serve
+bun x nx run @animaos/playground:serve
+bun x nx run @animaos/docs:dev
+bun x nx run @animaos/contributor-docs:dev
 ```
 
 If a daemon already answers on `http://127.0.0.1:8080/api/health`, `bun dev` reuses it and starts only the other four processes. An unknown host key (`--host elixir`, `--host python`) fails with `Unknown host`: those placeholders were removed.
@@ -117,9 +117,9 @@ cargo test -p anima-memory
 ### TypeScript
 
 ```bash
-bun x nx build @animaOS-SWARM/sdk
-bun x nx test @animaOS-SWARM/sdk
-bun x nx typecheck @animaOS-SWARM/web
+bun x nx build @animaos/sdk
+bun x nx test @animaos/sdk
+bun x nx typecheck @animaos/web
 bun x nx test workspace-dev --runInBand --skipNxCache
 
 # Everything
@@ -132,8 +132,8 @@ bun run lint          # oxlint over packages/*/src and apps/*/src
 ### Docs
 
 ```bash
-bun x nx run @animaOS-SWARM/docs:build --skipNxCache
-bun x nx run @animaOS-SWARM/contributor-docs:build --skipNxCache
+bun x nx run @animaos/docs:build --skipNxCache
+bun x nx run @animaos/contributor-docs:build --skipNxCache
 ```
 
 ### Affected

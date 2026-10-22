@@ -1,7 +1,7 @@
 import { createRef } from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
-import { ChatGptClient } from '@animaOS-SWARM/sdk';
+import { ChatGptClient } from '@animaos/sdk';
 import { daemon } from '../../lib/daemon-api';
 import { ModelStep, type ModelStepProps } from './ModelStep';
 

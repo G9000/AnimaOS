@@ -72,7 +72,7 @@ import {
   type SkillSupportingFile,
   type WorkflowInput,
   type WorkflowResumeInput,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import { consoleSessionHeaders } from './console-session';
 
 export type {
@@ -101,7 +101,7 @@ export type {
   BundleComponentView,
   ComponentReview,
   CommunityManifest,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 /** Shared owner transport policy, for both fetch and multipart XHR: the
  *  console session's token half, when the console has one. */

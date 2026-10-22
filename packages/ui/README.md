@@ -1,11 +1,11 @@
-# @animaOS-SWARM/ui
+# @animaos/ui
 
 Tailwind-only UI primitives for AnimaOS.
 
 ## Usage
 
 ```tsx
-import { Button, Box, Text } from '@animaOS-SWARM/ui';
+import { Button, Box, Text } from '@animaos/ui';
 ```
 
 ## Primitives

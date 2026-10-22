@@ -6,7 +6,7 @@ import type {
   BrowserScope,
   BrowserSelection,
   UploadedAttachment,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import {
   BrowserTaskControls,
   type BrowserControlsApi,

@@ -4,7 +4,7 @@ import {
   DaemonTooOldError,
   type Session,
   type SessionListOptions,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import { sessionFixture } from '../test/sessions';

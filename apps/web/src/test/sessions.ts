@@ -1,4 +1,4 @@
-import type { Session } from '@animaOS-SWARM/sdk';
+import type { Session } from '@animaos/sdk';
 
 /** A read-write chat of `agent-main` with every derived field. */
 export function sessionFixture(

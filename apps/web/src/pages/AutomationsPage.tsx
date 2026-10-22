@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { Automation } from '@animaOS-SWARM/sdk';
+import type { Automation } from '@animaos/sdk';
 
 import {
   AutomationEditor,

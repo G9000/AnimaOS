@@ -519,9 +519,9 @@ Use Vitest/jsdom and mocked fetch. Assert password inputs never receive an exist
 
 First confirm the inferred target after adding a minimal test config:
 
-Run: `bun x nx show project @animaOS-SWARM/playground --json`
+Run: `bun x nx show project @animaos/playground --json`
 
-Then run: `bun x nx run @animaOS-SWARM/playground:test --skipNxCache`
+Then run: `bun x nx run @animaos/playground:test --skipNxCache`
 
 Expected: FAIL because the API methods/component are absent. If no `test` target is inferred, add a `test` block to `vite.config.mts` (`environment: 'jsdom'`) and re-run `bun x nx show project ... --json`; do not bypass Nx.
 
@@ -539,15 +539,15 @@ Add a dedicated Providers button below the existing entity tabs. It opens settin
 
 - [ ] **Step 6: Run UI tests, typecheck, and build**
 
-Run: `bun x nx run @animaOS-SWARM/playground:test --skipNxCache`
+Run: `bun x nx run @animaos/playground:test --skipNxCache`
 
 Expected: PASS.
 
-Run: `bun x nx run @animaOS-SWARM/playground:typecheck --skipNxCache`
+Run: `bun x nx run @animaos/playground:typecheck --skipNxCache`
 
 Expected: PASS.
 
-Run: `bun x nx run @animaOS-SWARM/playground:build --skipNxCache`
+Run: `bun x nx run @animaos/playground:build --skipNxCache`
 
 Expected: PASS.
 
@@ -571,7 +571,7 @@ Assert selecting Ollama loads installed models only after selection, choosing a 
 
 - [ ] **Step 2: Run and verify failure**
 
-Run: `bun x nx run @animaOS-SWARM/playground:test --skipNxCache`
+Run: `bun x nx run @animaos/playground:test --skipNxCache`
 
 Expected: FAIL because Create Agent has only a free-text model input.
 
@@ -581,11 +581,11 @@ When `provider === 'ollama'`, fetch `/api/providers/ollama/models`, render a sel
 
 - [ ] **Step 4: Run tests and build**
 
-Run: `bun x nx run @animaOS-SWARM/playground:test --skipNxCache`
+Run: `bun x nx run @animaos/playground:test --skipNxCache`
 
 Expected: PASS.
 
-Run: `bun x nx run @animaOS-SWARM/playground:typecheck --skipNxCache`
+Run: `bun x nx run @animaos/playground:typecheck --skipNxCache`
 
 Expected: PASS.
 
@@ -634,21 +634,21 @@ Expected: PASS. On Windows executable-lock failure only, rerun with `$env:CI='1'
 
 - [ ] **Step 4: Run Playground verification through Nx**
 
-Run: `bun x nx run @animaOS-SWARM/playground:test --skipNxCache`
+Run: `bun x nx run @animaos/playground:test --skipNxCache`
 
 Expected: PASS.
 
-Run: `bun x nx run @animaOS-SWARM/playground:typecheck --skipNxCache`
+Run: `bun x nx run @animaos/playground:typecheck --skipNxCache`
 
 Expected: PASS.
 
-Run: `bun x nx run @animaOS-SWARM/playground:build --skipNxCache`
+Run: `bun x nx run @animaos/playground:build --skipNxCache`
 
 Expected: PASS.
 
 - [ ] **Step 5: Run docs verification**
 
-Run: `bun x nx run @animaOS-SWARM/docs:build --skipNxCache`
+Run: `bun x nx run @animaos/docs:build --skipNxCache`
 
 Expected: PASS.
 

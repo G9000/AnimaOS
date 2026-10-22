@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { createDaemonClient, type ChatGptStatus } from '@animaOS-SWARM/sdk';
+import { createDaemonClient, type ChatGptStatus } from '@animaos/sdk';
 
 const client = createDaemonClient({ baseUrl: '' }).chatgpt;
 const verificationUrl = 'https://auth.openai.com/codex/device';

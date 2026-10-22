@@ -7,7 +7,7 @@ import {
   type SystemActionOptions,
   type SystemInFlight,
   type SystemStatus,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { systemApi } from '../lib/daemon-api';
 import { RevealedText } from './memory/RevealedText';

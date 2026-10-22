@@ -1,4 +1,4 @@
-import type { Run } from '@animaOS-SWARM/sdk';
+import type { Run } from '@animaos/sdk';
 
 import { isOwnerWritten } from '../../lib/transcript';
 import { RunRecovery } from './RunRecovery';

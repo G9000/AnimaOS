@@ -16,7 +16,7 @@ export function buildProgram(): Command {
 
   program
     .name('animaos')
-    .description('animaOS-SWARM — Command & control your AI agent swarms')
+    .description('animaos — Command & control your AI agent swarms')
     .version('0.0.1');
 
   program.addCommand(runCommand);

@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import type { Session } from '@animaOS-SWARM/sdk';
+import type { Session } from '@animaos/sdk';
 import { KeptSummary } from './TranscriptNotes';
 import './session-continuity.css';
 

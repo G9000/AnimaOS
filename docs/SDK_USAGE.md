@@ -89,8 +89,8 @@ Runtime ownership in the current repo:
 
 - The reusable Rust runtime core lives in `packages/core-rust`.
 - The runnable Rust daemon host lives in `hosts/rust-daemon`.
-- `@animaOS-SWARM/sdk` is a TypeScript client over the daemon's HTTP and SSE APIs.
-- `@animaOS-SWARM/sdk` also owns the shared TypeScript types and typed helpers such as `agent()` and `swarm()`. There is no TypeScript execution runtime.
+- `@animaos/sdk` is a TypeScript client over the daemon's HTTP and SSE APIs.
+- `@animaos/sdk` also owns the shared TypeScript types and typed helpers such as `agent()` and `swarm()`. There is no TypeScript execution runtime.
 
 ---
 
@@ -153,7 +153,7 @@ import {
   createDaemonClient,
   DaemonHttpError,
   swarm,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 ```
 
 ### Create a Client
@@ -174,7 +174,7 @@ const customClient = createDaemonClient({
 #### Create an Agent
 
 ```typescript
-import { agent } from '@animaOS-SWARM/sdk';
+import { agent } from '@animaos/sdk';
 
 const myAgent = agent({
   name: 'researcher',
@@ -255,7 +255,7 @@ for (const memory of memories) {
 #### Create a Swarm
 
 ```typescript
-import { agent, swarm } from '@animaOS-SWARM/sdk';
+import { agent, swarm } from '@animaos/sdk';
 
 const modelSettings = {
   apiKey: process.env.OPENAI_API_KEY,
@@ -367,7 +367,7 @@ const recent = await client.memories.recent({
 ### Error Handling
 
 ```typescript
-import { DaemonHttpError } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError } from '@animaos/sdk';
 
 try {
   await client.agents.run('invalid-uuid', { text: 'Hello' });
@@ -448,7 +448,7 @@ const openrouterAgent = agent({
 ### Example 1: Simple Research Agent
 
 ```typescript
-import { agent, createDaemonClient } from '@animaOS-SWARM/sdk';
+import { agent, createDaemonClient } from '@animaos/sdk';
 
 const client = createDaemonClient();
 
@@ -489,7 +489,7 @@ main().catch(console.error);
 ### Example 2: Multi-Agent Content Team
 
 ```typescript
-import { agent, createDaemonClient, swarm } from '@animaOS-SWARM/sdk';
+import { agent, createDaemonClient, swarm } from '@animaos/sdk';
 
 const client = createDaemonClient();
 
@@ -569,7 +569,7 @@ createContentTeam().catch(console.error);
 ### Example 3: Agent with Memory
 
 ```typescript
-import { agent, createDaemonClient } from '@animaOS-SWARM/sdk';
+import { agent, createDaemonClient } from '@animaos/sdk';
 
 const client = createDaemonClient();
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { AgentRelationship, MemoryEntity } from '@animaOS-SWARM/sdk';
+import type { AgentRelationship, MemoryEntity } from '@animaos/sdk';
 
 import { DELETE_ENTITY_PROMPT } from '../../lib/memory';
 import { ConfirmRow } from './memory-ui';

@@ -6,7 +6,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { WorkflowTemplate } from '@animaOS-SWARM/sdk';
+import type { WorkflowTemplate } from '@animaos/sdk';
 import { WorkflowTemplates } from './WorkflowTemplates';
 
 const api = vi.hoisted(() => ({

@@ -1,4 +1,4 @@
-import type { DiscordConnector } from '@animaOS-SWARM/sdk';
+import type { DiscordConnector } from '@animaos/sdk';
 
 export function discordFixture(
   overrides: Partial<DiscordConnector> = {},

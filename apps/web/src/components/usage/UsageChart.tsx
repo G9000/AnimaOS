@@ -1,4 +1,4 @@
-import type { UsageGroup } from '@animaOS-SWARM/sdk';
+import type { UsageGroup } from '@animaos/sdk';
 
 import { formatTokens } from '../../lib/usage';
 

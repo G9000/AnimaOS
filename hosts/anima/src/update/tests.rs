@@ -20,7 +20,7 @@ use super::*;
 const MAC: &str = "aarch64-apple-darwin";
 const WINDOWS: &str = "x86_64-pc-windows-msvc";
 const LATEST: &str = include_str!("../../tests/fixtures/update/release-latest.json");
-const RELEASE_BASE: &str = "https://github.com/G9000/animaOS-SWARM/releases/download/v0.2.0";
+const RELEASE_BASE: &str = "https://github.com/G9000/animaos/releases/download/v0.2.0";
 
 fn version(text: &str) -> Version {
     Version::parse(text).unwrap()
@@ -376,7 +376,7 @@ async fn native_install_check_requires_a_matching_installer_before_network_or_re
     assert!(matches!(error, UpdateError::ManagedInstallation));
     assert_eq!(
         error.to_string(),
-        "This installation is managed by an installer. Download and install the matching Anima package from https://github.com/G9000/animaOS-SWARM/releases"
+        "This installation is managed by an installer. Download and install the matching Anima package from https://github.com/G9000/animaos/releases"
     );
     assert!(error.is_permanent());
 }
@@ -635,7 +635,7 @@ async fn serve(served: Served) -> String {
         served.latest.clone().unwrap()
     }
     let app = Router::new()
-        .route("/repos/G9000/animaOS-SWARM/releases/latest", get(latest))
+        .route("/repos/G9000/animaos/releases/latest", get(latest))
         .route(
             "/archive",
             get(|State(s): State<Served>| async move { s.archive }),

@@ -163,7 +163,7 @@ impl DiscordClient {
         Ok(Self {
             client: Client::builder()
                 .user_agent(concat!(
-                    "DiscordBot (https://github.com/G9000/animaOS-SWARM, ",
+                    "DiscordBot (https://github.com/G9000/animaos, ",
                     env!("CARGO_PKG_VERSION"),
                     ")"
                 ))

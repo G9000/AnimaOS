@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import type { MemoryExportFormat } from '@animaOS-SWARM/sdk';
+import type { MemoryExportFormat } from '@animaos/sdk';
 
 import { COMPANION_UNREACHABLE } from '../../lib/approvals';
 import { daemon } from '../../lib/daemon-api';
-import { DaemonHttpError } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError } from '@animaos/sdk';
 
 const CHOICES: readonly {
   format: MemoryExportFormat;

@@ -37,7 +37,7 @@
     {
       "component": "skill",
       "source": "bundles/coding-agents/gemini-cli/SKILL.md",
-      "revision": "animaOS-SWARM coding-agents bundle 1.1.0",
+      "revision": "animaos coding-agents bundle 1.1.0",
       "license": "MIT (repository package metadata; no root LICENSE file)",
       "notice": "Written for Anima from the CLI help, its source and official docs; see bundles/coding-agents/ATTRIBUTION.md"
     }

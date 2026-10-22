@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AutomationMessageMeta } from '@animaOS-SWARM/sdk';
+import type { AutomationMessageMeta } from '@animaos/sdk';
 
 import {
   MAX_TOASTS,

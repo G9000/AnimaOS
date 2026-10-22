@@ -10,7 +10,7 @@ use serde::Deserialize;
 use super::{extract_binary, release_trusted_comment, verify, UpdateError};
 
 pub const GITHUB_API: &str = "https://api.github.com";
-pub const REPO: &str = "G9000/animaOS-SWARM";
+pub const REPO: &str = "G9000/animaos";
 /// The largest release archive we download.
 pub const MAX_ARCHIVE_BYTES: u64 = 200 * 1024 * 1024;
 /// The largest API response, checksum or signature file we read.

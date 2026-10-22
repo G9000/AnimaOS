@@ -4,7 +4,7 @@ import type {
   Session,
   SessionMessageSearchHit,
   SessionMessageSearchPage,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import type { DaemonConnection } from '../hooks/useDaemonBootstrap';
 import type { DaemonWorkspaceState } from '../lib/daemon-api';
 import type { HashPage, HashRoute, Navigate } from '../lib/hash-route';

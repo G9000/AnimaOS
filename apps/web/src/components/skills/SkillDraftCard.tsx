@@ -3,7 +3,7 @@ import type {
   SkillDraft,
   SkillDraftApproval,
   SkillDraftProposer,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { daemon } from '../../lib/daemon-api';
 import { lineDiff, type DiffLine } from '../../lib/skill-diff';

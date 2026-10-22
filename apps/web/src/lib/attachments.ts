@@ -1,4 +1,4 @@
-import { DaemonHttpError, type UploadedAttachment } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError, type UploadedAttachment } from '@animaos/sdk';
 import { daemonRequestHeaders } from './daemon-api';
 
 export const MAX_DRAFT_ATTACHMENTS = 10;

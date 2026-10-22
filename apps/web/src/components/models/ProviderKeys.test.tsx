@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ProviderKeys as ProviderKeysView } from '@animaOS-SWARM/sdk';
+import type { ProviderKeys as ProviderKeysView } from '@animaos/sdk';
 
 import { daemon, type DaemonProvider } from '../../lib/daemon-api';
 import { ProviderKeys } from './ProviderKeys';

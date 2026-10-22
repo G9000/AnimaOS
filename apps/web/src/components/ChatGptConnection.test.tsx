@@ -8,7 +8,7 @@ const api = vi.hoisted(() => ({
   cancel: vi.fn(),
   disconnect: vi.fn(),
 }));
-vi.mock('@animaOS-SWARM/sdk', () => ({
+vi.mock('@animaos/sdk', () => ({
   createDaemonClient: () => ({ chatgpt: api }),
 }));
 const disconnected = {

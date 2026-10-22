@@ -6,7 +6,7 @@ import {
   type StartRunResult,
   type UploadedAttachment,
   type BrowserSelection,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import {

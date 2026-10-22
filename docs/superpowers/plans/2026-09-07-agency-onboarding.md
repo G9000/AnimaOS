@@ -23,10 +23,10 @@ Flow: Goal (name, brief, template) -> Model -> Team (agency only) -> Workspace (
 
 ## Verification commands
 
-- `bun x nx run @animaOS-SWARM/web:test --run --skipNxCache`
-- `bun x nx run @animaOS-SWARM/sdk:test --run --skipNxCache`
-- `bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache`
-- `bun x nx run @animaOS-SWARM/web:build --skipNxCache`
+- `bun x nx run @animaos/web:test --run --skipNxCache`
+- `bun x nx run @animaos/sdk:test --run --skipNxCache`
+- `bun x nx run @animaos/web:typecheck --skipNxCache`
+- `bun x nx run @animaos/web:build --skipNxCache`
 - `$env:CI='1'; $env:CARGO_TARGET_DIR='target/validation-rust-daemon'; bun x nx run rust-daemon:test --skipNxCache`
 - `bun x nx run rust-daemon:lint --skipNxCache`
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { AgentTask } from '@animaOS-SWARM/sdk';
+import type { AgentTask } from '@animaos/sdk';
 import { daemon, type DaemonSchedule } from '../lib/daemon-api';
 import type { AgentDetail } from '../lib/types';
 import { AgentAvatar } from './AgentAvatar';

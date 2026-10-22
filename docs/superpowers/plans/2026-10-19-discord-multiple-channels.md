@@ -21,8 +21,8 @@ Full pipeline constraints observed during verification: sandboxed loopback tests
 Final validation:
 
 - PASS: `bun x nx run rust-daemon:test --excludeTaskDependencies --skipNxCache --args=discord` with `CI=1 CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=target/validation-rust-daemon CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 RUST_TEST_THREADS=1`: 58 Discord tests passed. Executed outside the sandbox to permit loopback fixture servers. Includes the Gateway pacing regression, which failed before the shared-queue fix.
-- PASS: `bun x nx run @animaOS-SWARM/web:test --excludeTaskDependencies --skipNxCache --args='--run src/lib/discord.test.ts src/components/DiscordSettings.test.tsx src/hooks/useDiscordIntegrations.test.tsx'`: 20 passed. Workspace-local `TEMP`/`TMP` avoided sandbox temporary-file rename restrictions.
-- PASS: `bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache`, including nine dependency tasks.
+- PASS: `bun x nx run @animaos/web:test --excludeTaskDependencies --skipNxCache --args='--run src/lib/discord.test.ts src/components/DiscordSettings.test.tsx src/hooks/useDiscordIntegrations.test.tsx'`: 20 passed. Workspace-local `TEMP`/`TMP` avoided sandbox temporary-file rename restrictions.
+- PASS: `bun x nx run @animaos/web:typecheck --skipNxCache`, including nine dependency tasks.
 - PASS: scoped `rustfmt --check`, Prettier checks, and `git diff --check` for the changed files. Focused code review found no remaining actionable issues after the Gateway queue and active-worker test fixes.
 - FAIL outside this feature: the full required `rust-daemon:test` pipeline stopped at the core dependency's 10 Windows worktree failures. Running the full daemon target separately with dependencies excluded produced 2,428 passed, 5 failed, and 29 ignored: four unchanged worktree tests and one unchanged bundled-skill manifest comparison (LF versus CRLF). Integration binaries compiled, but Cargo stopped after the failing unit suite. Full `rust-daemon:lint` remains blocked by the unrelated formatting differences listed above.
 

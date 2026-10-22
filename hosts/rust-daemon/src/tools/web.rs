@@ -281,7 +281,7 @@ async fn fetch_web_text(url: &str, max_length: usize) -> Result<(String, String)
     let client = web_fetch_client()?;
     let response = client
         .get(parsed)
-        .header(USER_AGENT, "animaOS-SWARM/0.1")
+        .header(USER_AGENT, "animaos/0.1")
         .header(ACCEPT, "text/html,application/json,text/plain,*/*")
         .send()
         .await

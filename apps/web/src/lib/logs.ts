@@ -2,7 +2,7 @@ import {
   DaemonHttpError,
   type LogLevel,
   type LogLine,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { COMPANION_UNREACHABLE } from './approvals';
 

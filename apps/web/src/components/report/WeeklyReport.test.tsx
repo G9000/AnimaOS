@@ -1,7 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AgentMemory, Run, Session, UsageSummary } from '@animaOS-SWARM/sdk';
+import type { AgentMemory, Run, Session, UsageSummary } from '@animaos/sdk';
 
 import { daemon } from '../../lib/daemon-api';
 import { WeeklyReport } from './WeeklyReport';

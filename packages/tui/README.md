@@ -1,6 +1,6 @@
-# @animaOS-SWARM/tui
+# @animaos/tui
 
-Primary operator surface for animaOS-SWARM.
+Primary operator surface for animaos.
 
 This package powers the Ink-based terminal experience behind `animaos launch`. It exports the terminal app shell, agent and tool panels, result views, status components, and event-log hooks used to inspect and steer swarm execution without leaving the terminal.
 
@@ -17,7 +17,7 @@ Current TUI coverage includes:
 ```tsx
 import React from 'react';
 import { render } from 'ink';
-import { App, EventBus } from '@animaOS-SWARM/tui';
+import { App, EventBus } from '@animaos/tui';
 
 const eventBus = new EventBus();
 
@@ -40,8 +40,8 @@ Near-term focus is making the TUI strong enough for daily use: keyboard-first na
 
 ## Build
 
-Run `bun x nx build @animaOS-SWARM/tui`.
+Run `bun x nx build @animaos/tui`.
 
 ## Test
 
-Run `bun x nx test @animaOS-SWARM/tui`.
+Run `bun x nx test @animaos/tui`.

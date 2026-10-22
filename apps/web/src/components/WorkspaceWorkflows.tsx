@@ -5,7 +5,7 @@ import {
   type WorkflowResumeInput,
   type WorkflowRun,
   type WorkflowStepInput,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import type { AgentDetail } from '../lib/types';
 import { WorkflowTemplates } from './WorkflowTemplates';

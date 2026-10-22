@@ -25,7 +25,7 @@ Onboarding becomes a split introduction/form layout on desktop, with a compact m
 
 ## Verification
 
-Run `bun x nx test @animaOS-SWARM/web --run --skipNxCache`, `bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache`, and `bun x nx build @animaOS-SWARM/web --skipNxCache`. Check narrow mobile and short desktop screens, modal keyboard behavior, and no horizontal page overflow. Do not create real workspace data just to reach configured screens.
+Run `bun x nx test @animaos/web --run --skipNxCache`, `bun x nx run @animaos/web:typecheck --skipNxCache`, and `bun x nx build @animaos/web --skipNxCache`. Check narrow mobile and short desktop screens, modal keyboard behavior, and no horizontal page overflow. Do not create real workspace data just to reach configured screens.
 
 ### Results
 

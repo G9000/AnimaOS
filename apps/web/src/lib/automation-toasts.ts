@@ -1,4 +1,4 @@
-import type { AutomationMessageMeta } from '@animaOS-SWARM/sdk';
+import type { AutomationMessageMeta } from '@animaos/sdk';
 
 
 function clock(ms: number): string {

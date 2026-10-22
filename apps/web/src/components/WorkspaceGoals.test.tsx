@@ -6,7 +6,7 @@ import {
   act,
 } from '@testing-library/react';
 import { beforeEach, afterEach, it, expect, vi } from 'vitest';
-import type { GoalView, AgentJob } from '@animaOS-SWARM/sdk';
+import type { GoalView, AgentJob } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import { WorkspaceGoals } from './WorkspaceGoals';
 const goal: GoalView = {

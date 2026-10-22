@@ -76,7 +76,7 @@ for await (const event of client.logs.stream({ level: 'info', after: page.newest
 ## Status
 
 ```typescript
-import { StatusTooOldError } from '@animaOS-SWARM/sdk';
+import { StatusTooOldError } from '@animaos/sdk';
 
 try {
   const status = await client.status.get();

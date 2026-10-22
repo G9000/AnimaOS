@@ -140,7 +140,7 @@ The installers can't run commands after installing, so they end with
   `release.yml` by hand. On every pull request the workflow runs `dist plan`, which
   fails if `release.yml` is out of date.
 - `.github/build-setup.yml` runs in each build job before cargo. It installs Bun and
-  builds the web console (`@animaOS-SWARM/sdk`, then `@animaOS-SWARM/web`).
+  builds the web console (`@animaos/sdk`, then `@animaos/web`).
   `anima` is built with `features = ["bundled-ui"]`, which embeds `apps/web/dist`.
 - dist signs the macOS binary with the `CODESIGN_*` secrets. The binary carries an
   Info.plist (`hosts/anima/build.rs`), so its signing identifier is
@@ -319,7 +319,7 @@ assets.
 3. Download `anima-aarch64-apple-darwin.tar.gz` and unpack it. In the output of
    `codesign -dv anima`, check that `Identifier=dev.animaos.anima` appears.
 4. Run the shell installer from the release page:
-   `curl --proto '=https' --tlsv1.2 -LsSf https://github.com/G9000/animaOS-SWARM/releases/download/v0.0.0-test.1/anima-installer.sh | sh`.
+   `curl --proto '=https' --tlsv1.2 -LsSf https://github.com/G9000/animaos/releases/download/v0.0.0-test.1/anima-installer.sh | sh`.
    Check that `anima --version` prints `anima 0.0.0-test.1`.
 5. Delete the prerelease and its tag (`git push origin :refs/tags/v0.0.0-test.1`),
    then the scratch branch.

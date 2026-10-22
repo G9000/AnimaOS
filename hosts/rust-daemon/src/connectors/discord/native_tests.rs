@@ -170,7 +170,7 @@ async fn discord_requests_identify_the_client_with_the_required_user_agent() {
     assert_eq!(
         fixture.user_agents.lock().unwrap().as_slice(),
         &[Some(format!(
-            "DiscordBot (https://github.com/G9000/animaOS-SWARM, {})",
+            "DiscordBot (https://github.com/G9000/animaos, {})",
             env!("CARGO_PKG_VERSION")
         ))]
     );

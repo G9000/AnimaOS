@@ -1,4 +1,4 @@
-import type { Skill, SkillDraft } from '@animaOS-SWARM/sdk';
+import type { Skill, SkillDraft } from '@animaos/sdk';
 
 export function skillFixture(
   slug: string,

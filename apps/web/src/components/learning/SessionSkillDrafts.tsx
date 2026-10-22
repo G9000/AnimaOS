@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { SkillDraft } from '@animaOS-SWARM/sdk';
+import type { SkillDraft } from '@animaos/sdk';
 
 import { daemon } from '../../lib/daemon-api';
 import { revealInvisible } from '../../lib/skills';

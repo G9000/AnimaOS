@@ -7,7 +7,7 @@
 
 ## Context
 
-AnimaOS SWARM is being built toward durable execution — a system with replayable history, explicit step persistence, and eventually crash-safe resume.
+animaos is being built toward durable execution — a system with replayable history, explicit step persistence, and eventually crash-safe resume.
 
 Two problems need solving simultaneously:
 

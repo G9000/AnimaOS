@@ -2,7 +2,7 @@ import {
   DaemonHttpError,
   StatusTooOldError,
   type DaemonStatus,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { COMPANION_UNREACHABLE } from './approvals';
 

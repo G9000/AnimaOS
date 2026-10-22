@@ -77,7 +77,7 @@ Web tests will cover:
 - successful upload state refresh and repeat replacement; and
 - failed upload rollback, object URL cleanup, and accessible error output.
 
-Verification will run focused web tests during red-green development, then `bun x nx run @animaOS-SWARM/web:test --skipNxCache`, `bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache`, and `bun x nx run rust-daemon:test --skipNxCache`. If Windows locks the normal Rust target directory, validation will use the repository's documented isolated `CARGO_TARGET_DIR` fallback. The live client at `http://localhost:4200/` will then be reloaded to verify the desktop sidebar and compact mobile presentation.
+Verification will run focused web tests during red-green development, then `bun x nx run @animaos/web:test --skipNxCache`, `bun x nx run @animaos/web:typecheck --skipNxCache`, and `bun x nx run rust-daemon:test --skipNxCache`. If Windows locks the normal Rust target directory, validation will use the repository's documented isolated `CARGO_TARGET_DIR` fallback. The live client at `http://localhost:4200/` will then be reloaded to verify the desktop sidebar and compact mobile presentation.
 
 ## Acceptance Criteria
 

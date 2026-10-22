@@ -3,7 +3,7 @@ import {
   DaemonHttpError,
   type Automation,
   type AutomationRun,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { COMPANION_UNREACHABLE, formatWhen } from '../../lib/approvals';
 import { RUN_OUTCOME_LABELS } from '../../lib/automations';

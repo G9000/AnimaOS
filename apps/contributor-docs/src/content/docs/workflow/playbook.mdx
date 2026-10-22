@@ -26,8 +26,8 @@ The normal loop (`bun dev`, through `tools/workspace-dev`) starts:
 1. Clone the repo and enter it.
 
    ```bash
-   git clone https://github.com/G9000/animaOS-SWARM.git
-   cd animaOS-SWARM
+   git clone https://github.com/G9000/animaos.git
+   cd animaos
    ```
 
 2. Install JavaScript dependencies.
@@ -109,8 +109,8 @@ bun x nx run rust-daemon:dev
 ### Web-only and playground-only loops
 
 ```bash
-bun x nx run @animaOS-SWARM/web:serve
-bun x nx run @animaOS-SWARM/playground:serve
+bun x nx run @animaos/web:serve
+bun x nx run @animaos/playground:serve
 ```
 
 Both proxy to the daemon at `UI_BACKEND_ORIGIN` (default from the launcher: `http://127.0.0.1:8080`), so start a daemon too.
@@ -118,8 +118,8 @@ Both proxy to the daemon at `UI_BACKEND_ORIGIN` (default from the launcher: `htt
 ### Docs-only loop
 
 ```bash
-bun x nx run @animaOS-SWARM/docs:dev
-bun x nx run @animaOS-SWARM/contributor-docs:dev
+bun x nx run @animaos/docs:dev
+bun x nx run @animaos/contributor-docs:dev
 ```
 
 ### CLI plus daemon loop
@@ -175,8 +175,8 @@ bun run typecheck                 # nx run-many -t typecheck
 bun run lint                      # oxlint over packages and apps
 
 bun x nx run rust-daemon:test --skipNxCache
-bun x nx run @animaOS-SWARM/contributor-docs:build --skipNxCache
-bun x nx run @animaOS-SWARM/docs:build --skipNxCache
+bun x nx run @animaos/contributor-docs:build --skipNxCache
+bun x nx run @animaos/docs:build --skipNxCache
 ```
 
 ## Before You Push
@@ -185,9 +185,9 @@ bun x nx run @animaOS-SWARM/docs:build --skipNxCache
 |-------------|-----|
 | Rust host or core crates | `bun x nx run rust-daemon:test --skipNxCache` (runs `core-rust:test` first) |
 | Dev launcher (`tools/workspace-dev`) | `bun x nx test workspace-dev --runInBand --skipNxCache` |
-| A TypeScript package | the package's `test`, `typecheck` and `build` targets, for example `bun x nx test @animaOS-SWARM/sdk` |
-| Contributor docs | `bun x nx run @animaOS-SWARM/contributor-docs:build --skipNxCache` |
-| Public docs | `bun x nx run @animaOS-SWARM/docs:build --skipNxCache` |
+| A TypeScript package | the package's `test`, `typecheck` and `build` targets, for example `bun x nx test @animaos/sdk` |
+| Contributor docs | `bun x nx run @animaos/contributor-docs:build --skipNxCache` |
+| Public docs | `bun x nx run @animaos/docs:build --skipNxCache` |
 | Several areas | `bun run affected:build` and `bun run affected:test` |
 
 Do not call work complete until the relevant commands pass in the current tree.

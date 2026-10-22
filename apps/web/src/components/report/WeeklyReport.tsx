@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AgentMemory, Session } from '@animaOS-SWARM/sdk';
+import type { AgentMemory, Session } from '@animaos/sdk';
 
 import { daemon } from '../../lib/daemon-api';
 import {

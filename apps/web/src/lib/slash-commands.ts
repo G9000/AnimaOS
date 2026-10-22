@@ -1,4 +1,4 @@
-import type { Skill } from '@animaOS-SWARM/sdk';
+import type { Skill } from '@animaos/sdk';
 
 /** Composer slash commands (spec §15.3). `/<skill>` comes from the owner's
  *  skills (M5). */

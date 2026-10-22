@@ -303,16 +303,16 @@ Owner-requested ordinary whole-list Settings semantics remain existing behavior.
 ## 12. Root-only commands and bounded acceptance
 
 Root resolves inferred Nx targets once from current workspace metadata; names are
-verified packages @animaOS-SWARM/sdk and @animaOS-SWARM/web. Do not guess forwarding flags.
+verified packages @animaos/sdk and @animaos/web. Do not guess forwarding flags.
 Required commands after concrete changes (not run during this draft):
 
 - `bun x nx run rust-daemon:test --skipNxCache` for narrow native grant mutation.
 - `bun x nx run rust-daemon:lint --skipNxCache` after root formatting.
-- `bun x nx run @animaOS-SWARM/sdk:test --skipNxCache` with intentional service skips.
-- `bun x nx run @animaOS-SWARM/sdk:build --skipNxCache`.
-- `bun x nx run @animaOS-SWARM/web:test --skipNxCache` with intentional service skips.
-- `bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache`.
-- `bun x nx run @animaOS-SWARM/web:build --skipNxCache`.
+- `bun x nx run @animaos/sdk:test --skipNxCache` with intentional service skips.
+- `bun x nx run @animaos/sdk:build --skipNxCache`.
+- `bun x nx run @animaos/web:test --skipNxCache` with intentional service skips.
+- `bun x nx run @animaos/web:typecheck --skipNxCache`.
+- `bun x nx run @animaos/web:build --skipNxCache`.
   Set ANIMA_SKIP_SERVICE_TESTS=1 where current targets use it; document skip counts.
   Rust gates serialize, CARGO_INCREMENTAL=0; reuse current target directory only.
   No new target directory/worktree/dependency/service retry is part of this plan.

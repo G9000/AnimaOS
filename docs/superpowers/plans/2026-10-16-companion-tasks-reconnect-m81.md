@@ -57,9 +57,9 @@ Use deferred promises/endpoint counts and existing fixtures, with no timers or l
 Use the verified web Nx test forwarding for the five owned test files, then:
 
 ```text
-bun x nx run @animaOS-SWARM/web:test --skipNxCache
-bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache
-bun x nx run @animaOS-SWARM/web:build --skipNxCache
+bun x nx run @animaos/web:test --skipNxCache
+bun x nx run @animaos/web:typecheck --skipNxCache
+bun x nx run @animaos/web:build --skipNxCache
 ```
 
 Prettier-check touched source/docs and run scoped docs consistency. No Rust/SDK gates or actual browser/daemon/account/provider/profile activation. Explicit paths only; never stage nx.json/anima.yaml/.superpowers. Preserve historical raw/Git/runtime evidence and unrelated work. Standing unsigned per-command commits, PR attachment and merge-and-continue apply.

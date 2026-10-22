@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, it, vi } from 'vitest';
-import type { Session } from '@animaOS-SWARM/sdk';
+import type { Session } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import * as attachmentTransport from '../lib/attachments';
 import { ViewHarness } from '../ViewHarness';

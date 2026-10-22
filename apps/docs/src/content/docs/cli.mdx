@@ -23,7 +23,7 @@ The daemon does the thinking; the CLI creates agents or swarms over HTTP, sends 
 
 ## Installation
 
-`@animaOS-SWARM/cli` is a private workspace package; it is not published to npm. Build it from the repository and run it through the root script:
+`@animaos/cli` is a private workspace package; it is not published to npm. Build it from the repository and run it through the root script:
 
 ```bash
 bun install --frozen-lockfile
@@ -203,7 +203,7 @@ animaos assistant chat -n assistant --user-name "Sam"
 | Provider key and base-URL variables | Used to detect and forward credentials. See [Providers & Environment](/cli/providers/) |
 | `ANIMAOS_USER_ID`, `ANIMAOS_USER_NAME` | Defaults for `assistant chat` |
 
-The daemon has its own settings (port, workspace root, persistence) that the CLI does not read; see the [daemon README](https://github.com/G9000/animaOS-SWARM/blob/main/hosts/rust-daemon/README.md#environment-variables).
+The daemon has its own settings (port, workspace root, persistence) that the CLI does not read; see the [daemon README](https://github.com/G9000/animaos/blob/main/hosts/rust-daemon/README.md#environment-variables).
 
 ## Good Defaults
 

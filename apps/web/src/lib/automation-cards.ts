@@ -3,7 +3,7 @@ import {
   type Automation,
   type AutomationCardMeta,
   type AutomationMessageLike,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 /** What a card in the chat reads and does: the companion's automations and
  *  the owner's two answers to a due reminder. */

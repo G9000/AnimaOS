@@ -327,9 +327,9 @@ Update the agent guide and daemon/web documentation to describe automatic embedd
 - `bun x nx run core-rust:test --skipNxCache`
 - `bun x nx run rust-daemon:test --skipNxCache`
 - `bun x nx run rust-daemon:lint --skipNxCache`
-- `bun x nx run @animaOS-SWARM/web:test --skipNxCache`
-- `bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache`
-- `bun x nx run @animaOS-SWARM/web:build --skipNxCache`
+- `bun x nx run @animaos/web:test --skipNxCache`
+- `bun x nx run @animaos/web:typecheck --skipNxCache`
+- `bun x nx run @animaos/web:build --skipNxCache`
 - `bun x nx test workspace-dev --runInBand --skipNxCache` if workspace launcher behavior or project selection changes beyond deleting the legacy host.
 
 ## Acceptance Criteria

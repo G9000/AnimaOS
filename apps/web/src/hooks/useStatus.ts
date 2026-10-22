@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DaemonStatus } from '@animaOS-SWARM/sdk';
+import type { DaemonStatus } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import { STATUS_POLL_MS, statusErrorMessage } from '../lib/status';

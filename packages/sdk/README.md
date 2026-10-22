@@ -1,4 +1,4 @@
-# @animaOS-SWARM/sdk
+# @animaos/sdk
 
 Public TypeScript client for the animaOS Rust daemon.
 
@@ -16,7 +16,7 @@ Current SDK coverage includes:
 ## Quick Example
 
 ```ts
-import { createDaemonClient } from '@animaOS-SWARM/sdk';
+import { createDaemonClient } from '@animaos/sdk';
 
 const client = createDaemonClient({
   baseUrl: process.env.ANIMA_DAEMON_URL ?? 'http://127.0.0.1:8080',
@@ -95,11 +95,11 @@ if (status.connector?.status === 'active') {
 
 ## Build
 
-Run `bun run build:cli-sdk` to build the SDK and CLI together, or `bun x nx build @animaOS-SWARM/sdk` to build only this package.
+Run `bun run build:cli-sdk` to build the SDK and CLI together, or `bun x nx build @animaos/sdk` to build only this package.
 
 ## Test
 
-Run `bun x nx test @animaOS-SWARM/sdk`.
+Run `bun x nx test @animaos/sdk`.
 
 Integration tests build the Rust daemon with a separate compilation deadline, then run its binary on a temporary local port and workspace. They use an isolated environment and a local model stub; no developer credentials or persisted workspace data are inherited. `CARGO_TARGET_DIR` can select a build directory (otherwise `target/cargo/sdk-daemon-integration`).
 

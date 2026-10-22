@@ -6,7 +6,7 @@ import {
   act,
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { DaemonHttpError, type AgentJob } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError, type AgentJob } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import { AgentRunsView } from './AgentRuns';
 

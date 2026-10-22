@@ -1,4 +1,4 @@
-import { DaemonHttpError } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError } from '@animaos/sdk';
 import { describe, expect, it } from 'vitest';
 
 import { factFixture, memoryFixture } from '../test/memory';

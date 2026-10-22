@@ -13,7 +13,7 @@
 Files: `apps/web/src/lib/agent-access.ts`, `apps/web/src/components/SettingsPanel.tsx`, `apps/web/src/components/SettingsPanel.test.tsx`.
 
 - [x] Write failing tests for the toggle granting/revoking exactly `create_workflow` + `list_workflows`, preserving unrelated grants, profile changes, partial grants, helper disabling, and saved-state reseeding.
-- [x] Run `bun x nx run @animaOS-SWARM/web:test --skipNxCache --args=SettingsPanel.test.tsx --run` and confirm the new tests fail for the missing toggle.
+- [x] Run `bun x nx run @animaos/web:test --skipNxCache --args=SettingsPanel.test.tsx --run` and confirm the new tests fail for the missing toggle.
 - [x] Add a shared workflow permission constant and implement the toggle with existing abilities, tool dirty state, and save filtering. Profile selections retain explicit workflow opt-in. No default enablement.
 - [x] Rerun the focused permission suite, inspect the diff, and review spec compliance then quality.
 

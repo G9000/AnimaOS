@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   createDaemonClient,
   type ChatGptModelsSnapshot,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 const client = createDaemonClient({ baseUrl: '' }).chatgpt;
 const readError =

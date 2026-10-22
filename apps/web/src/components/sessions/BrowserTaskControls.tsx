@@ -6,7 +6,7 @@ import type {
   BrowserSelection,
   StopBrowserScopeInput,
   UploadedAttachment,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import { daemon } from '../../lib/daemon-api';
 import { MessageAttachments } from '../attachments/MessageAttachments';
 

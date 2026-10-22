@@ -4,8 +4,8 @@ WORKDIR /build
 COPY . .
 ENV NX_DAEMON=false CI=1
 RUN bun install --frozen-lockfile
-RUN bun x nx run @animaOS-SWARM/sdk:build --skipNxCache
-RUN bun x nx run @animaOS-SWARM/web:build --skipNxCache
+RUN bun x nx run @animaos/sdk:build --skipNxCache
+RUN bun x nx run @animaos/web:build --skipNxCache
 
 FROM caddy:2.10.2-alpine
 COPY --from=web /build/apps/web/dist /srv

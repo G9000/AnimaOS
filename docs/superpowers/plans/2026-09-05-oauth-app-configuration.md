@@ -59,9 +59,9 @@
 - Modify: `packages/sdk/README.md`
 
 - [x] Write failing SDK tests for encoded provider paths, PUT body, redacted status response and DELETE behavior.
-- [x] Run `bun x nx run @animaOS-SWARM/sdk:test --skipNxCache` and confirm expected failures.
+- [x] Run `bun x nx run @animaos/sdk:test --skipNxCache` and confirm expected failures.
 - [x] Add and publicly export `OAuthAppStatus`, `ConfigureOAuthAppInput`, `oauthAppStatus`, `configureOauthApp` and `removeOauthApp`.
-- [x] Rerun `bun x nx run @animaOS-SWARM/sdk:test --skipNxCache`, `bun x nx run @animaOS-SWARM/sdk:typecheck --skipNxCache`, and `bun x nx run @animaOS-SWARM/sdk:build --skipNxCache`.
+- [x] Rerun `bun x nx run @animaos/sdk:test --skipNxCache`, `bun x nx run @animaos/sdk:typecheck --skipNxCache`, and `bun x nx run @animaos/sdk:build --skipNxCache`.
 
 ### Task 5: Connectors setup UI
 
@@ -71,7 +71,7 @@
 - Modify: `apps/web/src/studio.css` only if existing utilities cannot express the layout
 
 - [x] Write failing UI tests for visible redirect URIs, masked secret inputs, Google shared-service copy, Microsoft tenant default, successful save clearing secrets and enabling Connect, independent provider errors, replacement/removal conflicts, and no secret rendering.
-- [x] Run `bun x nx run @animaOS-SWARM/web:test --skipNxCache --args='apps/web/src/components/ConnectorsView.test.tsx'` and confirm expected failures.
+- [x] Run `bun x nx run @animaos/web:test --skipNxCache --args='apps/web/src/components/ConnectorsView.test.tsx'` and confirm expected failures.
 - [x] Build accessible Google and Microsoft setup cards above the connector grid. Keep provider status isolated, use generic errors, and refresh affected service cards after Save/Remove.
 - [x] Rerun focused and full web tests, typecheck and build.
 
@@ -83,7 +83,7 @@
 
 - [x] Replace terminal-first setup guidance with the UI flow while retaining environment-variable fallback documentation.
 - [x] Run `bun x nx run rust-daemon:lint --skipNxCache` and `$env:RUST_TEST_THREADS='1'; bun x nx run rust-daemon:test --skipNxCache` (using `CI=1` and a separate `CARGO_TARGET_DIR` if the live Windows daemon locks the default target).
-- [x] Run `bun x nx run-many -t test typecheck build --projects=@animaOS-SWARM/web,@animaOS-SWARM/sdk --skipNxCache` and `bun x nx run @animaOS-SWARM/docs:build --skipNxCache`.
+- [x] Run `bun x nx run-many -t test typecheck build --projects=@animaos/web,@animaos/sdk --skipNxCache` and `bun x nx run @animaos/docs:build --skipNxCache`.
 - [x] Run an isolated daemon smoke test with fake app credentials, confirm only redacted status is returned and Gmail/Calendar readiness changes without restart, then remove the fake credentials without starting provider OAuth.
 - [x] Restart the existing workspace launcher with its environment preserved, reload the saved workspace if the control plane is ephemeral, and verify the Connectors UI/API is live without writing real provider credentials.
 - [x] Mark this plan complete with current verification evidence.

@@ -33,7 +33,7 @@
 - **Snapshot version 8.** M5 adds `skills` and `skillDrafts` to the control plane; an M4 daemon would load a v8 file and silently drop the owner's skills registry, so the version moves to 8 and the first start writes `<file>.pre-skills.bak` (JSON) or the `control_plane.backup.7` row (Postgres) first, following M2's `.pre-sessions.bak`, M3's `.pre-live-runs.bak`, and M4's `.pre-approvals.bak`. `pre_upgrade_backup_path` gains a version-7 branch so the M5 upgrade never overwrites `.pre-approvals.bak`.
 - **Tool grants (spec §13.3 step 5).** `sessions::migration::TOOL_GRANTS` appends `{ id: "m5-skills", read_class: ["load_skill"], write_class: ["propose_skill"] }`. The web's Observe, Collaborate, and Operate profiles add `load_skill`; Collaborate and Operate add `propose_skill`. Helpers never get `propose_skill` (`agent_runs::helper_config` filters it, and the handler refuses a helper); helpers do get the index and `load_skill` when their companion has it (spec §8.3 "helpers included").
 - Existing behavior stays except where a task's Interfaces block says so. Deliberate changes: `POST /api/agents/{id}/sessions/{sid}/runs` accepts a `skill` that names an enabled, active skill (it was always 400 before); runs of agents with `load_skill` carry the skills index in their system prompt.
-- Commands. Rust iteration: `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib -- <filter> <filter>` (filters after `--`), piped through `tail -30`. SDK: `bun x nx test @animaOS-SWARM/sdk`, and **every SDK-changing task ends with `bun x nx run @animaOS-SWARM/sdk:build`** so later direct web Vitest runs resolve the new exports. Web: `cd apps/web && bun x vitest run <files>`. The milestone gate (Task 14) runs `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache`.
+- Commands. Rust iteration: `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib -- <filter> <filter>` (filters after `--`), piped through `tail -30`. SDK: `bun x nx test @animaos/sdk`, and **every SDK-changing task ends with `bun x nx run @animaos/sdk:build`** so later direct web Vitest runs resolve the new exports. Web: `cd apps/web && bun x vitest run <files>`. The milestone gate (Task 14) runs `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run-many -t test,typecheck,build -p @animaos/sdk @animaos/web --skipNxCache`.
 - Formatting is clean at the start. Every task ends with `cargo fmt --all` when it touched Rust (then `git diff --stat` must show only the task's files; if `cargo fmt` reformatted unrelated files, tell the controller instead of staging them) and `bun x nx format:write --files=<each changed TS/TSX/CSS/MD file>` when it touched TypeScript, CSS, or Markdown, then re-runs its tests, so every commit stays formatted.
 - Stage files by explicit path only; never `git add -A`, `git add .`, or `git commit -a`. Never stage anything under `docs/` or `.superpowers/`, nor `nx.json` or `anima.yaml` (they show in `git status` and are not yours). `hosts/rust-daemon/README.md` is not under `docs/` and is staged with the task that changes it. Never use `git stash`, `git reset`, `git checkout -- <path>`, `git restore`, or `git worktree`, and never switch branches. Do not start the daemon, a dev server, a database, or a container; tests start what they need. Commits are GPG-signed on this machine: a commit can block on a pinentry dialog until the owner answers it.
 - Disk is tight (about 13 GB free; the Nx Rust gate needs about 12): never set a new `CARGO_TARGET_DIR`. CI stops at `nx start-ci-run` (Nx Cloud), so the local commands are the verification. No Postgres is available: Postgres tests stay `#[ignore]`.
@@ -7355,7 +7355,7 @@ describe('isSkillEvent', () => {
 });
 ```
 
-Run: `bun x nx test @animaOS-SWARM/sdk 2>&1 | tail -30`
+Run: `bun x nx test @animaos/sdk 2>&1 | tail -30`
 Expected: FAIL: `client.skills`, `isSkillEvent`, and the skill exports do not exist.
 
 - [ ] **Step 2: Implement the client**
@@ -7629,10 +7629,10 @@ export type {
 
 - [ ] **Step 3: Run the tests, typecheck, and build**
 
-Run: `bun x nx test @animaOS-SWARM/sdk 2>&1 | tail -30`
+Run: `bun x nx test @animaos/sdk 2>&1 | tail -30`
 Expected: PASS (4 new skills tests, 1 new events test, every earlier SDK test).
 
-Run: `bun x nx run @animaOS-SWARM/sdk:typecheck 2>&1 | tail -15 && bun x nx run @animaOS-SWARM/sdk:build 2>&1 | tail -15`
+Run: `bun x nx run @animaos/sdk:typecheck 2>&1 | tail -15 && bun x nx run @animaos/sdk:build 2>&1 | tail -15`
 Expected: both succeed (the build is what lets the web's direct Vitest runs resolve the new exports).
 
 If `index.spec.ts` asserts the exact list of exports, add the new ones to it.
@@ -7682,7 +7682,7 @@ Recommended implementer tier: cheap (mechanical client and types over a tested J
 Create `apps/web/src/test/skills.ts`:
 
 ```ts
-import type { Skill, SkillDraft } from '@animaOS-SWARM/sdk';
+import type { Skill, SkillDraft } from '@animaos/sdk';
 
 export function skillFixture(
   slug: string,
@@ -7859,7 +7859,7 @@ Create `apps/web/src/hooks/useSkills.test.tsx`:
 ```tsx
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DaemonHttpError } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import { skillDraftFixture, skillFixture } from '../test/skills';
@@ -8063,7 +8063,7 @@ import {
   SKILL_SLUG_PATTERN,
   type SkillDraftSource,
   type SkillStatus,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 export const STATUS_LABELS: Record<SkillStatus, string> = {
   active: 'Active',
@@ -8153,7 +8153,7 @@ import {
   type SkillDraft,
   type SkillDraftApproval,
   type SkillInput,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { COMPANION_UNREACHABLE } from '../lib/approvals';
 import { daemon } from '../lib/daemon-api';
@@ -8339,7 +8339,7 @@ Create `apps/web/src/pages/SkillsPage.test.tsx`:
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DaemonHttpError } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import { skillDraftFixture, skillFixture } from '../test/skills';
@@ -8823,7 +8823,7 @@ import type {
   SkillDraft,
   SkillDraftApproval,
   SkillDraftProposer,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { daemon } from '../../lib/daemon-api';
 import { lineDiff, type DiffLine } from '../../lib/skill-diff';
@@ -8994,7 +8994,7 @@ Create `apps/web/src/pages/SkillsPage.tsx`:
 
 ```tsx
 import { useState } from 'react';
-import type { Skill, SkillDraftProposer, SkillFile } from '@animaOS-SWARM/sdk';
+import type { Skill, SkillDraftProposer, SkillFile } from '@animaos/sdk';
 
 import { SkillDraftCard } from '../components/skills/SkillDraftCard';
 import {
@@ -9778,7 +9778,7 @@ Expected: FAIL: `skillSlashCommands`, `useSkillCommands`, the `skill` fields, an
 Replace `apps/web/src/lib/slash-commands.ts` with:
 
 ```ts
-import type { Skill } from '@animaOS-SWARM/sdk';
+import type { Skill } from '@animaos/sdk';
 
 /** Composer slash commands (spec §15.3). `/usage` arrives with the Usage
  *  page (M8); `/<skill>` comes from the owner's skills (M5). */
@@ -9933,7 +9933,7 @@ Create `apps/web/src/hooks/useSkillCommands.ts`:
 
 ```ts
 import { useEffect, useMemo, useState } from 'react';
-import type { Skill } from '@animaOS-SWARM/sdk';
+import type { Skill } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import {
@@ -10123,7 +10123,7 @@ In `apps/web/src/ViewHarness.tsx` (wiring lines only):
 Run: `cd apps/web && bun x vitest run src/lib/slash-commands.test.ts src/components/ChatScreen.test.tsx src/hooks/useSessionSends.test.tsx src/hooks/useSessionCommands.test.tsx src/hooks/useSkillCommands.test.tsx src/components/WorkspaceShell.test.tsx src/ViewHarness.test.tsx 2>&1 | tail -30`
 Expected: PASS, with no `act()` warning or console output (the harness's `listSkills` mock keeps every other harness test quiet).
 
-Run: `bun x nx run @animaOS-SWARM/web:typecheck 2>&1 | tail -15`
+Run: `bun x nx run @animaos/web:typecheck 2>&1 | tail -15`
 Expected: succeeds (the `SlashCommandName` cast in `runSlashCommand` is the only one needed).
 
 - [ ] **Step 6: Format and commit**
@@ -10175,7 +10175,7 @@ Run: `df -h .`
 - With at least 12 GB available: run `bun x nx run rust-daemon:test --skipNxCache` (it also runs `core-rust:test`). Expected: PASS (M4 ended at 1,654 passed / 7 ignored; M5 adds about 95 tests, a few of them Unix-only).
 - Otherwise run the fallback in the shared `target/` (no new `CARGO_TARGET_DIR`): `CARGO_INCREMENTAL=0 cargo test -p anima-core --lib`, `CARGO_INCREMENTAL=0 cargo test -p anima-model-adapters --lib`, `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib`, then `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --tests`. Expected: PASS. The fallback does not satisfy AGENTS.md's completion rule; record that the Nx gate is pending disk space. On Windows, if a running daemon locks `target/debug/anima-daemon.exe`, use AGENTS.md's `CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon` rerun only with the owner's go-ahead (it is a second target directory on a tight disk).
 
-Run: `bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache`
+Run: `bun x nx run-many -t test,typecheck,build -p @animaos/sdk @animaos/web --skipNxCache`
 Expected: every target succeeds (M4 ended at web 751 tests, SDK 63).
 
 Run: `cargo fmt --all --check && bun x nx format:check --base=origin/main`

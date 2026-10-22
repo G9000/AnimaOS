@@ -1,7 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { Approval } from '@animaOS-SWARM/sdk';
+import type { Approval } from '@animaos/sdk';
 
 import type { TelegramConnector } from '../../lib/daemon-api';
 import type { NeedsYouItem } from '../../lib/needs-you';

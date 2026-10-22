@@ -1,5 +1,5 @@
 {
-  "name": "@animaOS-SWARM/landing",
+  "name": "@animaos/landing",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/landing/src",
   "projectType": "application",

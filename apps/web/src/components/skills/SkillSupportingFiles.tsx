@@ -1,4 +1,4 @@
-import type { SkillSupportingFile } from '@animaOS-SWARM/sdk';
+import type { SkillSupportingFile } from '@animaos/sdk';
 import { revealInvisible } from '../../lib/skills';
 
 /** Safe review: HTML, SVG and scripts remain literal visible text. */

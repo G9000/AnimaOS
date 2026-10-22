@@ -5,7 +5,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { SessionMessage } from '@animaOS-SWARM/sdk';
+import type { SessionMessage } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 

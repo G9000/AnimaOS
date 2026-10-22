@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { DaemonCapabilities } from '@animaOS-SWARM/sdk';
+import type { DaemonCapabilities } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import { WorkspaceCapabilities } from './WorkspaceCapabilities';
 

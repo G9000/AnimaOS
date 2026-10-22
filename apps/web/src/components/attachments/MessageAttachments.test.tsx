@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { SessionMessageXlsxExtraction } from '@animaOS-SWARM/sdk';
+import type { SessionMessageXlsxExtraction } from '@animaos/sdk';
 import { daemon } from '../../lib/daemon-api';
 import {
   describeDocumentExtraction,

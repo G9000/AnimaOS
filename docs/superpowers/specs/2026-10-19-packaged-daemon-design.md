@@ -53,11 +53,11 @@ The owner's development loop stays the same: change code locally, push, and cut 
 ### Install
 
 ```bash
-curl -LsSf https://github.com/G9000/animaOS-SWARM/releases/latest/download/anima-installer.sh | sh
+curl -LsSf https://github.com/G9000/animaos/releases/latest/download/anima-installer.sh | sh
 ```
 
 ```powershell
-irm https://github.com/G9000/animaOS-SWARM/releases/latest/download/anima-installer.ps1 | iex
+irm https://github.com/G9000/animaos/releases/latest/download/anima-installer.ps1 | iex
 ```
 
 The script puts `anima` on the PATH and tells the user to run `anima setup` (cargo-dist installers cannot run post-install commands).
@@ -159,7 +159,7 @@ Restart, Stop, Quit and Update all go through the same gate:
 - **Agent self-stop detection** (`approvals/detection.rs`) catches `pkill`/`killall anima…` and `launchctl bootout|unload`, but not the new `anima` subcommands.
 - **macOS keychain trust is tied to the code signature.** Without a stable signing identity, every update brings back keychain prompts. See decision 12.
 - **Existing per-user folder.** `~/.animaos-swarm/` already holds global `secrets.json` and `permissions.json` (`packages/tools`). Workspaces use a local `.animaos-swarm/` folder.
-- **The repo is public** (`G9000/animaOS-SWARM`), so the update check needs no token.
+- **The repo is public** (`G9000/animaos`), so the update check needs no token.
 - **There are no tags and no release workflow yet.** The workspace version is `0.1.0` (root `Cargo.toml`). CI is `.github/workflows/ci.yml`, which runs Nx on Linux.
 - **`unsafe_code = "forbid"`** applies at the workspace level. Platform glue has to come from crates rather than local `unsafe`.
 - **cargo-dist names installers and archives after the Cargo package**, so the `anima` program must be its own package.

@@ -35,10 +35,10 @@ Shared guidance for GPT-6 Astra and GPT-5.6 coding agents, adapted from the offi
 
 # Dev Workflow
 
-- Use `bun dev --host rust` for the normal local workflow. It runs the selected host plus both browser surfaces, `@animaOS-SWARM/web` and `@animaOS-SWARM/playground`, through `workspace-dev`. The web console talks only to the daemon on `127.0.0.1:8080`. The daemon automatically starts restored Telegram connectors; no separate gateway process or token environment variable is used.
+- Use `bun dev --host rust` for the normal local workflow. It runs the selected host plus both browser surfaces, `@animaos/web` and `@animaos/playground`, through `workspace-dev`. The web console talks only to the daemon on `127.0.0.1:8080`. The daemon automatically starts restored Telegram connectors; no separate gateway process or token environment variable is used.
 - The only supported host key is `rust`.
 - Use Nx project targets for host work: `bun x nx run rust-daemon:dev`, `bun x nx run rust-daemon:build`, `bun x nx run rust-daemon:test`, and `bun x nx run rust-daemon:lint`.
-- Use Nx project targets for docs work: `bun x nx run @animaOS-SWARM/docs:build` and `bun x nx run @animaOS-SWARM/contributor-docs:build`.
+- Use Nx project targets for docs work: `bun x nx run @animaos/docs:build` and `bun x nx run @animaos/contributor-docs:build`.
 - Use `bun x nx test workspace-dev` when changing host selection, process orchestration, or dev launcher behavior.
 - Use `bun x nx show projects --json` to confirm project names before assuming target names or paths.
 - Prefer `bun x nx ...` over direct tool commands for build/test/lint tasks when an Nx target exists.
@@ -49,7 +49,7 @@ Shared guidance for GPT-6 Astra and GPT-5.6 coding agents, adapted from the offi
 - Cargo outputs are isolated under `target/cargo`; use `bun run rust:cache:status` to check their size and `bun run rust:cache:clean` to remove only those outputs.
 - On Windows, if a running daemon locks `target/cargo/debug/anima-daemon.exe`, rerun Rust host validation with `CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache`.
 - For dev launcher changes, run `bun x nx test workspace-dev --runInBand --skipNxCache`.
-- For Astro docs changes, run the relevant build target: `bun x nx run @animaOS-SWARM/docs:build --skipNxCache` or `bun x nx run @animaOS-SWARM/contributor-docs:build --skipNxCache`.
+- For Astro docs changes, run the relevant build target: `bun x nx run @animaos/docs:build --skipNxCache` or `bun x nx run @animaos/contributor-docs:build --skipNxCache`.
 - For TypeScript package changes, use the relevant Nx `test`, `build`, or `typecheck` target.
 - Do not claim completion unless the relevant verification commands have passed in the current tree.
 

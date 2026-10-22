@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { DaemonCapabilities } from '@animaOS-SWARM/sdk';
+import type { DaemonCapabilities } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 
 const groups = [

@@ -1,11 +1,11 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { DaemonHttpError } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError } from '@animaos/sdk';
 import type {
   LearningReview,
   LearningSkillDraftInput,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import { skillDraftFixture } from '../../test/skills';
 import { skillFixture } from '../../test/skills';
 import {

@@ -61,7 +61,7 @@ function attribution(bundle) {
   const local = {
     component: 'skill',
     source: `bundles/coding-agents/${bundle.dir}/SKILL.md`,
-    revision: `animaOS-SWARM coding-agents bundle ${VERSION}`,
+    revision: `animaos coding-agents bundle ${VERSION}`,
     license: 'MIT (repository package metadata; no root LICENSE file)',
     notice:
       'Written for Anima from the CLI help, its source and official docs; see bundles/coding-agents/ATTRIBUTION.md',

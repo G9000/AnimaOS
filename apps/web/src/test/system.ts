@@ -1,4 +1,4 @@
-import type { DaemonStatus, LogLine } from '@animaOS-SWARM/sdk';
+import type { DaemonStatus, LogLine } from '@animaos/sdk';
 
 export function logLineFixture(
   seq: number,

@@ -24,7 +24,7 @@
 - Formatting is clean at the start (`cargo fmt --all --check` and `bun x nx format:check --base=origin/main` both pass). Every task ends with `cargo fmt --all` when it touched Rust and `bun x nx format:write --files=<each changed TS/TSX/CSS/MD file>` when it touched TypeScript, then re-runs its tests, so every commit stays formatted.
 - CI (`.github/workflows/ci.yml`) stops at `nx start-ci-run` (Nx Cloud), so the local commands in each task and Task 22 are the verification.
 - No Postgres is available. Postgres tests stay `#[ignore]` and are hand-checked; no M3 task adds a Postgres test.
-- Commands. Rust iteration: `CARGO_INCREMENTAL=0 cargo test -p anima-core --lib -- <filter>`, `CARGO_INCREMENTAL=0 cargo test -p anima-model-adapters --lib -- <filter>`, `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib -- <filter> <filter>` (filters after `--`). SDK: `bun x nx test @animaOS-SWARM/sdk`. Web: `cd apps/web && bun x vitest run <files>`, or `bun x nx test @animaOS-SWARM/web`. The milestone gate (Task 22) runs `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache`.
+- Commands. Rust iteration: `CARGO_INCREMENTAL=0 cargo test -p anima-core --lib -- <filter>`, `CARGO_INCREMENTAL=0 cargo test -p anima-model-adapters --lib -- <filter>`, `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib -- <filter> <filter>` (filters after `--`). SDK: `bun x nx test @animaos/sdk`. Web: `cd apps/web && bun x vitest run <files>`, or `bun x nx test @animaos/web`. The milestone gate (Task 22) runs `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run-many -t test,typecheck,build -p @animaos/sdk @animaos/web --skipNxCache`.
 - Stage files by explicit path only; never `git add -A`, `git add .`, or `git commit -a`. Never use `git stash`, `git reset`, `git checkout -- <path>`, `git restore`, or `git worktree`. Never stage anything under `docs/` except where a step says so. Do not start the daemon or a dev server; tests start what they need.
 - Out of scope (later milestones, do not build): approvals and `run.awaiting_approval`/`approval.*` emission (M4), skills and the `skill` input (M5), automations and `automation.updated` (M6), usage records for runs, titles, and compaction (M8), attachments and image rendering (M9; M3 validates `attachmentIds` and applies the pure image cap only), the ⌘K additions of spec §15.3's last bullet (M4, which adds Review approvals), `/usage` and `/<skill>` slash commands (M8, M5).
 
@@ -15909,7 +15909,7 @@ it('compacts a session and returns its record', async () => {
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `bun x nx test @animaOS-SWARM/sdk`
+Run: `bun x nx test @animaos/sdk`
 Expected: FAIL — `client.runs`, `client.events`, `isTerminalRunStatus`, `isRunLifecycleEvent`, and `sessions.compact` do not exist.
 
 - [ ] **Step 3: Implement the clients**
@@ -16266,14 +16266,14 @@ and add `SessionCompactionError,` to the `export type { … } from './sessions.j
 
 - [ ] **Step 4: Run the SDK tests to verify they pass**
 
-Run: `bun x nx test @animaOS-SWARM/sdk`
+Run: `bun x nx test @animaos/sdk`
 Expected: PASS — the new runs, events, and compaction tests and every existing SDK test (the real-daemon integration test builds the daemon from this tree; its stub answers streaming requests with JSON, which Task 4 handles).
 
 - [ ] **Step 5: Adapt the web to the new types**
 
 In `apps/web/src/lib/daemon-api.ts`:
 
-1. Add `type StartRunInput,` to the `@animaOS-SWARM/sdk` import list.
+1. Add `type StartRunInput,` to the `@animaos/sdk` import list.
 2. Change `ScheduleOutcome`'s `status: 'silent' | 'spoke' | 'error';` to `status: 'silent' | 'spoke' | 'error' | 'stopped';`.
 3. Add to the `daemon` object, after `exportSession`:
 
@@ -16342,16 +16342,16 @@ const labels: Record<AgentJob['status'] | AgentJobAttempt['status'], string> = {
 };
 ```
 
-(adding `type AgentJobAttempt` to its `@animaOS-SWARM/sdk` import), and in `apps/web/src/test/sessions.ts` add `compactionError: null,` after `contextTrimmed: null,`.
+(adding `type AgentJobAttempt` to its `@animaos/sdk` import), and in `apps/web/src/test/sessions.ts` add `compactionError: null,` after `contextTrimmed: null,`.
 
 - [ ] **Step 6: Run the web checks**
 
-Run: `bun x nx run-many -t typecheck -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache && cd apps/web && bun x vitest run src/components/AgentWork.test.tsx src/components/AgentRuns.test.tsx`
+Run: `bun x nx run-many -t typecheck -p @animaos/sdk @animaos/web --skipNxCache && cd apps/web && bun x vitest run src/components/AgentWork.test.tsx src/components/AgentRuns.test.tsx`
 Expected: PASS.
 
 - [ ] **Step 7: Format and commit**
 
-Run: `bun x nx format:write --files=packages/sdk/src/runs.ts,packages/sdk/src/runs.spec.ts,packages/sdk/src/events.ts,packages/sdk/src/events.spec.ts,packages/sdk/src/client.ts,packages/sdk/src/sessions.ts,packages/sdk/src/sessions.spec.ts,packages/sdk/src/agents.ts,packages/sdk/src/index.ts,apps/web/src/lib/daemon-api.ts,apps/web/src/components/AgentWork.tsx,apps/web/src/components/AgentRuns.tsx,apps/web/src/test/sessions.ts && bun x nx test @animaOS-SWARM/sdk`
+Run: `bun x nx format:write --files=packages/sdk/src/runs.ts,packages/sdk/src/runs.spec.ts,packages/sdk/src/events.ts,packages/sdk/src/events.spec.ts,packages/sdk/src/client.ts,packages/sdk/src/sessions.ts,packages/sdk/src/sessions.spec.ts,packages/sdk/src/agents.ts,packages/sdk/src/index.ts,apps/web/src/lib/daemon-api.ts,apps/web/src/components/AgentWork.tsx,apps/web/src/components/AgentRuns.tsx,apps/web/src/test/sessions.ts && bun x nx test @animaos/sdk`
 Expected: PASS.
 
 ```bash
@@ -16361,7 +16361,7 @@ git commit -m "feat(sdk): add runs, the agent event stream, and session compacti
 
 #### Controller rulings from the pre-flight audit (binding)
 
-1. End the task by running `bun x nx run @animaOS-SWARM/sdk:build`, so later direct web vitest runs resolve the new exports (audit I6).
+1. End the task by running `bun x nx run @animaos/sdk:build`, so later direct web vitest runs resolve the new exports (audit I6).
 2. Prettier reformatted some JSX fragments in this plan into invalid code (bare children or props came out as `{ … ; }` statements, attributes as `name = { value };`): drop those wrappers and trailing `;`, write attributes as `name={value}`, and match "old" anchors by content (audit I7).
 
 ---
@@ -16394,7 +16394,7 @@ import type {
   Run,
   RunLifecycleEventType,
   SnapshotRun,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 
@@ -16651,7 +16651,7 @@ Create `apps/web/src/lib/session-events.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import type { AgentEvent } from '@animaOS-SWARM/sdk';
+import type { AgentEvent } from '@animaos/sdk';
 
 import {
   EMPTY_LIVE_STATE,
@@ -16922,7 +16922,7 @@ Create `apps/web/src/hooks/useAgentEvents.test.tsx`:
 ```tsx
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DaemonHttpError } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError } from '@animaos/sdk';
 
 import {
   deltaEvent,
@@ -17075,7 +17075,7 @@ import {
   type AgentEvent,
   type LiveToolCard,
   type Run,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 /** The streamed text of one model call (spec §4.5 steps). */
 export interface LiveStep {
@@ -17375,7 +17375,7 @@ Create `apps/web/src/hooks/useAgentEvents.ts`:
 
 ```ts
 import { useEffect, useRef, useSyncExternalStore } from 'react';
-import { DaemonHttpError, type AgentEvent } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError, type AgentEvent } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import {
@@ -17600,7 +17600,7 @@ Expected: PASS.
 
 - [ ] **Step 6: Typecheck, format, and commit**
 
-Run: `bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache && bun x nx format:write --files=apps/web/src/lib/session-events.ts,apps/web/src/lib/session-events.test.ts,apps/web/src/hooks/useAgentEvents.ts,apps/web/src/hooks/useAgentEvents.test.tsx,apps/web/src/test/live.ts`
+Run: `bun x nx run @animaos/web:typecheck --skipNxCache && bun x nx format:write --files=apps/web/src/lib/session-events.ts,apps/web/src/lib/session-events.test.ts,apps/web/src/hooks/useAgentEvents.ts,apps/web/src/hooks/useAgentEvents.test.tsx,apps/web/src/test/live.ts`
 Expected: typecheck passes (`src/test/live.ts` is part of the app's typecheck; the test files are not).
 
 ```bash
@@ -17610,7 +17610,7 @@ git commit -m "feat(web): keep each companion's live runs from one shared event 
 
 #### Controller rulings from the pre-flight audit (binding)
 
-1. The SDK `dist` must be current before direct `cd apps/web && bun x vitest run …` runs (rebuild with `bun x nx run @animaOS-SWARM/sdk:build` if Task 15 changed since), or verify through `bun x nx test @animaOS-SWARM/web` (audit I6).
+1. The SDK `dist` must be current before direct `cd apps/web && bun x vitest run …` runs (rebuild with `bun x nx run @animaos/sdk:build` if Task 15 changed since), or verify through `bun x nx test @animaos/web` (audit I6).
 2. The event stream never swallows failures silently: log non-404 errors, back off on 403/429 instead of retrying forever, and on a 404 probe the agent (like the SDK's sessions client does) to tell an unknown or deleted agent from a daemon too old (audit M15).
 3. Back off after several `stream.resync` events in a row instead of reconnecting immediately every time (audit M21).
 
@@ -17996,7 +17996,7 @@ Expected: FAIL — `./transcript` does not exist.
 Create `apps/web/src/lib/transcript.ts`:
 
 ```ts
-import { isTerminalRunStatus, type Run } from '@animaOS-SWARM/sdk';
+import { isTerminalRunStatus, type Run } from '@animaos/sdk';
 
 import { emptyLiveRun, stepRunId, type LiveRun } from './session-events';
 import type { ChatMessage } from './types';
@@ -18845,7 +18845,7 @@ Create `apps/web/src/components/sessions/RunActivity.tsx`:
 
 ```tsx
 import { useEffect, useState, type ReactNode } from 'react';
-import { isTerminalRunStatus, type Run } from '@animaOS-SWARM/sdk';
+import { isTerminalRunStatus, type Run } from '@animaos/sdk';
 
 import { isActiveRun, type LiveRun } from '../../lib/session-events';
 import {
@@ -19071,7 +19071,7 @@ export function PendingMessage({
 Create `apps/web/src/components/sessions/RunOutcomeCard.tsx`:
 
 ```tsx
-import type { Run } from '@animaOS-SWARM/sdk';
+import type { Run } from '@animaos/sdk';
 
 /** How a run ended when it did not simply reply (spec §15.2). */
 export function RunOutcomeCard({
@@ -19582,12 +19582,12 @@ In `apps/web/src/styles.css`, after `@import './sessions.css';` add `@import './
 Run: `cd apps/web && bun x vitest run src/lib/transcript.test.ts src/components/sessions/RunActivity.test.tsx src/components/ChatScreen.test.tsx src/components/ChatScreen.memo.test.tsx src/visual-tokens.test.ts`
 Expected: PASS (the memo test still counts one Markdown render per bubble render: bubbles are not memoized, and draft changes do not re-render `MessageList`).
 
-Run: `bun x nx test @animaOS-SWARM/web`
+Run: `bun x nx test @animaos/web`
 Expected: PASS.
 
 - [ ] **Step 11: Typecheck, format, and commit**
 
-Run: `bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache && bun x nx format:write --files=apps/web/src/lib/transcript.ts,apps/web/src/lib/transcript.test.ts,apps/web/src/components/sessions/ToolStepCard.tsx,apps/web/src/components/sessions/HelperCard.tsx,apps/web/src/components/sessions/RunActivity.tsx,apps/web/src/components/sessions/RunOutcomeCard.tsx,apps/web/src/components/sessions/TranscriptNotes.tsx,apps/web/src/components/sessions/RunActivity.test.tsx,apps/web/src/live-runs.css,apps/web/src/styles.css,apps/web/src/components/ChatScreen.tsx,apps/web/src/components/ChatScreen.test.tsx`
+Run: `bun x nx run @animaos/web:typecheck --skipNxCache && bun x nx format:write --files=apps/web/src/lib/transcript.ts,apps/web/src/lib/transcript.test.ts,apps/web/src/components/sessions/ToolStepCard.tsx,apps/web/src/components/sessions/HelperCard.tsx,apps/web/src/components/sessions/RunActivity.tsx,apps/web/src/components/sessions/RunOutcomeCard.tsx,apps/web/src/components/sessions/TranscriptNotes.tsx,apps/web/src/components/sessions/RunActivity.test.tsx,apps/web/src/live-runs.css,apps/web/src/styles.css,apps/web/src/components/ChatScreen.tsx,apps/web/src/components/ChatScreen.test.tsx`
 Expected: PASS.
 
 ```bash
@@ -19597,7 +19597,7 @@ git commit -m "feat(web): show tool steps, helpers, and run outcomes in the tran
 
 #### Controller rulings from the pre-flight audit (binding)
 
-1. The SDK `dist` must be current before direct `cd apps/web && bun x vitest run …` runs (rebuild with `bun x nx run @animaOS-SWARM/sdk:build` if Task 15 changed since), or verify through `bun x nx test @animaOS-SWARM/web` (audit I6).
+1. The SDK `dist` must be current before direct `cd apps/web && bun x vitest run …` runs (rebuild with `bun x nx run @animaos/sdk:build` if Task 15 changed since), or verify through `bun x nx test @animaos/web` (audit I6).
 2. Prettier reformatted some JSX fragments in this plan into invalid code (bare children or props came out as `{ … ; }` statements, attributes as `name = { value };`): drop those wrappers and trailing `;`, write attributes as `name={value}`, and match "old" anchors by content (audit I7).
 3. Historical tool cards (audit I1, web part): `resultText` reads the error from the tool message's JSON text when `taskResult` is absent; the test fixture uses only metadata keys the daemon exposes (`toolStatus`, `toolDurationMs`, `incomplete`, not `taskResult`); an orphan card takes its name from the matching assistant message's `toolCalls` instead of a `toolName` key the daemon never writes.
 
@@ -19668,7 +19668,7 @@ Create `apps/web/src/hooks/useSessionSends.test.tsx`:
 ```tsx
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DaemonConnectionError, DaemonHttpError } from '@animaOS-SWARM/sdk';
+import { DaemonConnectionError, DaemonHttpError } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import { runFixture } from '../test/live';
@@ -19891,7 +19891,7 @@ import {
   DaemonHttpError,
   type RunMode,
   type StartRunResult,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 
@@ -20200,7 +20200,7 @@ Expected: PASS.
 
 In `apps/web/src/ViewHarness.tsx`:
 
-1. Change `import type { Session, SessionMessage } from '@animaOS-SWARM/sdk';` to `import type { RunMode, Session } from '@animaOS-SWARM/sdk';`; add `import { useSessionSends } from './hooks/useSessionSends';` after the `useDaemonBootstrap` import; add `import { loadDraft, storeDraft } from './lib/drafts';` and `import type { PendingBubble } from './lib/transcript';` after the `session-groups` import; and replace
+1. Change `import type { Session, SessionMessage } from '@animaos/sdk';` to `import type { RunMode, Session } from '@animaos/sdk';`; add `import { useSessionSends } from './hooks/useSessionSends';` after the `useDaemonBootstrap` import; add `import { loadDraft, storeDraft } from './lib/drafts';` and `import type { PendingBubble } from './lib/transcript';` after the `session-groups` import; and replace
 
 ```ts
 import {
@@ -20443,7 +20443,7 @@ import {
   DaemonTooOldError,
   type Session,
   type SessionMessage,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 ```
 
 add `import { SEND_RETRY_DELAYS_MS } from './hooks/useSessionSends';` after the `useSessionMessages` import, and `import { runFixture } from './test/live';` after the `./test/sessions` import.
@@ -20919,12 +20919,12 @@ it('resends a restored message with its key and gives a new message a new key', 
 Run: `cd apps/web && bun x vitest run src/ViewHarness.test.tsx src/components/sessions/SessionView.test.tsx src/hooks/useSessionSends.test.tsx src/lib/drafts.test.ts`
 Expected: PASS.
 
-Run: `bun x nx test @animaOS-SWARM/web`
+Run: `bun x nx test @animaos/web`
 Expected: PASS.
 
 - [ ] **Step 9: Typecheck, format, and commit**
 
-Run: `bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache && bun x nx format:write --files=apps/web/src/lib/drafts.ts,apps/web/src/lib/drafts.test.ts,apps/web/src/hooks/useSessionSends.ts,apps/web/src/hooks/useSessionSends.test.tsx,apps/web/src/ViewHarness.tsx,apps/web/src/ViewHarness.test.tsx,apps/web/src/components/sessions/SessionView.tsx,apps/web/src/components/sessions/SessionView.test.tsx`
+Run: `bun x nx run @animaos/web:typecheck --skipNxCache && bun x nx format:write --files=apps/web/src/lib/drafts.ts,apps/web/src/lib/drafts.test.ts,apps/web/src/hooks/useSessionSends.ts,apps/web/src/hooks/useSessionSends.test.tsx,apps/web/src/ViewHarness.tsx,apps/web/src/ViewHarness.test.tsx,apps/web/src/components/sessions/SessionView.tsx,apps/web/src/components/sessions/SessionView.test.tsx`
 Expected: PASS (no unused locals remain in `ViewHarness.tsx`: `httpStatus` still serves the unlisted-session read, `SESSION_MESSAGES_POLL_MS` its retry).
 
 ```bash
@@ -20935,7 +20935,7 @@ git commit -m "feat(web): send messages through the runs route with ordered retr
 #### Controller rulings from the pre-flight audit (binding)
 
 1. Opus implementer and opus reviewer for this task (audit M5).
-2. The SDK `dist` must be current before direct `cd apps/web && bun x vitest run …` runs (rebuild with `bun x nx run @animaOS-SWARM/sdk:build` if Task 15 changed since), or verify through `bun x nx test @animaOS-SWARM/web` (audit I6).
+2. The SDK `dist` must be current before direct `cd apps/web && bun x vitest run …` runs (rebuild with `bun x nx run @animaos/sdk:build` if Task 15 changed since), or verify through `bun x nx test @animaos/web` (audit I6).
 3. Prettier reformatted some JSX fragments in this plan into invalid code (bare children or props came out as `{ … ; }` statements, attributes as `name = { value };`): drop those wrappers and trailing `;`, write attributes as `name={value}`, and match "old" anchors by content (audit I7).
 4. Keep "Queued for Telegram delivery" (audit I8 — M2 restored it deliberately): keep reading `deliveryQueued` where Telegram replies still go through the connector send, or derive it when a Telegram session's run completes while its connector has an approved chat; keep the test "reports a Telegram reply that is queued for delivery".
 5. The Playwright specs that mock `/run` go stale after this task; they are outside the M3 gate — the controller carries their rewrite to M10 (audit M4).
@@ -21592,12 +21592,12 @@ In `apps/web/src/components/sessions/SessionView.tsx`:
 Run: `cd apps/web && bun x vitest run src/lib/slash-commands.test.ts src/components/ChatScreen.test.tsx src/components/sessions/SessionView.test.tsx src/visual-tokens.test.ts`
 Expected: PASS.
 
-Run: `bun x nx test @animaOS-SWARM/web`
+Run: `bun x nx test @animaos/web`
 Expected: PASS (ViewHarness passes none of the new props yet, so its composer behaves as in Task 18).
 
 - [ ] **Step 6: Typecheck, format, and commit**
 
-Run: `bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache && bun x nx format:write --files=apps/web/src/lib/slash-commands.ts,apps/web/src/lib/slash-commands.test.ts,apps/web/src/components/sessions/SlashCommandMenu.tsx,apps/web/src/components/ChatScreen.tsx,apps/web/src/components/ChatScreen.test.tsx,apps/web/src/components/icons.tsx,apps/web/src/components/sessions/SessionView.tsx,apps/web/src/live-runs.css`
+Run: `bun x nx run @animaos/web:typecheck --skipNxCache && bun x nx format:write --files=apps/web/src/lib/slash-commands.ts,apps/web/src/lib/slash-commands.test.ts,apps/web/src/components/sessions/SlashCommandMenu.tsx,apps/web/src/components/ChatScreen.tsx,apps/web/src/components/ChatScreen.test.tsx,apps/web/src/components/icons.tsx,apps/web/src/components/sessions/SessionView.tsx,apps/web/src/live-runs.css`
 Expected: PASS.
 
 ```bash
@@ -21607,7 +21607,7 @@ git commit -m "feat(web): add slash commands, Stop, and steering to the composer
 
 #### Controller rulings from the pre-flight audit (binding)
 
-1. The SDK `dist` must be current before direct `cd apps/web && bun x vitest run …` runs (rebuild with `bun x nx run @animaOS-SWARM/sdk:build` if Task 15 changed since), or verify through `bun x nx test @animaOS-SWARM/web` (audit I6).
+1. The SDK `dist` must be current before direct `cd apps/web && bun x vitest run …` runs (rebuild with `bun x nx run @animaos/sdk:build` if Task 15 changed since), or verify through `bun x nx test @animaos/web` (audit I6).
 
 ---
 
@@ -21662,7 +21662,7 @@ Create `apps/web/src/hooks/useSessionRuns.test.tsx`:
 ```tsx
 import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DaemonHttpError } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import { runFixture } from '../test/live';
@@ -21997,7 +21997,7 @@ Create `apps/web/src/hooks/useSessionRuns.ts`:
 
 ```ts
 import { useEffect, useState } from 'react';
-import type { Run } from '@animaOS-SWARM/sdk';
+import type { Run } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 
@@ -22373,7 +22373,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { Session } from '@animaOS-SWARM/sdk';
+import type { Session } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import { sessionKey } from '../lib/session-groups';
@@ -22719,12 +22719,12 @@ and add `ref={rowRef}` to the row's outer `<div className="session-row"`.
 Run: `cd apps/web && bun x vitest run src/lib/hash-route.test.ts src/hooks/useSessionRuns.test.tsx src/hooks/useDaemonBootstrap.test.tsx src/hooks/useCompanionSessions.test.tsx src/hooks/useSessionMessages.test.tsx src/components/sessions/SessionSidebar.test.tsx`
 Expected: PASS — including every existing bootstrap test (the first poll is armed once the first read settles, 5 s later, and waits for the poll in flight) and every existing sessions test.
 
-Run: `bun x nx test @animaOS-SWARM/web`
+Run: `bun x nx test @animaos/web`
 Expected: PASS (ViewHarness does not pass `live` yet).
 
 - [ ] **Step 6: Typecheck, format, and commit**
 
-Run: `bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache && bun x nx format:write --files=apps/web/src/lib/hash-route.ts,apps/web/src/lib/hash-route.test.ts,apps/web/src/hooks/useSessionRuns.ts,apps/web/src/hooks/useSessionRuns.test.tsx,apps/web/src/hooks/useDaemonBootstrap.ts,apps/web/src/hooks/useDaemonBootstrap.test.tsx,apps/web/src/hooks/useCompanionSessions.ts,apps/web/src/hooks/useCompanionSessions.test.tsx,apps/web/src/hooks/useSessionMessages.ts,apps/web/src/hooks/useSessionMessages.test.tsx,apps/web/src/components/sessions/SessionSidebar.tsx,apps/web/src/components/sessions/SessionSidebar.test.tsx`
+Run: `bun x nx run @animaos/web:typecheck --skipNxCache && bun x nx format:write --files=apps/web/src/lib/hash-route.ts,apps/web/src/lib/hash-route.test.ts,apps/web/src/hooks/useSessionRuns.ts,apps/web/src/hooks/useSessionRuns.test.tsx,apps/web/src/hooks/useDaemonBootstrap.ts,apps/web/src/hooks/useDaemonBootstrap.test.tsx,apps/web/src/hooks/useCompanionSessions.ts,apps/web/src/hooks/useCompanionSessions.test.tsx,apps/web/src/hooks/useSessionMessages.ts,apps/web/src/hooks/useSessionMessages.test.tsx,apps/web/src/components/sessions/SessionSidebar.tsx,apps/web/src/components/sessions/SessionSidebar.test.tsx`
 Expected: PASS.
 
 ```bash
@@ -22734,7 +22734,7 @@ git commit -m "feat(web): pace polls by the event stream and route helper sessio
 
 #### Controller rulings from the pre-flight audit (binding)
 
-1. The SDK `dist` must be current before direct `cd apps/web && bun x vitest run …` runs (rebuild with `bun x nx run @animaOS-SWARM/sdk:build` if Task 15 changed since), or verify through `bun x nx test @animaOS-SWARM/web` (audit I6).
+1. The SDK `dist` must be current before direct `cd apps/web && bun x vitest run …` runs (rebuild with `bun x nx run @animaos/sdk:build` if Task 15 changed since), or verify through `bun x nx test @animaos/web` (audit I6).
 2. Carry-forward: the sessions list's polling glitches M2 left (a session moving up mid-walk, an older walk overwriting an optimistic upsert/remove, a stale-closure `refresh` reading old filters — read filters from refs) should be resolved by event-paced refreshes here; add tests for the ones this task's design touches.
 
 ---
@@ -22838,7 +22838,7 @@ Expected: FAIL — `runs`, `actions`, `announcement`, and the compaction notice 
 
 In `apps/web/src/components/sessions/SessionView.tsx`:
 
-1. Replace `import type { Session } from '@animaOS-SWARM/sdk';` with `import { isTerminalRunStatus, type Session } from '@animaOS-SWARM/sdk';`, add `import type { LiveRun } from '../../lib/session-events';`, and replace `import { buildTranscript, type PendingBubble } from '../../lib/transcript';` with
+1. Replace `import type { Session } from '@animaos/sdk';` with `import { isTerminalRunStatus, type Session } from '@animaos/sdk';`, add `import type { LiveRun } from '../../lib/session-events';`, and replace `import { buildTranscript, type PendingBubble } from '../../lib/transcript';` with
 
 ```tsx
 import {
@@ -23330,7 +23330,7 @@ Expected: FAIL — the harness does not read the stream, so no live run, Stop, s
 
 In `apps/web/src/ViewHarness.tsx`:
 
-1. Replace `import type { RunMode, Session } from '@animaOS-SWARM/sdk';` with
+1. Replace `import type { RunMode, Session } from '@animaos/sdk';` with
 
 ```ts
 import {
@@ -23340,7 +23340,7 @@ import {
   type Run,
   type RunMode,
   type Session,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 ```
 
 add `import { useAgentEvents } from './hooks/useAgentEvents';` after the `useAgentIntegrations` import and `import { useSessionRuns } from './hooks/useSessionRuns';` after the `useSessionSends` import; replace the `useSessionMessages` import with
@@ -23860,12 +23860,12 @@ announcement = { announcement };
 Run: `cd apps/web && bun x vitest run src/ViewHarness.test.tsx src/components/sessions/SessionView.test.tsx`
 Expected: PASS — the new tests and every existing one (with the idle stream the harness polls exactly as in Task 18; the peer-helper test now credits "Private teammate request" to Beta and still shows the read-only note).
 
-Run: `bun x nx test @animaOS-SWARM/web`
+Run: `bun x nx test @animaos/web`
 Expected: PASS.
 
 - [ ] **Step 6: Typecheck, format, and commit**
 
-Run: `bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache && bun x nx format:write --files=apps/web/src/ViewHarness.tsx,apps/web/src/ViewHarness.test.tsx,apps/web/src/components/sessions/SessionView.tsx,apps/web/src/components/sessions/SessionView.test.tsx`
+Run: `bun x nx run @animaos/web:typecheck --skipNxCache && bun x nx format:write --files=apps/web/src/ViewHarness.tsx,apps/web/src/ViewHarness.test.tsx,apps/web/src/components/sessions/SessionView.tsx,apps/web/src/components/sessions/SessionView.test.tsx`
 Expected: PASS.
 
 ```bash
@@ -23876,7 +23876,7 @@ git commit -m "feat(web): stream runs into the session view with Stop, steering,
 #### Controller rulings from the pre-flight audit (binding)
 
 1. Opus implementer and opus reviewer for this task (audit M5).
-2. The SDK `dist` must be current before direct `cd apps/web && bun x vitest run …` runs (rebuild with `bun x nx run @animaOS-SWARM/sdk:build` if Task 15 changed since), or verify through `bun x nx test @animaOS-SWARM/web` (audit I6).
+2. The SDK `dist` must be current before direct `cd apps/web && bun x vitest run …` runs (rebuild with `bun x nx run @animaos/sdk:build` if Task 15 changed since), or verify through `bun x nx test @animaos/web` (audit I6).
 3. Prettier reformatted some JSX fragments in this plan into invalid code (bare children or props came out as `{ … ; }` statements, attributes as `name = { value };`): drop those wrappers and trailing `;`, write attributes as `name={value}`, and match "old" anchors by content (audit I7). In Step 15, `agent={agent}` occurs twice in `ViewHarness.tsx`; edit the one on `<SessionView`.
 4. Steer bubbles (audit I3, web part): keep a steer's text until it appears in history (`clientRequestId`) or as a queued run with its text; if the joined run ends `interrupted` or `failed`, move the text to the recovery panel; never settle a steer only because the stream reconnected.
 5. Keep "Queued for Telegram delivery" (audit I8), as ruled in Task 18.
@@ -23910,7 +23910,7 @@ Run: `df -h /System/Volumes/Data`
 - With at least 12 GB available: run `bun x nx run rust-daemon:test --skipNxCache` (it also runs `core-rust:test`). Expected: PASS.
 - Otherwise run the fallback in the shared `target/`: `CARGO_INCREMENTAL=0 cargo test -p anima-core --lib`, `CARGO_INCREMENTAL=0 cargo test -p anima-model-adapters --lib`, `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib`, `CARGO_INCREMENTAL=0 cargo test -p anima-core --tests`, then `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --tests`. Expected: PASS. The fallback does not satisfy AGENTS.md's completion rule; record that the Nx gate is pending disk space.
 
-Run: `bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache`
+Run: `bun x nx run-many -t test,typecheck,build -p @animaos/sdk @animaos/web --skipNxCache`
 Expected: every target succeeds.
 
 Run: `cargo fmt --all --check && bun x nx format:check --base=origin/main`

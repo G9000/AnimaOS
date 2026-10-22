@@ -81,7 +81,7 @@ A queued run waits behind the session's earlier messages. A companion holds at m
 ### Poll
 
 ```typescript
-import { isTerminalRunStatus } from '@animaOS-SWARM/sdk';
+import { isTerminalRunStatus } from '@animaos/sdk';
 
 let current = run;
 while (!isTerminalRunStatus(current.status)) {
@@ -100,7 +100,7 @@ if (current.status === 'completed' && current.replyMessageId) {
 ### Stream
 
 ```typescript
-import { isRunLifecycleEvent, isTerminalRunStatus } from '@animaOS-SWARM/sdk';
+import { isRunLifecycleEvent, isTerminalRunStatus } from '@animaos/sdk';
 
 const controller = new AbortController();
 

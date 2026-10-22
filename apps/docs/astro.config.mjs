@@ -2,7 +2,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import lucode from 'lucode-starlight';
 
-const site = process.env.ANIMAOS_DOCS_SITE ?? 'https://g9000.github.io/animaOS-SWARM';
+const site = process.env.ANIMAOS_DOCS_SITE ?? 'https://g9000.github.io/animaos';
 
 function docsSidebarOverride() {
   return {
@@ -38,10 +38,10 @@ export default defineConfig({
         replacesTitle: false,
       },
       social: [
-        { icon: 'github', label: 'GitHub', href: 'https://github.com/G9000/animaOS-SWARM' },
+        { icon: 'github', label: 'GitHub', href: 'https://github.com/G9000/animaos' },
       ],
       plugins: [
-        lucode({ footerText: 'Built with [animaOS](https://github.com/G9000/animaOS-SWARM).' }),
+        lucode({ footerText: 'Built with [animaOS](https://github.com/G9000/animaos).' }),
         docsSidebarOverride(),
       ],
       sidebar: [

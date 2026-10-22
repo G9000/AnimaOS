@@ -1,5 +1,5 @@
 {
-  "name": "@animaOS-SWARM/web-e2e",
+  "name": "@animaos/web-e2e",
   "version": "0.0.1",
   "private": true,
   "nx": {
@@ -17,8 +17,8 @@
         "dependsOn": [
           {
             "projects": [
-              "@animaOS-SWARM/sdk",
-              "@animaOS-SWARM/web"
+              "@animaos/sdk",
+              "@animaos/web"
             ],
             "target": "build"
           }
@@ -39,10 +39,10 @@
       }
     },
     "implicitDependencies": [
-      "@animaOS-SWARM/web"
+      "@animaos/web"
     ]
   },
   "devDependencies": {
-    "@animaOS-SWARM/sdk": "workspace:*"
+    "@animaos/sdk": "workspace:*"
   }
 }

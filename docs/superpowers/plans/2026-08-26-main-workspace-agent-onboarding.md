@@ -59,7 +59,7 @@ expect(selectMainAgent([newer, oldest])).toBe(oldest);
 - [ ] **Step 4: Run the tests to verify the red state**
 
 ```powershell
-bun x nx test @animaOS-SWARM/web --skipNxCache
+bun x nx test @animaos/web --skipNxCache
 ```
 
 Expected: FAIL because `agent-access.ts` does not exist or does not export the required helpers.
@@ -82,7 +82,7 @@ export function selectMainAgent(agents: readonly AgentDetail[]): AgentDetail | n
 - [ ] **Step 6: Run tests and commit**
 
 ```powershell
-bun x nx test @animaOS-SWARM/web --skipNxCache
+bun x nx test @animaos/web --skipNxCache
 git add apps/web/package.json apps/web/vitest.config.mts apps/web/src/test/setup.ts apps/web/src/lib/agent-access.ts apps/web/src/lib/agent-access.test.ts bun.lock
 git commit -m "test(web): define workspace access profiles"
 ```
@@ -237,8 +237,8 @@ Assert `toAgentDetail` maps `state.config.tools` to `toolNames` and preserves ex
 - [ ] **Step 2: Run focused tests to verify failure**
 
 ```powershell
-bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=daemon-api.test.ts
-bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=useDaemonBootstrap.test.tsx
+bun x nx test @animaos/web --skipNxCache --testFile=daemon-api.test.ts
+bun x nx test @animaos/web --skipNxCache --testFile=useDaemonBootstrap.test.tsx
 ```
 
 Expected: FAIL because tool mapping and the hook do not exist.
@@ -270,7 +270,7 @@ Use one initial bootstrap, five-second agent polling, and last-known-good data o
 - [ ] **Step 5: Run tests and commit**
 
 ```powershell
-bun x nx test @animaOS-SWARM/web --skipNxCache
+bun x nx test @animaos/web --skipNxCache
 git add apps/web/src/lib/types.ts apps/web/src/lib/daemon-api.ts apps/web/src/lib/daemon-api.test.ts apps/web/src/hooks/useDaemonBootstrap.ts apps/web/src/hooks/useDaemonBootstrap.test.tsx
 git commit -m "feat(web): model daemon agents and workspace access"
 ```
@@ -305,7 +305,7 @@ Render the flow with provider fixtures and cover:
 - [ ] **Step 2: Run the component test to verify failure**
 
 ```powershell
-bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=OnboardingFlow.test.tsx
+bun x nx test @animaos/web --skipNxCache --testFile=OnboardingFlow.test.tsx
 ```
 
 Expected: FAIL because the onboarding components do not exist.
@@ -334,7 +334,7 @@ Configured providers are selectable; unavailable providers remain visible and di
 - [ ] **Step 5: Run tests and commit**
 
 ```powershell
-bun x nx test @animaOS-SWARM/web --skipNxCache
+bun x nx test @animaos/web --skipNxCache
 git add apps/web/src/components/onboarding apps/web/src/components/SetupScreen.tsx
 git commit -m "feat(web): add guided main-agent onboarding"
 ```
@@ -366,7 +366,7 @@ In `ViewHarness.test.tsx`, mock the daemon client and use fake timers where need
 Run the test before structural edits; if a contract cannot be characterized without the new collection seam, add the smallest harness injection necessary and commit that seam separately before continuing.
 
 ```powershell
-bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=ViewHarness.test.tsx
+bun x nx test @animaos/web --skipNxCache --testFile=ViewHarness.test.tsx
 ```
 
 Expected: PASS for the current behavior characterization.
@@ -390,8 +390,8 @@ In `apps/web-e2e/src/main-workspace-agent.spec.ts`, use `page.route('**/api/**',
 - [ ] **Step 3: Run the new behavior tests to verify the red state**
 
 ```powershell
-bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=WorkspaceShell.test.tsx
-bun x nx e2e @animaOS-SWARM/web-e2e --skipNxCache --project=chromium --grep="main workspace agent"
+bun x nx test @animaos/web --skipNxCache --testFile=WorkspaceShell.test.tsx
+bun x nx e2e @animaos/web-e2e --skipNxCache --project=chromium --grep="main workspace agent"
 ```
 
 Expected: FAIL because the shell and multi-agent collection flow do not exist.
@@ -411,8 +411,8 @@ Keep `MessageList` and `Composer` APIs stable where practical. Place them in a c
 - [ ] **Step 7: Run tests and commit**
 
 ```powershell
-bun x nx test @animaOS-SWARM/web --skipNxCache
-bun x nx e2e @animaOS-SWARM/web-e2e --skipNxCache --project=chromium --grep="main workspace agent"
+bun x nx test @animaos/web --skipNxCache
+bun x nx e2e @animaos/web-e2e --skipNxCache --project=chromium --grep="main workspace agent"
 git add apps/web/src/components/WorkspaceShell.tsx apps/web/src/components/AgentPresence.tsx apps/web/src/components/ActivityView.tsx apps/web/src/components/AgentsView.tsx apps/web/src/components/WorkspaceShell.test.tsx apps/web/src/components/ChatScreen.tsx apps/web/src/components/CheckinsView.tsx apps/web/src/components/Sidebar.tsx apps/web/src/ViewHarness.tsx apps/web/src/ViewHarness.test.tsx apps/web-e2e/src/main-workspace-agent.spec.ts
 git commit -m "feat(web): center the workspace on the main agent"
 ```
@@ -431,7 +431,7 @@ Cover exact profile derivation, `Custom access` for unmatched tools, a deliberat
 - [ ] **Step 2: Run the focused test to verify failure**
 
 ```powershell
-bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=SettingsPanel.test.tsx
+bun x nx test @animaos/web --skipNxCache --testFile=SettingsPanel.test.tsx
 ```
 
 Expected: FAIL because Settings does not expose access controls or pass tools in its patch.
@@ -447,7 +447,7 @@ Have `saveSettings` use `response.agent` to update local state immediately and t
 - [ ] **Step 5: Run tests and commit**
 
 ```powershell
-bun x nx test @animaOS-SWARM/web --skipNxCache
+bun x nx test @animaos/web --skipNxCache
 git add apps/web/src/components/SettingsPanel.tsx apps/web/src/components/SettingsPanel.test.tsx apps/web/src/ViewHarness.tsx
 git commit -m "feat(web): edit main-agent workspace access"
 ```
@@ -480,7 +480,7 @@ In `apps/web/src/visual-tokens.test.ts`, read `styles.css` plus the listed compo
 - [ ] **Step 2: Run the guard to verify failure**
 
 ```powershell
-bun x nx test @animaOS-SWARM/web --skipNxCache --testFile=visual-tokens.test.ts
+bun x nx test @animaos/web --skipNxCache --testFile=visual-tokens.test.ts
 ```
 
 Expected: FAIL while the current blue/sky styling remains.
@@ -496,8 +496,8 @@ Add a slim translucent desktop top shell, centered spatial canvas, code-native l
 - [ ] **Step 5: Run unit, type, build, and lint checks**
 
 ```powershell
-bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/web --skipNxCache
-bun x nx run @animaOS-SWARM/web:lint --skipNxCache
+bun x nx run-many -t test,typecheck,build -p @animaos/web --skipNxCache
+bun x nx run @animaos/web:lint --skipNxCache
 ```
 
 If the inferred web project has no `lint` target, record that fact and run the repository lint command scoped to `apps/web/src` using the existing workspace configuration instead of inventing an Nx target.
@@ -517,7 +517,7 @@ git commit -m "style(web): apply neon rose spatial workspace"
 - [ ] **Step 1: Run the complete relevant automated suite**
 
 ```powershell
-$env:CI='1'; bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/web --skipNxCache
+$env:CI='1'; bun x nx run-many -t test,typecheck,build -p @animaos/web --skipNxCache
 $env:CI='1'; $env:CARGO_TARGET_DIR='target/validation-rust-daemon'; bun x nx run rust-daemon:test --skipNxCache
 $env:CI='1'; $env:CARGO_TARGET_DIR='target/validation-rust-daemon'; bun x nx run rust-daemon:lint --skipNxCache
 ```
@@ -529,7 +529,7 @@ Expected: all relevant non-ignored tests, web typecheck/build, and Rust formatti
 Run the Playwright route-fixture suite created in Task 6. Its in-memory API owns zero-agent, provider failure/retry, create failure, successful POST, multiple-agent, PATCH failure, and offline responses without touching user daemon data:
 
 ```powershell
-bun x nx e2e @animaOS-SWARM/web-e2e --skipNxCache --project=chromium --grep="main workspace agent"
+bun x nx e2e @animaos/web-e2e --skipNxCache --project=chromium --grep="main workspace agent"
 ```
 
 Verify the cases explicitly assert all four steps, disabled providers, Collaborate default, draft preservation, immediate Workspace transition, `aria-current="step"`/live announcement changes, first-invalid-field focus, keyboard-only operation, textual/icon status labels, `390x844` bottom dock/sheet behavior, and reduced-motion styles.
@@ -555,7 +555,7 @@ In a second terminal start the web proxy against the disposable daemon:
 
 ```powershell
 $env:UI_BACKEND_ORIGIN='http://127.0.0.1:18080'
-bun x nx run @animaOS-SWARM/web:dev
+bun x nx run @animaos/web:dev
 ```
 
 Use `http://localhost:4200`. Complete onboarding with the deterministic provider and send one chat message. In a third PowerShell terminal, run these exact live assertions:

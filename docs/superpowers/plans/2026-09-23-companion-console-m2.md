@@ -24,7 +24,7 @@
 - Error strings in this plan are exact; tests assert them.
 - Existing behavior stays: `POST /api/agents/{id}/run` request/response and reserved prefixes, `GET /api/agents` without `view`, the connector message routes, Telegram idempotency, schedules, jobs, the CLI and TUI. The only deliberate daemon changes are listed in each task's Interfaces block.
 - Formatting: `state.rs` and `routes/mod.rs` are not rustfmt-clean. Do not run `cargo fmt` over the workspace; hand-format edits there to match the surrounding code. New Rust files may be formatted with `rustfmt --edition 2021 <file>`.
-- Commands. Rust iteration: `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib -- <filter> <filter>` (several filters go after `--`); core: `CARGO_INCREMENTAL=0 cargo test -p anima-core --lib -- <filter>`. SDK: `bun x nx test @animaOS-SWARM/sdk`. Web: from `apps/web`, `bun x vitest run <files>`, or `bun x nx test @animaOS-SWARM/web`. The milestone gate (Task 18) runs `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache`.
+- Commands. Rust iteration: `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib -- <filter> <filter>` (several filters go after `--`); core: `CARGO_INCREMENTAL=0 cargo test -p anima-core --lib -- <filter>`. SDK: `bun x nx test @animaos/sdk`. Web: from `apps/web`, `bun x vitest run <files>`, or `bun x nx test @animaos/web`. The milestone gate (Task 18) runs `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run-many -t test,typecheck,build -p @animaos/sdk @animaos/web --skipNxCache`.
 - Stage files by explicit path only; never `git add -A`, `git add .`, or `git commit -a`. Never stage anything under `docs/` except where a step says so.
 
 ## File map
@@ -10418,7 +10418,7 @@ git commit -m "feat(daemon): prune mirrored messages from the control plane's ho
 **Interfaces:**
 
 - Consumes: the Task 11–12 routes and JSON shapes (camelCase): `GET/POST /api/agents/{id}/sessions`, `GET/PATCH/DELETE /api/agents/{id}/sessions/{sid}`, `GET …/messages`, `GET …/export`, `GET /api/agents?view=summary`.
-- Produces (exported from `@animaOS-SWARM/sdk`): `SessionsClient` with `list(agentId, SessionListOptions?) -> Promise<SessionPage>`, `get(agentId, sessionId, { signal? }?) -> Promise<Session>`, `messages(agentId, sessionId, SessionMessageOptions?) -> Promise<SessionMessagePage>`, `create(agentId, { title? }?) -> Promise<Session>`, `update(agentId, sessionId, SessionUpdateInput) -> Promise<Session>`, `remove(agentId, sessionId) -> Promise<void>`, `exportMarkdown(agentId, sessionId, { signal? }?) -> Promise<string>`; types `Session`, `SessionKind`, `SessionOrigin`, `SessionTitleSource`, `SessionCapabilities`, `SessionSummary`, `SessionContextTrimmed`, `SessionMatch`, `SessionPage`, `SessionListOptions`, `SessionMessage`, `SessionMessageAttachment`, `SessionMessagePage`, `SessionMessageOptions`, `SessionUpdateInput`; `DaemonClient.sessions`; `DaemonClient.requestText(path, init?) -> Promise<string>`; `AgentsClient.listSummaries() -> Promise<AgentSummary[]>` and type `AgentSummary`. Changes are additive.
+- Produces (exported from `@animaos/sdk`): `SessionsClient` with `list(agentId, SessionListOptions?) -> Promise<SessionPage>`, `get(agentId, sessionId, { signal? }?) -> Promise<Session>`, `messages(agentId, sessionId, SessionMessageOptions?) -> Promise<SessionMessagePage>`, `create(agentId, { title? }?) -> Promise<Session>`, `update(agentId, sessionId, SessionUpdateInput) -> Promise<Session>`, `remove(agentId, sessionId) -> Promise<void>`, `exportMarkdown(agentId, sessionId, { signal? }?) -> Promise<string>`; types `Session`, `SessionKind`, `SessionOrigin`, `SessionTitleSource`, `SessionCapabilities`, `SessionSummary`, `SessionContextTrimmed`, `SessionMatch`, `SessionPage`, `SessionListOptions`, `SessionMessage`, `SessionMessageAttachment`, `SessionMessagePage`, `SessionMessageOptions`, `SessionUpdateInput`; `DaemonClient.sessions`; `DaemonClient.requestText(path, init?) -> Promise<string>`; `AgentsClient.listSummaries() -> Promise<AgentSummary[]>` and type `AgentSummary`. Changes are additive.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -10580,7 +10580,7 @@ it('lists agent summaries without transcripts', async () => {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `bun x nx test @animaOS-SWARM/sdk`
+Run: `bun x nx test @animaos/sdk`
 Expected: FAIL — `client.sessions` is undefined (`Cannot read properties of undefined (reading 'list')`) and `agents.listSummaries is not a function`.
 
 - [ ] **Step 3: Implement**
@@ -10898,10 +10898,10 @@ export type {
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `bun x nx test @animaOS-SWARM/sdk`
+Run: `bun x nx test @animaos/sdk`
 Expected: PASS (4 new session tests, the new agents test, and every existing SDK test).
 
-Run: `bun x nx run @animaOS-SWARM/sdk:typecheck`
+Run: `bun x nx run @animaos/sdk:typecheck`
 Expected: exit 0.
 
 - [ ] **Step 5: Commit**
@@ -10915,7 +10915,7 @@ git commit -m "feat(sdk): add the sessions client and agent summaries"
 
 #### Controller rulings from the pre-flight audit (binding)
 
-1. End the task by running `bun x nx run @animaOS-SWARM/sdk:build` so later direct `vitest` runs in apps/web resolve the new sessions client from `packages/sdk/dist`.
+1. End the task by running `bun x nx run @animaos/sdk:build` so later direct `vitest` runs in apps/web resolve the new sessions client from `packages/sdk/dist`.
 2. The SDK maps a 404 from the sessions routes to a typed daemon-too-old error so the web can show "Update the daemon" (spec §13.4). Test.
 
 ---
@@ -10944,7 +10944,7 @@ git commit -m "feat(sdk): add the sessions client and agent summaries"
 Create `apps/web/src/test/sessions.ts`:
 
 ```ts
-import type { Session } from '@animaOS-SWARM/sdk';
+import type { Session } from '@animaos/sdk';
 
 /** A read-write chat of `agent-main` with every derived field. */
 export function sessionFixture(
@@ -11265,7 +11265,7 @@ describe('useCompanionSessions', () => {
 Create `apps/web/src/hooks/useSessionMessages.test.tsx`:
 
 ```tsx
-import type { SessionMessage } from '@animaOS-SWARM/sdk';
+import type { SessionMessage } from '@animaos/sdk';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -11594,7 +11594,7 @@ export function useHashRoute(): [HashRoute, Navigate] {
 Create `apps/web/src/lib/session-groups.ts`:
 
 ```ts
-import type { Session, SessionKind } from '@animaOS-SWARM/sdk';
+import type { Session, SessionKind } from '@animaos/sdk';
 
 export const SESSION_KIND_ORDER: readonly SessionKind[] = [
   'chat',
@@ -11736,7 +11736,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { Session } from '@animaOS-SWARM/sdk';
+import type { Session } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import { sessionKey } from '../lib/session-groups';
@@ -11836,7 +11836,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { SessionMessage } from '@animaOS-SWARM/sdk';
+import type { SessionMessage } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 
@@ -11984,7 +11984,7 @@ export function useSessionMessages(
 
 In `apps/web/src/lib/daemon-api.ts`:
 
-- add `type Session`, `type SessionListOptions`, `type SessionMessage`, `type SessionMessageOptions`, and `type SessionUpdateInput` to the `import { createDaemonClient, … } from '@animaOS-SWARM/sdk';` list;
+- add `type Session`, `type SessionListOptions`, `type SessionMessage`, `type SessionMessageOptions`, and `type SessionUpdateInput` to the `import { createDaemonClient, … } from '@animaos/sdk';` list;
 - add to the `daemon` object, after `goalJobs`:
 
 ```ts
@@ -12049,7 +12049,7 @@ git commit -m "feat(web): add hash routes, session grouping, and session data ho
 
 #### Controller rulings from the pre-flight audit (binding)
 
-1. Before running web tests directly, make sure the SDK dist is current (`bun x nx run @animaOS-SWARM/sdk:build`), or run them through `bun x nx test @animaOS-SWARM/web`.
+1. Before running web tests directly, make sure the SDK dist is current (`bun x nx run @animaos/sdk:build`), or run them through `bun x nx test @animaos/web`.
 2. `mergeNewest`: when the newest page's first message is not already in the list (a gap), reset `nextBefore` from the page or reload the session so no permanent gap remains. Test.
 
 ---
@@ -12604,7 +12604,7 @@ Create `apps/web/src/components/sessions/SessionSidebar.tsx`:
 
 ```tsx
 import { useEffect, useState, type KeyboardEvent } from 'react';
-import type { Session, SessionKind } from '@animaOS-SWARM/sdk';
+import type { Session, SessionKind } from '@animaos/sdk';
 
 import {
   SESSION_KIND_FILTER_LABELS,
@@ -12967,7 +12967,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
-import type { Session } from '@animaOS-SWARM/sdk';
+import type { Session } from '@animaos/sdk';
 
 import { SESSION_KIND_LABELS } from '../../lib/session-groups';
 import type { AgentDetail, ChatMessage } from '../../lib/types';
@@ -14550,7 +14550,7 @@ Expected: PASS.
 
 In `apps/web/src/ViewHarness.test.tsx`:
 
-(a) Add to the imports: `import type { Session, SessionMessage } from '@animaOS-SWARM/sdk';` and `import { sessionFixture } from './test/sessions';`.
+(a) Add to the imports: `import type { Session, SessionMessage } from '@animaos/sdk';` and `import { sessionFixture } from './test/sessions';`.
 
 (b) Replace `async function openChat() { … }` with:
 
@@ -15396,7 +15396,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { Session } from '@animaOS-SWARM/sdk';
+import type { Session } from '@animaos/sdk';
 
 import { AlertIcon } from './components/icons';
 import { CompanionSetup } from './components/onboarding/CompanionSetup';
@@ -16592,10 +16592,10 @@ if (sessionsMatch) {
 
 - [ ] **Step 6: Run the web tests**
 
-Run: `bun x nx test @animaOS-SWARM/web`
+Run: `bun x nx test @animaos/web`
 Expected: PASS — every web test, including the rewritten shell tests, the updated and new ViewHarness tests, and `visual-tokens.test.ts`.
 
-Run: `bun x nx run @animaOS-SWARM/web:typecheck`
+Run: `bun x nx run @animaos/web:typecheck`
 Expected: exit 0 (no references to the deleted components or the removed `workspace`/`activity`/`telegram` props remain).
 
 - [ ] **Step 7: Commit**
@@ -16648,7 +16648,7 @@ Run: `df -h /System/Volumes/Data`
 - With at least 12 GB available: run `bun x nx run rust-daemon:test --skipNxCache` (it also runs `core-rust:test`). Expected: PASS.
 - Otherwise run the fallback in the shared `target/`: `CARGO_INCREMENTAL=0 cargo test -p anima-core --lib`, `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib`, `CARGO_INCREMENTAL=0 cargo test -p anima-core --tests`, then `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --tests`. Expected: PASS. The fallback does not satisfy AGENTS.md's completion rule; record that the Nx gate is pending disk space.
 
-Run: `bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache`
+Run: `bun x nx run-many -t test,typecheck,build -p @animaos/sdk @animaos/web --skipNxCache`
 Expected: every target succeeds.
 
 The Postgres conformance test stays `#[ignore]` without a database; when one is available, run `DATABASE_URL=postgres://… CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib -- --ignored history::postgres` and record the result.

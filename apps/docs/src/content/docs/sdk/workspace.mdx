@@ -67,7 +67,7 @@ const blob = await client.workspace.downloadFile('reports/weekly.md');
 
 ## Instruction Files
 
-Place `SOUL.md` in the workspace root to define the lead agent's identity, and `ANIMA.md` (or `.anima.md`), `AGENTS.md` or `CLAUDE.md` for project instructions. Files are UTF-8, size-bounded and screened for suspicious instructions; they cannot override owner permissions. Priority and limits are in [the daemon README](https://github.com/G9000/animaOS-SWARM/blob/main/hosts/rust-daemon/README.md#standard-markdown-agent-files).
+Place `SOUL.md` in the workspace root to define the lead agent's identity, and `ANIMA.md` (or `.anima.md`), `AGENTS.md` or `CLAUDE.md` for project instructions. Files are UTF-8, size-bounded and screened for suspicious instructions; they cannot override owner permissions. Priority and limits are in [the daemon README](https://github.com/G9000/animaos/blob/main/hosts/rust-daemon/README.md#standard-markdown-agent-files).
 
 `client.agentFiles.preview(agentId)` reports what would load, without file contents:
 

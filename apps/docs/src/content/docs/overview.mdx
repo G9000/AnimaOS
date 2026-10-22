@@ -70,13 +70,13 @@ The reusable runtime lives in the Rust workspace under `packages/core-rust` and 
 | API and console | Port `8787` (control port `8788`) | Daemon on `8080`, web console on `4200` |
 | Data | `~/.animaos-swarm/` | Its own development data |
 
-The packaged program's commands include `anima`, `anima setup`, `anima status`, `anima start`, `anima stop`, `anima restart`, `anima quit`, `anima logs`, `anima update` and `anima config`. It is a separate copy from a development daemon; the two never share data or credentials. See the [packaged Anima guide](https://github.com/G9000/animaOS-SWARM/blob/main/apps/contributor-docs/src/content/docs/packaged-anima.md) for install, updates and limits.
+The packaged program's commands include `anima`, `anima setup`, `anima status`, `anima start`, `anima stop`, `anima restart`, `anima quit`, `anima logs`, `anima update` and `anima config`. It is a separate copy from a development daemon; the two never share data or credentials. See the [packaged Anima guide](https://github.com/G9000/animaos/blob/main/apps/contributor-docs/src/content/docs/packaged-anima.md) for install, updates and limits.
 
 For development, run from the repository root:
 
 ```bash
 bun install --frozen-lockfile
-bun x nx run @animaOS-SWARM/sdk:build
+bun x nx run @animaos/sdk:build
 bun dev --host rust
 ```
 
@@ -143,7 +143,7 @@ bun run animaos run "Say hello" -m gpt-4o-mini
 Or use the TypeScript SDK for full control:
 
 ```typescript
-import { agent, createDaemonClient } from '@animaOS-SWARM/sdk';
+import { agent, createDaemonClient } from '@animaos/sdk';
 
 const client = createDaemonClient();
 

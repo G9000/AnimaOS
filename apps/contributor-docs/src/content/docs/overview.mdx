@@ -5,7 +5,7 @@ description: How to navigate and contribute to the animaOS monorepo
 
 import { Steps } from '@astrojs/starlight/components';
 
-This site is for **contributors and maintainers** of animaOS. If you are looking for user-facing SDK, CLI, or TUI documentation, see the [public docs site](https://github.com/G9000/animaOS-SWARM/tree/main/apps/docs). The repository's `AGENTS.md` states the current repo rules and verification commands; this site expands on them.
+This site is for **contributors and maintainers** of animaOS. If you are looking for user-facing SDK, CLI, or TUI documentation, see the [public docs site](https://github.com/G9000/animaos/tree/main/apps/docs). The repository's `AGENTS.md` states the current repo rules and verification commands; this site expands on them.
 
 ## What is animaOS?
 
@@ -30,9 +30,9 @@ The repo previously carried a TypeScript runtime, a mod system, an agency genera
 | Directory | Purpose | Language |
 |-----------|---------|----------|
 | `packages/core-rust/` | Rust crates: `anima-core`, `anima-memory`, `anima-swarm`, `anima-schedule`, `anima-harness`, `anima-model-adapters`, `anima-service-adapters`, `anima-document-content`, `anima-process`, `anima-acp`, `anima-worktree` | Rust |
-| `packages/sdk/` | `@animaOS-SWARM/sdk`: daemon HTTP/SSE client | TypeScript |
-| `packages/cli/` | `@animaOS-SWARM/cli`: the `animaos` command | TypeScript |
-| `packages/tui/` | `@animaOS-SWARM/tui`: Ink terminal UI | TypeScript |
+| `packages/sdk/` | `@animaos/sdk`: daemon HTTP/SSE client | TypeScript |
+| `packages/cli/` | `@animaos/cli`: the `animaos` command | TypeScript |
+| `packages/tui/` | `@animaos/tui`: Ink terminal UI | TypeScript |
 | `packages/ui/` | Shared React UI primitives | TypeScript |
 | `hosts/rust-daemon/` | `anima-daemon`: the Rust host (Axum HTTP/SSE) | Rust |
 | `hosts/anima/` | `anima`: installable supervisor, tray, updater | Rust |
@@ -65,8 +65,8 @@ The repo previously carried a TypeScript runtime, a mod system, an agency genera
 2. **Clone and install**
 
    ```bash
-   git clone https://github.com/G9000/animaOS-SWARM.git
-   cd animaOS-SWARM
+   git clone https://github.com/G9000/animaos.git
+   cd animaos
    bun install
    ```
 
@@ -85,7 +85,7 @@ The repo previously carried a TypeScript runtime, a mod system, an agency genera
    bun x nx run rust-daemon:test --skipNxCache
 
    # TypeScript packages
-   bun x nx test @animaOS-SWARM/sdk
+   bun x nx test @animaos/sdk
    ```
 
 </Steps>

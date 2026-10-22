@@ -62,7 +62,7 @@
 - **No naming of other agents.** Rules are written from the behaviours listed here; no pattern text, comments or identifiers are copied from another project.
 - **Platforms.** Keep the floor's normalization lowercase. Strip backslash escapes only on non-Windows builds (`cfg!(not(windows))`), because `C:\Windows` must survive normalization.
 - **Dependencies.** Add `unicode-normalization = "0.1"` to `hosts/rust-daemon/Cargo.toml` and nothing else.
-- **Verification.** `bun x nx run rust-daemon:test --skipNxCache` must pass, apart from the 16 known macOS failures (14 `fp08_host_*`, 2 `m44_*`). Web: `bun x nx run @animaOS-SWARM/web:test --skipNxCache` and `bun x nx run @animaOS-SWARM/web:typecheck`.
+- **Verification.** `bun x nx run rust-daemon:test --skipNxCache` must pass, apart from the 16 known macOS failures (14 `fp08_host_*`, 2 `m44_*`). Web: `bun x nx run @animaos/web:test --skipNxCache` and `bun x nx run @animaos/web:typecheck`.
 
 ## Review Focus
 
@@ -270,7 +270,7 @@ Also return it for the programs `dropdb`, and for `mysqladmin … drop`.
   - Web test: with `smartCheck: true`, typing in the textarea and blurring calls `setAutonomy` with `{ smartPolicy: "…" }`. With `smartCheck: false`, there is no textarea.
 - [ ] **Step 2: Run** `cargo test -p anima-daemon --lib -- autonomy smart_check_system` and `bun x vitest run src/components/autonomy` in `apps/web`. Expected: FAIL.
 - [ ] **Step 3: Implement** the field, validation, route fields, prompt builder and card. The command stays in the user message exactly as today.
-- [ ] **Step 4: Run** the same commands plus `bun x nx run @animaOS-SWARM/web:typecheck`. Expected: PASS.
+- [ ] **Step 4: Run** the same commands plus `bun x nx run @animaos/web:typecheck`. Expected: PASS.
 - [ ] **Step 5: Commit** `feat(autonomy): owner guidance for the smart check`.
 
 ### Task 7: Three-refusals breaker
@@ -304,7 +304,7 @@ Also return it for the programs `dropdb`, and for `mysqladmin … drop`.
 - Modify: `docs/superpowers/specs/2026-10-19-autonomy-free-strict-design.md`. Add an implementation note under "Always asks, in both modes (the floor)".
 
 - [ ] **Step 1: Run** `cargo fmt -p anima-daemon` and `bun x nx run rust-daemon:test --skipNxCache`. Expected: only the 16 known macOS failures.
-- [ ] **Step 2: Run** `bun x nx run @animaOS-SWARM/web:test --skipNxCache` and `bun x nx run @animaOS-SWARM/web:typecheck`. Expected: PASS.
+- [ ] **Step 2: Run** `bun x nx run @animaos/web:test --skipNxCache` and `bun x nx run @animaos/web:typecheck`. Expected: PASS.
 - [ ] **Step 3: Run a live check in the test console (Free mode):**
   - `run: echo cm0gLXJmIC8= | base64 -d | sh` shows an approval card with "runs hidden (encoded) commands".
   - `bash -c 'rm -rf ~'` is refused as blocked.

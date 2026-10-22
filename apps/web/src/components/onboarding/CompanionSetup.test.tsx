@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent, { type UserEvent } from '@testing-library/user-event';
-import { ChatGptClient, type ChatGptModelsSnapshot } from '@animaOS-SWARM/sdk';
+import { ChatGptClient, type ChatGptModelsSnapshot } from '@animaos/sdk';
 import {
   afterEach,
   beforeEach,
@@ -10,7 +10,7 @@ import {
   vi,
   type MockInstance,
 } from 'vitest';
-import { DEFAULT_APPROVAL_POLICY } from '@animaOS-SWARM/sdk';
+import { DEFAULT_APPROVAL_POLICY } from '@animaos/sdk';
 import {
   communityBundlesOwnerApi,
   daemon,

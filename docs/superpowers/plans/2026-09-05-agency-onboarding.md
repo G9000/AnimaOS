@@ -50,8 +50,8 @@ Follow-up verification: 254 web tests across 25 files passed. Both 1280px and 39
 
 ### Initial agency implementation verification
 
-- Web: 262 tests across 24 files passed with `bun x nx run @animaOS-SWARM/web:test --run --skipNxCache`.
+- Web: 262 tests across 24 files passed with `bun x nx run @animaos/web:test --run --skipNxCache`.
 - Web typecheck and production build passed through Nx.
 - Rust daemon full Nx test target passed with `CI=1` and `CARGO_TARGET_DIR=target/validation-rust-daemon`; workspace API has 38 passing tests including team restart, YAML resume, rollback, concurrency, limits, and lead identity persistence.
-- Chromium browser review flow passed at 1280px and 390px via `bun x nx run @animaOS-SWARM/web-e2e:e2e --args='src/agency-onboarding.spec.ts --project=chromium' --skipNxCache`. Screenshots inspected and horizontal overflow checked. Browser/API generation tests use fixtures; no live paid model call performed.
+- Chromium browser review flow passed at 1280px and 390px via `bun x nx run @animaos/web-e2e:e2e --args='src/agency-onboarding.spec.ts --project=chromium' --skipNxCache`. Screenshots inspected and horizontal overflow checked. Browser/API generation tests use fixtures; no live paid model call performed.
 - Code review findings addressed: lead profile validation, starter retention on profile regeneration, and durable lead selection via settings metadata rather than creation-time ties.

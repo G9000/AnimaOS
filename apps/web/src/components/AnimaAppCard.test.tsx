@@ -6,7 +6,7 @@ import {
   type SupervisorStatusJson,
   type SystemInFlight,
   type SystemStatus,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AnimaAppCard } from './AnimaAppCard';

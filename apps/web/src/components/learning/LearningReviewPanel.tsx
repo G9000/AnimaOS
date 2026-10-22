@@ -9,7 +9,7 @@ import type {
   Skill,
   SkillDetail,
   SkillDraft,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import { SectionTitle } from '../ui-bits';
 import { LearningSkillDraftForm } from './LearningSkillDraftForm';
 

@@ -1,4 +1,4 @@
-import type { SessionMessage, SessionMessagePage } from '@animaOS-SWARM/sdk';
+import type { SessionMessage, SessionMessagePage } from '@animaos/sdk';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 

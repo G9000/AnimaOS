@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { StrictMode, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DaemonTooOldError, type Session } from '@animaOS-SWARM/sdk';
+import { DaemonTooOldError, type Session } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import { sessionFixture } from '../test/sessions';
 import { useAttachmentSession } from './useAttachmentSession';

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DaemonHttpError, type Automation } from '@animaOS-SWARM/sdk';
+import { DaemonHttpError, type Automation } from '@animaos/sdk';
 
 import { COMPANION_UNREACHABLE } from '../../lib/approvals';
 import {

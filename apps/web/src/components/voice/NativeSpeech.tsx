@@ -5,7 +5,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { speechTextIsValid } from '@animaOS-SWARM/sdk';
+import { speechTextIsValid } from '@animaos/sdk';
 import type { ChatMessage } from '../../lib/types';
 import { daemon } from '../../lib/daemon-api';
 

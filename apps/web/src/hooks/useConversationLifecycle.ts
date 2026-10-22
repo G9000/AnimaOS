@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { Session, SessionMessage } from '@animaOS-SWARM/sdk';
+import type { Session, SessionMessage } from '@animaos/sdk';
 import { importLegacyCheckins } from '../lib/checkins';
 import { daemon } from '../lib/daemon-api';
 import { sessionKey } from '../lib/session-groups';

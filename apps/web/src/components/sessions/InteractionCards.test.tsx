@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { ClarificationRequest } from '@animaOS-SWARM/sdk';
+import type { ClarificationRequest } from '@animaos/sdk';
 import { ClarificationCard, SideQuestionCard } from './InteractionCards';
 
 const request: ClarificationRequest = {

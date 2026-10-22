@@ -88,8 +88,8 @@ describe('offline one-owner deployment contracts', () => {
 
   test('web build order and contract target cannot launch services', () => {
     const dockerfile = read('deploy/vps/web.Dockerfile');
-    expect(dockerfile.indexOf('@animaOS-SWARM/sdk:build')).toBeLessThan(
-      dockerfile.indexOf('@animaOS-SWARM/web:build'),
+    expect(dockerfile.indexOf('@animaos/sdk:build')).toBeLessThan(
+      dockerfile.indexOf('@animaos/web:build'),
     );
     const target = JSON.parse(read('apps/web-e2e/package.json')).nx.targets[
       'deployment-contracts'

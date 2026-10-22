@@ -46,7 +46,7 @@ The independent runtime review found no remaining actionable P1/P2 findings afte
 - Required `rust-daemon:test --skipNxCache` remains blocked in its `core-rust:test` dependency: **4 passed, 10 failed** in `anima-worktree`, with Windows `git worktree add` rejecting `//?/C:/...` paths.
 - Deterministic SDK suite: **230 passed, 3 service integration tests skipped** with `ANIMA_SKIP_SERVICE_TESTS=1`.
 - Focused web suite: **46 passed** across Discord helpers, settings, integration hook, automation editor and automation page. The UI worker separately passed the native channel/thread ViewHarness regressions.
-- `@animaOS-SWARM/web:typecheck --skipNxCache` passed, including SDK/UI dependency checks.
+- `@animaos/web:typecheck --skipNxCache` passed, including SDK/UI dependency checks.
 - Final API documentation check (`rust-daemon:test --excludeTaskDependencies --skipNxCache --args='--lib docs_contracts'`): **2 passed, 0 failed, 1 inventory-printing helper ignored**. The README lists all 236 registered operations, including both new Discord endpoints, and historical route-preservation checks remain intact.
 - Scoped Rust formatting, Markdown formatting and `git diff --check` passed. Global `rust-daemon:lint` still reports formatting drift outside this change's scoped checks.
 

@@ -4,7 +4,7 @@ import {
   type Automation,
   type AutomationInput,
   type AutomationPatch,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { COMPANION_UNREACHABLE } from '../lib/approvals';
 import { daemon } from '../lib/daemon-api';

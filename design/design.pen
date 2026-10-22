@@ -12291,7 +12291,7 @@
                           "id": "GFjry",
                           "name": "Text",
                           "fill": "#FFFFFFE6",
-                          "content": "git clone https://github.com/G9000/animaOS-SWARM",
+                          "content": "git clone https://github.com/G9000/animaos",
                           "fontFamily": "$font-mono",
                           "fontSize": 14,
                           "fontWeight": "normal"
@@ -12347,7 +12347,7 @@
                           "id": "Csw7Q",
                           "name": "Text",
                           "fill": "#FFFFFFE6",
-                          "content": "bun x nx run @animaOS-SWARM/sdk:build",
+                          "content": "bun x nx run @animaos/sdk:build",
                           "fontFamily": "$font-mono",
                           "fontSize": 14,
                           "fontWeight": "normal"

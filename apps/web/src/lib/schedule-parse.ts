@@ -1,4 +1,4 @@
-import type { AutomationTrigger } from '@animaOS-SWARM/sdk';
+import type { AutomationTrigger } from '@animaos/sdk';
 
 /** Spec §15.4: phrases the Automations page understands. The daemon
  *  previews and stores what they mean; the browser never computes fire

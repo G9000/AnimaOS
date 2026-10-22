@@ -11,8 +11,8 @@
         "cwd": ".",
         "parallel": false,
         "commands": [
-          { "command": "bun x nx run @animaOS-SWARM/sdk:build", "forwardAllArgs": false },
-          { "command": "bun x nx run @animaOS-SWARM/web:build", "forwardAllArgs": false },
+          { "command": "bun x nx run @animaos/sdk:build", "forwardAllArgs": false },
+          { "command": "bun x nx run @animaos/web:build", "forwardAllArgs": false },
           { "command": "cargo build --release --locked -p anima --features native-install", "forwardAllArgs": false }
         ]
       }

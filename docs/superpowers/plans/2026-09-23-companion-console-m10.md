@@ -118,7 +118,7 @@ Focused reusable behavior inspected:
 | Router/OpenAPI          | router in `routes/mod.rs`, utoipa registrations there                          | Verify every console route schema/auth/docs and aliases     |
 | E2E specs               | companion/independent-agents still mock legacy `/run`                          | Use sessions/runs/event stream fixtures                     |
 | E2E configs             | default+companion configs start Vite preview                                   | Add no-webServer console config/target                      |
-| Nx project              | `@animaOS-SWARM/web-e2e` resolves e2e/typecheck/e2e-live                       | Add explicit offline console target in its package metadata |
+| Nx project              | `@animaos/web-e2e` resolves e2e/typecheck/e2e-live                       | Add explicit offline console target in its package metadata |
 | Dependencies            | Bun/Nx/Playwright already installed                                            | No install required by draft                                |
 | Core reasoning          | adapter already shapes max_completion_tokens and omits unsupported temperature | Verify existing behavior; avoid rewriting solved risk       |
 | Silent pairs            | `sessions/pruning.rs` already prunes old mirrored hidden turns since M6        | Retain verified behavior; do not reimplement                |
@@ -346,7 +346,7 @@ compose.test.env:
 - [ ] Return validation and touched paths; controller commits without signing.
 
 ```powershell
-bun x nx run @animaOS-SWARM/web-e2e:deployment-contracts --skipNxCache
+bun x nx run @animaos/web-e2e:deployment-contracts --skipNxCache
 docker compose --env-file deploy/vps/fixtures/compose.test.env -f deploy/vps/compose.yaml config --quiet
 ```
 
@@ -648,7 +648,7 @@ $env:CARGO_INCREMENTAL='0'
 cargo test -p anima-daemon --lib -- sessions 2>&1 | Select-Object -Last 30
 $env:CARGO_INCREMENTAL='0'
 cargo test -p anima-daemon --lib -- agent_runs 2>&1 | Select-Object -Last 30
-bun x nx run-many -t test,typecheck -p @animaOS-SWARM/web --skipNxCache
+bun x nx run-many -t test,typecheck -p @animaos/web --skipNxCache
 ```
 
 Expected: session/contention and existing extracted suites pass.
@@ -683,7 +683,7 @@ installConsoleFixture(page, state): Promise<ConsoleFixtureController>
   controller.failNext(method, path, status, body)
 
 e2e-console target:
-  dependsOn @animaOS-SWARM/sdk:build and @animaOS-SWARM/web:build
+  dependsOn @animaos/sdk:build and @animaos/web:build
   command playwright test --config=playwright.console.config.ts
   parallelism false; proper source/build inputs and report outputs
 ```
@@ -727,8 +727,8 @@ e2e-console target:
 **Commands:**
 
 ```powershell
-bun x nx run @animaOS-SWARM/web-e2e:typecheck --skipNxCache
-bun x nx run @animaOS-SWARM/web-e2e:e2e-console --skipNxCache
+bun x nx run @animaos/web-e2e:typecheck --skipNxCache
+bun x nx run @animaos/web-e2e:e2e-console --skipNxCache
 ```
 
 Expected: browser-only fixture suite runs; no daemon/dev server/DB/container starts.
@@ -798,8 +798,8 @@ Commit suggestion: `test(e2e): add serverless companion console fixture harness`
 **Commands:**
 
 ```powershell
-bun x nx run @animaOS-SWARM/web-e2e:e2e-console --skipNxCache
-bun x nx run @animaOS-SWARM/web-e2e:typecheck --skipNxCache
+bun x nx run @animaos/web-e2e:e2e-console --skipNxCache
+bun x nx run @animaos/web-e2e:typecheck --skipNxCache
 ```
 
 Expected: required simulated console journeys pass; no legacy run mocks remain in migrated paths.
@@ -859,7 +859,7 @@ global daemonTooOld = existing sessions/stream/runs missing OR statusUnsupported
 **Commands:**
 
 ```powershell
-bun x nx run-many -t test,typecheck -p @animaOS-SWARM/web --skipNxCache
+bun x nx run-many -t test,typecheck -p @animaos/web --skipNxCache
 ```
 
 Expected: web compatibility and existing console tests pass without warnings.
@@ -918,7 +918,7 @@ Commit suggestion: `fix(web): detect older daemons from missing status endpoint`
 - Attachment upload/preview/download and browser support for voice.
 - Normal local workflow `bun dev --host rust` is an operator instruction only.
 - Distinguish web from playground, core-ts, Rust daemon and placeholder hosts.
-- Correct Nx names @animaOS-SWARM/web and @animaOS-SWARM/web-e2e.
+- Correct Nx names @animaos/web and @animaos/web-e2e.
 - Offline e2e-console target and its no-service guarantees.
 - Default/live suites explicitly start services and are not run in this milestone.
 - Mock API/stream evidence does not prove real provider/Caddy/TLS delivery.
@@ -1051,10 +1051,10 @@ bun x nx run rust-daemon:test --skipNxCache
 ```
 
 ```powershell
-bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache
-bun x nx run @animaOS-SWARM/web-e2e:typecheck --skipNxCache
-bun x nx run @animaOS-SWARM/web-e2e:e2e-console --skipNxCache
-bun x nx run @animaOS-SWARM/web-e2e:deployment-contracts --skipNxCache
+bun x nx run-many -t test,typecheck,build -p @animaos/sdk @animaos/web --skipNxCache
+bun x nx run @animaos/web-e2e:typecheck --skipNxCache
+bun x nx run @animaos/web-e2e:e2e-console --skipNxCache
+bun x nx run @animaos/web-e2e:deployment-contracts --skipNxCache
 docker compose --env-file deploy/vps/fixtures/compose.test.env -f deploy/vps/compose.yaml config --quiet
 ```
 

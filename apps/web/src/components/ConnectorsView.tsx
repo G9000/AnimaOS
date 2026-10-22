@@ -12,7 +12,7 @@ import {
   type MailProvider,
   type MailDraft,
   type OAuthAppProvider,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import { primaryBtnCls } from './ui-bits';
 import { GoogleDriveCard } from './GoogleDriveCard';
 import { GenericEmailSettings } from './GenericEmailSettings';

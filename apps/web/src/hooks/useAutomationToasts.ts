@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { automationMessageMeta, type AgentEvent } from '@animaOS-SWARM/sdk';
+import { automationMessageMeta, type AgentEvent } from '@animaos/sdk';
 
 import {
   dismissToast,

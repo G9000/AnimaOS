@@ -4,7 +4,7 @@ import type {
   ClarificationAnswerInput,
   ClarificationRequest,
   SideQuestionAnswer,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import { revealInvisible } from '../../lib/skills';
 
 export interface ClarificationCardProps {

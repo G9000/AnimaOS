@@ -3,7 +3,7 @@ import type {
   ClarificationRequest,
   InteractionsClient,
   SideQuestionAnswer,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface SessionInteractionOptions {

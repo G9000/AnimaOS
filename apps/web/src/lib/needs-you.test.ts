@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Approval, LearningReview, Run } from '@animaOS-SWARM/sdk';
+import type { Approval, LearningReview, Run } from '@animaos/sdk';
 
 import type { TelegramConnector } from './daemon-api';
 import { approvalHeadline, doneActions, needsYouItems } from './needs-you';

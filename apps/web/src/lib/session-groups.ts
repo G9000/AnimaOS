@@ -1,4 +1,4 @@
-import type { Session, SessionKind } from '@animaOS-SWARM/sdk';
+import type { Session, SessionKind } from '@animaos/sdk';
 
 export const SESSION_KIND_ORDER: readonly SessionKind[] = [
   'chat',

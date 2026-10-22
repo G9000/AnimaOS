@@ -1,4 +1,4 @@
-import type { DriveConnector } from '@animaOS-SWARM/sdk';
+import type { DriveConnector } from '@animaos/sdk';
 export function driveFixture(
   overrides: Partial<DriveConnector> = {},
 ): DriveConnector {

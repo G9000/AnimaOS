@@ -303,10 +303,10 @@ Files: `packages/sdk/src/{connectors,connectors.spec,index}.ts`; create `apps/we
 - [x] Root rechecks final M13 source/version/controller seams after merge; publishes this plan and five binding risks before implementation.
 - [x] Root runs focused red/green checks requested by workers; no new target directory or parallel Rust compilation.
 - [x] One daemon batch review plus final SDK/web review; one combined fix wave only unless new meaningful failure warrants another.
-- [x] Root uses already-resolved project names `rust-daemon`, `@animaOS-SWARM/sdk`, `@animaOS-SWARM/web`; refresh project metadata with read-only Nx command if merged M13 changes target contracts.
+- [x] Root uses already-resolved project names `rust-daemon`, `@animaos/sdk`, `@animaos/web`; refresh project metadata with read-only Nx command if merged M13 changes target contracts.
 - [x] Required current-tree Rust gate in PowerShell: `$env:CARGO_INCREMENTAL='0'; $env:CI='1'; bun x nx run rust-daemon:test --skipNxCache`. Expected all required tests pass; ignored live/Postgres tests remain reported separately.
 - [x] Rust formatting gate: `bun x nx run rust-daemon:lint --skipNxCache` with same serialized environment and existing target directory.
-- [x] SDK/web: `bun x nx run-many --targets=test,typecheck,build --projects=@animaOS-SWARM/sdk,@animaOS-SWARM/web --skipNxCache` with `CI=1`; use bounded tests, no daemon/service launch. Root checks flags if final workspace target setup differs.
+- [x] SDK/web: `bun x nx run-many --targets=test,typecheck,build --projects=@animaos/sdk,@animaos/web --skipNxCache` with `CI=1`; use bounded tests, no daemon/service launch. Root checks flags if final workspace target setup differs.
 - [x] No workspace-dev/Astro gate unless those sources are actually changed; no launcher change is in this scope. Markdown consistency/formatting only for owned docs.
 - [x] Root updates daemon README, existing Google OAuth setup docs, connector contribution guidance and handover for selected Drive scope, provider consent/setup/API enablement, unsupported formats, local disconnect and v13/pre-Drive backup. No hosted/live readiness claim.
 - [x] Verify no manifest/lock/dependency features changed; preserve unrelated paths and exact staging list. Root explicitly commits/pushes/creates and attaches PR, merges verified head under standing authorization, updates main/handover, and resumes final selected daily-flow readiness assessment.

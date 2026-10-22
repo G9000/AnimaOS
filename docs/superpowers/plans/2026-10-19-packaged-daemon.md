@@ -19,7 +19,7 @@
 - Rust (edition 2021), axum 0.8, tokio, reqwest (rustls), process-wrap.
 - New crates: `rust-embed`, `toml`, `clap`, `dialoguer`, `tray-icon`, `tao`, `minisign-verify`, `self-replace`, `semver`, `flate2` + `tar`, `zip`, and `winreg` (Windows only).
 - cargo-dist (`dist`), GitHub Actions, minisign.
-- Web: React + vitest, `@animaOS-SWARM/sdk`.
+- Web: React + vitest, `@animaos/sdk`.
 
 **Spec:** `docs/superpowers/specs/2026-10-19-packaged-daemon-design.md`
 
@@ -52,8 +52,8 @@
 - Verification:
   - `bun x nx run rust-daemon:test --skipNxCache`
   - `bun x nx run anima:test --skipNxCache`
-  - `bun x nx run @animaOS-SWARM/web:test --skipNxCache`
-  - `bun x nx run @animaOS-SWARM/sdk:test --skipNxCache`
+  - `bun x nx run @animaos/web:test --skipNxCache`
+  - `bun x nx run @animaos/sdk:test --skipNxCache`
   - On Windows, use the `CI=1 CARGO_TARGET_DIR=…` fallback from AGENTS.md.
 
 ## Review Focus
@@ -215,7 +215,7 @@
 - [ ] **Step 4: Implement** `ui.rs`, `cli.rs` and `commands/run.rs`.
 - [ ] **Step 5: Run `cargo test -p anima`.** Expected: PASS.
 - [ ] **Step 6: Bundled check.**
-  1. Run `bun x nx run @animaOS-SWARM/web:build`, then `cargo build -p anima --features bundled-ui`.
+  1. Run `bun x nx run @animaos/web:build`, then `cargo build -p anima --features bundled-ui`.
   2. Run the binary with a temp HOME and confirm that `curl -s http://127.0.0.1:8787/ | grep -c '<div id="root"'` prints `1`.
   3. Add a `#[cfg(feature = "bundled-ui")]` test `ui_router_falls_back_to_index`: `GET /some/deep/path` → 200 with a body containing `<div id="root"`.
 - [ ] **Step 7: Commit** `feat(anima): embedded console and anima run`.
@@ -531,9 +531,9 @@
   - clicking **Stop now** calls `action('stop', { force: true })`;
   - after Stop → the stopped copy is exact;
   - unsupervised → no buttons.
-- [ ] **Step 3: Run `bun x nx run @animaOS-SWARM/sdk:test --skipNxCache` and `bun x nx run @animaOS-SWARM/web:test --skipNxCache`.** Expected: FAIL.
+- [ ] **Step 3: Run `bun x nx run @animaos/sdk:test --skipNxCache` and `bun x nx run @animaos/web:test --skipNxCache`.** Expected: FAIL.
 - [ ] **Step 4: Implement**, following the `chatgpt.ts` client pattern and the HealthPage styling in `system.css`.
-- [ ] **Step 5: Run both test targets and `bun x nx run @animaOS-SWARM/web:typecheck`.** Expected: PASS.
+- [ ] **Step 5: Run both test targets and `bun x nx run @animaos/web:typecheck`.** Expected: PASS.
 - [ ] **Step 6: Commit** `feat(web): Anima app controls on the Health page`.
 
 ### Task 14: Telegram "already connected elsewhere"
@@ -554,7 +554,7 @@
   - The web test renders the copy for that status.
 - [ ] **Step 2: Run them.** Expected: FAIL.
 - [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run @animaOS-SWARM/web:test --skipNxCache`.** Expected: PASS.
+- [ ] **Step 4: Run `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run @animaos/web:test --skipNxCache`.** Expected: PASS.
 - [ ] **Step 5: Commit** `feat(connectors): clear message when a Telegram bot is polled elsewhere`.
 
 ---
@@ -574,7 +574,7 @@
     - It parses the GitHub `releases/latest` response.
     - The asset names follow cargo-dist: `anima-{target}.tar.gz` (Unix) or `anima-{target}.zip` (Windows), plus `.sha256`, plus our `.minisig`.
     - It returns `None` when the release is not newer, is a draft / prerelease, or **any of the three assets for `target` is missing**.
-  - `pub async fn check(client: &reqwest::Client, repo: &str, current, target) -> Result<Option<ReleaseInfo>, UpdateError>`. `repo = "G9000/animaOS-SWARM"`, sent with `User-Agent: anima/{version}`.
+  - `pub async fn check(client: &reqwest::Client, repo: &str, current, target) -> Result<Option<ReleaseInfo>, UpdateError>`. `repo = "G9000/animaos"`, sent with `User-Agent: anima/{version}`.
   - `pub fn verify(archive: &[u8], sha256_file: &str, minisig: &str, public_key: &str) -> Result<(), UpdateError>`. Both the checksum and the signature must pass.
   - `pub fn extract_binary(archive: &[u8], target: &str) -> Result<Vec<u8>, UpdateError>`. It finds the `anima` / `anima.exe` entry.
   - `pub fn swap(new_binary: &[u8], current_exe: &Path) -> Result<PathBuf, UpdateError>`.
@@ -652,7 +652,7 @@
     - `windows-archive = ".zip"`
     - `checksum = "sha256"`
     - `install-updater = false` (we ship our own)
-    - `github-build-setup = "../build-setup.yml"`, which installs Bun, runs `bun install --frozen-lockfile` and runs `bun x nx run @animaOS-SWARM/web:build` before cargo
+    - `github-build-setup = "../build-setup.yml"`, which installs Bun, runs `bun install --frozen-lockfile` and runs `bun x nx run @animaos/web:build` before cargo
     - `macos-sign = true`
     - `post-announce-jobs = ["./sign-release"]`
   - **Secrets** (documented, set by the owner):
@@ -689,12 +689,12 @@
 - Modify: `hosts/rust-daemon/README.md` (link), `AGENTS.md` (one line under Repo Boundaries: "`hosts/anima` is the installable `anima` program (supervisor, tray, updater) wrapping `rust-daemon`.")
 
 - [ ] **Step 1: Write the docs page:** install one-liners, `anima setup`, the commands table from the spec, Stop vs Quit, running side by side with `bun dev` (ports 8787/8080; separate data and keychain; one Telegram bot per copy), updating, and the release process (link `tools/release/README.md`).
-- [ ] **Step 2: Run `bun x nx run @animaOS-SWARM/contributor-docs:build --skipNxCache`.** Expected: PASS.
+- [ ] **Step 2: Run `bun x nx run @animaos/contributor-docs:build --skipNxCache`.** Expected: PASS.
 - [ ] **Step 3: Run the full verification:**
   - `bun x nx run rust-daemon:test --skipNxCache`
   - `bun x nx run anima:test --skipNxCache`
-  - `bun x nx run @animaOS-SWARM/sdk:test --skipNxCache`
-  - `bun x nx run @animaOS-SWARM/web:test --skipNxCache`
+  - `bun x nx run @animaos/sdk:test --skipNxCache`
+  - `bun x nx run @animaos/web:test --skipNxCache`
   - `bun x nx test workspace-dev --runInBand --skipNxCache`
   - `cargo fmt --all --check`
 

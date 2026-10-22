@@ -1,5 +1,5 @@
 {
-  "name": "@animaOS-SWARM/docs",
+  "name": "@animaos/docs",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/docs/src",
   "projectType": "application",

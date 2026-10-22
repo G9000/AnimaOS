@@ -7,7 +7,7 @@ import {
   type ApprovalMatcherKind,
   type RiskClass,
   type Session,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { daemon } from './daemon-api';
 import type { LiveState } from './session-events';

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ApprovalDecision } from '@animaOS-SWARM/sdk';
+import type { ApprovalDecision } from '@animaos/sdk';
 
 import type { ApprovalDecide } from '../../lib/approvals';
 import type { HashPage } from '../../lib/hash-route';

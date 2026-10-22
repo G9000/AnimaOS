@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
-import { StatusTooOldError } from '@animaOS-SWARM/sdk';
+import { StatusTooOldError } from '@animaos/sdk';
 import { afterEach, expect, it, vi } from 'vitest';
 import { daemon } from '../lib/daemon-api';
 import { statusFixture } from '../test/system';

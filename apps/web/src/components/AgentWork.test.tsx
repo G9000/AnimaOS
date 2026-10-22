@@ -7,7 +7,7 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { AgentTasks } from '@animaOS-SWARM/sdk';
+import type { AgentTasks } from '@animaos/sdk';
 import {
   daemon,
   type DaemonSchedule,

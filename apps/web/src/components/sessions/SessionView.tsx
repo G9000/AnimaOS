@@ -11,7 +11,7 @@ import {
   type Session,
   type BrowserSelection,
   type UploadedAttachment,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import { useSaveToMemory } from '../../hooks/useSaveToMemory';
 import { setPresenceSpeaking } from '../../lib/presence';

@@ -1,5 +1,5 @@
-import type { TaskResult } from '@animaOS-SWARM/sdk';
-import type { IEventBus } from '@animaOS-SWARM/tui';
+import type { TaskResult } from '@animaos/sdk';
+import type { IEventBus } from '@animaos/tui';
 import type {
   DaemonEvent,
   SwarmAgentEventPayload,
@@ -9,7 +9,7 @@ import type {
   SwarmTaskFailedPayload,
   SwarmToolAfterPayload,
   SwarmToolBeforePayload,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 
 import type { AgencyConfig } from '../agency/types.js';
 import { extractResultText, toRuntimeTaskResult } from './utils.js';

@@ -14,7 +14,7 @@
 - [x] Replace warm Studio colors and decorative styling across shell, chat, onboarding, settings, and shared surfaces with Fixer tokens and compact geometry.
 - [x] Run web tests, typecheck, build, and desktop/mobile browser checks. Review the diff and record remaining limitations.
 
-**Validation:** `bun x nx run @animaOS-SWARM/web:test --run --skipNxCache`, `bun x nx run @animaOS-SWARM/web:typecheck --skipNxCache`, and `bun x nx run @animaOS-SWARM/web:build --skipNxCache`. No Rust changes are planned.
+**Validation:** `bun x nx run @animaos/web:test --run --skipNxCache`, `bun x nx run @animaos/web:typecheck --skipNxCache`, and `bun x nx run @animaos/web:build --skipNxCache`. No Rust changes are planned.
 
 ## Review refinements
 

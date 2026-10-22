@@ -33,7 +33,7 @@
 - **Untrusted content (model-written memory text).** The companion writes memories (`memory_add` tool, the evaluator's extractions) and the owner can save a model message (Save to memory). Text that smuggles instructions must not enter memory, because memories are injected into later prompts. Rule: a memory's content, tags, and a fact's value refuse Unicode tag characters, bidirectional embeddings, overrides, isolates, and variation-selector supplements (`skills::is_smuggling_character`, already `pub(crate)`), through one function `memory_text::has_hidden_text`, in: the `memory_add` tool (Task 4), `POST /api/memories` (Task 4, a deliberate small change to an existing route), `PATCH /api/memories/{id}`, and `PATCH /api/memories/facts/{id}`. Restored records are not re-checked. Other invisible format characters (zero-width space and the like) are accepted by the daemon and **revealed** in the web: every model-written string the Memory page and the chat show goes through `revealInvisible` (`apps/web/src/lib/skills.ts`) and renders as a text node, never through `MarkdownMessage` or HTML. Task 9 greps for this.
 - **Concurrency, every task.** Lock order: memory write lock (`DaemonState::memory_handle()`, a tokio `RwLock`) → embeddings write lock (a leaf). The memory store is separate from the control plane: no control-plane transaction is taken, and the state lock is held only long enough to clone the handles (`state.read().await.memory_handle()`), never while awaiting the memory lock. No `std::sync::Mutex` is held across `.await`. **Every owner mutation runs its whole body (lock, mutate, save, embedding sync) in its own `tokio::spawn`** (`memory_edits::locked`, Task 2), so a dropped request never leaves a half-applied change (`MemoryMutation` already restores the snapshot when dropped before a save; the spawned task finishes either way). The embedding is synced while the memory write lock is still held, so two concurrent edits cannot leave the vector of the older one.
 - Existing behavior stays except where a task says so. Deliberate changes: `POST /api/memories` and the `memory_add` tool refuse hidden-Unicode text; nothing else of the existing routes changes. `MemoryManager::forget` keeps its present behavior (it does not clean citations); the new `delete_memory` is what the owner's delete calls.
-- Commands. Rust iteration: `CARGO_INCREMENTAL=0 cargo test -p anima-memory --lib -- <filter>`; `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib -- <filter>`; integration: `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --test memory_api 2>&1 | tail -30` (pipe the others through `tail -30` too). SDK: `bun x nx test @animaOS-SWARM/sdk`, and **every SDK-changing task ends with `bun x nx run @animaOS-SWARM/sdk:build`** so later direct web Vitest runs resolve the new exports. Web: `cd apps/web && bun x vitest run <files>`. The milestone gate (Task 9): `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache`.
+- Commands. Rust iteration: `CARGO_INCREMENTAL=0 cargo test -p anima-memory --lib -- <filter>`; `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib -- <filter>`; integration: `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --test memory_api 2>&1 | tail -30` (pipe the others through `tail -30` too). SDK: `bun x nx test @animaos/sdk`, and **every SDK-changing task ends with `bun x nx run @animaos/sdk:build`** so later direct web Vitest runs resolve the new exports. Web: `cd apps/web && bun x vitest run <files>`. The milestone gate (Task 9): `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run-many -t test,typecheck,build -p @animaos/sdk @animaos/web --skipNxCache`.
 - Formatting. Every task ends with `cargo fmt --all` when it touched Rust (then `git diff --stat` must show only the task's files; if `cargo fmt` reformatted unrelated files, tell the controller instead of staging them) and `bun x nx format:write --files=<each changed TS/TSX/CSS/MD file>` when it touched TypeScript, CSS, or Markdown, then re-runs its tests.
 - Git. Stage files by explicit path only; never `git add -A`, `git add .`, or `git commit -a`. Never stage anything under `docs/` or `.superpowers/`, nor `nx.json` or `anima.yaml`. `hosts/rust-daemon/README.md` is not under `docs/` and is staged with the task that changes it. Never use `git stash`, `git reset`, `git checkout -- <path>`, `git restore`, or `git worktree`, and never switch branches. Do not start the daemon, a dev server, a database, or a container; tests start what they need. Commits are GPG-signed on this machine and can block on a pinentry dialog until the owner answers it. End each commit message with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
 - Disk is tight: never set a new `CARGO_TARGET_DIR`. No Postgres is available (the memory store's Postgres path stays untested here, as before).
@@ -458,15 +458,15 @@ deleteEntity(kind: RelationshipEndpointKind, entityId: string): Promise<MemoryEn
                                                                                // DELETE /api/memories/entities/{id}?kind=...
 ```
 
-Rules: ids are `encodeURIComponent`-encoded in paths; `facts` sends `includeInactive=true` only when true and never sends undefined params; errors surface as the client's existing `DaemonHttpError` (nothing new). The SDK does not validate lengths; the constants are for callers. `Memory` stays the existing type from `@animaOS-SWARM/memory`; its `type` field is the memory type, as the daemon's `MemoryResponse` already serializes it.
+Rules: ids are `encodeURIComponent`-encoded in paths; `facts` sends `includeInactive=true` only when true and never sends undefined params; errors surface as the client's existing `DaemonHttpError` (nothing new). The SDK does not validate lengths; the constants are for callers. `Memory` stays the existing type from `@animaos/memory`; its `type` field is the memory type, as the daemon's `MemoryResponse` already serializes it.
 
 **Tests** (`memories.spec.ts`): `update sends a PATCH with only the given fields`; `update can clear tags with null`; `delete encodes the id and returns the counts`; `facts sends only the options that are set`; `facts includes includeInactive only when true`; `replaceFact patches the value`; `deleteFact deletes by id`; `deleteEntity sends the kind and encodes ids with colons`; `a daemon refusal reaches the caller as DaemonHttpError`; `the limits match the daemon` (the five constants equal 8000, 20, 40, 500, 500).
 
 **Steps:**
 
-- [ ] **Step 1:** Write the spec; run `bun x nx test @animaOS-SWARM/sdk 2>&1 | tail -20`. Expected: FAIL.
-- [ ] **Step 2:** Implement; run it again. Expected: PASS. Run `bun x nx run @animaOS-SWARM/sdk:typecheck 2>&1 | tail -10` if that target exists (`bun x nx show projects --json` and `bun x nx show project @animaOS-SWARM/sdk` name it).
-- [ ] **Step 3:** `bun x nx format:write --files=packages/sdk/src/memories.ts,packages/sdk/src/memories.spec.ts,packages/sdk/src/index.ts`; re-run the SDK tests; then `bun x nx run @animaOS-SWARM/sdk:build 2>&1 | tail -10`. Expected: build succeeds.
+- [ ] **Step 1:** Write the spec; run `bun x nx test @animaos/sdk 2>&1 | tail -20`. Expected: FAIL.
+- [ ] **Step 2:** Implement; run it again. Expected: PASS. Run `bun x nx run @animaos/sdk:typecheck 2>&1 | tail -10` if that target exists (`bun x nx show projects --json` and `bun x nx show project @animaos/sdk` name it).
+- [ ] **Step 3:** `bun x nx format:write --files=packages/sdk/src/memories.ts,packages/sdk/src/memories.spec.ts,packages/sdk/src/index.ts`; re-run the SDK tests; then `bun x nx run @animaos/sdk:build 2>&1 | tail -10`. Expected: build succeeds.
 - [ ] **Step 4:** Stage the three files by path; commit:
 
 ```bash
@@ -486,7 +486,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 - Create: `apps/web/src/lib/memory.ts`, `lib/memory.test.ts`, `components/memory/RevealedText.tsx`, `components/memory/RevealedText.test.tsx`, `hooks/useMemory.ts`, `hooks/useMemory.test.tsx`, `test/memory.ts`
 - Modify: `apps/web/src/lib/daemon-api.ts`, `lib/daemon-api.test.ts`
 
-All new daemon calls go through the SDK (`setupClient.memories`). Preconditions: Task 5's SDK build is done (`bun x nx run @animaOS-SWARM/sdk:build`).
+All new daemon calls go through the SDK (`setupClient.memories`). Preconditions: Task 5's SDK build is done (`bun x nx run @animaos/sdk:build`).
 
 **Interfaces (exact):**
 
@@ -608,7 +608,7 @@ relationshipFixture(id: string, overrides?: Partial<AgentRelationship>): AgentRe
 
 - [ ] **Step 1:** Write the tests; `cd apps/web && bun x vitest run src/lib/memory.test.ts src/components/memory src/hooks/useMemory.test.tsx src/lib/daemon-api.test.ts 2>&1 | tail -30`. Expected: FAIL.
 - [ ] **Step 2:** Implement; run again. Expected: PASS, with no `act()` warnings or console output.
-- [ ] **Step 3:** `bun x nx format:write --files=<each changed file>`; re-run; `bun x nx typecheck @animaOS-SWARM/web 2>&1 | tail -10` (confirm the target name with `bun x nx show project @animaOS-SWARM/web`).
+- [ ] **Step 3:** `bun x nx format:write --files=<each changed file>`; re-run; `bun x nx typecheck @animaos/web 2>&1 | tail -10` (confirm the target name with `bun x nx show project @animaos/web`).
 - [ ] **Step 4:** Stage the files by path; commit:
 
 ```bash
@@ -686,7 +686,7 @@ The ⌘K list and the mobile dock pick the destination up from `DESTINATIONS` (G
 - [ ] **Step 1:** Write the tests; `cd apps/web && bun x vitest run src/pages/MemoryPage.test.tsx src/components/WorkspaceShell.test.tsx src/ViewHarness.test.tsx 2>&1 | tail -30`. Expected: FAIL.
 - [ ] **Step 2:** Implement the page, components, CSS, shell destination, and harness wiring. Run the same command, then `bun x vitest run src/visual-tokens.test.ts 2>&1 | tail -10` (find its path with `find src -name "visual-tokens.test.ts"`). Expected: PASS and silent.
 - [ ] **Step 3:** `grep -rn "dangerouslySetInnerHTML\|MarkdownMessage\|innerHTML" apps/web/src/pages/MemoryPage.tsx apps/web/src/components/memory` prints nothing; `git diff --stat -- apps/web/src/ViewHarness.tsx` shows a handful of added lines.
-- [ ] **Step 4:** `bun x nx format:write --files=<each changed file>`; re-run the tests; `bun x nx typecheck @animaOS-SWARM/web 2>&1 | tail -10`.
+- [ ] **Step 4:** `bun x nx format:write --files=<each changed file>`; re-run the tests; `bun x nx typecheck @animaos/web 2>&1 | tail -10`.
 - [ ] **Step 5:** Stage by path; commit:
 
 ```bash
@@ -760,7 +760,7 @@ export function SaveToMemory({ message, save, saved }: {
 
 - [ ] **Step 1:** Write the tests; `cd apps/web && bun x vitest run src/hooks/useSaveToMemory.test.tsx src/components/memory src/components/ChatScreen.test.tsx src/components/ChatScreen.memo.test.tsx src/components/sessions/SessionView.test.tsx src/hooks/useTranscriptActions.test.tsx 2>&1 | tail -30`. Expected: FAIL.
 - [ ] **Step 2:** Implement; run the same command, then the full web suite once: `bun x vitest run 2>&1 | tail -15`. Expected: PASS and silent.
-- [ ] **Step 3:** `bun x nx format:write --files=<each changed file>`; re-run; `bun x nx typecheck @animaOS-SWARM/web 2>&1 | tail -10`.
+- [ ] **Step 3:** `bun x nx format:write --files=<each changed file>`; re-run; `bun x nx typecheck @animaos/web 2>&1 | tail -10`.
 - [ ] **Step 4:** Stage by path; commit:
 
 ```bash
@@ -812,7 +812,7 @@ Run: `df -h .`
 - With at least 12 GB available: `bun x nx run rust-daemon:test --skipNxCache` (it also runs `core-rust:test`). Expected: PASS (M6 ended at 1,874 passed; M7 adds about 60 Rust tests).
 - Otherwise run the fallback in the shared `target/` (no new `CARGO_TARGET_DIR`): `CARGO_INCREMENTAL=0 cargo test -p anima-memory`, `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --lib`, then `CARGO_INCREMENTAL=0 cargo test -p anima-daemon --tests`. Expected: PASS. The fallback does not satisfy AGENTS.md's completion rule; record that the Nx gate is pending disk space. On Windows, if a running daemon locks `target/debug/anima-daemon.exe`, use AGENTS.md's `CI=1 CARGO_TARGET_DIR=target/validation-rust-daemon` rerun only with the owner's go-ahead.
 
-Run: `bun x nx run-many -t test,typecheck,build -p @animaOS-SWARM/sdk @animaOS-SWARM/web --skipNxCache`
+Run: `bun x nx run-many -t test,typecheck,build -p @animaos/sdk @animaos/web --skipNxCache`
 Expected: every target succeeds (M6 ended with the web at about 850 tests; M7 adds about 70 web and 10 SDK tests).
 
 Run: `cargo fmt --all --check && bun x nx format:check --base=origin/main`

@@ -1,6 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { Run, SessionMessage } from '@animaOS-SWARM/sdk';
+import type { Run, SessionMessage } from '@animaos/sdk';
 
 import { emptyLiveRun, type LiveRun } from '../lib/session-events';
 import { runFixture } from '../test/live';

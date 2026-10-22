@@ -3,7 +3,7 @@ import type {
   ConnectGenericEmailInput,
   EmailEndpoint,
   GenericEmailSettings as EmailSettings,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import { primaryBtnCls } from './ui-bits';
 
 const endpoint = (port: number): EmailEndpoint => ({

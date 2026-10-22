@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { RunRecoverySummary } from '@animaOS-SWARM/sdk';
+import type { RunRecoverySummary } from '@animaos/sdk';
 import { daemon } from '../../lib/daemon-api';
 
 export function RunRecovery(props: {

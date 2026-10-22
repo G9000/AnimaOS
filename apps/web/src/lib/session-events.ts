@@ -7,7 +7,7 @@ import {
   type ModelFallback,
   type Run,
   type SessionMessageAttachment,
-} from '@animaOS-SWARM/sdk';
+} from '@animaos/sdk';
 import { messageAttachment } from './attachments';
 import { toolWebSources } from './web-sources';
 
