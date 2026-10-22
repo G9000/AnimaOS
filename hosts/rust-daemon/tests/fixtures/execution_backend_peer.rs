@@ -109,7 +109,7 @@ fn main() {
                     cleanup_confirmed: true,
                     message: "Controlled terminal reconciliation".into(),
                 };
-                use hmac::{Hmac, Mac};
+                use hmac::{Hmac, KeyInit, Mac};
                 let mut mac = Hmac::<sha2::Sha256>::new_from_slice(
                     original["receiptKey"].as_str().unwrap().as_bytes(),
                 )

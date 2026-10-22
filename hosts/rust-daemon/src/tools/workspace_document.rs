@@ -133,7 +133,7 @@ async fn execute(request: ReadRequest, slots: Arc<Semaphore>) -> Result<String, 
             let bytes = workspace
                 .read_file_snapshot(&relative, MAX_DOCUMENT_INPUT_BYTES as usize)
                 .map_err(|_| UNAVAILABLE)?;
-            let hash = format!("{:x}", Sha256::digest(&bytes));
+            let hash = hex::encode(Sha256::digest(&bytes));
             Ok::<_, &'static str>((bytes, hash))
         },
         &cancel,

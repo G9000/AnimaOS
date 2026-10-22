@@ -7,7 +7,7 @@ use futures::channel::oneshot;
 use futures::future::{select, Either};
 use futures::lock::Mutex;
 use futures_timer::Delay;
-use jsonschema::JSONSchema;
+use jsonschema::Validator;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -71,8 +71,8 @@ impl CapabilityResultRecorder for InMemoryCapabilityResultRecorder {
 
 struct RegisteredExecutor {
     executor: Arc<dyn CapabilityExecutor>,
-    input_validator: Arc<JSONSchema>,
-    output_validator: Arc<JSONSchema>,
+    input_validator: Arc<Validator>,
+    output_validator: Arc<Validator>,
 }
 
 impl CapabilityRegistry {
@@ -981,7 +981,7 @@ fn durable_result(
         u64::try_from(bytes.len()).map_err(|_| CapabilityError::output_validation())?;
     DurableCapabilityResult::new(
         CapabilityReferenceId::new(result_ref),
-        format!("jcs-v1:{digest:x}"),
+        format!("jcs-v1:{}", hex::encode(digest)),
         manifest.schema_digest().to_owned(),
         size_bytes,
         DurableCapabilityStatus::Completed,

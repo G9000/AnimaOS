@@ -887,7 +887,7 @@ impl DispatchPolicyGuard {
             manifest_version: context.manifest_version,
             canonical_argument_digest: context.canonical_argument_digest,
             policy_revision: context.policy_revision,
-            decision_digest: format!("sha256:{:x}", Sha256::digest(digest)),
+            decision_digest: format!("sha256:{}", hex::encode(Sha256::digest(digest))),
         })
     }
 

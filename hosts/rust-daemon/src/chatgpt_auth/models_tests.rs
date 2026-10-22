@@ -971,7 +971,7 @@ async fn m49_chatgpt_models_real_metadata_refresh() {
             let bytes = serde_json::to_vec(&ids).unwrap();
             println!(
                 "M49_METADATA_DIAGNOSTIC {}",
-                json!({"state":snapshot.state,"count":ids.len(),"digest":format!("{:x}",Sha256::digest(&bytes)),"error":snapshot.error})
+                json!({"state":snapshot.state,"count":ids.len(),"digest":hex::encode(Sha256::digest(&bytes)),"error":snapshot.error})
             );
             assert!(matches!(snapshot.state,"ready"|"empty"),"M49 metadata did not return a current catalog; no fallback or generation is authorized");
         }

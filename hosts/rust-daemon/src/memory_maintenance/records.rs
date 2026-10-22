@@ -77,10 +77,9 @@ impl MemoryImage {
         })
     }
     pub(super) fn fingerprint(&self) -> String {
-        format!(
-            "{:x}",
-            Sha256::digest(serde_json::to_vec(self).expect("memory image serializes"))
-        )
+        hex::encode(Sha256::digest(
+            serde_json::to_vec(self).expect("memory image serializes"),
+        ))
     }
 }
 

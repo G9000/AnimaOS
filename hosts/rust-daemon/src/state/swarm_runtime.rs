@@ -370,7 +370,7 @@ fn stable_swarm_persistence_agent_id(swarm_id: &str, agent_name: &str) -> String
 fn swarm_task_owner_id(swarm_id: &str, member_id: &str) -> String {
     use sha2::{Digest, Sha256};
     let tagged = format!("swarm:{swarm_id}:member:{member_id}");
-    format!("swarm:{:x}", Sha256::digest(tagged.as_bytes()))
+    format!("swarm:{}", hex::encode(Sha256::digest(tagged.as_bytes())))
 }
 
 struct SwarmParticipantsProvider {

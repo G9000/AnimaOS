@@ -36,7 +36,7 @@ fn valid_id(value: &str) -> bool {
 }
 
 pub(crate) fn sha256(text: &str) -> String {
-    format!("{:x}", Sha256::digest(text.as_bytes()))
+    hex::encode(Sha256::digest(text.as_bytes()))
 }
 
 pub(super) fn valid_digest(value: &str) -> bool {

@@ -67,7 +67,7 @@ pub(crate) fn summary(run: &RunRecord) -> RecoverySummary {
             .recovery
             .as_ref()
             .map(|r| r.fingerprint.clone())
-            .unwrap_or_else(|| format!("{:x}", Sha256::digest(evidence))),
+            .unwrap_or_else(|| hex::encode(Sha256::digest(evidence))),
         eligible,
         review_required: !run.tools_started.is_empty()
             || !run.action_receipts.is_empty()

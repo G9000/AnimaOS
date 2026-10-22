@@ -22,8 +22,8 @@ clap = { version = "4", features = ["derive"] }
 dialoguer = { version = "0.12", default-features = false }
 directories = "6"
 flate2 = { version = "=1.1.9", default-features = false, features = ["rust_backend"] }
-getrandom = "0.3"
-minisign-verify = "0.2"
+getrandom = "0.4"
+minisign-verify = "0.3"
 open = "5"
 process-wrap = { version = "=10.0.1", default-features = false, features = ["tokio1", "creation-flags", "job-object", "kill-on-drop", "process-group"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
@@ -33,11 +33,11 @@ self-replace = "1"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 tar = { version = "0.4", default-features = false }
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
-toml = "0.8"
-zip = { version = "2", default-features = false, features = ["deflate-flate2", "flate2"] }
+toml = "1.1"
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [target.'cfg(any(target_os = "macos", windows))'.dependencies]
 tao = { version = "0.37.1", default-features = false }
@@ -48,7 +48,7 @@ sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 winreg = "0.56.0"
 
 [dev-dependencies]
-minisign = "0.7"
+minisign = "0.10"
 plist = "1.10.1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
 tempfile = "=3.27.0"

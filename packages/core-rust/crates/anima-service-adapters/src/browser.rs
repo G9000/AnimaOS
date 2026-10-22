@@ -560,7 +560,7 @@ pub fn decode_operation(
 
 fn digest<T: Serialize>(value: &T) -> Result<String, BrowserError> {
     let bytes = serde_jcs::to_vec(value).map_err(|_| invalid())?;
-    Ok(format!("{:x}", Sha256::digest(bytes)))
+    Ok(hex::encode(Sha256::digest(bytes)))
 }
 pub fn scope_digest(scope: &BrowserScope) -> Result<String, BrowserError> {
     validate_scope(scope)?;

@@ -222,7 +222,7 @@ pub(crate) fn schema_digest_for(
     if bytes.len() > MAX_CAPABILITY_SCHEMA_PAIR_BYTES {
         return Err(ManifestCatalogError::InvalidSchemaDigest);
     }
-    Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
+    Ok(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
 }
 
 impl<'de> Deserialize<'de> for CapabilityManifest {

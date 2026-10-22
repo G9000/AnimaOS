@@ -185,7 +185,7 @@ On Windows this can print LF-to-CRLF warnings; conflict markers and trailing-whi
 2. `nx format:check --base=remotes/origin/main`
 3. `bun x nx run-many -t lint test build typecheck e2e-ci`
 
-Nx Cloud distributes the work. The Rust targets (`core-rust`, `rust-daemon`, `anima`) are part of `run-many`. Releases have their own workflows (`release.yml`, `sign-release.yml`).
+GitHub Actions runs these tasks on its CI runner. The Rust targets (`core-rust`, `rust-daemon`, `anima`) are part of `run-many`. Releases have their own workflows (`release.yml`, `sign-release.yml`).
 
 ## Golden Rules
 

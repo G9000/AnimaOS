@@ -268,7 +268,7 @@ fn deserialize_checkpoint_version<'de, D: serde::Deserializer<'de>>(
 }
 
 pub fn checkpoint_digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }
 
 /// Domain: `anima-filesystem-checkpoint-scope-v1\0`, then exact serde JSON of
@@ -280,7 +280,7 @@ pub fn checkpoint_scope_digest(scope: &CheckpointScope) -> String {
     // This closed struct contains only strings and a closed enum, which serde
     // JSON serializes infallibly. Invalid/unbounded scopes are rejected below.
     hash.update(serde_json::to_vec(scope).expect("checkpoint scope serialization"));
-    format!("{:x}", hash.finalize())
+    hex::encode(hash.finalize())
 }
 
 pub fn validate_filesystem_checkpoint(
@@ -886,7 +886,7 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     fn digest(bytes: &[u8]) -> String {
-        format!("{:x}", Sha256::digest(bytes))
+        hex::encode(Sha256::digest(bytes))
     }
     fn scope() -> CheckpointScope {
         CheckpointScope {

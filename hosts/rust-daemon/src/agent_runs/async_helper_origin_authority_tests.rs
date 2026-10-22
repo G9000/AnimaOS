@@ -454,7 +454,7 @@ async fn fp05_origin_authority_committed_reply_digest_is_host_saved_and_reset_on
     assert!(record.reply_message_id.is_some());
     assert_eq!(
         value["replySha256"],
-        json!(format!("{:x}", Sha256::digest(b"recorded child result"))),
+        json!(hex::encode(Sha256::digest(b"recorded child result"))),
         "a committed reply digest survives transcript hot-tail eviction"
     );
     record.finish(RunStatus::Failed, None, record.created_at_ms + 100);

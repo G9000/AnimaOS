@@ -726,7 +726,7 @@ fn sha256(value: String) -> Result<String, EvidencePortError> {
 }
 
 fn sha256_bytes(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }
 
 fn dedup_scopes(scopes: Vec<MemoryScope>) -> Result<Vec<MemoryScope>, EvidencePortError> {

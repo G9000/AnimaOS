@@ -2,7 +2,7 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use jsonschema::{Draft, JSONSchema};
+use jsonschema::{Draft, Validator};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -204,11 +204,11 @@ fn safe_schema(schema: &Value) -> Result<(), ExternalToolError> {
     }
     Ok(())
 }
-fn compile(schema: &Value) -> Result<JSONSchema, ExternalToolError> {
+fn compile(schema: &Value) -> Result<Validator, ExternalToolError> {
     safe_schema(schema)?;
-    JSONSchema::options()
+    jsonschema::options()
         .with_draft(Draft::Draft202012)
-        .compile(schema)
+        .build(schema)
         .map_err(|_| ExternalToolError::SchemaRejected)
 }
 fn normalize_schema(mut schema: Value) -> Result<Value, ExternalToolError> {
@@ -285,7 +285,7 @@ pub fn external_descriptor_digest(
     let bytes = serde_jcs::to_vec(&json!({"remoteName":name,"description":description,
         "inputSchema":input,"outputSchema":output,"classification":"exec"}))
     .map_err(|_| ExternalToolError::SchemaRejected)?;
-    Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
+    Ok(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
 }
 pub fn validate_external_arguments(
     tool: &ExternalToolDescriptor,

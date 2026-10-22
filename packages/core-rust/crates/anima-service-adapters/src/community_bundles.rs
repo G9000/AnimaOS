@@ -314,7 +314,7 @@ pub fn validate_manifest(
 }
 
 fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }
 fn cap(actual: usize, maximum: usize) -> Result<(), ManifestError> {
     if actual > maximum {
@@ -970,13 +970,13 @@ mod tests {
         let canonical = serde_jcs::to_vec(&json).unwrap();
         assert_eq!(
             validated.manifest_digest,
-            format!("{:x}", Sha256::digest(&canonical))
+            hex::encode(Sha256::digest(&canonical))
         );
         assert_eq!(
             validated.source_skill_digests,
             vec![SkillSourceDigest {
                 component_key: "violet-procedure".into(),
-                source_digest: format!("{:x}", Sha256::digest(skill_file.as_bytes())),
+                source_digest: hex::encode(Sha256::digest(skill_file.as_bytes())),
             }]
         );
         let reformatted = serde_json::to_vec(&json).unwrap();

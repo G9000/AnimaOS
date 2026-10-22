@@ -28,7 +28,7 @@ impl Drop for Store {
 }
 
 fn hash(text: &str) -> String {
-    format!("{:x}", Sha256::digest(text.as_bytes()))
+    hex::encode(Sha256::digest(text.as_bytes()))
 }
 
 fn job_value(agent: &str, id: &str, status: &str) -> Value {

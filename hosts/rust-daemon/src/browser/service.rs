@@ -163,7 +163,7 @@ impl BrowserService {
         }
         let bytes = serde_json::to_vec(&(epoch, &state.agents[agent].config().tools))
             .map_err(|_| BrowserServiceError::Unavailable)?;
-        Ok(format!("{:x}", Sha256::digest(bytes)))
+        Ok(hex::encode(Sha256::digest(bytes)))
     }
     /// The owner mutation calls this only after its ordered durability ack.
     /// Closing metadata is synchronous; physical retirement runs outside guards.
@@ -1043,12 +1043,9 @@ fn observed_digest(
     // numbers. Sorted serde_json maps encode their RFC8785 form exactly.
     let value =
         serde_json::to_value(observation).map_err(|_| browser_error(BrowserErrorCode::Protocol))?;
-    Ok(format!(
-        "{:x}",
-        Sha256::digest(
-            serde_json::to_vec(&value).map_err(|_| browser_error(BrowserErrorCode::Protocol))?
-        )
-    ))
+    Ok(hex::encode(Sha256::digest(
+        serde_json::to_vec(&value).map_err(|_| browser_error(BrowserErrorCode::Protocol))?,
+    )))
 }
 struct AbandonedBrowserCall(Option<CancelSignal>);
 impl Drop for AbandonedBrowserCall {
@@ -1390,7 +1387,7 @@ impl BrowserService {
                 for artifact in &reply.observation.artifacts {
                     if let Some(existing)=published.get(&artifact.id) {let kind=if artifact.kind==BrowserArtifactKind::Csv{BrowserArtifactKindView::Csv}else{BrowserArtifactKindView::Screenshot};if existing.bytes!=artifact.bytes||existing.sha256!=artifact.sha256||existing.kind!=kind{return Err(browser_error(BrowserErrorCode::Protocol));}accepted.push(existing.clone());continue;}
                     let bytes=task.handle.read_output(artifact).await?;
-                    if bytes.bytes.len() as u64!=artifact.bytes || bytes.sha256!=artifact.sha256 || format!("{:x}",Sha256::digest(&bytes.bytes))!=artifact.sha256 {return Err(browser_error(BrowserErrorCode::Protocol));}
+                    if bytes.bytes.len() as u64!=artifact.bytes || bytes.sha256!=artifact.sha256 || hex::encode(Sha256::digest(&bytes.bytes))!=artifact.sha256 {return Err(browser_error(BrowserErrorCode::Protocol));}
                     self.revalidate_dispatch(&stamp).await?;
                     if Self::identity(workspace.root_path.clone()).await.map_err(|_|browser_error(BrowserErrorCode::Stale))?!=identity {return Err(browser_error(BrowserErrorCode::Stale));}
                     let attachment_id=format!("att-{}",uuid::Uuid::new_v4());

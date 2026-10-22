@@ -33,7 +33,7 @@ pub(crate) struct VerifiedOutput {
     pub(crate) sha256: String,
 }
 pub(super) fn hash(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }
 
 pub(super) fn validate_slots(

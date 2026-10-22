@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { writeFile, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Interface } from 'node:readline';
-import yaml from 'js-yaml';
+import { dump } from 'js-yaml';
 import {
   DAEMON_HEALTH_UNAVAILABLE_MESSAGE,
   DAEMON_RECOVERED_MESSAGE,
@@ -651,7 +651,7 @@ function agentDefToDaemonConfig(
 function saveAgency(dir: string, agency: AgencyConfig) {
   writeFileSync(
     join(dir, 'anima.yaml'),
-    yaml.dump(agency, { lineWidth: 120, noRefs: true })
+    dump(agency, { lineWidth: 120, noRefs: true })
   );
 }
 

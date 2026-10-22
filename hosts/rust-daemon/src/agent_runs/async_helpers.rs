@@ -38,7 +38,10 @@ pub(super) fn operation_key(
         tool_call_id
     ]))
     .expect("string tuple serializes");
-    Ok(format!("helper-{operation}:{:x}", Sha256::digest(bytes)))
+    Ok(format!(
+        "helper-{operation}:{}",
+        hex::encode(Sha256::digest(bytes))
+    ))
 }
 
 /// A worktree launch has its own domain, so a replay with different
@@ -52,7 +55,7 @@ fn worktree_fingerprint(name: &str, task: &str, completion: &str, repo: &str) ->
         repo
     ]))
     .expect("string tuple serializes");
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }
 
 fn fingerprint(name: &str, task: &str, completion: &str) -> String {
@@ -63,7 +66,7 @@ fn fingerprint(name: &str, task: &str, completion: &str) -> String {
         completion
     ]))
     .expect("string tuple serializes");
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }
 
 /// Current host identity, never caller-selected owner/session IDs. A completed

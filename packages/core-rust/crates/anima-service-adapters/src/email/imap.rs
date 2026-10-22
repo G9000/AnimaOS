@@ -105,7 +105,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Session<S> {
     }
     async fn read_response(&mut self) -> Result<Response<'static>, EmailError> {
         loop {
-            match imap_proto::parser::parse_response(&self.buffer) {
+            match Response::parse(&self.buffer) {
                 Ok((remaining, item)) => {
                     let used = self.buffer.len() - remaining.len();
                     let item = item.into_owned();

@@ -182,7 +182,7 @@ fn actual_byte_digest_decode_scan_and_render_bounds() {
     let value = f.load();
     assert_eq!(
         entry(&value, "SOUL.md").digest,
-        Some(format!("{:x}", Sha256::digest(b"You are helpful.\r\n")))
+        Some(hex::encode(Sha256::digest(b"You are helpful.\r\n")))
     );
     assert_eq!(
         entry(&value, ".anima.md").state,

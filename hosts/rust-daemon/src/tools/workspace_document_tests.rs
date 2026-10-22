@@ -144,7 +144,7 @@ async fn m67_real_parsers_return_exact_source_hash_and_native_locators() {
         let value = envelope(&text);
         assert_eq!(
             value["source"],
-            json!({"path":path,"sha256":format!("{:x}",Sha256::digest(bytes))})
+            json!({"path":path,"sha256":hex::encode(Sha256::digest(bytes))})
         );
         let extracted: ExtractedDocumentText =
             serde_json::from_value(value["extraction"].clone()).unwrap();
@@ -292,10 +292,7 @@ async fn m67_captured_snapshot_is_not_reread_after_extraction() {
     .await
     .unwrap();
     let value = envelope(&result);
-    assert_eq!(
-        value["source"]["sha256"],
-        format!("{:x}", Sha256::digest(XLSX))
-    );
+    assert_eq!(value["source"]["sha256"], hex::encode(Sha256::digest(XLSX)));
     assert!(result.contains("137.42"));
     assert_eq!(std::fs::read(path).unwrap(), b"new current contents");
 }

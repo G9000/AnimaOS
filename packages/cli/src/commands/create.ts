@@ -3,7 +3,7 @@ import * as clack from '@clack/prompts';
 import pc from 'picocolors';
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import yaml from 'js-yaml';
+import { dump } from 'js-yaml';
 import type { AgencyConfig, AgentDefinition } from '../agency/types.js';
 import {
   agentSlug,
@@ -190,7 +190,7 @@ function writeWorkspace(
 
   writeFileSync(
     join(dirPath, 'anima.yaml'),
-    yaml.dump(config, { lineWidth: 120, noRefs: true })
+    dump(config, { lineWidth: 120, noRefs: true })
   );
 
   writeFileSync(join(dirPath, 'org-chart.mmd'), renderOrgChart(config));

@@ -84,7 +84,7 @@ impl AcceptedAgentFiles {
             "agent-files-render-v1",
         ))
         .expect("manifest serialization");
-        self.manifest.snapshot_digest = format!("{:x}", Sha256::digest(data));
+        self.manifest.snapshot_digest = hex::encode(Sha256::digest(data));
         self.manifest.estimated_tokens = self.rendered.estimated_tokens;
     }
 }

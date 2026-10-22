@@ -30,7 +30,7 @@ use tokio::sync::Semaphore;
 
 const CSV: &[u8] = b"supplier,quantity,unit_price,total,delivery_days\nsupplierA,3,12.50,37.50,2\n";
 fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }
 fn json_data(value: Value) -> DataValue {
     match value {

@@ -36,5 +36,5 @@ pub(crate) fn split_reply(text: &str) -> Vec<String> {
 }
 /// Recent provider nonce dedup improves resistance; it never authorizes replay of Unknown.
 pub(crate) fn stable_nonce(attempt_id: &str) -> String {
-    format!("{:x}", Sha256::digest(attempt_id.as_bytes()))[..24].to_owned()
+    hex::encode(Sha256::digest(attempt_id.as_bytes()))[..24].to_owned()
 }

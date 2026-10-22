@@ -7,7 +7,6 @@ on:
   pull_request:
 
 permissions:
-  actions: read
   contents: read
 
 jobs:
@@ -29,13 +28,5 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      # This enables task distribution via Nx Cloud.
-      # Learn more at https://nx.dev/ci/reference/nx-cloud-cli#npx-nxcloud-startcirun
-      - run: bun x nx start-ci-run --distribute-on="3 linux-medium-js" --stop-agents-after="e2e-ci"
-
-      # Prepend any command with "nx record --" to record its logs to Nx Cloud
-      - run: bun x nx record -- bun x nx format:check --base="remotes/origin/main"
+      - run: bun x nx format:check --base="remotes/origin/main"
       - run: bun x nx run-many -t lint test build typecheck e2e-ci
-      # Nx Cloud recommends fixes for failures to help you get CI green faster. Learn more: https://nx.dev/ci/features/self-healing-ci
-      - run: bun x nx fix-ci
-        if: always()

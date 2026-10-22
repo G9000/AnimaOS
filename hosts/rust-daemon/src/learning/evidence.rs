@@ -122,10 +122,9 @@ pub(super) async fn capture_source(
     let identity = json!({"runId":run.id,"agentId":run.agent_id,"sessionId":run.session_id,
         "input":run.input,"replyId":reply.message.id,"replyText":reply.message.content.text,
         "actions":run.action_receipts,"steps":run.steps,"model":run.model,"provider":run.provider});
-    let digest = format!(
-        "{:x}",
-        Sha256::digest(serde_json::to_vec(&identity).expect("JSON evidence serializes"))
-    );
+    let digest = hex::encode(Sha256::digest(
+        serde_json::to_vec(&identity).expect("JSON evidence serializes"),
+    ));
     let mut anchors = vec!["input".to_string(), "reply".to_string()];
     let mut actions = Vec::new();
     for receipt in run.action_receipts.iter().take(8) {
@@ -316,13 +315,10 @@ pub(super) async fn capture_conversation(
                 "replyId":turn.reply_id,"replyText":turn.reply})
         })
         .collect();
-    let digest = format!(
-        "{:x}",
-        Sha256::digest(
-            serde_json::to_vec(&json!({"agentId":agent_id,"turns":identity}))
-                .expect("JSON evidence serializes")
-        )
-    );
+    let digest = hex::encode(Sha256::digest(
+        serde_json::to_vec(&json!({"agentId":agent_id,"turns":identity}))
+            .expect("JSON evidence serializes"),
+    ));
     let core = {
         let manager = memory.read().await;
         let (user, notes) = crate::core_memory::blocks_for(&manager, agent_id);

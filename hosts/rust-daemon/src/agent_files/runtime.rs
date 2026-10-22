@@ -8,10 +8,9 @@ use crate::state::DaemonState;
 pub(crate) const PROFILE_SETTING: &str = "agentFilesProfileEnabled";
 
 pub(crate) fn config_revision(config: &AgentConfig) -> String {
-    format!(
-        "{:x}",
-        Sha256::digest(serde_json::to_vec(config).unwrap_or_default())
-    )
+    hex::encode(Sha256::digest(
+        serde_json::to_vec(config).unwrap_or_default(),
+    ))
 }
 
 pub(crate) fn capture_scope(

@@ -210,7 +210,7 @@ async fn m48_provider_request_export_synthetic_first_call() {
     println!(
         "M48_REQUEST_FIXTURE {}",
         json!({
-            "fixtureVersion":1, "bytes":bytes.len(), "sha256":format!("{:x}", Sha256::digest(&bytes)),
+            "fixtureVersion":1, "bytes":bytes.len(), "sha256":hex::encode(Sha256::digest(&bytes)),
             "modelCalls":1, "tools":14, "externalProviderCalls":0,
         })
     );
@@ -302,7 +302,7 @@ async fn m48_provider_request_real_zero_tool_route_diagnostic() {
                 "M48_ROUTE_DIAGNOSTIC {}",
                 json!({
                     "markerMatch":marker_match, "bytes":response.content.text.len(),
-                    "sha256":format!("{:x}", Sha256::digest(response.content.text.as_bytes())),
+                    "sha256":hex::encode(Sha256::digest(response.content.text.as_bytes())),
                     "reportedUsage":response.usage, "unexpectedTools":unexpected_tools,
                 })
             );

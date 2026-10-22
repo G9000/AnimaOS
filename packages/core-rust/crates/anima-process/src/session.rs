@@ -20,6 +20,7 @@ use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 use std::{
     io::{Read, Write},
+    num::NonZeroU16,
     path::PathBuf,
     sync::{Arc, Mutex, MutexGuard},
     time::{Duration, Instant},
@@ -202,7 +203,11 @@ impl AppSession {
         let (changes, _) = watch::channel(0);
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
-                parser: vt100::Parser::new(size.rows, size.cols, config.scrollback_lines),
+                parser: vt100::Parser::new(
+                    NonZeroU16::new(size.rows).expect("session rows are clamped above zero"),
+                    NonZeroU16::new(size.cols).expect("session columns are clamped above zero"),
+                    config.scrollback_lines,
+                ),
                 transcript: text::Transcript::new(config.transcript_bytes, config.transcript_lines),
                 stripper: text::EscapeStripper::default(),
                 exit: None,
@@ -324,7 +329,10 @@ impl AppSession {
                 pixel_height: 0,
             })
             .map_err(other)?;
-        self.shared.state().parser.screen_mut().set_size(rows, cols);
+        self.shared.state().parser.screen_mut().set_size(
+            NonZeroU16::new(rows).expect("resized rows are clamped above zero"),
+            NonZeroU16::new(cols).expect("resized columns are clamped above zero"),
+        );
         Ok(())
     }
 
@@ -464,7 +472,10 @@ fn read_output(
                     query::Piece::Output(bytes) => apply_output(&mut state, &bytes),
                     query::Piece::Query(query) => {
                         let screen = state.parser.screen();
-                        replies.extend(query.reply(screen.cursor_position(), screen.size()));
+                        let size = screen.size();
+                        replies.extend(
+                            query.reply(screen.cursor_position(), (size.0.get(), size.1.get())),
+                        );
                     }
                 }
             }
@@ -497,7 +508,7 @@ fn screen_of(parser: &vt100::Parser) -> Screen {
     let screen = parser.screen();
     let (rows, cols) = screen.size();
     let mut lines: Vec<String> = screen
-        .rows(0, cols)
+        .rows(0, cols.get())
         .map(|row| row.trim_end().to_string())
         .collect();
     while lines.last().is_some_and(String::is_empty) {
@@ -506,7 +517,7 @@ fn screen_of(parser: &vt100::Parser) -> Screen {
     Screen {
         rows: lines,
         cursor: screen.cursor_position(),
-        size: (rows, cols),
+        size: (rows.get(), cols.get()),
         alternate: screen.alternate_screen(),
     }
 }

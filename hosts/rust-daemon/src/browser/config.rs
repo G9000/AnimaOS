@@ -160,7 +160,7 @@ impl VerifiedBrowserInstallation {
                 }
                 hash.update(&buffer[..read]);
             }
-            if total != metadata.len() || format!("{:x}", hash.finalize()) != *expected {
+            if total != metadata.len() || hex::encode(hash.finalize()) != *expected {
                 return Err(error(BrowserErrorCode::Unavailable));
             }
         }

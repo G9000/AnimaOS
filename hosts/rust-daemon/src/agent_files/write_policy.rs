@@ -44,7 +44,7 @@ pub(crate) struct ProtectedWrite {
 }
 
 fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }
 
 fn resolved_target(path: &Path) -> Result<PathBuf, &'static str> {

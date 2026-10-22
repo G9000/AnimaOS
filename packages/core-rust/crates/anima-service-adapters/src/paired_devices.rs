@@ -123,7 +123,7 @@ pub fn valid_digest(value: &str) -> bool {
     })
 }
 pub fn digest_bytes(bytes: &[u8]) -> String {
-    format!("sha256:{:x}", Sha256::digest(bytes))
+    format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
 }
 
 #[cfg(test)]

@@ -788,7 +788,7 @@ pub(super) fn canonical_digest<T: Serialize>(value: &T) -> Result<String, Browse
     let value = serde_json::to_value(value).map_err(|_| error(BrowserErrorCode::Invalid))?;
     let mut bytes = String::new();
     render(&value, &mut bytes)?;
-    Ok(format!("{:x}", Sha256::digest(bytes.as_bytes())))
+    Ok(hex::encode(Sha256::digest(bytes.as_bytes())))
 }
 pub(super) fn strict_decode<T: de::DeserializeOwned>(bytes: &[u8]) -> Result<T, BrowserError> {
     if bytes.len() > FRAME {

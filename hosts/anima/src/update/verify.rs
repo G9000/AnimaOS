@@ -114,7 +114,8 @@ fn extract_from_zip(archive: &[u8], binary_name: &str) -> Result<Vec<u8>, Update
     let mut found = None;
     for index in 0..zip.len() {
         let mut file = zip.by_index(index).map_err(unreadable)?;
-        let name = entry_file_name(file.name())?;
+        let path = file.name().map_err(unreadable)?;
+        let name = entry_file_name(path.as_ref())?;
         if name == Some(binary_name) && file.is_file() {
             if found.is_some() {
                 return Err(duplicate(binary_name));

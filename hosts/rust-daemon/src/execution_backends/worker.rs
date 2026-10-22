@@ -1,7 +1,7 @@
 //! Fixed Rust SSH worker. Untrusted command text is framed JSON, never a remote shell argument.
 use super::{process, ExecutionReceipt, ExecutionStatus};
 use anima_core::CancelSignal;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::Sha256;
 use std::{

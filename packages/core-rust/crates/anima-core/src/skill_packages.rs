@@ -97,7 +97,7 @@ pub fn validate_skill_package(
 }
 pub fn skill_package_hash(skill: &[u8], files: &[SkillSupportingFile]) -> String {
     if files.is_empty() {
-        return format!("{:x}", Sha256::digest(skill));
+        return hex::encode(Sha256::digest(skill));
     }
     let mut hash = Sha256::new();
     hash.update(b"anima-skill-package-v1\0");
@@ -111,7 +111,7 @@ pub fn skill_package_hash(skill: &[u8], files: &[SkillSupportingFile]) -> String
         hash.update((file.content.len() as u64).to_be_bytes());
         hash.update(file.content.as_bytes());
     }
-    format!("{:x}", hash.finalize())
+    hex::encode(hash.finalize())
 }
 
 #[cfg(test)]
@@ -160,7 +160,7 @@ mod tests {
         let bytes = b"legacy skill bytes";
         assert_eq!(
             skill_package_hash(bytes, &[]),
-            format!("{:x}", Sha256::digest(bytes))
+            hex::encode(Sha256::digest(bytes))
         );
         let a = file("templates/a.md", "a");
         let b = file("references/b.txt", "b");

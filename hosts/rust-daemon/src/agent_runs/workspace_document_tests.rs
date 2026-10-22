@@ -116,7 +116,7 @@ impl DocumentExtractor for RecordingParser {
 #[tokio::test]
 async fn m67_workspace_xlsx_tool_reaches_next_model_request_with_source_and_coverage() {
     let relative = RELATIVE;
-    let expected_hash = format!("{:x}", Sha256::digest(XLSX));
+    let expected_hash = hex::encode(Sha256::digest(XLSX));
     let model = ScriptedModel::new(vec![
         Step::Tools(vec![read_call("m67-read-ledger")]),
         Step::Text(vec![

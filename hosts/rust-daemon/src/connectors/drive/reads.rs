@@ -206,8 +206,8 @@ impl DriveManager {
             returned_bytes: returned.len(),
             returned_scalars: returned.chars().count(),
             truncated: returned.len() < content.bytes.len(),
-            source_bytes_sha256: format!("{:x}", Sha256::digest(&content.bytes)),
-            returned_text_sha256: format!("{:x}", Sha256::digest(returned.as_bytes())),
+            source_bytes_sha256: hex::encode(Sha256::digest(&content.bytes)),
+            returned_text_sha256: hex::encode(Sha256::digest(returned.as_bytes())),
             fetched_at_ms: now_ms(),
         };
         self.current(&capture, Some("drive_read")).await?;

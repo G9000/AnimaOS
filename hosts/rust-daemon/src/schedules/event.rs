@@ -84,7 +84,7 @@ fn occurrence_id(schedule_id: &str, event_id: &str) -> String {
     digest.update((schedule_id.len() as u64).to_be_bytes());
     digest.update(schedule_id.as_bytes());
     digest.update(event_id.as_bytes());
-    format!("event:{:x}", digest.finalize())
+    format!("event:{}", hex::encode(digest.finalize()))
 }
 
 fn stale(item: &EventOccurrence, schedules: &HashMap<String, ScheduledPromptRecord>) -> bool {

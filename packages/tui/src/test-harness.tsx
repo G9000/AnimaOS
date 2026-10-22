@@ -113,6 +113,9 @@ export async function pressInkKey(
 ) {
   await flushInk();
   rendered.stdin.write(key);
+  if ((typeof key === 'string' ? key : key.toString()) === '\u001B') {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
   await flushInk();
 }
 

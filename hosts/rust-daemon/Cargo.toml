@@ -17,25 +17,26 @@ anima-schedule = { path = "../../packages/core-rust/crates/anima-schedule" }
 anima-swarm = { path = "../../packages/core-rust/crates/anima-swarm" }
 anima-worktree = { path = "../../packages/core-rust/crates/anima-worktree" }
 atomicwrites = "0.4.4"
-cap-std = "3.4.5"
-cap-fs-ext = "3.4.5"
+cap-std = "4.0.3"
+cap-fs-ext = "4.0.3"
 async-trait = "0.1"
 base64 = "0.22"
-hmac = "0.12"
-sha2 = "0.10"
+hmac = "0.13"
+sha2 = "0.11"
 axum = "0.8"
 http-body-util = "0.1"
+hex = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = "0.10"
 iana-time-zone = "0.1"
-fastembed = { version = "5.13.4", default-features = false, features = ["hf-hub-rustls-tls", "ort-download-binaries-rustls-tls"] }
+fastembed = { version = "7.2", default-features = false, features = ["hf-hub-rustls-tls", "ort-download-binaries-rustls-tls"] }
 futures = "0.3"
 keyring = "4.1.6"
 meval = "0.2"
 regex = "1"
 unicode-normalization = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "stream"] }
-rmcp = { version = "=3.5.1", default-features = false, features = ["client", "transport-streamable-http-client", "transport-async-rw"] }
+rmcp = { version = "=3.6.0", default-features = false, features = ["client", "transport-streamable-http-client", "transport-async-rw"] }
 process-wrap = { version = "=10.0.1", default-features = false, features = ["std", "tokio1", "creation-flags", "job-object", "kill-on-drop", "process-group"] }
 sse-stream = "=0.2.4"
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -44,7 +45,7 @@ serde_json = "1"
 serde_yaml = "0.9"
 sqlx = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["request-id", "timeout", "trace"] }
+tower-http = { version = "0.7", features = ["request-id", "timeout", "trace"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time", "process", "io-util"] }
 tempfile = "=3.27.0"
 tokio-util = { version = "=0.7.18", features = ["rt"] }
@@ -52,9 +53,9 @@ tokio-rustls = { version = "=0.26.4", default-features = false, features = ["rin
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4"] }
-utoipa = { version = "5.4.0", features = ["axum_extras"] }
-utoipa-scalar = { version = "0.3", features = ["axum"] }
-zeroize = "1.8"
+utoipa = { version = "6", features = ["axum_extras"] }
+utoipa-scalar = { version = "0.4", features = ["axum"] }
+zeroize = "1.9"
 twilight-gateway = { version = "=0.17.1", default-features = false, features = ["rustls-webpki-roots"] }
 twilight-model = "=0.17.1"
 

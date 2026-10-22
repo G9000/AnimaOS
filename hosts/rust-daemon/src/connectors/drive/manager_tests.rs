@@ -389,11 +389,11 @@ async fn faithful_scalar_truncation_keeps_exact_source_and_returned_digests_and_
     assert!(result.truncated);
     assert_eq!(
         result.source_bytes_sha256,
-        format!("{:x}", Sha256::digest(text.as_bytes()))
+        hex::encode(Sha256::digest(text.as_bytes()))
     );
     assert_eq!(
         result.returned_text_sha256,
-        format!("{:x}", Sha256::digest(result.text.as_bytes()))
+        hex::encode(Sha256::digest(result.text.as_bytes()))
     );
     transport.metadata_count.store(0, Ordering::SeqCst);
     transport.changed.store(true, Ordering::SeqCst);

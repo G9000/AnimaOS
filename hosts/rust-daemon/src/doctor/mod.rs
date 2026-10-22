@@ -77,10 +77,9 @@ pub(crate) struct RepairCandidate {
     pub(crate) action: String,
 }
 pub(crate) fn fingerprint<T: Serialize>(v: &T) -> String {
-    format!(
-        "{:x}",
-        Sha256::digest(serde_json::to_vec(v).expect("typed doctor value"))
-    )
+    hex::encode(Sha256::digest(
+        serde_json::to_vec(v).expect("typed doctor value"),
+    ))
 }
 fn conflict() -> ApiError {
     ApiError::conflict("Doctor repair state or authority changed; refresh the exact candidate")

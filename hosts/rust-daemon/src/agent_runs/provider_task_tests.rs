@@ -132,7 +132,7 @@ struct Witness {
 fn witness(path: &Path) -> Witness {
     let bytes = std::fs::read(path).unwrap();
     Witness {
-        sha256: format!("{:x}", Sha256::digest(&bytes)),
+        sha256: hex::encode(Sha256::digest(&bytes)),
         bytes,
         modified: std::fs::metadata(path).unwrap().modified().unwrap(),
     }

@@ -1,9 +1,9 @@
-use jsonschema::{Draft, JSONSchema};
+use jsonschema::{Draft, Validator};
 use serde_json::Value;
 
 use super::CapabilityError;
 
-pub(super) fn compile_schema(schema: &Value) -> Result<JSONSchema, ()> {
+pub(super) fn compile_schema(schema: &Value) -> Result<Validator, ()> {
     let draft = match schema.get("$schema") {
         None => Draft::Draft7,
         Some(Value::String(uri))
@@ -22,14 +22,14 @@ pub(super) fn compile_schema(schema: &Value) -> Result<JSONSchema, ()> {
         }
         _ => return Err(()),
     };
-    JSONSchema::options()
+    jsonschema::options()
         .with_draft(draft)
-        .compile(schema)
+        .build(schema)
         .map_err(|_| ())
 }
 
 pub(super) fn validate_instance(
-    validator: &JSONSchema,
+    validator: &Validator,
     instance: &Value,
     output: bool,
 ) -> Result<(), CapabilityError> {

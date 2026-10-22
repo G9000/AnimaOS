@@ -16,7 +16,7 @@ async fn fp05_origin_runtime_http_review_binds_exact_displayed_output_pair() {
         .state
         .id;
     let result = "Owner-visible exact aggregate";
-    let digest = format!("{:x}", Sha256::digest(result.as_bytes()));
+    let digest = hex::encode(Sha256::digest(result.as_bytes()));
     let final_output = serde_json::json!({"generation":1,"sha256":digest,
         "outputs":[{"runId":"callback","replyMessageId":"reply","outputSha256":digest,
             "preview":result,"previewTruncated":false}]});

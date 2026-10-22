@@ -342,7 +342,7 @@ fn selection_digest(ids: &[DriveFileId]) -> String {
         .map(|id| id.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    format!("{:x}", Sha256::digest(joined.as_bytes()))
+    hex::encode(Sha256::digest(joined.as_bytes()))
 }
 fn queue_cleanup(record: &mut DriveRecord, generation: String) -> Result<(), DriveError> {
     if !record.cleanup_generations.contains(&generation) {

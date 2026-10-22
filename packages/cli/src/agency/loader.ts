@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import yaml from 'js-yaml';
+import { load } from 'js-yaml';
 import type { AgencyConfig } from './types.js';
 
 /**
@@ -48,7 +48,7 @@ export function loadAgency(dir: string): AgencyConfig {
   }
 
   const raw = readFileSync(filePath, 'utf-8');
-  const parsed = yaml.load(raw) as Record<string, unknown>;
+  const parsed = load(raw) as Record<string, unknown>;
 
   if (!parsed || typeof parsed !== 'object') {
     throw new Error(

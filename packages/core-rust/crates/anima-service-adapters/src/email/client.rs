@@ -154,8 +154,8 @@ pub(super) fn build_message(
         .ok_or(EmailError::Invalid)?
         .1;
     let id = format!(
-        "<anima-{:x}@{domain}>",
-        Sha256::digest(message.id.as_bytes())
+        "<anima-{}@{domain}>",
+        hex::encode(Sha256::digest(message.id.as_bytes()))
     );
     let mut builder = Message::builder()
         .from(account.address.parse().map_err(|_| EmailError::Invalid)?)
@@ -191,16 +191,13 @@ pub(super) async fn read_inbox<S: tokio::io::AsyncRead + tokio::io::AsyncWrite +
         .command("EXAMINE INBOX", false, |response| {
             match response {
                 Response::MailboxData(MailboxDatum::Exists(value)) => exists = value,
-                Response::Data {
-                    code: Some(code), ..
+                Response::Data { outcome, .. } | Response::Done { outcome, .. } => {
+                    match outcome.code {
+                        Some(ResponseCode::UidValidity(value)) => uid_validity = value,
+                        Some(ResponseCode::UidNext(value)) => uid_next = value,
+                        _ => {}
+                    }
                 }
-                | Response::Done {
-                    code: Some(code), ..
-                } => match code {
-                    ResponseCode::UidValidity(value) => uid_validity = value,
-                    ResponseCode::UidNext(value) => uid_next = value,
-                    _ => {}
-                },
                 _ => {}
             }
             Ok(())

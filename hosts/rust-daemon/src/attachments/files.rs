@@ -11,7 +11,7 @@ pub(crate) struct SavedUpload {
 }
 
 fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }
 fn io_error(error: std::io::Error) -> AttachmentError {
     if error.kind() == std::io::ErrorKind::FileTooLarge {

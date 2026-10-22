@@ -70,7 +70,7 @@ impl Reader<'_> {
             }
         };
         entry.raw_byte_count = bytes.len() as u64;
-        entry.digest = Some(format!("{:x}", Sha256::digest(&bytes)));
+        entry.digest = Some(hex::encode(Sha256::digest(&bytes)));
         let decoded = match String::from_utf8(bytes) {
             Ok(text) => text,
             Err(_) => {

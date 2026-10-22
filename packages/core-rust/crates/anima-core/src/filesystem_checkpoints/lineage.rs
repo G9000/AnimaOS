@@ -114,7 +114,7 @@ fn domain_digest(domain: &[u8], value: &impl Serialize) -> String {
     // Closed structs contain no fallible custom serializers. Planner callers
     // first stream-bound the full input before constructing these encodings.
     hash.update(serde_json::to_vec(value).expect("checkpoint lineage serialization"));
-    format!("{:x}", hash.finalize())
+    hex::encode(hash.finalize())
 }
 
 pub fn checkpoint_manifest_digest(checkpoint: &FilesystemCheckpoint) -> String {

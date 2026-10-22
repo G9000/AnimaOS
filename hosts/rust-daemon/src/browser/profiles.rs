@@ -211,19 +211,16 @@ impl ProfileStore {
         Ok(view)
     }
     fn digest(view: &mut BrowserProfileView) -> Result<(), BrowserServiceError> {
-        view.digest = format!(
-            "{:x}",
-            Sha256::digest(
-                serde_json::to_vec(&(
-                    &view.id,
-                    &view.agent_id,
-                    &view.policy_id,
-                    &view.origin,
-                    view.revision
-                ))
-                .map_err(|_| BrowserServiceError::Unavailable)?
-            )
-        );
+        view.digest = hex::encode(Sha256::digest(
+            serde_json::to_vec(&(
+                &view.id,
+                &view.agent_id,
+                &view.policy_id,
+                &view.origin,
+                view.revision,
+            ))
+            .map_err(|_| BrowserServiceError::Unavailable)?,
+        ));
         Ok(())
     }
     fn save(&self, root: &Path, view: &BrowserProfileView) -> Result<(), BrowserServiceError> {
