@@ -1,9 +1,11 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
-import type { TaskResult } from '@animaos/sdk';
+import type { AgentEvent, Session, TaskResult } from '@animaos/sdk';
 import type { IEventBus } from './event-bus.js';
 import { useDaemonState } from './hooks/use-daemon-state.js';
 import { useEventLog } from './hooks/use-event-log.js';
+import { useSessionWorkspace } from './hooks/use-session-workspace.js';
+import { useSessionReview } from './hooks/use-session-review.js';
 import { Header } from './components/header.js';
 import { AgentPanel } from './components/agent-panel.js';
 import { MessageStream } from './components/message-stream.js';
@@ -15,11 +17,18 @@ import { ResultView } from './components/result-view.js';
 import { AgentsPanel } from './components/agents-panel.js';
 import { TraceView } from './components/trace-view.js';
 import { HistoryView } from './components/history-view.js';
+import { SessionList } from './components/session-list.js';
+import { SessionChat } from './components/session-chat.js';
+import {
+  SessionReview,
+  type ReviewFilter,
+} from './components/session-review.js';
 import { buildDisplayedAgents } from './displayed-agents.js';
 import { buildAppInputCommands } from './input-commands.js';
 import type { ResultEntry } from './components/result-log.js';
-import type { InputSuggestion } from './components/input-bar.js';
+import type { InputSuggestion, SlashCommand } from './components/input-bar.js';
 import type { AgentProfile } from './types.js';
+import type { TuiSessionApi } from './session-api.js';
 
 export interface AppProps {
   eventBus: IEventBus;
@@ -57,9 +66,23 @@ export interface AppProps {
   /** Called for non-fatal diagnostic events that would otherwise be
    * swallowed (malformed event payloads, hung daemon polls, etc.). */
   onWarning?: (where: string, detail: unknown) => void;
+  /** Optional daemon-backed session API for persistent chat views. */
+  sessionApi?: TuiSessionApi;
 }
 
-type AppView = 'swarm' | 'agents' | 'history' | 'trace' | 'result';
+type AppView =
+  | 'swarm'
+  | 'agents'
+  | 'history'
+  | 'trace'
+  | 'result'
+  | 'session-list'
+  | 'session-chat';
+type PendingSessionIntent =
+  | { id: number; kind: 'chat' }
+  | { id: number; kind: 'new' }
+  | { id: number; kind: 'open'; query: string }
+  | null;
 type HistoryMode = 'history' | 'resume';
 type ResumeAssistState = {
   kind: 'matches' | 'suggestions';
@@ -79,6 +102,67 @@ type DeletedSavedRunState = {
   entry: ResultEntry;
   index: number;
 };
+
+interface SessionPickerCommandInputProps {
+  commands: SlashCommand[];
+  onSubmit: (value: string) => void | Promise<unknown>;
+  onCancel: () => void;
+}
+
+function SessionPickerCommandInput({
+  commands,
+  onSubmit,
+  onCancel,
+}: SessionPickerCommandInputProps): React.ReactElement {
+  const [value, setValue] = useState('/');
+  const commandPrefix = /^\/([^\s]*)/.exec(value)?.[1]?.toLowerCase() ?? '';
+  const matchingCommands = commands.filter((command) =>
+    command.name.startsWith(commandPrefix)
+  );
+
+  useInput((input, key) => {
+    if (key.escape) {
+      onCancel();
+      return;
+    }
+    if (key.return) {
+      const command = value.trim();
+      if (command.length > 1 && command.startsWith('/')) void onSubmit(command);
+      return;
+    }
+    if (key.backspace || key.delete) {
+      setValue((current) => current.slice(0, -1));
+      return;
+    }
+    if (!key.ctrl && !key.meta && !key.tab && input.length > 0) {
+      setValue((current) => current + input);
+    }
+  });
+
+  return (
+    <Box flexDirection="column" paddingX={1}>
+      <Text bold color="cyan">
+        Session command
+      </Text>
+      <Box borderStyle="single" paddingX={1}>
+        <Text>{value}</Text>
+        <Text color="cyan">▌</Text>
+      </Box>
+      <Text color="gray" dimColor>
+        {matchingCommands.length > 0
+          ? matchingCommands
+              .map(
+                (command) =>
+                  `/${command.name}${command.args ? ` ${command.args}` : ''}`
+              )
+              .join('  ·  ')
+          : 'No matching session commands.'}
+        {'  ·  '}enter run · esc cancel
+      </Text>
+    </Box>
+  );
+}
+
 const DEFAULT_MAX_PROMPT_HISTORY = 100;
 const DEFAULT_MAX_DELETED_SAVED_RUN_UNDOS = 5;
 const TASK_SUBMISSION_BLOCKED_MESSAGE =
@@ -402,6 +486,7 @@ export function App({
   maxPromptHistory = DEFAULT_MAX_PROMPT_HISTORY,
   maxDeletedSavedRunUndos = DEFAULT_MAX_DELETED_SAVED_RUN_UNDOS,
   onWarning,
+  sessionApi,
 }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const [phase, setPhase] = useState<'waiting' | 'running'>('waiting');
@@ -417,6 +502,15 @@ export function App({
     : undefined;
 
   const [view, setView] = useState<AppView>(resumeEntry ? 'result' : 'swarm');
+  const sessionViewHistoryRef = useRef<AppView[]>([]);
+  const sessionIntentIdRef = useRef(0);
+  const processingSessionIntentRef = useRef<number | null>(null);
+  const [pendingSessionIntent, setPendingSessionIntent] =
+    useState<PendingSessionIntent>(null);
+  const [forceAgentPicker, setForceAgentPicker] = useState(false);
+  const [sessionPickerCommandMode, setSessionPickerCommandMode] =
+    useState(false);
+  const sessionLookupAbortRef = useRef<AbortController | null>(null);
   const [currentTask, setCurrentTask] = useState(
     task ?? resumeEntry?.task ?? ''
   );
@@ -490,13 +584,103 @@ export function App({
     showMessage: showMsg,
     onWarning,
   });
-  const { swarmInputCommands, resultInputCommands, helpCommands } =
-    buildAppInputCommands({
-      interactive,
-      hasSavedRuns: resultLog.length > 0,
-      taskEntryBlockedByDaemon,
-      showResultCommands: view === 'result' && Boolean(activeResult),
-    });
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter | null>(null);
+  const reviewObserverRef = useRef<(event: AgentEvent) => void>(() => {});
+  const observeReviewEvent = useCallback(
+    (event: AgentEvent) => reviewObserverRef.current(event),
+    []
+  );
+  const sessionWorkspace = useSessionWorkspace({
+    api: interactive ? sessionApi : undefined,
+    online: !taskEntryBlockedByDaemon,
+    onEvent: observeReviewEvent,
+  });
+  const sessionReview = useSessionReview({
+    api: interactive ? sessionApi?.review : undefined,
+    agentId: sessionWorkspace.activeSession?.agentId,
+    sessionId: sessionWorkspace.activeSession?.id,
+    online: !taskEntryBlockedByDaemon,
+    runAgentIds: sessionWorkspace.eventState?.runAgentIds,
+    runSessionIds: sessionWorkspace.eventState?.runSessionIds,
+  });
+  reviewObserverRef.current = sessionReview.onEvent;
+  useEffect(() => {
+    setReviewFilter(null);
+  }, [
+    view,
+    sessionWorkspace.activeSession?.agentId,
+    sessionWorkspace.activeSession?.id,
+  ]);
+  const {
+    swarmInputCommands,
+    resultInputCommands,
+    sessionPickerInputCommands,
+    helpCommands,
+  } = buildAppInputCommands({
+    interactive,
+    hasSavedRuns: resultLog.length > 0,
+    taskEntryBlockedByDaemon,
+    showResultCommands: view === 'result' && Boolean(activeResult),
+    sessionView:
+      view === 'session-chat'
+        ? 'chat'
+        : view === 'session-list'
+          ? 'picker'
+          : null,
+    hasMultipleAgents: sessionWorkspace.agents.length > 1,
+    canSteerSession: Boolean(
+      sessionWorkspace.activeSession?.capabilities.steer
+    ),
+    canStopSessionRun: sessionWorkspace.canStopActiveRun,
+  });
+
+  const navigateSessionView = useCallback(
+    (nextView: AppView) => {
+      setSessionPickerCommandMode(false);
+      if (nextView !== view) sessionViewHistoryRef.current.push(view);
+      setView(nextView);
+    },
+    [view]
+  );
+
+  const backFromSessionView = useCallback(() => {
+    let previousView = sessionViewHistoryRef.current.pop() ?? 'swarm';
+    if (previousView === 'session-chat' && !sessionWorkspace.activeSession) {
+      previousView = sessionViewHistoryRef.current.pop() ?? 'swarm';
+    }
+    sessionIntentIdRef.current += 1;
+    processingSessionIntentRef.current = null;
+    sessionLookupAbortRef.current?.abort();
+    sessionLookupAbortRef.current = null;
+    setPendingSessionIntent(null);
+    setForceAgentPicker(false);
+    setView(previousView);
+  }, [sessionWorkspace.activeSession]);
+
+  const cancelSessionIntent = useCallback(() => {
+    sessionIntentIdRef.current += 1;
+    processingSessionIntentRef.current = null;
+    sessionLookupAbortRef.current?.abort();
+    sessionLookupAbortRef.current = null;
+    setPendingSessionIntent(null);
+  }, []);
+
+  const setSessionIntent = useCallback(
+    (intent: Exclude<PendingSessionIntent, null>) => {
+      sessionLookupAbortRef.current?.abort();
+      sessionLookupAbortRef.current = null;
+      processingSessionIntentRef.current = null;
+      setPendingSessionIntent({ ...intent, id: ++sessionIntentIdRef.current });
+    },
+    []
+  );
+
+  useEffect(
+    () => () => {
+      sessionLookupAbortRef.current?.abort();
+    },
+    []
+  );
 
   const blockInteractiveTaskSubmission = useCallback(() => {
     if (!interactive || !daemonWarning) {
@@ -513,8 +697,8 @@ export function App({
         ? currentTask.slice(0, 37) + '...'
         : currentTask
       : interactive
-      ? 'interactive'
-      : 'idle';
+        ? 'interactive'
+        : 'idle';
 
     showMsg(
       [
@@ -760,6 +944,7 @@ export function App({
 
   const runTask = useCallback(
     async (input: string) => {
+      cancelSessionIntent();
       if (!onTask) {
         return;
       }
@@ -778,8 +963,8 @@ export function App({
       const taskResult = await onTask(input);
       const text =
         taskResult.status === 'success'
-          ? (taskResult.data as { text?: string })?.text ?? 'completed'
-          : taskResult.error ?? 'error';
+          ? ((taskResult.data as { text?: string })?.text ?? 'completed')
+          : (taskResult.error ?? 'error');
 
       const entry: ResultEntry = {
         id: `run-${Date.now()}-${String(nextResultId.current++)}`,
@@ -793,7 +978,14 @@ export function App({
       onResultRecorded?.(entry);
       setPhase('waiting');
     },
-    [clearResumeAssist, onTask, rememberPrompt, reset, onResultRecorded]
+    [
+      cancelSessionIntent,
+      clearResumeAssist,
+      onTask,
+      rememberPrompt,
+      reset,
+      onResultRecorded,
+    ]
   );
 
   useInput(
@@ -840,6 +1032,7 @@ export function App({
         return;
       }
 
+      cancelSessionIntent();
       if (resultLog.length === 0) {
         showMsg('No saved runs yet. Run a task first.');
         return;
@@ -849,7 +1042,19 @@ export function App({
       setHistoryMode('resume');
       setView('history');
     },
-    { isActive: interactive && phase === 'waiting' && view === 'swarm' }
+    {
+      isActive: interactive && phase === 'waiting' && view === 'swarm',
+    }
+  );
+
+  useInput(
+    (input) => {
+      if (input === '/') setSessionPickerCommandMode(true);
+    },
+    {
+      isActive:
+        interactive && view === 'session-list' && !sessionPickerCommandMode,
+    }
   );
 
   useInput(
@@ -883,12 +1088,206 @@ export function App({
     { isActive: interactive && phase === 'waiting' && view === 'swarm' }
   );
 
+  const openSessionByQuery = useCallback(
+    async (query: string, intentId: number): Promise<boolean> => {
+      if (!sessionApi || !sessionWorkspace.selectedAgentId) return false;
+      const agentId = sessionWorkspace.selectedAgentId;
+      const normalizedQuery = query.trim().toLocaleLowerCase();
+      const isCurrentIntent = () =>
+        sessionIntentIdRef.current === intentId &&
+        !sessionLookupAbortRef.current?.signal.aborted;
+      const loadedIdMatch = sessionWorkspace.sessions.find(
+        (session) =>
+          !session.archived &&
+          session.kind === 'chat' &&
+          session.id.toLocaleLowerCase() === normalizedQuery
+      );
+      if (loadedIdMatch) {
+        if (!isCurrentIntent()) return false;
+        const opened = await sessionWorkspace.openSession(loadedIdMatch);
+        if (opened && isCurrentIntent()) navigateSessionView('session-chat');
+        return opened;
+      }
+
+      const controller = new AbortController();
+      sessionLookupAbortRef.current?.abort();
+      sessionLookupAbortRef.current = controller;
+      const pages: Session[] = [];
+      const seenSessionIds = new Set<string>();
+      let paginatedIdMatch: Session | undefined;
+      let cursor: string | undefined;
+      const visitedCursors = new Set<string>();
+      try {
+        do {
+          const page = await sessionApi.listSessions(
+            agentId,
+            cursor,
+            controller.signal
+          );
+          if (!isCurrentIntent()) return false;
+          for (const session of page.sessions) {
+            if (
+              session.agentId !== agentId ||
+              session.kind !== 'chat' ||
+              session.archived ||
+              seenSessionIds.has(session.id)
+            ) {
+              continue;
+            }
+            seenSessionIds.add(session.id);
+            pages.push(session);
+          }
+          paginatedIdMatch = pages.find(
+            (session) => session.id.toLocaleLowerCase() === normalizedQuery
+          );
+          if (paginatedIdMatch) break;
+          const nextCursor = page.nextCursor ?? undefined;
+          if (!nextCursor || visitedCursors.has(nextCursor)) break;
+          visitedCursors.add(nextCursor);
+          cursor = nextCursor;
+        } while (true);
+      } catch (lookupError) {
+        if (isCurrentIntent()) {
+          showMsg(
+            `Could not search sessions: ${
+              lookupError instanceof Error
+                ? lookupError.message
+                : String(lookupError)
+            }`
+          );
+        }
+        return false;
+      } finally {
+        if (sessionLookupAbortRef.current === controller) {
+          sessionLookupAbortRef.current = null;
+        }
+      }
+
+      if (!isCurrentIntent()) return false;
+      const idMatch = paginatedIdMatch;
+      if (idMatch) {
+        const opened = await sessionWorkspace.openSession(idMatch);
+        if (opened && isCurrentIntent()) navigateSessionView('session-chat');
+        return opened;
+      }
+
+      const exactTitleMatches = pages.filter(
+        (session) =>
+          session.title.trim().toLocaleLowerCase() === normalizedQuery
+      );
+      const matches =
+        exactTitleMatches.length > 0
+          ? exactTitleMatches
+          : pages.filter((session) =>
+              session.title.trim().toLocaleLowerCase().includes(normalizedQuery)
+            );
+      if (matches.length > 1) {
+        showMsg(
+          `More than one session matches "${query}". Use /open with its session ID.`
+        );
+        return false;
+      }
+      const match = matches[0];
+      if (!match && /\s/.test(query.trim())) {
+        showMsg(`No chat session matches "${query}".`);
+        return false;
+      }
+      const opened = await sessionWorkspace.openSession(match ?? query.trim());
+      if (opened && isCurrentIntent()) navigateSessionView('session-chat');
+      return opened;
+    },
+    [navigateSessionView, sessionApi, sessionWorkspace, showMsg]
+  );
+
+  useEffect(() => {
+    const intent = pendingSessionIntent;
+    if (
+      !intent ||
+      !sessionApi ||
+      processingSessionIntentRef.current === intent.id
+    ) {
+      return;
+    }
+    if (sessionWorkspace.loadingAgents) return;
+
+    if (sessionWorkspace.agents.length === 0) {
+      navigateSessionView('session-list');
+      setPendingSessionIntent(null);
+      return;
+    }
+
+    if (!sessionWorkspace.selectedAgentId) {
+      if (sessionWorkspace.agents.length > 1) {
+        navigateSessionView('session-list');
+      }
+      return;
+    }
+
+    if (
+      intent.kind !== 'new' &&
+      !sessionWorkspace.activeSession &&
+      sessionWorkspace.loadingSessions
+    ) {
+      return;
+    }
+
+    processingSessionIntentRef.current = intent.id;
+    void (async () => {
+      try {
+        if (intent.kind === 'chat') {
+          if (sessionWorkspace.activeSession) {
+            navigateSessionView('session-chat');
+          } else {
+            const latestSession = [...sessionWorkspace.sessions].sort(
+              (left, right) => right.lastActivityAtMs - left.lastActivityAtMs
+            )[0];
+            if (latestSession) {
+              const opened = await sessionWorkspace.openSession(latestSession);
+              if (opened && sessionIntentIdRef.current === intent.id) {
+                navigateSessionView('session-chat');
+              }
+            } else {
+              navigateSessionView('session-list');
+            }
+          }
+        } else if (intent.kind === 'new') {
+          const created = await sessionWorkspace.createSession();
+          if (created && sessionIntentIdRef.current === intent.id) {
+            navigateSessionView('session-chat');
+          }
+        } else {
+          await openSessionByQuery(intent.query, intent.id);
+        }
+      } finally {
+        if (processingSessionIntentRef.current === intent.id) {
+          processingSessionIntentRef.current = null;
+        }
+        if (sessionIntentIdRef.current === intent.id) {
+          setPendingSessionIntent(null);
+        }
+      }
+    })();
+  }, [
+    navigateSessionView,
+    openSessionByQuery,
+    pendingSessionIntent,
+    sessionApi,
+    sessionWorkspace,
+  ]);
+
   const handleSlashCommand = useCallback(
     async (cmd: string) => {
       clearResumeAssist();
       const [name, ...rest] = cmd.slice(1).trim().split(/\s+/);
       const args = rest.join(' ').trim();
       const commandName = name.toLowerCase();
+      if (
+        !['chat', 'sessions', 'new', 'open', 'agent', 'back'].includes(
+          commandName
+        )
+      ) {
+        cancelSessionIntent();
+      }
 
       if (commandName !== 'delete' && pendingDeleteCommand) {
         setPendingDeleteCommand(null);
@@ -897,6 +1296,91 @@ export function App({
         setPendingDropOldestUndoCommand(null);
       }
       switch (commandName) {
+        case 'chat':
+          if (!sessionApi) {
+            showMsg('Session chat is unavailable in this launch.');
+          } else {
+            setForceAgentPicker(false);
+            setSessionIntent({ id: 0, kind: 'chat' });
+          }
+          break;
+        case 'sessions':
+          if (!sessionApi) {
+            showMsg('Session chat is unavailable in this launch.');
+          } else {
+            cancelSessionIntent();
+            setForceAgentPicker(false);
+            navigateSessionView('session-list');
+          }
+          break;
+        case 'new':
+          if (!sessionApi) {
+            showMsg('Session chat is unavailable in this launch.');
+          } else {
+            setForceAgentPicker(false);
+            setSessionIntent({ id: 0, kind: 'new' });
+          }
+          break;
+        case 'open':
+          if (!args) {
+            showMsg('Usage: /open <session-id-or-title>');
+          } else if (!sessionApi) {
+            showMsg('Session chat is unavailable in this launch.');
+          } else {
+            setForceAgentPicker(false);
+            setSessionIntent({ id: 0, kind: 'open', query: args });
+          }
+          break;
+        case 'agent':
+          if (!sessionApi) {
+            showMsg('Session chat is unavailable in this launch.');
+          } else if (
+            !sessionWorkspace.loadingAgents &&
+            sessionWorkspace.agents.length < 2
+          ) {
+            showMsg('Only one daemon agent is available.');
+          } else {
+            cancelSessionIntent();
+            setForceAgentPicker(true);
+            navigateSessionView('session-list');
+          }
+          break;
+        case 'review':
+        case 'approvals':
+        case 'clarifications':
+          if (!sessionWorkspace.activeSession || view !== 'session-chat') {
+            showMsg('Open a chat session before reviewing requests.');
+          } else if (!sessionApi?.review) {
+            showMsg('Session review is unavailable in this launch.');
+          } else {
+            setReviewFilter(commandName === 'review' ? 'all' : commandName);
+          }
+          break;
+        case 'queue':
+          if (!sessionWorkspace.activeSession) {
+            showMsg('Open a chat session before changing its send mode.');
+          } else {
+            sessionWorkspace.setRunMode('queue');
+            showMsg('Send mode: queue.');
+          }
+          break;
+        case 'steer':
+          if (!sessionWorkspace.activeSession) {
+            showMsg('Open a chat session before changing its send mode.');
+          } else if (!sessionWorkspace.activeSession.capabilities.steer) {
+            showMsg('Steer mode is unavailable for this session.');
+          } else {
+            sessionWorkspace.setRunMode('steer');
+            showMsg('Send mode: steer.');
+          }
+          break;
+        case 'stop':
+          if (!sessionWorkspace.canStopActiveRun) {
+            showMsg('There is no stoppable active run in this session.');
+          } else if (await sessionWorkspace.stopActiveRun()) {
+            showMsg('Stop requested. Waiting for daemon confirmation.');
+          }
+          break;
         case 'agents':
           if (profiles.length === 0) {
             showMsg('No agent profiles loaded. Create an agency first.');
@@ -981,8 +1465,8 @@ export function App({
           const targetEntry = args
             ? findSavedRunByExactLabel(resultLog, args)
             : view === 'result' && activeResult
-            ? activeResult
-            : undefined;
+              ? activeResult
+              : undefined;
 
           if (!args && !targetEntry) {
             showMsg(
@@ -1084,7 +1568,12 @@ export function App({
           }
           break;
         case 'back':
-          setView('swarm');
+          if (view === 'session-list' || view === 'session-chat') {
+            backFromSessionView();
+          } else {
+            cancelSessionIntent();
+            setView('swarm');
+          }
           break;
         case 'retry': {
           const retryEntry =
@@ -1133,6 +1622,12 @@ export function App({
       reset,
       profiles,
       showMsg,
+      sessionApi,
+      sessionWorkspace,
+      setSessionIntent,
+      navigateSessionView,
+      backFromSessionView,
+      cancelSessionIntent,
       showStatus,
       syncDaemonWarning,
       resultLog,
@@ -1154,6 +1649,7 @@ export function App({
       blockInteractiveTaskSubmission,
       runTask,
       onClearHistory,
+      view,
     ]
   );
 
@@ -1177,6 +1673,18 @@ export function App({
     ]
   );
 
+  const handleSessionChatSubmit = useCallback(
+    async (input: string) => {
+      const text = input.trim();
+      if (text.startsWith('/')) {
+        await handleSlashCommand(text);
+        return;
+      }
+      return sessionWorkspace.sendMessage(text);
+    },
+    [handleSlashCommand, sessionWorkspace]
+  );
+
   const handleSaveAgent = useCallback(
     (profile: AgentProfile) => {
       setProfiles((prev) =>
@@ -1195,6 +1703,136 @@ export function App({
     ],
     [resultLog]
   );
+
+  if (view === 'session-list') {
+    if (sessionPickerCommandMode) {
+      return (
+        <SessionPickerCommandInput
+          commands={sessionPickerInputCommands}
+          onSubmit={async (command) => {
+            setSessionPickerCommandMode(false);
+            await handleSlashCommand(command);
+          }}
+          onCancel={() => setSessionPickerCommandMode(false)}
+        />
+      );
+    }
+    return (
+      <Box flexDirection="column">
+        <SessionList
+          agents={sessionWorkspace.agents}
+          selectedAgentId={
+            forceAgentPicker ? null : sessionWorkspace.selectedAgentId
+          }
+          sessions={sessionWorkspace.sessions}
+          nextCursor={sessionWorkspace.nextSessionCursor}
+          loadingAgents={sessionWorkspace.loadingAgents}
+          loading={sessionWorkspace.loadingSessions}
+          error={sessionWorkspace.error}
+          disabled={!sessionApi || sessionWorkspace.isOffline}
+          onSelectAgent={async (agentId) => {
+            const selected = await sessionWorkspace.selectAgent(agentId);
+            if (selected) setForceAgentPicker(false);
+            return selected;
+          }}
+          onOpenSession={async (session) => {
+            const opened = await sessionWorkspace.openSession(session);
+            if (opened) navigateSessionView('session-chat');
+            return opened;
+          }}
+          onCreateSession={async () => {
+            const created = await sessionWorkspace.createSession();
+            if (created) navigateSessionView('session-chat');
+            return created;
+          }}
+          onLoadNext={() => sessionWorkspace.loadNextSessions()}
+          onRetry={sessionWorkspace.retry}
+          onBack={backFromSessionView}
+        />
+        {systemMsg ? (
+          <Box paddingX={2}>
+            <Text color="cyan">{systemMsg}</Text>
+          </Box>
+        ) : null}
+      </Box>
+    );
+  }
+
+  if (view === 'session-chat') {
+    if (!sessionWorkspace.activeSession) {
+      return (
+        <Box flexDirection="column" paddingX={1}>
+          <Text color={sessionWorkspace.error ? 'red' : 'gray'}>
+            {sessionWorkspace.error ??
+              (sessionWorkspace.loadingSession
+                ? 'Loading chat session…'
+                : 'Choose a chat session to continue.')}
+          </Text>
+          {systemMsg ? <Text color="cyan">{systemMsg}</Text> : null}
+          <Text color="gray" dimColor>
+            Type /back to return.
+          </Text>
+        </Box>
+      );
+    }
+
+    return (
+      <Box flexDirection="column">
+        <SessionChat
+          visible={reviewFilter === null}
+          reviewSummary={
+            sessionApi?.review
+              ? {
+                  approvals: sessionReview.approvals.length,
+                  clarifications: sessionReview.clarifications.length,
+                }
+              : undefined
+          }
+          onReview={() => {
+            if (sessionApi?.review) setReviewFilter('all');
+            else showMsg('Session review is unavailable in this launch.');
+          }}
+          session={sessionWorkspace.activeSession}
+          messages={sessionWorkspace.messages}
+          runs={sessionWorkspace.runs}
+          activeRun={sessionWorkspace.activeRun}
+          eventState={sessionWorkspace.eventState}
+          runMode={sessionWorkspace.runMode}
+          canStopActiveRun={sessionWorkspace.canStopActiveRun}
+          stopRequested={sessionWorkspace.stopRequestedRunIds.includes(
+            sessionWorkspace.activeRun?.id ?? ''
+          )}
+          disabled={sessionWorkspace.sessionActionsDisabled}
+          loadingMessages={sessionWorkspace.loadingSession}
+          streamStatus={sessionWorkspace.streamStatus}
+          error={sessionWorkspace.error}
+          onSubmit={handleSessionChatSubmit}
+          onModeChange={sessionWorkspace.setRunMode}
+          onStop={sessionWorkspace.stopActiveRun}
+        />
+        {reviewFilter ? (
+          <SessionReview
+            key={`${sessionWorkspace.activeSession.agentId}:${sessionWorkspace.activeSession.id}:${reviewFilter}`}
+            review={sessionReview}
+            filter={reviewFilter}
+            onBack={() => setReviewFilter(null)}
+            onStop={
+              sessionWorkspace.canStopActiveRun
+                ? () => {
+                    void sessionWorkspace.stopActiveRun();
+                  }
+                : undefined
+            }
+          />
+        ) : null}
+        {systemMsg ? (
+          <Box paddingX={2}>
+            <Text color="cyan">{systemMsg}</Text>
+          </Box>
+        ) : null}
+      </Box>
+    );
+  }
 
   // ── Agents view ──
   if (view === 'agents') {
@@ -1310,8 +1948,8 @@ export function App({
             ? 'Resumed last run. Retry unavailable while daemon is down. Use /health to recheck or /back to return.'
             : 'Resumed last run. Type /retry to run it again or /back to return.'
           : taskEntryBlockedByDaemon
-          ? 'Resumed saved run. Retry unavailable while daemon is down. Use /health to recheck or /back to return.'
-          : 'Resumed saved run. Type /retry to run it again or /back to return.'
+            ? 'Resumed saved run. Retry unavailable while daemon is down. Use /health to recheck or /back to return.'
+            : 'Resumed saved run. Type /retry to run it again or /back to return.'
         : undefined;
     const note =
       interactive && !activeResult.label

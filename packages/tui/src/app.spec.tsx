@@ -1,7 +1,15 @@
 import React from 'react';
+import { stripVTControlCharacters } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { TaskResult } from '@animaos/sdk';
+import type {
+  AgentEvent,
+  AgentSummary,
+  Session,
+  SessionPage,
+  TaskResult,
+} from '@animaos/sdk';
 import type { IEventBus } from './event-bus.js';
+import type { TuiSessionApi } from './session-api.js';
 
 vi.mock('./hooks/use-event-log.js', () => ({
   useEventLog: vi.fn(),
@@ -18,6 +26,7 @@ import {
 } from './test-harness.js';
 import type { ResultEntry } from './components/result-log.js';
 import type { AgentProfile } from './types.js';
+import { approval, clarification } from '../tests/review-fixtures.js';
 
 afterEach(() => {
   cleanupInk();
@@ -59,13 +68,107 @@ function createAgentProfile(
   };
 }
 
+function createDaemonAgent(id: string): AgentSummary {
+  return {
+    state: {
+      id,
+      name: id,
+      status: 'idle',
+      config: {} as AgentSummary['state']['config'],
+      createdAtMs: 1,
+      tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    },
+    messageCount: 0,
+    eventCount: 0,
+    lastTask: null,
+  };
+}
+
+function createChatSession(
+  id: string,
+  agentId: string,
+  overrides: Partial<Session> = {}
+): Session {
+  return {
+    id,
+    agentId,
+    roomId: id,
+    kind: 'chat',
+    origin: 'web',
+    title: id,
+    titleSource: 'owner',
+    createdAtMs: 1,
+    lastActivityAtMs: 1,
+    lastReadAtMs: null,
+    archived: false,
+    parentSessionId: null,
+    parentRunId: null,
+    parentAgentId: null,
+    summary: null,
+    contextTrimmed: null,
+    compactionError: null,
+    messageCount: 0,
+    preview: null,
+    activeRuns: 0,
+    pendingApprovals: 0,
+    unread: false,
+    capabilities: {
+      send: true,
+      steer: true,
+      stop: true,
+      rename: true,
+      archive: true,
+      delete: true,
+      compact: true,
+      export: true,
+    },
+    ...overrides,
+  };
+}
+
+function neverSessionEvents(signal: AbortSignal): AsyncIterable<AgentEvent> {
+  return {
+    async *[Symbol.asyncIterator]() {
+      if (signal.aborted) return;
+      await new Promise<void>((resolve) => {
+        signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+    },
+  };
+}
+
+function createSessionApi(
+  overrides: Partial<TuiSessionApi> = {}
+): TuiSessionApi {
+  const agent = createDaemonAgent('agent-a');
+  const session = createChatSession('session-a', 'agent-a');
+  return {
+    listAgents: vi.fn().mockResolvedValue([agent]),
+    listSessions: vi
+      .fn()
+      .mockResolvedValue({ sessions: [session], nextCursor: null }),
+    createSession: vi.fn().mockResolvedValue(session),
+    getMessages: vi.fn().mockResolvedValue({ messages: [], nextBefore: null }),
+    listRuns: vi.fn().mockResolvedValue([]),
+    startRun: vi.fn(),
+    stopRun: vi.fn(),
+    streamEvents: vi
+      .fn()
+      .mockImplementation((_agentId: string, signal: AbortSignal) =>
+        neverSessionEvents(signal)
+      ),
+    ...overrides,
+  };
+}
+
 function mockEventLog(overrides: Partial<UseEventLogResult> = {}) {
   vi.mocked(useEventLog).mockReturnValue({
     agents: [],
     messages: [],
     tools: [],
     stats: {
-      totalTokens: 0,      elapsed: 0,
+      totalTokens: 0,
+      elapsed: 0,
       agentCount: 0,
       strategy: 'round-robin',
       laggedEventCount: 0,
@@ -87,7 +190,615 @@ function createDeferredResult() {
   return { promise, resolve };
 }
 
+function createDeferredSessionPage() {
+  let resolve!: (page: SessionPage) => void;
+  const promise = new Promise<SessionPage>((res) => {
+    resolve = res;
+  });
+
+  return { promise, resolve };
+}
+
 describe('App interactions', () => {
+  it('opens focused review without stealing or clearing the chat draft or creating another stream', async () => {
+    mockEventLog();
+    const sessionApi = createSessionApi({
+      review: {
+        listPendingApprovals: vi.fn().mockResolvedValue([approval()]),
+        decideApproval: vi.fn(),
+        listClarifications: vi.fn().mockResolvedValue([clarification()]),
+        answerClarification: vi.fn(),
+      },
+    });
+    const rendered = render(
+      <App
+        eventBus={createEventBus()}
+        strategy="round-robin"
+        interactive
+        sessionApi={sessionApi}
+      />
+    );
+    await submit(rendered, '/chat');
+    await vi.waitFor(() =>
+      expect(rendered.lastFrame()).toContain('Type a message')
+    );
+    await pressKey(rendered, 'unfinished draft');
+    await vi.waitFor(() =>
+      expect(rendered.lastFrame()).toContain('1 approval')
+    );
+    await pressKey(rendered, '\u0012');
+    expect(rendered.lastFrame()).toContain('Session review');
+    expect(rendered.lastFrame()).toContain('Which target?');
+    expect(rendered.lastFrame()).not.toContain('unfinished draft');
+    await pressKey(rendered, '\u001b');
+    expect(rendered.lastFrame()).toContain('unfinished draft');
+    expect(sessionApi.startRun).not.toHaveBeenCalled();
+    expect(sessionApi.streamEvents).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens filtered approvals and clarifications through chat commands', async () => {
+    mockEventLog();
+    const sessionApi = createSessionApi({
+      review: {
+        listPendingApprovals: vi.fn().mockResolvedValue([approval()]),
+        decideApproval: vi.fn(),
+        listClarifications: vi.fn().mockResolvedValue([clarification()]),
+        answerClarification: vi.fn(),
+      },
+    });
+    const rendered = render(
+      <App
+        eventBus={createEventBus()}
+        strategy="round-robin"
+        interactive
+        sessionApi={sessionApi}
+      />
+    );
+    await submit(rendered, '/chat');
+    await vi.waitFor(() =>
+      expect(rendered.lastFrame()).toContain('Type a message')
+    );
+    await submit(rendered, '/approvals');
+    expect(rendered.lastFrame()).toContain('Session review · approvals');
+    expect(rendered.lastFrame()).not.toContain('Which target?');
+    await pressKey(rendered, '\u001b');
+    await submit(rendered, '/clarifications');
+    expect(rendered.lastFrame()).toContain('Session review · clarifications');
+    expect(rendered.lastFrame()).toContain('Which target?');
+  });
+
+  it('shows a helpful message when session commands are used without an API', async () => {
+    mockEventLog();
+    const rendered = render(
+      <App eventBus={createEventBus()} strategy="round-robin" interactive />
+    );
+
+    await submit(rendered, '/chat');
+
+    expect(rendered.lastFrame()).toContain(
+      'Session chat is unavailable in this launch.'
+    );
+    expect(rendered.lastFrame()).toContain('SWARM');
+  });
+
+  it('opens the most recently active non-archived chat session from /chat', async () => {
+    mockEventLog();
+    const agent = createDaemonAgent('agent-a');
+    const older = createChatSession('session-old', 'agent-a', {
+      title: 'Older chat',
+      lastActivityAtMs: 10,
+    });
+    const latest = createChatSession('session-new', 'agent-a', {
+      title: 'Latest chat',
+      lastActivityAtMs: 20,
+    });
+    const archived = createChatSession('session-archived', 'agent-a', {
+      title: 'Archived chat',
+      archived: true,
+      lastActivityAtMs: 30,
+    });
+    const sessionApi = createSessionApi({
+      listAgents: vi.fn().mockResolvedValue([agent]),
+      listSessions: vi.fn().mockResolvedValue({
+        sessions: [older, archived, latest],
+        nextCursor: null,
+      }),
+    });
+    const rendered = render(
+      <App
+        eventBus={createEventBus()}
+        strategy="round-robin"
+        interactive
+        sessionApi={sessionApi}
+      />
+    );
+
+    await submit(rendered, '/chat');
+    await flush();
+    await flush();
+
+    expect(rendered.lastFrame()).toContain('Latest chat');
+    expect(rendered.lastFrame()).not.toContain('Archived chat');
+    await submit(rendered, '/back');
+    expect(rendered.lastFrame()).toContain('SWARM');
+  });
+
+  it('waits for the initial sole-agent session page before resolving /chat', async () => {
+    mockEventLog();
+    const agent = createDaemonAgent('agent-a');
+    const older = createChatSession('session-old', 'agent-a', {
+      title: 'Older initial chat',
+      lastActivityAtMs: 10,
+    });
+    const latest = createChatSession('session-latest', 'agent-a', {
+      title: 'Latest initial chat',
+      lastActivityAtMs: 20,
+    });
+    const deferredPage = createDeferredSessionPage();
+    const sessionApi = createSessionApi({
+      listAgents: vi.fn().mockResolvedValue([agent]),
+      listSessions: vi.fn().mockReturnValue(deferredPage.promise),
+    });
+    const rendered = render(
+      <App
+        eventBus={createEventBus()}
+        strategy="round-robin"
+        interactive
+        sessionApi={sessionApi}
+      />
+    );
+
+    await flush();
+    await flush();
+    expect(sessionApi.listSessions).toHaveBeenCalledTimes(1);
+
+    await submit(rendered, '/chat');
+    await flush();
+    expect(rendered.lastFrame()).not.toContain('Chat sessions');
+    expect(sessionApi.getMessages).not.toHaveBeenCalled();
+
+    deferredPage.resolve({
+      sessions: [older, latest],
+      nextCursor: null,
+    });
+    await flush();
+    await flush();
+    await flush();
+
+    expect(rendered.lastFrame()).toContain('Latest initial chat');
+    expect(sessionApi.getMessages).toHaveBeenCalledWith(
+      'agent-a',
+      'session-latest',
+      undefined,
+      expect.any(AbortSignal)
+    );
+  });
+
+  it('creates a session with /new and opens an existing session by title', async () => {
+    mockEventLog();
+    const agent = createDaemonAgent('agent-a');
+    const existing = createChatSession('session-a', 'agent-a', {
+      title: 'Quarterly planning',
+    });
+    const created = createChatSession('session-new', 'agent-a', {
+      title: 'New chat',
+    });
+    const sessionApi = createSessionApi({
+      listAgents: vi.fn().mockResolvedValue([agent]),
+      listSessions: vi.fn().mockResolvedValue({
+        sessions: [existing],
+        nextCursor: null,
+      }),
+      createSession: vi.fn().mockResolvedValue(created),
+    });
+    const rendered = render(
+      <App
+        eventBus={createEventBus()}
+        strategy="round-robin"
+        interactive
+        sessionApi={sessionApi}
+      />
+    );
+
+    await submit(rendered, '/new');
+    await flush();
+    await flush();
+    expect(sessionApi.createSession).toHaveBeenCalledWith('agent-a', undefined);
+    expect(rendered.lastFrame()).toContain('New chat');
+
+    await submit(rendered, '/open quarterly planning');
+    await flush();
+    await flush();
+    expect(rendered.lastFrame()).toContain('Quarterly planning');
+    expect(sessionApi.getMessages).toHaveBeenCalledWith(
+      'agent-a',
+      'session-a',
+      undefined,
+      expect.any(AbortSignal)
+    );
+  });
+
+  it('reports ambiguity when duplicate exact titles are already loaded', async () => {
+    mockEventLog();
+    const first = createChatSession('session-one', 'agent-a', {
+      title: 'Shared title',
+    });
+    const second = createChatSession('session-two', 'agent-a', {
+      title: 'Shared title',
+    });
+    const sessionApi = createSessionApi({
+      listSessions: vi.fn().mockResolvedValue({
+        sessions: [first, second],
+        nextCursor: null,
+      }),
+    });
+    const rendered = render(
+      <App
+        eventBus={createEventBus()}
+        strategy="round-robin"
+        interactive
+        sessionApi={sessionApi}
+      />
+    );
+
+    await flush();
+    await flush();
+    await submit(rendered, '/open Shared title');
+    await flush();
+    await flush();
+
+    expect(rendered.lastFrame()).toContain('More than one session matches');
+    expect(sessionApi.getMessages).not.toHaveBeenCalled();
+  });
+
+  it('reports ambiguity when an exact title duplicate is on a later page', async () => {
+    mockEventLog();
+    const first = createChatSession('session-one', 'agent-a', {
+      title: 'Shared title',
+    });
+    const second = createChatSession('session-two', 'agent-a', {
+      title: 'Shared title',
+    });
+    const listSessions = vi
+      .fn()
+      .mockImplementation((_agentId: string, cursor?: string) =>
+        Promise.resolve(
+          cursor === 'cursor-two'
+            ? { sessions: [second], nextCursor: null }
+            : { sessions: [first], nextCursor: 'cursor-two' }
+        )
+      );
+    const sessionApi = createSessionApi({ listSessions });
+    const rendered = render(
+      <App
+        eventBus={createEventBus()}
+        strategy="round-robin"
+        interactive
+        sessionApi={sessionApi}
+      />
+    );
+
+    await flush();
+    await flush();
+    await submit(rendered, '/open Shared title');
+    await flush();
+    await flush();
+
+    expect(listSessions).toHaveBeenCalledWith(
+      'agent-a',
+      'cursor-two',
+      expect.any(AbortSignal)
+    );
+    expect(rendered.lastFrame()).toContain('More than one session matches');
+    expect(sessionApi.getMessages).not.toHaveBeenCalled();
+  });
+
+  it('resolves a unique title from a later session page', async () => {
+    mockEventLog();
+    const first = createChatSession('session-one', 'agent-a', {
+      title: 'Other title',
+    });
+    const second = createChatSession('session-two', 'agent-a', {
+      title: 'Target title',
+    });
+    const listSessions = vi
+      .fn()
+      .mockImplementation((_agentId: string, cursor?: string) =>
+        Promise.resolve(
+          cursor === 'cursor-two'
+            ? { sessions: [second], nextCursor: null }
+            : { sessions: [first], nextCursor: 'cursor-two' }
+        )
+      );
+    const sessionApi = createSessionApi({ listSessions });
+    const rendered = render(
+      <App
+        eventBus={createEventBus()}
+        strategy="round-robin"
+        interactive
+        sessionApi={sessionApi}
+      />
+    );
+
+    await flush();
+    await flush();
+    await submit(rendered, '/open Target title');
+    await flush();
+    await flush();
+
+    expect(listSessions).toHaveBeenCalledWith(
+      'agent-a',
+      'cursor-two',
+      expect.any(AbortSignal)
+    );
+    expect(rendered.lastFrame()).toContain('Target title');
+    expect(sessionApi.getMessages).toHaveBeenCalledWith(
+      'agent-a',
+      'session-two',
+      undefined,
+      expect.any(AbortSignal)
+    );
+  });
+
+  it('resolves a session ID from a later session page', async () => {
+    mockEventLog();
+    const first = createChatSession('session-one', 'agent-a', {
+      title: 'Other title',
+    });
+    const second = createChatSession('session-two', 'agent-a', {
+      title: 'Target title',
+    });
+    const listSessions = vi
+      .fn()
+      .mockImplementation((_agentId: string, cursor?: string) =>
+        Promise.resolve(
+          cursor === 'cursor-two'
+            ? { sessions: [second], nextCursor: 'cursor-three' }
+            : cursor === 'cursor-three'
+              ? {
+                  sessions: [
+                    createChatSession('session-three', 'agent-a', {
+                      title: 'Never needed title',
+                    }),
+                  ],
+                  nextCursor: null,
+                }
+              : { sessions: [first], nextCursor: 'cursor-two' }
+        )
+      );
+    const sessionApi = createSessionApi({ listSessions });
+    const rendered = render(
+      <App
+        eventBus={createEventBus()}
+        strategy="round-robin"
+        interactive
+        sessionApi={sessionApi}
+      />
+    );
+
+    await flush();
+    await flush();
+    await submit(rendered, '/open session-two');
+    await flush();
+    await flush();
+
+    expect(listSessions).toHaveBeenCalledWith(
+      'agent-a',
+      'cursor-two',
+      expect.any(AbortSignal)
+    );
+    expect(listSessions).not.toHaveBeenCalledWith(
+      'agent-a',
+      'cursor-three',
+      expect.any(AbortSignal)
+    );
+    expect(rendered.lastFrame()).toContain('Target title');
+    expect(sessionApi.getMessages).toHaveBeenCalledWith(
+      'agent-a',
+      'session-two',
+      undefined,
+      expect.any(AbortSignal)
+    );
+  });
+
+  it('aborts a pending session lookup when navigating to the agents view', async () => {
+    mockEventLog();
+    const agent = createDaemonAgent('agent-a');
+    const target = createChatSession('session-delayed', 'agent-a', {
+      title: 'Delayed title',
+    });
+    const deferredLookup = createDeferredSessionPage();
+    let listCallCount = 0;
+    let lookupSignal: AbortSignal | undefined;
+    const listSessions = vi.fn(
+      (_agentId: string, _cursor?: string, signal?: AbortSignal) => {
+        listCallCount += 1;
+        if (listCallCount === 1) {
+          return Promise.resolve({ sessions: [], nextCursor: null });
+        }
+        lookupSignal = signal;
+        return deferredLookup.promise;
+      }
+    );
+    const sessionApi = createSessionApi({
+      listAgents: vi.fn().mockResolvedValue([agent]),
+      listSessions,
+    });
+    const rendered = render(
+      <App
+        eventBus={createEventBus()}
+        strategy="round-robin"
+        interactive
+        agentProfiles={[createAgentProfile()]}
+        sessionApi={sessionApi}
+      />
+    );
+
+    await flush();
+    await flush();
+    await submit(rendered, '/open Delayed title');
+    await flush();
+    expect(listCallCount).toBe(2);
+    expect(lookupSignal?.aborted).toBe(false);
+
+    await submit(rendered, '/agents');
+    expect(rendered.lastFrame()).toContain('Agents (1)');
+    expect(lookupSignal?.aborted).toBe(true);
+
+    deferredLookup.resolve({ sessions: [target], nextCursor: null });
+    await flush();
+    await flush();
+    expect(rendered.lastFrame()).toContain('Agents (1)');
+    expect(rendered.lastFrame()).not.toContain('Delayed title');
+    expect(sessionApi.getMessages).not.toHaveBeenCalled();
+  });
+
+  it('requires explicit agent selection before entering chat when several agents exist', async () => {
+    mockEventLog();
+    const agentA = createDaemonAgent('agent-a');
+    const agentB = createDaemonAgent('agent-b');
+    const older = createChatSession('session-old', 'agent-a', {
+      title: 'Older agent chat',
+      lastActivityAtMs: 10,
+    });
+    const latest = createChatSession('session-latest', 'agent-a', {
+      title: 'Latest agent chat',
+      lastActivityAtMs: 20,
+    });
+    const sessionApi = createSessionApi({
+      listAgents: vi.fn().mockResolvedValue([agentA, agentB]),
+      listSessions: vi.fn().mockResolvedValue({
+        sessions: [older, latest],
+        nextCursor: null,
+      }),
+    });
+    const rendered = render(
+      <App
+        eventBus={createEventBus()}
+        strategy="round-robin"
+        interactive
+        sessionApi={sessionApi}
+      />
+    );
+
+    await submit(rendered, '/chat');
+    await flush();
+    expect(rendered.lastFrame()).toContain('Choose an agent');
+    expect(rendered.lastFrame()).toContain('agent-a');
+    expect(rendered.lastFrame()).toContain('agent-b');
+    expect(sessionApi.listSessions).not.toHaveBeenCalled();
+
+    await pressKey(rendered, '\r');
+    await flush();
+    expect(sessionApi.listSessions).toHaveBeenCalledWith(
+      'agent-a',
+      undefined,
+      expect.any(AbortSignal)
+    );
+    await flush();
+    await flush();
+    expect(rendered.lastFrame()).toContain('Latest agent chat');
+  });
+
+  it('opens the session picker with creation available when /chat has no sessions', async () => {
+    mockEventLog();
+    const created = createChatSession('session-created', 'agent-a', {
+      title: 'Fresh chat',
+    });
+    const sessionApi = createSessionApi({
+      listSessions: vi
+        .fn()
+        .mockResolvedValue({ sessions: [], nextCursor: null }),
+      createSession: vi.fn().mockResolvedValue(created),
+    });
+    const rendered = render(
+      <App
+        eventBus={createEventBus()}
+        strategy="round-robin"
+        interactive
+        sessionApi={sessionApi}
+      />
+    );
+
+    await submit(rendered, '/chat');
+    await flush();
+    await flush();
+    expect(rendered.lastFrame()).toContain('Chat sessions');
+    expect(rendered.lastFrame()).toContain('No chat sessions yet');
+
+    await pressKey(rendered, 'c');
+    await flush();
+    await flush();
+    expect(sessionApi.createSession).toHaveBeenCalledWith('agent-a', undefined);
+    expect(rendered.lastFrame()).toContain('Fresh chat');
+  });
+
+  it('opens the session picker from chat and returns to chat with /back', async () => {
+    mockEventLog();
+    const sessionApi = createSessionApi();
+    const rendered = render(
+      <App
+        eventBus={createEventBus()}
+        strategy="round-robin"
+        interactive
+        sessionApi={sessionApi}
+      />
+    );
+
+    await submit(rendered, '/chat');
+    await flush();
+    await flush();
+    expect(rendered.lastFrame()).toContain('session-a');
+
+    await submit(rendered, '/sessions');
+    await flush();
+    expect(rendered.lastFrame()).toContain('Chat sessions');
+    await submit(rendered, '/open session-a');
+    await flush();
+    await flush();
+    expect(rendered.lastFrame()).toContain('Agent: agent-a');
+
+    await submit(rendered, '/sessions');
+    await submit(rendered, '/back');
+    expect(rendered.lastFrame()).toContain('session-a');
+
+    await submit(rendered, '/steer');
+    expect(rendered.lastFrame()).toContain('Mode: steer');
+    await submit(rendered, '/queue');
+    expect(rendered.lastFrame()).toContain('Mode: queue');
+
+    await submit(rendered, '/help');
+    const helpText = stripVTControlCharacters(rendered.lastFrame()).replace(
+      /\s+/g,
+      ' '
+    );
+    expect(helpText).toContain('/queue queue the next message');
+    expect(helpText).toContain(
+      '/steer steer the active run with the next message'
+    );
+  });
+
+  it('keeps the picker command input open when Enter is pressed on a bare slash', async () => {
+    mockEventLog();
+    const rendered = render(
+      <App
+        eventBus={createEventBus()}
+        strategy="round-robin"
+        interactive
+        sessionApi={createSessionApi()}
+      />
+    );
+
+    await submit(rendered, '/sessions');
+    await flush();
+    await pressKey(rendered, '/');
+    await pressKey(rendered, '\r');
+
+    expect(rendered.lastFrame()).toContain('Session command');
+    await pressKey(rendered, '\u001B');
+    expect(rendered.lastFrame()).toContain('Chat sessions');
+  });
+
   it('starts in resumed result view and returns to swarm with /back', async () => {
     mockEventLog();
 
@@ -1728,10 +2439,11 @@ describe('App interactions', () => {
         },
       ],
       stats: {
-        totalTokens: 0,        elapsed: 0,
+        totalTokens: 0,
+        elapsed: 0,
         agentCount: 2,
         strategy: 'round-robin',
-      laggedEventCount: 0,
+        laggedEventCount: 0,
       },
     });
 
@@ -2279,10 +2991,11 @@ describe('App interactions', () => {
   it('shows live session state with s while a task is running', async () => {
     mockEventLog({
       stats: {
-        totalTokens: 0,        elapsed: 0,
+        totalTokens: 0,
+        elapsed: 0,
         agentCount: 1,
         strategy: 'round-robin',
-      laggedEventCount: 0,
+        laggedEventCount: 0,
       },
     });
     const deferred = createDeferredResult();

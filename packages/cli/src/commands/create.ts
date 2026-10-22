@@ -242,7 +242,7 @@ async function promptRequiredText(input: {
     placeholder: input.placeholder,
     initialValue: input.initialValue,
     validate: (candidate) => {
-      if (!candidate.trim()) return 'Required';
+      if (!candidate?.trim()) return 'Required';
       return undefined;
     },
   });

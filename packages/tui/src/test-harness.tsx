@@ -10,9 +10,12 @@ class Stdout extends EventEmitter {
   frames: string[] = [];
   private lastRenderedFrame = '';
 
-  write = (frame: string) => {
-    this.frames.push(frame);
-    this.lastRenderedFrame = frame;
+  write = (frame: string, callback?: () => void) => {
+    if (frame !== '' || !callback) {
+      this.frames.push(frame);
+      this.lastRenderedFrame = frame;
+    }
+    callback?.();
     return true;
   };
 
@@ -23,9 +26,12 @@ class Stderr extends EventEmitter {
   frames: string[] = [];
   private lastRenderedFrame = '';
 
-  write = (frame: string) => {
-    this.frames.push(frame);
-    this.lastRenderedFrame = frame;
+  write = (frame: string, callback?: () => void) => {
+    if (frame !== '' || !callback) {
+      this.frames.push(frame);
+      this.lastRenderedFrame = frame;
+    }
+    callback?.();
     return true;
   };
 
@@ -104,6 +110,9 @@ export function cleanupInk() {
 export async function flushInk() {
   await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 0));
+  await Promise.all(
+    inkInstances.map((instance) => instance.waitUntilRenderFlush())
+  );
   await Promise.resolve();
 }
 

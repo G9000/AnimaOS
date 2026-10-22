@@ -28,9 +28,10 @@ const daemonTargetDir = resolve(
 );
 const buildDaemon = promisify(execFile);
 
-describe
-  .skipIf(process.env.ANIMA_SKIP_SERVICE_TESTS === '1')
-  .sequential('@animaos/sdk real daemon integration', () => {
+describe.skipIf(process.env.ANIMA_SKIP_SERVICE_TESTS === '1')(
+  '@animaos/sdk real daemon integration',
+  { concurrent: false },
+  () => {
     let daemonProcess: ChildProcess | null = null;
     let daemonOutput = '';
     let temporaryWorkspace: string | undefined;
@@ -301,7 +302,8 @@ describe
         },
       });
     }, 90000);
-  });
+  },
+);
 
 async function reservePort(): Promise<number> {
   return new Promise((resolvePort, reject) => {

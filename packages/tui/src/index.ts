@@ -7,6 +7,8 @@ export type {
   AgentProfile,
 } from './types.js';
 
+export type { TuiSessionApi, TuiReviewApi } from './session-api.js';
+
 export { AgentsPanel } from './components/agents-panel.js';
 export type { AgentsPanelProps } from './components/agents-panel.js';
 

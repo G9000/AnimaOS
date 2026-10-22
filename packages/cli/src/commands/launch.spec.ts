@@ -36,6 +36,29 @@ function mockSwarms(overrides: Record<string, any> = {}): any {
   };
 }
 
+function withTuiSessionClients<T extends { swarms: unknown }>(client: T) {
+  return {
+    agents: {
+      get: vi.fn().mockResolvedValue({}),
+      listSummaries: vi.fn().mockResolvedValue([]),
+    },
+    sessions: {
+      list: vi.fn().mockResolvedValue({ sessions: [] }),
+      create: vi.fn().mockResolvedValue({}),
+      messages: vi.fn().mockResolvedValue({ messages: [] }),
+    },
+    runs: {
+      listForSession: vi.fn().mockResolvedValue([]),
+      start: vi.fn().mockResolvedValue({}),
+      stop: vi.fn().mockResolvedValue({}),
+    },
+    events: {
+      stream: vi.fn().mockImplementation(emptySubscription),
+    },
+    ...client,
+  };
+}
+
 function createDaemonTuiHarness() {
   let element:
     | {
@@ -1506,7 +1529,7 @@ describe('launch command daemon plain-text mode', () => {
         dir: agencyDir,
         tui: true,
       },
-      { client, ...harness.deps }
+      { client: withTuiSessionClients(client), ...harness.deps }
     );
 
     const element = harness.getElement() as unknown as {
@@ -1574,7 +1597,7 @@ describe('launch command daemon plain-text mode', () => {
         dir: agencyDir,
         tui: true,
       },
-      { client, ...harness.deps }
+      { client: withTuiSessionClients(client), ...harness.deps }
     );
 
     const element = harness.getElement();
@@ -1623,7 +1646,7 @@ describe('launch command daemon plain-text mode', () => {
         dir: agencyDir,
         tui: true,
       },
-      { client, ...harness.deps }
+      { client: withTuiSessionClients(client), ...harness.deps }
     );
 
     const element = harness.getElement() as unknown as {
@@ -1679,7 +1702,7 @@ describe('launch command daemon plain-text mode', () => {
         dir: agencyDir,
         tui: true,
       },
-      { client, ...harness.deps }
+      { client: withTuiSessionClients(client), ...harness.deps }
     );
 
     const element = harness.getElement() as unknown as {
@@ -1764,7 +1787,7 @@ describe('launch command daemon plain-text mode', () => {
         dir: agencyDir,
         tui: true,
       },
-      { client, ...harness.deps }
+      { client: withTuiSessionClients(client), ...harness.deps }
     );
 
     const element = harness.getElement() as unknown as {
@@ -1838,7 +1861,7 @@ describe('launch command daemon plain-text mode', () => {
         dir: agencyDir,
         tui: true,
       },
-      { client, ...harness.deps }
+      { client: withTuiSessionClients(client), ...harness.deps }
     );
 
     const element = harness.getElement() as unknown as {
@@ -1918,7 +1941,7 @@ describe('launch command daemon plain-text mode', () => {
         dir: agencyDir,
         tui: true,
       },
-      { client, ...harness.deps }
+      { client: withTuiSessionClients(client), ...harness.deps }
     );
 
     expect(client.swarms.create).toHaveBeenCalledOnce();
@@ -1928,6 +1951,168 @@ describe('launch command daemon plain-text mode', () => {
     expect(harness.render).toHaveBeenCalledOnce();
     expect(harness.waitUntilExit).toHaveBeenCalledOnce();
     expect(harness.unmount).not.toHaveBeenCalled();
+    expect(harness.getElement()?.props.sessionApi).toEqual(
+      expect.objectContaining({
+        listAgents: expect.any(Function),
+        listSessions: expect.any(Function),
+        createSession: expect.any(Function),
+        getMessages: expect.any(Function),
+        listRuns: expect.any(Function),
+        startRun: expect.any(Function),
+        stopRun: expect.any(Function),
+        streamEvents: expect.any(Function),
+      })
+    );
+  });
+
+  it('injects an SDK-backed session API into the interactive TUI', async () => {
+    const harness = createDaemonTuiHarness();
+    const signal = new AbortController().signal;
+    const eventStream = emptySubscription();
+    const client = {
+      swarms: mockSwarms(),
+      agents: {
+        get: vi.fn(),
+        listSummaries: vi.fn().mockResolvedValue([]),
+      },
+      sessions: {
+        list: vi.fn().mockResolvedValue({ sessions: [] }),
+        create: vi.fn().mockResolvedValue({ id: 'session-2' }),
+        messages: vi.fn().mockResolvedValue({ messages: [] }),
+      },
+      runs: {
+        listForSession: vi.fn().mockResolvedValue([]),
+        start: vi.fn().mockResolvedValue({ run: { id: 'run-1' } }),
+        stop: vi.fn().mockResolvedValue({ id: 'run-1' }),
+      },
+      events: {
+        stream: vi.fn().mockReturnValue(eventStream),
+      },
+    };
+
+    await executeLaunchCommand(
+      undefined,
+      {
+        dir: agencyDir,
+        tui: true,
+      },
+      { client: withTuiSessionClients(client), ...harness.deps }
+    );
+
+    const sessionApi = harness.getElement()?.props.sessionApi as
+      | {
+          listAgents: (signal?: AbortSignal) => Promise<unknown>;
+          listSessions: (
+            agentId: string,
+            cursor?: string,
+            signal?: AbortSignal
+          ) => Promise<unknown>;
+          createSession: (agentId: string, title?: string) => Promise<unknown>;
+          getMessages: (
+            agentId: string,
+            sessionId: string,
+            before?: string,
+            signal?: AbortSignal
+          ) => Promise<unknown>;
+          listRuns: (
+            agentId: string,
+            sessionId: string,
+            signal?: AbortSignal
+          ) => Promise<unknown>;
+          startRun: (
+            agentId: string,
+            sessionId: string,
+            input: { text: string },
+            idempotencyKey: string
+          ) => Promise<unknown>;
+          stopRun: (agentId: string, runId: string) => Promise<unknown>;
+          streamEvents: (agentId: string, signal: AbortSignal) => AsyncIterable<unknown>;
+        }
+      | undefined;
+
+    expect(sessionApi).toBeDefined();
+    if (!sessionApi) return;
+
+    const input = { text: 'Hello from the TUI' };
+    await sessionApi.listAgents(signal);
+    await sessionApi.listSessions('agent-1', 'cursor-1', signal);
+    await sessionApi.createSession('agent-1', 'Follow-up');
+    await sessionApi.getMessages('agent-1', 'session-1', 'message-1', signal);
+    await sessionApi.listRuns('agent-1', 'session-1', signal);
+    await sessionApi.startRun('agent-1', 'session-1', input, 'idempotency-1');
+    await sessionApi.stopRun('agent-1', 'run-1');
+    expect(sessionApi.streamEvents('agent-1', signal)).toBe(eventStream);
+
+    expect(client.agents.listSummaries).toHaveBeenCalledWith({ signal });
+    expect(client.sessions.list).toHaveBeenCalledWith('agent-1', {
+      kind: 'chat',
+      archived: false,
+      includeHelpers: false,
+      cursor: 'cursor-1',
+      signal,
+    });
+    expect(client.sessions.create).toHaveBeenCalledWith('agent-1', {
+      title: 'Follow-up',
+    });
+    expect(client.sessions.messages).toHaveBeenCalledWith(
+      'agent-1',
+      'session-1',
+      { before: 'message-1', signal }
+    );
+    expect(client.runs.listForSession).toHaveBeenCalledWith(
+      'agent-1',
+      'session-1',
+      { signal }
+    );
+    expect(client.runs.start).toHaveBeenCalledWith(
+      'agent-1',
+      'session-1',
+      input,
+      { idempotencyKey: 'idempotency-1', signal: undefined }
+    );
+    expect(client.runs.stop).toHaveBeenCalledWith('agent-1', 'run-1');
+    expect(client.events.stream).toHaveBeenCalledWith('agent-1', { signal });
+  });
+
+  it('wires approval and clarification review through the existing daemon clients', async () => {
+    const harness = createDaemonTuiHarness();
+    const signal = new AbortController().signal;
+    const approvals = { list: vi.fn().mockResolvedValue({ approvals: [], nextCursor: null }), decide: vi.fn().mockResolvedValue({}) };
+    const interactions = { list: vi.fn().mockResolvedValue([]), answer: vi.fn().mockResolvedValue({}) };
+    await executeLaunchCommand(undefined, { dir: agencyDir, tui: true }, {
+      client: withTuiSessionClients({ swarms: mockSwarms(), approvals, interactions }), ...harness.deps,
+    });
+    const sessionApi = harness.getElement()?.props.sessionApi as import('@animaos/tui').TuiSessionApi;
+    expect(sessionApi.review).toBeDefined();
+    await sessionApi.review!.listPendingApprovals(signal);
+    await sessionApi.review!.listClarifications('agent-a', 'session-a', signal);
+    await sessionApi.review!.decideApproval('approval-a', { decision: 'deny', revision: 3, note: 'No' });
+    await sessionApi.review!.answerClarification('agent-a', 'session-a', 'question-a', { revision: 2, answers: [] });
+    expect(approvals.list).toHaveBeenCalledWith({ status: 'pending', signal });
+    expect(approvals.decide).toHaveBeenCalledWith('approval-a', { decision: 'deny', revision: 3, note: 'No' });
+    expect(interactions.list).toHaveBeenCalledWith('agent-a', 'session-a', { signal });
+    expect(interactions.answer).toHaveBeenCalledWith('agent-a', 'session-a', 'question-a', { revision: 2, answers: [] });
+  });
+
+  it('reports missing TUI session clients as a recoverable launch error', async () => {
+    const harness = createDaemonTuiHarness();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await executeLaunchCommand(
+      undefined,
+      {
+        dir: agencyDir,
+        tui: true,
+      },
+      { client: { swarms: mockSwarms() }, ...harness.deps }
+    );
+
+    expect(process.exitCode).toBe(1);
+    expect(error).toHaveBeenCalledWith(
+      'Error:',
+      'TUI launch requires these daemon clients: agents, sessions, runs, events.'
+    );
+    expect(harness.render).not.toHaveBeenCalled();
   });
 
   it('returns a task error instead of throwing when daemon TUI swarm creation fails', async () => {
@@ -1944,7 +2129,7 @@ describe('launch command daemon plain-text mode', () => {
         dir: agencyDir,
         tui: true,
       },
-      { client, ...harness.deps }
+      { client: withTuiSessionClients(client), ...harness.deps }
     );
 
     const element = harness.getElement() as unknown as {
@@ -2011,7 +2196,7 @@ describe('launch command daemon plain-text mode', () => {
         dir: agencyDir,
         tui: true,
       },
-      { client, ...harness.deps }
+      { client: withTuiSessionClients(client), ...harness.deps }
     );
 
     const element = harness.getElement() as unknown as {

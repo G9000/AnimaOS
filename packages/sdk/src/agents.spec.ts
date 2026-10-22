@@ -110,6 +110,15 @@ describe('agent transport', () => {
     expect(await agents.listSummaries()).toEqual([summary]);
     expect(requests[0].url).toBe('/api/agents?view=summary');
   });
+
+  it('forwards an abort signal when listing agent summaries', async () => {
+    const { agents, requests } = transport({ agents: [] });
+    const signal = new AbortController().signal;
+
+    await agents.listSummaries({ signal });
+
+    expect(requests[0].init?.signal).toBe(signal);
+  });
 });
 
 it('uploads binary avatars and encodes agent IDs for removal', async () => {

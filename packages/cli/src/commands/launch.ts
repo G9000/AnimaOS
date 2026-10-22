@@ -12,7 +12,7 @@ import {
   type SwarmConfig,
   type TaskResult,
 } from '@animaos/sdk';
-import type { IEventBus } from '@animaos/tui';
+import type { IEventBus, TuiSessionApi } from '@animaos/tui';
 import { loadAgency, agencyExists } from '../agency/loader.js';
 import {
   loadSeedMemories,
@@ -62,9 +62,19 @@ interface DaemonTuiRuntime {
   App: unknown;
 }
 
+type LaunchDaemonClient = Pick<CliDaemonClient, 'swarms'> &
+  Partial<Pick<CliDaemonClient, 'health'>> & {
+    agents?: Pick<CliDaemonClient['agents'], 'get' | 'listSummaries'>;
+    memories?: Pick<CliDaemonClient['memories'], 'create'>;
+    sessions?: Pick<CliDaemonClient['sessions'], 'list' | 'create' | 'messages'>;
+    runs?: Pick<CliDaemonClient['runs'], 'listForSession' | 'start' | 'stop'>;
+    events?: Pick<CliDaemonClient['events'], 'stream'>;
+    approvals?: Pick<CliDaemonClient['approvals'], 'list' | 'decide'>;
+    interactions?: Pick<CliDaemonClient['interactions'], 'list' | 'answer'>;
+  };
+
 interface LaunchDeps {
-  client?: Pick<CliDaemonClient, 'swarms'> &
-    Partial<Pick<CliDaemonClient, 'health' | 'agents' | 'memories'>>;
+  client?: LaunchDaemonClient;
   createReadline?: () => Pick<Interface, 'question' | 'close'>;
   createDaemonTuiRuntime?: () => Promise<DaemonTuiRuntime>;
 }
@@ -490,8 +500,7 @@ function daemonToolsForAgent(agent: AgentDefinition): ResolvedDaemonTools {
 }
 
 function createDaemonSwarmSession(
-  client: Pick<CliDaemonClient, 'swarms'> &
-    Partial<Pick<CliDaemonClient, 'agents' | 'memories'>>,
+  client: LaunchDaemonClient,
   agency: AgencyConfig,
   opts: Pick<LaunchOptions, 'apiKey'>,
   onAfterCreate?: (swarm: DaemonSwarmSnapshot) => Promise<void>
@@ -531,8 +540,7 @@ function createDaemonSwarmSession(
 }
 
 async function applySeedMemories(
-  client: Pick<CliDaemonClient, 'swarms'> &
-    Partial<Pick<CliDaemonClient, 'agents' | 'memories'>>,
+  client: LaunchDaemonClient,
   swarm: DaemonSwarmSnapshot,
   seeds: AgentSeedMemories[]
 ): Promise<{ created: number; errors: string[] } | undefined> {
@@ -722,6 +730,76 @@ function printLaunchResult(result: TaskResult, setExitCodeOnError = false) {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type TuiSessionClient = Required<
+  Pick<LaunchDaemonClient, 'agents' | 'sessions' | 'runs' | 'events'>
+> &
+  Pick<LaunchDaemonClient, 'approvals' | 'interactions'>;
+
+function requireTuiSessionClient(client: LaunchDaemonClient): TuiSessionClient {
+  const { agents, sessions, runs, events } = client;
+  if (!agents || !sessions || !runs || !events) {
+    const missing = [
+      !agents && 'agents',
+      !sessions && 'sessions',
+      !runs && 'runs',
+      !events && 'events',
+    ].filter((name): name is string => Boolean(name));
+    throw new Error(
+      `TUI launch requires these daemon clients: ${missing.join(', ')}.`
+    );
+  }
+
+  return {
+    agents,
+    sessions,
+    runs,
+    events,
+    approvals: client.approvals,
+    interactions: client.interactions,
+  };
+}
+
+function createTuiSessionApi(client: TuiSessionClient): TuiSessionApi {
+  const { approvals, interactions } = client;
+  return {
+    review:
+      approvals && interactions
+        ? {
+            listPendingApprovals: async (signal) =>
+              (await approvals.list({ status: 'pending', signal })).approvals,
+            decideApproval: (id, input) => approvals.decide(id, input),
+            listClarifications: (agentId, sessionId, signal) =>
+              interactions.list(agentId, sessionId, { signal }),
+            answerClarification: (agentId, sessionId, id, input) =>
+              interactions.answer(agentId, sessionId, id, input),
+          }
+        : undefined,
+    listAgents: (signal) => client.agents.listSummaries({ signal }),
+    listSessions: (agentId, cursor, signal) =>
+      client.sessions.list(agentId, {
+        kind: 'chat',
+        archived: false,
+        includeHelpers: false,
+        cursor,
+        signal,
+      }),
+    createSession: (agentId, title) =>
+      client.sessions.create(agentId, { title }),
+    getMessages: (agentId, sessionId, before, signal) =>
+      client.sessions.messages(agentId, sessionId, { before, signal }),
+    listRuns: (agentId, sessionId, signal) =>
+      client.runs.listForSession(agentId, sessionId, { signal }),
+    startRun: (agentId, sessionId, input, idempotencyKey) =>
+      client.runs.start(agentId, sessionId, input, {
+        idempotencyKey,
+        signal: undefined,
+      }),
+    stopRun: (agentId, runId) => client.runs.stop(agentId, runId),
+    streamEvents: (agentId, signal) =>
+      client.events.stream(agentId, { signal }),
+  };
 }
 
 async function loadDaemonTuiRuntime(): Promise<DaemonTuiRuntime> {
@@ -915,6 +993,7 @@ async function executeDaemonTuiLaunchCommand(
 ): Promise<void> {
   try {
     const client = deps.client ?? createCliDaemonClient();
+    const tuiSessionClient = requireTuiSessionClient(client);
     const seeds = loadSeedMemories(opts.dir, agency);
     const swarmSession = createDaemonSwarmSession(
       client,
@@ -929,6 +1008,7 @@ async function executeDaemonTuiLaunchCommand(
       ? await deps.createDaemonTuiRuntime()
       : await loadDaemonTuiRuntime();
     const bus = tuiRuntime.eventBus;
+    const sessionApi = createTuiSessionApi(tuiSessionClient);
     const initialResults = loadLaunchHistory(opts.dir);
     const preflightWarning = await getDaemonPreflightWarning(client);
     const pollDaemonWarning = createDaemonWarningPoller(client);
@@ -1028,6 +1108,7 @@ async function executeDaemonTuiLaunchCommand(
     if (!task) {
       const element = tuiRuntime.createElement(tuiRuntime.App, {
         eventBus: bus,
+        sessionApi,
         strategy: agency.strategy,
         interactive: true,
         onTask: runTask,
@@ -1048,6 +1129,7 @@ async function executeDaemonTuiLaunchCommand(
 
     const element = tuiRuntime.createElement(tuiRuntime.App, {
       eventBus: bus,
+      sessionApi,
       strategy: agency.strategy,
       task,
       onTask: runTask,

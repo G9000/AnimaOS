@@ -233,9 +233,12 @@ export class AgentsClient {
     return response.agents;
   }
 
-  async listSummaries(): Promise<AgentSummary[]> {
+  async listSummaries(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<AgentSummary[]> {
     const response = await this.client.requestJson<{ agents: AgentSummary[] }>(
       '/api/agents?view=summary',
+      { signal: options.signal },
     );
     return response.agents;
   }
