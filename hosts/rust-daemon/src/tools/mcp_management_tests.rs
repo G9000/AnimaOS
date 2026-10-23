@@ -129,7 +129,7 @@ async fn chat_mcp_setup_configures_tests_grants_and_uses_tools_in_a_later_chat()
     )
     .await;
     let row = f.manager.get(&f.agent.id, &id).await.unwrap();
-    assert_eq!(row.state, McpConnectionState::NeedsReview);
+    assert_eq!(row.state, McpConnectionState::Ready);
     assert_eq!(row.candidates.len(), 1);
     assert_eq!(
         f.factory.calls.load(Ordering::SeqCst),

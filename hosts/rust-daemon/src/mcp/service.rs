@@ -290,7 +290,7 @@ impl McpManager {
             return Err(McpServiceError::InvalidRequest);
         }
         if token.is_none() && old.bearer_credential_ref.is_none() {
-            return self.view(old);
+            return self.view(old, &*state.read().await);
         }
         let version = next_version(old.version)?;
         self.retire_and_join(id).await?;
@@ -349,7 +349,7 @@ impl McpManager {
             Self::owner(&guard, agent)?;
             self.same_publication(&guard)?;
             guard.mcp_registry = next;
-            self.publish(&guard.mcp_registry)?;
+            self.publish(&guard)?;
             if uncertain {
                 return Err(McpServiceError::Unavailable);
             }
@@ -365,7 +365,7 @@ impl McpManager {
                     connection.state = McpConnectionState::Disconnected;
                 }
             }
-            self.view(guard.mcp_registry.connections[id].clone())
+            self.view(guard.mcp_registry.connections[id].clone(), &guard)
         }
         .await;
         if saved.is_err() {
@@ -446,7 +446,12 @@ impl McpManager {
         .await
         .map_err(|_| McpServiceError::Unavailable)?
     }
-    fn view(&self, record: McpConnectionRecord) -> Result<McpConnectionView, McpServiceError> {
+    fn view(
+        &self,
+        record: McpConnectionRecord,
+        state: &DaemonState,
+    ) -> Result<McpConnectionView, McpServiceError> {
+        let tool_access = McpToolAccess::for_agent(state, &record.agent_id);
         let live = self
             .inner
             .live
@@ -459,6 +464,7 @@ impl McpManager {
             .unwrap_or_default();
         Ok(McpConnectionView {
             record,
+            tool_access,
             state: connection.state,
             wire_generation: connection.generation,
             discovery_id: connection.discovery_id,
@@ -494,27 +500,27 @@ impl McpManager {
         agent: &str,
     ) -> Result<Vec<McpConnectionView>, McpServiceError> {
         let state = self.state()?;
-        let rows = {
-            let guard = state.read().await;
-            self.management_scope(&guard, agent)?;
-            Self::owner(&guard, agent)?;
-            self.same_publication(&guard)?;
-            guard
-                .mcp_registry
-                .connections
-                .values()
-                .filter(|row| row.agent_id == agent)
-                .cloned()
-                .collect::<Vec<_>>()
-        };
-        rows.into_iter().map(|row| self.view(row)).collect()
+        let guard = state.read().await;
+        self.management_scope(&guard, agent)?;
+        Self::owner(&guard, agent)?;
+        self.same_publication(&guard)?;
+        guard
+            .mcp_registry
+            .connections
+            .values()
+            .filter(|row| row.agent_id == agent)
+            .map(|row| self.view(row.clone(), &guard))
+            .collect()
     }
     pub(crate) async fn get(
         &self,
         agent: &str,
         id: &str,
     ) -> Result<McpConnectionView, McpServiceError> {
-        self.view(self.record(agent, id, None).await?)
+        let record = self.record(agent, id, None).await?;
+        let state = self.state()?;
+        let guard = state.read().await;
+        self.view(record, &guard)
     }
     pub(crate) async fn create(
         &self,
@@ -646,7 +652,7 @@ impl McpManager {
             apply_grant(&mut tools, alias, input.granted.then_some(&descriptor));
             if tools == old_tools {
                 return Ok(McpGrantOutcome {
-                    connection: self.view(row.clone())?,
+                    connection: self.view(row.clone(), &guard)?,
                     granted: input.granted,
                     tool_names: tools
                         .iter()
@@ -707,12 +713,12 @@ impl McpManager {
         if uncertain {
             self.retire(id, Some(McpServiceError::Unavailable))?;
         }
-        self.publish(&guard.mcp_registry)?;
+        self.publish(&guard)?;
         if uncertain {
             return Err(McpServiceError::Unavailable);
         }
         Ok(McpGrantOutcome {
-            connection: self.view(guard.mcp_registry.connections[id].clone())?,
+            connection: self.view(guard.mcp_registry.connections[id].clone(), &guard)?,
             granted: input.granted,
             tool_names,
         })
@@ -836,7 +842,7 @@ impl McpManager {
                                 row.enabled = enabled;
                             }
                             if *row == old {
-                                return self.view(old).map(Some);
+                                return self.view(old, &guard).map(Some);
                             }
                             retire = row.endpoint != old.endpoint || row.enabled != old.enabled;
                             row.version = next_version(row.version)?;
@@ -871,7 +877,7 @@ impl McpManager {
                                 .iter()
                                 .any(|tool| tool.descriptor == candidate)
                             {
-                                return self.view(row.clone()).map(Some);
+                                return self.view(row.clone(), &guard).map(Some);
                             }
                             if row.reviewed_tools.len() >= MAX_REVIEWED_TOOLS {
                                 return Err(McpServiceError::Busy);
@@ -1046,21 +1052,27 @@ impl McpManager {
                 self.retire(id, None)?;
             }
         }
-        self.publish(&guard.mcp_registry)?;
+        self.publish(&guard)?;
         if uncertain {
             return Err(McpServiceError::Unavailable);
         }
         result_id
-            .map(|id| self.view(guard.mcp_registry.connections[&id].clone()))
+            .map(|id| self.view(guard.mcp_registry.connections[&id].clone(), &guard))
             .transpose()
     }
-    fn publish(&self, registry: &McpRegistry) -> Result<(), McpServiceError> {
+    fn publish(&self, state: &DaemonState) -> Result<(), McpServiceError> {
+        let registry = &state.mcp_registry;
         let mut live = self
             .inner
             .live
             .lock()
             .map_err(|_| McpServiceError::Unavailable)?;
         let mut publication = McpPublishedCatalog::from_registry(registry);
+        publication.access = state
+            .agents
+            .keys()
+            .map(|agent| (agent.clone(), McpToolAccess::for_agent(state, agent)))
+            .collect();
         for record in registry
             .connections
             .values()
@@ -1076,29 +1088,60 @@ impl McpManager {
             }) else {
                 continue;
             };
-            connection.state = if connection.candidates.iter().any(|candidate| {
-                !record
-                    .reviewed_tools
-                    .iter()
-                    .any(|tool| &tool.descriptor == candidate)
-            }) {
+            let access = publication
+                .access
+                .get(&record.agent_id)
+                .copied()
+                .unwrap_or(McpToolAccess::Denied);
+            connection.state = if access == McpToolAccess::Review
+                && connection.candidates.iter().any(|candidate| {
+                    !record
+                        .reviewed_tools
+                        .iter()
+                        .any(|tool| &tool.descriptor == candidate)
+                }) {
                 McpConnectionState::NeedsReview
             } else {
                 McpConnectionState::Ready
             };
-            for tool in record.reviewed_tools.iter().filter(|tool| {
-                connection
-                    .candidates
+            if access == McpToolAccess::Denied {
+                continue;
+            }
+            for candidate in &connection.candidates {
+                let tool = match record
+                    .reviewed_tools
                     .iter()
-                    .any(|candidate| candidate == &tool.descriptor)
-            }) {
+                    .find(|tool| &tool.descriptor == candidate)
+                {
+                    Some(tool) => tool.clone(),
+                    None if access == McpToolAccess::Automatic => ReviewedMcpTool {
+                        alias: alias_for(&record.id, &candidate.descriptor_digest)?,
+                        descriptor: candidate.clone(),
+                    },
+                    None => continue,
+                };
+                let key = (record.agent_id.clone(), tool.alias.clone());
+                if publication
+                    .known
+                    .get(&key)
+                    .is_some_and(|known| known.tool != tool)
+                {
+                    return Err(McpServiceError::Conflict);
+                }
+                publication.known.insert(
+                    key.clone(),
+                    McpKnownBinding {
+                        connection_id: record.id.clone(),
+                        tool: tool.clone(),
+                    },
+                );
                 publication.live.insert(
-                    (record.agent_id.clone(), tool.alias.clone()),
+                    key,
                     McpReadyBinding {
                         connection_id: record.id.clone(),
                         version: record.version,
                         generation: connection.generation,
-                        tool: tool.clone(),
+                        tool,
                     },
                 );
             }
@@ -1109,6 +1152,24 @@ impl McpManager {
             .write()
             .map_err(|_| McpServiceError::Unavailable)? = publication;
         Ok(())
+    }
+    pub(crate) fn tool_access(&self, agent: &str) -> McpToolAccess {
+        self.inner
+            .publication
+            .read()
+            .ok()
+            .and_then(|publication| publication.access.get(agent).copied())
+            .unwrap_or_default()
+    }
+
+    /// Called under the state write lock for both permission edits and rollbacks.
+    pub(crate) fn refresh_agent_permissions(
+        &self,
+        state: &DaemonState,
+        agent: &str,
+    ) -> Result<(), McpServiceError> {
+        self.note_agent_permissions_changed(agent);
+        self.publish(state)
     }
     pub(crate) fn known_descriptor(&self, agent: &str, alias: &str) -> Option<ToolDescriptor> {
         self.inner
@@ -1372,8 +1433,8 @@ impl McpManager {
         }
         let state = self.state()?;
         let guard = state.read().await;
-        self.publish(&guard.mcp_registry)?;
-        self.view(current.map_err(|_| McpServiceError::Revoked)?)
+        self.publish(&guard)?;
+        self.view(current.map_err(|_| McpServiceError::Revoked)?, &guard)
     }
     pub(crate) async fn disconnect(
         &self,
@@ -1386,12 +1447,11 @@ impl McpManager {
         self.owned(async move {
             let _transaction = manager.inner.transactions.lock().await;
             let record = manager.record(&agent, &id, Some(expected)).await?;
-            {
-                let state = manager.state()?;
-                manager.management_scope(&*state.read().await, &agent)?;
-            }
+            let state = manager.state()?;
+            let guard = state.read().await;
+            manager.management_scope(&guard, &agent)?;
             manager.retire(&id, None)?;
-            manager.view(record)
+            manager.view(record, &guard)
         })
         .await
     }
@@ -1605,7 +1665,7 @@ impl McpManager {
     }
     pub(crate) fn publish_bundle_catalog(
         &self,
-        registry: &McpRegistry,
+        state: &DaemonState,
         retire: &[String],
         _agent: &str,
     ) -> Result<(), McpServiceError> {
@@ -1613,7 +1673,7 @@ impl McpManager {
         for id in retire {
             self.retire(id, None)?;
         }
-        self.publish(registry)
+        self.publish(state)
     }
     pub(crate) fn retire_bundle_connections(&self, ids: &[String]) -> Result<(), McpServiceError> {
         for id in ids {
@@ -1819,9 +1879,7 @@ impl McpManager {
             })
             .ok_or(McpServiceError::Revoked)?;
         let _ = run;
-        if !guard.sessions.contains(&stamp.agent_id, &stamp.session_id)
-            || !runtime.config().allows_tool(&stamp.alias)
-        {
+        if !guard.sessions.contains(&stamp.agent_id, &stamp.session_id) {
             return Err(McpServiceError::Revoked);
         }
         let binding = self
@@ -1833,6 +1891,26 @@ impl McpManager {
             .get(&(stamp.agent_id.clone(), stamp.alias.clone()))
             .cloned()
             .ok_or(McpServiceError::Revoked)?;
+        match McpToolAccess::for_agent(&guard, &stamp.agent_id) {
+            McpToolAccess::Automatic => {}
+            McpToolAccess::Review => {
+                if !runtime
+                    .config()
+                    .tools
+                    .iter()
+                    .flatten()
+                    .any(|tool| tool == &binding.tool.tool_descriptor())
+                    || !guard
+                        .mcp_registry
+                        .connections
+                        .get(&stamp.connection_id)
+                        .is_some_and(|record| record.reviewed_tools.contains(&binding.tool))
+                {
+                    return Err(McpServiceError::Revoked);
+                }
+            }
+            McpToolAccess::Denied => return Err(McpServiceError::Revoked),
+        }
         let epoch = *self
             .inner
             .live

@@ -35,7 +35,11 @@ function statusText(connection: McpConnection): string {
     case 'needs_review':
       return 'Connected — tools need review';
     case 'ready':
-      return 'Connected — reviewed tools ready';
+      return connection.toolAccess === 'automatic'
+        ? 'Connected — tools available automatically'
+        : connection.toolAccess === 'denied'
+          ? 'Connected — tools blocked by policy'
+          : 'Connected — reviewed tools ready';
     case 'degraded':
       return 'Connection unavailable';
   }
@@ -291,9 +295,9 @@ export function McpConnectionsPanel({
             External tools (MCP)
           </h2>
           <p className="mt-1 max-w-3xl text-xs text-ink-3">
-            Save a server, connect, review its tools, then choose which tools
-            your agent may use. Saving or reviewing never grants permission.
-            These external tools use your existing approval rules.
+            Save a server, enable it, and connect. Free mode allows its tools
+            automatically. Strict requires tool review and permission grants;
+            Custom follows your execution setting. Saving starts no connection.
           </p>
         </div>
         <button
@@ -682,7 +686,9 @@ function ConnectionCard({
   const bearerEligible =
     !local &&
     (row.endpoint.startsWith('https://') ||
-      /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/.test(row.endpoint));
+      /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/.test(
+        row.endpoint,
+      ));
   const wireBusy =
     row.state === 'stopping' ||
     row.state === 'connecting' ||
@@ -733,6 +739,17 @@ function ConnectionCard({
         <p className="text-xs">
           The connection reported an issue ({row.error.code}). Refresh to check
           its current state.
+        </p>
+      )}
+      {row.toolAccess === 'automatic' && (
+        <p className="text-xs text-ink-3">
+          Tools from this connection become available automatically after it is
+          enabled and connected. New tools are available on the next agent turn.
+        </p>
+      )}
+      {row.toolAccess === 'denied' && (
+        <p className="text-xs text-ink-3">
+          MCP tools are blocked by the agent’s execution policy.
         </p>
       )}
       {bearerEligible && (
@@ -923,73 +940,83 @@ function ConnectionCard({
               >
                 <Descriptor tool={tool} />
                 <p className="text-xs">
-                  {reviewed
-                    ? 'Reviewed — permission is chosen separately.'
-                    : 'Not reviewed — not available to the agent.'}
+                  {row.toolAccess === 'automatic'
+                    ? !stale && row.enabled && connected
+                      ? 'Available automatically under the agent’s permissions.'
+                      : 'Currently unavailable — enable and connect to use automatically.'
+                    : row.toolAccess === 'denied'
+                      ? 'Blocked by the agent’s execution policy.'
+                      : reviewed
+                        ? 'Reviewed — permission is chosen separately.'
+                        : 'Not reviewed — not available to the agent.'}
                 </p>
-                <button
-                  className={button}
-                  disabled={
-                    blocked ||
-                    wireBusy ||
-                    !connected ||
-                    !row.discoveryId ||
-                    reviewed
-                  }
-                  onClick={() => review(tool)}
-                >
-                  Review {tool.remoteName}
-                </button>
+                {(row.toolAccess ?? 'review') === 'review' && (
+                  <button
+                    className={button}
+                    disabled={
+                      blocked ||
+                      wireBusy ||
+                      !connected ||
+                      !row.discoveryId ||
+                      reviewed
+                    }
+                    onClick={() => review(tool)}
+                  >
+                    Review {tool.remoteName}
+                  </button>
+                )}
               </div>
             );
           })}
         </div>
       )}
-      {showSavedTools && row.reviewedTools.length > 0 && (
-        <div className="space-y-3">
-          <h4 className="text-sm font-medium">Reviewed permissions</h4>
-          {row.reviewedTools.map((tool) => {
-            const granted = toolNames?.includes(tool.alias) ?? false;
-            const usable =
-              !stale &&
-              row.enabled &&
-              connected &&
-              row.candidates.some(
-                (candidate) =>
-                  candidate.descriptorDigest === tool.descriptorDigest,
+      {showSavedTools &&
+        (row.toolAccess ?? 'review') === 'review' &&
+        row.reviewedTools.length > 0 && (
+          <div className="space-y-3">
+            <h4 className="text-sm font-medium">Reviewed permissions</h4>
+            {row.reviewedTools.map((tool) => {
+              const granted = toolNames?.includes(tool.alias) ?? false;
+              const usable =
+                !stale &&
+                row.enabled &&
+                connected &&
+                row.candidates.some(
+                  (candidate) =>
+                    candidate.descriptorDigest === tool.descriptorDigest,
+                );
+              return (
+                <div
+                  key={tool.alias}
+                  className="space-y-2 border-t border-line pt-3"
+                >
+                  <Descriptor tool={tool} />
+                  <p className="break-all text-xs">Saved tool: {tool.alias}</p>
+                  <p className="text-xs">
+                    {toolNames === null
+                      ? 'Permission unknown'
+                      : granted
+                        ? 'Permission granted'
+                        : 'Permission not granted'}{' '}
+                    ·{' '}
+                    {usable
+                      ? 'Available on this connection'
+                      : 'Currently unavailable; saved permission is retained'}
+                  </p>
+                  <button
+                    className={button}
+                    disabled={blocked || toolNames === null}
+                    onClick={() =>
+                      grant(tool.alias, tool.descriptorDigest, !granted)
+                    }
+                  >
+                    {granted ? 'Revoke' : 'Grant'} {tool.remoteName}
+                  </button>
+                </div>
               );
-            return (
-              <div
-                key={tool.alias}
-                className="space-y-2 border-t border-line pt-3"
-              >
-                <Descriptor tool={tool} />
-                <p className="break-all text-xs">Saved tool: {tool.alias}</p>
-                <p className="text-xs">
-                  {toolNames === null
-                    ? 'Permission unknown'
-                    : granted
-                      ? 'Permission granted'
-                      : 'Permission not granted'}{' '}
-                  ·{' '}
-                  {usable
-                    ? 'Available on this connection'
-                    : 'Currently unavailable; saved permission is retained'}
-                </p>
-                <button
-                  className={button}
-                  disabled={blocked || toolNames === null}
-                  onClick={() =>
-                    grant(tool.alias, tool.descriptorDigest, !granted)
-                  }
-                >
-                  {granted ? 'Revoke' : 'Grant'} {tool.remoteName}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
+            })}
+          </div>
+        )}
     </article>
   );
 }

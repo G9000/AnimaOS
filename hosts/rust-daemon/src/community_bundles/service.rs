@@ -632,7 +632,7 @@ impl BundleService {
             self.mcp.note_agent_permissions_changed(agent);
         }
         self.mcp
-            .publish_bundle_catalog(&state.mcp_registry, &retire, agent)
+            .publish_bundle_catalog(&state, &retire, agent)
             .map_err(|_| BundleError::Unavailable)?;
         if uncertain {
             let ids = state

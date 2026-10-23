@@ -48,6 +48,7 @@ pub(crate) struct Scope {
     pub owner_chat: bool,
     pub owner_main: bool,
     pub mcp_available: bool,
+    pub automatic_mcp: bool,
 }
 
 pub(crate) fn discovery(config: &AgentConfig, scope: Scope) -> bool {
@@ -66,6 +67,14 @@ pub(crate) fn select(
 ) -> Vec<ToolDescriptor> {
     let registry = crate::tools::ToolRegistry::new();
     let mut tools = config.tools.clone().unwrap_or_default();
+    if scope.automatic_mcp && !super::is_helper_config(config) && !scope.delegated && !scope.peers {
+        for tool in ready_mcp {
+            if !tools.contains(tool) {
+                tools.retain(|old| old.name != tool.name);
+                tools.push(tool.clone());
+            }
+        }
+    }
     tools.retain(|tool| {
         !matches!(tool.name.as_str(), "delegate_to_agent" | "spawn_helper")
             && (scope.can_delegate
@@ -197,6 +206,8 @@ impl super::AgentRunCoordinator {
             owner_chat,
             owner_main: owner_chat && session.main_chat && session.has_main_chat_identity(),
             mcp_available: self.mcp.is_some(),
+            automatic_mcp: crate::mcp::McpToolAccess::for_agent(&state, agent_id)
+                == crate::mcp::McpToolAccess::Automatic,
             ..Scope::default()
         };
         let ready = self

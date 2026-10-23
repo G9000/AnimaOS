@@ -263,11 +263,13 @@ impl RunToolCatalog {
             }
             Origin::HostDerived => {} // Ordinary host-derived team grants remain unchanged.
             Origin::Mcp(stamp) => {
-                if !canonical
-                    .tools
-                    .iter()
-                    .flatten()
-                    .any(|current| current == &entry.descriptor)
+                if crate::mcp::McpToolAccess::for_agent(state, &self.agent.id)
+                    != crate::mcp::McpToolAccess::Automatic
+                    && !canonical
+                        .tools
+                        .iter()
+                        .flatten()
+                        .any(|current| current == &entry.descriptor)
                 {
                     return Err(REFUSED);
                 }

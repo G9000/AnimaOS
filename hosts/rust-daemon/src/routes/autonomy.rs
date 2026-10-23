@@ -146,6 +146,14 @@ pub(super) async fn put_autonomy(
                 record.smart_policy = policy;
             }
             guard.autonomy.set(record);
+            if let Err(error) = guard.refresh_mcp_permissions(&agent_id) {
+                guard.autonomy.set(previous_record);
+                if let Some(previous) = previous_policy {
+                    guard.approvals.restore_policy(&agent_id, previous);
+                }
+                let _ = guard.refresh_mcp_permissions(&agent_id);
+                return rejected(ApiError::service_unavailable(error));
+            }
             (
                 previous_record,
                 previous_policy,
@@ -158,6 +166,7 @@ pub(super) async fn put_autonomy(
             if let Some(previous) = previous_policy {
                 guard.approvals.restore_policy(&agent_id, previous);
             }
+            let _ = guard.refresh_mcp_permissions(&agent_id);
             return rejected(ApiError::service_unavailable(error.to_string()));
         }
         drop(transaction);

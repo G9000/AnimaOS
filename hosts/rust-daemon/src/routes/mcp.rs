@@ -96,6 +96,7 @@ fn connection_response(view: McpConnectionView) -> McpConnectionResponse {
         enabled: view.record.enabled,
         has_bearer_credential: view.record.bearer_credential_ref.is_some(),
         version: view.record.version,
+        tool_access: view.tool_access.as_str().into(),
         reviewed_tools: view
             .record
             .reviewed_tools

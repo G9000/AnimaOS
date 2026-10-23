@@ -226,6 +226,7 @@ pub(crate) struct McpReadyBinding {
 pub(crate) struct McpPublishedCatalog {
     pub(crate) known: BTreeMap<(String, String), McpKnownBinding>,
     pub(crate) live: BTreeMap<(String, String), McpReadyBinding>,
+    pub(crate) access: BTreeMap<String, McpToolAccess>,
 }
 impl McpPublishedCatalog {
     pub(crate) fn from_registry(registry: &McpRegistry) -> Self {
@@ -247,10 +248,51 @@ impl McpPublishedCatalog {
         Self {
             known,
             live: Default::default(),
+            access: Default::default(),
         }
     }
 }
 pub(crate) type SharedMcpPublication = Arc<RwLock<McpPublishedCatalog>>;
+
+/// Derived live authority, never a durable tool review or grant.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum McpToolAccess {
+    Automatic,
+    #[default]
+    Review,
+    Denied,
+}
+
+impl McpToolAccess {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Automatic => "automatic",
+            Self::Review => "review",
+            Self::Denied => "denied",
+        }
+    }
+
+    pub(crate) fn for_agent(state: &crate::state::DaemonState, agent: &str) -> Self {
+        use crate::approvals::{autonomy::AutonomyMode, PolicyAction};
+        if state
+            .agents
+            .get(agent)
+            .is_none_or(|runtime| crate::agent_runs::is_helper_config(runtime.config()))
+        {
+            return Self::Denied;
+        }
+        match state.autonomy_of(agent).mode {
+            AutonomyMode::Free => Self::Automatic,
+            AutonomyMode::Strict => Self::Review,
+            AutonomyMode::Custom => match state.approvals.policy(agent).exec {
+                PolicyAction::Allow => Self::Automatic,
+                PolicyAction::Ask => Self::Review,
+                PolicyAction::Deny => Self::Denied,
+            },
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -282,6 +324,7 @@ pub(crate) struct StaticMcpError {
 #[derive(Clone, Debug)]
 pub(crate) struct McpConnectionView {
     pub(crate) record: McpConnectionRecord,
+    pub(crate) tool_access: McpToolAccess,
     pub(crate) state: McpConnectionState,
     pub(crate) wire_generation: u64,
     pub(crate) discovery_id: Option<String>,

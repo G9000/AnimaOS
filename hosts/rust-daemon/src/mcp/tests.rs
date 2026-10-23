@@ -22,6 +22,9 @@ use crate::state::DaemonState;
 #[path = "chat_management_tests.rs"]
 mod chat_management_tests;
 
+#[path = "autonomy_tests.rs"]
+mod autonomy_tests;
+
 fn candidate() -> anima_core::ExternalToolDescriptor {
     prepare_external_tool("echo_record","Read a synthetic record",json!({"type":"object",
         "properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}),None).unwrap()

@@ -2360,6 +2360,9 @@ impl AgentRunCoordinator {
             owner_chat,
             owner_main,
             mcp_available: self.mcp.is_some(),
+            automatic_mcp: self.mcp.as_ref().is_some_and(|manager| {
+                manager.tool_access(&agent_id) == crate::mcp::McpToolAccess::Automatic
+            }),
         };
         let tools = tool_scope::select(&original_config, &ready_mcp, scope);
         let discovery_enabled = tool_scope::discovery(&original_config, scope);

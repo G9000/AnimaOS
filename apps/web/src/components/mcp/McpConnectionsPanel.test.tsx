@@ -86,6 +86,45 @@ async function loaded() {
 }
 
 describe('owner external tools', () => {
+  it('shows automatic access without manual review or grant controls', async () => {
+    const mock = api([ready({ toolAccess: 'automatic', reviewedTools: [] })]);
+    render(<McpConnectionsPanel agentId="main" api={mock} />);
+    await loaded();
+    expect(
+      screen.getByText('Connected — tools available automatically'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Available automatically under the agent’s permissions.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Review lookup' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Grant lookup' }),
+    ).not.toBeInTheDocument();
+    expect(mock.review).not.toHaveBeenCalled();
+    expect(mock.setGrant).not.toHaveBeenCalled();
+  });
+
+  it('shows a policy block instead of offering a grant that cannot allow execution', async () => {
+    const mock = api([ready({ toolAccess: 'denied' })]);
+    render(<McpConnectionsPanel agentId="main" api={mock} />);
+    await loaded();
+    expect(
+      screen.getByText(
+        'MCP tools are blocked by the agent’s execution policy.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Review lookup' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Grant lookup' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('navigation releases a same-lifetime status-reconciliation busy claim without publishing late rows', async () => {
     const mock = api();
     const reconciliation = deferred<void>();

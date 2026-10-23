@@ -4123,6 +4123,7 @@ impl DaemonState {
         if let Ok(mut publication) = self.mcp_publication.write() {
             publication.known.retain(|(owner, _), _| owner != agent_id);
             publication.live.retain(|(owner, _), _| owner != agent_id);
+            publication.access.remove(agent_id);
         }
     }
 

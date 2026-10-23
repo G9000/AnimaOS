@@ -42,6 +42,8 @@ pub(crate) struct McpConnectionResponse {
     pub(crate) has_bearer_credential: bool,
     pub(crate) version: u64,
     pub(crate) reviewed_tools: Vec<ReviewedMcpToolResponse>,
+    /// Derived from the current agent permissions: automatic, review, or denied.
+    pub(crate) tool_access: String,
     pub(crate) state: String,
     pub(crate) wire_generation: u64,
     pub(crate) discovery_id: Option<String>,

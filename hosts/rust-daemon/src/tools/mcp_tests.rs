@@ -7,6 +7,9 @@ mod tool_discovery_catalog_tests;
 #[path = "mcp_management_tests.rs"]
 mod management_tests;
 
+#[path = "mcp_autonomy_tests.rs"]
+mod autonomy_tests;
+
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -466,7 +469,14 @@ impl<F: McpTransportFactory + 'static> Fixture<F> {
             .await
             .unwrap();
         if is_stdio {
-            assert_eq!(connected.state, McpConnectionState::NeedsReview);
+            assert_eq!(
+                connected.state,
+                if policy == PolicyAction::Ask {
+                    McpConnectionState::NeedsReview
+                } else {
+                    McpConnectionState::Ready
+                }
+            );
             assert_eq!(connected.candidates.len(), 1);
             assert_eq!(
                 connected.candidates[0].remote_name,

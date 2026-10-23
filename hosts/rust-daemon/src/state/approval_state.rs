@@ -203,6 +203,15 @@ impl DaemonState {
         })
     }
 
+    pub(crate) fn refresh_mcp_permissions(&self, agent: &str) -> Result<(), String> {
+        if let Some(manager) = &self.mcp_manager {
+            manager
+                .refresh_agent_permissions(self, agent)
+                .map_err(|_| "MCP permissions could not be refreshed".to_string())?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn agent_autonomy(
         &self,
         agent_id: &str,

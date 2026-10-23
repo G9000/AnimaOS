@@ -364,6 +364,12 @@ pub(super) async fn put_approval_policy(
             let previous = guard.approvals.set_policy(&agent_id, policy);
             // A class choice made by hand is Custom unless it equals a preset.
             guard.autonomy.follow_policy(&agent_id, &policy);
+            if let Err(error) = guard.refresh_mcp_permissions(&agent_id) {
+                guard.approvals.restore_policy(&agent_id, previous);
+                guard.autonomy.set(previous_autonomy);
+                let _ = guard.refresh_mcp_permissions(&agent_id);
+                return rejected(ApiError::service_unavailable(error));
+            }
             (
                 previous,
                 previous_autonomy,
@@ -374,6 +380,7 @@ pub(super) async fn put_approval_policy(
             let mut guard = state.daemon.write().await;
             guard.approvals.restore_policy(&agent_id, previous);
             guard.autonomy.set(previous_autonomy);
+            let _ = guard.refresh_mcp_permissions(&agent_id);
             drop(guard);
             return rejected(ApiError::service_unavailable(error.to_string()));
         }

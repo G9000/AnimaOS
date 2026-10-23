@@ -45,6 +45,8 @@ export interface McpConnection {
   /** Saved credential reference only; not vault availability or remote validity. */
   hasBearerCredential: boolean;
   reviewedTools: ReviewedMcpTool[];
+  /** Current agent policy; older daemons require manual review and grants. */
+  toolAccess?: 'automatic' | 'review' | 'denied';
   state: McpConnectionState;
   wireGeneration: number;
   discoveryId: string | null;
