@@ -2,47 +2,17 @@
   "name": "@animaos/web-e2e",
   "version": "0.0.1",
   "private": true,
-  "nx": {
-    "targets": {
-      "deployment-contracts": {
-        "executor": "nx:run-commands",
-        "options": {
-          "cwd": ".",
-          "command": "bun test deploy/vps/contracts.test.ts"
-        },
-        "cache": false
-      },
-      "e2e-console": {
-        "executor": "nx:run-commands",
-        "dependsOn": [
-          {
-            "projects": [
-              "@animaos/sdk",
-              "@animaos/web"
-            ],
-            "target": "build"
-          }
-        ],
-        "options": {
-          "cwd": "apps/web-e2e",
-          "command": "playwright test --config=playwright.console.config.ts"
-        },
-        "parallelism": false,
-        "cache": false,
-        "inputs": [
-          "default",
-          "^production"
-        ],
-        "outputs": [
-          "{projectRoot}/test-output/console"
-        ]
-      }
-    },
-    "implicitDependencies": [
-      "@animaos/web"
-    ]
-  },
   "devDependencies": {
     "@animaos/sdk": "workspace:*"
+  },
+  "scripts": {
+    "build-deps": "bun run --filter @animaos/sdk --filter @animaos/web build",
+    "e2e": "bun run build-deps && bun ../../tools/workspace-dev/scripts/run-task.ts -- bun x playwright test",
+    "e2e-ci": "bun run build-deps && CI=1 bun ../../tools/workspace-dev/scripts/run-task.ts -- bun x playwright test",
+    "e2e-console": "bun run build-deps && bun ../../tools/workspace-dev/scripts/run-task.ts -- bun x playwright test --config=playwright.console.config.ts",
+    "e2e-companion": "bun run build-deps && bun ../../tools/workspace-dev/scripts/run-task.ts -- bun x playwright test --config=playwright.companion.config.ts",
+    "deployment-contracts": "bun ../../tools/workspace-dev/scripts/run-task.ts -- bun test ../../deploy/vps/contracts.test.ts",
+    "typecheck": "tsc --build --emitDeclarationOnly",
+    "lint": "oxlint src --config ../../.oxlintrc.json --tsconfig tsconfig.json"
   }
 }

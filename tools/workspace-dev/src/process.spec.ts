@@ -8,9 +8,8 @@ import { runManagedProcesses } from './process.js';
 
 const parentFixturePath = resolve(
   import.meta.dirname,
-  '../tests/fixtures/spawn-http-server-parent.js'
+  '../tests/fixtures/spawn-http-server-parent.js',
 );
-const workspaceRoot = resolve(import.meta.dirname, '../../..');
 
 describe.skipIf(process.platform !== 'win32')(
   'workspace-dev process management',
@@ -32,53 +31,49 @@ describe.skipIf(process.platform !== 'win32')(
       }
     });
 
-    it(
-      'stops descendant processes when the launcher shuts down',
-      async () => {
-        const port = await reservePort();
-        let runSettled = false;
-        const runPromise = runManagedProcesses([
-          {
-            name: 'fixture-parent',
-            command: process.execPath,
-            args: [parentFixturePath, workspaceRoot, String(port)],
-          },
-        ]).finally(() => {
-          runSettled = true;
-        });
+    it('stops descendant processes when the launcher shuts down', async () => {
+      const port = await reservePort();
+      let runSettled = false;
+      const runPromise = runManagedProcesses([
+        {
+          name: 'fixture-parent',
+          command: process.execPath,
+          args: [parentFixturePath, String(port)],
+        },
+      ]).finally(() => {
+        runSettled = true;
+      });
 
-        try {
-          const ready = await Promise.race([
-            waitForCondition(() => isHealthOk(port), 90_000),
-            runPromise.then(() => false),
-          ]);
-          expect(ready).toBe(true);
+      try {
+        const ready = await Promise.race([
+          waitForCondition(() => isHealthOk(port), 90_000),
+          runPromise.then(() => false),
+        ]);
+        expect(ready).toBe(true);
 
-          process.emit('SIGINT');
-          await runPromise;
+        process.emit('SIGINT');
+        await runPromise;
 
-          const descendantStopped = await waitForCondition(
-            async () => !(await isHealthOk(port)),
-            5_000
-          );
+        const descendantStopped = await waitForCondition(
+          async () => !(await isHealthOk(port)),
+          5_000,
+        );
 
-          if (!descendantStopped) {
-            leakedPid = findListeningPid(port);
-          } else {
-            leakedPid = null;
-          }
-
-          expect(descendantStopped).toBe(true);
-        } finally {
-          if (!runSettled) {
-            process.emit('SIGINT');
-            await runPromise.catch(() => undefined);
-          }
+        if (!descendantStopped) {
+          leakedPid = findListeningPid(port);
+        } else {
+          leakedPid = null;
         }
-      },
-      120_000
-    );
-  }
+
+        expect(descendantStopped).toBe(true);
+      } finally {
+        if (!runSettled) {
+          process.emit('SIGINT');
+          await runPromise.catch(() => undefined);
+        }
+      }
+    }, 120_000);
+  },
 );
 
 async function reservePort(): Promise<number> {
@@ -107,7 +102,7 @@ async function reservePort(): Promise<number> {
 async function waitForCondition(
   predicate: () => Promise<boolean>,
   timeoutMs = 10_000,
-  intervalMs = 100
+  intervalMs = 100,
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
 
@@ -124,9 +119,7 @@ async function waitForCondition(
 
 async function isHealthOk(port: number): Promise<boolean> {
   try {
-    const response = await fetch(
-      `http://127.0.0.1:${String(port)}/api/health`
-    );
+    const response = await fetch(`http://127.0.0.1:${String(port)}/api/health`);
     return response.ok;
   } catch {
     return false;
@@ -142,7 +135,7 @@ function findListeningPid(port: number): number | null {
     .find(
       (line) =>
         line.includes(`127.0.0.1:${String(port)}`) &&
-        line.includes('LISTENING')
+        line.includes('LISTENING'),
     );
 
   if (!matchingLine) {

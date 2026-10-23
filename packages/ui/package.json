@@ -10,5 +10,9 @@
       "default": "./src/index.ts"
     },
     "./package.json": "./package.json"
+  },
+  "scripts": {
+    "typecheck": "tsc --build --emitDeclarationOnly",
+    "lint": "oxlint src --config ../../.oxlintrc.json --tsconfig tsconfig.json"
   }
 }

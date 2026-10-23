@@ -3,9 +3,9 @@
 The marketing page and waitlist. Astro, prerendered, with one Vercel function at `/api/waitlist` that writes sign-ups to Airtable so the Airtable key never reaches the browser.
 
 ```bash
-bun x nx run @animaos/landing:dev
-bun x nx run @animaos/landing:test
-bun x nx run @animaos/landing:build
+bun run --filter @animaos/landing dev
+bun run --filter @animaos/landing test
+bun run --filter @animaos/landing build
 ```
 
 Without Airtable settings the page works and the form answers "the waitlist isn't open yet" (503).

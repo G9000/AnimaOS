@@ -32,5 +32,12 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/react": "^19.3.0"
+  },
+  "scripts": {
+    "build-deps": "bun run --filter @animaos/sdk --filter @animaos/tui build",
+    "build": "tsc --build tsconfig.lib.json",
+    "typecheck": "bun run build && tsc --build --emitDeclarationOnly",
+    "test": "bun run build-deps && bun ../../tools/workspace-dev/scripts/run-vitest.ts run",
+    "lint": "oxlint src --config ../../.oxlintrc.json --tsconfig tsconfig.json"
   }
 }

@@ -37,9 +37,9 @@ launcher. The console uses the loopback daemon on `127.0.0.1:8080`; the Rust hos
 wraps reusable `packages/core-rust` code. Elixir/Python hosts are placeholders.
 
 ```sh
-bun x nx run @animaos/web:build
-bun x nx run @animaos/web:typecheck
-bun x nx run @animaos/web:test
+bun run --filter @animaos/web build
+bun run --filter @animaos/web typecheck
+bun run --filter @animaos/web test
 ```
 
 For offline browser evidence, see [web-e2e](../web-e2e/README.md). Its explicit

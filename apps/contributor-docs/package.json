@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "typecheck": "tsc --build --emitDeclarationOnly",
+    "lint": "oxlint src --config ../../.oxlintrc.json --tsconfig tsconfig.json"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.42.6",

@@ -17,8 +17,20 @@ A suite names an existing ordinary agent and supplies independent train and held
   "maxOutputTokens": 512,
   "trialTimeoutMs": 30000,
   "fixtures": [
-    {"id":"train","heldout":false,"required":true,"prompt":"Apply the procedure to a training example.","oracle":{"kind":"exactText","expected":"owner-verified answer"}},
-    {"id":"heldout","heldout":true,"required":true,"prompt":"Apply the procedure to a different example.","oracle":{"kind":"canonicalJson","expected":"{\"result\":42}"}}
+    {
+      "id": "train",
+      "heldout": false,
+      "required": true,
+      "prompt": "Apply the procedure to a training example.",
+      "oracle": { "kind": "exactText", "expected": "owner-verified answer" }
+    },
+    {
+      "id": "heldout",
+      "heldout": true,
+      "required": true,
+      "prompt": "Apply the procedure to a different example.",
+      "oracle": { "kind": "canonicalJson", "expected": "{\"result\":42}" }
+    }
   ]
 }
 ```
@@ -53,7 +65,7 @@ Keep the existing `settings.completionReview: true` opt-in. Declare the exact co
 [
   {
     "id": "rust-host-tests",
-    "command": "bun x nx run rust-daemon:test --skipNxCache",
+    "command": "bun run --filter rust-daemon test",
     "cwd": ".",
     "files": [],
     "directories": ["hosts/rust-daemon", "packages/core-rust"]

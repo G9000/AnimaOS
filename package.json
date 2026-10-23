@@ -4,23 +4,23 @@
   "packageManager": "bun@1.4.3",
   "license": "MIT",
   "scripts": {
-    "affected:build": "bun x nx affected -t build",
-    "affected:test": "bun x nx affected -t test",
-    "build": "bun x nx run-many -t build",
-    "build:cli-sdk": "tsc -b packages/sdk/tsconfig.lib.json packages/cli/tsconfig.lib.json",
-    "daemon": "bun tools/workspace-dev/src/rust-daemon-dev.ts",
-    "dev": "bun x nx run workspace-dev:dev --",
-    "animaos": "node packages/cli/dist/index.js",
-    "graph": "bun x nx graph",
-    "lint": "oxlint --config .oxlintrc.json packages/*/src apps/*/src",
-    "lint:fix": "oxlint --fix --config .oxlintrc.json packages/*/src apps/*/src",
-    "projects": "bun x nx show projects",
+    "dev": "bun tools/workspace-dev/src/main.ts",
+    "build": "bun run --sequential --workspaces --if-present build",
+    "build:libs": "tsc --build packages/sdk/tsconfig.lib.json packages/tui/tsconfig.lib.json packages/cli/tsconfig.lib.json",
+    "build:cli-sdk": "bun run --filter @animaos/sdk --filter @animaos/tui --filter @animaos/cli build",
+    "test": "bun run --sequential --workspaces --if-present test",
+    "typecheck": "tsc --build --emitDeclarationOnly",
+    "lint": "bun run --workspaces --if-present lint",
+    "lint:fix": "oxlint --fix --config .oxlintrc.json packages/*/src apps/*/src tools/workspace-dev/src",
+    "daemon": "bun run --filter rust-daemon dev",
+    "rust:build": "cargo build --workspace",
+    "rust:test": "bun run --sequential --filter rust-daemon --filter anima test",
+    "rust:lint": "cargo fmt --all --check",
     "rust:cache:status": "bun tools/workspace-dev/scripts/rust-cache.ts status",
     "rust:cache:clean": "bun tools/workspace-dev/scripts/rust-cache.ts clean",
-    "test": "bun x nx run-many -t test",
-    "typecheck": "bun x nx run-many -t typecheck",
-    "web": "bun x nx dev @animaos/web",
-    "playground": "bun x nx dev @animaos/playground"
+    "web": "bun run --filter @animaos/web dev",
+    "playground": "bun run --filter @animaos/playground dev",
+    "animaos": "node packages/cli/dist/index.js"
   },
   "private": true,
   "dependencies": {
@@ -31,12 +31,6 @@
   "devDependencies": {
     "@babel/core": "^8.0.7",
     "@babel/preset-react": "^8.0.1",
-    "@nx/devkit": "~24.0.0",
-    "@nx/js": "~24.0.0",
-    "@nx/playwright": "~24.0.0",
-    "@nx/react": "~24.0.0",
-    "@nx/vite": "~24.0.0",
-    "@nx/vitest": "~24.0.0",
     "@playwright/test": "^1.64.1",
     "@swc-node/register": "1.12.1",
     "@swc/core": "^1.16.18",
@@ -51,7 +45,6 @@
     "esbuild": "^0.28.2",
     "jiti": "^2.7.0",
     "jsdom": "^30.1.3",
-    "nx": "~24.0.0",
     "oxlint": "^1.89.0",
     "prettier": "^3.9.10",
     "tailwindcss": "^4.3.3",
@@ -63,6 +56,7 @@
   "workspaces": [
     "packages/*",
     "apps/*",
-    "tools/*"
+    "tools/*",
+    "hosts/*"
   ]
 }

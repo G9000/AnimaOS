@@ -7,7 +7,9 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "test": "vitest run"
+    "test": "bun ../../tools/workspace-dev/scripts/run-vitest.ts run",
+    "typecheck": "tsc --build --emitDeclarationOnly",
+    "lint": "oxlint src --config ../../.oxlintrc.json --tsconfig tsconfig.json"
   },
   "dependencies": {
     "@astrojs/vercel": "^11.0.16",

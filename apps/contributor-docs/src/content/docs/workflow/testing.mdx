@@ -5,27 +5,27 @@ description: How to test each part of the animaOS monorepo
 
 import { Aside } from '@astrojs/starlight/components';
 
-Run commands from the repo root. Prefer the Nx targets; they run the same cargo and vitest commands CI uses. `AGENTS.md` lists the required verification per area, and a change is not done until those commands pass in the current tree. Prefix with `NX_TUI=false` for quieter output, and add `--skipNxCache` when you need a real re-run.
+Run commands from the repo root. Prefer the Bun workspace scripts; they run the same Cargo and Vitest commands CI uses. `AGENTS.md` lists the required verification per area, and a change is not done until those commands pass in the current tree. Each invocation runs the underlying checks.
 
 Rust outputs share `target/cargo`. Run `bun run rust:cache:status` to check the cache; it warns above 64 GiB. Run `bun run rust:cache:clean` to remove only Cargo outputs, preserving files outside that directory.
 
 ## What to Run
 
-| You changed | Command |
-|-------------|---------|
-| Rust host or core crates | `bun x nx run rust-daemon:test --skipNxCache` |
-| Core crates only | `bun x nx run core-rust:test --skipNxCache` |
-| Packaged program (`hosts/anima`) | `bun x nx run anima:test` |
-| Dev launcher | `bun x nx test workspace-dev --runInBand --skipNxCache` |
-| A TypeScript package | `bun x nx test <project>` plus `typecheck` and `build` |
-| Public docs | `bun x nx run @animaos/docs:build --skipNxCache` |
-| Contributor docs | `bun x nx run @animaos/contributor-docs:build --skipNxCache` |
+| You changed                      | Command                                                        |
+| -------------------------------- | -------------------------------------------------------------- |
+| Rust host or core crates         | `bun run --filter rust-daemon test`                            |
+| Core crates only                 | `bun run --filter core-rust test`                              |
+| Packaged program (`hosts/anima`) | `bun run --filter anima test`                                  |
+| Dev launcher                     | `bun run --filter workspace-dev test`                          |
+| A TypeScript package             | `bun run --filter <project> test` plus `typecheck` and `build` |
+| Public docs                      | `bun run --filter @animaos/docs build`                         |
+| Contributor docs                 | `bun run --filter @animaos/contributor-docs build`             |
 
 ## Rust Core
 
 ```bash
 # All eleven core crates (Cargo outputs are in target/cargo)
-bun x nx run core-rust:test
+bun run --filter core-rust test
 
 # One crate, or one module
 cargo test -p anima-core
@@ -45,27 +45,27 @@ cargo test --workspace
 
 ```bash
 # Fast deterministic regression gate (baseline_memory_eval_cases_pass)
-NX_TUI=false bun x nx run core-rust:memory-eval --skipNxCache
+bun run --filter core-rust memory-eval
 
 # Temporal fact and relationship CRUD and supersession
 cargo test -p anima-memory temporal -- --nocapture
 
 # LoCoMo-style smoke benchmark (feature "locomo-eval")
-NX_TUI=false bun x nx run core-rust:memory-locomo --skipNxCache
+bun run --filter core-rust memory-locomo
 
 # Download the public dataset into .cache/locomo (git-ignored), then run the full retrieval benchmark
-NX_TUI=false bun x nx run core-rust:memory-locomo-fetch --skipNxCache
-NX_TUI=false bun x nx run core-rust:memory-locomo-dataset --skipNxCache
+bun run --filter core-rust memory-locomo-fetch
+bun run --filter core-rust memory-locomo-dataset
 
 # End-to-end agent benchmark with real model calls (expensive; needs real provider config)
-NX_TUI=false bun x nx run rust-daemon:memory-locomo-agent --skipNxCache
+bun run --filter rust-daemon memory-locomo-agent
 ```
 
 Thresholds and tunables (`LOCOMO_*` variables, `ANIMAOS_RS_MEMORY_QUERY_EXPANDER=locomo`) are documented in `docs/testing.md`. The dataset targets compile `anima-memory` with `locomo-eval`. The agent benchmark fails without real providers; it never falls back to the deterministic model. A no-default-features portability check: `CARGO_TARGET_DIR=target/cargo/validation-memory-no-default cargo test -p anima-memory --no-default-features`.
 
 ### Node oracles and the browser worker
 
-`core-rust` also has Node-based targets that run `node --test`: `browser-worker-test` (the Playwright worker in `browser-worker/`), `coding-acceptance-test` (`acceptance/coding-m47`), `coding-acceptance-m87-test`, `coding-reliability-test` (`coding-m86`), `provider-task-acceptance-test` (`provider-task-m52`) and `research-acceptance-test` (`research-m84`). They are not cached and not parallel.
+`core-rust` also has Node-based scripts that run `node --test`: `browser-worker-test` (the Playwright worker in `browser-worker/`), `coding-acceptance-test` (`acceptance/coding-m47`), `coding-acceptance-m87-test`, `coding-reliability-test` (`coding-m86`), `provider-task-acceptance-test` (`provider-task-m52`) and `research-acceptance-test` (`research-m84`). These scripts run their checks on each invocation.
 
 ### Mocking in Rust tests
 
@@ -97,17 +97,20 @@ For provider HTTP code, `anima-model-adapters` tests run local `axum` servers. F
 
 ```bash
 # Standard run: core-rust:test first, then cargo test -p anima-daemon
-bun x nx run rust-daemon:test --skipNxCache
+bun run --filter rust-daemon test
 
 # Format check
-bun x nx run rust-daemon:lint --skipNxCache
+bun run --filter rust-daemon lint
 
 # Windows, when a running daemon locks target/cargo/debug/anima-daemon.exe
-CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache
+CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun run --filter rust-daemon test
 ```
 
 <Aside type="note">
-The Windows workaround uses a separate target directory so the running binary and the test binary do not conflict. In PowerShell set `$env:CI="1"` and `$env:CARGO_TARGET_DIR="target/cargo/validation-rust-daemon"` first (and clear them afterwards).
+  The Windows workaround uses a separate target directory so the running binary
+  and the test binary do not conflict. In PowerShell set `$env:CI="1"` and
+  `$env:CARGO_TARGET_DIR="target/cargo/validation-rust-daemon"` first (and clear
+  them afterwards).
 </Aside>
 
 Daemon tests live in `hosts/rust-daemon/tests/` (HTTP-level: `agent_api`, `connector_api`, `memory_api`, `schedule_api`, `swarm_api`, `workspace_api`, `health`, `document_worker`, `step_log_integration`) and in `*_tests.rs` files beside the modules. They build routers in process, use deterministic model adapters, fake connector transports and credential stores, temporary stores and random ports, and never call real providers, open real accounts or start containers. Connector tests follow `CONNECTOR-CONTRIBUTING.md`: injected fakes and deterministic barriers, no real services, no reading user profiles or secrets. `step_log_integration` is `#[ignore]`d because it needs a `DATABASE_URL`-backed Postgres; run it deliberately with `cargo test -p anima-daemon --test step_log_integration -- --ignored`.
@@ -115,11 +118,11 @@ Daemon tests live in `hosts/rust-daemon/tests/` (HTTP-level: `agent_api`, `conne
 ## TypeScript Packages
 
 ```bash
-bun x nx test @animaos/sdk
-bun x nx test @animaos/tui
-bun x nx test @animaos/cli
-bun x nx test @animaos/web
-bun x nx typecheck @animaos/sdk
+bun run --filter @animaos/sdk test
+bun run --filter @animaos/tui test
+bun run --filter @animaos/cli test
+bun run --filter @animaos/web test
+bun run --filter @animaos/sdk typecheck
 
 # Everything
 bun run test
@@ -146,17 +149,17 @@ const bus: IEventBus = {
 `apps/web-e2e` covers the console with Playwright. The offline journeys need no daemon, dev server or database: fake APIs fulfill routes and real SSE bytes go through the SDK parser.
 
 ```bash
-bun x nx run @animaos/web-e2e:e2e-console --skipNxCache
-bun x nx run @animaos/web-e2e:typecheck --skipNxCache
-bun x nx run @animaos/web-e2e:deployment-contracts --skipNxCache
+bun run --filter @animaos/web-e2e e2e-console
+bun run --filter @animaos/web-e2e typecheck
+bun run --filter @animaos/web-e2e deployment-contracts
 ```
 
-CI runs `e2e-ci` through `nx run-many`. The service-starting suites (`e2e`, companion configuration) use preview and dev servers and are kept for separately authorized runtime testing. Simulated passes do not establish real HTTP chunking, selected-model streaming, microphone behavior or container restarts; see `deploy/vps/README.md` for manual acceptance.
+CI runs `bun run --filter @animaos/web-e2e e2e-ci`. The service-starting suites (`e2e`, companion configuration) use preview and dev servers and are kept for separately authorized runtime testing. Simulated passes do not establish real HTTP chunking, selected-model streaming, microphone behavior or container restarts; see `deploy/vps/README.md` for manual acceptance.
 
 ## Dev Launcher
 
 ```bash
-bun x nx test workspace-dev --runInBand --skipNxCache
+bun run --filter workspace-dev test
 ```
 
 These tests cover host selection and argument parsing, the persistence environment for the dev daemon, process orchestration and graceful shutdown, and the daemon build and signing arguments (`hosts.spec.ts`, `main.spec.ts`, `process.spec.ts`, `rust-daemon-dev.spec.ts`).
@@ -165,8 +168,8 @@ These tests cover host selection and argument parsing, the persistence environme
 
 ```bash
 # Catches MDX errors and broken sidebar links
-bun x nx run @animaos/docs:build --skipNxCache
-bun x nx run @animaos/contributor-docs:build --skipNxCache
+bun run --filter @animaos/docs build
+bun run --filter @animaos/contributor-docs build
 ```
 
 ## Diff Hygiene
@@ -175,17 +178,18 @@ bun x nx run @animaos/contributor-docs:build --skipNxCache
 git --no-pager diff --check
 ```
 
-On Windows this can print LF-to-CRLF warnings; conflict markers and trailing-whitespace errors are the blocking problems. Git Bash accepts inline `NX_TUI=false command`; in PowerShell set `$env:NX_TUI="false"` first.
+On Windows this can print LF-to-CRLF warnings; conflict markers and trailing-whitespace errors are the blocking problems.
 
 ## Continuous Integration
 
 `.github/workflows/ci.yml` runs on pushes to `main` and on pull requests:
 
 1. `bun install --frozen-lockfile`
-2. `nx format:check --base=remotes/origin/main`
-3. `bun x nx run-many -t lint test build typecheck e2e-ci`
+2. Prettier checks existing changed files from `remotes/origin/main...HEAD`.
+3. Root `bun run lint`, `bun run test`, `bun run build`, and `bun run typecheck`.
+4. `bun run --filter @animaos/web-e2e e2e-ci`.
 
-GitHub Actions runs these tasks on its CI runner. The Rust targets (`core-rust`, `rust-daemon`, `anima`) are part of `run-many`. Releases have their own workflows (`release.yml`, `sign-release.yml`).
+GitHub Actions runs these tasks on its CI runner. The root scripts include the Rust workspaces (`core-rust`, `rust-daemon`, `anima`). Releases have their own workflows (`release.yml`, `sign-release.yml`).
 
 ## Golden Rules
 

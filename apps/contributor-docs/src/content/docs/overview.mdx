@@ -27,23 +27,23 @@ The repo previously carried a TypeScript runtime, a mod system, an agency genera
 
 ## Repo Boundaries
 
-| Directory | Purpose | Language |
-|-----------|---------|----------|
-| `packages/core-rust/` | Rust crates: `anima-core`, `anima-memory`, `anima-swarm`, `anima-schedule`, `anima-harness`, `anima-model-adapters`, `anima-service-adapters`, `anima-document-content`, `anima-process`, `anima-acp`, `anima-worktree` | Rust |
-| `packages/sdk/` | `@animaos/sdk`: daemon HTTP/SSE client | TypeScript |
-| `packages/cli/` | `@animaos/cli`: the `animaos` command | TypeScript |
-| `packages/tui/` | `@animaos/tui`: Ink terminal UI | TypeScript |
-| `packages/ui/` | Shared React UI primitives | TypeScript |
-| `hosts/rust-daemon/` | `anima-daemon`: the Rust host (Axum HTTP/SSE) | Rust |
-| `hosts/anima/` | `anima`: installable supervisor, tray, updater | Rust |
-| `apps/web/` | Web console (thin client of the daemon) | TypeScript |
-| `apps/web-e2e/` | Browser tests for the console | TypeScript |
-| `apps/playground/` | Interactive playground | TypeScript |
-| `apps/docs/` | Public user-facing documentation site | Astro |
-| `apps/contributor-docs/` | This site | Astro |
-| `tools/workspace-dev/` | Dev launcher behind `bun dev` | TypeScript |
-| `tools/memory-eval/`, `tools/release/` | Memory benchmark scripts; release signing and docs | JS / shell |
-| `deploy/vps/` | Docker Compose and Caddy package for a one-owner VPS | Config |
+| Directory                              | Purpose                                                                                                                                                                                                                 | Language   |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `packages/core-rust/`                  | Rust crates: `anima-core`, `anima-memory`, `anima-swarm`, `anima-schedule`, `anima-harness`, `anima-model-adapters`, `anima-service-adapters`, `anima-document-content`, `anima-process`, `anima-acp`, `anima-worktree` | Rust       |
+| `packages/sdk/`                        | `@animaos/sdk`: daemon HTTP/SSE client                                                                                                                                                                                  | TypeScript |
+| `packages/cli/`                        | `@animaos/cli`: the `animaos` command                                                                                                                                                                                   | TypeScript |
+| `packages/tui/`                        | `@animaos/tui`: Ink terminal UI                                                                                                                                                                                         | TypeScript |
+| `packages/ui/`                         | Shared React UI primitives                                                                                                                                                                                              | TypeScript |
+| `hosts/rust-daemon/`                   | `anima-daemon`: the Rust host (Axum HTTP/SSE)                                                                                                                                                                           | Rust       |
+| `hosts/anima/`                         | `anima`: installable supervisor, tray, updater                                                                                                                                                                          | Rust       |
+| `apps/web/`                            | Web console (thin client of the daemon)                                                                                                                                                                                 | TypeScript |
+| `apps/web-e2e/`                        | Browser tests for the console                                                                                                                                                                                           | TypeScript |
+| `apps/playground/`                     | Interactive playground                                                                                                                                                                                                  | TypeScript |
+| `apps/docs/`                           | Public user-facing documentation site                                                                                                                                                                                   | Astro      |
+| `apps/contributor-docs/`               | This site                                                                                                                                                                                                               | Astro      |
+| `tools/workspace-dev/`                 | Dev launcher behind `bun dev`                                                                                                                                                                                           | TypeScript |
+| `tools/memory-eval/`, `tools/release/` | Memory benchmark scripts; release signing and docs                                                                                                                                                                      | JS / shell |
+| `deploy/vps/`                          | Docker Compose and Caddy package for a one-owner VPS                                                                                                                                                                    | Config     |
 
 ## Key Rules
 
@@ -82,10 +82,10 @@ The repo previously carried a TypeScript runtime, a mod system, an agency genera
 
    ```bash
    # Rust host or core crates
-   bun x nx run rust-daemon:test --skipNxCache
+   bun run --filter rust-daemon test
 
    # TypeScript packages
-   bun x nx test @animaos/sdk
+   bun run --filter @animaos/sdk test
    ```
 
 </Steps>
@@ -101,4 +101,4 @@ The repo previously carried a TypeScript runtime, a mod system, an agency genera
 
 ## Code Review
 
-CI (`.github/workflows/ci.yml`) runs `nx format:check` against `main`, then `bun x nx run-many -t lint test build typecheck e2e-ci`. For Rust changes, run `bun x nx run rust-daemon:test --skipNxCache` locally first. On Windows, if a running daemon locks the binary, use `CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache`.
+CI (`.github/workflows/ci.yml`) checks changed files with Prettier, then runs the root `lint`, `test`, `build`, and `typecheck` scripts plus `bun run --filter @animaos/web-e2e e2e-ci`. For Rust changes, run `bun run --filter rust-daemon test` locally first. On Windows, if a running daemon locks the binary, use `CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun run --filter rust-daemon test`.

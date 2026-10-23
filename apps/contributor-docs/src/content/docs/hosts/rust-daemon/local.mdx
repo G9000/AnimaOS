@@ -8,11 +8,13 @@ import { Aside, Steps } from '@astrojs/starlight/components';
 ## Pick the Right Entry Point
 
 - `bun dev` or `bun dev --host rust` for the normal workspace loop. `rust` is the only host key. It runs `tools/workspace-dev`, which starts the daemon on `127.0.0.1:8080` plus the web console, playground, public docs and contributor docs. If a daemon already answers on `http://127.0.0.1:8080/api/health`, it reuses it and starts only the other surfaces.
-- `bun x nx run rust-daemon:dev` (or `bun run daemon`) when you only need the daemon process. Both build through `tools/workspace-dev/src/rust-daemon-dev.ts`: `cargo build -p anima-daemon --bin anima-daemon`, optional macOS re-signing, then run the binary.
-- `cargo run -p anima-daemon` for the raw process without the Nx wrapper. It uses only the environment you give it.
+- `bun run --filter rust-daemon dev` (or `bun run daemon`) when you only need the daemon process. Both build through `tools/workspace-dev/src/rust-daemon-dev.ts`: `cargo build -p anima-daemon --bin anima-daemon`, optional macOS re-signing, then run the binary.
+- `cargo run -p anima-daemon` for the raw process without the development wrapper. It uses only the environment you give it.
 
 <Aside type="tip">
-  Use `bun dev --host rust` for UI-plus-host work. Use `bun x nx run rust-daemon:dev` when you are only changing routes, persistence wiring or runtime behavior.
+  Use `bun dev --host rust` for UI-plus-host work. Use `bun run --filter
+  rust-daemon dev` when you are only changing routes, persistence wiring or
+  runtime behavior.
 </Aside>
 
 ## What `bun dev` Persists
@@ -63,7 +65,7 @@ One-time setup: in Keychain Access create a self-signed **Code Signing** certifi
 1. Run the daemon tests after host or core changes.
 
    ```bash
-   bun x nx run rust-daemon:test --skipNxCache
+   bun run --filter rust-daemon test
    ```
 
    This runs `core-rust:test` first, then `cargo test -p anima-daemon`.
@@ -71,19 +73,19 @@ One-time setup: in Keychain Access create a self-signed **Code Signing** certifi
 2. Check formatting.
 
    ```bash
-   bun x nx run rust-daemon:lint --skipNxCache
+   bun run --filter rust-daemon lint
    ```
 
 3. Rebuild contributor docs after docs edits.
 
    ```bash
-   bun x nx run @animaos/contributor-docs:build --skipNxCache
+   bun run --filter @animaos/contributor-docs build
    ```
 
 4. Rebuild public docs if you changed user-facing docs.
 
    ```bash
-   bun x nx run @animaos/docs:build --skipNxCache
+   bun run --filter @animaos/docs build
    ```
 
 </Steps>
@@ -93,7 +95,7 @@ One-time setup: in Keychain Access create a self-signed **Code Signing** certifi
 A running daemon can keep `target/cargo/debug/anima-daemon.exe` locked. If that happens during validation, rerun the test target with an isolated target directory:
 
 ```bash
-CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache
+CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun run --filter rust-daemon test
 ```
 
 ## Scope Boundaries

@@ -79,6 +79,7 @@ describe('offline one-owner deployment contracts', () => {
         .split(' '),
     ).toEqual([
       '/api/connectors/gcalendar/callback',
+      '/api/connectors/gdrive/callback',
       '/api/connectors/mail/gmail/callback',
       '/api/connectors/mail/outlook/callback',
     ]);
@@ -88,17 +89,13 @@ describe('offline one-owner deployment contracts', () => {
 
   test('web build order and contract target cannot launch services', () => {
     const dockerfile = read('deploy/vps/web.Dockerfile');
-    expect(dockerfile.indexOf('@animaos/sdk:build')).toBeLessThan(
-      dockerfile.indexOf('@animaos/web:build'),
+    expect(dockerfile.indexOf('--filter @animaos/sdk build')).toBeLessThan(
+      dockerfile.indexOf('--filter @animaos/web build'),
     );
-    const target = JSON.parse(read('apps/web-e2e/package.json')).nx.targets[
-      'deployment-contracts'
-    ];
-    expect(target.executor).toBe('nx:run-commands');
-    expect(target.options.cwd).toBe('.');
-    expect(target.options.command).toBe(
-      'bun test deploy/vps/contracts.test.ts',
+    const scripts = JSON.parse(read('apps/web-e2e/package.json')).scripts;
+    expect(scripts['deployment-contracts']).toBe(
+      'bun ../../tools/workspace-dev/scripts/run-task.ts -- bun test ../../deploy/vps/contracts.test.ts',
     );
-    expect(target.dependsOn ?? []).toEqual([]);
+    expect(scripts['predeployment-contracts']).toBeUndefined();
   });
 });

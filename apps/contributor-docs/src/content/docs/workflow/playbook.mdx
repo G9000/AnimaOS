@@ -60,22 +60,27 @@ The normal loop (`bun dev`, through `tools/workspace-dev`) starts:
 </Steps>
 
 <Aside type="tip">
-  The launcher checks `http://127.0.0.1:8080/api/health` first. If a daemon is already running there, `bun dev` reuses it and only starts the browser surfaces and docs apps.
+  The launcher checks `http://127.0.0.1:8080/api/health` first. If a daemon is
+  already running there, `bun dev` reuses it and only starts the browser
+  surfaces and docs apps.
 </Aside>
 
 <Aside type="note">
-  `bun dev` persists the daemon's data in `~/.animaos-swarm/data/` (agents, history, memory). Set `ANIMAOS_DEV_EPHEMERAL=1` for a throwaway run, or `ANIMAOS_RS_CONTROL_PLANE_FILE=./data/control-plane.json` for a project-local store. That default folder is the one an installed `anima` also uses.
+  `bun dev` persists the daemon's data in `~/.animaos-swarm/data/` (agents,
+  history, memory). Set `ANIMAOS_DEV_EPHEMERAL=1` for a throwaway run, or
+  `ANIMAOS_RS_CONTROL_PLANE_FILE=./data/control-plane.json` for a project-local
+  store. That default folder is the one an installed `anima` also uses.
 </Aside>
 
 ## What You Should See
 
-| Surface | URL | Notes |
-|---|---|---|
-| Rust daemon | `http://127.0.0.1:8080` | HTTP API, SSE, `/docs` (Scalar) |
-| Web console | `http://127.0.0.1:4200` | Main browser UI |
-| Playground | `http://127.0.0.1:4201` | Interactive runtime playground |
-| Public docs | `http://127.0.0.1:4321` | User-facing docs |
-| Contributor docs | `http://127.0.0.1:4322` | This site |
+| Surface          | URL                     | Notes                           |
+| ---------------- | ----------------------- | ------------------------------- |
+| Rust daemon      | `http://127.0.0.1:8080` | HTTP API, SSE, `/docs` (Scalar) |
+| Web console      | `http://127.0.0.1:4200` | Main browser UI                 |
+| Playground       | `http://127.0.0.1:4201` | Interactive runtime playground  |
+| Public docs      | `http://127.0.0.1:4321` | User-facing docs                |
+| Contributor docs | `http://127.0.0.1:4322` | This site                       |
 
 Quick checks:
 
@@ -103,14 +108,14 @@ bun dev
 For changes confined to the Rust daemon.
 
 ```bash
-bun x nx run rust-daemon:dev
+bun run --filter rust-daemon dev
 ```
 
 ### Web-only and playground-only loops
 
 ```bash
-bun x nx run @animaos/web:serve
-bun x nx run @animaos/playground:serve
+bun run --filter @animaos/web dev
+bun run --filter @animaos/playground dev
 ```
 
 Both proxy to the daemon at `UI_BACKEND_ORIGIN` (default from the launcher: `http://127.0.0.1:8080`), so start a daemon too.
@@ -118,8 +123,8 @@ Both proxy to the daemon at `UI_BACKEND_ORIGIN` (default from the launcher: `htt
 ### Docs-only loop
 
 ```bash
-bun x nx run @animaos/docs:dev
-bun x nx run @animaos/contributor-docs:dev
+bun run --filter @animaos/docs dev
+bun run --filter @animaos/contributor-docs dev
 ```
 
 ### CLI plus daemon loop
@@ -168,27 +173,26 @@ cargo run -p anima-daemon
 ## Daily Commands
 
 ```bash
-bun x nx show projects            # list projects
-bun run build                     # nx run-many -t build
-bun run test                      # nx run-many -t test
-bun run typecheck                 # nx run-many -t typecheck
+bun run build                     # build every workspace
+bun run test                      # test every workspace
+bun run typecheck                 # check workspace types
 bun run lint                      # oxlint over packages and apps
 
-bun x nx run rust-daemon:test --skipNxCache
-bun x nx run @animaos/contributor-docs:build --skipNxCache
-bun x nx run @animaos/docs:build --skipNxCache
+bun run --filter rust-daemon test
+bun run --filter @animaos/contributor-docs build
+bun run --filter @animaos/docs build
 ```
 
 ## Before You Push
 
-| You changed | Run |
-|-------------|-----|
-| Rust host or core crates | `bun x nx run rust-daemon:test --skipNxCache` (runs `core-rust:test` first) |
-| Dev launcher (`tools/workspace-dev`) | `bun x nx test workspace-dev --runInBand --skipNxCache` |
-| A TypeScript package | the package's `test`, `typecheck` and `build` targets, for example `bun x nx test @animaos/sdk` |
-| Contributor docs | `bun x nx run @animaos/contributor-docs:build --skipNxCache` |
-| Public docs | `bun x nx run @animaos/docs:build --skipNxCache` |
-| Several areas | `bun run affected:build` and `bun run affected:test` |
+| You changed                          | Run                                                                                                     |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| Rust host or core crates             | `bun run --filter rust-daemon test` (runs `core-rust:test` first)                                       |
+| Dev launcher (`tools/workspace-dev`) | `bun run --filter workspace-dev test`                                                                   |
+| A TypeScript package                 | the package's `test`, `typecheck` and `build` targets, for example `bun run --filter @animaos/sdk test` |
+| Contributor docs                     | `bun run --filter @animaos/contributor-docs build`                                                      |
+| Public docs                          | `bun run --filter @animaos/docs build`                                                                  |
+| Several areas                        | `bun run build`, `bun run test`, and `bun run typecheck`                                                |
 
 Do not call work complete until the relevant commands pass in the current tree.
 
@@ -198,7 +202,7 @@ Do not call work complete until the relevant commands pass in the current tree.
 - If Rust validation hits that lock, rerun with an isolated target directory:
 
 ```bash
-CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache
+CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun run --filter rust-daemon test
 ```
 
 ## Related Pages

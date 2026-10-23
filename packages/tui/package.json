@@ -16,7 +16,11 @@
     }
   },
   "scripts": {
-    "build": "tsc --build tsconfig.lib.json"
+    "build": "tsc --build tsconfig.lib.json",
+    "build-deps": "bun run --filter @animaos/sdk build",
+    "typecheck": "bun run build && tsc --build --emitDeclarationOnly",
+    "test": "bun run build-deps && bun ../../tools/workspace-dev/scripts/run-vitest.ts run",
+    "lint": "oxlint src --config ../../.oxlintrc.json --tsconfig tsconfig.json"
   },
   "dependencies": {
     "ink": "^8.0.0",

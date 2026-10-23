@@ -59,7 +59,7 @@ animaos/
     `-- docs/, contributor-docs/    Astro documentation sites
 ```
 
-**Tech Stack:** Rust, Bun, TypeScript, Nx, Cargo, Vite, React, Vitest, Playwright, Oxlint
+**Tech Stack:** Rust, Bun, TypeScript, Cargo, Vite, React, Vitest, Playwright, Oxlint
 
 ---
 
@@ -67,34 +67,35 @@ animaos/
 
 ### Shipping Today
 
-| Component | Status | Details |
-|---|---|---|
-| Rust runtime ports | Done | Reusable Rust runtime crates now live in `packages/core-rust`, while the current runnable daemon host lives in `hosts/rust-daemon` |
-| Provider support | Done | OpenAI, Anthropic, Google/Gemini, Ollama, and several OpenAI-compatible providers run through the daemon |
-| Swarm coordination | Done | Supervisor, dynamic, and round-robin strategies are implemented |
-| CLI surface | Done | `create` (single agent), `run`, `chat`, `launch`, `agents`, and `assistant` are available through the local `animaos` binary |
-| SDK | Done | The TypeScript SDK provides daemon HTTP/SSE clients, shared types, and config helper factories |
-| Memory services | Done | BM25 search, task history, document storage, and recent memory retrieval are implemented in the reusable Rust core and exposed today through the current daemon host |
-| Daemon API | Done | Agents, swarms, documents, search, and health endpoints are served by the Rust daemon |
-| TUI support | Done | Local launch sessions already render through the Ink-based terminal UI package |
-| Test coverage | Done | TypeScript package tests and the Rust `cargo test` suite are part of the current development flow |
+| Component          | Status | Details                                                                                                                                                              |
+| ------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Rust runtime ports | Done   | Reusable Rust runtime crates now live in `packages/core-rust`, while the current runnable daemon host lives in `hosts/rust-daemon`                                   |
+| Provider support   | Done   | OpenAI, Anthropic, Google/Gemini, Ollama, and several OpenAI-compatible providers run through the daemon                                                             |
+| Swarm coordination | Done   | Supervisor, dynamic, and round-robin strategies are implemented                                                                                                      |
+| CLI surface        | Done   | `create` (single agent), `run`, `chat`, `launch`, `agents`, and `assistant` are available through the local `animaos` binary                                         |
+| SDK                | Done   | The TypeScript SDK provides daemon HTTP/SSE clients, shared types, and config helper factories                                                                       |
+| Memory services    | Done   | BM25 search, task history, document storage, and recent memory retrieval are implemented in the reusable Rust core and exposed today through the current daemon host |
+| Daemon API         | Done   | Agents, swarms, documents, search, and health endpoints are served by the Rust daemon                                                                                |
+| TUI support        | Done   | Local launch sessions already render through the Ink-based terminal UI package                                                                                       |
+| Test coverage      | Done   | TypeScript package tests and the Rust `cargo test` suite are part of the current development flow                                                                    |
 
 ### Active Gaps
 
-| Component | Status | Details |
-|---|---|---|
-| TUI operator experience | In progress | `launch` already uses the terminal UI, but it still needs stronger navigation, trace inspection, approvals, memory drill-down, and session resume |
-| Web console | Active | `apps/web` is the main companion console; this PRD's earlier TUI-first framing predates it |
-| Auth and audit policy | Planned | API auth, managed permission tiers, and audit surfaces still need productization |
-| Persistent relational storage | Planned | The current runtime leans on file/BM25 flows; a DB layer remains future work |
-| Extension packaging | Planned | The TypeScript mod system was removed; extension manifests and loaders belong in the daemon (see the extension-boundary design) |
-| Release and install polish | Planned | CI, package docs, install paths, and changelog/security posture still need tightening |
+| Component                     | Status      | Details                                                                                                                                           |
+| ----------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TUI operator experience       | In progress | `launch` already uses the terminal UI, but it still needs stronger navigation, trace inspection, approvals, memory drill-down, and session resume |
+| Web console                   | Active      | `apps/web` is the main companion console; this PRD's earlier TUI-first framing predates it                                                        |
+| Auth and audit policy         | Planned     | API auth, managed permission tiers, and audit surfaces still need productization                                                                  |
+| Persistent relational storage | Planned     | The current runtime leans on file/BM25 flows; a DB layer remains future work                                                                      |
+| Extension packaging           | Planned     | The TypeScript mod system was removed; extension manifests and loaders belong in the daemon (see the extension-boundary design)                   |
+| Release and install polish    | Planned     | CI, package docs, install paths, and changelog/security posture still need tightening                                                             |
 
 ---
 
 ## 6. Near-Term Roadmap
 
 ### Phase 1 - TUI, Observability, and Output Quality
+
 - Make the `launch` TUI the default operator workflow worth staying inside
 - Keyboard-first navigation across agents, tools, logs, and final result views
 - Inline approvals, pending states, and error recovery in the terminal flow
@@ -105,12 +106,14 @@ animaos/
 - Confidence scoring contracts for agent and swarm results
 
 ### Phase 2 - Faster and Smarter Coordination
+
 - Parallel dispatch for independent tasks
 - Generate-then-validate strategies with cheap validator agents
 - Smarter routing using triggers, examples, and LLM fallback
 - Better shared memory and knowledge-linking between agents mid-run
 
 ### Phase 3 - Product Surface Hardening
+
 - Harden the TUI as the primary operator surface for runs, traces, tool calls, and memory state
 - Keep the web dashboard secondary until it adds clear value beyond the terminal workflow
 - Auth, audit, and managed permission policy surfaces
@@ -118,6 +121,7 @@ animaos/
 - Better packaging, onboarding, and install flows for teams adopting the kit
 
 ### Phase 4 - Extension and Distribution Model
+
 - First-class plugin manifests and loading conventions
 - Example extensions that demonstrate actions, providers, evaluators, and policy hooks
 - A clearer settings story for managed permissions and guardrails
@@ -127,17 +131,17 @@ animaos/
 
 ## 7. Key Design Decisions
 
-| Decision | Choice | Why |
-|---|---|---|
-| Execution runtime | Reusable Rust core plus Rust daemon host | Keeps runtime ownership reusable while preserving a deterministic streaming boundary in the current host |
-| Primary operator surface | TUI via `animaos launch` | Fastest path to trust, iteration, and operator control without building a second product surface too early |
-| Client surfaces | TypeScript packages | CLI, SDK, TUI, UI, and shared contracts stay easy to compose and integrate |
-| Workspace runner | Bun | Fast installs and repo-local command execution |
-| Monorepo | Nx | Project graph, affected execution, and consistent build/test orchestration |
-| Plugin pattern | Action / Provider / Evaluator | Still the most coherent extension surface across the workspace |
-| Swarm pattern | Supervisor / Dynamic / Round-robin | Covers the current coordination needs without overfitting to one workflow |
-| Memory core | BM25 + structured persistence | Cheap search today; heavier storage remains optional |
-| Tooling model | Built-in toolkit with permission controls | Keeps execution auditable while supporting local workflows and daemon execution |
+| Decision                 | Choice                                    | Why                                                                                                        |
+| ------------------------ | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Execution runtime        | Reusable Rust core plus Rust daemon host  | Keeps runtime ownership reusable while preserving a deterministic streaming boundary in the current host   |
+| Primary operator surface | TUI via `animaos launch`                  | Fastest path to trust, iteration, and operator control without building a second product surface too early |
+| Client surfaces          | TypeScript packages                       | CLI, SDK, TUI, UI, and shared contracts stay easy to compose and integrate                                 |
+| Workspace runner         | Bun                                       | Fast installs and repo-local command execution                                                             |
+| Monorepo                 | Bun workspaces                            | Workspace package linking and explicit build/test scripts                                                  |
+| Plugin pattern           | Action / Provider / Evaluator             | Still the most coherent extension surface across the workspace                                             |
+| Swarm pattern            | Supervisor / Dynamic / Round-robin        | Covers the current coordination needs without overfitting to one workflow                                  |
+| Memory core              | BM25 + structured persistence             | Cheap search today; heavier storage remains optional                                                       |
+| Tooling model            | Built-in toolkit with permission controls | Keeps execution auditable while supporting local workflows and daemon execution                            |
 
 ---
 
@@ -159,7 +163,8 @@ const contentTeam = await client.swarms.create(
       name: 'manager',
       provider: 'openai',
       model: 'gpt-4o',
-      system: 'Plan the work, delegate to workers, and synthesize the final answer.',
+      system:
+        'Plan the work, delegate to workers, and synthesize the final answer.',
       settings: modelSettings,
     }),
     workers: [
@@ -178,7 +183,7 @@ const contentTeam = await client.swarms.create(
         settings: modelSettings,
       }),
     ],
-  })
+  }),
 );
 
 const result = await client.swarms.run(contentTeam.id, {

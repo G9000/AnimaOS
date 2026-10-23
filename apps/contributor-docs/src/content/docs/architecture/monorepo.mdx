@@ -5,7 +5,7 @@ description: How the animaOS monorepo is organized
 
 import { Aside } from '@astrojs/starlight/components';
 
-The animaOS monorepo uses **Nx** for task orchestration, **Bun** for package management and one **Cargo workspace** (the root `Cargo.toml`) for every Rust crate. Nx discovers projects through `project.json` and `package.json` files.
+The animaOS monorepo uses **Bun workspaces** for package linking and task scripts, plus one **Cargo workspace** (the root `Cargo.toml`) for every Rust crate. Workspace names and commands are explicit in each `package.json`; the root manifest includes `packages/*`, `apps/*`, `tools/*`, and `hosts/*`.
 
 ## Directory Layout
 
@@ -36,31 +36,30 @@ animaos/
 ├── bundles/coding-agents/  # Skill bundles that teach agents to drive coding CLIs
 ├── deploy/vps/             # Compose + Caddy package for a one-owner VPS
 ├── docs/                   # Longer design notes (companion guides, plans, specs)
-├── nx.json
 ├── package.json
 ├── Cargo.toml              # Rust workspace manifest
 └── dist-workspace.toml     # cargo-dist release config (only `anima` ships)
 ```
 
-To see the Nx project names: `bun x nx show projects`. They are `core-rust`, `rust-daemon`, `anima`, `workspace-dev`, `@animaos/{sdk,cli,tui,ui,web,web-e2e,playground,docs,contributor-docs}`.
+Workspace names are `core-rust`, `rust-daemon`, `anima`, `workspace-dev`, and `@animaos/{sdk,cli,tui,ui,web,web-e2e,playground,docs,contributor-docs,landing}`. Inspect the corresponding `package.json` for available scripts.
 
 ## Rust Workspace
 
 Workspace members: the eleven crates below, `hosts/rust-daemon` (package `anima-daemon`) and `hosts/anima` (package `anima`). The workspace forbids `unsafe_code`.
 
-| Crate | Responsibility | Depends on |
-|-------|----------------|------------|
-| `anima-core` | Agent loop, traits, durable engine, policy and capability contracts. No I/O. | none (workspace-internal) |
-| `anima-memory` | Memory store, BM25, recall fusion, temporal facts, external-provider plug-in point. No I/O. | `anima-core` |
-| `anima-swarm` | Swarm coordinator, strategies, message bus | `anima-core`, `anima-memory` |
-| `anima-schedule` | Pure tick-driven job scheduler | none |
-| `anima-service-adapters` | Contracts and validation for browser, connectors, bundles, speech, documents | `anima-core` |
-| `anima-document-content` | DOCX/PDF/XLSX text extraction from bytes | `anima-service-adapters` |
-| `anima-model-adapters` | Provider catalog and HTTP adapters, pricing table, speech/transcription | `anima-core`, `anima-service-adapters` |
-| `anima-harness` | Embeddable builder: provider + tools + agent loop | `anima-core`, `anima-model-adapters` |
-| `anima-process` | Process custody and PTY app sessions | none |
-| `anima-acp` | Agent Client Protocol client | `anima-process` |
-| `anima-worktree` | Git worktree isolation for helper agents | none |
+| Crate                    | Responsibility                                                                              | Depends on                             |
+| ------------------------ | ------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `anima-core`             | Agent loop, traits, durable engine, policy and capability contracts. No I/O.                | none (workspace-internal)              |
+| `anima-memory`           | Memory store, BM25, recall fusion, temporal facts, external-provider plug-in point. No I/O. | `anima-core`                           |
+| `anima-swarm`            | Swarm coordinator, strategies, message bus                                                  | `anima-core`, `anima-memory`           |
+| `anima-schedule`         | Pure tick-driven job scheduler                                                              | none                                   |
+| `anima-service-adapters` | Contracts and validation for browser, connectors, bundles, speech, documents                | `anima-core`                           |
+| `anima-document-content` | DOCX/PDF/XLSX text extraction from bytes                                                    | `anima-service-adapters`               |
+| `anima-model-adapters`   | Provider catalog and HTTP adapters, pricing table, speech/transcription                     | `anima-core`, `anima-service-adapters` |
+| `anima-harness`          | Embeddable builder: provider + tools + agent loop                                           | `anima-core`, `anima-model-adapters`   |
+| `anima-process`          | Process custody and PTY app sessions                                                        | none                                   |
+| `anima-acp`              | Agent Client Protocol client                                                                | `anima-process`                        |
+| `anima-worktree`         | Git worktree isolation for helper agents                                                    | none                                   |
 
 Details are under [Rust Core](/architecture/rust-core/).
 
@@ -85,14 +84,14 @@ Details are under [Rust Core](/architecture/rust-core/).
 
 ### `packages/core-rust/`
 
-Reusable Rust crates plus two non-crate helpers: `acceptance/` (Node oracle tests behind the `coding-*`, `provider-task-*` and `research-*` Nx targets) and `browser-worker/` (the Playwright worker `worker.mjs`). Nx targets on `core-rust`:
+Reusable Rust crates plus two non-crate helpers: `acceptance/` (Node oracle tests behind the `coding-*`, `provider-task-*` and `research-*` scripts) and `browser-worker/` (the Playwright worker `worker.mjs`). Scripts on `core-rust`:
 
-| Target | What it does |
-|--------|--------------|
-| `build`, `test`, `lint` | Cargo build / test / `cargo fmt --check` for all eleven crates |
-| `memory-eval` | Baseline memory evaluation cases |
-| `memory-locomo`, `memory-locomo-fetch`, `memory-locomo-dataset` | LoCoMo smoke, download and dataset benchmarks |
-| `browser-worker-test`, `coding-*-test`, `provider-task-acceptance-test`, `research-acceptance-test` | Node test oracles |
+| Script                                                                                              | What it does                                                   |
+| --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `build`, `test`, `lint`                                                                             | Cargo build / test / `cargo fmt --check` for all eleven crates |
+| `memory-eval`                                                                                       | Baseline memory evaluation cases                               |
+| `memory-locomo`, `memory-locomo-fetch`, `memory-locomo-dataset`                                     | LoCoMo smoke, download and dataset benchmarks                  |
+| `browser-worker-test`, `coding-*-test`, `provider-task-acceptance-test`, `research-acceptance-test` | Node test oracles                                              |
 
 ### `packages/sdk/`, `packages/cli/`, `packages/tui/`, `packages/ui/`
 
@@ -109,11 +108,11 @@ The Rust host. See [Rust Daemon](/hosts/rust-daemon/).
 
 ### `hosts/anima/`
 
-The installable supervisor wrapper (`anima` binary, Nx project `anima`). It depends on `anima-daemon` as a library and embeds the built web console in release builds. See [Packaged Anima](/packaged-anima/).
+The installable supervisor wrapper (`anima` binary, Bun workspace `anima`). It depends on `anima-daemon` as a library and embeds the built web console in release builds. See [Packaged Anima](/packaged-anima/).
 
 ### `tools/workspace-dev/`
 
-Runs the dev environment. `bun dev` is `nx run workspace-dev:dev`; it starts the selected host plus the browser and docs surfaces.
+Runs the dev environment. `bun dev` runs the `workspace-dev` launcher; it starts the selected host plus the browser and docs surfaces.
 
 ```bash
 bun dev --host rust
@@ -122,28 +121,29 @@ bun dev --host rust
 `rust` is the only accepted host key (`HOST_KEYS` in `tools/workspace-dev/src/hosts.ts`). Host selection, ports and the dev data location live in that file and nowhere else.
 
 <Aside type="note">
-  Hosts are intentionally separate from packages. If code could be reused by another host, it belongs under `packages/`, not `hosts/`.
+  Hosts are intentionally separate from packages. If code could be reused by
+  another host, it belongs under `packages/`, not `hosts/`.
 </Aside>
 
-## Nx Basics
+## Workspace Scripts
 
 ```bash
-bun x nx show projects                 # list projects
-bun x nx show project rust-daemon      # targets of one project
-bun x nx graph                         # dependency graph
+bun run build                         # build every workspace
+bun run --filter rust-daemon test     # core and daemon tests
+bun run --filter @animaos/web typecheck
 ```
 
-Prefer `bun x nx run <project>:<target>` over calling cargo or vitest directly when an Nx target exists.
+Prefer the repository's Bun scripts over direct tools when a matching script exists.
 
 ## Adding a New Package
 
 1. Create the directory under `packages/` or `hosts/`.
-2. Add a `project.json` (or a `package.json` for a TypeScript package) with its targets.
-3. Nx picks it up on the next command. Rust crates also need a `members` entry in the root `Cargo.toml`, and, if they should be built and tested with the core, an entry in the `-p` lists of the `core-rust` `build`, `test` and `lint` targets in `packages/core-rust/project.json`.
+2. Add a `package.json` with a unique workspace name and explicit scripts, following the closest existing package. Declare workspace dependencies with `workspace:*`.
+3. Run `bun install` to link the workspace. Rust crates also need a `members` entry in the root `Cargo.toml`, and, if they should be built and tested with the core, an entry in the `-p` lists of the `core-rust` `build`, `test` and `lint` scripts in `packages/core-rust/package.json`.
 
 ## Build Order
 
-Nx handles build order through the dependency graph:
+Workspace scripts declare their build prerequisites explicitly:
 
 - `rust-daemon:build` and `rust-daemon:test` first run `core-rust:build` / `core-rust:test`.
 - `@animaos/cli` depends on `@animaos/sdk` and `@animaos/tui`; `tui` depends on `sdk`.

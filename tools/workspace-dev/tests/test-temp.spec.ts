@@ -14,11 +14,21 @@ import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
-const { preTasksExecution, postTasksExecution } = require('../test-temp.cjs');
+const { prepareTask, cleanupTask } = require('../task-temp.cjs');
+function startTask(_options: unknown, ctx: ReturnType<typeof context>) {
+  Object.assign(process.env, prepareTask(ctx));
+}
+function finishTask(
+  _options: unknown,
+  ctx: ReturnType<typeof context> & { taskResults?: unknown },
+) {
+  cleanupTask(ctx);
+}
 const originalEnv = {
   TMP: process.env.TMP,
   TEMP: process.env.TEMP,
   TMPDIR: process.env.TMPDIR,
+  ANIMAOS_TASK_TEMP_ROOT: process.env.ANIMAOS_TASK_TEMP_ROOT,
 };
 const roots: string[] = [];
 const scratchParents: string[] = [];
@@ -51,13 +61,27 @@ function context(workspaceRoot: string, id = 'invocation-1') {
 }
 
 function start(ctx: ReturnType<typeof context>) {
-  preTasksExecution(undefined, ctx);
+  startTask(undefined, ctx);
   const scratch = process.env.TMPDIR!;
   scratchParents.push(dirname(scratch));
   return scratch;
 }
 
-describe('Nx temporary-file lifecycle', () => {
+describe('task temporary-file lifecycle', () => {
+  it('returns child-only temp settings without changing the caller environment', () => {
+    const root = workspace();
+    const ctx = context(root);
+    const before = { ...process.env };
+    const env = prepareTask(ctx);
+    scratchParents.push(dirname(env.TMPDIR));
+    expect(process.env).toEqual(before);
+    expect(env.TMP).toBe(env.TMPDIR);
+    expect(env.TEMP).toBe(env.TMPDIR);
+    expect(env.ANIMAOS_TASK_TEMP_ROOT).toBeTruthy();
+    cleanupTask(ctx);
+    expect(existsSync(env.TMPDIR)).toBe(false);
+  });
+
   it('isolates child-process temporary files and removes them after a failed test', () => {
     const root = workspace();
     const ctx = context(root);
@@ -73,7 +97,7 @@ describe('Nx temporary-file lifecycle', () => {
     const taskResults = {
       'workspace-dev:test': { status: 'failure', code: 17 },
     };
-    postTasksExecution(undefined, { ...ctx, taskResults });
+    finishTask(undefined, { ...ctx, taskResults });
     expect(existsSync(scratch)).toBe(false);
     expect(taskResults['workspace-dev:test'].code).toBe(17);
   });
@@ -89,13 +113,13 @@ describe('Nx temporary-file lifecycle', () => {
     const second = context(root, 'second');
     const secondDir = start(second);
     expect(firstDir).not.toBe(secondDir);
-    postTasksExecution(undefined, { ...first, taskResults: {} });
+    finishTask(undefined, { ...first, taskResults: {} });
     expect(existsSync(firstDir)).toBe(false);
     expect(existsSync(secondDir)).toBe(true);
     for (const dir of ['target/cargo', 'test-output', '.tmp']) {
       expect(readFileSync(join(root, dir, 'keep'), 'utf8')).toBe('keep');
     }
-    postTasksExecution(undefined, { ...second, taskResults: {} });
+    finishTask(undefined, { ...second, taskResults: {} });
     expect(existsSync(secondDir)).toBe(false);
   });
 
@@ -103,7 +127,7 @@ describe('Nx temporary-file lifecycle', () => {
     const root = workspace();
     process.env.TMPDIR = root;
     writeFileSync(join(root, 'keep'), 'keep');
-    postTasksExecution(undefined, { ...context(root), taskResults: {} });
+    finishTask(undefined, { ...context(root), taskResults: {} });
     expect(readFileSync(join(root, 'keep'), 'utf8')).toBe('keep');
   });
 
@@ -112,7 +136,7 @@ describe('Nx temporary-file lifecycle', () => {
     const outside = workspace();
     const ctx = context(root);
     const scratch = start(ctx);
-    postTasksExecution(undefined, { ...ctx, taskResults: {} });
+    finishTask(undefined, { ...ctx, taskResults: {} });
     const parent = dirname(scratch);
     rmSync(parent, { recursive: true });
     symlinkSync(
@@ -120,7 +144,7 @@ describe('Nx temporary-file lifecycle', () => {
       parent,
       process.platform === 'win32' ? 'junction' : 'dir',
     );
-    expect(() => preTasksExecution(undefined, context(root))).toThrow(
+    expect(() => startTask(undefined, context(root))).toThrow(
       /symlink|redirect/i,
     );
     expect(existsSync(outside)).toBe(true);
@@ -140,7 +164,7 @@ describe('Nx temporary-file lifecycle', () => {
     );
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(() =>
-      postTasksExecution(undefined, { ...ctx, taskResults: {} }),
+      finishTask(undefined, { ...ctx, taskResults: {} }),
     ).not.toThrow();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('temporary'));
     expect(readFileSync(join(outside, 'keep'), 'utf8')).toBe('keep');
@@ -158,7 +182,7 @@ describe('Nx temporary-file lifecycle', () => {
       join(scratch, 'linked'),
       process.platform === 'win32' ? 'junction' : 'dir',
     );
-    postTasksExecution(undefined, { ...ctx, taskResults: {} });
+    finishTask(undefined, { ...ctx, taskResults: {} });
     expect(existsSync(scratch)).toBe(false);
     expect(readFileSync(join(outside, 'keep'), 'utf8')).toBe('keep');
   });
@@ -173,7 +197,7 @@ describe('Nx temporary-file lifecycle', () => {
         stdio: 'ignore',
       }),
     ).toThrow();
-    postTasksExecution(undefined, { ...ctx, taskResults: {} });
+    finishTask(undefined, { ...ctx, taskResults: {} });
   });
 
   it('accepts another invocation winning creation of the shared workspace parent', () => {
@@ -184,7 +208,7 @@ describe('Nx temporary-file lifecycle', () => {
       mkdir(directory);
       if (
         typeof directory === 'string' &&
-        basename(directory).startsWith('anima-nx-')
+        basename(directory).startsWith('anima-task-')
       ) {
         throw Object.assign(
           new Error('another invocation created the parent'),
@@ -194,6 +218,6 @@ describe('Nx temporary-file lifecycle', () => {
     });
     const ctx = context(root);
     expect(() => start(ctx)).not.toThrow();
-    postTasksExecution(undefined, { ...ctx, taskResults: {} });
+    finishTask(undefined, { ...ctx, taskResults: {} });
   });
 });

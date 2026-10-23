@@ -10,11 +10,11 @@ This means the core has zero I/O dependencies — no HTTP clients, no database d
 
 **Rust Core** — Three crates with zero I/O dependencies:
 
-| Crate | Key Types |
-|-------|-----------|
-| `anima-core` | `AgentRuntime`, `ModelAdapter` (trait), `Provider` (trait), `Evaluator` (trait), `EventBus` |
-| `anima-memory` | `MemoryManager`, `BM25`, vector search, temporal KG, relationship graph |
-| `anima-swarm` | `SwarmCoordinator`, `MessageBus`, strategies (supervisor, round-robin, dynamic) |
+| Crate          | Key Types                                                                                   |
+| -------------- | ------------------------------------------------------------------------------------------- |
+| `anima-core`   | `AgentRuntime`, `ModelAdapter` (trait), `Provider` (trait), `Evaluator` (trait), `EventBus` |
+| `anima-memory` | `MemoryManager`, `BM25`, vector search, temporal KG, relationship graph                     |
+| `anima-swarm`  | `SwarmCoordinator`, `MessageBus`, strategies (supervisor, round-robin, dynamic)             |
 
 ## Crate: `anima-core`
 
@@ -36,6 +36,7 @@ pub struct AgentRuntime {
 ```
 
 **Task loop:**
+
 1. Inject provider context into the prompt
 2. Call `ModelAdapter::generate()`
 3. If the model returns a tool call, execute it and feed the result back (up to 8 iterations)
@@ -44,25 +45,25 @@ pub struct AgentRuntime {
 
 ### Key traits
 
-| Trait | Role |
-|-------|------|
-| `ModelAdapter` | Abstracts LLM calls. Hosts implement this for OpenAI, Anthropic, Ollama, etc. |
-| `Provider` | Injects dynamic context (current time, user info, search results) before each generation |
-| `Evaluator` | Post-processing hook after each response. Used for scoring, reflection, follow-up actions |
-| `DatabaseAdapter` | Persistence boundary. The host provides SQLite, JSON, or any storage backend |
+| Trait             | Role                                                                                      |
+| ----------------- | ----------------------------------------------------------------------------------------- |
+| `ModelAdapter`    | Abstracts LLM calls. Hosts implement this for OpenAI, Anthropic, Ollama, etc.             |
+| `Provider`        | Injects dynamic context (current time, user info, search results) before each generation  |
+| `Evaluator`       | Post-processing hook after each response. Used for scoring, reflection, follow-up actions |
+| `DatabaseAdapter` | Persistence boundary. The host provides SQLite, JSON, or any storage backend              |
 
 ### Events
 
 `AgentRuntime` emits `EngineEvent`s for every significant state change:
 
-| Event Type | Fired When |
-|------------|-----------|
-| `AgentSpawned` | Runtime created |
-| `TaskStarted` | `run()` called |
-| `ToolInvoked` | Model requested a tool call |
-| `ToolCompleted` | Tool handler finished |
-| `MessageGenerated` | Model produced a response |
-| `TaskCompleted` | Task loop finished |
+| Event Type         | Fired When                  |
+| ------------------ | --------------------------- |
+| `AgentSpawned`     | Runtime created             |
+| `TaskStarted`      | `run()` called              |
+| `ToolInvoked`      | Model requested a tool call |
+| `ToolCompleted`    | Tool handler finished       |
+| `MessageGenerated` | Model produced a response   |
+| `TaskCompleted`    | Task loop finished          |
 
 Hosts can attach an event listener to stream these over SSE or log them.
 
@@ -87,12 +88,12 @@ pub struct MemoryManager {
 
 ### Search pipeline
 
-| Stage | Algorithm | Purpose |
-|-------|-----------|---------|
-| Lexical | BM25 | Keyword relevance |
-| Vector | Cosine similarity | Semantic meaning |
-| Temporal | Time-decay scoring | Recent events |
-| Relationship | Graph proximity | Connected agents/entities |
+| Stage        | Algorithm          | Purpose                   |
+| ------------ | ------------------ | ------------------------- |
+| Lexical      | BM25               | Keyword relevance         |
+| Vector       | Cosine similarity  | Semantic meaning          |
+| Temporal     | Time-decay scoring | Recent events             |
+| Relationship | Graph proximity    | Connected agents/entities |
 
 ### Recall fusion
 
@@ -107,6 +108,7 @@ pub fn recall(
 ```
 
 Each result contains individual scores:
+
 - `lexical_score` — BM25 contribution
 - `vector_score` — embedding similarity
 - `relationship_score` — graph proximity
@@ -118,11 +120,11 @@ Each result contains individual scores:
 
 Before storing a memory, `evaluate()` returns a decision:
 
-| Decision | Meaning |
-|----------|---------|
-| `Store` | Save as a new memory |
-| `Merge` | Combine with an existing duplicate |
-| `Ignore` | Too low quality or redundant |
+| Decision | Meaning                            |
+| -------- | ---------------------------------- |
+| `Store`  | Save as a new memory               |
+| `Merge`  | Combine with an existing duplicate |
+| `Ignore` | Too low quality or redundant       |
 
 ### Snapshot boundary
 
@@ -150,11 +152,11 @@ pub struct SwarmCoordinator {
 
 Strategies are pluggable functions that decide how work flows between agents.
 
-| Strategy | Behavior |
-|----------|----------|
+| Strategy     | Behavior                                                                   |
+| ------------ | -------------------------------------------------------------------------- |
 | `Supervisor` | Manager delegates tasks, reviews results, and synthesizes the final answer |
-| `RoundRobin` | Each worker takes a turn in fixed order |
-| `Dynamic` | Manager dynamically assigns tasks based on context and worker capabilities |
+| `RoundRobin` | Each worker takes a turn in fixed order                                    |
+| `Dynamic`    | Manager dynamically assigns tasks based on context and worker capabilities |
 
 ### Message bus
 
@@ -177,7 +179,7 @@ cargo test --workspace
 cargo nextest run --workspace
 
 # Memory benchmark (LoCoMo eval)
-bun x nx run core-rust:memory-locomo --skipNxCache
+bun run --filter core-rust memory-locomo
 
 # Build release
 cargo build --release

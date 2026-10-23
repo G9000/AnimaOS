@@ -7,12 +7,12 @@ import { Aside } from '@astrojs/starlight/components';
 
 ## Health, Readiness and Status
 
-| Endpoint | Auth | Use |
-|----------|------|-----|
-| `GET /health`, `/api/health` | none | Liveness. Always `200 {"status":"ok"}` |
-| `GET /ready`, `/api/ready` | none | Readiness. `503` with `issues` when the daemon cannot serve |
-| `GET /metrics` | none | Prometheus text, counts only |
-| `GET /api/status` | owner | One snapshot of version, uptime, storage, providers, connectors, automations, approvals, runs, events, logs, limits |
+| Endpoint                     | Auth  | Use                                                                                                                 |
+| ---------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------- |
+| `GET /health`, `/api/health` | none  | Liveness. Always `200 {"status":"ok"}`                                                                              |
+| `GET /ready`, `/api/ready`   | none  | Readiness. `503` with `issues` when the daemon cannot serve                                                         |
+| `GET /metrics`               | none  | Prometheus text, counts only                                                                                        |
+| `GET /api/status`            | owner | One snapshot of version, uptime, storage, providers, connectors, automations, approvals, runs, events, logs, limits |
 
 Readiness reports `database: "missing"` and returns `503` when `ANIMAOS_RS_PERSISTENCE_MODE=postgres` is set without a working database adapter. It also reports an issue when the background-process manager is unavailable or the history store is failing, so orchestrators can retry or fail fast. A healthy proxy alone does not establish a healthy daemon or a configured model.
 
@@ -26,21 +26,21 @@ By default the daemon is an `ephemeral` control plane. Set `ANIMAOS_RS_CONTROL_P
 
 `GET /metrics` (`routes/health.rs`, `routes/status.rs`) is unauthenticated and carries counts only: no agent names, ids, prompts or costs.
 
-| Metric | Meaning |
-|--------|---------|
-| `anima_daemon_ready` | 1 when ready |
-| `anima_daemon_uptime_seconds` | Process uptime |
-| `anima_daemon_agents`, `anima_daemon_swarms`, `anima_daemon_swarm_snapshots`, `anima_daemon_memories` | Registered counts |
-| `anima_daemon_runs`, `anima_daemon_runs_running`, `anima_daemon_runs_queued` | Run ledger counts (the ledger prunes old finished runs, so these are not lifetime totals) |
-| `anima_daemon_approvals_pending` | Approvals waiting for the owner |
-| `anima_daemon_automations_failing` | Automations in failure |
-| `anima_daemon_background_processes`, `anima_daemon_background_process_manager_healthy` | Background command count and manager health |
-| `anima_daemon_database_configured`, `anima_daemon_persistence_mode_info`, `anima_daemon_control_plane_durability_info` | Persistence configuration (labelled `mode`) |
-| `anima_daemon_max_concurrent_runs`, `anima_daemon_max_background_processes`, `anima_daemon_max_request_bytes`, `anima_daemon_request_timeout_seconds` | Configured limits |
-| `anima_daemon_event_subscribers`, `anima_daemon_event_lagged_total` | Open live streams; times a subscriber lagged |
-| `anima_daemon_history_pending_flush`, `anima_daemon_history_usage_queued`, `anima_daemon_history_failing`, `anima_daemon_history_flush_errors_total` | History outbox health |
-| `anima_daemon_messages_pruned_total` | Messages pruned from the hot tail |
-| `anima_daemon_log_lines_buffered` | Lines in the in-memory log tail |
+| Metric                                                                                                                                                | Meaning                                                                                   |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `anima_daemon_ready`                                                                                                                                  | 1 when ready                                                                              |
+| `anima_daemon_uptime_seconds`                                                                                                                         | Process uptime                                                                            |
+| `anima_daemon_agents`, `anima_daemon_swarms`, `anima_daemon_swarm_snapshots`, `anima_daemon_memories`                                                 | Registered counts                                                                         |
+| `anima_daemon_runs`, `anima_daemon_runs_running`, `anima_daemon_runs_queued`                                                                          | Run ledger counts (the ledger prunes old finished runs, so these are not lifetime totals) |
+| `anima_daemon_approvals_pending`                                                                                                                      | Approvals waiting for the owner                                                           |
+| `anima_daemon_automations_failing`                                                                                                                    | Automations in failure                                                                    |
+| `anima_daemon_background_processes`, `anima_daemon_background_process_manager_healthy`                                                                | Background command count and manager health                                               |
+| `anima_daemon_database_configured`, `anima_daemon_persistence_mode_info`, `anima_daemon_control_plane_durability_info`                                | Persistence configuration (labelled `mode`)                                               |
+| `anima_daemon_max_concurrent_runs`, `anima_daemon_max_background_processes`, `anima_daemon_max_request_bytes`, `anima_daemon_request_timeout_seconds` | Configured limits                                                                         |
+| `anima_daemon_event_subscribers`, `anima_daemon_event_lagged_total`                                                                                   | Open live streams; times a subscriber lagged                                              |
+| `anima_daemon_history_pending_flush`, `anima_daemon_history_usage_queued`, `anima_daemon_history_failing`, `anima_daemon_history_flush_errors_total`  | History outbox health                                                                     |
+| `anima_daemon_messages_pruned_total`                                                                                                                  | Messages pruned from the hot tail                                                         |
+| `anima_daemon_log_lines_buffered`                                                                                                                     | Lines in the in-memory log tail                                                           |
 
 There are no HTTP request-count or latency metrics; use the request log lines (below).
 
@@ -50,9 +50,9 @@ The daemon logs through `tracing`. The default filter is `anima_daemon=info,towe
 
 An in-memory tail keeps the last 2,000 lines (each at most 4 KiB), redacted at capture (API keys, `Authorization` and bearer values, OAuth and Telegram tokens, JWTs and long unlabeled tokens become `[redacted]`). Redaction is pattern-based, so treat `RUST_LOG=debug` or `trace` with care: it lets request and provider payload fragments into both the console and the tail.
 
-| Route | Description |
-|-------|-------------|
-| `GET /api/logs?level=&q=&after=&limit=` | Owner. `{ lines, newestSeq }`; `limit` 1 to 1,000 (default 200) |
+| Route                                   | Description                                                                                      |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `GET /api/logs?level=&q=&after=&limit=` | Owner. `{ lines, newestSeq }`; `limit` 1 to 1,000 (default 200)                                  |
 | `GET /api/logs/stream?level=&q=&after=` | Owner SSE: `event: log` per line, `event: resync` when the stream fell behind; at most 8 streams |
 
 `anima logs [-f]` (packaged program) reads the supervisor's log files instead.
@@ -61,39 +61,39 @@ An in-memory tail keeps the last 2,000 lines (each at most 4 KiB), redacted at c
 
 Before Stop, Restart, Quit or Update a supervisor drains the daemon so no agent work is cut off (`system/drain.rs`):
 
-| Route | Description |
-|-------|-------------|
-| `POST /api/system/drain` | Begin draining; `202 { draining, inFlight }` |
-| `GET /api/system/drain` | `{ draining, inFlight }` where `inFlight` counts chat runs, queued runs, swarm runs, helper runs, jobs, background processes, app sessions and ACP sessions |
-| `DELETE /api/system/drain` | Cancel the drain; `204` |
-| `POST /api/system/shutdown` | `202`, then the same graceful shutdown as SIGTERM |
-| `GET /api/system`, `POST /api/system/actions/{action}` | Relay to the supervisor (`start`, `stop`, `restart`, `quit`, `update`, `check-update`, `cancel`); `supervised: false` when no supervisor is configured |
-| `POST /api/system/session` | Trade the one-time console launch code (valid 15 seconds) for a 12-hour console session |
+| Route                                                  | Description                                                                                                                                                 |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/system/drain`                               | Begin draining; `202 { draining, inFlight }`                                                                                                                |
+| `GET /api/system/drain`                                | `{ draining, inFlight }` where `inFlight` counts chat runs, queued runs, swarm runs, helper runs, jobs, background processes, app sessions and ACP sessions |
+| `DELETE /api/system/drain`                             | Cancel the drain; `204`                                                                                                                                     |
+| `POST /api/system/shutdown`                            | `202`, then the same graceful shutdown as SIGTERM                                                                                                           |
+| `GET /api/system`, `POST /api/system/actions/{action}` | Relay to the supervisor (`start`, `stop`, `restart`, `quit`, `update`, `check-update`, `cancel`); `supervised: false` when no supervisor is configured      |
+| `POST /api/system/session`                             | Trade the one-time console launch code (valid 15 seconds) for a 12-hour console session                                                                     |
 
 While draining, new chat messages, legacy runs, peer messages, connector sends, swarm runs, jobs and goals are refused with `503`; Telegram and Discord messages are still received, and due automations and queued jobs stay due. Accepted runs finish. Authorization: without an `Origin`, the admin bearer token (`ANIMA_LOCAL_ADMIN_TOKEN`); from a browser, an allowed Origin plus a console session (cookie `anima_console_<port>` and the `x-anima-console-session` header), because any local process can send an Origin header. See [Packaged Anima](/packaged-anima/) for the console-session model and its stated limits.
 
 ## Building
 
 ```bash
-# Debug build of the daemon binary (what the Nx target runs)
-bun x nx run rust-daemon:build --skipNxCache
+# Debug build of the daemon binary (what the workspace script runs)
+bun run --filter rust-daemon build
 
 # Release build
 cargo build --release -p anima-daemon
 ```
 
-The Nx `build` target runs `tools/workspace-dev/src/rust-daemon-dev.ts --build-only`, which builds `anima-daemon` in the **debug** profile (after `core-rust:build`) and re-signs it on macOS when `ANIMAOS_DEV_SIGNING_IDENTITY` is set. The release binary is `target/cargo/release/anima-daemon` (`.exe` on Windows). The packaged `anima` binary is built by `cargo build -p anima` (`bun x nx run anima:build`) or by the release pipeline.
+The `rust-daemon` workspace's `build` script runs `tools/workspace-dev/src/rust-daemon-dev.ts --build-only`, which builds `anima-daemon` in the **debug** profile (after `core-rust:build`) and re-signs it on macOS when `ANIMAOS_DEV_SIGNING_IDENTITY` is set. The release binary is `target/cargo/release/anima-daemon` (`.exe` on Windows). The packaged `anima` binary is built by `cargo build -p anima` (`bun run --filter anima build`) or by the release pipeline.
 
 Cross-compilation needs the target toolchain and its native dependencies (the daemon links SQLite, ONNX Runtime through `fastembed` and the platform credential APIs); only `aarch64-apple-darwin` and `x86_64-pc-windows-msvc` are built and tested for releases.
 
 ## Testing
 
 ```bash
-bun x nx run rust-daemon:test --skipNxCache
-bun x nx run rust-daemon:lint --skipNxCache
+bun run --filter rust-daemon test
+bun run --filter rust-daemon lint
 
 # Windows, when a running daemon locks the binary
-CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache
+CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun run --filter rust-daemon test
 ```
 
 Daemon tests build routers in process (`tests/*.rs` and unit tests beside modules) with deterministic model adapters, fake transports and vaults, temporary stores and random ports. They do not call real providers or start containers. `tests/document_worker.rs` and the stdio MCP fixture start small helper binaries built from the same crate's examples.
@@ -117,5 +117,7 @@ jq 'keys' data/control-plane.json
 ```
 
 <Aside type="caution">
-  Control-plane, history and memory files can contain conversation text and memory content. Do not paste them into issues or chat. Secrets are not in them (they live in the OS credential store), but private conversation content is.
+  Control-plane, history and memory files can contain conversation text and
+  memory content. Do not paste them into issues or chat. Secrets are not in them
+  (they live in the OS credential store), but private conversation content is.
 </Aside>

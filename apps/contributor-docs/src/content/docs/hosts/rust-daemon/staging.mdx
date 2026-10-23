@@ -6,11 +6,19 @@ description: The Postgres container profile for the Rust daemon and the one-owne
 import { Aside, Steps } from '@astrojs/starlight/components';
 
 <Aside type="caution" title="Read this before binding to 0.0.0.0">
-  Owner-only routes (sessions, runs, approvals, connectors, usage, logs, memory edits, the workspace file browser and the rest of the console's API) require a **loopback bind** and a loopback `Host`, and reject forwarding headers. A daemon bound to `0.0.0.0` behind a proxy answers those routes with `403 local owner authorization required`. The profile below serves the agent, swarm, memory, health and readiness APIs; for the full console behind TLS use the VPS package, which keeps the daemon on loopback.
+  Owner-only routes (sessions, runs, approvals, connectors, usage, logs, memory
+  edits, the workspace file browser and the rest of the console's API) require a
+  **loopback bind** and a loopback `Host`, and reject forwarding headers. A
+  daemon bound to `0.0.0.0` behind a proxy answers those routes with `403 local
+  owner authorization required`. The profile below serves the agent, swarm,
+  memory, health and readiness APIs; for the full console behind TLS use the VPS
+  package, which keeps the daemon on loopback.
 </Aside>
 
 <Aside type="caution" title="Single replica">
-  Run one daemon. Vector indexes are process-local and rebuilt from the memory snapshot on startup, and run state, workers and connector pollers live in one process.
+  Run one daemon. Vector indexes are process-local and rebuilt from the memory
+  snapshot on startup, and run state, workers and connector pollers live in one
+  process.
 </Aside>
 
 ## Container Profile (Postgres)
@@ -50,7 +58,9 @@ RUST_LOG=info,tower_http=info
 Set at least one provider key (for example `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`). The example file also sets `ANIMAOS_RS_REQUEST_TIMEOUT_SECS=60`, `ANIMAOS_RS_MAX_REQUEST_BYTES=262144`, `ANIMAOS_RS_MAX_CONCURRENT_RUNS=8` and `ANIMAOS_RS_MAX_BACKGROUND_PROCESSES=4`. Set `ANIMAOS_RS_API_KEY` for anything reachable beyond the host: without it the daemon trusts the network.
 
 <Aside type="note">
-  The daemon runs embedded migrations at startup. If `ANIMAOS_RS_PERSISTENCE_MODE=postgres` is set and Postgres is unavailable or a migration fails, startup fails; there is no silent fallback to memory mode.
+  The daemon runs embedded migrations at startup. If
+  `ANIMAOS_RS_PERSISTENCE_MODE=postgres` is set and Postgres is unavailable or a
+  migration fails, startup fails; there is no silent fallback to memory mode.
 </Aside>
 
 ## Vector Strategy
@@ -94,4 +104,4 @@ Key points (`deploy/vps/README.md` is the full procedure):
 - Five named volumes (`daemon_state`, `workspace`, `daemon_home`, `caddy_data`, `caddy_config`) plus the protected `.env` and the image ids form one backup generation; back up with the daemon stopped and restore all of them together.
 - Secrets (`ANIMA_INTERNAL_API_KEY`, `ANIMA_LOCAL_ADMIN_TOKEN`, `ANIMA_KEYRING_PASSWORD`) are mandatory with no defaults. The image runs a private D-Bus session and GNOME Secret Service, unlocks the persisted login keyring at startup and probes a write, read and delete before the daemon starts; a wrong password fails startup instead of using transient credentials. Never replace `ANIMA_KEYRING_PASSWORD` to troubleshoot an existing vault.
 - `ANIMA_PUBLIC_BASE_URL=https://<domain>` sets the OAuth callback origin for Google and Microsoft apps.
-- Verification is by contract tests (`deploy/vps/contracts.test.ts`, the `deployment-contracts` Nx target of `web-e2e`) and manual acceptance (public TLS, real providers, reboot, off-site restore); the package is not verified by starting containers in CI.
+- Verification is by contract tests (`deploy/vps/contracts.test.ts`, the `deployment-contracts` script of `@animaos/web-e2e`) and manual acceptance (public TLS, real providers, reboot, off-site restore); the package is not verified by starting containers in CI.

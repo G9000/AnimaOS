@@ -162,10 +162,10 @@ Run this from the repository root. It launches Caddy only on loopback with test 
 
 ## Offline milestone checks
 
-From the repository root, with the Nx daemon and Cloud disabled:
+From the repository root:
 
 ```sh
-NX_DAEMON=false NX_ISOLATE_PLUGINS=false NX_NO_CLOUD=true bun x nx run @animaos/web-e2e:deployment-contracts --skipNxCache
+bun run --filter @animaos/web-e2e deployment-contracts
 docker compose --env-file deploy/vps/fixtures/compose.test.env -f deploy/vps/compose.yaml config --quiet
 ```
 

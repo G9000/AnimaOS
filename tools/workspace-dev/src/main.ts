@@ -22,8 +22,7 @@ export interface WorkspaceDevPlanOptions {
 
 export function parseHostArg(argv: string[]): HostKey {
   const hostFlagIndex = argv.findIndex((value) => value === '--host');
-  const nextValue =
-    hostFlagIndex >= 0 ? argv[hostFlagIndex + 1] : undefined;
+  const nextValue = hostFlagIndex >= 0 ? argv[hostFlagIndex + 1] : undefined;
 
   if (!nextValue) {
     return 'rust';
@@ -34,7 +33,7 @@ export function parseHostArg(argv: string[]): HostKey {
 
 export function buildWorkspaceDevPlan(
   hostName: string,
-  options: WorkspaceDevPlanOptions = {}
+  options: WorkspaceDevPlanOptions = {},
 ): WorkspaceDevPlan {
   const host = getHostDefinition(hostName);
 
@@ -44,7 +43,7 @@ export function buildWorkspaceDevPlan(
     processes.push({
       name: host.projectName,
       command: 'bun',
-      args: ['x', 'nx', 'run', `${host.projectName}:dev`],
+      args: ['run', '--filter', host.projectName, 'dev'],
       env: hostProcessEnv(host, options.env, options.homeDir),
     });
   }
@@ -52,7 +51,7 @@ export function buildWorkspaceDevPlan(
   processes.push({
     name: '@animaos/web',
     command: 'bun',
-    args: ['x', 'nx', 'run', '@animaos/web:serve'],
+    args: ['run', '--filter', '@animaos/web', 'dev'],
     env: {
       UI_BACKEND_ORIGIN: host.baseUrl,
       VITE_HOST_KEY: host.key,
@@ -62,7 +61,7 @@ export function buildWorkspaceDevPlan(
   processes.push({
     name: '@animaos/playground',
     command: 'bun',
-    args: ['x', 'nx', 'run', '@animaos/playground:serve'],
+    args: ['run', '--filter', '@animaos/playground', 'dev'],
     env: {
       UI_BACKEND_ORIGIN: host.baseUrl,
       VITE_HOST_KEY: host.key,
@@ -72,13 +71,13 @@ export function buildWorkspaceDevPlan(
   processes.push({
     name: '@animaos/docs',
     command: 'bun',
-    args: ['x', 'nx', 'run', '@animaos/docs:dev'],
+    args: ['run', '--filter', '@animaos/docs', 'dev'],
   });
 
   processes.push({
     name: '@animaos/contributor-docs',
     command: 'bun',
-    args: ['x', 'nx', 'run', '@animaos/contributor-docs:dev'],
+    args: ['run', '--filter', '@animaos/contributor-docs', 'dev'],
   });
 
   return {
@@ -106,11 +105,12 @@ async function isHostReachable(baseUrl: string): Promise<boolean> {
   }
 }
 
-const isEntrypoint = (
-  import.meta as ImportMeta & {
-    main?: boolean;
-  }
-).main === true;
+const isEntrypoint =
+  (
+    import.meta as ImportMeta & {
+      main?: boolean;
+    }
+  ).main === true;
 
 if (isEntrypoint) {
   void run(process.argv.slice(2)).catch((error: unknown) => {

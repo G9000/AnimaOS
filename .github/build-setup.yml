@@ -27,12 +27,10 @@
     GH_TOKEN: ''
 - name: Build the web console
   run: |
-    bun x nx run @animaos/sdk:build
-    bun x nx run @animaos/web:build
+    bun run --filter @animaos/sdk build
+    bun run --filter @animaos/web build
   shell: bash
   env:
-    NX_NO_CLOUD: true
-    NX_DAEMON: false
     CODESIGN_CERTIFICATE: ''
     CODESIGN_CERTIFICATE_PASSWORD: ''
     CODESIGN_IDENTITY: ''

@@ -15,22 +15,30 @@ This site documents the developer surfaces: the **TypeScript SDK**, the **`anima
 
 <CardGrid>
   <Card title="Keep persistent agents" icon="seti:rust">
-    Each agent has its own main conversation, memory, tools and approval policy. Registered agents, sessions and schedules survive restarts when persistence is configured.
+    Each agent has its own main conversation, memory, tools and approval policy.
+    Registered agents, sessions and schedules survive restarts when persistence
+    is configured.
   </Card>
   <Card title="Remember and recall" icon="seti:db">
-    Facts, preferences and always-on core memory, searched with BM25 plus embeddings, relationships and temporal facts. Owners can review, correct, export and delete what is kept.
+    Facts, preferences and always-on core memory, searched with BM25 plus
+    embeddings, relationships and temporal facts. Owners can review, correct,
+    export and delete what is kept.
   </Card>
   <Card title="Delegate and coordinate" icon="seti:typescript">
-    Agents bring in helpers, and swarms run a manager with workers under supervisor, round-robin or dynamic strategies.
+    Agents bring in helpers, and swarms run a manager with workers under
+    supervisor, round-robin or dynamic strategies.
   </Card>
   <Card title="Run work unattended" icon="seti:terminal">
-    Jobs, goals and automations (time and event triggers) run inside the daemon while the console is closed. Approvals decide what an unattended run may do.
+    Jobs, goals and automations (time and event triggers) run inside the daemon
+    while the console is closed. Approvals decide what an unattended run may do.
   </Card>
   <Card title="Meet it where you are" icon="seti:html">
-    The web console, Telegram, Discord, Gmail, Outlook, Google Calendar and Google Drive. Voice transcription and speech output are opt-in.
+    The web console, Telegram, Discord, Gmail, Outlook, Google Calendar and
+    Google Drive. Voice transcription and speech output are opt-in.
   </Card>
   <Card title="Stay in control" icon="seti:docker">
-    Allow, ask or deny per risk class, always-allow rules, reviewed MCP tools and skills, usage and cost records, and logs.
+    Allow, ask or deny per risk class, always-allow rules, reviewed MCP tools
+    and skills, usage and cost records, and logs.
   </Card>
 </CardGrid>
 
@@ -58,17 +66,20 @@ See [Companion workflows](/companion-workflows/) for `/learn`, event automation 
 The reusable runtime lives in the Rust workspace under `packages/core-rust` and stays independent of any host. The daemon (`hosts/rust-daemon`) wraps it and exposes HTTP and server-sent events. The SDK, CLI and TUI never run agent code themselves; they call the daemon.
 
 <Aside type="note">
-  The Rust daemon is the only supported host today. Earlier TypeScript runtime packages, the mod system and the agency generator have been removed. `animaos create` scaffolds a single agent workspace, and `bun dev --host` accepts only `rust`.
+  The Rust daemon is the only supported host today. Earlier TypeScript runtime
+  packages, the mod system and the agency generator have been removed. `animaos
+  create` scaffolds a single agent workspace, and `bun dev --host` accepts only
+  `rust`.
 </Aside>
 
 ## Ways to run it
 
-| | Packaged `anima` | From the repository |
-|---|------------------|---------------------|
-| What it is | An installable program that wraps the daemon, embeds the web console, and adds a tray icon, supervisor and self-updater | The development workflow |
-| Start | `anima setup`, then `anima` | `bun dev --host rust` |
-| API and console | Port `8787` (control port `8788`) | Daemon on `8080`, web console on `4200` |
-| Data | `~/.animaos-swarm/` | Its own development data |
+|                 | Packaged `anima`                                                                                                        | From the repository                     |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| What it is      | An installable program that wraps the daemon, embeds the web console, and adds a tray icon, supervisor and self-updater | The development workflow                |
+| Start           | `anima setup`, then `anima`                                                                                             | `bun dev --host rust`                   |
+| API and console | Port `8787` (control port `8788`)                                                                                       | Daemon on `8080`, web console on `4200` |
+| Data            | `~/.animaos-swarm/`                                                                                                     | Its own development data                |
 
 The packaged program's commands include `anima`, `anima setup`, `anima status`, `anima start`, `anima stop`, `anima restart`, `anima quit`, `anima logs`, `anima update` and `anima config`. It is a separate copy from a development daemon; the two never share data or credentials. See the [packaged Anima guide](https://github.com/G9000/animaos/blob/main/apps/contributor-docs/src/content/docs/packaged-anima.md) for install, updates and limits.
 
@@ -76,7 +87,7 @@ For development, run from the repository root:
 
 ```bash
 bun install --frozen-lockfile
-bun x nx run @animaos/sdk:build
+bun run --filter @animaos/sdk build
 bun dev --host rust
 ```
 
@@ -120,11 +131,11 @@ By default the daemon runs ephemeral. Configure a control-plane file (or Postgre
 
 ## Clients
 
-| Client | Use it for | Docs |
-|--------|-----------|------|
-| TypeScript SDK | Programmatic access to every daemon route | [SDK Quick Start](/sdk/quickstart/) |
-| `animaos` CLI | Scaffold an agent workspace, run an agent or swarm, chat, inspect agents | [CLI](/cli/) |
-| TUI | Watch a swarm work from an `anima.yaml` workspace, with history and retry | [TUI](/tui/) |
+| Client         | Use it for                                                                | Docs                                |
+| -------------- | ------------------------------------------------------------------------- | ----------------------------------- |
+| TypeScript SDK | Programmatic access to every daemon route                                 | [SDK Quick Start](/sdk/quickstart/) |
+| `animaos` CLI  | Scaffold an agent workspace, run an agent or swarm, chat, inspect agents  | [CLI](/cli/)                        |
+| TUI            | Watch a swarm work from an `anima.yaml` workspace, with history and retry | [TUI](/tui/)                        |
 
 ## Getting started in 60 seconds
 
@@ -153,7 +164,7 @@ const helper = await client.agents.create(
     provider: 'openai',
     model: 'gpt-4o-mini',
     system: 'You are a helpful assistant.',
-  })
+  }),
 );
 
 const result = await client.agents.run(helper.state.id, {
@@ -164,5 +175,8 @@ console.log(result.result.data?.text);
 ```
 
 <Aside type="caution">
-  AnimaOS is under active development. Connector and tool capabilities have setup and scope limits, browser work is scoped, and interrupted work may need review after a restart. The daemon README and the capabilities endpoint describe current limits.
+  AnimaOS is under active development. Connector and tool capabilities have
+  setup and scope limits, browser work is scoped, and interrupted work may need
+  review after a restart. The daemon README and the capabilities endpoint
+  describe current limits.
 </Aside>

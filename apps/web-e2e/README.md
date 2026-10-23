@@ -5,9 +5,9 @@ Browser coverage for `@animaos/web`, the companion console.
 ## Offline console journeys
 
 ```sh
-bun x nx run @animaos/web-e2e:e2e-console --skipNxCache
-bun x nx run @animaos/web-e2e:typecheck --skipNxCache
-bun x nx run @animaos/web-e2e:deployment-contracts --skipNxCache
+bun run --filter @animaos/web-e2e e2e-console
+bun run --filter @animaos/web-e2e typecheck
+bun run --filter @animaos/web-e2e deployment-contracts
 ```
 
 `playwright.console.config.ts` has no `webServer`. Its target builds SDK/web
@@ -38,14 +38,14 @@ servers. They are retained for separately authorized runtime
 testing and excluded from the no-service milestone gates:
 
 ```sh
-bun x nx run @animaos/web-e2e:e2e
+bun run --filter @animaos/web-e2e e2e
 ```
 
 Do not use the default target when services are prohibited.
 
 ## Isolated memory HTTP acceptance (M61)
 
-The normal `bun x nx run @animaos/web-e2e:e2e-console --skipNxCache`
+The normal `bun run --filter @animaos/web-e2e e2e-console`
 remains offline: 18 cases pass, including a held-response memory editor and
 manual-redirect regression. The actual memory HTTP/restart case is skipped unless
 an explicit fresh M61 root release enables it. Do not enable it against a normal

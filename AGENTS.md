@@ -37,43 +37,20 @@ Shared guidance for GPT-6 Astra and GPT-5.6 coding agents, adapted from the offi
 
 - Use `bun dev --host rust` for the normal local workflow. It runs the selected host plus both browser surfaces, `@animaos/web` and `@animaos/playground`, through `workspace-dev`. The web console talks only to the daemon on `127.0.0.1:8080`. The daemon automatically starts restored Telegram connectors; no separate gateway process or token environment variable is used.
 - The only supported host key is `rust`.
-- Use Nx project targets for host work: `bun x nx run rust-daemon:dev`, `bun x nx run rust-daemon:build`, `bun x nx run rust-daemon:test`, and `bun x nx run rust-daemon:lint`.
-- Use Nx project targets for docs work: `bun x nx run @animaos/docs:build` and `bun x nx run @animaos/contributor-docs:build`.
-- Use `bun x nx test workspace-dev` when changing host selection, process orchestration, or dev launcher behavior.
-- Use `bun x nx show projects --json` to confirm project names before assuming target names or paths.
-- Prefer `bun x nx ...` over direct tool commands for build/test/lint tasks when an Nx target exists.
+- Use Bun workspace scripts for focused work: `bun run --filter <workspace-name> <script>`. Inspect the workspace's `package.json` before assuming a script name.
+- Use `bun run daemon`, `bun run rust:build`, `bun run rust:test`, and `bun run rust:lint` for daemon development, build, tests, and formatting.
+- Use `bun run --filter @animaos/docs build` and `bun run --filter @animaos/contributor-docs build` for docs work.
+- Use `bun run --filter workspace-dev test` when changing host selection, process orchestration, or dev launcher behavior.
+- Use root `bun run build`, `bun run test`, `bun run typecheck`, and `bun run lint` for workspace-wide checks.
+- Prefer the repository's Bun scripts over direct tool commands when a matching script exists.
 
 # Verification
 
-- For Rust host/core changes, run `bun x nx run rust-daemon:test --skipNxCache`.
+- For Rust host/core changes, run `bun run rust:test` (the full core, daemon, and packaged supervisor suites).
 - Cargo outputs are isolated under `target/cargo`; use `bun run rust:cache:status` to check their size and `bun run rust:cache:clean` to remove only those outputs.
-- On Windows, if a running daemon locks `target/cargo/debug/anima-daemon.exe`, rerun Rust host validation with `CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun x nx run rust-daemon:test --skipNxCache`.
-- For dev launcher changes, run `bun x nx test workspace-dev --runInBand --skipNxCache`.
-- For Astro docs changes, run the relevant build target: `bun x nx run @animaos/docs:build --skipNxCache` or `bun x nx run @animaos/contributor-docs:build --skipNxCache`.
-- For TypeScript package changes, use the relevant Nx `test`, `build`, or `typecheck` target.
+- On Windows, if a running daemon locks `target/cargo/debug/anima-daemon.exe`, rerun Rust host validation with `CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun run rust:test`. In PowerShell, set those environment variables before invoking the script.
+- For dev launcher changes, run `bun run --filter workspace-dev test`.
+- For Astro docs changes, run the relevant build target: `bun run --filter @animaos/docs build` or `bun run --filter @animaos/contributor-docs build`.
+- For TypeScript package changes, use the relevant workspace's `test`, `build`, and `typecheck` scripts.
 - Do not claim completion unless the relevant verification commands have passed in the current tree.
-- Nx tasks isolate OS temporary files under an OS-temp `anima-nx-*` directory and clean their own invocation directory after completion, including failed tests. Keep reports in the configured `test-output` paths. After each verification, remove task-owned scratch scripts, snapshots, logs, and screenshots once their results are recorded; inspect exact paths and active users before cleanup. Hard-killed runs may require manual cleanup. Retain Cargo/Nx caches unless cache cleanup is explicitly requested.
-
-<!-- nx configuration start-->
-<!-- Leave the start & end comments to automatically receive updates. -->
-
-# General Guidelines for working with Nx
-
-- For navigating/exploring the workspace, invoke the `nx-workspace` skill first - it has patterns for querying projects, targets, and dependencies
-- When running tasks (for example build, lint, test, e2e, etc.), always prefer running the task through `nx` (i.e. `nx run`, `nx run-many`, `nx affected`) instead of using the underlying tooling directly
-- Prefix nx commands with the workspace's package manager (e.g., `bun x nx build`) - avoids using globally installed CLI
-- You have access to the Nx MCP server and its tools, use them to help the user
-- For Nx plugin best practices, check `node_modules/@nx/<plugin>/PLUGIN.md`. Not all plugins have this file - proceed without it if unavailable.
-- NEVER guess CLI flags - always check nx_docs or `--help` first when unsure
-
-## Scaffolding & Generators
-
-- For scaffolding tasks (creating apps, libs, project structure, setup), ALWAYS invoke the `nx-generate` skill FIRST before exploring or calling MCP tools
-
-## When to use nx_docs
-
-- USE for: advanced config options, unfamiliar flags, migration guides, plugin configuration, edge cases
-- DON'T USE for: basic generator syntax (`nx g @nx/react:app`), standard commands, things you already know
-- The `nx-generate` skill handles generator discovery internally - don't call nx_docs just to look up generator syntax
-
-<!-- nx configuration end-->
+- The task wrapper (`tools/workspace-dev/scripts/run-task.ts`) gives each invocation an owned directory under OS-temp `anima-task-*`, passes that directory to child tasks, and cleans it after completion, including failed tests. Keep reports in the configured `test-output` paths. After each verification, remove task-owned scratch scripts, snapshots, logs, and screenshots once their results are recorded; inspect exact paths and active users before cleanup. Hard-killed runs may require manual cleanup. Retain Cargo and tool caches unless cache cleanup is explicitly requested.

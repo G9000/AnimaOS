@@ -42,8 +42,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     env:
-      NX_DAEMON: 'false'
-      NX_NO_CLOUD: 'true'
       CARGO_PACKAGER_SIGN_PRIVATE_KEY: ''
       CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ''
     steps:
@@ -66,13 +64,13 @@ jobs:
       - name: Install JavaScript dependencies
         run: bun install --frozen-lockfile --ignore-scripts
       - name: Check installer lifecycle and configurations
-        run: bun x nx run anima:package-check --skipNxCache
+        run: bun run --filter anima package-check
       - name: Install pinned packaging CLI
         run: cargo install cargo-packager --version 0.11.8 --locked --root target/tools
       - name: Build native packages
-        run: bun x nx run anima:package --skipNxCache
+        run: bun run --filter anima package
       - name: Verify native first launch and runtime lifecycle
-        run: bun x nx run anima:test --skipNxCache --args="--release --locked --features native-install --test first_launch"
+        run: bun run --filter anima test --release --locked --features native-install --test first_launch
       - name: Inspect Linux package
         if: runner.os == 'Linux'
         shell: bash

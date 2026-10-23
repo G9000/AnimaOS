@@ -1,11 +1,11 @@
-FROM node:22-bookworm-slim AS web
-COPY --from=oven/bun:1.3.8 /usr/local/bin/bun /usr/local/bin/bun
+FROM node:24-bookworm-slim AS web
+COPY --from=oven/bun:1.4.3 /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /build
 COPY . .
-ENV NX_DAEMON=false CI=1
+ENV CI=1
 RUN bun install --frozen-lockfile
-RUN bun x nx run @animaos/sdk:build --skipNxCache
-RUN bun x nx run @animaos/web:build --skipNxCache
+RUN bun run --filter @animaos/sdk build
+RUN bun run --filter @animaos/web build
 
 FROM caddy:2.10.2-alpine
 COPY --from=web /build/apps/web/dist /srv

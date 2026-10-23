@@ -1,6 +1,6 @@
 # Testing Commands
 
-Run commands from the repository root. The workspace package manager is Bun, so Nx commands should be prefixed with `bun x`.
+Run commands from the repository root. Use `bun run --filter <workspace-name> <script>` for focused checks, or root `bun run build`, `bun run test`, `bun run typecheck`, and `bun run lint` for workspace-wide checks.
 
 Rust build artifacts are kept under `target/cargo`. Check their size with `bun run rust:cache:status`; it warns above 64 GiB. `bun run rust:cache:clean` clears only that Cargo cache directory, leaving other files under `target/` alone.
 
@@ -9,7 +9,7 @@ Rust build artifacts are kept under `target/cargo`. Check their size with `bun r
 Fast deterministic memory regression gate:
 
 ```bash
-NX_TUI=false bun x nx run core-rust:memory-eval --skipNxCache
+bun run --filter core-rust memory-eval
 ```
 
 Focused temporal fact/relationship CRUD and supersession checks:
@@ -21,13 +21,13 @@ cargo test --manifest-path Cargo.toml -p anima-memory temporal -- --nocapture
 LOCOMO-style long-memory smoke benchmark:
 
 ```bash
-NX_TUI=false bun x nx run core-rust:memory-locomo --skipNxCache
+bun run --filter core-rust memory-locomo
 ```
 
 Fetch the public LOCOMO CSV into the local `.cache/locomo` directory:
 
 ```bash
-NX_TUI=false bun x nx run core-rust:memory-locomo-fetch --skipNxCache
+bun run --filter core-rust memory-locomo-fetch
 ```
 
 The fetch target writes `.cache/locomo/locomo.csv`, `.cache/locomo/locomo_dataset.json`, and `.cache/locomo/manifest.json`. The cache directory is git-ignored. Use `LOCOMO_DATASET_URL` to point at a different upstream CSV artifact, `LOCOMO_BENCHMARK_DATASET_URL` to point at a different labeled benchmark JSON artifact, and `LOCOMO_CACHE_DIR` to choose a different local cache directory. The default Hugging Face CSV does not declare a redistribution license in its dataset card, so keep it as a local cache unless upstream terms are confirmed.
@@ -35,7 +35,7 @@ The fetch target writes `.cache/locomo/locomo.csv`, `.cache/locomo/locomo_datase
 Production-grade LOCOMO retrieval benchmark over the labeled dataset:
 
 ```bash
-NX_TUI=false bun x nx run core-rust:memory-locomo-dataset --skipNxCache
+bun run --filter core-rust memory-locomo-dataset
 ```
 
 That command fetches the dataset if missing, populates `MemoryManager` with all conversation turns from `locomo_dataset.json`, evaluates category 1-4 questions against official evidence turn IDs, and prints retrieval profiles: `core` (`MemoryManager::new()`, multilingual analyzer, no expansion), `locomo-tuned` (`MemoryManager::with_query_expander(locomo_query_expander())`), `locomo-temporal-*` profiles that seed temporal facts from conversation-only profile/preference cues and sweep temporal recall weight, and `locomo-temporal-rerank-*` profiles that retrieve a broader candidate pool before reranking temporal evidence back down to `LOCOMO_TOP_K`. The default quality thresholds apply only to `locomo-tuned`; the printed delta shows how much the LOCOMO-specific expansion changes hit rate and MRR, and the temporal profiles show whether seeded temporal facts improve category 3 without hurting the other categories. Tunables:
@@ -65,7 +65,7 @@ LOCOMO_AGENT_MODEL=gpt-4.1-mini \
 LOCOMO_JUDGE_PROVIDER=openai \
 LOCOMO_JUDGE_MODEL=gpt-4.1 \
 OPENAI_API_KEY=sk-... \
-NX_TUI=false bun x nx run rust-daemon:memory-locomo-agent --skipNxCache
+bun run --filter rust-daemon memory-locomo-agent
 ```
 
 This is the expensive full-stack benchmark. It starts an isolated Rust daemon when `LOCOMO_DAEMON_URL` is not set, ingests LOCOMO turns through the SDK/daemon memory API, retrieves evidence through daemon recall, asks a real answer model through daemon agent runs, judges answers with a real judge model through daemon agent runs, writes a detailed JSON report under `.cache/locomo-agent`, and fails if thresholds are not met. It intentionally fails without real provider configuration; it does not use the deterministic test model as a fallback.
@@ -118,7 +118,7 @@ LOCOMO_AGENT_MIN_QUESTIONS=100 \
 LOCOMO_AGENT_MIN_ACCURACY=0.80 \
 LOCOMO_AGENT_ANSWER_MAX_TOKENS=512 \
 LOCOMO_AGENT_JUDGE_MAX_TOKENS=512 \
-NX_TUI=false bun x nx run rust-daemon:memory-locomo-agent --skipNxCache
+bun run --filter rust-daemon memory-locomo-agent
 ```
 
 The May 2026 validated run reached `0.900` answer accuracy, `0.940` retrieval hit rate, `0.860` all-evidence hit rate, `0.900` answer-evidence hit rate, `0.161` labeled answer-evidence precision, `7.7` average answer evidence lines, and `0.000` judge failure rate on 100 questions. Category accuracies were: category 1 `0.806`, category 2 `0.919`, category 3 `1.000`, and category 4 `0.952` after the precision reranker, relation-specific extraction prompts, and the explicit LOCOMO query expander.
@@ -132,13 +132,13 @@ To isolate lexical recall from embedding effects in a local smoke run, set `ANIM
 For a paid smoke run, cap the questions and lower the minimum question threshold to the same value so the command remains honest about the smaller sample:
 
 ```bash
-LOCOMO_AGENT_MAX_QUESTIONS=20 LOCOMO_AGENT_MIN_QUESTIONS=20 NX_TUI=false bun x nx run rust-daemon:memory-locomo-agent --skipNxCache
+LOCOMO_AGENT_MAX_QUESTIONS=20 LOCOMO_AGENT_MIN_QUESTIONS=20 bun run --filter rust-daemon memory-locomo-agent
 ```
 
 Full Rust core tests:
 
 ```bash
-NX_TUI=false bun x nx run core-rust:test --skipNxCache
+bun run --filter core-rust test
 ```
 
 Core memory portability check without optional features:
@@ -152,13 +152,13 @@ CARGO_TARGET_DIR=target/cargo/validation-memory-no-default cargo test -p anima-m
 Rust daemon tests. The isolated target directory avoids Windows file-lock issues when a daemon binary is already running:
 
 ```bash
-CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon NX_TUI=false bun x nx run rust-daemon:test --skipNxCache
+CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun run --filter rust-daemon test
 ```
 
 TypeScript SDK tests:
 
 ```bash
-NX_TUI=false bun x nx run @animaos/sdk:test --skipNxCache
+bun run --filter @animaos/sdk test
 ```
 
 ## Browser playground validation
@@ -166,25 +166,25 @@ NX_TUI=false bun x nx run @animaos/sdk:test --skipNxCache
 Playground typecheck:
 
 ```bash
-NX_TUI=false bun x nx run @animaos/playground:typecheck --skipNxCache
+bun run --filter @animaos/playground typecheck
 ```
 
 Playground build:
 
 ```bash
-NX_TUI=false bun x nx run @animaos/playground:build --skipNxCache
+bun run --filter @animaos/playground build
 ```
 
 Web UI typecheck:
 
 ```bash
-NX_TUI=false bun x nx run @animaos/web:typecheck --skipNxCache
+bun run --filter @animaos/web typecheck
 ```
 
 Web UI build:
 
 ```bash
-NX_TUI=false bun x nx run @animaos/web:build --skipNxCache
+bun run --filter @animaos/web build
 ```
 
 ## Diff hygiene
@@ -197,13 +197,12 @@ On Windows this may print LF-to-CRLF warnings. Those warnings are not whitespace
 
 ## PowerShell environment form
 
-Git Bash accepts inline environment variables like `NX_TUI=false command`. In PowerShell, set environment variables before running the command:
+Git Bash accepts inline environment variables like `CI=1 command`. In PowerShell, set environment variables before running the command:
 
 ```powershell
-$env:NX_TUI="false"
 $env:CI="1"
 $env:CARGO_TARGET_DIR="target/cargo/validation-rust-daemon"
-bun x nx run rust-daemon:test --skipNxCache
+bun run --filter rust-daemon test
 ```
 
 Clear a temporary PowerShell environment variable when you are done:
@@ -247,6 +246,7 @@ ANIMAOS_RS_MEMORY_EMBEDDING_MODEL=nomic-embed-text \
 ANIMAOS_RS_MEMORY_EMBEDDINGS_BASE_URL=http://127.0.0.1:11434/v1 \
 bun dev --host rust
 ```
+
 PowerShell:
 
 ```powershell

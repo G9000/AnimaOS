@@ -1,23 +1,23 @@
 ---
 title: Rust Daemon
-description: "The anima-daemon Axum HTTP/SSE host in hosts/rust-daemon: architecture, startup, request boundary and shutdown"
+description: 'The anima-daemon Axum HTTP/SSE host in hosts/rust-daemon: architecture, startup, request boundary and shutdown'
 ---
 
 `anima-daemon` (`hosts/rust-daemon`) is the runnable host for animaOS. It is an Axum HTTP/SSE server that wires the reusable crates in `packages/core-rust` to real infrastructure: model providers, SQLite and optional Postgres persistence, the OS credential store, connectors (Telegram, Discord, Google Drive, Calendar, Gmail and Outlook), MCP servers, process control and a browser worker. It is also a library: `hosts/anima` embeds it and adds supervision.
 
 The long-form reference is `hosts/rust-daemon/README.md` (route inventory, per-feature limits and rollback notes); the live contract is `GET /openapi.json` and the Scalar UI at `/docs`. This section explains how the pieces fit and where to change them.
 
-| Page | Covers |
-|------|--------|
-| [Local Development](/hosts/rust-daemon/local/) | Running and verifying the daemon |
-| [Environment](/hosts/rust-daemon/env/) | Every environment variable |
-| [HTTP API](/hosts/rust-daemon/api/) | Route families, conventions, authorization |
-| [Runs and Sessions](/hosts/rust-daemon/runs/) | Sessions, the run ledger, steer and stop, approvals, SSE events, jobs and automations |
-| [Persistence](/hosts/rust-daemon/persistence/) | Control plane, history store, memory store, keys and credentials, upgrades and rollback |
-| [Connectors](/hosts/rust-daemon/connectors/) | Telegram, Discord, Drive, Calendar, mail, MCP, OAuth apps |
-| [Coding Apps and Helpers](/hosts/rust-daemon/coding/) | Background commands, app sessions, ACP coding agents, helpers and worktrees, imports |
-| [Staging Deployment](/hosts/rust-daemon/staging/) | Postgres container profile and the VPS package |
-| [Operations](/hosts/rust-daemon/ops/) | Readiness, metrics, logs, drain, building, debugging |
+| Page                                                  | Covers                                                                                  |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| [Local Development](/hosts/rust-daemon/local/)        | Running and verifying the daemon                                                        |
+| [Environment](/hosts/rust-daemon/env/)                | Every environment variable                                                              |
+| [HTTP API](/hosts/rust-daemon/api/)                   | Route families, conventions, authorization                                              |
+| [Runs and Sessions](/hosts/rust-daemon/runs/)         | Sessions, the run ledger, steer and stop, approvals, SSE events, jobs and automations   |
+| [Persistence](/hosts/rust-daemon/persistence/)        | Control plane, history store, memory store, keys and credentials, upgrades and rollback |
+| [Connectors](/hosts/rust-daemon/connectors/)          | Telegram, Discord, Drive, Calendar, mail, MCP, OAuth apps                               |
+| [Coding Apps and Helpers](/hosts/rust-daemon/coding/) | Background commands, app sessions, ACP coding agents, helpers and worktrees, imports    |
+| [Staging Deployment](/hosts/rust-daemon/staging/)     | Postgres container profile and the VPS package                                          |
+| [Operations](/hosts/rust-daemon/ops/)                 | Readiness, metrics, logs, drain, building, debugging                                    |
 
 ## Architecture
 
@@ -52,25 +52,25 @@ The daemon implements `ModelAdapter` as `RuntimeModelAdapter` (provider routing 
 
 `hosts/rust-daemon/src/lib.rs` declares every module; the public surface is `run_from_env`, `serve`, `serve_with`, `app*` test constructors, `DaemonConfig` and `PersistenceMode`. Notable modules:
 
-| Module | Responsibility |
-|--------|----------------|
-| `app.rs`, `app/` | `DaemonConfig`, router construction, `serve_with`, env parsing (`entry.rs`), persistence wiring, shutdown |
-| `routes/` | Axum handlers, request and response contracts (`routes/contracts/`), OpenAPI registration (`routes/mod.rs`), owner authorization (`routes/http.rs`) |
-| `state.rs`, `state/` | `DaemonState` and its run commit, stop, session, swarm and live state |
-| `agent_runs.rs`, `agent_runs/` | The run coordinator: queue, steer, stop, approvals gate, helpers, compaction, titles, worktrees |
-| `runs/`, `sessions/` | Run ledger types; session records, pruning, history reads, compaction, context selection |
-| `approvals/` | Risk table, policy and rules, autonomy modes, shell analysis, the gate |
-| `history/` | Row-based history store: SQLite, Postgres and in-memory; outbox and worker |
-| `control_plane_store.rs` | Versioned control-plane snapshot (JSON file or Postgres `host_snapshots`) and upgrade backups |
-| `core_memory/`, `learning/`, `memory_*.rs` | Memory features described in [Memory in the Daemon](/architecture/rust-core/anima-memory/daemon-memory/) |
-| `tools/`, `tool_rpc/`, `tools/process/` | The native tool registry and the code-execution bridge |
-| `connectors/` | Telegram, Discord, Drive, Calendar, mail, OAuth apps |
-| `mcp/`, `browser/`, `community_bundles/`, `skills/` | MCP connections, browser tools, bundles, skills |
-| `usage/`, `provider_keys/`, `chatgpt_auth*`, `keychain.rs` | Usage pricing, key pools, ChatGPT sign-in, credential store |
-| `live/`, `events.rs`, `logs*` | Per-agent SSE hub, swarm event fan-out, redacted log tail |
-| `system/` | Drain and the supervisor relay |
-| `agent_files/`, `attachments/` | Standard Markdown agent files, uploads and document admission |
-| `postgres.rs`, `migrations/` | `SqlxPostgresAdapter` and embedded migrations (`step_log`, `host_snapshots`, `history_*`) |
+| Module                                                     | Responsibility                                                                                                                                      |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app.rs`, `app/`                                           | `DaemonConfig`, router construction, `serve_with`, env parsing (`entry.rs`), persistence wiring, shutdown                                           |
+| `routes/`                                                  | Axum handlers, request and response contracts (`routes/contracts/`), OpenAPI registration (`routes/mod.rs`), owner authorization (`routes/http.rs`) |
+| `state.rs`, `state/`                                       | `DaemonState` and its run commit, stop, session, swarm and live state                                                                               |
+| `agent_runs.rs`, `agent_runs/`                             | The run coordinator: queue, steer, stop, approvals gate, helpers, compaction, titles, worktrees                                                     |
+| `runs/`, `sessions/`                                       | Run ledger types; session records, pruning, history reads, compaction, context selection                                                            |
+| `approvals/`                                               | Risk table, policy and rules, autonomy modes, shell analysis, the gate                                                                              |
+| `history/`                                                 | Row-based history store: SQLite, Postgres and in-memory; outbox and worker                                                                          |
+| `control_plane_store.rs`                                   | Versioned control-plane snapshot (JSON file or Postgres `host_snapshots`) and upgrade backups                                                       |
+| `core_memory/`, `learning/`, `memory_*.rs`                 | Memory features described in [Memory in the Daemon](/architecture/rust-core/anima-memory/daemon-memory/)                                            |
+| `tools/`, `tool_rpc/`, `tools/process/`                    | The native tool registry and the code-execution bridge                                                                                              |
+| `connectors/`                                              | Telegram, Discord, Drive, Calendar, mail, OAuth apps                                                                                                |
+| `mcp/`, `browser/`, `community_bundles/`, `skills/`        | MCP connections, browser tools, bundles, skills                                                                                                     |
+| `usage/`, `provider_keys/`, `chatgpt_auth*`, `keychain.rs` | Usage pricing, key pools, ChatGPT sign-in, credential store                                                                                         |
+| `live/`, `events.rs`, `logs*`                              | Per-agent SSE hub, swarm event fan-out, redacted log tail                                                                                           |
+| `system/`                                                  | Drain and the supervisor relay                                                                                                                      |
+| `agent_files/`, `attachments/`                             | Standard Markdown agent files, uploads and document admission                                                                                       |
+| `postgres.rs`, `migrations/`                               | `SqlxPostgresAdapter` and embedded migrations (`step_log`, `host_snapshots`, `history_*`)                                                           |
 
 ## Startup Sequence
 
@@ -91,7 +91,7 @@ Order of layers (`routes/mod.rs`): request id (`x-request-id` generated or propa
 - **Timeouts.** Standard routes use `ANIMAOS_RS_REQUEST_TIMEOUT_SECS` (default 30). The blocking run routes (`/api/agents/{id}/run`, `/api/swarms/{id}/run`, `/api/agents/{id}/messages`, connector sends, `/api/agencies/generate`) use `ANIMAOS_RS_RUN_REQUEST_TIMEOUT_SECS` (default 600). Voice and speech routes have their own bounds. A timeout returns `408`; an admitted run keeps going.
 - **Body limit.** `ANIMAOS_RS_MAX_REQUEST_BYTES` (default 64 KiB) is enforced by handlers through a bounded body reader, not by a global layer; some routes (uploads, skill import, session runs) apply their own larger limits.
 - **API key.** If `ANIMAOS_RS_API_KEY` is set, every route except health, readiness, metrics, `/openapi.json`, `/docs` and the exact OAuth callback paths requires `Authorization: Bearer <key>` or `x-api-key`. Unset means trust-the-network, fine only for loopback.
-- **Owner authorization.** Most routes that read or change a person's data are *owner-only* (`LocalOwnerPolicy` in `routes/http.rs`). A request qualifies only if the daemon is bound to a loopback address, the `Host` header is loopback and no forwarding headers are present (`Forwarded`, `Via`, `X-Forwarded-*`, `X-Real-IP`, `Client-IP`, `True-Client-IP`, `CF-Connecting-IP`), and then one of: an `Origin` header that exactly matches an allowed browser origin (`http://localhost:4200`, `127.0.0.1:4200`, `4201`, plus `ANIMA_ALLOWED_UI_ORIGINS`; only the configured ones when `ANIMA_SUPERVISOR_URL` is set), or `Authorization: Bearer <ANIMA_LOCAL_ADMIN_TOKEN>` for originless clients. Read-only fetches may omit `Origin` when Fetch Metadata says `same-origin` and the referrer is an allowed origin. Lifecycle routes additionally need a console session. A non-loopback bind therefore makes owner-only routes answer `403`; this is deliberate and is why the VPS package keeps the daemon on loopback behind a gateway (see [Staging Deployment](/hosts/rust-daemon/staging/)).
+- **Owner authorization.** Most routes that read or change a person's data are _owner-only_ (`LocalOwnerPolicy` in `routes/http.rs`). A request qualifies only if the daemon is bound to a loopback address, the `Host` header is loopback and no forwarding headers are present (`Forwarded`, `Via`, `X-Forwarded-*`, `X-Real-IP`, `Client-IP`, `True-Client-IP`, `CF-Connecting-IP`), and then one of: an `Origin` header that exactly matches an allowed browser origin (`http://localhost:4200`, `127.0.0.1:4200`, `4201`, plus `ANIMA_ALLOWED_UI_ORIGINS`; only the configured ones when `ANIMA_SUPERVISOR_URL` is set), or `Authorization: Bearer <ANIMA_LOCAL_ADMIN_TOKEN>` for originless clients. Read-only fetches may omit `Origin` when Fetch Metadata says `same-origin` and the referrer is an allowed origin. Lifecycle routes additionally need a console session. A non-loopback bind therefore makes owner-only routes answer `403`; this is deliberate and is why the VPS package keeps the daemon on loopback behind a gateway (see [Staging Deployment](/hosts/rust-daemon/staging/)).
 
 ## State and Concurrency
 
@@ -107,4 +107,4 @@ Ctrl+C or Unix SIGTERM (or the drain route's shutdown) starts a 40-second budget
 - Do not add a tool without a risk class (see `approvals/policy.rs`).
 - Never put secrets in the control plane, logs or model-visible text. Credentials go through the OS credential store (`keychain.rs`, `connectors/credentials.rs`).
 - Every new owner route needs the owner-authorization check and `Cache-Control: no-store`, an entry in the OpenAPI registration and a handler test.
-- For host changes run `bun x nx run rust-daemon:test --skipNxCache`.
+- For host changes run `bun run --filter rust-daemon test`.

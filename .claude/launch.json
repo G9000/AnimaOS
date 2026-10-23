@@ -13,20 +13,30 @@
     {
       "name": "e2e-web",
       "runtimeExecutable": "bun",
-      "runtimeArgs": ["x", "nx", "run", "@animaos/web:serve"],
+      "runtimeArgs": ["run", "--filter", "@animaos/web", "dev"],
       "port": 4200
     },
     {
       "name": "landing",
       "runtimeExecutable": "bun",
-      "runtimeArgs": ["x", "astro", "dev", "--root", "apps/landing", "--port", "4330"],
+      "runtimeArgs": [
+        "x",
+        "astro",
+        "dev",
+        "--root",
+        "apps/landing",
+        "--port",
+        "4330"
+      ],
       "port": 4330
     },
     {
       "name": "web-local",
       "runtimeExecutable": "bun",
-      "runtimeArgs": ["x", "nx", "run", "@animaos/web:serve"],
-      "env": { "UI_BACKEND_ORIGIN": "http://127.0.0.1:8080" },
+      "runtimeArgs": ["run", "--filter", "@animaos/web", "dev"],
+      "env": {
+        "UI_BACKEND_ORIGIN": "http://127.0.0.1:8080"
+      },
       "port": 4200
     }
   ]

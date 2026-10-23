@@ -16,15 +16,9 @@ The SDK is a client for the Rust daemon (`hosts/rust-daemon`). It does not embed
    From the repository root:
 
    <Tabs>
-     <TabItem label="bun">
-       ```bash
-       bun run daemon
-       ```
-     </TabItem>
+     <TabItem label="bun">```bash bun run daemon ```</TabItem>
      <TabItem label="cargo">
-       ```bash
-       cargo run --manifest-path Cargo.toml -p anima-daemon
-       ```
+       ```bash cargo run --manifest-path Cargo.toml -p anima-daemon ```
      </TabItem>
    </Tabs>
 
@@ -52,7 +46,9 @@ The SDK is a client for the Rust daemon (`hosts/rust-daemon`). It does not embed
 </Steps>
 
 <Aside type="tip">
-  `bun dev --host rust` starts the daemon, the web console on `http://localhost:4200` and the playground. `bun run daemon` is the smallest loop when you only need the API.
+  `bun dev --host rust` starts the daemon, the web console on
+  `http://localhost:4200` and the playground. `bun run daemon` is the smallest
+  loop when you only need the API.
 </Aside>
 
 ## Installation
@@ -61,7 +57,7 @@ The SDK is a client for the Rust daemon (`hosts/rust-daemon`). It does not embed
 
 ```bash
 bun install --frozen-lockfile
-bun x nx run @animaos/sdk:build
+bun run --filter @animaos/sdk build
 ```
 
 ```json
@@ -104,7 +100,7 @@ const researcher = await client.agents.create(
     provider: 'openai',
     model: 'gpt-4o-mini',
     system: 'You are a research assistant. Provide concise, factual answers.',
-  })
+  }),
 );
 
 console.log('Created agent:', researcher.state.id);
@@ -166,7 +162,8 @@ const editorialSwarm = await client.swarms.create(
       name: 'editor',
       provider: 'openai',
       model: 'gpt-4o',
-      system: 'Break work into steps, review outputs, and synthesize the final answer.',
+      system:
+        'Break work into steps, review outputs, and synthesize the final answer.',
     }),
     workers: [
       agent({
@@ -182,7 +179,7 @@ const editorialSwarm = await client.swarms.create(
         system: 'Turn approved findings into polished output.',
       }),
     ],
-  })
+  }),
 );
 
 const result = await client.swarms.run(editorialSwarm.id, {
@@ -212,11 +209,11 @@ try {
 }
 ```
 
-| Error | Property | Meaning |
-|-------|----------|---------|
-| `DaemonHttpError` | `status: number` | HTTP status code from the daemon |
-| `DaemonHttpError` | `body: unknown` | Parsed response body (JSON when possible) |
-| `DaemonConnectionError` | `cause: unknown` | Original fetch or network error |
+| Error                   | Property         | Meaning                                   |
+| ----------------------- | ---------------- | ----------------------------------------- |
+| `DaemonHttpError`       | `status: number` | HTTP status code from the daemon          |
+| `DaemonHttpError`       | `body: unknown`  | Parsed response body (JSON when possible) |
+| `DaemonConnectionError` | `cause: unknown` | Original fetch or network error           |
 
 ## Next Steps
 

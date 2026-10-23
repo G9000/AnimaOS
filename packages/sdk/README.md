@@ -48,9 +48,21 @@ console.log({
 Pass a stable `roomId` to keep subsequent direct turns in the same conversation:
 
 ```ts
-await client.agents.run(agentId, { text: 'Plan the release' }, { roomId: 'release-planning' });
-await client.agents.run(agentId, { text: 'Expand the testing steps' }, { roomId: 'release-planning' });
-const peer = await client.agents.sendMessage(agentId, reviewerId, 'Review the release plan');
+await client.agents.run(
+  agentId,
+  { text: 'Plan the release' },
+  { roomId: 'release-planning' },
+);
+await client.agents.run(
+  agentId,
+  { text: 'Expand the testing steps' },
+  { roomId: 'release-planning' },
+);
+const peer = await client.agents.sendMessage(
+  agentId,
+  reviewerId,
+  'Review the release plan',
+);
 console.log(peer.agent.state.id, peer.result.data?.text);
 ```
 
@@ -84,8 +96,16 @@ Microsoft configuration also accepts an optional `tenant`. OAuth app status retu
 const client = createDaemonClient({ baseUrl: '' });
 const status = await client.connectors.mailStatus(agentId, 'gmail');
 if (status.connector?.status === 'active') {
-  const messages = await client.connectors.mailMessages(agentId, 'gmail', status.connector.id);
-  const drafts = await client.connectors.mailDrafts(agentId, 'gmail', status.connector.id);
+  const messages = await client.connectors.mailMessages(
+    agentId,
+    'gmail',
+    status.connector.id,
+  );
+  const drafts = await client.connectors.mailDrafts(
+    agentId,
+    'gmail',
+    status.connector.id,
+  );
 }
 ```
 
@@ -95,11 +115,11 @@ if (status.connector?.status === 'active') {
 
 ## Build
 
-Run `bun run build:cli-sdk` to build the SDK and CLI together, or `bun x nx build @animaos/sdk` to build only this package.
+Run `bun run build:cli-sdk` to build the SDK and CLI together, or `bun run --filter @animaos/sdk build` to build only this package.
 
 ## Test
 
-Run `bun x nx test @animaos/sdk`.
+Run `bun run --filter @animaos/sdk test`.
 
 Integration tests build the Rust daemon with a separate compilation deadline, then run its binary on a temporary local port and workspace. They use an isolated environment and a local model stub; no developer credentials or persisted workspace data are inherited. `CARGO_TARGET_DIR` can select a build directory (otherwise `target/cargo/sdk-daemon-integration`).
 

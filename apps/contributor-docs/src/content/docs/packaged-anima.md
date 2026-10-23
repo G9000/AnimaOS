@@ -3,7 +3,7 @@ title: Packaged Anima
 description: The installable anima program, its commands, how it supervises the daemon, and how releases and updates work
 ---
 
-`hosts/anima` builds the installable `anima` program (Nx project `anima`, Cargo package `anima`). It embeds `anima-daemon` as a library, embeds the built web console in release builds (the `bundled-ui` feature), and adds a supervisor, a tray / menu-bar icon (macOS and Windows) and a self-updater. Contributors keep using `bun dev --host rust`; the packaged program is what end users install.
+`hosts/anima` builds the installable `anima` program (Bun workspace `anima`, Cargo package `anima`). It embeds `anima-daemon` as a library, embeds the built web console in release builds (the `bundled-ui` feature), and adds a supervisor, a tray / menu-bar icon (macOS and Windows) and a self-updater. Contributors keep using `bun dev --host rust`; the packaged program is what end users install.
 
 Releases are built for **macOS on Apple Silicon** (`aarch64-apple-darwin`) and **Windows x64** (`x86_64-pc-windows-msvc`). Only `hosts/anima` ships; `anima-daemon` is not published on its own (`dist = false`).
 
@@ -31,19 +31,19 @@ Until `anima setup` has chosen a workspace, `anima`, `anima start` and `anima su
 
 ## Commands
 
-| Command | What it does |
-|---|---|
-| `anima` | Start Anima if needed, then open the console |
-| `anima setup` | First-run questions; safe to re-run. `--yes` accepts the defaults |
-| `anima status` | Running / stopped, version, address, workspace, connectors, update available |
-| `anima start` / `stop` / `restart` | Start or stop the server; the tray stays |
-| `anima quit` | Stop everything, including the tray |
-| `anima autostart on` / `off` | Start at login, or not |
-| `anima logs [-f]` | Recent output of the server log (`logs/anima.log`, last 200 lines) |
-| `anima update` | Install the latest release |
-| `anima config get [key]` / `set <key> <value>` | Read or change `workspace`, `port`, `control-port`, `updates.check` |
-| `anima run` | Run the server in the foreground, with no tray and no supervision |
-| `anima supervise [--background] [--no-tray]` | Run the supervisor (what autostart launches) |
+| Command                                        | What it does                                                                 |
+| ---------------------------------------------- | ---------------------------------------------------------------------------- |
+| `anima`                                        | Start Anima if needed, then open the console                                 |
+| `anima setup`                                  | First-run questions; safe to re-run. `--yes` accepts the defaults            |
+| `anima status`                                 | Running / stopped, version, address, workspace, connectors, update available |
+| `anima start` / `stop` / `restart`             | Start or stop the server; the tray stays                                     |
+| `anima quit`                                   | Stop everything, including the tray                                          |
+| `anima autostart on` / `off`                   | Start at login, or not                                                       |
+| `anima logs [-f]`                              | Recent output of the server log (`logs/anima.log`, last 200 lines)           |
+| `anima update`                                 | Install the latest release                                                   |
+| `anima config get [key]` / `set <key> <value>` | Read or change `workspace`, `port`, `control-port`, `updates.check`          |
+| `anima run`                                    | Run the server in the foreground, with no tray and no supervision            |
+| `anima supervise [--background] [--no-tray]`   | Run the supervisor (what autostart launches)                                 |
 
 `stop`, `restart`, `quit` and `update` accept `--now` to skip waiting for running work.
 
@@ -51,13 +51,13 @@ Until `anima setup` has chosen a workspace, `anima`, `anima start` and `anima su
 
 Everything lives under `~/.animaos-swarm/` (`hosts/anima/src/paths.rs`, folders created private, mode `0700` on Unix):
 
-| Path | Contents |
-|------|----------|
-| `config.toml` | `workspace`, `port` (default 8787), `control_port` (default 8788), `autostart` (default false), `[updates] check` (default true). Written atomically, mode `0600` |
-| `control-token`, `admin-token` | Bearer tokens for the supervisor control API and for the daemon's owner API |
-| `data/` | The daemon's stores (below) |
-| `logs/` | `anima.log` (rotated at 10 MiB, 3 files kept) |
-| `run/` | `update-pending.json`, `update-failed.json` during an update |
+| Path                           | Contents                                                                                                                                                          |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.toml`                  | `workspace`, `port` (default 8787), `control_port` (default 8788), `autostart` (default false), `[updates] check` (default true). Written atomically, mode `0600` |
+| `control-token`, `admin-token` | Bearer tokens for the supervisor control API and for the daemon's owner API                                                                                       |
+| `data/`                        | The daemon's stores (below)                                                                                                                                       |
+| `logs/`                        | `anima.log` (rotated at 10 MiB, 3 files kept)                                                                                                                     |
+| `run/`                         | `update-pending.json`, `update-failed.json` during an update                                                                                                      |
 
 Autostart is a per-user LaunchAgent `~/Library/LaunchAgents/dev.animaos.anima.plist` (label `dev.animaos.anima`) on macOS and the `AnimaOS` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` on Windows.
 
@@ -67,22 +67,22 @@ Autostart is a per-user LaunchAgent `~/Library/LaunchAgents/dev.animaos.anima.pl
 
 The environment handed to the daemon (`hosts/anima/src/server_env.rs`; values already set in the process environment win):
 
-| Variable | Value |
-|----------|-------|
-| `ANIMAOS_RS_HOST` / `ANIMAOS_RS_PORT` | `127.0.0.1` / the configured port (8787) |
-| `ANIMAOS_WORKSPACE_ROOT` | the configured workspace |
-| `ANIMAOS_RS_CONTROL_PLANE_FILE` | `data/control-plane.json` |
-| `ANIMAOS_RS_HISTORY_SQLITE_FILE` | `data/history.sqlite` |
-| `ANIMAOS_RS_PROVIDER_KEYS_FILE` | `data/provider-keys.json` |
-| `ANIMAOS_RS_MEMORY_SQLITE_FILE` | `data/memory.sqlite` (skipped if `ANIMAOS_RS_MEMORY_FILE` is set) |
-| `ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE` | `data/embeddings.sqlite` |
-| `ANIMAOS_RS_MEMORY_EMBEDDINGS_CACHE_DIR` | `data/embeddings-cache` |
-| `ANIMAOS_RS_CHECKPOINT_ROOT` | `data/checkpoints` (Windows only) |
-| `ANIMA_ALLOWED_UI_ORIGINS` | `http://127.0.0.1:<port>,http://localhost:<port>` |
-| `ANIMA_PUBLIC_BASE_URL` | `http://127.0.0.1:<port>` |
-| `ANIMAOS_RS_KEYCHAIN_NAMESPACE` | `installed` |
-| `ANIMA_LOCAL_ADMIN_TOKEN_FILE` | the path of `admin-token` (a path, not the token, because the environment of a process is readable by other processes of the same user) |
-| `ANIMA_SUPERVISOR_URL`, `ANIMA_SUPERVISOR_TOKEN_FILE` | the control API address and the path of `control-token` |
+| Variable                                              | Value                                                                                                                                   |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `ANIMAOS_RS_HOST` / `ANIMAOS_RS_PORT`                 | `127.0.0.1` / the configured port (8787)                                                                                                |
+| `ANIMAOS_WORKSPACE_ROOT`                              | the configured workspace                                                                                                                |
+| `ANIMAOS_RS_CONTROL_PLANE_FILE`                       | `data/control-plane.json`                                                                                                               |
+| `ANIMAOS_RS_HISTORY_SQLITE_FILE`                      | `data/history.sqlite`                                                                                                                   |
+| `ANIMAOS_RS_PROVIDER_KEYS_FILE`                       | `data/provider-keys.json`                                                                                                               |
+| `ANIMAOS_RS_MEMORY_SQLITE_FILE`                       | `data/memory.sqlite` (skipped if `ANIMAOS_RS_MEMORY_FILE` is set)                                                                       |
+| `ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE`            | `data/embeddings.sqlite`                                                                                                                |
+| `ANIMAOS_RS_MEMORY_EMBEDDINGS_CACHE_DIR`              | `data/embeddings-cache`                                                                                                                 |
+| `ANIMAOS_RS_CHECKPOINT_ROOT`                          | `data/checkpoints` (Windows only)                                                                                                       |
+| `ANIMA_ALLOWED_UI_ORIGINS`                            | `http://127.0.0.1:<port>,http://localhost:<port>`                                                                                       |
+| `ANIMA_PUBLIC_BASE_URL`                               | `http://127.0.0.1:<port>`                                                                                                               |
+| `ANIMAOS_RS_KEYCHAIN_NAMESPACE`                       | `installed`                                                                                                                             |
+| `ANIMA_LOCAL_ADMIN_TOKEN_FILE`                        | the path of `admin-token` (a path, not the token, because the environment of a process is readable by other processes of the same user) |
+| `ANIMA_SUPERVISOR_URL`, `ANIMA_SUPERVISOR_TOKEN_FILE` | the control API address and the path of `control-token`                                                                                 |
 
 Because `ANIMA_SUPERVISOR_URL` is set, the daemon accepts only the configured origins for owner actions, not the dev origins on ports 4200 and 4201.
 
@@ -99,11 +99,11 @@ Agents need owner approval to run `anima stop|quit|restart|update|config|autosta
 
 ## Side by Side with `bun dev`
 
-| | Installed `anima` | `bun dev --host rust` |
-|---|---|---|
-| Console / API port | 8787 (control port 8788) | 8080 |
-| Data | `~/.animaos-swarm/data/` | by default `~/.animaos-swarm/data/` too (see below) |
-| Keychain namespace | `installed` | none (historical service names) |
+|                    | Installed `anima`        | `bun dev --host rust`                               |
+| ------------------ | ------------------------ | --------------------------------------------------- |
+| Console / API port | 8787 (control port 8788) | 8080                                                |
+| Data               | `~/.animaos-swarm/data/` | by default `~/.animaos-swarm/data/` too (see below) |
+| Keychain namespace | `installed`              | none (historical service names)                     |
 
 Ports and credential-store items never collide. **Data does by default**: `tools/workspace-dev` points the dev daemon's control-plane file at `~/.animaos-swarm/data/control-plane.json`, which is the installed program's file, so `history.sqlite` and `memory.sqlite` beside it are shared too. If both could run against one folder, give the dev daemon its own `ANIMAOS_RS_CONTROL_PLANE_FILE` (and `ANIMAOS_RS_PROVIDER_KEYS_FILE`) or use `ANIMAOS_DEV_EPHEMERAL=1`. A Telegram bot can only be connected to one copy; the other shows "This bot is already connected somewhere else."
 
@@ -124,9 +124,9 @@ Not yet verified: Windows paths, and a real CI release run (the owner's dry rele
 ## Development
 
 ```bash
-bun x nx run anima:build      # cargo build -p anima
-bun x nx run anima:test       # cargo test -p anima
-bun x nx run anima:lint       # cargo fmt --all --check
+bun run --filter anima build      # cargo build -p anima
+bun run --filter anima test       # cargo test -p anima
+bun run --filter anima lint       # cargo fmt --all --check
 ```
 
 Tests use fakes for `launchctl`, the registry and the network, and a throwaway `minisign` key for update verification.

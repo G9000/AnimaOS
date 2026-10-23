@@ -8,21 +8,21 @@ description: The reusable Rust crates behind the animaOS daemon
 The crates live under `packages/core-rust/crates/` and build in the root Cargo workspace. From the repo root:
 
 ```bash
-bun x nx run core-rust:build
-bun x nx run core-rust:test
+bun run --filter core-rust build
+bun run --filter core-rust test
 ```
 
 ## Crates
 
-| Crate | What it is | I/O |
-|-------|-----------|-----|
-| [`anima-core`](/architecture/rust-core/anima-core/) | `AgentRuntime` task loop, `ModelAdapter` / `Provider` / `Evaluator` / `DatabaseAdapter` traits, events, context-window selection, plus a portable durable engine with capability, policy and execution-store contracts | None |
-| [`anima-memory`](/architecture/rust-core/anima-memory/) | `MemoryManager`: BM25 index, recall fusion, entities, relationships, temporal facts, owner edits, retention, eval harness, external-provider plug-in point | None |
-| [`anima-swarm`](/architecture/rust-core/anima-swarm/) | `SwarmCoordinator`, `MessageBus`, supervisor / round-robin / dynamic strategies | None |
-| [`anima-schedule`](/architecture/rust-core/anima-schedule/) | Pure tick-driven `Scheduler` for interval and daily jobs | None (one JSON file loader) |
-| [`anima-model-adapters`](/architecture/rust-core/model-adapters/) | Provider catalog and HTTP adapters, ChatGPT subscription adapter, pricing table, speech and transcription | HTTP |
-| [`anima-harness`](/architecture/rust-core/anima-harness/) | Builder API that composes the agent loop with the provider catalog and your tools | HTTP (through adapters) |
-| [Supporting crates](/architecture/rust-core/supporting-crates/) | `anima-service-adapters` (contracts), `anima-document-content` (DOCX/PDF/XLSX text), `anima-process` (process custody, PTY sessions), `anima-acp` (ACP client), `anima-worktree` (git worktrees) | Mixed |
+| Crate                                                             | What it is                                                                                                                                                                                                             | I/O                         |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| [`anima-core`](/architecture/rust-core/anima-core/)               | `AgentRuntime` task loop, `ModelAdapter` / `Provider` / `Evaluator` / `DatabaseAdapter` traits, events, context-window selection, plus a portable durable engine with capability, policy and execution-store contracts | None                        |
+| [`anima-memory`](/architecture/rust-core/anima-memory/)           | `MemoryManager`: BM25 index, recall fusion, entities, relationships, temporal facts, owner edits, retention, eval harness, external-provider plug-in point                                                             | None                        |
+| [`anima-swarm`](/architecture/rust-core/anima-swarm/)             | `SwarmCoordinator`, `MessageBus`, supervisor / round-robin / dynamic strategies                                                                                                                                        | None                        |
+| [`anima-schedule`](/architecture/rust-core/anima-schedule/)       | Pure tick-driven `Scheduler` for interval and daily jobs                                                                                                                                                               | None (one JSON file loader) |
+| [`anima-model-adapters`](/architecture/rust-core/model-adapters/) | Provider catalog and HTTP adapters, ChatGPT subscription adapter, pricing table, speech and transcription                                                                                                              | HTTP                        |
+| [`anima-harness`](/architecture/rust-core/anima-harness/)         | Builder API that composes the agent loop with the provider catalog and your tools                                                                                                                                      | HTTP (through adapters)     |
+| [Supporting crates](/architecture/rust-core/supporting-crates/)   | `anima-service-adapters` (contracts), `anima-document-content` (DOCX/PDF/XLSX text), `anima-process` (process custody, PTY sessions), `anima-acp` (ACP client), `anima-worktree` (git worktrees)                       | Mixed                       |
 
 ## Dependencies Between Crates
 

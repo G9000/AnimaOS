@@ -38,7 +38,7 @@ bun run animaos assistant inbox --since 1756000000000 --limit 10
 
 ## Build
 
-Run `bun run build:cli-sdk` to build the CLI and its SDK dependency, or `bun x nx build @animaos/cli` to build only this package.
+Run `bun run build:cli-sdk` to build the CLI and its SDK dependency, or `bun run --filter @animaos/cli build` to build only this package.
 
 ## Run
 
@@ -60,4 +60,4 @@ bun run animaos launch --no-tui
 
 ## Test
 
-Run `bun x nx test @animaos/cli`.
+Run `bun run --filter @animaos/cli test`.

@@ -3,15 +3,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-const marker = '.anima-nx-temp.json';
-// Capture before this plugin changes TMPDIR. Reusing a daemon worker must not
-// nest the next invocation inside an already cleaned invocation.
-const temporaryRoot = fs.realpathSync(os.tmpdir());
+const marker = '.anima-task-temp.json';
+// Nested workspace scripts share the original OS temp root, not their parent's
+// disposable run directory. Each command still gets a separate owned directory.
+const temporaryRoot = fs.realpathSync(
+  process.env.ANIMAOS_TASK_TEMP_ROOT || os.tmpdir(),
+);
 
 function runDirectory(context, create) {
   const root = fs.realpathSync(context.workspaceRoot);
   const workspace =
-    'anima-nx-' + createHash('sha256').update(root).digest('hex').slice(0, 16);
+    'anima-task-' +
+    createHash('sha256').update(root).digest('hex').slice(0, 16);
   const name =
     'run-' + createHash('sha256').update(context.id).digest('hex').slice(0, 24);
   let directory = temporaryRoot;
@@ -23,7 +26,7 @@ function runDirectory(context, create) {
       try {
         fs.mkdirSync(directory);
       } catch (error) {
-        // Shared workspace parents may be created by a concurrent Nx process.
+        // Shared workspace parents may be created by a concurrent command.
         // The final run directory remains exclusive to this invocation.
         if (part === name || error.code !== 'EEXIST') throw error;
       }
@@ -44,19 +47,22 @@ function runDirectory(context, create) {
   return { root, directory };
 }
 
-// Nx propagates these environment mutations to task processes, including when
-// the plugin runs in an isolated worker or the daemon. No task arguments change.
-function preTasksExecution(_options, context) {
+function prepareTask(context) {
   const { root, directory } = runDirectory(context, true);
   fs.writeFileSync(
     path.join(directory, marker),
     JSON.stringify({ id: context.id, root }),
     { flag: 'wx' },
   );
-  for (const key of ['TMP', 'TEMP', 'TMPDIR']) process.env[key] = directory;
+  return {
+    TMP: directory,
+    TEMP: directory,
+    TMPDIR: directory,
+    ANIMAOS_TASK_TEMP_ROOT: temporaryRoot,
+  };
 }
 
-function postTasksExecution(_options, context) {
+function cleanupTask(context) {
   try {
     const run = runDirectory(context, false);
     if (!run) return;
@@ -79,13 +85,12 @@ function postTasksExecution(_options, context) {
   } catch (error) {
     // Preserve the original task result if Windows still has a file open.
     console.warn(
-      `[test-temp] Could not clean temporary files: ${error.message}`,
+      `[task-temp] Could not clean temporary files: ${error.message}`,
     );
   }
 }
 
 module.exports = {
-  name: 'anima-test-temp',
-  preTasksExecution,
-  postTasksExecution,
+  prepareTask,
+  cleanupTask,
 };

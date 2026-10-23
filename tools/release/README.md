@@ -6,12 +6,12 @@
 console using [cargo-packager 0.11.8](https://docs.rs/cargo-packager/0.11.8/cargo_packager/).
 The app identity is `dev.animaos.anima`, and the displayed product is **Anima**.
 
-| Native build host | Outputs under `target/native-installers/` |
-| --- | --- |
-| Windows x64 | `anima_<version>_x64-setup.exe`, a per-user NSIS wizard |
-| Linux x64 | Debian package and AppImage |
-| macOS Apple Silicon | `Anima.app` and an arm64 DMG |
-| macOS Intel | `Anima.app` and an x64 DMG |
+| Native build host   | Outputs under `target/native-installers/`               |
+| ------------------- | ------------------------------------------------------- |
+| Windows x64         | `anima_<version>_x64-setup.exe`, a per-user NSIS wizard |
+| Linux x64           | Debian package and AppImage                             |
+| macOS Apple Silicon | `Anima.app` and an arm64 DMG                            |
+| macOS Intel         | `Anima.app` and an x64 DMG                              |
 
 Build the console and native binary before packaging. The `native-install` feature
 is required: it embeds the console and prevents the raw-binary updater from
@@ -20,8 +20,8 @@ replacing package-owned files. No-argument launches prepare first-run settings.
 ```sh
 bun install --frozen-lockfile --ignore-scripts
 cargo install cargo-packager --version 0.11.8 --locked --root target/tools
-bun x nx run anima:package-check --skipNxCache
-bun x nx run anima:package --skipNxCache
+bun run --filter anima package-check
+bun run --filter anima package
 ```
 
 The script packages `target/cargo/release/anima` (`anima.exe` on Windows). Optional
@@ -118,16 +118,16 @@ trigger is the pattern `'**[0-9]+.[0-9]+.[0-9]+*'`, so `v0.2.0`, `0.2.0` and
 `anima/0.2.0` all start a release, not only `v*` tags. Use `v<version>` tags, and
 protect them (see the tag ruleset below).
 
-| Asset | What it is |
-| --- | --- |
-| `anima-aarch64-apple-darwin.tar.gz` | macOS binary, code-signed as `dev.animaos.anima` |
-| `anima-x86_64-pc-windows-msvc.zip` | Windows binary |
-| `<archive>.sha256` | SHA-256 of each archive |
-| `<archive>.minisig` | minisign signature of each archive, uploaded by the signing job |
-| `sha256.sum` | All checksums in one file (dist always writes it) |
-| `anima-installer.sh` | `curl … \| sh` installer for macOS |
-| `anima-installer.ps1` | PowerShell installer for Windows |
-| `dist-manifest.json` | dist's description of the release (dist always uploads it) |
+| Asset                               | What it is                                                      |
+| ----------------------------------- | --------------------------------------------------------------- |
+| `anima-aarch64-apple-darwin.tar.gz` | macOS binary, code-signed as `dev.animaos.anima`                |
+| `anima-x86_64-pc-windows-msvc.zip`  | Windows binary                                                  |
+| `<archive>.sha256`                  | SHA-256 of each archive                                         |
+| `<archive>.minisig`                 | minisign signature of each archive, uploaded by the signing job |
+| `sha256.sum`                        | All checksums in one file (dist always writes it)               |
+| `anima-installer.sh`                | `curl … \| sh` installer for macOS                              |
+| `anima-installer.ps1`               | PowerShell installer for Windows                                |
+| `dist-manifest.json`                | dist's description of the release (dist always uploads it)      |
 
 The installers can't run commands after installing, so they end with
 `Run 'anima setup' to finish installing Anima.`
@@ -218,13 +218,13 @@ approve access again.
 
 Set all of these before the first tag.
 
-| Secret | Value | Where |
-| --- | --- | --- |
-| `CODESIGN_CERTIFICATE` | the base64 text of `AnimaOS-Code-Signing.p12` | repository |
-| `CODESIGN_CERTIFICATE_PASSWORD` | the `.p12` export password | repository |
-| `CODESIGN_IDENTITY` | `AnimaOS Code Signing` (the certificate's name) | repository |
-| `MINISIGN_SECRET_KEY` | the full contents of `anima-release.key` (both lines) | `release` environment |
-| `MINISIGN_PASSWORD` | the minisign key password | `release` environment |
+| Secret                          | Value                                                 | Where                 |
+| ------------------------------- | ----------------------------------------------------- | --------------------- |
+| `CODESIGN_CERTIFICATE`          | the base64 text of `AnimaOS-Code-Signing.p12`         | repository            |
+| `CODESIGN_CERTIFICATE_PASSWORD` | the `.p12` export password                            | repository            |
+| `CODESIGN_IDENTITY`             | `AnimaOS Code Signing` (the certificate's name)       | repository            |
+| `MINISIGN_SECRET_KEY`           | the full contents of `anima-release.key` (both lines) | `release` environment |
+| `MINISIGN_PASSWORD`             | the minisign key password                             | `release` environment |
 
 The `CODESIGN_*` secrets go under Settings → Secrets and variables → Actions →
 Repository secrets.

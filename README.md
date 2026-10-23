@@ -53,7 +53,7 @@ Install Bun and the Rust toolchain, then run from the repository root:
 
 ```bash
 bun install --frozen-lockfile
-bun x nx run @animaos/sdk:build
+bun run --filter @animaos/sdk build
 bun dev --host rust
 ```
 
@@ -68,17 +68,17 @@ The launcher selects the Rust host and starts the web console, playground, and d
 
 Reusable engine code lives in `packages/`; runnable backend processes live in `hosts/`; user-facing surfaces live in `apps/`. Host selection stays in `tools/workspace-dev`.
 
-| Path | What lives there |
-| --- | --- |
-| `packages/core-rust` | The reusable Rust runtime: `anima-core`, `anima-memory`, `anima-swarm`, `anima-schedule`, `anima-harness`, model adapters, and document support. The core stays independent of backend hosts. |
-| `hosts/rust-daemon` | `anima-daemon`, the runnable Axum host. It exposes HTTP and SSE, and embeds the Telegram and Discord connectors. |
-| `packages/sdk` | The public TypeScript client for the daemon. It owns the shared TypeScript types. |
-| `packages/cli`, `packages/tui`, `packages/ui` | The `animaos` command line, its terminal UI, and shared web components. All are thin clients of the daemon. |
-| `apps/web` | The companion web console (React and Vite). |
-| `apps/playground`, `apps/docs`, `apps/contributor-docs` | The playground and the two Astro documentation sites. |
-| `tools/workspace-dev` | The `bun dev` launcher, which picks the host and starts the browser apps. |
-| `deploy/vps` | Docker Compose, Caddy and the daemon image for a one-owner server. |
-| `design/` | The pen.dev design file and the orb shader. |
+| Path                                                    | What lives there                                                                                                                                                                              |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/core-rust`                                    | The reusable Rust runtime: `anima-core`, `anima-memory`, `anima-swarm`, `anima-schedule`, `anima-harness`, model adapters, and document support. The core stays independent of backend hosts. |
+| `hosts/rust-daemon`                                     | `anima-daemon`, the runnable Axum host. It exposes HTTP and SSE, and embeds the Telegram and Discord connectors.                                                                              |
+| `packages/sdk`                                          | The public TypeScript client for the daemon. It owns the shared TypeScript types.                                                                                                             |
+| `packages/cli`, `packages/tui`, `packages/ui`           | The `animaos` command line, its terminal UI, and shared web components. All are thin clients of the daemon.                                                                                   |
+| `apps/web`                                              | The companion web console (React and Vite).                                                                                                                                                   |
+| `apps/playground`, `apps/docs`, `apps/contributor-docs` | The playground and the two Astro documentation sites.                                                                                                                                         |
+| `tools/workspace-dev`                                   | The `bun dev` launcher, which picks the host and starts the browser apps.                                                                                                                     |
+| `deploy/vps`                                            | Docker Compose, Caddy and the daemon image for a one-owner server.                                                                                                                            |
+| `design/`                                               | The pen.dev design file and the orb shader.                                                                                                                                                   |
 
 More detail: [Rust daemon architecture](docs/rust-daemon-architecture.md), [swarm architecture](docs/swarm-architecture.md).
 
@@ -105,15 +105,15 @@ See [docs/testing.md](docs/testing.md) for focused validation commands and the [
 ```bash
 bun run build              # build all packages
 bun run test               # run all tests
-bun run affected:test      # only what changed on this branch
-bun run graph              # open the project graph
+bun run typecheck          # check all workspace types
+bun run lint               # lint workspace code
 
 bun dev                    # daemon + web console + playground (same as bun dev --host rust)
 bun run daemon             # the Rust daemon only
 bun run web                # the web console only (daemon must be running)
 ```
 
-Prefer Nx targets for focused work, for example `bun x nx run rust-daemon:test` or `bun x nx run-many -t typecheck,build,test -p @animaos/web`.
+Use focused workspace scripts, for example `bun run --filter rust-daemon test` or `bun run --filter @animaos/web test`. Run that workspace's `typecheck` and `build` scripts as needed.
 
 ## CLI and SDK
 
@@ -137,26 +137,26 @@ For task progress, background helpers, local Python, and selected-file recovery,
 
 ### Model providers
 
-| Provider | Accepted names | Key env vars | Base URL env var | Notes |
-| --- | --- | --- | --- | --- |
-| OpenAI | `openai` | `OPENAI_API_KEY`, `OPENAI_KEY`, `OPENAI_TOKEN` | `OPENAI_BASE_URL` | Native chat completions |
-| Anthropic | `anthropic` | `ANTHROPIC_API_KEY`, `ANTHROPIC_KEY`, `ANTHROPIC_TOKEN`, `CLAUDE_API_KEY` | `ANTHROPIC_BASE_URL` | Native Messages API |
-| Google Gemini | `google`, `gemini` | `GOOGLE_API_KEY`, `GOOGLE_KEY`, `GOOGLE_AI_KEY`, `GEMINI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` | `GOOGLE_BASE_URL` | Native `generateContent` |
-| Ollama | `ollama` | `OLLAMA_API_KEY` | `OLLAMA_BASE_URL` | Local; OpenAI-compatible |
-| Groq | `groq` | `GROQ_API_KEY`, `GROQ_KEY`, `GROQ_TOKEN` | `GROQ_BASE_URL` | OpenAI-compatible |
-| xAI | `xai`, `grok` | `XAI_API_KEY`, `XAI_KEY`, `GROK_API_KEY` | `XAI_BASE_URL` | OpenAI-compatible |
-| OpenRouter | `openrouter` | `OPENROUTER_API_KEY`, `OPENROUTER_KEY`, `OPENROUTER_TOKEN` | `OPENROUTER_BASE_URL` | OpenAI-compatible |
-| Mistral | `mistral` | `MISTRAL_API_KEY`, `MISTRAL_KEY`, `MISTRAL_TOKEN` | `MISTRAL_BASE_URL` | OpenAI-compatible |
-| Together | `together` | `TOGETHER_API_KEY`, `TOGETHER_KEY`, `TOGETHER_TOKEN` | `TOGETHER_BASE_URL` | OpenAI-compatible |
-| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | `DEEPSEEK_BASE_URL` | OpenAI-compatible |
-| Fireworks | `fireworks` | `FIREWORKS_API_KEY` | `FIREWORKS_BASE_URL` | OpenAI-compatible |
-| Perplexity | `perplexity` | `PERPLEXITY_API_KEY` | `PERPLEXITY_BASE_URL` | OpenAI-compatible |
+| Provider      | Accepted names     | Key env vars                                                                                      | Base URL env var      | Notes                    |
+| ------------- | ------------------ | ------------------------------------------------------------------------------------------------- | --------------------- | ------------------------ |
+| OpenAI        | `openai`           | `OPENAI_API_KEY`, `OPENAI_KEY`, `OPENAI_TOKEN`                                                    | `OPENAI_BASE_URL`     | Native chat completions  |
+| Anthropic     | `anthropic`        | `ANTHROPIC_API_KEY`, `ANTHROPIC_KEY`, `ANTHROPIC_TOKEN`, `CLAUDE_API_KEY`                         | `ANTHROPIC_BASE_URL`  | Native Messages API      |
+| Google Gemini | `google`, `gemini` | `GOOGLE_API_KEY`, `GOOGLE_KEY`, `GOOGLE_AI_KEY`, `GEMINI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` | `GOOGLE_BASE_URL`     | Native `generateContent` |
+| Ollama        | `ollama`           | `OLLAMA_API_KEY`                                                                                  | `OLLAMA_BASE_URL`     | Local; OpenAI-compatible |
+| Groq          | `groq`             | `GROQ_API_KEY`, `GROQ_KEY`, `GROQ_TOKEN`                                                          | `GROQ_BASE_URL`       | OpenAI-compatible        |
+| xAI           | `xai`, `grok`      | `XAI_API_KEY`, `XAI_KEY`, `GROK_API_KEY`                                                          | `XAI_BASE_URL`        | OpenAI-compatible        |
+| OpenRouter    | `openrouter`       | `OPENROUTER_API_KEY`, `OPENROUTER_KEY`, `OPENROUTER_TOKEN`                                        | `OPENROUTER_BASE_URL` | OpenAI-compatible        |
+| Mistral       | `mistral`          | `MISTRAL_API_KEY`, `MISTRAL_KEY`, `MISTRAL_TOKEN`                                                 | `MISTRAL_BASE_URL`    | OpenAI-compatible        |
+| Together      | `together`         | `TOGETHER_API_KEY`, `TOGETHER_KEY`, `TOGETHER_TOKEN`                                              | `TOGETHER_BASE_URL`   | OpenAI-compatible        |
+| DeepSeek      | `deepseek`         | `DEEPSEEK_API_KEY`                                                                                | `DEEPSEEK_BASE_URL`   | OpenAI-compatible        |
+| Fireworks     | `fireworks`        | `FIREWORKS_API_KEY`                                                                               | `FIREWORKS_BASE_URL`  | OpenAI-compatible        |
+| Perplexity    | `perplexity`       | `PERPLEXITY_API_KEY`                                                                              | `PERPLEXITY_BASE_URL` | OpenAI-compatible        |
 
 `--api-key` overrides the environment for one CLI call. For daemon-backed commands, credentials are forwarded per request, so changing keys doesn't need a daemon restart. In the web console, the ChatGPT subscription and server-side keys are set up during onboarding or later in Settings → Model.
 
 ## Tech stack
 
-Rust (Axum, SQLite), Bun, TypeScript, React, Vite, Tailwind, Nx, Vitest, Playwright, and pen.dev for design.
+Rust (Axum, SQLite), Bun, TypeScript, React, Vite, Tailwind, Vitest, Playwright, and pen.dev for design.
 
 ## License
 

@@ -11,7 +11,7 @@ describe('workspace-dev orchestration', () => {
 
   it('plans the rust host and UI processes with injected backend origin', () => {
     expect(
-      buildWorkspaceDevPlan('rust', { env: {}, homeDir: '/home/dev' })
+      buildWorkspaceDevPlan('rust', { env: {}, homeDir: '/home/dev' }),
     ).toEqual({
       host: {
         key: 'rust',
@@ -26,7 +26,7 @@ describe('workspace-dev orchestration', () => {
         {
           name: 'rust-daemon',
           command: 'bun',
-          args: ['x', 'nx', 'run', 'rust-daemon:dev'],
+          args: ['run', '--filter', 'rust-daemon', 'dev'],
           env: {
             ANIMAOS_RS_HOST: '127.0.0.1',
             ANIMAOS_RS_PORT: '8080',
@@ -34,14 +34,14 @@ describe('workspace-dev orchestration', () => {
               '/home/dev',
               '.animaos-swarm',
               'data',
-              'control-plane.json'
+              'control-plane.json',
             ),
           },
         },
         {
           name: '@animaos/web',
           command: 'bun',
-          args: ['x', 'nx', 'run', '@animaos/web:serve'],
+          args: ['run', '--filter', '@animaos/web', 'dev'],
           env: {
             UI_BACKEND_ORIGIN: 'http://127.0.0.1:8080',
             VITE_HOST_KEY: 'rust',
@@ -50,7 +50,7 @@ describe('workspace-dev orchestration', () => {
         {
           name: '@animaos/playground',
           command: 'bun',
-          args: ['x', 'nx', 'run', '@animaos/playground:serve'],
+          args: ['run', '--filter', '@animaos/playground', 'dev'],
           env: {
             UI_BACKEND_ORIGIN: 'http://127.0.0.1:8080',
             VITE_HOST_KEY: 'rust',
@@ -59,12 +59,12 @@ describe('workspace-dev orchestration', () => {
         {
           name: '@animaos/docs',
           command: 'bun',
-          args: ['x', 'nx', 'run', '@animaos/docs:dev'],
+          args: ['run', '--filter', '@animaos/docs', 'dev'],
         },
         {
           name: '@animaos/contributor-docs',
           command: 'bun',
-          args: ['x', 'nx', 'run', '@animaos/contributor-docs:dev'],
+          args: ['run', '--filter', '@animaos/contributor-docs', 'dev'],
         },
       ],
     });
@@ -74,7 +74,7 @@ describe('workspace-dev orchestration', () => {
     expect(
       buildWorkspaceDevPlan('rust', {
         reuseExistingHost: true,
-      })
+      }),
     ).toEqual({
       host: {
         key: 'rust',
@@ -89,7 +89,7 @@ describe('workspace-dev orchestration', () => {
         {
           name: '@animaos/web',
           command: 'bun',
-          args: ['x', 'nx', 'run', '@animaos/web:serve'],
+          args: ['run', '--filter', '@animaos/web', 'dev'],
           env: {
             UI_BACKEND_ORIGIN: 'http://127.0.0.1:8080',
             VITE_HOST_KEY: 'rust',
@@ -98,7 +98,7 @@ describe('workspace-dev orchestration', () => {
         {
           name: '@animaos/playground',
           command: 'bun',
-          args: ['x', 'nx', 'run', '@animaos/playground:serve'],
+          args: ['run', '--filter', '@animaos/playground', 'dev'],
           env: {
             UI_BACKEND_ORIGIN: 'http://127.0.0.1:8080',
             VITE_HOST_KEY: 'rust',
@@ -107,12 +107,12 @@ describe('workspace-dev orchestration', () => {
         {
           name: '@animaos/docs',
           command: 'bun',
-          args: ['x', 'nx', 'run', '@animaos/docs:dev'],
+          args: ['run', '--filter', '@animaos/docs', 'dev'],
         },
         {
           name: '@animaos/contributor-docs',
           command: 'bun',
-          args: ['x', 'nx', 'run', '@animaos/contributor-docs:dev'],
+          args: ['run', '--filter', '@animaos/contributor-docs', 'dev'],
         },
       ],
     });

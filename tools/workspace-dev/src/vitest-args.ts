@@ -6,6 +6,9 @@ export function normalizeVitestArgs(args: string[]): string[] {
     if (!arg) {
       continue;
     }
+    if (index === 0 && arg === 'run') {
+      continue;
+    }
 
     if (arg === '--runInBand') {
       const nextArg = args[index + 1];

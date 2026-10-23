@@ -19,5 +19,5 @@ It derives the charge from validated document content, not a caller-supplied
 token-count field. This accounting does not grant attachment authority: the host
 must still verify ownership and source hashes before sending content.
 
-Run `bun x nx run core-rust:test --skipNxCache` from the workspace root. The
+Run `bun run --filter core-rust test` from the workspace root. The
 existing core Rust build, test and lint targets include this crate explicitly.

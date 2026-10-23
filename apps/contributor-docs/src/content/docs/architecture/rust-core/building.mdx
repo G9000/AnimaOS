@@ -9,17 +9,17 @@ description: Building and testing the Rust crates, and adding providers, tools a
 
 - Rust stable (via [rustup](https://rustup.rs))
 - [cargo-nextest](https://nexte.st) (optional)
-- Bun, for the Nx targets
+- Bun, for workspace scripts
 
 ### Commands
 
 Run from the repo root. The Cargo workspace is the root `Cargo.toml`; there is no `packages/core-rust/Cargo.toml`.
 
 ```bash
-# Preferred: the Nx targets build and test exactly the eleven core crates
-bun x nx run core-rust:build
-bun x nx run core-rust:test
-bun x nx run core-rust:lint        # cargo fmt --check for those crates
+# Preferred: workspace scripts build and test exactly the eleven core crates
+bun run --filter core-rust build
+bun run --filter core-rust test
+bun run --filter core-rust lint        # cargo fmt --check for those crates
 
 # Direct cargo, one crate
 cargo check -p anima-core
@@ -30,7 +30,7 @@ cargo test -p anima-swarm
 cargo test --workspace
 ```
 
-`core-rust:build` and `core-rust:test` share the workspace Cargo cache under `target/cargo`, avoiding duplicate dependency builds. They build `anima-core`, `anima-service-adapters`, `anima-model-adapters`, `anima-memory`, `anima-schedule`, `anima-swarm`, `anima-harness`, `anima-document-content`, `anima-process`, `anima-acp` and `anima-worktree`. Adding a crate means updating the `-p` lists in `packages/core-rust/project.json` as well as the root `Cargo.toml` `members`.
+`core-rust:build` and `core-rust:test` share the workspace Cargo cache under `target/cargo`, avoiding duplicate dependency builds. They build `anima-core`, `anima-service-adapters`, `anima-model-adapters`, `anima-memory`, `anima-schedule`, `anima-swarm`, `anima-harness`, `anima-document-content`, `anima-process`, `anima-acp` and `anima-worktree`. Adding a crate means updating the `-p` lists in `packages/core-rust/package.json` as well as the root `Cargo.toml` `members`.
 
 ### Workspace Facts
 
@@ -41,15 +41,15 @@ cargo test --workspace
 ## Testing
 
 ```bash
-# Core crates through Nx
-bun x nx run core-rust:test --skipNxCache
+# Core crates through workspace scripts
+bun run --filter core-rust test
 
 # One module
 cargo test -p anima-memory memory_manager::tests
 
 # Memory evaluation harness and benchmarks
-bun x nx run core-rust:memory-eval --skipNxCache
-bun x nx run core-rust:memory-locomo --skipNxCache
+bun run --filter core-rust memory-eval
+bun run --filter core-rust memory-locomo
 ```
 
 Other `core-rust` targets run Node test oracles: `browser-worker-test` and the `coding-acceptance-*`, `coding-reliability-test`, `provider-task-acceptance-test` and `research-acceptance-test` targets (see [Testing](/workflow/testing/)).
@@ -95,4 +95,4 @@ A strategy is a `CoordinatorStrategyFn` passed to `SwarmCoordinator::with_hooks`
 
 ## CI
 
-CI does not call cargo directly. `.github/workflows/ci.yml` runs `nx format:check` and `bun x nx run-many -t lint test build typecheck e2e-ci`, which includes `core-rust` and `rust-daemon` through their targets. Run the same Nx targets locally before pushing.
+`.github/workflows/ci.yml` checks changed files with Prettier, then runs the root `lint`, `test`, `build`, and `typecheck` scripts plus `bun run --filter @animaos/web-e2e e2e-ci`. Root scripts include `core-rust` and `rust-daemon`. Run the same workspace scripts locally before pushing.

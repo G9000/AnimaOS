@@ -28,17 +28,17 @@ Not every crate is I/O-free. `anima-model-adapters` makes HTTP calls with `reqwe
 
 ## Why Not Everything in Rust
 
-| Layer | Language | Reason |
-|-------|----------|--------|
-| Engine and host | Rust | Single binary, long-lived process, explicit boundaries |
-| SDK, CLI, TUI | TypeScript | Familiar async patterns, Ink for terminal UI |
-| Web console, playground | TypeScript | React ecosystem, Vite tooling |
-| Docs sites | Astro | Starlight |
+| Layer                   | Language   | Reason                                                 |
+| ----------------------- | ---------- | ------------------------------------------------------ |
+| Engine and host         | Rust       | Single binary, long-lived process, explicit boundaries |
+| SDK, CLI, TUI           | TypeScript | Familiar async patterns, Ink for terminal UI           |
+| Web console, playground | TypeScript | React ecosystem, Vite tooling                          |
+| Docs sites              | Astro      | Starlight                                              |
 
 The SDK owns the request/response types shared by the CLI, TUI and UI. A client in another language only needs the daemon's HTTP/SSE contract (`/openapi.json` on a running daemon).
 
 ## Trade-offs
 
-- **Compile times.** Rust builds are slower than TypeScript transpilation, and the daemon pulls in heavy dependencies (SQLite, an ONNX embedding runtime via `fastembed`, an MCP client). Use `cargo check -p <crate>` for fast feedback and `cargo test -p <crate>` for a single crate; use the Nx targets for full validation.
+- **Compile times.** Rust builds are slower than TypeScript transpilation, and the daemon pulls in heavy dependencies (SQLite, an ONNX embedding runtime via `fastembed`, an MCP client). Use `cargo check -p <crate>` for fast feedback and `cargo test -p <crate>` for a single crate; use the Bun workspace scripts for full validation.
 - **Packaging.** Native binaries per platform. The release pipeline builds `aarch64-apple-darwin` and `x86_64-pc-windows-msvc` (see `dist-workspace.toml`).
 - **Contributor ramp-up.** The core uses `async_trait` and trait objects heavily; start with [AgentRuntime](/architecture/rust-core/anima-core/agent-runtime/).

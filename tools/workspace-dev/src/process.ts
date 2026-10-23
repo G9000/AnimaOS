@@ -6,15 +6,16 @@ export interface ManagedProcessDefinition {
   command: string;
   args: string[];
   env?: Record<string, string>;
+  cwd?: string;
 }
 
 const execFileAsync = promisify(execFile);
 
 export function spawnManagedProcess(
-  definition: ManagedProcessDefinition
+  definition: ManagedProcessDefinition,
 ): ChildProcess {
   return spawn(definition.command, definition.args, {
-    cwd: process.cwd(),
+    cwd: definition.cwd ?? process.cwd(),
     env: {
       ...process.env,
       ...definition.env,
@@ -24,19 +25,14 @@ export function spawnManagedProcess(
   });
 }
 
-async function stopManagedProcess(child: ChildProcess): Promise<void> {
+export async function stopManagedProcess(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.pid === undefined) {
     return;
   }
 
   if (process.platform === 'win32') {
     try {
-      await execFileAsync('taskkill', [
-        '/PID',
-        String(child.pid),
-        '/T',
-        '/F',
-      ]);
+      await execFileAsync('taskkill', ['/PID', String(child.pid), '/T', '/F']);
     } catch {
       // A concurrent exit is fine during shutdown cleanup.
     }
@@ -52,7 +48,7 @@ async function stopManagedProcess(child: ChildProcess): Promise<void> {
 }
 
 export async function runManagedProcesses(
-  definitions: ManagedProcessDefinition[]
+  definitions: ManagedProcessDefinition[],
 ): Promise<void> {
   const children = definitions.map(spawnManagedProcess);
   let shuttingDown = false;
@@ -86,13 +82,13 @@ export async function runManagedProcesses(
               reject(
                 new Error(
                   `Process '${definitions[index]?.name ?? 'unknown'}' exited early with code ${String(
-                    code
-                  )} and signal ${String(signal)}.`
-                )
+                    code,
+                  )} and signal ${String(signal)}.`,
+                ),
               );
             });
             child.once('error', reject);
-          })
+          }),
       ),
     ]);
 
@@ -108,8 +104,8 @@ export async function runManagedProcesses(
               }
 
               child.once('exit', () => resolve());
-            })
-        )
+            }),
+        ),
       );
     }
   } finally {

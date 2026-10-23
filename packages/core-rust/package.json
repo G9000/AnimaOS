@@ -1,0 +1,21 @@
+{
+  "name": "core-rust",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "harness-reliability-test": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- node --test packages/core-rust/acceptance/harness-reliability/driver.test.mjs",
+    "coding-acceptance-m87-test": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- node --test packages/core-rust/acceptance/coding-m87/oracle.test.mjs",
+    "coding-acceptance-test": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- node --test packages/core-rust/acceptance/coding-m47/oracle.test.mjs",
+    "coding-reliability-test": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- node --test packages/core-rust/acceptance/coding-m86/oracle.test.mjs",
+    "provider-task-acceptance-test": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- node --test packages/core-rust/acceptance/provider-task-m52/oracle.test.mjs",
+    "research-acceptance-test": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- node --test packages/core-rust/acceptance/research-m84/oracle.test.mjs",
+    "browser-worker-test": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- node --test packages/core-rust/browser-worker/worker.test.mjs",
+    "build": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- cargo build --manifest-path Cargo.toml -p anima-core -p anima-service-adapters -p anima-model-adapters -p anima-memory -p anima-schedule -p anima-swarm -p anima-harness -p anima-document-content -p anima-process -p anima-acp -p anima-worktree",
+    "test": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- cargo test --manifest-path Cargo.toml -p anima-core -p anima-service-adapters -p anima-model-adapters -p anima-memory -p anima-schedule -p anima-swarm -p anima-harness -p anima-document-content -p anima-process -p anima-acp -p anima-worktree",
+    "memory-eval": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- cargo test --manifest-path Cargo.toml -p anima-memory baseline_memory_eval_cases_pass",
+    "memory-locomo": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- cargo test --manifest-path Cargo.toml -p anima-memory locomo_smoke_eval_cases_pass --features locomo-eval",
+    "memory-locomo-fetch": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- bun tools/memory-eval/download-locomo.mjs",
+    "memory-locomo-dataset": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- bun tools/memory-eval/run-locomo-dataset.mjs",
+    "lint": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- cargo fmt --manifest-path Cargo.toml --package anima-core --package anima-service-adapters --package anima-model-adapters --package anima-memory --package anima-schedule --package anima-swarm --package anima-harness --package anima-document-content --package anima-process --package anima-acp --package anima-worktree --check"
+  }
+}

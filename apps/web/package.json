@@ -3,9 +3,13 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "dev": "bun run build-deps && vite",
+    "build": "bun run build-deps && vite build",
+    "preview": "vite preview",
+    "build-deps": "bun run --filter @animaos/sdk build",
+    "typecheck": "tsc --build --emitDeclarationOnly",
+    "test": "bun run build-deps && bun ../../tools/workspace-dev/scripts/run-vitest.ts run",
+    "lint": "oxlint src --config ../../.oxlintrc.json --tsconfig tsconfig.json"
   },
   "dependencies": {
     "@animaos/sdk": "workspace:*",

@@ -9,10 +9,10 @@ Run the trace-driver regressions through `core-rust:harness-reliability-test`,
 and the Rust gate through `rust-daemon:test` (which also runs `core-rust:test`):
 
 ```bash
-bun x nx run core-rust:harness-reliability-test --skipNxCache
-bun x nx run rust-daemon:test --skipNxCache
-bun x nx run rust-daemon:lint --skipNxCache
-bun x nx run anima:test --skipNxCache
+bun run --filter core-rust harness-reliability-test
+bun run --filter rust-daemon test
+bun run --filter rust-daemon lint
+bun run --filter anima test
 ```
 
 The focused daemon filter is `harness_reliability_`. Its eight fixed seeds are
@@ -67,11 +67,11 @@ check helpers operate only in the trial's disposable fixture workspace.
 
 Build each intended revision separately and retain its build log. The test
 binary must contain `app::harness_reliability_tests::live_trace::trace_live_worker`
-and `trace_live_compare`. A build-only Nx invocation can expose Cargo's actual
+and `trace_live_compare`. A build-only Cargo invocation can expose its actual
 test executable path in its `compiler-artifact` JSON output:
 
 ```bash
-bun x nx run core-rust:test --skipNxCache --command="cargo test -p anima-daemon --lib --no-run --message-format=json"
+bun tools/workspace-dev/scripts/run-task.ts cargo test -p anima-daemon --lib --no-run --message-format=json
 node packages/core-rust/acceptance/harness-reliability/live-driver.mjs --record-build /absolute/test-binary /absolute/baseline-build.json
 ```
 

@@ -4,12 +4,12 @@ Anima runs locally and opens its console in your browser. The desktop packages
 include the Rust host and the production console. Rust and Bun are needed only
 when building from source.
 
-| Computer | Package | Installation |
-| --- | --- | --- |
-| Windows x64 | `anima_<version>_x64-setup.exe` | Run the setup wizard, then open **Anima** from Start. Installs for your Windows account without administrator permission. |
-| Linux x64, glibc 2.35 or newer | `.deb` | Open with your package manager, or use `sudo apt install ./<package>.deb`. Open **Anima** from the application menu. |
-| Linux x64, glibc 2.35 or newer | `.AppImage` | Keep it in a permanent folder, allow execution (`chmod +x <file>.AppImage`), and open it. AppImage support may require your distribution's FUSE compatibility package or extraction mode. |
-| macOS Apple Silicon or Intel | Matching architecture `.dmg` | Open the disk image, drag **Anima** to Applications, eject the image, and open Anima. |
+| Computer                       | Package                         | Installation                                                                                                                                                                              |
+| ------------------------------ | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows x64                    | `anima_<version>_x64-setup.exe` | Run the setup wizard, then open **Anima** from Start. Installs for your Windows account without administrator permission.                                                                 |
+| Linux x64, glibc 2.35 or newer | `.deb`                          | Open with your package manager, or use `sudo apt install ./<package>.deb`. Open **Anima** from the application menu.                                                                      |
+| Linux x64, glibc 2.35 or newer | `.AppImage`                     | Keep it in a permanent folder, allow execution (`chmod +x <file>.AppImage`), and open it. AppImage support may require your distribution's FUSE compatibility package or extraction mode. |
+| macOS Apple Silicon or Intel   | Matching architecture `.dmg`    | Open the disk image, drag **Anima** to Applications, eject the image, and open Anima.                                                                                                     |
 
 A graphical desktop and browser are required. Linux currently has no tray icon.
 Windows ARM and Linux ARM packages are not configured in this release pipeline.
@@ -54,7 +54,7 @@ workspaces. Back them up separately if you intend to move computers.
 ## Build from source
 
 Follow [Native desktop installers](../../tools/release/README.md#native-desktop-installers)
-for the pinned packaging tool, build prerequisites, and `bun x nx run anima:package`.
+for the pinned packaging tool, build prerequisites, and `bun run --filter anima package`.
 Packages appear in `target/native-installers/`. Release jobs build each package on
 its native operating system; a Windows machine does not validate Linux/macOS apps.
 

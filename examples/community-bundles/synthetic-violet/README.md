@@ -20,7 +20,7 @@ From the repository root, the operator explicitly builds the existing fixture on
 ```powershell
 $env:CARGO_INCREMENTAL='0'
 $env:CARGO_BUILD_JOBS='1'
-bun --no-env-file x nx run rust-daemon:build --excludeTaskDependencies --skipNxCache --args='--example mcp_stdio_peer'
+bun --no-env-file tools/workspace-dev/scripts/run-task.ts cargo build -p anima-daemon --example mcp_stdio_peer
 ```
 
 The resulting executable is `target/cargo/debug/examples/mcp_stdio_peer.exe`. This build

@@ -39,12 +39,12 @@ Code: `connectors/discord/`, `connectors/adapters/discord.rs`.
 
 All three share the OAuth app service (`connectors/oauth_apps.rs`). The owner configures a Google (and, for Outlook, Microsoft) OAuth application in the console (`GET` / `PUT` / `DELETE /api/connectors/oauth-apps/{provider}`) or through `ANIMA_GOOGLE_*` / `ANIMA_MICROSOFT_*` variables, and registers the exact callback URLs shown in the UI under `ANIMA_PUBLIC_BASE_URL`:
 
-| Service | Callback path |
-|---------|---------------|
-| Gmail | `/api/connectors/mail/gmail/callback` |
-| Google Calendar | `/api/connectors/gcalendar/callback` |
-| Google Drive | `/api/connectors/gdrive/callback` |
-| Outlook | `/api/connectors/mail/outlook/callback` |
+| Service         | Callback path                           |
+| --------------- | --------------------------------------- |
+| Gmail           | `/api/connectors/mail/gmail/callback`   |
+| Google Calendar | `/api/connectors/gcalendar/callback`    |
+| Google Drive    | `/api/connectors/gdrive/callback`       |
+| Outlook         | `/api/connectors/mail/outlook/callback` |
 
 Callbacks are the only `GET` routes exempt from the API key and the owner check; they authenticate with an expiring, single-use OAuth state. Pending nonces and verifiers are in memory, so a restart invalidates an unfinished consent.
 
@@ -69,4 +69,4 @@ Code: `mcp/` (`records.rs`, `service.rs`, `transport.rs`, `stdio.rs`, `credentia
 
 ## Tests
 
-Use injected fakes and deterministic barriers; do not start real providers, services or containers, and never read a user's profile or credentials. Reuse the host regressions for pairing, stop and restart, cancellation, credential replacement, durable admission and outbox recovery. Run `bun x nx run rust-daemon:test --skipNxCache` and `bun x nx run rust-daemon:lint --skipNxCache`.
+Use injected fakes and deterministic barriers; do not start real providers, services or containers, and never read a user's profile or credentials. Reuse the host regressions for pairing, stop and restart, cancellation, credential replacement, durable admission and outbox recovery. Run `bun run --filter rust-daemon test` and `bun run --filter rust-daemon lint`.

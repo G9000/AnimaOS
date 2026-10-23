@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
-import { nxE2EPreset } from '@nx/playwright/preset';
-import { workspaceRoot } from '@nx/devkit';
+import { resolve } from 'node:path';
+
+const workspaceRoot = resolve(__dirname, '../..');
 
 // For CI, you may want to set BASE_URL to the deployed application.
 const baseURL = process.env['BASE_URL'] || 'http://localhost:4200';
@@ -15,7 +16,28 @@ const baseURL = process.env['BASE_URL'] || 'http://localhost:4200';
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
-  ...nxE2EPreset(__filename, { testDir: './src' }),
+  testDir: './src',
+  // The offline console gate imports shared journeys and has its own config.
+  testIgnore: '**/console/**',
+  outputDir: 'test-output/playwright/output',
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 1 : undefined,
+  reporter: process.env.CI
+    ? [
+        [
+          'html',
+          { outputFolder: 'test-output/playwright/report', open: 'on-failure' },
+        ],
+        ['blob', { outputDir: 'test-output/playwright/blob-report' }],
+      ]
+    : [
+        [
+          'html',
+          { outputFolder: 'test-output/playwright/report', open: 'on-failure' },
+        ],
+      ],
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     baseURL,
@@ -24,7 +46,7 @@ export default defineConfig({
   },
   /* Run your local dev server before starting the tests */
   webServer: {
-    command: 'bun x nx run @animaos/web:preview',
+    command: 'bun run --filter @animaos/web preview',
     url: 'http://localhost:4200',
     reuseExistingServer: true,
     cwd: workspaceRoot,

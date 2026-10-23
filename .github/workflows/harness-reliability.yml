@@ -44,9 +44,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
-      NX_DAEMON: 'false'
-      NX_ISOLATE_PLUGINS: 'false'
-      NX_NO_CLOUD: 'true'
       CARGO_TARGET_DIR: target/cargo
       RUST_TEST_THREADS: '4'
       ANIMA_RUN_TRACE_LIVE: '0'
@@ -71,17 +68,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libdbus-1-dev libssl-dev
       - run: bun install --frozen-lockfile --ignore-scripts
-      - name: Validate Nx project identities
-        run: bun x nx show projects --json
       - name: Bounded trace-driver and incomplete-matrix regressions
-        run: bun x nx run core-rust:harness-reliability-test --skipNxCache
+        run: bun run --filter core-rust harness-reliability-test
       - name: Core and daemon tests including real child-process sequences
-        # rust-daemon:test depends on core-rust:test; both run through Nx.
-        run: bun x nx run rust-daemon:test --skipNxCache
+        # The daemon test script runs the full core suite first.
+        run: bun run --filter rust-daemon test
       - name: Rust format gate
-        run: bun x nx run rust-daemon:lint --skipNxCache
+        run: bun run --filter rust-daemon lint
       - name: Packaged supervisor lifecycle tests
-        run: bun x nx run anima:test --skipNxCache
+        run: bun run --filter anima test
       - name: Retain deterministic seed traces
         if: always()
         uses: actions/upload-artifact@v4
@@ -108,9 +103,6 @@ jobs:
           --health-cmd "pg_isready -U anima_gate -d anima_harness_gate"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      NX_DAEMON: 'false'
-      NX_ISOLATE_PLUGINS: 'false'
-      NX_NO_CLOUD: 'true'
       CARGO_TARGET_DIR: target/cargo
       RUST_TEST_THREADS: '1'
       ANIMA_RUN_TRACE_LIVE: '0'
@@ -130,4 +122,4 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libdbus-1-dev libssl-dev
       - run: bun install --frozen-lockfile --ignore-scripts
       - name: Serialize session-death takeover and stale-writer acceptance
-        run: bun x nx run core-rust:test --skipNxCache --command="cargo test -p anima-daemon profile_owner_postgres_ -- --ignored --test-threads=1"
+        run: bun tools/workspace-dev/scripts/run-task.ts cargo test -p anima-daemon profile_owner_postgres_ -- --ignored --test-threads=1

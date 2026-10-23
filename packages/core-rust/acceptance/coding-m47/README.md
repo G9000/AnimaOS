@@ -28,8 +28,8 @@ all-void, case/Unicode ordering, large exact cents, CRLF/leading-zeroes and malf
 rows/amounts. Literal expected strings are frozen inputs; root hashes them before
 admission and runs the same oracle once on the final candidate and after restart.
 
-Root adds one existing-core Nx target; no package/project/dependency is introduced.
-Intended target: `bun --no-env-file x nx run core-rust:coding-acceptance-test --skipNxCache`
+The `core-rust` workspace exposes the `coding-acceptance-test` script; no additional dependency is introduced.
+Intended target: `bun --no-env-file run --filter core-rust coding-acceptance-test`
 executing `node --test packages/core-rust/acceptance/coding-m47/oracle.test.mjs`.
 Root must verify the target name/configuration after adding it; these are future
 instructions, not passing evidence. Candidate commands are in `fixture/README.md`.

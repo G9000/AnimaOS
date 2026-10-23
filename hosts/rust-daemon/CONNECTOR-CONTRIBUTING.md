@@ -92,8 +92,8 @@ durable admission/outbox and recovery. Do not start real providers, services,
 databases or containers for these tests, and do not read user profiles or secrets.
 
 Run the existing host gate, which also runs its core Rust dependency tests, with
-`CARGO_INCREMENTAL=0`: `bun x nx run rust-daemon:test --skipNxCache`. Run
-`bun x nx run rust-daemon:lint --skipNxCache` for Rust formatting. Follow `AGENTS.md`
+`CARGO_INCREMENTAL=0`: `bun run --filter rust-daemon test`. Run
+`bun run --filter rust-daemon lint` for Rust formatting. Follow `AGENTS.md`
 and the milestone handover for environment and staging constraints.
 
 M12 preserved the owner HTTP API, SDK and console; M13 adds a separate Discord

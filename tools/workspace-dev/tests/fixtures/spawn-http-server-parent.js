@@ -1,20 +1,20 @@
 import { spawn } from 'node:child_process';
-import { resolve } from 'node:path';
+const port = process.argv[2];
 
-const workspaceRoot = process.argv[2];
-const port = process.argv[3];
-const targetDir = resolve(workspaceRoot, 'target', 'cargo', 'workspace-dev-fixture');
-
-spawn('bun', ['x', 'nx', 'run', 'rust-daemon:dev'], {
-  cwd: workspaceRoot,
-  env: {
-    ...process.env,
-    ANIMAOS_RS_HOST: '127.0.0.1',
-    ANIMAOS_RS_PORT: port,
-    CARGO_TARGET_DIR: process.env.CARGO_TARGET_DIR ?? targetDir,
+// Exercise a real Bun descendant without coupling process cleanup to a Rust
+// compilation or a user's daemon profile.
+spawn(
+  'bun',
+  [
+    '-e',
+    `Bun.serve({ hostname: '127.0.0.1', port: ${Number(port)},
+  fetch() { return new Response('ok'); } });`,
+  ],
+  {
+    env: process.env,
+    stdio: 'ignore',
   },
-  stdio: 'ignore',
-});
+);
 
 const holdOpen = setInterval(() => {}, 1000);
 
