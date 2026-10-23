@@ -125,10 +125,29 @@ impl LiveRuns {
 
     pub(crate) fn set_tool_scope(&self, run_id: &str, tools: Vec<ToolDescriptor>) {
         if let Some(run) = self.lock().get_mut(run_id) {
-            // A turn cannot acquire a wider scope after its first model call.
+            // Initial publication stays frozen. Validated owner MCP refreshes
+            // use the separate MCP-only replacement below.
             if run.tool_scope.is_none() {
                 run.tool_scope = Some(tools);
             }
+        }
+    }
+
+    /// Called only after revalidating an owner run's MCP snapshot. This view
+    /// grants no dispatch authority and cannot widen its native tool ceiling.
+    pub(crate) fn refresh_mcp_tool_scope(&self, run_id: &str, tools: &[ToolDescriptor]) {
+        if let Some(scope) = self
+            .lock()
+            .get_mut(run_id)
+            .and_then(|run| run.tool_scope.as_mut())
+        {
+            scope.retain(|tool| !tool.name.starts_with("mcp_"));
+            scope.extend(
+                tools
+                    .iter()
+                    .filter(|tool| tool.name.starts_with("mcp_"))
+                    .cloned(),
+            );
         }
     }
 

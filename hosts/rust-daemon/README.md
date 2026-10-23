@@ -15,6 +15,15 @@ disabled connections and pending content, followed by existing separate owner
 start, descriptor grants and exact skill approval. It does not install executable
 artifacts or native connector modules.
 
+In a direct owner chat, successful `manage_mcp` connection, discovery, review,
+grant, update, disconnect, and removal operations refresh permitted tools before
+the next model call in the same run. The agent can continue the original request
+without another owner message. `manage_mcp { "action": "refresh" }` also reloads
+the current permitted tool snapshot without reconnecting or making remote calls.
+With tool discovery enabled, the agent uses `search_tools` or `describe_tool` to
+expose newly available schemas. Normal approvals, live revocation checks, and the
+existing run budget still apply; refresh never retries an external mutation.
+
 ## Scoped browser work
 
 M46 adds four separately granted browser tools for ordinary owner chat runs,

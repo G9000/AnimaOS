@@ -21,6 +21,7 @@ mod mail;
 mod main_chat_clear;
 mod mcp;
 pub(crate) mod mcp_management;
+pub(crate) mod mcp_refresh;
 #[cfg(test)]
 mod mcp_tests;
 mod memory;
@@ -94,6 +95,7 @@ struct ToolRegistration {
 pub(crate) struct ToolExecutionContext {
     pub(super) mcp: Option<crate::mcp::McpManager>,
     pub(super) tool_catalog: Option<Arc<catalog::RunToolCatalog>>,
+    pub(super) tool_refresh: Option<Arc<mcp_refresh::McpToolRefresh>>,
     pub(super) execution: Arc<crate::execution_backends::ExecutionService>,
     pub(super) mcp_stamp: Option<crate::mcp::McpDispatchStamp>,
     pub(super) browser: Option<crate::browser::BrowserService>,
@@ -209,6 +211,7 @@ impl ToolExecutionContext {
         Self {
             mcp: None,
             tool_catalog: None,
+            tool_refresh: None,
             execution: Arc::new(crate::execution_backends::ExecutionService::default()),
             mcp_stamp: None,
             browser: None,
@@ -449,12 +452,33 @@ impl ToolExecutionContext {
         self
     }
 
+    pub(crate) fn with_tool_refresh(
+        mut self,
+        refresh: Option<Arc<mcp_refresh::McpToolRefresh>>,
+    ) -> Self {
+        self.tool_refresh = refresh;
+        self
+    }
+
     pub(crate) async fn execute_tool(
-        self,
+        mut self,
         agent: AgentState,
         user_message: Message,
         tool_call: ToolCall,
     ) -> TaskResult<Content> {
+        if let Some(refresh) = &self.tool_refresh {
+            self.tool_catalog = refresh.catalog();
+            self.tool_registry = self.tool_registry.with_mcp_descriptors(
+                agent
+                    .config
+                    .tools
+                    .iter()
+                    .flatten()
+                    .filter(|tool| tool.name.starts_with("mcp_"))
+                    .cloned()
+                    .collect(),
+            );
+        }
         let name = tool_call.name.clone();
         let projection = (
             self.tool_results.clone(),
@@ -2034,6 +2058,8 @@ impl ToolRegistry {
     }
 
     pub(crate) fn with_mcp_descriptors(mut self, descriptors: Vec<ToolDescriptor>) -> Self {
+        self.registrations
+            .retain(|name, _| !name.starts_with("mcp_"));
         for descriptor in descriptors {
             // These are only the current owner's validated reviewed bindings.
             // The native handler still captures and fences live authority.

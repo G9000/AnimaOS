@@ -10,6 +10,9 @@ mod management_tests;
 #[path = "mcp_autonomy_tests.rs"]
 mod autonomy_tests;
 
+#[path = "mcp_refresh_tests.rs"]
+mod refresh_tests;
+
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},

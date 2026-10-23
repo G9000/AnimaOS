@@ -39,6 +39,39 @@ struct AsyncBoundaryModelAdapter;
 
 struct StaticProvider;
 
+struct FailedToolRefresh;
+
+#[async_trait]
+impl crate::RunToolRefresher for FailedToolRefresh {
+    async fn refresh_tools(&self, _: &AgentState) -> Result<Option<Vec<ToolDescriptor>>, String> {
+        Err("Tool refresh authority expired".into())
+    }
+}
+
+#[test]
+fn failed_tool_refresh_stops_before_using_a_stale_model_config() {
+    let messages = Arc::new(Mutex::new(Vec::new()));
+    let mut runtime = AgentRuntime::new(
+        tool_config(),
+        Arc::new(RecordingModelAdapter {
+            messages: messages.clone(),
+        }),
+    );
+    runtime.set_tool_refresher(Some(Arc::new(FailedToolRefresh)));
+    runtime.init();
+    let result = block_on(runtime.run(Content {
+        text: "Continue my request".into(),
+        ..Default::default()
+    }));
+    assert_eq!(result.status, TaskStatus::Error);
+    assert_eq!(
+        result.error.as_deref(),
+        Some("Tool refresh authority expired")
+    );
+    assert_eq!(runtime.state().status, AgentStatus::Failed);
+    assert!(messages.lock().unwrap().is_empty());
+}
+
 struct RefreshingTaskProvider {
     refresh: bool,
     calls: Arc<std::sync::atomic::AtomicUsize>,

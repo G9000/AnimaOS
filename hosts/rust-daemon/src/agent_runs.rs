@@ -2477,12 +2477,35 @@ impl AgentRunCoordinator {
                 .with_origins(delegated_parent.clone(), peer_sources.clone()),
             )
         });
-        if let Some(catalog) = &tool_catalog {
+        let tool_refresh = owner_chat
+            .then(|| mcp_for_run.clone())
+            .flatten()
+            .map(|manager| {
+                Arc::new(crate::tools::mcp_refresh::McpToolRefresh::new(
+                    self.state.clone(),
+                    crate::runs::RunLink {
+                        run_id: run_id.clone(),
+                        session_id: session_id.clone(),
+                        agent_id: agent_id.clone(),
+                    },
+                    live_run.control().cancel,
+                    original_config.clone(),
+                    manager,
+                    tool_catalog.clone(),
+                ))
+            });
+        if let Some(refresh) = &tool_refresh {
+            runtime.set_tool_refresher(Some(refresh.clone()));
+            if discovery_enabled {
+                runtime.set_model_tool_selector(Some(refresh.clone()));
+            }
+        } else if let Some(catalog) = &tool_catalog {
             runtime.set_model_tool_selector(Some(catalog.clone()));
         }
         let tool_context = tool_context
             .with_standing_owner_turn(standing_admission.local_owner)
             .with_tool_catalog(tool_catalog)
+            .with_tool_refresh(tool_refresh)
             .with_completion_review(completion_review)
             .with_document_extractor(Arc::clone(&self.document_extractor))
             .with_action_journal(action_journal.clone())

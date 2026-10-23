@@ -37,7 +37,7 @@ async fn chat_mcp_setup_is_visible_before_a_server_is_configured() {
     f.manager.shutdown().await;
 }
 
-fn management_call(args: Value) -> ToolCall {
+pub(super) fn management_call(args: Value) -> ToolCall {
     ToolCall {
         id: uuid::Uuid::new_v4().to_string(),
         name: "manage_mcp".into(),
@@ -102,6 +102,85 @@ async fn chat_mcp_setup_is_visible_with_tool_discovery_enabled() {
         .any(|m| m.role == anima_core::MessageRole::Tool
             && m.content.text.contains("canConfigureMcp")));
     f.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn chat_mcp_connect_refreshes_tools_and_continues_in_the_same_run() {
+    for discovery in [false, true] {
+        let f = Fixture::new(PolicyAction::Allow, false, false).await;
+        let row = f.manager.get(&f.agent.id, &f.connection_id).await.unwrap();
+        let row = f
+            .manager
+            .disconnect(&f.agent.id, &f.connection_id, row.record.version)
+            .await
+            .unwrap();
+        {
+            let mut state = f.state.write().await;
+            let mut config = state.agents[&f.agent.id].config().clone();
+            config
+                .settings
+                .get_or_insert_with(Default::default)
+                .additional
+                .insert("toolDiscovery".into(), DataValue::Bool(discovery));
+            state.restore_agent_config(&f.agent.id, config);
+        }
+        let mut steps = vec![Step::Tools(vec![management_call(json!({
+            "action":"connect", "connection_id":f.connection_id,
+            "expected_version":row.record.version
+        }))])];
+        if discovery {
+            steps.push(Step::Tools(vec![ToolCall {
+                id: "find-newly-connected-tool".into(),
+                name: "search_tools".into(),
+                args: [("query".into(), DataValue::String(f.alias.clone()))].into(),
+            }]));
+        }
+        steps.push(Step::Tools(vec![f.call("use-newly-connected-tool")]));
+        steps.push(Step::Text(vec!["Original request completed"]));
+        let model = ScriptedModel::new(steps);
+        f.state.write().await.model_adapter = model.clone();
+        let result = f
+            .coordinator
+            .run(chat_request(
+                &f.agent.id,
+                "chat:same-run-mcp",
+                "Connect my MCP and read the project record",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.result.status, "success", "{:?}", result.result);
+        assert!(!model.configs()[0].allows_tool(&f.alias));
+        assert!(model.configs()[1 + usize::from(discovery)].allows_tool(&f.alias));
+        assert_eq!(f.factory.calls.load(Ordering::SeqCst), 1);
+        assert!(model
+            .requests()
+            .last()
+            .unwrap()
+            .messages
+            .iter()
+            .any(|m| m.role == anima_core::MessageRole::Tool
+                && m.content.text.contains("synthetic M42 value")));
+        let state = f.state.read().await;
+        let runs = state.runs.for_session(&f.agent.id, "chat:same-run-mcp");
+        assert_eq!(runs.len(), 1);
+        assert!(runs[0]
+            .action_receipts
+            .iter()
+            .any(|receipt| receipt.name == f.alias));
+        assert_eq!(
+            model
+                .requests()
+                .last()
+                .unwrap()
+                .messages
+                .iter()
+                .filter(|m| m.role == anima_core::MessageRole::User)
+                .count(),
+            1
+        );
+        drop(state);
+        f.manager.shutdown().await;
+    }
 }
 
 #[tokio::test]

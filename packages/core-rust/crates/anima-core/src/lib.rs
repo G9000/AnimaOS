@@ -47,7 +47,7 @@ pub mod tool_rpc;
 pub mod tool_selection;
 pub mod trace_evaluation;
 pub mod turn_recovery;
-pub use tool_selection::ModelToolSelector;
+pub use tool_selection::{ModelToolSelector, RunToolRefresher};
 pub mod workflow_templates;
 pub mod workflows;
 pub use workflows::{

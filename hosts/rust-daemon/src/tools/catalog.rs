@@ -372,6 +372,18 @@ impl RunToolCatalog {
         }
     }
 
+    pub(super) fn inherit_hydration(&self, previous: &Self) {
+        let names = previous
+            .hydrated
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .iter()
+            .filter(|name| self.entries.contains_key(*name))
+            .cloned()
+            .collect::<Vec<_>>();
+        self.hydrate(&names);
+    }
+
     pub(crate) async fn search(
         &self,
         agent: &AgentState,

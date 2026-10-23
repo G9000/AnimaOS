@@ -103,6 +103,7 @@ pub struct AgentRuntime {
     model_adapter: Arc<dyn ModelAdapter>,
     /// Per-run request selection, never persisted or used as execution authority.
     model_tool_selector: Option<Arc<dyn crate::ModelToolSelector>>,
+    tool_refresher: Option<Arc<dyn crate::RunToolRefresher>>,
     /// Frozen host admission; applies only to per-call request copies.
     tool_output_pruning: crate::tool_output_pruning::ToolOutputPruning,
     db: Option<Arc<dyn DatabaseAdapter>>,
@@ -164,6 +165,7 @@ impl AgentRuntime {
             evaluators: Vec::new(),
             model_adapter,
             model_tool_selector: None,
+            tool_refresher: None,
             tool_output_pruning: Default::default(),
             db: None,
             persistence_agent_id: None,
@@ -214,6 +216,7 @@ impl AgentRuntime {
             evaluators: Vec::new(),
             model_adapter,
             model_tool_selector: None,
+            tool_refresher: None,
             tool_output_pruning: Default::default(),
             db: None,
             persistence_agent_id: None,
@@ -234,6 +237,10 @@ impl AgentRuntime {
     /// Restricts only tools advertised on each subsequent model request.
     pub fn set_model_tool_selector(&mut self, selector: Option<Arc<dyn crate::ModelToolSelector>>) {
         self.model_tool_selector = selector;
+    }
+
+    pub fn set_tool_refresher(&mut self, refresher: Option<Arc<dyn crate::RunToolRefresher>>) {
+        self.tool_refresher = refresher;
     }
 
     /// Configure request-only projection. This admission is never persisted,
@@ -700,6 +707,23 @@ impl AgentRuntime {
                 success_hint_pending = false;
                 successful_cycle.reset_history();
                 cycle_hint_pending = false;
+            }
+            if self.stop_requested() {
+                return self.finish_stopped(start);
+            }
+            if let Some(refresher) = &self.tool_refresher {
+                match refresher.refresh_tools(&self.state).await {
+                    Ok(Some(tools)) => self.state.config.tools = Some(tools),
+                    Ok(None) => {}
+                    Err(error) => {
+                        if self.stop_requested() {
+                            return self.finish_stopped(start);
+                        }
+                        let duration_ms = now_millis().saturating_sub(start);
+                        self.mark_failed(error.clone(), duration_ms);
+                        return TaskResult::error(error, duration_ms);
+                    }
+                }
             }
             if self.stop_requested() {
                 return self.finish_stopped(start);
