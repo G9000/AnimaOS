@@ -62,6 +62,9 @@ test-output
 .env.local
 target/
 
+# Disposable agent scratch
+/.tmp/
+
 # Windows test-local temporary files and Node compile caches
 /.tmp/vitest*/
 

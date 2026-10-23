@@ -52,6 +52,7 @@ Shared guidance for GPT-6 Astra and GPT-5.6 coding agents, adapted from the offi
 - For Astro docs changes, run the relevant build target: `bun x nx run @animaos/docs:build --skipNxCache` or `bun x nx run @animaos/contributor-docs:build --skipNxCache`.
 - For TypeScript package changes, use the relevant Nx `test`, `build`, or `typecheck` target.
 - Do not claim completion unless the relevant verification commands have passed in the current tree.
+- Nx tasks isolate OS temporary files under an OS-temp `anima-nx-*` directory and clean their own invocation directory after completion, including failed tests. Keep reports in the configured `test-output` paths. After each verification, remove task-owned scratch scripts, snapshots, logs, and screenshots once their results are recorded; inspect exact paths and active users before cleanup. Hard-killed runs may require manual cleanup. Retain Cargo/Nx caches unless cache cleanup is explicitly requested.
 
 <!-- nx configuration start-->
 <!-- Leave the start & end comments to automatically receive updates. -->

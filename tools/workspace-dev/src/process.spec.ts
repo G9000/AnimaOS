@@ -12,8 +12,9 @@ const parentFixturePath = resolve(
 );
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 
-describe.skipIf(process.platform !== 'win32').sequential(
+describe.skipIf(process.platform !== 'win32')(
   'workspace-dev process management',
+  { concurrent: false },
   () => {
     let leakedPid: number | null = null;
 
