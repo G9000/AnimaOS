@@ -1755,6 +1755,7 @@ pub(crate) struct ControlPlanePersistRequest {
     revision: u64,
     order: Arc<ControlPlanePersistOrder>,
     action_candidate: Option<String>,
+    turn_candidate: Option<String>,
     mcp_candidate: bool,
     mcp_removed_grants: Option<(String, Vec<String>)>,
     bundle_candidate: bool,
@@ -1772,6 +1773,9 @@ struct ControlPlaneAcknowledged {
     /// Action-only patches from the last acknowledged snapshot, bounded by
     /// its retained ledger. Never restore a row a later snapshot removed.
     run_actions: HashMap<String, AcknowledgedRunActions>,
+    /// Acknowledged progress patches are merged only into an existing matching
+    /// attempt. They never resurrect removed runs or restore execution authority.
+    run_turns: HashMap<String, crate::runs::turn::RunTurn>,
     mcp_connections: Option<Vec<crate::mcp::McpConnectionRecord>>,
     mcp_removed_grants: Option<(String, Vec<String>)>,
     mcp_grants: HashMap<String, AcknowledgedMcpGrants>,
@@ -1823,6 +1827,7 @@ pub(crate) struct TestControlPlaneSaveGate {
     pub(crate) release: Arc<Semaphore>,
     fail: bool,
     uncertain_after_save: bool,
+    skip_turn_checkpoints: bool,
 }
 
 impl ControlPlanePersistRequest {
@@ -1851,6 +1856,18 @@ impl ControlPlanePersistRequest {
 
     pub(crate) async fn save_action_candidate(self) -> std::io::Result<()> {
         self.save_ordered(true).await
+    }
+
+    pub(crate) fn with_run_turn(
+        mut self,
+        run_id: &str,
+        turn: crate::runs::turn::RunTurn,
+    ) -> Option<Self> {
+        let record = self.snapshot.runs.iter_mut().find(|run| run.id == run_id)?;
+        record.turn = Some(turn);
+        record.mirrored = false;
+        self.turn_candidate = Some(run_id.to_string());
+        Some(self)
     }
 
     pub(crate) fn with_mcp_candidate(
@@ -1927,6 +1944,11 @@ impl ControlPlanePersistRequest {
         // Merge acknowledged actions under the same persistence ordering,
         // preserving all unrelated run fields and never inserting rows.
         for record in &mut self.snapshot.runs {
+            if self.turn_candidate.as_deref() != Some(record.id.as_str()) {
+                if let Some(turn) = acknowledged.run_turns.get(&record.id) {
+                    record.merge_acknowledged_turn(turn);
+                }
+            }
             if self.action_candidate.as_deref() == Some(record.id.as_str()) {
                 continue;
             }
@@ -2079,11 +2101,20 @@ impl ControlPlanePersistRequest {
         }
         #[cfg(test)]
         let test_save_gate = {
-            self.order
+            let mut pending = self
+                .order
                 .test_save_gate
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .take()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if self.turn_candidate.is_some()
+                && pending
+                    .as_ref()
+                    .is_some_and(|gate| gate.skip_turn_checkpoints)
+            {
+                None
+            } else {
+                pending.take()
+            }
         };
         #[cfg(test)]
         let uncertain_after_save = test_save_gate
@@ -2145,6 +2176,12 @@ impl ControlPlanePersistRequest {
                     },
                 )
             })
+            .collect();
+        acknowledged.run_turns = self
+            .snapshot
+            .runs
+            .iter()
+            .filter_map(|record| record.turn.clone().map(|turn| (record.id.clone(), turn)))
             .collect();
         Ok(())
     }
@@ -2400,6 +2437,12 @@ impl DaemonState {
     /// store may not have applied (the restart rule).
     pub(crate) fn set_history(&mut self, history: crate::history::SharedHistory) {
         history.replay_deletions(&self.pending_history_deletions);
+        let pending = self.history.pending_usage();
+        if !pending.is_empty() {
+            history
+                .restore_usage(pending)
+                .expect("validated pending usage fits the replacement history service");
+        }
         self.history = history;
     }
 
@@ -2449,6 +2492,7 @@ impl DaemonState {
             revision: self.control_plane_revision,
             order: Arc::clone(&self.control_plane_persist_order),
             action_candidate: None,
+            turn_candidate: None,
             mcp_candidate: false,
             mcp_removed_grants: None,
             bundle_candidate: false,
@@ -2465,7 +2509,25 @@ impl DaemonState {
             release: Arc::new(Semaphore::new(0)),
             fail,
             uncertain_after_save: false,
+            skip_turn_checkpoints: false,
         };
+        *self
+            .control_plane_persist_order
+            .test_save_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(gate.clone());
+        gate
+    }
+
+    /// Target an existing action/approval/commit save while allowing the new
+    /// awaited progress checkpoints to retain their normal persistence custody.
+    #[cfg(test)]
+    pub(crate) fn install_test_control_plane_non_turn_save_gate(
+        &mut self,
+        fail: bool,
+    ) -> TestControlPlaneSaveGate {
+        let mut gate = self.install_test_control_plane_save_gate(fail);
+        gate.skip_turn_checkpoints = true;
         *self
             .control_plane_persist_order
             .test_save_gate
@@ -2615,6 +2677,7 @@ impl DaemonState {
         snapshot.agent_autonomy = self.autonomy.snapshot(&self.live_agent_ids());
         snapshot.skill_ledger = self.skill_ledger.clone();
         snapshot.skill_evaluations = self.skill_evaluations.clone();
+        snapshot.pending_usage = self.history.pending_usage();
         snapshot.helper_worktree_repos = self.helper_worktree_repos.clone();
         let skills = self.skills.snapshot();
         snapshot.skills = skills.skills;
@@ -2865,6 +2928,7 @@ impl DaemonState {
         }
         self.tool_grants_applied = snapshot.tool_grants_applied.into_iter().collect();
         self.pending_history_deletions = snapshot.pending_history_deletions;
+        self.history.restore_usage(snapshot.pending_usage)?;
         self.runs = crate::runs::RunLedger::restored_with_pins(
             snapshot.runs,
             &self.live_agent_ids(),
@@ -3097,6 +3161,7 @@ impl DaemonState {
         )?;
         crate::skills::SkillRegistry::validate(&snapshot.skills, &snapshot.skill_drafts)?;
         snapshot.skill_evaluations.validate()?;
+        crate::history::HistoryService::validate_pending_usage(&snapshot.pending_usage)?;
         crate::community_bundles::validate_snapshot(snapshot)?;
         for draft in &snapshot.skill_drafts {
             if let Some(source) = &draft.learning_source {

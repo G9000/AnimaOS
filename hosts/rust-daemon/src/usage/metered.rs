@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use super::{is_zero, usage_record, UsageCall, UsageSource};
 use crate::app::SharedDaemonState;
+use crate::history::HistoryError;
 
 /// The agent id of a call made for no agent (profile or agency generation
 /// that names none).
@@ -123,16 +124,17 @@ impl SecondaryCall {
 /// usage is all zero makes no row, as a run step's does not.
 pub(crate) async fn record_secondary(
     state: &SharedDaemonState,
+    transactions: Arc<tokio::sync::Mutex<()>>,
     meter: &Metered,
     call: SecondaryCall,
-) {
+) -> Result<(), HistoryError> {
     let calls = meter
         .take()
         .into_iter()
         .filter(|metered| !is_zero(&metered.usage))
         .collect::<Vec<_>>();
     if calls.is_empty() {
-        return;
+        return Ok(());
     }
     let (overrides, history) = {
         let guard = state.read().await;
@@ -162,7 +164,10 @@ pub(crate) async fn record_secondary(
             )
         })
         .collect();
-    history.enqueue_usage(records);
+    history
+        .enqueue_usage_durable(state, transactions, records)
+        .await?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -331,11 +336,20 @@ mod tests {
         let empty = meter(Reply::Fail);
         let _ = empty.generate(&config(), &request()).await;
         let call = SecondaryCall::for_config("agent-a", None, UsageSource::Title, &config());
-        record_secondary(&state, &empty, call.clone()).await;
+        record_secondary(
+            &state,
+            Arc::new(tokio::sync::Mutex::new(())),
+            &empty,
+            call.clone(),
+        )
+        .await
+        .unwrap();
 
         let zero = meter(Reply::Usage(TokenUsage::default()));
         zero.generate(&config(), &request()).await.unwrap();
-        record_secondary(&state, &zero, call).await;
+        record_secondary(&state, Arc::new(tokio::sync::Mutex::new(())), &zero, call)
+            .await
+            .unwrap();
 
         assert!(state.read().await.history.pending_usage().is_empty());
     }
@@ -356,6 +370,7 @@ mod tests {
         meter.generate(&config(), &request()).await.unwrap();
         record_secondary(
             &state,
+            Arc::new(tokio::sync::Mutex::new(())),
             &meter,
             SecondaryCall::for_config(
                 "agent-a",
@@ -364,7 +379,8 @@ mod tests {
                 &config(),
             ),
         )
-        .await;
+        .await
+        .unwrap();
 
         let rows = state.read().await.history.pending_usage();
         assert_eq!(rows.len(), 1);
@@ -400,10 +416,12 @@ mod tests {
         meter.generate(&config(), &request()).await.unwrap();
         record_secondary(
             &state,
+            Arc::new(tokio::sync::Mutex::new(())),
             &meter,
             SecondaryCall::for_config("agent-a", None, UsageSource::Title, &config()),
         )
-        .await;
+        .await
+        .unwrap();
 
         let rows = state.read().await.history.pending_usage();
         let mut models: Vec<_> = rows

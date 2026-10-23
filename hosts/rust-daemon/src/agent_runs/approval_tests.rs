@@ -647,7 +647,7 @@ async fn a_request_that_cannot_be_saved_never_runs_its_tool() {
         .state
         .write()
         .await
-        .install_test_control_plane_save_gate(true);
+        .install_test_control_plane_non_turn_save_gate(true);
     gate.release();
     tokio::time::timeout(Duration::from_secs(5), save.entered.acquire())
         .await

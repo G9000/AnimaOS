@@ -142,7 +142,12 @@ impl AgentRunCoordinator {
                 UsageSource::Title,
                 &config,
             );
-            record_secondary(&self.state, &meter, call).await;
+            if let Err(error) =
+                record_secondary(&self.state, self.control_plane_transactions(), &meter, call).await
+            {
+                warn!(agent_id = %agent_id, session_id = %session_id, error = %error, "could not save the title call's usage");
+                return;
+            }
         }
         let title = match generated {
             Ok(Ok(title)) => title,

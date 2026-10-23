@@ -76,6 +76,26 @@ export interface RunRecoverySummary {
   unknownActionCount: number;
   remainingAttempts: number;
   continuationRunId: string | null;
+  rootRunId?: string | null;
+  checkpointSequence?: number | null;
+  checkpointPhase?: 'before_model' | 'model_responded' | 'tools_settled' | null;
+  recoveryState?:
+    | 'safely_recoverable'
+    | 'owner_review_required'
+    | 'already_completed'
+    | 'stopped'
+    | 'invalid_or_stale';
+}
+
+/** Persisted progress and final identity; this summary grants no execution authority. */
+export interface TurnSummary {
+  rootRunId: string;
+  originalInputDigest: string;
+  attemptInputDigest: string;
+  checkpointSequence?: number | null;
+  checkpointPhase?: 'before_model' | 'model_responded' | 'tools_settled' | null;
+  terminalReplyMessageId?: string | null;
+  terminalReplySha256?: string | null;
 }
 
 export interface ContinueRecoveryInput {
@@ -130,6 +150,8 @@ export interface Run {
   asyncHelper?: AsyncHelperSummary;
   /** Generated helper evidence, never a newly authored owner request. */
   helperCompletion?: HelperCompletionOrigin;
+  /** Absent on runs created before durable turn binding was introduced. */
+  turn?: TurnSummary;
 }
 
 /** `queue` waits behind the session's earlier messages; `steer` joins its

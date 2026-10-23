@@ -271,6 +271,8 @@ pub(crate) struct RunRecord {
     #[serde(default)]
     pub(crate) recovery_attempt: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) turn: Option<super::turn::RunTurn>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) async_helper: Option<super::AsyncHelper>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) helper_completion: Option<super::HelperCompletion>,
@@ -349,6 +351,7 @@ impl RunRecord {
             recovery: None,
             recovery_of: None,
             recovery_attempt: 0,
+            turn: None,
             async_helper: None,
             helper_completion: None,
             reply_message_id: None,
@@ -378,6 +381,9 @@ impl RunRecord {
         self.model = model;
         self.provider = provider;
         self.mirrored = false;
+        if let Some(turn) = &mut self.turn {
+            turn.terminal = None;
+        }
     }
 
     /// Records a terminal status; a later call (for example a rolled-back
@@ -390,6 +396,7 @@ impl RunRecord {
         self.error = error;
         self.finished_at_ms = Some(now_ms.max(self.created_at_ms));
         self.mirrored = false;
+        self.seal_turn_terminal();
         if let Some(helper) = &mut self.async_helper {
             if matches!(
                 helper.completion,
@@ -1015,6 +1022,41 @@ impl RunLedger {
     pub(crate) fn validate(records: &[RunRecord]) -> Result<(), String> {
         let mut ids = HashSet::new();
         for record in records {
+            super::turn::validate(record)?;
+            if let (Some(turn), Some(parent_id)) = (&record.turn, &record.recovery_of) {
+                if let Some(parent) = records.iter().find(|r| &r.id == parent_id) {
+                    if parent.agent_id != record.agent_id
+                        || parent.session_id != record.session_id
+                        || record.recovery_attempt != parent.recovery_attempt.saturating_add(1)
+                        || parent
+                            .recovery
+                            .as_ref()
+                            .is_none_or(|claim| claim.continuation_run_id != record.id)
+                    {
+                        return Err(
+                            "Saved turn continuation does not match its original owner claim"
+                                .into(),
+                        );
+                    }
+                    let (root, input) = parent
+                        .turn
+                        .as_ref()
+                        .map(|t| {
+                            (
+                                t.binding.root_run_id.clone(),
+                                t.binding.original_input_digest.clone(),
+                            )
+                        })
+                        .unwrap_or_else(|| (parent.id.clone(), super::turn::digest(&parent.input)));
+                    if turn.binding.root_run_id != root
+                        || turn.binding.original_input_digest != input
+                    {
+                        return Err(
+                            "Saved turn recovery changed its original input identity".into()
+                        );
+                    }
+                }
+            }
             super::validate_receipts(&record.action_receipts)?;
             if record.recovery_attempt > super::recovery::MAX_RECOVERY_ATTEMPTS
                 || (record.recovery_attempt == 0) != record.recovery_of.is_none()

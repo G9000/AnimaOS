@@ -460,7 +460,7 @@ async fn a_helper_started_after_its_companions_stop_never_calls_its_model() {
         .state
         .write()
         .await
-        .install_test_control_plane_save_gate(false);
+        .install_test_control_plane_non_turn_save_gate(false);
     gate.release();
     tokio::time::timeout(Duration::from_secs(5), intent_gate.entered.acquire())
         .await

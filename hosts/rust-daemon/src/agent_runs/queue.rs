@@ -624,6 +624,13 @@ impl AgentRunCoordinator {
         }
         let (record, previous_title, previous_recovery_mirrored, persist) = {
             let mut guard = self.state.write().await;
+            // Attachment/history validation above may await I/O. Recovery data
+            // is not authority; recheck the exact claim under admission's lock.
+            if let Some(admission) = &recovery {
+                if let Some(answer) = admission.validate(&guard, &request)? {
+                    return Ok(answer);
+                }
+            }
             let Some(runtime) = guard.agents.get(&request.agent_id) else {
                 return Err(ApiError::not_found());
             };
@@ -750,13 +757,27 @@ impl AgentRunCoordinator {
             if let Some(admission) = &recovery {
                 let source = guard
                     .runs
-                    .get_mut(&admission.source_run_id)
+                    .get(&admission.source_run_id)
                     .ok_or_else(ApiError::not_found)?;
                 record.recovery_of = Some(source.id.clone());
                 record.recovery_attempt = source.recovery_attempt.saturating_add(1);
                 // This input is a host-authored quotation of prior evidence,
                 // not a new owner statement for memory or resend purposes.
-                record.system_followup = Some(true);
+                // Automatic adoption preserves exactly the original owner input.
+                record.system_followup = Some(!admission.automatic);
+            }
+            // Admission captures browser provenance and current owner binding
+            // before the accepted-input save, including a recovery child.
+            record.turn = Some(
+                crate::runs::turn::bind(&guard, &record, browser.is_some()).map_err(|_| {
+                    ApiError::conflict("Could not bind accepted turn to its current owner")
+                })?,
+            );
+            if let Some(admission) = &recovery {
+                let source = guard
+                    .runs
+                    .get_mut(&admission.source_run_id)
+                    .ok_or_else(ApiError::not_found)?;
                 source.recovery = Some(crate::runs::recovery::RecoveryRecord {
                     fingerprint: admission.fingerprint.clone(),
                     continuation_run_id: record.id.clone(),

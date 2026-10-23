@@ -42,6 +42,8 @@ pub mod structured_tasks;
 pub mod tool_output_pruning;
 pub mod tool_rpc;
 pub mod tool_selection;
+pub mod trace_evaluation;
+pub mod turn_recovery;
 pub use tool_selection::ModelToolSelector;
 pub mod workflow_templates;
 pub mod workflows;

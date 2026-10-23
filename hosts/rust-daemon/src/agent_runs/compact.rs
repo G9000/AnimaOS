@@ -299,7 +299,11 @@ impl AgentRunCoordinator {
         // (spec §11); a dropped one records nothing.
         let call =
             SecondaryCall::for_config(agent_id, Some(session_id), UsageSource::Compaction, &config);
-        record_secondary(&self.state, &meter, call).await;
+        if let Err(error) =
+            record_secondary(&self.state, self.control_plane_transactions(), &meter, call).await
+        {
+            return Compacted::Failed(error.to_string());
+        }
         let Some(summary) = summary else {
             return Compacted::Stopped;
         };

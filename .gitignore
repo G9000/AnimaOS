@@ -80,3 +80,6 @@ target/
 
 # Controlled tool-discovery validation evidence
 /.tmp/tool-discovery-review-green.log
+
+# Local verification logs and isolated turn-recovery evidence
+/.tmp/unified-turn-recovery-*/

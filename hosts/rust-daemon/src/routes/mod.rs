@@ -1753,7 +1753,13 @@ async fn metrics_entry(State(state): State<AppState>) -> AxumResponse {
 )]
 async fn create_agency_entry(State(state): State<AppState>, request: AxumRequest) -> AxumResponse {
     match read_limited_body(request, state.config.max_request_bytes).await {
-        Ok(body) => match agencies::handle_create_agency(body, &state.daemon).await {
+        Ok(body) => match agencies::handle_create_agency(
+            body,
+            &state.daemon,
+            &state.agent_runs.control_plane_transactions(),
+        )
+        .await
+        {
             Ok(response) => json_response(StatusCode::CREATED, &response),
             Err(error) => error.into_response(),
         },
@@ -1776,7 +1782,13 @@ async fn generate_agency_entry(
     request: AxumRequest,
 ) -> AxumResponse {
     match read_limited_body(request, state.config.max_request_bytes).await {
-        Ok(body) => match agencies::handle_generate_agency(body, &state.daemon).await {
+        Ok(body) => match agencies::handle_generate_agency(
+            body,
+            &state.daemon,
+            &state.agent_runs.control_plane_transactions(),
+        )
+        .await
+        {
             Ok(response) => json_response(StatusCode::OK, &response),
             Err(error) => error.into_response(),
         },
@@ -2096,7 +2108,13 @@ async fn generate_profile_entry(
     request: AxumRequest,
 ) -> AxumResponse {
     match read_limited_body(request, state.config.max_request_bytes).await {
-        Ok(body) => match profile::handle_generate_profile(body, &state.daemon).await {
+        Ok(body) => match profile::handle_generate_profile(
+            body,
+            &state.daemon,
+            &state.agent_runs.control_plane_transactions(),
+        )
+        .await
+        {
             Ok(response) => json_response(StatusCode::OK, &response),
             Err(error) => error.into_response(),
         },

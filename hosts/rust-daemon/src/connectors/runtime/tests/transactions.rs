@@ -652,7 +652,7 @@ async fn delivery_cannot_send_outbound_from_a_failing_final_owner_thread_snapsho
     let save_gate = state
         .write()
         .await
-        .install_test_control_plane_save_gate(true);
+        .install_test_control_plane_non_turn_save_gate(true);
     release.add_permits(1);
     save_gate.entered.acquire().await.unwrap().forget();
 
@@ -844,7 +844,7 @@ async fn failed_run_publish_preserves_inbound_accepted_while_model_was_running()
     let gate = state
         .write()
         .await
-        .install_test_control_plane_save_gate(true);
+        .install_test_control_plane_non_turn_save_gate(true);
     release.add_permits(1);
     gate.entered.acquire().await.unwrap().forget();
     gate.release.add_permits(1);

@@ -37,6 +37,9 @@ mod shutdown;
 mod skills;
 mod stop;
 mod titles;
+mod turn;
+#[cfg(test)]
+mod turn_tests;
 pub(crate) mod worktrees;
 
 #[allow(unused_imports)] // The tests use the rest.
@@ -1666,6 +1669,14 @@ impl AgentRunCoordinator {
                 if !waiting {
                     return Err(ApiError::conflict(RUN_NOT_QUEUED));
                 }
+                if let Some(record) = guard.runs.get(accepted_id).filter(|r| r.turn.is_some()) {
+                    let binding = if browser_selection.is_some() {
+                        crate::runs::turn::current_for_browser_selection(&guard, record)
+                    } else {
+                        crate::runs::turn::current(&guard, record)
+                    };
+                    binding.map_err(|_| ApiError::conflict("Accepted turn binding changed; review the saved input before continuing"))?;
+                }
             }
             let Some(crate::state::RunBuild {
                 mut runtime,
@@ -1807,6 +1818,21 @@ impl AgentRunCoordinator {
             }
             if inherited_stop.is_some() && record.stop.is_none() {
                 record.stop = inherited_stop;
+            }
+            if record.turn.is_none() {
+                // Direct API/MCP/channel runs share the same contract. Their
+                // durable start is already started, so it grants no automatic retry.
+                match crate::runs::turn::bind(&guard, &record, browser_selection.is_some()) {
+                    Ok(turn) => record.turn = Some(turn),
+                    Err(_) => {
+                        if session_created {
+                            guard.sessions.remove(&agent_id, &session_id);
+                        }
+                        return Err(ApiError::conflict(
+                            "Could not bind turn to its current owner",
+                        ));
+                    }
+                }
             }
             let standing_admission = match crate::standing_intents::admit(
                 &mut guard,
@@ -2319,6 +2345,21 @@ impl AgentRunCoordinator {
                 source,
                 live_run.control().cancel,
             )));
+        if let Some(turn) = &started.turn {
+            runtime.set_turn_checkpoint_sink(
+                turn.binding.clone(),
+                Arc::new(self::turn::HostTurnCheckpointSink::new(
+                    &self.state,
+                    self.control_plane_transactions(),
+                    crate::runs::RunLink {
+                        run_id: run_id.clone(),
+                        agent_id: agent_id.clone(),
+                        session_id: session_id.clone(),
+                    },
+                    live_run.control().cancel,
+                )),
+            );
+        }
         let history = runtime.messages().to_vec();
         #[cfg(test)]
         let tool_context = {

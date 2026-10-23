@@ -1534,6 +1534,7 @@ pub(crate) struct FlakyHistoryStore {
     usage_failing: AtomicBool,
     /// The size of every `upsert_usage` batch that reached the store.
     usage_batches: Mutex<Vec<usize>>,
+    usage_write_gate: Mutex<Option<StoreGate>>,
     panic_on_write: AtomicBool,
     existence_gate: Mutex<Option<StoreGate>>,
     message_read_gate: Mutex<Option<(usize, StoreGate)>>,
@@ -1558,6 +1559,7 @@ impl FlakyHistoryStore {
             page_messages_failing: AtomicBool::new(false),
             usage_failing: AtomicBool::new(false),
             usage_batches: Mutex::new(Vec::new()),
+            usage_write_gate: Mutex::new(None),
             panic_on_write: AtomicBool::new(false),
             existence_gate: Mutex::new(None),
             message_read_gate: Mutex::new(None),
@@ -1594,6 +1596,18 @@ impl FlakyHistoryStore {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()
+    }
+
+    pub(crate) fn hold_next_usage_write(&self) -> StoreGate {
+        let gate = StoreGate {
+            entered: Arc::new(Semaphore::new(0)),
+            release: Arc::new(Semaphore::new(0)),
+        };
+        *self
+            .usage_write_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(gate.clone());
+        gate
     }
 
     /// Makes the next `upsert_messages` call panic.
@@ -1789,6 +1803,15 @@ impl HistoryStore for FlakyHistoryStore {
 
     async fn upsert_usage(&self, records: &[UsageRecord]) -> Result<(), HistoryError> {
         self.check()?;
+        let gate = self
+            .usage_write_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(gate) = gate {
+            gate.entered.add_permits(1);
+            gate.release.acquire().await.unwrap().forget();
+        }
         if self.usage_failing.load(Ordering::SeqCst) {
             return Err(HistoryError::new("injected usage write failure"));
         }

@@ -111,6 +111,11 @@ pub struct AgentRuntime {
     run_id: Option<String>,
     /// Receives this run's live frames (spec §4.5). Never persisted.
     observer: Option<Arc<dyn RunObserver>>,
+    turn_checkpoint: Option<(
+        crate::turn_recovery::TurnBinding,
+        Arc<dyn crate::turn_recovery::TurnCheckpointSink>,
+    )>,
+    turn_sequence: u64,
     /// The host's stop signal and steering inbox for this run (spec §4.6–§4.7).
     control: Option<RunControl>,
 }
@@ -161,6 +166,8 @@ impl AgentRuntime {
             step_counter: 0,
             run_id: None,
             observer: None,
+            turn_checkpoint: None,
+            turn_sequence: 0,
             control: None,
             agent_files: crate::RenderedAgentFiles::default(),
             host_guidance: String::new(),
@@ -207,6 +214,8 @@ impl AgentRuntime {
             step_counter: snapshot.step_count,
             run_id: None,
             observer: None,
+            turn_checkpoint: None,
+            turn_sequence: 0,
             control: None,
             agent_files: crate::RenderedAgentFiles::default(),
             host_guidance: String::new(),
@@ -261,6 +270,61 @@ impl AgentRuntime {
     /// Scopes persisted tool step keys to one host run so concurrent runs that
     /// start from the same canonical record never share step-log rows. A
     /// durable retry key on the input still takes precedence.
+    /// Install a fresh host-owned attempt. Progress grants no execution authority.
+    pub fn set_turn_checkpoint_sink(
+        &mut self,
+        binding: crate::turn_recovery::TurnBinding,
+        sink: Arc<dyn crate::turn_recovery::TurnCheckpointSink>,
+    ) {
+        self.turn_checkpoint = Some((binding, sink));
+        self.turn_sequence = 0;
+    }
+
+    async fn save_turn_boundary(
+        &mut self,
+        phase: crate::turn_recovery::TurnPhase,
+        model_calls: u64,
+        conversation: &[Message],
+        response: Option<&crate::ModelGenerateResponse>,
+    ) -> Result<(), String> {
+        let Some((binding, sink)) = &self.turn_checkpoint else {
+            return Ok(());
+        };
+        let sequence = self
+            .turn_sequence
+            .checked_add(1)
+            .ok_or("Turn checkpoint sequence exhausted")?;
+        let mut checkpoint = crate::turn_recovery::TurnCheckpoint::bounded(
+            binding.clone(),
+            sequence,
+            phase,
+            model_calls,
+            conversation,
+        );
+        if let Some(response) = response {
+            if checkpoint.progress.len() == crate::turn_recovery::MAX_TURN_PROGRESS_MESSAGES {
+                checkpoint.progress.remove(0);
+            }
+            checkpoint
+                .progress
+                .push(crate::turn_recovery::TurnProgress::bounded(
+                    MessageRole::Assistant,
+                    &response.content.text,
+                ));
+            checkpoint.pending_tools = response
+                .tool_calls
+                .iter()
+                .flatten()
+                .take(65)
+                .map(crate::turn_recovery::TurnToolIntent::from_call)
+                .collect();
+        }
+        checkpoint.validate(binding)?;
+        sink.save(checkpoint).await?;
+        self.turn_sequence = sequence;
+        Ok(())
+    }
+
     pub fn set_run_id(&mut self, run_id: impl Into<String>) {
         self.run_id = Some(run_id.into());
     }
@@ -608,6 +672,25 @@ impl AgentRuntime {
                 cycle_hint_pending = false;
             }
             model_calls += 1;
+            if let Err(error) = self
+                .save_turn_boundary(
+                    crate::turn_recovery::TurnPhase::BeforeModel,
+                    model_calls,
+                    &conversation,
+                    None,
+                )
+                .await
+            {
+                if self.stop_requested() {
+                    return self.finish_stopped(start);
+                }
+                let duration = now_millis().saturating_sub(start);
+                self.mark_failed(error.clone(), duration);
+                return TaskResult::error(error, duration);
+            }
+            if self.stop_requested() {
+                return self.finish_stopped(start);
+            }
             let step_id = self.step_id_for(model_calls);
             self.emit_frame(RunFrame::StepStarted {
                 step_id: step_id.clone(),
@@ -677,6 +760,27 @@ impl AgentRuntime {
 
             match outcome {
                 Ok(mut response) => {
+                    self.apply_token_usage(&response.usage);
+                    if let Err(error) = self
+                        .save_turn_boundary(
+                            crate::turn_recovery::TurnPhase::ModelResponded,
+                            model_calls,
+                            &conversation,
+                            Some(&response),
+                        )
+                        .await
+                    {
+                        // This usage was already incurred, even if progress
+                        // persistence failed. It remains telemetry, never authority.
+                        self.emit_response_usage(&sink, &step_id, &response.usage);
+                        if self.stop_requested() {
+                            self.record_stopped_model_response(&room_id, &step_id, &response);
+                            return self.finish_stopped(start);
+                        }
+                        let duration = now_millis().saturating_sub(start);
+                        self.mark_failed(error.clone(), duration);
+                        return TaskResult::error(error, duration);
+                    }
                     // Runtime provenance comes from the actual stop reason and
                     // acceptance, rather than provider-supplied metadata.
                     if let Some(metadata) = response.content.metadata.as_mut() {
@@ -694,19 +798,7 @@ impl AgentRuntime {
                                 DataValue::Bool(true),
                             );
                     }
-                    self.apply_token_usage(&response.usage);
-                    if let Some(served) = sink.take_served() {
-                        self.emit_frame(RunFrame::ModelServed {
-                            step_id: step_id.clone(),
-                            provider: served.provider,
-                            model: served.model,
-                            reason: served.reason,
-                        });
-                    }
-                    self.emit_frame(RunFrame::StepUsage {
-                        step_id: step_id.clone(),
-                        usage: response.usage.clone(),
-                    });
+                    self.emit_response_usage(&sink, &step_id, &response.usage);
 
                     if is_runaway(&response.content.text) {
                         return self.fail_step(
@@ -1107,17 +1199,6 @@ impl AgentRuntime {
                                         } else {
                                             now_millis().saturating_sub(tool_started)
                                         };
-                                        if let Some(observer) = &observer {
-                                            observer.on_frame(RunFrame::ToolFinished {
-                                                step_id: frame_step_id,
-                                                tool_call_id: prepared_step.tool_call.id.clone(),
-                                                name: prepared_step.tool_call.name.clone(),
-                                                status: tool_result.status,
-                                                duration_ms: tool_duration,
-                                                result: tool_result_text(&tool_result),
-                                                recovered,
-                                            });
-                                        }
                                         (
                                             prepared_step.tool_call,
                                             prepared_step.step_index,
@@ -1189,6 +1270,20 @@ impl AgentRuntime {
                                 }
                             }
 
+                            let finished_frames: Vec<_> = tool_results
+                                .iter()
+                                .map(|(call, _, _, recovered, result, duration)| {
+                                    RunFrame::ToolFinished {
+                                        step_id: step_id.clone(),
+                                        tool_call_id: call.id.clone(),
+                                        name: call.name.clone(),
+                                        status: result.status,
+                                        duration_ms: *duration,
+                                        result: tool_result_text(result),
+                                        recovered: *recovered,
+                                    }
+                                })
+                                .collect();
                             for (
                                 tool_call,
                                 _,
@@ -1231,6 +1326,26 @@ impl AgentRuntime {
                                 conversation.push(tool_message);
                             }
 
+                            if let Err(error) = self
+                                .save_turn_boundary(
+                                    crate::turn_recovery::TurnPhase::ToolsSettled,
+                                    model_calls,
+                                    &conversation,
+                                    None,
+                                )
+                                .await
+                            {
+                                if self.stop_requested() {
+                                    return self.finish_stopped(start);
+                                }
+                                let duration = now_millis().saturating_sub(start);
+                                self.mark_failed(error.clone(), duration);
+                                return TaskResult::error(error, duration);
+                            }
+                            for frame in finished_frames {
+                                self.emit_frame(frame);
+                            }
+
                             self.record_token_event();
                         }
                     }
@@ -1257,6 +1372,76 @@ impl AgentRuntime {
     /// host set no run id.
     fn step_id_for(&self, step: u64) -> String {
         run_step_id(self.run_id.as_deref().unwrap_or("run"), step)
+    }
+
+    fn emit_response_usage(&self, sink: &StepSink, step: &str, usage: &TokenUsage) {
+        if let Some(served) = sink.take_served() {
+            self.emit_frame(RunFrame::ModelServed {
+                step_id: step.into(),
+                provider: served.provider,
+                model: served.model,
+                reason: served.reason,
+            });
+        }
+        self.emit_frame(RunFrame::StepUsage {
+            step_id: step.into(),
+            usage: usage.clone(),
+        });
+    }
+
+    /// A stop during response persistence cannot leave an observed tool request
+    /// without its cancelled protocol results. This records data only.
+    fn record_stopped_model_response(
+        &mut self,
+        room: &str,
+        step: &str,
+        response: &crate::ModelGenerateResponse,
+    ) {
+        let calls = response.tool_calls.as_deref().unwrap_or_default();
+        if calls.is_empty() {
+            let message_id = self.record_unfinished_step(
+                room,
+                step,
+                &response.content.text,
+                STOPPED_METADATA_KEY,
+            );
+            self.emit_frame(RunFrame::StepFinished {
+                step_id: step.into(),
+                message_id,
+            });
+        } else {
+            let assistant = self.tag_for_run(
+                content_with_tool_calls(response.content.clone(), calls),
+                Some(step),
+                Vec::new(),
+            );
+            let message =
+                self.record_message_in_room(room.into(), MessageRole::Assistant, assistant);
+            self.emit_frame(RunFrame::StepFinished {
+                step_id: step.into(),
+                message_id: Some(message.id),
+            });
+            for call in calls {
+                let cancelled = self.tag_for_run(
+                    content_from_tool_result(
+                        call,
+                        TaskResult::error(
+                            self.control
+                                .as_ref()
+                                .map_or(CANCELLED_TOOL_RESULT, |control| {
+                                    control.cancel.tool_result()
+                                }),
+                            0,
+                        ),
+                        false,
+                    ),
+                    Some(step),
+                    self.tool_markers(TaskStatus::Error, 0),
+                );
+                self.record_message_in_room(room.into(), MessageRole::Tool, cancelled);
+            }
+        }
+        self.record_token_event();
     }
 
     fn emit_frame(&self, frame: RunFrame) {

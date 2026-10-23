@@ -925,12 +925,12 @@ async fn a_steer_of_a_run_whose_result_cannot_be_saved_is_offered_again() {
         "also this",
         "taken in before the second call"
     );
-    // The run's result save is the next save: it fails.
+    // Fail the result save after its model-response checkpoint is retained.
     let save_gate = coordinator
         .state
         .write()
         .await
-        .install_test_control_plane_save_gate(true);
+        .install_test_control_plane_non_turn_save_gate(true);
     save_gate.release.add_permits(1);
     gate.release();
     let mut events = events_until(&mut subscription, "run.failed").await;
@@ -1067,8 +1067,12 @@ async fn a_steer_saved_as_its_run_finished_becomes_the_next_message() {
         .unwrap()
         .unwrap()
         .forget();
-    // Meanwhile the run's only model call ends and its inbox closes.
+    // The model returns while acceptance is held. The new awaited response
+    // checkpoint shares the transaction, so completion cannot pass that save.
     gate.release();
+    tokio::task::yield_now().await;
+    assert!(!control.steering.is_closed());
+    save_gate.release.add_permits(1);
     for _ in 0..500 {
         if control.steering.is_closed() {
             break;
@@ -1076,8 +1080,6 @@ async fn a_steer_saved_as_its_run_finished_becomes_the_next_message() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert!(control.steering.is_closed());
-    save_gate.release.add_permits(1);
-
     let answer = steering.await.unwrap();
     assert!(
         matches!(&answer, AcceptedRun::Steered(record) if record.id == first.id),
@@ -1093,9 +1095,9 @@ async fn a_steer_saved_as_its_run_finished_becomes_the_next_message() {
     assert_eq!(model.requests().len(), 2);
 }
 
-/// A run whose stop is saved but whose signal has not reached it yet ends
-/// normally; the steers it left are still interrupted, not requeued, since
-/// the stop is read from its record under the transaction (fix round 1).
+/// A saved stop remains authoritative even before its signal arrives. The
+/// awaited response checkpoint observes it, cancels the run and interrupts
+/// its remaining steers instead of requeuing them.
 #[tokio::test]
 async fn a_saved_stop_that_has_not_reached_the_run_still_keeps_its_steers_from_running() {
     let gate = Gate::new();
@@ -1142,7 +1144,7 @@ async fn a_saved_stop_that_has_not_reached_the_run_still_keeps_its_steers_from_r
         interrupted.error.as_ref().unwrap().code,
         "stopped_before_start"
     );
-    wait_for_key(&coordinator, &agent_id, "key-1", RunStatus::Completed).await;
+    wait_for_key(&coordinator, &agent_id, "key-1", RunStatus::Cancelled).await;
     gate.release.add_permits(2);
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(model.requests().len(), 1, "the steer never ran");

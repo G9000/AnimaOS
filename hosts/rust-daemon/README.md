@@ -1580,3 +1580,7 @@ Missing/corrupt evidence or an interrupted checkpoint transaction reports
 `Filesystem checkpoint RecoveryRequired`. Unknown effects stop further native
 effects in that run and require explicit review. Restoring daemon state does
 not replay effects or mark unfinished tasks complete.
+
+### Turn recovery and durable secondary usage
+
+See [Turn recovery and trace evaluation](../../docs/companion/turn-recovery.md) for host-bound ordinary chat progress, conservative startup adoption, reviewed continuation, durable usage custody and the crash/trace acceptance boundaries. Snapshot format 27 preserves an exact version-26 pre-upgrade backup.

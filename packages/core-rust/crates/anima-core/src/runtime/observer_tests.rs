@@ -985,3 +985,172 @@ fn a_step_answered_by_the_primary_reports_no_model() {
         .iter()
         .any(|frame| matches!(frame, RunFrame::ModelServed { .. })));
 }
+
+struct CheckpointFailure(crate::turn_recovery::TurnPhase);
+#[async_trait]
+impl crate::turn_recovery::TurnCheckpointSink for CheckpointFailure {
+    async fn save(&self, checkpoint: crate::turn_recovery::TurnCheckpoint) -> Result<(), String> {
+        if checkpoint.phase == self.0 {
+            Err("checkpoint disk unavailable".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[test]
+fn turn_checkpoint_save_failure_stops_at_each_effect_boundary() {
+    use crate::turn_recovery::{TurnBinding, TurnPhase};
+    for (phase, models, tools) in [
+        (TurnPhase::BeforeModel, 0, 0),
+        (TurnPhase::ModelResponded, 1, 0),
+        (TurnPhase::ToolsSettled, 1, 1),
+    ] {
+        let (mut runtime, frames) = runtime_with(
+            Arc::new(StreamingModel {
+                tool: Some("search"),
+            }),
+            &["search"],
+        );
+        let binding = TurnBinding {
+            root_run_id: "root".into(),
+            attempt_run_id: "run".into(),
+            agent_id: runtime.id().into(),
+            session_id: "room".into(),
+            original_input_digest: "a".repeat(64),
+            attempt_input_digest: "a".repeat(64),
+            workspace_digest: "b".repeat(64),
+            config_digest: "c".repeat(64),
+            automatic_eligible: true,
+        };
+        runtime.set_turn_checkpoint_sink(binding, Arc::new(CheckpointFailure(phase)));
+        let tool_calls = Arc::new(Mutex::new(0));
+        let count = tool_calls.clone();
+        let result = block_on(runtime.run_with_tools(text("weather?"), move |_, _, _| {
+            *count.lock().unwrap() += 1;
+            async { TaskResult::success(text("sunny"), 0) }
+        }));
+        assert_eq!(result.status, TaskStatus::Error, "{phase:?}");
+        assert!(result
+            .error
+            .unwrap()
+            .contains("checkpoint disk unavailable"));
+        assert_eq!(*tool_calls.lock().unwrap(), tools, "{phase:?}");
+        let observed = frames.take();
+        assert_eq!(
+            observed
+                .iter()
+                .filter_map(|f| match f {
+                    RunFrame::StepUsage { usage, .. } => Some(usage.total_tokens),
+                    _ => None,
+                })
+                .sum::<u64>(),
+            (models * 5) as u64,
+            "known usage survives {phase:?}"
+        );
+        let started = observed
+            .iter()
+            .filter(|frame| matches!(frame, RunFrame::StepStarted { .. }))
+            .count();
+        assert_eq!(started, models, "{phase:?}");
+    }
+}
+
+struct StopDuringCheckpoint(CancelSignal);
+#[async_trait]
+impl crate::turn_recovery::TurnCheckpointSink for StopDuringCheckpoint {
+    async fn save(&self, _: crate::turn_recovery::TurnCheckpoint) -> Result<(), String> {
+        self.0.cancel();
+        Err("owner stopped while checkpoint awaited storage".into())
+    }
+}
+
+struct StopDuringResponseCheckpoint(CancelSignal);
+#[async_trait]
+impl crate::turn_recovery::TurnCheckpointSink for StopDuringResponseCheckpoint {
+    async fn save(&self, checkpoint: crate::turn_recovery::TurnCheckpoint) -> Result<(), String> {
+        if checkpoint.phase == crate::turn_recovery::TurnPhase::ModelResponded {
+            self.0.cancel();
+            Err("stopped while saving observed response".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[test]
+fn stopped_response_checkpoint_pairs_every_tool_without_dispatch() {
+    use crate::turn_recovery::TurnBinding;
+    let (mut runtime, _) = runtime_with(
+        Arc::new(StreamingModel {
+            tool: Some("search"),
+        }),
+        &["search"],
+    );
+    let control = RunControl::new();
+    let sink = Arc::new(StopDuringResponseCheckpoint(control.cancel.clone()));
+    runtime.set_run_control(control);
+    runtime.set_turn_checkpoint_sink(
+        TurnBinding {
+            root_run_id: "root".into(),
+            attempt_run_id: "run".into(),
+            agent_id: runtime.id().into(),
+            session_id: "room".into(),
+            original_input_digest: "a".repeat(64),
+            attempt_input_digest: "a".repeat(64),
+            workspace_digest: "b".repeat(64),
+            config_digest: "c".repeat(64),
+            automatic_eligible: false,
+        },
+        sink,
+    );
+    let result = block_on(runtime.run_with_tools(text("search"), |_, _, _| async {
+        panic!("stopped response must never dispatch")
+    }));
+    assert_eq!(result.error.as_deref(), Some(RUN_STOPPED_ERROR));
+    assert_eq!(
+        runtime
+            .messages()
+            .iter()
+            .map(|m| m.role)
+            .collect::<Vec<_>>(),
+        vec![MessageRole::User, MessageRole::Assistant, MessageRole::Tool]
+    );
+    assert_eq!(
+        string_metadata(&runtime.messages()[2], "toolCallId"),
+        Some("call-1")
+    );
+    assert!(runtime.messages()[2]
+        .content
+        .text
+        .contains(crate::CANCELLED_TOOL_RESULT));
+}
+
+#[test]
+fn owner_stop_while_checkpoint_awaits_preserves_stopped_outcome() {
+    use crate::turn_recovery::TurnBinding;
+    let (mut runtime, frames) = runtime_with(Arc::new(StreamingModel { tool: None }), &[]);
+    let control = RunControl::new();
+    let sink = Arc::new(StopDuringCheckpoint(control.cancel.clone()));
+    runtime.set_run_control(control);
+    runtime.set_turn_checkpoint_sink(
+        TurnBinding {
+            root_run_id: "root".into(),
+            attempt_run_id: "run".into(),
+            agent_id: runtime.id().into(),
+            session_id: "room".into(),
+            original_input_digest: "a".repeat(64),
+            attempt_input_digest: "a".repeat(64),
+            workspace_digest: "b".repeat(64),
+            config_digest: "c".repeat(64),
+            automatic_eligible: true,
+        },
+        sink,
+    );
+    let result = block_on(runtime.run(text("reply")));
+    assert_eq!(result.error.as_deref(), Some(RUN_STOPPED_ERROR));
+    assert!(!frames
+        .take()
+        .iter()
+        .any(|f| matches!(f, RunFrame::StepStarted { .. })));
+}

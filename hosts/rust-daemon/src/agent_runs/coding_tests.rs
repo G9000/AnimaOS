@@ -499,7 +499,7 @@ async fn m47_coding_failed_started_receipt_preserves_source_and_unfinished_tasks
         .state
         .write()
         .await
-        .install_test_control_plane_save_gate(true);
+        .install_test_control_plane_non_turn_save_gate(true);
     gate.release();
     tokio::time::timeout(Duration::from_secs(5), failed.entered.acquire())
         .await

@@ -141,7 +141,12 @@ impl AgentRunCoordinator {
                 crate::usage::UsageSource::Approval,
                 &config,
             );
-            record_secondary(&self.state, &meter, call).await;
+            if record_secondary(&self.state, self.control_plane_transactions(), &meter, call)
+                .await
+                .is_err()
+            {
+                return SmartVerdict::Escalate;
+            }
         }
         match answer {
             Ok(Ok(response)) => SmartVerdict::parse(&response.content.text),

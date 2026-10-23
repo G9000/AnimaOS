@@ -473,7 +473,7 @@ async fn a7_actual_write_with_failed_outcome_save_preserves_started_and_unfinish
         .state
         .write()
         .await
-        .install_test_control_plane_save_gate(false);
+        .install_test_control_plane_non_turn_save_gate(false);
     gate.release();
     entered_save(&intent).await;
     let failed = fixture
@@ -481,7 +481,7 @@ async fn a7_actual_write_with_failed_outcome_save_preserves_started_and_unfinish
         .state
         .write()
         .await
-        .install_test_control_plane_save_gate(true);
+        .install_test_control_plane_non_turn_save_gate(true);
     intent.release.add_permits(1);
     entered_save(&failed).await;
     fixture.preserved(OUTPUT);

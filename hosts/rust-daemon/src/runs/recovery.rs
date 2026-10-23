@@ -26,6 +26,10 @@ pub(crate) struct RecoverySummary {
     pub(crate) unknown_action_count: usize,
     pub(crate) remaining_attempts: u8,
     pub(crate) continuation_run_id: Option<String>,
+    pub(crate) root_run_id: Option<String>,
+    pub(crate) checkpoint_sequence: Option<u64>,
+    pub(crate) checkpoint_phase: Option<String>,
+    pub(crate) recovery_state: String,
 }
 
 pub(crate) fn summary(run: &RunRecord) -> RecoverySummary {
@@ -56,6 +60,7 @@ pub(crate) fn summary(run: &RunRecord) -> RecoverySummary {
         &run.action_receipts,
         &run.error,
         run.recovery_attempt,
+        &run.turn,
     ))
     .expect("run evidence serializes");
     RecoverySummary {
@@ -75,6 +80,25 @@ pub(crate) fn summary(run: &RunRecord) -> RecoverySummary {
         unknown_action_count: unknown,
         remaining_attempts: MAX_RECOVERY_ATTEMPTS.saturating_sub(run.recovery_attempt),
         continuation_run_id: run.recovery.as_ref().map(|r| r.continuation_run_id.clone()),
+        root_run_id: run.turn.as_ref().map(|t| t.binding.root_run_id.clone()),
+        checkpoint_sequence: run
+            .turn
+            .as_ref()
+            .and_then(|t| t.checkpoint.as_ref().map(|c| c.sequence)),
+        checkpoint_phase: run
+            .turn
+            .as_ref()
+            .and_then(|t| t.checkpoint.as_ref().map(|c| c.phase.as_str().to_string())),
+        recovery_state: if run.status == RunStatus::Completed {
+            "already_completed"
+        } else if run.stop.is_some() || run.status == RunStatus::Cancelled {
+            "stopped"
+        } else if eligible {
+            "owner_review_required"
+        } else {
+            "invalid_or_stale"
+        }
+        .into(),
     }
 }
 

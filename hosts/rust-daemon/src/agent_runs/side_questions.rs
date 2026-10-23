@@ -135,10 +135,14 @@ impl AgentRunCoordinator {
         // Account for completed calls even when their response is unusable.
         record_secondary(
             &self.state,
+            self.control_plane_transactions(),
             &meter,
             SecondaryCall::for_config(agent, Some(session), UsageSource::SideQuestion, &config),
         )
-        .await;
+        .await
+        .map_err(|_| {
+            ApiError::service_unavailable("The side question's usage could not be saved")
+        })?;
         let response = response
             .map_err(|_| ApiError::service_unavailable("The side question timed out"))?
             .map_err(|_| {

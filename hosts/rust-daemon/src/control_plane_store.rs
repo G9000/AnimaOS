@@ -34,10 +34,12 @@ use crate::schedules::ScheduledPromptRecord;
 /// recovery lineage and event occurrences; 24 adds workflows, 25 adds reusable
 /// workflow templates, and 26 adds opt-in memory maintenance with per-cohort
 /// recovery journals, Doctor repair images, standing intentions and paired-node
-/// identity records. Runtime transport sessions/processes are never persisted. Older
+/// identity records; 27 adds bound turn progress and durable secondary usage.
+/// Runtime transport sessions/processes are never persisted. Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 26;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 27;
+pub(crate) const PRE_TURN_RECOVERY_BACKUP_SUFFIX: &str = ".pre-turn-recovery.bak";
 pub(crate) const PRE_MEMORY_MAINTENANCE_BACKUP_SUFFIX: &str = ".pre-memory-maintenance.bak";
 pub(crate) const PRE_WORKFLOW_TEMPLATES_BACKUP_SUFFIX: &str = ".pre-workflow-templates.bak";
 pub(crate) const PRE_WORKFLOWS_BACKUP_SUFFIX: &str = ".pre-workflows.bak";
@@ -246,6 +248,10 @@ pub(crate) struct ControlPlaneSnapshot {
     pub(crate) skill_ledger: Vec<crate::skills::ledger::SkillLedgerEntry>,
     #[serde(default)]
     pub(crate) skill_evaluations: crate::skills::evaluation::EvaluationRegistry,
+    /// Secondary-call usage remains in durable custody until history upsert and
+    /// the exact pending-row acknowledgement have both settled.
+    #[serde(default)]
+    pub(crate) pending_usage: Vec<crate::usage::UsageRecord>,
     /// Repositories where helper worktrees were created, for the startup sweep.
     #[serde(default)]
     pub(crate) helper_worktree_repos: Vec<String>,
@@ -495,8 +501,10 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
                 PRE_WORKFLOWS_BACKUP_SUFFIX
             } else if loaded_version < 25 {
                 PRE_WORKFLOW_TEMPLATES_BACKUP_SUFFIX
-            } else {
+            } else if loaded_version < 26 {
                 PRE_MEMORY_MAINTENANCE_BACKUP_SUFFIX
+            } else {
+                PRE_TURN_RECOVERY_BACKUP_SUFFIX
             }
         });
         path.with_file_name(name)
@@ -741,6 +749,7 @@ impl ControlPlaneSnapshot {
             agent_autonomy: vec![],
             skill_ledger: vec![],
             skill_evaluations: crate::skills::evaluation::EvaluationRegistry::default(),
+            pending_usage: Vec::new(),
             helper_worktree_repos: vec![],
             skills: vec![],
             skill_drafts: vec![],
@@ -1703,5 +1712,42 @@ mod learning_snapshot_tests {
             std::fs::remove_file(file).unwrap();
         }
         std::fs::remove_dir(directory).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod turn_recovery_migration_tests {
+    use super::*;
+    #[tokio::test]
+    async fn turn_recovery_upgrade_preserves_exact_version26_bytes_and_defaults_pending_usage() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("state.json");
+        let original = b"{\n  \"version\": 26\n}\n";
+        fs::write(&path, original).unwrap();
+        let config = ControlPlaneStoreConfig::Json(path.clone());
+        let mut saved = load_control_plane_snapshot(&config).await.unwrap().unwrap();
+        assert!(saved.pending_usage.is_empty());
+        let backup = write_pre_upgrade_backup(&config, saved.version)
+            .await
+            .unwrap();
+        assert_eq!(
+            PathBuf::from(backup),
+            path.with_file_name("state.json.pre-turn-recovery.bak")
+        );
+        assert_eq!(
+            fs::read(path.with_file_name("state.json.pre-turn-recovery.bak")).unwrap(),
+            original
+        );
+        saved.version = CONTROL_PLANE_STORE_VERSION;
+        save_control_plane_snapshot(Some(&config), &saved)
+            .await
+            .unwrap();
+        let reloaded = load_control_plane_snapshot(&config).await.unwrap().unwrap();
+        assert_eq!(reloaded.version, 27);
+        assert!(reloaded.pending_usage.is_empty());
+        assert_eq!(
+            fs::read(path.with_file_name("state.json.pre-turn-recovery.bak")).unwrap(),
+            original
+        );
     }
 }

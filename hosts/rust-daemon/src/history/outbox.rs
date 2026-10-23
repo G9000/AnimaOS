@@ -11,9 +11,15 @@
 //!
 //! Usage (spec §11): a terminal run's rows are derived from its record as it
 //! is mirrored, so they are as durable as the run. Secondary calls (titles,
-//! compaction, profile, agency) queue their rows in a separate bounded
-//! in-memory queue, never ordered against deletions (usage survives them);
-//! those rows are lost on a crash before the next flush.
+//! compaction, profile, agency) retain bounded pending rows in the saved
+//! control plane, independently of deletions. History acknowledgement removes
+//! exact IDs only after an idempotent store write and a saved acknowledgement.
+
+#[path = "usage_outbox.rs"]
+mod usage_outbox;
+#[cfg(test)]
+#[path = "usage_tests.rs"]
+mod usage_tests;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -117,11 +123,13 @@ pub(crate) struct FlushReport {
 /// Secondary-call usage rows waiting for the store, oldest first.
 #[derive(Debug, Default)]
 struct UsageQueue {
-    next_seq: u64,
-    rows: VecDeque<(u64, UsageRecord)>,
-    /// Set by the first drop of an overflow burst, so it warns once; cleared
-    /// once the queue is back under its bound.
-    overflowing: bool,
+    rows: VecDeque<UsageRecord>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum UsageAcceptance {
+    Durable,
+    Ephemeral,
 }
 
 /// What the status and metrics routes read from the outbox (spec 11.3).
@@ -220,49 +228,6 @@ impl HistoryService {
 
     fn usage(&self) -> MutexGuard<'_, UsageQueue> {
         lock(&self.usage)
-    }
-
-    /// Queues secondary-call usage rows (titles, compaction, profile,
-    /// agency) for the next flush. The queue holds at most `USAGE_QUEUE_MAX`
-    /// rows: past it the oldest are dropped, with one warning per overflow
-    /// burst (controller ruling 2), logged once the queue's lock is released.
-    pub(crate) fn enqueue_usage(&self, records: Vec<UsageRecord>) {
-        if records.is_empty() {
-            return;
-        }
-        let (dropped, first_of_burst) = {
-            let mut usage = self.usage();
-            for record in records {
-                usage.next_seq += 1;
-                let seq = usage.next_seq;
-                usage.rows.push_back((seq, record));
-            }
-            let excess = usage.rows.len().saturating_sub(self.max_usage);
-            usage.rows.drain(..excess);
-            let first_of_burst = excess > 0 && !usage.overflowing;
-            if excess > 0 {
-                usage.overflowing = true;
-            }
-            (excess, first_of_burst)
-        };
-        if first_of_burst {
-            warn!(
-                dropped,
-                limit = self.max_usage,
-                "the usage queue is full; the oldest usage rows were dropped"
-            );
-        }
-        self.wake.notify_one();
-    }
-
-    /// Usage rows queued and not yet written, oldest first.
-    #[cfg(test)]
-    pub(crate) fn pending_usage(&self) -> Vec<UsageRecord> {
-        self.usage()
-            .rows
-            .iter()
-            .map(|(_, record)| record.clone())
-            .collect()
     }
 
     /// Queues one durable commit's messages. Call only after the control-plane
@@ -469,7 +434,7 @@ impl HistoryService {
         self.write_approvals(state, transactions, report).await?;
         self.write_schedule_fires(state, transactions, report)
             .await?;
-        self.write_usage(report).await
+        self.write_usage(state, transactions, report).await
     }
 
     /// Writes queued items in order until the queue is empty. Each applied
@@ -628,37 +593,6 @@ impl HistoryService {
             report.fires += removed;
             if removed == 0 || fires.len() < HISTORY_FIRE_BATCH {
                 return Ok(());
-            }
-        }
-    }
-
-    /// Writes the queued secondary-call usage rows in batches. A batch
-    /// leaves the queue only once the store holds it (by sequence, so rows
-    /// an overflow dropped meanwhile are not dropped twice); a failure keeps
-    /// it queued for the next flush.
-    async fn write_usage(&self, report: &mut FlushReport) -> Result<(), HistoryError> {
-        loop {
-            let (through, records) = {
-                let usage = self.usage();
-                let Some((through, _)) = usage.rows.iter().take(HISTORY_USAGE_BATCH).last() else {
-                    return Ok(());
-                };
-                let records = usage
-                    .rows
-                    .iter()
-                    .take(HISTORY_USAGE_BATCH)
-                    .map(|(_, record)| record.clone())
-                    .collect::<Vec<_>>();
-                (*through, records)
-            };
-            self.store.upsert_usage(&records).await?;
-            report.usage += records.len();
-            let mut usage = self.usage();
-            while usage.rows.front().is_some_and(|(seq, _)| *seq <= through) {
-                usage.rows.pop_front();
-            }
-            if usage.rows.len() < self.max_usage {
-                usage.overflowing = false;
             }
         }
     }
@@ -999,7 +933,9 @@ mod tests {
             .await
             .unwrap();
         let history = state.read().await.history.clone();
-        history.enqueue_usage(vec![secondary_row("title_1", &agent_id, 5)]);
+        history
+            .enqueue_usage(vec![secondary_row("title_1", &agent_id, 5)])
+            .unwrap();
         let before = history.stats();
         assert_eq!((before.pending, before.usage_queued), (2, 1));
         assert_eq!(
@@ -1876,11 +1812,13 @@ mod tests {
         let (state, coordinator, agent_id) = state_with(HistoryService::new(store.clone())).await;
         let transactions = coordinator.control_plane_transactions();
         let history = state.read().await.history.clone();
-        history.enqueue_usage(
-            (0..1_201)
-                .map(|index| secondary_row(&format!("usage_{index:04}"), &agent_id, 10 + index))
-                .collect(),
-        );
+        history
+            .enqueue_usage(
+                (0..1_201)
+                    .map(|index| secondary_row(&format!("usage_{index:04}"), &agent_id, 10 + index))
+                    .collect(),
+            )
+            .unwrap();
         assert_eq!(history.pending_usage().len(), 1_201);
 
         let report = history
@@ -1898,25 +1836,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_usage_queue_drops_the_oldest_past_its_bound() {
+    async fn the_usage_queue_rejects_overflow_without_dropping_accepted_rows() {
         let store = Arc::new(FlakyHistoryStore::new());
         let history = HistoryService::with_usage_capacity(store.clone(), 3);
         let mut daemon = DaemonState::new();
         daemon.set_history(Arc::clone(&history));
         let state = Arc::new(RwLock::new(daemon));
         let transactions = Mutex::new(());
-        history.enqueue_usage(vec![
-            secondary_row("usage_1", "agent-1", 1),
-            secondary_row("usage_2", "agent-1", 2),
-        ]);
-        history.enqueue_usage(vec![
-            secondary_row("usage_3", "agent-1", 3),
-            secondary_row("usage_4", "agent-1", 4),
-            secondary_row("usage_5", "agent-1", 5),
-        ]);
+        history
+            .enqueue_usage(vec![
+                secondary_row("usage_1", "agent-1", 1),
+                secondary_row("usage_2", "agent-1", 2),
+            ])
+            .unwrap();
+        let saturated = history
+            .enqueue_usage(vec![
+                secondary_row("usage_3", "agent-1", 3),
+                secondary_row("usage_4", "agent-1", 4),
+                secondary_row("usage_5", "agent-1", 5),
+            ])
+            .unwrap_err();
+        assert!(saturated.to_string().contains("capacity"));
         assert_eq!(
             ids(&history.pending_usage()),
-            ["usage_3", "usage_4", "usage_5"]
+            ["usage_1", "usage_2"],
+            "capacity saturation must preserve accepted usage custody"
         );
 
         store.set_usage_failing(true);
@@ -1926,7 +1870,7 @@ mod tests {
             .is_err());
         assert_eq!(
             history.pending_usage().len(),
-            3,
+            2,
             "a failed write keeps the rows queued"
         );
 
@@ -1935,10 +1879,69 @@ mod tests {
             .flush_once(&state, &transactions, now_millis())
             .await
             .unwrap();
-        assert_eq!(report.usage, 3);
+        assert_eq!(report.usage, 2);
         assert_eq!(
             ids(&store.page_usage(&all_usage("agent-1")).await.unwrap()),
-            ["usage_3", "usage_4", "usage_5"]
+            ["usage_1", "usage_2"]
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_secondary_usage_survives_a_control_plane_snapshot_restart() {
+        let history = HistoryService::ephemeral();
+        let mut daemon = DaemonState::new();
+        daemon.set_history(history.clone());
+        history
+            .enqueue_usage(vec![secondary_row(
+                "usage_before_restart",
+                "deleted-agent",
+                7,
+            )])
+            .unwrap();
+        let saved = serde_json::to_value(daemon.control_plane_snapshot()).unwrap();
+        assert_eq!(saved["pendingUsage"].as_array().map(Vec::len), Some(1));
+
+        let mut restored = DaemonState::new();
+        restored
+            .restore_control_plane_snapshot(serde_json::from_value(saved).unwrap())
+            .unwrap();
+        let replacement = HistoryService::ephemeral();
+        restored.set_history(replacement.clone());
+        assert_eq!(ids(&replacement.pending_usage()), ["usage_before_restart"]);
+        let state = Arc::new(RwLock::new(restored));
+        let report = replacement
+            .flush_once(&state, &Mutex::new(()), now_millis())
+            .await
+            .unwrap();
+        assert_eq!(report.usage, 1);
+        assert!(replacement.pending_usage().is_empty());
+        assert_eq!(
+            ids(&replacement
+                .store()
+                .page_usage(&all_usage("deleted-agent"))
+                .await
+                .unwrap()),
+            ["usage_before_restart"]
+        );
+    }
+
+    #[test]
+    fn secondary_usage_retries_keep_one_immutable_row_per_id() {
+        let history = HistoryService::with_usage_capacity(Arc::new(MemoryHistoryStore::new()), 1);
+        let original = secondary_row("usage_retry", "agent-a", 1);
+        history.enqueue_usage(vec![original.clone()]).unwrap();
+        assert!(history
+            .enqueue_usage(vec![original.clone()])
+            .unwrap()
+            .is_empty());
+        assert_eq!(history.pending_usage(), [original.clone()]);
+
+        let changed = secondary_row("usage_retry", "agent-a", 2);
+        assert!(history.enqueue_usage(vec![changed]).is_err());
+        assert_eq!(
+            history.pending_usage(),
+            [original],
+            "a retry must not replace accepted usage"
         );
     }
 
@@ -1957,7 +1960,9 @@ mod tests {
         )
         .await;
         let history = state.read().await.history.clone();
-        history.enqueue_usage(vec![secondary_row("usage_title", &agent_id, 3_000)]);
+        history
+            .enqueue_usage(vec![secondary_row("usage_title", &agent_id, 3_000)])
+            .unwrap();
         history
             .flush_once(&state, &transactions, now_millis())
             .await

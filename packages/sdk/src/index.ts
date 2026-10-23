@@ -117,7 +117,7 @@ export type {
   WorkflowTemplateParameter,
   WorkflowTemplateSource,
 } from './workflows.js';
-export type { RunRecoverySummary, ContinueRecoveryInput } from './runs.js';
+export type { RunRecoverySummary, ContinueRecoveryInput, TurnSummary } from './runs.js';
 export type {
   AsyncHelperSummary,
   HelperCompletionDisposition,

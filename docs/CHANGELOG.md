@@ -2,6 +2,8 @@
 
 ## 2026-10-23
 
+- Document bound turn progress, conservative startup recovery, durable secondary-call usage and snapshot format 27. Add real child-process crash acceptance and a six-case Rust trace-evaluation battery; distinguish deterministic and provider evidence.
+
 - Document opt-in skill evaluation before promotion, historical compaction checkpoints, request-copy output pruning, and completion evidence bound to file versions. Describe approval/Undo boundaries, provider and usage limits, and the SDK controls; update the Rust daemon API inventory to 290 operations.
 
 ## 2026-10-20 (reference cleanup)

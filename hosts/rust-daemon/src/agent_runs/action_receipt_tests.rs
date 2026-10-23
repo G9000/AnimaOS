@@ -1068,7 +1068,7 @@ async fn coordinator_receipt_failure_stops_model_continuation_and_finishes_faile
         .state
         .write()
         .await
-        .install_test_control_plane_save_gate(true);
+        .install_test_control_plane_non_turn_save_gate(true);
     gate.release();
     entered_save(&failed).await;
     failed.release.add_permits(1);

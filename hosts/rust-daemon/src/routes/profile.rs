@@ -144,6 +144,7 @@ fn parse_profile_output(output: &str) -> Result<AgentProfileResponse, String> {
 pub(crate) async fn handle_generate_profile(
     body: Vec<u8>,
     state: &SharedDaemonState,
+    transactions: &std::sync::Arc<tokio::sync::Mutex<()>>,
 ) -> Result<AgentProfileEnvelope, ApiError> {
     let request: GenerateProfileRequest = super::parse_json_body(body)?;
     let preset = profile_preset(request.preset_id.trim())
@@ -225,7 +226,9 @@ pub(crate) async fn handle_generate_profile(
         UsageSource::Profile,
         &generator_config,
     );
-    record_secondary(state, &meter, call).await;
+    record_secondary(state, transactions.clone(), &meter, call)
+        .await
+        .map_err(|_| ApiError::service_unavailable("Profile call usage could not be saved"))?;
     let response = response
         .map_err(|message| ApiError::bad_request(format!("profile model error: {message}")))?;
     let profile = parse_profile_output(&response.content.text).map_err(|error| {
@@ -343,10 +346,13 @@ mod tests {
     #[tokio::test]
     async fn happy_path_returns_parsed_profile() {
         let state = scripted_state(SCRIPTED_PROFILE_JSON);
-        let envelope =
-            handle_generate_profile(request_body("chief-of-staff", Some("openai")), &state)
-                .await
-                .expect("happy path should succeed");
+        let envelope = handle_generate_profile(
+            request_body("chief-of-staff", Some("openai")),
+            &state,
+            &Arc::new(tokio::sync::Mutex::new(())),
+        )
+        .await
+        .expect("happy path should succeed");
         assert_eq!(envelope.profile.bio, "A calm operator.");
         assert_eq!(envelope.profile.adjectives, vec!["calm", "precise"]);
         assert!(envelope.profile.system.contains("You are Anima"));
@@ -357,8 +363,12 @@ mod tests {
     async fn profile_generation_records_usage_with_source_profile() {
         for output in [SCRIPTED_PROFILE_JSON, "sorry, I cannot"] {
             let state = scripted_state(output);
-            let _ = handle_generate_profile(request_body("chief-of-staff", Some("openai")), &state)
-                .await;
+            let _ = handle_generate_profile(
+                request_body("chief-of-staff", Some("openai")),
+                &state,
+                &Arc::new(tokio::sync::Mutex::new(())),
+            )
+            .await;
             let rows = state.read().await.history.pending_usage();
             assert_eq!(rows.len(), 1, "unusable output still spent tokens");
             let row = &rows[0];
@@ -379,6 +389,7 @@ mod tests {
         let error = handle_generate_profile(
             request_body("chief-of-staff", Some("deterministic")),
             &state,
+            &Arc::new(tokio::sync::Mutex::new(())),
         )
         .await
         .expect_err("deterministic provider should be rejected");
@@ -393,9 +404,13 @@ mod tests {
     #[tokio::test]
     async fn missing_provider_is_unavailable() {
         let state = scripted_state(SCRIPTED_PROFILE_JSON);
-        let error = handle_generate_profile(request_body("chief-of-staff", None), &state)
-            .await
-            .expect_err("missing provider should be rejected");
+        let error = handle_generate_profile(
+            request_body("chief-of-staff", None),
+            &state,
+            &Arc::new(tokio::sync::Mutex::new(())),
+        )
+        .await
+        .expect_err("missing provider should be rejected");
         assert_eq!(error.status, axum::http::StatusCode::BAD_REQUEST);
         assert!(
             error.message.starts_with(PROFILE_GENERATION_UNAVAILABLE),
@@ -407,9 +422,13 @@ mod tests {
     #[tokio::test]
     async fn unknown_preset_is_rejected() {
         let state = scripted_state(SCRIPTED_PROFILE_JSON);
-        let error = handle_generate_profile(request_body("nope", Some("openai")), &state)
-            .await
-            .expect_err("unknown preset should be rejected");
+        let error = handle_generate_profile(
+            request_body("nope", Some("openai")),
+            &state,
+            &Arc::new(tokio::sync::Mutex::new(())),
+        )
+        .await
+        .expect_err("unknown preset should be rejected");
         assert_eq!(error.status, axum::http::StatusCode::BAD_REQUEST);
     }
 }

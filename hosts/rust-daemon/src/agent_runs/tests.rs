@@ -2783,8 +2783,8 @@ async fn a_failed_final_save_fails_the_run_and_reverts_only_its_transcript() {
     assert_eq!(coordinator.lock_counts(), (0, 0));
 }
 
-/// Waits for the run parked in the gate model, makes the next control-plane
-/// save (its final save) fail, then releases the run.
+/// Waits for the run parked in the gate model and fails its final save after
+/// the awaited model-response checkpoint has retained custody.
 async fn fail_the_next_final_save(
     coordinator: &AgentRunCoordinator,
     entered: &Semaphore,
@@ -2795,7 +2795,7 @@ async fn fail_the_next_final_save(
         .state
         .write()
         .await
-        .install_test_control_plane_save_gate(true);
+        .install_test_control_plane_non_turn_save_gate(true);
     gate.release.add_permits(1);
     release.add_permits(1);
 }
@@ -2980,7 +2980,7 @@ async fn assert_a_flush_during_a_failing_final_save_mirrors_only_saved_state(rec
         .state
         .write()
         .await
-        .install_test_control_plane_save_gate(true);
+        .install_test_control_plane_non_turn_save_gate(true);
     release.add_permits(1);
     // The commit is merged in memory and its final save is in flight.
     gate.entered.acquire().await.unwrap().forget();

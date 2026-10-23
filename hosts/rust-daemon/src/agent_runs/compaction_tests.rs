@@ -721,23 +721,94 @@ async fn quality_checkpoint_stale_compaction_cannot_replace_newer_session_contin
 
 #[tokio::test]
 async fn quality_checkpoint_failed_save_rolls_back_summary_and_checkpoint_together() {
-    let adapter = BeforeSummary::new(
-        ScriptedModel::with_secondary(
+    struct BeforeUsageSave {
+        inner: Arc<ScriptedModel>,
+        state: OnceLock<SharedDaemonState>,
+        gate: std::sync::Mutex<
+            Option<tokio::sync::oneshot::Sender<crate::state::TestControlPlaneSaveGate>>,
+        >,
+    }
+    #[async_trait]
+    impl ModelAdapter for BeforeUsageSave {
+        fn provider(&self) -> &str {
+            "before-usage-save"
+        }
+        async fn generate(
+            &self,
+            config: &AgentConfig,
+            request: &ModelGenerateRequest,
+        ) -> Result<ModelGenerateResponse, String> {
+            let gate = self
+                .state
+                .get()
+                .unwrap()
+                .write()
+                .await
+                .install_test_control_plane_save_gate(false);
+            assert!(self.gate.lock().unwrap().take().unwrap().send(gate).is_ok());
+            self.inner.generate(config, request).await
+        }
+        async fn stream(
+            &self,
+            config: &AgentConfig,
+            request: &ModelGenerateRequest,
+            sink: &dyn ModelStreamSink,
+        ) -> Result<(), String> {
+            self.inner.stream(config, request, sink).await
+        }
+    }
+    let (gate_sender, gate_receiver) = tokio::sync::oneshot::channel();
+    let adapter = Arc::new(BeforeUsageSave {
+        inner: ScriptedModel::with_secondary(
             vec![Step::Text(vec!["Booked"])],
             vec![Step::Text(vec![QUALITY_CHECKPOINT_RESPONSE])],
         ),
-        |state| {
-            state
-                .install_test_control_plane_save_gate(true)
-                .release
-                .add_permits(1);
-        },
-    );
+        state: OnceLock::new(),
+        gate: std::sync::Mutex::new(Some(gate_sender)),
+    });
     let (coordinator, agent_id) = long_session(adapter.clone(), true).await;
     assert!(adapter.state.set(Arc::clone(&coordinator.state)).is_ok());
-    coordinator
-        .run(chat_request(&agent_id, "chat:long", "book one"))
+    let running = {
+        let coordinator = coordinator.clone();
+        let request = chat_request(&agent_id, "chat:long", "book one");
+        tokio::spawn(async move { coordinator.run(request).await })
+    };
+    let usage_save = tokio::time::timeout(Duration::from_secs(5), gate_receiver)
         .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), usage_save.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    let summary_save = {
+        let mut state = coordinator.state.write().await;
+        let record = state.sessions.get(&agent_id, "chat:long").unwrap();
+        assert!(record.summary.is_none());
+        assert!(record.checkpoint.is_none());
+        assert_eq!(state.history.pending_usage().len(), 1);
+        state.install_test_control_plane_save_gate(true)
+    };
+    // Usage custody succeeds; failure is injected only after the summary and
+    // structured checkpoint have been prepared in the next save candidate.
+    usage_save.release.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(5), summary_save.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    {
+        let state = coordinator.state.read().await;
+        let candidate = state.sessions.get(&agent_id, "chat:long").unwrap();
+        assert!(candidate.summary.is_some());
+        assert!(candidate.checkpoint.is_some());
+    }
+    summary_save.release.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(5), running)
+        .await
+        .unwrap()
+        .unwrap()
         .unwrap();
     let state = coordinator.state.read().await;
     let record = state.sessions.get(&agent_id, "chat:long").unwrap();
@@ -759,27 +830,103 @@ async fn quality_checkpoint_failed_save_rolls_back_summary_and_checkpoint_togeth
 /// run's start saved them.
 #[tokio::test]
 async fn a_summary_that_cannot_be_saved_is_recorded_and_the_run_goes_on_trimmed() {
-    let adapter = BeforeSummary::new(
-        ScriptedModel::with_secondary(
+    struct BeforeUsageSave {
+        inner: Arc<ScriptedModel>,
+        state: OnceLock<SharedDaemonState>,
+        gate: std::sync::Mutex<
+            Option<tokio::sync::oneshot::Sender<crate::state::TestControlPlaneSaveGate>>,
+        >,
+    }
+    #[async_trait]
+    impl ModelAdapter for BeforeUsageSave {
+        fn provider(&self) -> &str {
+            "before-usage-save"
+        }
+        async fn generate(
+            &self,
+            config: &AgentConfig,
+            request: &ModelGenerateRequest,
+        ) -> Result<ModelGenerateResponse, String> {
+            let gate = self
+                .state
+                .get()
+                .unwrap()
+                .write()
+                .await
+                .install_test_control_plane_save_gate(false);
+            assert!(self.gate.lock().unwrap().take().unwrap().send(gate).is_ok());
+            self.inner.generate(config, request).await
+        }
+        async fn stream(
+            &self,
+            config: &AgentConfig,
+            request: &ModelGenerateRequest,
+            sink: &dyn ModelStreamSink,
+        ) -> Result<(), String> {
+            self.inner.stream(config, request, sink).await
+        }
+    }
+    let (gate_sender, gate_receiver) = tokio::sync::oneshot::channel();
+    let adapter = Arc::new(BeforeUsageSave {
+        inner: ScriptedModel::with_secondary(
             vec![Step::Text(vec!["Booked"])],
             vec![Step::Text(vec!["They planned a trip to Lisbon."])],
         ),
-        // The next save, the summary's, fails.
-        |state| {
-            state
-                .install_test_control_plane_save_gate(true)
-                .release
-                .add_permits(1);
-        },
-    );
+        state: OnceLock::new(),
+        gate: std::sync::Mutex::new(Some(gate_sender)),
+    });
     let (coordinator, agent_id) = long_session(adapter.clone(), true).await;
     assert!(adapter.state.set(Arc::clone(&coordinator.state)).is_ok());
     let hub = coordinator.state.read().await.live.clone();
     let mut subscription = hub.subscribe(&agent_id).unwrap();
 
-    coordinator
-        .run(chat_request(&agent_id, "chat:long", "book one"))
+    let running = {
+        let coordinator = coordinator.clone();
+        let request = chat_request(&agent_id, "chat:long", "book one");
+        tokio::spawn(async move { coordinator.run(request).await })
+    };
+    let usage_save = tokio::time::timeout(Duration::from_secs(5), gate_receiver)
         .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), usage_save.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    let summary_save = {
+        let mut state = coordinator.state.write().await;
+        assert!(state
+            .sessions
+            .get(&agent_id, "chat:long")
+            .unwrap()
+            .summary
+            .is_none());
+        assert_eq!(state.history.pending_usage().len(), 1);
+        state.install_test_control_plane_save_gate(true)
+    };
+    // Let the independent usage save finish before failing the actual summary
+    // candidate, and verify its state instead of counting prior saves.
+    usage_save.release.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(5), summary_save.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    assert!(coordinator
+        .state
+        .read()
+        .await
+        .sessions
+        .get(&agent_id, "chat:long")
+        .unwrap()
+        .summary
+        .is_some());
+    summary_save.release.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(5), running)
+        .await
+        .unwrap()
+        .unwrap()
         .unwrap();
 
     // Fix round 1: the unsaved error is announced at once, not at the next save.

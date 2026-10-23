@@ -316,6 +316,7 @@ impl DaemonState {
                         .map(|message| crate::runs::committed_output_sha256(&message.content.text))
                 });
             }
+            record.seal_turn_terminal();
         }
         self.runs.settle_helper_origin(&change_set.run_id);
         let pins = crate::runs::origin_pins(&self.control_plane_snapshot());

@@ -176,6 +176,7 @@ mod tests {
         calls: std::sync::Mutex<Vec<(AgentConfig, ModelGenerateRequest)>>,
         gate: std::sync::Mutex<Option<crate::agent_runs::test_support::Gate>>,
         fail_baseline: std::sync::atomic::AtomicBool,
+        partial_usage_before_gate: std::sync::atomic::AtomicBool,
     }
     #[async_trait]
     impl ModelAdapter for ResponseModel {
@@ -227,6 +228,29 @@ mod tests {
                     ..TokenUsage::default()
                 },
             })
+        }
+
+        async fn stream(
+            &self,
+            config: &AgentConfig,
+            request: &ModelGenerateRequest,
+            sink: &dyn anima_core::ModelStreamSink,
+        ) -> Result<(), String> {
+            if self
+                .partial_usage_before_gate
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                sink.emit(anima_core::ModelStreamFrame::Usage(TokenUsage {
+                    prompt_tokens: 2,
+                    completion_tokens: 1,
+                    total_tokens: 3,
+                    ..TokenUsage::default()
+                }))
+                .await?;
+            }
+            let response = self.generate(config, request).await?;
+            sink.emit(anima_core::ModelStreamFrame::Final(response))
+                .await
         }
     }
     async fn evaluated_daemon(
@@ -779,6 +803,88 @@ mod tests {
         assert!(late.trials[0].usage_reported);
         assert_eq!(late.trials[0].usage.total_tokens, 11);
         assert!(late.retired_at_ms.is_some());
+        assert_eq!(model.calls.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn quality_skill_evaluation_partial_timeout_accounts_final_usage_once_after_physical_retirement(
+    ) {
+        let (state, skills, model, agent, _) = evaluated_daemon("evaluation-partial-usage").await;
+        let store = Arc::new(crate::history::conformance::FlakyHistoryStore::new());
+        store.set_usage_failing(true);
+        let history = crate::history::HistoryService::new(store.clone());
+        state.write().await.set_history(history.clone());
+        model
+            .partial_usage_before_gate
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let gate = crate::agent_runs::test_support::Gate::new();
+        *model.gate.lock().unwrap() = Some(gate.clone());
+        let draft = skills
+            .import(skill_text("Notes").into_bytes(), None)
+            .await
+            .unwrap();
+        let row = skills
+            .start_evaluation(&draft.id, DraftApproval::default())
+            .await
+            .unwrap();
+        gate.entered().await;
+        let timed_out = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            skills.wait_evaluation(&row.id),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let premature_global_usage = history.pending_usage();
+        gate.release();
+        physically_retired(&state).await;
+
+        assert_eq!(timed_out.status, EvaluationStatus::Inconclusive);
+        assert_eq!(timed_out.trials[0].usage.total_tokens, 3);
+        assert!(!timed_out.trials[0].usage_complete);
+        assert!(
+            premature_global_usage.is_empty(),
+            "logical timeout evidence must not settle a physical call's global accounting"
+        );
+        let final_report = skills.wait_evaluation(&row.id).await.unwrap();
+        assert_eq!(final_report.trials[0].usage.total_tokens, 11);
+        assert!(final_report.trials[0].usage_complete);
+        let pending = history.pending_usage();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, format!("{}_train_Baseline_0", row.id));
+        assert_eq!(pending[0].total_tokens, 11);
+        assert!(history
+            .flush_once(
+                &state,
+                &skills.transactions,
+                anima_core::primitives::now_millis()
+            )
+            .await
+            .is_err());
+        assert_eq!(history.pending_usage(), pending);
+        store.set_usage_failing(false);
+        history
+            .flush_once(
+                &state,
+                &skills.transactions,
+                anima_core::primitives::now_millis(),
+            )
+            .await
+            .unwrap();
+        let rows = history
+            .store()
+            .page_usage(&crate::history::UsagePageQuery {
+                from_ms: 0,
+                to_ms: u64::MAX >> 1,
+                agent_id: Some(agent),
+                session_id: None,
+                before: None,
+                limit: 20,
+            })
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].total_tokens, 11);
         assert_eq!(model.calls.lock().unwrap().len(), 1);
     }
     #[tokio::test]

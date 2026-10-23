@@ -14,9 +14,34 @@ use anima_core::{
 use async_trait::async_trait;
 use futures::FutureExt;
 use std::{
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::{Duration, Instant},
 };
+
+/// One physical call owns its timestamp and retirement witness. At most one
+/// transport is active, so this side state stays bounded by that custody.
+#[derive(Clone)]
+struct TrialCustody {
+    started_at_ms: u64,
+    retired: Arc<AtomicBool>,
+}
+
+impl TrialCustody {
+    fn new() -> Self {
+        Self {
+            started_at_ms: now_millis(),
+            retired: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+enum TrialObservation {
+    Deadline,
+    Retired,
+}
 
 fn bounded(mut text: String) -> String {
     while text.len() > 1024 {
@@ -247,6 +272,7 @@ impl SkillService {
                         package,
                     );
                     let started = Instant::now();
+                    let custody = TrialCustody::new();
                     let deadline =
                         absolute.min(started + Duration::from_millis(logical_timeout_ms));
                     let sink = Arc::new(EvaluationSink {
@@ -272,6 +298,7 @@ impl SkillService {
                     let timer_id = report_id.clone();
                     let timer_trial = trial.clone();
                     let timer_config = config.clone();
+                    let timer_custody = custody.clone();
                     let timer = tokio::spawn(async move {
                         tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
                         let observed = timer_sink.trial(
@@ -283,7 +310,13 @@ impl SkillService {
                             ),
                         );
                         timer_service
-                            .save_evaluation_trial(&timer_id, observed, &timer_config, true)
+                            .save_evaluation_trial(
+                                &timer_id,
+                                observed,
+                                &timer_config,
+                                timer_custody,
+                                TrialObservation::Deadline,
+                            )
                             .await;
                     });
                     // Do not timeout/drop this future. Sink rejection asks a
@@ -301,8 +334,14 @@ impl SkillService {
                     let error = stream.err().map(bounded);
                     let observed = sink.trial(trial, started, error);
                     let failed = observed.error.is_some();
-                    self.save_evaluation_trial(&report_id, observed, &config, failed)
-                        .await;
+                    self.save_evaluation_trial(
+                        &report_id,
+                        observed,
+                        &config,
+                        custody,
+                        TrialObservation::Retired,
+                    )
+                    .await;
                     if failed {
                         break 'fixtures;
                     }
@@ -395,11 +434,22 @@ impl SkillService {
         report_id: &str,
         trial: EvaluationTrial,
         config: &AgentConfig,
-        terminal: bool,
+        custody: TrialCustody,
+        observation: TrialObservation,
     ) {
+        let physical_retirement = matches!(observation, TrialObservation::Retired);
+        if physical_retirement && custody.retired.swap(true, Ordering::AcqRel) {
+            return;
+        }
         let (id, config) = (report_id.to_owned(), config.clone());
         let _ = self
             .evaluation_transaction(move |service| async move {
+                // Timer transactions are detached from their waiter. A timer
+                // aborted after spawning this work may enter after the physical
+                // result; check under the shared transaction before mutating it.
+                if !physical_retirement && custody.retired.load(Ordering::Acquire) {
+                    return Ok(());
+                }
                 let mut state = service.state.write().await;
                 let current = state
                     .skill_evaluations
@@ -425,7 +475,7 @@ impl SkillService {
                 } else {
                     row.trials.push(trial.clone());
                 }
-                if terminal
+                if trial.error.is_some()
                     && matches!(
                         row.status,
                         EvaluationStatus::Running | EvaluationStatus::Passed
@@ -443,7 +493,9 @@ impl SkillService {
                     row.usage_complete = false;
                 }
                 let agent_id = row.agent_id.clone();
-                let usage = trial.usage_reported.then(|| {
+                // Deadline reports preserve partial provider evidence, but only
+                // actual transport retirement settles the immutable global row.
+                let usage = (physical_retirement && trial.usage_reported).then(|| {
                     crate::usage::usage_record(
                         &crate::usage::UsageCall {
                             id: format!(
@@ -457,19 +509,46 @@ impl SkillService {
                             provider: config.provider.clone().unwrap_or_else(|| "unknown".into()),
                             model: config.model.clone(),
                             duration_ms: trial.duration_ms,
-                            created_at_ms: now_millis().saturating_sub(trial.duration_ms),
+                            created_at_ms: custody.started_at_ms,
                         },
                         &trial.usage,
                         &state.pricing_overrides,
                     )
                 });
                 let history = state.history.clone();
+                let inserted_usage = match usage {
+                    Some(usage) => match history.enqueue_usage(vec![usage]) {
+                        Ok(ids) => ids,
+                        Err(error) => {
+                            if let Some(row) = state
+                                .skill_evaluations
+                                .reports
+                                .iter_mut()
+                                .find(|r| r.id == id)
+                            {
+                                row.status = EvaluationStatus::Inconclusive;
+                                row.error =
+                                    Some("Evaluation usage custody could not be accepted".into());
+                                row.usage_complete = false;
+                                row.finished_at_ms.get_or_insert_with(now_millis);
+                            }
+                            let persist = state.control_plane_persist_request();
+                            drop(state);
+                            persist
+                                .save()
+                                .await
+                                .map_err(|error| unavailable(&bounded(error.to_string())))?;
+                            return Err(unavailable(&bounded(error.to_string())));
+                        }
+                    },
+                    None => Vec::new(),
+                };
                 let persist = state.control_plane_persist_request();
                 drop(state);
-                if let Some(usage) = usage {
-                    history.enqueue_usage(vec![usage]);
-                }
                 if let Err(error) = persist.save().await {
+                    if !crate::control_plane_store::is_durability_uncertain(&error) {
+                        history.rollback_usage(&inserted_usage);
+                    }
                     if let Some(row) = service
                         .state
                         .write()
@@ -631,5 +710,96 @@ impl ModelStreamSink for EvaluationSink {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod usage_settlement_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn stale_logical_timeout_cannot_downgrade_retired_trial_evidence() {
+        let state = Arc::new(tokio::sync::RwLock::new(crate::state::DaemonState::new()));
+        let service = crate::skills::test_support::service(&state);
+        let digest = "0".repeat(64);
+        state
+            .write()
+            .await
+            .skill_evaluations
+            .reports
+            .push(EvaluationReport {
+                id: "evaluation-stale-timer".into(),
+                identity: EvaluationIdentity {
+                    workspace: "fixture".into(),
+                    slug: "notes".into(),
+                    suite_revision: 1,
+                    suite_digest: digest.clone(),
+                    baseline_hash: None,
+                    candidate_hash: digest.clone(),
+                    draft_id: "draft".into(),
+                    draft_digest: digest.clone(),
+                    model_config_digest: digest,
+                    grader: "fixture".into(),
+                },
+                agent_id: "agent".into(),
+                model: "fixture".into(),
+                provider: Some("test".into()),
+                status: EvaluationStatus::Inconclusive,
+                reserved_at_ms: 1,
+                finished_at_ms: Some(2),
+                trials: Vec::new(),
+                error: Some("timed out".into()),
+                response_only: true,
+                usage_complete: false,
+                retired_at_ms: Some(3),
+            });
+        let final_trial = EvaluationTrial {
+            fixture_id: "train".into(),
+            repetition: 0,
+            variant: TrialVariant::Baseline,
+            response: None,
+            error: Some("late output is ineligible".into()),
+            usage: TokenUsage {
+                prompt_tokens: 10,
+                completion_tokens: 1,
+                total_tokens: 11,
+                ..Default::default()
+            },
+            usage_reported: true,
+            usage_complete: true,
+            duration_ms: 20,
+        };
+        let mut stale_timeout = final_trial.clone();
+        stale_timeout.usage.total_tokens = 3;
+        stale_timeout.usage.prompt_tokens = 2;
+        stale_timeout.usage_complete = false;
+        stale_timeout.duration_ms = 10;
+        let config = crate::agent_runs::test_support::companion_config("Eval");
+        let custody = TrialCustody::new();
+        service
+            .save_evaluation_trial(
+                "evaluation-stale-timer",
+                final_trial.clone(),
+                &config,
+                custody.clone(),
+                TrialObservation::Retired,
+            )
+            .await;
+        service
+            .save_evaluation_trial(
+                "evaluation-stale-timer",
+                stale_timeout,
+                &config,
+                custody,
+                TrialObservation::Deadline,
+            )
+            .await;
+        assert_eq!(
+            state.read().await.skill_evaluations.reports[0].trials,
+            [final_trial]
+        );
+        let pending = state.read().await.history.pending_usage();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].total_tokens, 11);
     }
 }

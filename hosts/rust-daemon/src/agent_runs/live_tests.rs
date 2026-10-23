@@ -365,11 +365,23 @@ async fn observer_frames_ignore_the_state_lock_while_native_tool_finish_waits_fo
         tokio::spawn(async move { coordinator.run(request).await })
     };
 
-    // A model's tool-start frame remains independent of daemon state, but
-    // native execution and its success frame wait for action evidence.
+    // The model-response checkpoint precedes tool publication. Hold the
+    // subsequent native intent save, then show that its already published
+    // tool-start frame can be read while state is locked; success still waits
+    // for the native evidence save and its current-authority recheck.
     gate.entered().await;
-    let guard = coordinator.state.write().await;
+    let intent_save = coordinator
+        .state
+        .write()
+        .await
+        .install_test_control_plane_non_turn_save_gate(false);
     gate.release();
+    within("the native intent save", intent_save.entered.acquire())
+        .await
+        .unwrap()
+        .forget();
+    let guard = coordinator.state.write().await;
+    intent_save.release.add_permits(1);
     let tools = events_until(&mut subscription, "tool.started").await;
     assert!(types(&tools).contains(&"tool.started"));
     let held = quiet_for(&mut subscription).await;
@@ -464,7 +476,7 @@ async fn a_failed_final_save_is_announced_as_a_failed_run_without_its_messages()
         .state
         .write()
         .await
-        .install_test_control_plane_save_gate(true);
+        .install_test_control_plane_non_turn_save_gate(true);
     save.release.add_permits(1);
     gate.release();
 

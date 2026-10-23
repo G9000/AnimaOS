@@ -215,15 +215,17 @@ struct SeedMemoryEntry {
 pub(crate) async fn handle_generate_agency(
     body: Vec<u8>,
     state: &SharedDaemonState,
+    transactions: &Arc<tokio::sync::Mutex<()>>,
 ) -> Result<AgencyGenerateResponse, ApiError> {
     let request: AgencyGenerateRequest = super::parse_json_body(body)?;
 
-    generate_agency_from_request(request, state).await
+    generate_agency_from_request(request, state, transactions).await
 }
 
 pub(crate) async fn handle_create_agency(
     body: Vec<u8>,
     state: &SharedDaemonState,
+    transactions: &Arc<tokio::sync::Mutex<()>>,
 ) -> Result<AgencyCreateResponse, ApiError> {
     let request: AgencyCreateRequest = super::parse_json_body(body)?;
     let output_dir = request
@@ -244,9 +246,9 @@ pub(crate) async fn handle_create_agency(
         model: request.model,
         model_pool: request.model_pool,
     })?;
-    let agency = generate_agency_from_prepared(prepared.clone(), state).await?;
+    let agency = generate_agency_from_prepared(prepared.clone(), state, transactions).await?;
     let seeds = if seed_memories {
-        generate_seed_memories(&prepared, &agency, state).await?
+        generate_seed_memories(&prepared, &agency, state, transactions).await?
     } else {
         Vec::new()
     };
@@ -297,10 +299,11 @@ pub(crate) async fn handle_create_agency(
 async fn generate_agency_from_request(
     request: AgencyGenerateRequest,
     state: &SharedDaemonState,
+    transactions: &Arc<tokio::sync::Mutex<()>>,
 ) -> Result<AgencyGenerateResponse, ApiError> {
     let prepared = prepare_generate_request(request)?;
 
-    generate_agency_from_prepared(prepared, state).await
+    generate_agency_from_prepared(prepared, state, transactions).await
 }
 
 fn prepare_generate_request(
@@ -368,6 +371,7 @@ fn prepare_generate_request(
 async fn generate_agency_from_prepared(
     prepared: PreparedAgencyRequest,
     state: &SharedDaemonState,
+    transactions: &Arc<tokio::sync::Mutex<()>>,
 ) -> Result<AgencyGenerateResponse, ApiError> {
     let PreparedAgencyRequest {
         name,
@@ -430,9 +434,7 @@ async fn generate_agency_from_prepared(
         max_tokens: None,
     };
 
-    let response = generate_metered(state, adapter, &agent_config, &request)
-        .await
-        .map_err(|message| ApiError::bad_request(format!("model error: {message}")))?;
+    let response = generate_metered(state, transactions, adapter, &agent_config, &request).await?;
 
     let agents = parse_agents_payload(&response.content.text, &tool_registry)?;
     let (mission, values, definitions) = agents;
@@ -641,6 +643,7 @@ async fn generate_seed_memories(
     prepared: &PreparedAgencyRequest,
     agency: &AgencyGenerateResponse,
     state: &SharedDaemonState,
+    transactions: &Arc<tokio::sync::Mutex<()>>,
 ) -> Result<Vec<AgentSeedMemories>, ApiError> {
     let adapter: Arc<dyn ModelAdapter> = {
         let guard = state.read().await;
@@ -682,9 +685,7 @@ async fn generate_seed_memories(
         max_tokens: None,
     };
 
-    let response = generate_metered(state, adapter, &agent_config, &request)
-        .await
-        .map_err(|message| ApiError::bad_request(format!("seed model error: {message}")))?;
+    let response = generate_metered(state, transactions, adapter, &agent_config, &request).await?;
 
     parse_seed_payload(&response.content.text, &agency.agents)
 }
@@ -693,15 +694,18 @@ async fn generate_seed_memories(
 /// agency request names no agent; spec §11).
 async fn generate_metered(
     state: &SharedDaemonState,
+    transactions: &Arc<tokio::sync::Mutex<()>>,
     adapter: Arc<dyn ModelAdapter>,
     config: &AgentConfig,
     request: &ModelGenerateRequest,
-) -> Result<anima_core::ModelGenerateResponse, String> {
+) -> Result<anima_core::ModelGenerateResponse, ApiError> {
     let meter = Metered::new(adapter);
     let response = meter.generate(config, request).await;
     let call = SecondaryCall::for_config(USAGE_NO_AGENT, None, UsageSource::Agency, config);
-    record_secondary(state, &meter, call).await;
-    response
+    record_secondary(state, transactions.clone(), &meter, call)
+        .await
+        .map_err(|_| ApiError::service_unavailable("Agency call usage could not be saved"))?;
+    response.map_err(|message| ApiError::bad_request(format!("agency model error: {message}")))
 }
 
 fn build_seed_prompt(agency: &AgencyGenerateResponse) -> String {
@@ -2173,10 +2177,11 @@ agents:
         )
         .unwrap();
 
-        let agency = super::generate_agency_from_prepared(prepared.clone(), &state)
+        let transactions = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+        let agency = super::generate_agency_from_prepared(prepared.clone(), &state, &transactions)
             .await
             .unwrap();
-        super::generate_seed_memories(&prepared, &agency, &state)
+        super::generate_seed_memories(&prepared, &agency, &state, &transactions)
             .await
             .unwrap();
 

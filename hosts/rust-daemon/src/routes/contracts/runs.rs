@@ -125,6 +125,18 @@ pub(crate) struct HelperCompletionOriginResponse {
 /// A ledger run (spec §4.1) as clients see it.
 #[derive(Clone, Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct TurnSummaryResponse {
+    pub(crate) root_run_id: String,
+    pub(crate) original_input_digest: String,
+    pub(crate) attempt_input_digest: String,
+    pub(crate) checkpoint_sequence: Option<u64>,
+    pub(crate) checkpoint_phase: Option<String>,
+    pub(crate) terminal_reply_message_id: Option<String>,
+    pub(crate) terminal_reply_sha256: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct RunResponse {
     pub(crate) id: String,
     pub(crate) agent_id: String,
@@ -157,6 +169,8 @@ pub(crate) struct RunResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) recovery_of: Option<String>,
     pub(crate) recovery_attempt: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) turn: Option<TurnSummaryResponse>,
     /// The committed final reply, once the run completed.
     pub(crate) reply_message_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -210,6 +224,21 @@ impl From<&RunRecord> for RunResponse {
             recovery: record.recovery.clone(),
             recovery_of: record.recovery_of.clone(),
             recovery_attempt: record.recovery_attempt,
+            turn: record.turn.as_ref().map(|turn| TurnSummaryResponse {
+                root_run_id: turn.binding.root_run_id.clone(),
+                original_input_digest: turn.binding.original_input_digest.clone(),
+                attempt_input_digest: turn.binding.attempt_input_digest.clone(),
+                checkpoint_sequence: turn.checkpoint.as_ref().map(|c| c.sequence),
+                checkpoint_phase: turn
+                    .checkpoint
+                    .as_ref()
+                    .map(|c| c.phase.as_str().to_string()),
+                terminal_reply_message_id: turn
+                    .terminal
+                    .as_ref()
+                    .and_then(|t| t.reply_message_id.clone()),
+                terminal_reply_sha256: turn.terminal.as_ref().and_then(|t| t.reply_sha256.clone()),
+            }),
             reply_message_id: record.reply_message_id.clone(),
             async_helper: record
                 .async_helper

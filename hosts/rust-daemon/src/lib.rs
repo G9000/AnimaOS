@@ -68,3 +68,5 @@ pub use app::{
     DaemonConfig, PersistenceMode,
 };
 mod chatgpt_auth;
+#[cfg(test)]
+mod trace_live_tests;
