@@ -30,11 +30,7 @@ export interface TokenUsage {
 }
 
 export type AgentStatus =
-  | 'idle'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'terminated';
+  'idle' | 'running' | 'completed' | 'failed' | 'terminated';
 
 /** Finite limits shared by a turn, its helpers and reviewed recovery attempts. */
 export interface ExecutionLimits {

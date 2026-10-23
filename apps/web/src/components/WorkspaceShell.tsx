@@ -573,6 +573,7 @@ export function WorkspaceShell({
                       : undefined
                   }
                   needsYou={(inbox?.count ?? 0) > 0}
+                  presence={page === null ? presence : 'calm'}
                   onOpenConversations={
                     sidebar !== null ? () => setDrawerOpen(true) : undefined
                   }

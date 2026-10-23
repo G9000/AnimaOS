@@ -11,6 +11,12 @@ const LOOK: Record<PresenceMode, { accent: string; energy: number }> = {
   attention: { accent: '#F2B44B', energy: 0.55 },
 };
 
+/** How the orb looks while the agent is in each state: the same orb in the
+ *  background and in the header avatar. */
+export function presenceLook(mode: PresenceMode) {
+  return LOOK[mode];
+}
+
 /** At rest in the quiet background the orb barely moves. */
 const QUIET_CALM_ENERGY = 0.15;
 

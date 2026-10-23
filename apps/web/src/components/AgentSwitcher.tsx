@@ -3,6 +3,8 @@ import type { AgentDetail } from '../lib/types';
 import { companionAgents } from '../lib/active-agent';
 import { AgentAvatar } from './AgentAvatar';
 import { HaloOrb } from './halo/HaloOrb';
+import { presenceLook } from './halo/HaloBackdrop';
+import type { PresenceMode } from '../lib/presence';
 import {
   BrainIcon,
   ChevronIcon,
@@ -43,6 +45,7 @@ export function AgentSwitcher({
   title,
   subtitle,
   needsYou = false,
+  presence = 'calm',
   onOpenConversations,
   onImport,
   onOpenMemory,
@@ -66,6 +69,8 @@ export function AgentSwitcher({
   subtitle?: string;
   /** Something is waiting on the owner: a mark on the avatar. */
   needsYou?: boolean;
+  /** What the agent is doing: its avatar orb moves and glows to match. */
+  presence?: PresenceMode;
   onOpenConversations?: () => void;
   onImport?: () => void;
   onOpenMemory?: () => void;
@@ -90,6 +95,7 @@ export function AgentSwitcher({
     return AVATAR_ACCENTS[index % AVATAR_ACCENTS.length];
   };
   const thread = title !== undefined;
+  const look = presenceLook(presence);
   const coins = others.slice(0, MAX_COINS);
   const hidden = others.length - coins.length;
 
@@ -165,8 +171,8 @@ export function AgentSwitcher({
               size={30}
               fallback={
                 <HaloOrb
-                  accent={accentFor(agent.id)}
-                  energy={0.6}
+                  accent={thread ? accentFor(agent.id) : look.accent}
+                  energy={thread ? 0.6 : look.energy}
                   className="agent-switch-orb"
                 />
               }

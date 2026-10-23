@@ -14,7 +14,7 @@ pub(super) fn register(registry: &mut ToolRegistry) {
     let mut schema = object_parameters(vec![
         required_parameter("action", string_enum_parameter("MCP connection operation", &["list", "configure", "update", "connect", "discover", "review", "grant", "disconnect", "remove"])),
         optional_parameter("label", non_blank_string_parameter("Name for a new connection, required for configure")),
-        optional_parameter("configuration", string_parameter("For configure: one secret-free JSON server definition with url, or command and args. Also accepts a single entry under mcpServers, Hermes mcp_servers, or OpenClaw mcp.servers. Supported transports: Streamable HTTP and trusted absolute Windows .exe. Never forward authentication, headers, env, cwd, or unsupported options; explain those requirements first.")),
+        optional_parameter("configuration", string_parameter("For configure: one secret-free JSON server definition with url, or command and args. Also accepts a single entry under mcpServers, mcp_servers, or mcp.servers. Supported transports: Streamable HTTP and trusted absolute Windows .exe. Never forward authentication, headers, env, cwd, or unsupported options; explain those requirements first.")),
         optional_parameter("connection_id", non_blank_string_parameter("Exact saved connection ID from list/configure")),
         optional_parameter("expected_version", bounded_integer_parameter("Exact current saved version; refresh on conflict", 1, 9_007_199_254_740_991)),
         optional_parameter("enabled", boolean_parameter("For update: explicitly enable or disable the saved connection")),

@@ -5,7 +5,7 @@ import { useSyncExternalStore } from 'react';
 export const CHAT_BACKGROUNDS = ['full', 'quiet', 'off'] as const;
 export type ChatBackground = (typeof CHAT_BACKGROUNDS)[number];
 
-export const DEFAULT_CHAT_BACKGROUND: ChatBackground = 'quiet';
+export const DEFAULT_CHAT_BACKGROUND: ChatBackground = 'off';
 
 const STORAGE_KEY = 'anima.chatBackground';
 const CHANGED = 'anima:chat-background';
