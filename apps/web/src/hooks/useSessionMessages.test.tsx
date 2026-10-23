@@ -43,6 +43,47 @@ afterEach(() => {
 });
 
 describe('useSessionMessages', () => {
+  it('resets anchored paging and rejects old in-flight pages after clearing the same chat', async () => {
+    let finish!: (page: SessionMessagePage) => void;
+    vi.spyOn(daemon, 'sessionMessages')
+      .mockResolvedValueOnce({
+        messages: [message('old-anchor', 1)],
+        nextBefore: 'old-cursor',
+        anchorMessageId: 'old-anchor',
+        hasNewer: true,
+      })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      )
+      .mockResolvedValue({ messages: [], nextBefore: null });
+    const { result, rerender } = renderHook(
+      ({ resetKey, anchor }) =>
+        useSessionMessages(
+          'agent-main',
+          'chat:1',
+          0,
+          SESSION_MESSAGES_POLL_MS,
+          { resetKey, anchorMessageId: anchor },
+        ),
+      { initialProps: { resetKey: 0, anchor: 'old-anchor' as string | null } },
+    );
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+    await act(async () => {
+      void result.current.loadOlder();
+    });
+    rerender({ resetKey: 1, anchor: null });
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.hasOlder).toBe(false);
+    await act(async () => {
+      finish({ messages: [message('stale-older', 0)], nextBefore: null });
+    });
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.hasOlder).toBe(false);
+  });
+
   it('loads one exact old window, isolates it from live refreshes and returns to latest', async () => {
     const polls = capturePolls();
     const pages = vi

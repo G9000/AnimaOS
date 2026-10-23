@@ -235,7 +235,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         schedules::schedule_status,
         schedules::preview_schedule,
         sessions::list_sessions, sessions::get_session, sessions::list_session_messages, sessions::search_session_messages,
-        sessions::create_session, sessions::main_chat, sessions::update_session, sessions::delete_session, sessions::export_session,
+        sessions::create_session, sessions::main_chat, sessions::update_session, sessions::delete_session, sessions::export_session, sessions::clear_session,
         sessions::compact_session,
         events::agent_events,
         runs::start_session_run, runs::list_session_runs, runs::get_run, runs::stop_run,
@@ -1054,6 +1054,10 @@ fn router_with_services_with_policies_and_integrations(
         .route(
             "/api/agents/{agent_id}/sessions/{session_id}/compact",
             axum::routing::post(sessions::compact_session),
+        )
+        .route(
+            "/api/agents/{agent_id}/sessions/{session_id}/clear",
+            axum::routing::post(sessions::clear_session),
         )
         .route(
             "/api/agents/{agent_id}/sessions/{session_id}/runs",

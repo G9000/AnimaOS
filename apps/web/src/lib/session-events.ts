@@ -333,6 +333,21 @@ export function applyEvent(state: LiveState, event: AgentEvent): LiveState {
   // A seq at or below the last one applied is a repeat from this stream.
   if (event.seq <= state.seq) return state;
   const next: LiveState = { ...state, seq: event.seq };
+  if (event.type === 'session.cleared') {
+    const keep = (item: { agentId: string; sessionId: string }) =>
+      item.agentId !== event.agentId || item.sessionId !== event.sessionId;
+    return {
+      ...next,
+      runs: Object.fromEntries(
+        Object.entries(state.runs).filter(([, live]) => keep(live.run)),
+      ),
+      approvals: Object.fromEntries(
+        Object.entries(state.approvals).filter(([, approval]) =>
+          keep(approval),
+        ),
+      ),
+    };
+  }
   if (event.type === 'stream.resync')
     return { ...next, epoch: state.epoch + 1 };
   if (event.type === 'skill.updated')

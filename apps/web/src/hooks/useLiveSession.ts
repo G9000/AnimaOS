@@ -210,9 +210,13 @@ export function useLiveSession({
       (lifecycle && isTerminalRunStatus(event.run.status))
     )
       refreshSoon('messages', refreshMessages);
-    if (lifecycle) refreshSoon('runs', refreshRuns);
+    if (lifecycle || event.type === 'session.cleared')
+      refreshSoon('runs', refreshRuns);
     // Its title, trimmed context and compaction error live on its record.
-    if (event.type === 'session.updated' && refreshSession)
+    if (
+      (event.type === 'session.updated' || event.type === 'session.cleared') &&
+      refreshSession
+    )
       refreshSoon('session', refreshSession);
     if (event.type === 'run.completed') announce(key, event.run.id);
   };

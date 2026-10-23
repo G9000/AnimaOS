@@ -15,6 +15,7 @@ mod drive;
 mod execution;
 mod filesystem;
 mod mail;
+mod main_chat_clear;
 mod mcp;
 #[cfg(test)]
 mod mcp_tests;
@@ -672,6 +673,19 @@ impl ToolExecutionContext {
         tool_call: &ToolCall,
     ) -> Result<(), TaskResult<Content>> {
         self.revalidate_catalog(agent, tool_call).await?;
+        if tool_call.name != "clear_main_chat" {
+            if let (Some(coordinator), Some(run)) = (&self.team, &self.run_link) {
+                if coordinator
+                    .main_chat_clear_requested(&run.agent_id, &run.session_id, &run.run_id)
+                    .await
+                {
+                    return Err(TaskResult::error(
+                        "The chat clear request is saved; finish this reply without further tools",
+                        0,
+                    ));
+                }
+            }
+        }
         // The catalog bounds these read controls by the captured opt-in and
         // upstream identities; every discovered target retains live source grants.
         let derived_discovery_control = self.tool_catalog.as_ref().is_some_and(|catalog| {
@@ -831,6 +845,7 @@ impl ToolRegistry {
             registrations: HashMap::new(),
         };
         clarify::register(&mut registry);
+        registry.register(tool_descriptor("clear_main_chat", "Clear/reset this main conversation only when the owner explicitly asks. Keeps the companion, settings and all saved memories. The host clears messages and conversation summaries after this turn settles. After a successful request, finish your reply immediately; do not call other tools or save conversation memories. A request is pending until the host applies it.", object_parameters(vec![])), main_chat_clear::execute);
         let mut code_parameters = object_parameters(vec![required_parameter("code", non_blank_string_parameter("Complete Python program; serialized arguments must fit the 16 KiB execution review")), optional_parameter("reset", boolean_parameter("Explicit state-reset request; one-shot execution is always fresh"))]);
         code_parameters.insert("additionalProperties".into(), DataValue::Bool(false));
         registry.register(tool_descriptor("execute_code", "Run a fresh Python program that chains your permitted native tools. Use Python standard libraries and import functions from anima_tools, for example from anima_tools import read_file, write_file. Call native keyword arguments, such as read_file(file_path=\"notes.txt\"). Print only the needed final output. Available functions are the current grant intersection of web_search, web_fetch, read_file, write_file, glob, grep, edit_file, multi_edit and bash. Variables never persist between programs. Requires an explicitly configured local interpreter, execute_code and bash grants, execution approval and durable per-call receipts. Local Python has the operating-system access of the daemon user; native calls retain their own grants and approvals. Printed verification claims remain untrusted; cleanup uncertainty retains physical capacity.", code_parameters), execute_code);

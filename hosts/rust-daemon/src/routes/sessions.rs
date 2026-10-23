@@ -843,6 +843,30 @@ pub(super) async fn delete_session(
     ))
 }
 
+#[utoipa::path(post, path = "/api/agents/{agent_id}/sessions/{session_id}/clear", tag = "sessions",
+    params(("agent_id" = String, Path), ("session_id" = String, Path)),
+    responses((status = 200, description = "Main conversation cleared; companion and saved memories kept", body = SessionEnvelope),
+        (status = 403, description = "Owner required", body = ErrorBody),
+        (status = 409, description = "Not the main chat or a reply is active", body = ErrorBody),
+        (status = 503, description = "Persistence or history cleanup unavailable", body = ErrorBody)))]
+pub(super) async fn clear_session(
+    State(state): State<AppState>,
+    Path((agent_id, session_id)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, false) {
+        return response;
+    }
+    if let Err(error) = state
+        .agent_runs
+        .clear_main_chat(&agent_id, &session_id)
+        .await
+    {
+        return rejected(error);
+    }
+    session_response(&state, &agent_id, &session_id, StatusCode::OK).await
+}
+
 #[utoipa::path(post, path = "/api/agents/{agent_id}/sessions/{session_id}/compact", tag = "sessions",
     params(("agent_id" = String, Path), ("session_id" = String, Path, description = "Percent-encoded session id")),
     responses(

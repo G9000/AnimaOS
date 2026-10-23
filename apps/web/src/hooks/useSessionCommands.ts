@@ -85,6 +85,7 @@ export interface SessionCommandOptions {
   slashCommands: readonly SlashCommand[];
   /** Reads the open session's ledger again. */
   refreshRuns: () => void;
+  refreshMessages?: () => void;
   /** Shows (or clears) the composer's error. */
   setError: (message: string | null) => void;
   navigate: Navigate;
@@ -183,6 +184,22 @@ export function useSessionCommands(
       const { session, activeRun } = current;
       if (!session) return result;
       const { capabilities } = session;
+      if (session.mainChat && !activeRun) {
+        const clear = async () => {
+          try {
+            adoptSession(
+              await daemon.clearSession(session.agentId, session.id),
+            );
+            current.refreshRuns();
+            current.refreshMessages?.();
+            current.setError(null);
+          } catch (caught) {
+            current.setError(errorMessage(caught));
+          }
+        };
+        result.clear = () => void clear();
+        result.reset = () => void clear();
+      }
       if (activeRun && capabilities.stop)
         result.stop = () => void stopRun(activeRun);
       if (capabilities.rename)

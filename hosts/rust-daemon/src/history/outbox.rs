@@ -487,9 +487,9 @@ impl HistoryService {
                         }
                         None => self.store.delete_agent(&deletion.agent_id).await?,
                     }
+                    clear_saved_deletion(state, transactions, &deletion).await?;
                     self.complete_through(through);
                     report.deletions += 1;
-                    clear_saved_deletion(state, transactions, &deletion).await;
                 }
             }
         }
@@ -712,29 +712,31 @@ impl HistoryService {
 }
 
 /// Drops the saved entry of a deletion the store applied, in a normal save.
-/// A failed save only delays that: the entry is already gone from memory, so
-/// the next successful save drops it, and a restart before then repeats an
-/// idempotent delete.
+/// A reused main session stays blocked until this removal is durable. On
+/// failure retain both the marker and queued deletion for an idempotent retry.
 async fn clear_saved_deletion(
     state: &SharedDaemonState,
     transactions: &Mutex<()>,
     deletion: &HistoryDeletion,
-) {
+) -> Result<(), HistoryError> {
     let _transaction = transactions.lock().await;
     let persist = {
         let mut guard = state.write().await;
         if !guard.clear_history_deletion(deletion) {
-            return;
+            return Ok(());
         }
         guard.control_plane_persist_request()
     };
     if let Err(error) = persist.save().await {
-        warn!(
-            error = %error,
-            agent_id = %deletion.agent_id,
-            "could not save a finished history deletion; a restart repeats it"
-        );
+        state
+            .write()
+            .await
+            .record_history_deletion(deletion.clone());
+        return Err(HistoryError::new(format!(
+            "could not save a finished history deletion: {error}"
+        )));
     }
+    Ok(())
 }
 
 /// Whether a recorded deletion (an agent, or one of its sessions) covers a

@@ -4,6 +4,106 @@ import { useSessionInteractions } from './useSessionInteractions';
 import type { ClarificationRequest } from '@animaos/sdk';
 
 describe('useSessionInteractions', () => {
+  it('clears side questions and fences late answers when the same chat resets', async () => {
+    let finish!: (value: {
+      answer: string;
+      snapshotAtMs: number;
+      snapshotThroughMessageId: null;
+    }) => void;
+    const client = {
+      list: vi.fn().mockResolvedValue([]),
+      answer: vi.fn(),
+      sideQuestion: vi
+        .fn()
+        .mockResolvedValueOnce({
+          answer: 'Old answer',
+          snapshotAtMs: 1,
+          snapshotThroughMessageId: null,
+        })
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finish = resolve;
+            }),
+        ),
+    };
+    const { result, rerender } = renderHook(
+      ({ resetKey }) =>
+        useSessionInteractions({
+          agentId: 'a',
+          sessionId: 's',
+          resetKey,
+          client,
+        }),
+      { initialProps: { resetKey: 0 } },
+    );
+    await act(async () => {
+      await result.current.ask('Old question');
+    });
+    await act(async () => {
+      void result.current.ask('Pending old question');
+    });
+    expect(result.current.sideQuestions).toHaveLength(2);
+    const signal = client.sideQuestion.mock.calls[1][3].signal as AbortSignal;
+    rerender({ resetKey: 1 });
+    expect(signal.aborted).toBe(true);
+    expect(result.current.sideQuestions).toEqual([]);
+    await act(async () => {
+      finish({
+        answer: 'Late old answer',
+        snapshotAtMs: 2,
+        snapshotThroughMessageId: null,
+      });
+    });
+    expect(result.current.sideQuestions).toEqual([]);
+  });
+
+  it('discards a clarification read from before the same chat reset', async () => {
+    let finish!: (value: ClarificationRequest[]) => void;
+    const client = {
+      list: vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<ClarificationRequest[]>((resolve) => {
+              finish = resolve;
+            }),
+        )
+        .mockResolvedValue([]),
+      answer: vi.fn(),
+      sideQuestion: vi.fn(),
+    };
+    const { result, rerender } = renderHook(
+      ({ resetKey }) =>
+        useSessionInteractions({
+          agentId: 'a',
+          sessionId: 's',
+          resetKey,
+          client,
+        }),
+      { initialProps: { resetKey: 0 } },
+    );
+    rerender({ resetKey: 1 });
+    await waitFor(() => expect(client.list).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      finish([
+        {
+          id: 'old',
+          agentId: 'a',
+          sessionId: 's',
+          runId: 'r',
+          toolCallId: 'c',
+          questions: [],
+          revision: 1,
+          createdAtMs: 1,
+          status: 'cancelled',
+          response: null,
+        },
+      ]);
+    });
+    expect(result.current.clarifications).toEqual([]);
+  });
+
   it('discards a side answer from the session left behind', async () => {
     let finish!: (value: {
       answer: string;

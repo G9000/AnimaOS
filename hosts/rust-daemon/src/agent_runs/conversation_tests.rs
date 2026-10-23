@@ -11,6 +11,105 @@ use super::AgentRunCoordinator;
 use crate::sessions::{SessionKind, SessionOrigin, SessionRecord, TitleSource};
 use crate::state::DaemonState;
 
+#[tokio::test]
+async fn main_chat_clear_tool_finishes_without_restoring_the_old_transcript() {
+    clear_with_discovery(false).await;
+}
+
+#[tokio::test]
+async fn main_chat_clear_tool_is_available_with_discovery_enabled() {
+    clear_with_discovery(true).await;
+}
+
+async fn clear_with_discovery(discovery: bool) {
+    let model = ScriptedModel::new(vec![
+        Step::Text(vec!["old answer"]),
+        Step::Tools(vec![ToolCall {
+            id: "clear-1".into(),
+            name: "clear_main_chat".into(),
+            args: BTreeMap::new(),
+        }]),
+        Step::Text(vec!["The chat will be cleared."]),
+    ]);
+    let (coordinator, agent) = super::test_support::coordinator_with(model.clone()).await;
+    super::test_support::add_chat(&coordinator, &agent, "chat:main").await;
+    coordinator
+        .state
+        .write()
+        .await
+        .sessions
+        .get_mut(&agent, "chat:main")
+        .unwrap()
+        .main_chat = true;
+    let mut config = coordinator
+        .state
+        .read()
+        .await
+        .get_agent(&agent)
+        .unwrap()
+        .state
+        .config;
+    config
+        .settings
+        .as_mut()
+        .unwrap()
+        .additional
+        .insert("toolDiscovery".into(), DataValue::Bool(discovery));
+    coordinator
+        .state
+        .write()
+        .await
+        .restore_agent_config(&agent, config);
+    coordinator
+        .run(chat_request(
+            &agent,
+            "chat:main",
+            "old private conversation",
+        ))
+        .await
+        .unwrap();
+    let before = coordinator
+        .state
+        .read()
+        .await
+        .get_agent(&agent)
+        .unwrap()
+        .state
+        .config;
+    let memory = coordinator.state.read().await.memory_handle();
+    crate::core_memory::apply_edit(
+        &mut *memory.write().await,
+        crate::core_memory::CoreAgent {
+            id: &agent,
+            name: "Companion",
+        },
+        crate::core_memory::CoreBlock::User,
+        crate::core_memory::CoreEdit::Add {
+            text: "The owner prefers jasmine tea.".into(),
+        },
+        crate::core_memory::ScanMode::Refuse,
+    )
+    .unwrap();
+    let memories_before = memory.read().await.snapshot();
+    coordinator
+        .run(chat_request(&agent, "chat:main", "clear our conversation"))
+        .await
+        .unwrap();
+    let guard = coordinator.state.read().await;
+    assert!(guard
+        .agents
+        .get(&agent)
+        .unwrap()
+        .messages()
+        .iter()
+        .all(|m| m.room_id != "chat:main"));
+    assert_eq!(guard.get_agent(&agent).unwrap().state.config, before);
+    assert!(guard.sessions.get(&agent, "chat:main").unwrap().main_chat);
+    assert!(model.configs()[1].allows_tool("clear_main_chat"));
+    drop(guard);
+    assert_eq!(memory.read().await.snapshot(), memories_before);
+}
+
 fn search_call(args: &[(&str, DataValue)]) -> ToolCall {
     ToolCall {
         id: "search-1".into(),

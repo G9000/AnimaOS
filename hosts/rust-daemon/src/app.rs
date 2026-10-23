@@ -240,6 +240,7 @@ pub async fn app_with_configured_persistence(config: DaemonConfig) -> io::Result
     let scheduler = runtime.scheduler.clone();
     // Install synchronous services before any producer can contend for state.
     let router = router_with_runtime(state, config, runtime, false);
+    turn_recovery.recover_main_chat_clears().await.map_err(|error| io::Error::other(error.message()))?;
     turn_recovery.auto_recover_unstarted().await;
     learning.recover_skill_work();
     jobs.start().await.map_err(|error| {
@@ -425,6 +426,7 @@ async fn serve_with_state_and_voice(
     };
     // Router installation uses uncontended construction-time state. Restored
     // workers and the scanner may acquire it immediately after being started.
+    agent_runs.recover_main_chat_clears().await.map_err(|error| io::Error::other(error.message()))?;
     agent_runs.auto_recover_unstarted().await;
     agent_runs.learning().recover_skill_work();
     jobs.start().await.map_err(|error| {

@@ -86,6 +86,52 @@ afterEach(() => {
 });
 
 describe('useSessionCommands', () => {
+  it.each(['clear', 'reset'])(
+    'clears only the main chat with /%s without deleting the companion',
+    async (command) => {
+      const main = sessionFixture('room-7', { mainChat: true });
+      const clear = vi
+        .spyOn(daemon, 'clearSession')
+        .mockResolvedValue({ ...main, messageCount: 0 });
+      const remove = vi.spyOn(daemon, 'deleteAgent');
+      const { result, options } = setup({
+        session: main,
+        draft: `/${command}`,
+      });
+      await act(async () => result.current.send());
+      expect(clear).toHaveBeenCalledExactlyOnceWith('agent-main', 'room-7');
+      expect(options.refreshRuns).toHaveBeenCalledOnce();
+      expect(options.queueSend).not.toHaveBeenCalled();
+      expect(remove).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['clear', 'reset'])(
+    'keeps /%s unavailable in another chat',
+    (command) => {
+      const clear = vi.spyOn(daemon, 'clearSession');
+      const { result, options } = setup({ draft: `/${command}` });
+      act(() => result.current.send());
+      expect(clear).not.toHaveBeenCalled();
+      expect(options.updateChat).toHaveBeenCalledWith(
+        CHAT_KEY,
+        expect.objectContaining({
+          error: `/${command} is not available here.`,
+        }),
+      );
+    },
+  );
+
+  it('refuses clear while a main-chat reply is running', () => {
+    const clear = vi.spyOn(daemon, 'clearSession');
+    const { result } = setup({
+      session: sessionFixture('room-7', { mainChat: true }),
+      draft: '/clear',
+      activeRun: runFixture('active', { status: 'running' }),
+    });
+    act(() => result.current.send());
+    expect(clear).not.toHaveBeenCalled();
+  });
   it('sends learn and its complete source requirements as an ordinary queued turn', () => {
     const { result, options } = setup({
       draft: '/learn docs/api.md focus on errors',

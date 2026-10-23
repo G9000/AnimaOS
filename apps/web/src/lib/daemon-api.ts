@@ -665,6 +665,13 @@ export const daemon = {
     sessionId: string,
     patch: SessionUpdateInput,
   ) => setupClient.sessions.update(agentId, sessionId, patch),
+  clearSession: async (agentId: string, sessionId: string) =>
+    (
+      await request<{ session: Session }>(
+        `/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}/clear`,
+        { method: 'POST' },
+      )
+    ).session,
   deleteSession: (agentId: string, sessionId: string) =>
     setupClient.sessions.remove(agentId, sessionId),
   sessionMessages: (

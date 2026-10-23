@@ -29,6 +29,7 @@ enum Origin {
     Explicit(ToolDescriptor),
     MemoryAdd(ToolDescriptor),
     HostDerived,
+    MainChatClear,
     Mcp(crate::mcp::McpDispatchStamp),
 }
 /// A captured ceiling over the final, filtered run descriptors. Its only
@@ -84,6 +85,7 @@ impl RunToolCatalog {
                     continue;
                 }
                 match explicit {
+                    _ if descriptor.name == "clear_main_chat" => Origin::MainChatClear,
                     Some(source) => Origin::Explicit(source.clone()),
                     None if descriptor.name == "core_memory"
                         && original.allows_tool("memory_add") =>
@@ -209,6 +211,30 @@ impl RunToolCatalog {
                     .iter()
                     .flatten()
                     .any(|current| current == source)
+                {
+                    return Err(REFUSED);
+                }
+            }
+            Origin::MainChatClear => {
+                let run = state.runs.get(&self.run.run_id).ok_or(REFUSED)?;
+                let session = state
+                    .sessions
+                    .get(&self.run.agent_id, &self.run.session_id)
+                    .ok_or(REFUSED)?;
+                if !self.peer_sources.is_empty()
+                    || self.delegated_parent.is_some()
+                    || crate::agent_runs::is_helper_config(canonical)
+                    || run.agent_id != self.run.agent_id
+                    || run.session_id != self.run.session_id
+                    || !matches!(
+                        run.source,
+                        crate::runs::RunSource::Web | crate::runs::RunSource::Api
+                    )
+                    || run.system_followup.unwrap_or(false)
+                    || run.parent_run_id.is_some()
+                    || !run.status.is_in_flight()
+                    || !session.main_chat
+                    || !session.has_main_chat_identity()
                 {
                     return Err(REFUSED);
                 }
@@ -453,6 +479,11 @@ impl ModelToolSelector for RunToolCatalog {
         };
         if self.scope_current(&guard).is_err() {
             return BTreeSet::new();
+        }
+        // A captured control for this exact owner/main-chat run, revalidated
+        // independently of ordinary catalog grants on every model request.
+        if self.entry_current(&guard, "clear_main_chat").is_ok() {
+            names.insert("clear_main_chat".into());
         }
         names.retain(|name| {
             if matches!(name.as_str(), SEARCH | DESCRIBE) {

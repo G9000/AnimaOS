@@ -916,6 +916,88 @@ describe('persistent main conversation', () => {
     return main;
   }
 
+  it.each(['slash', 'another window'] as const)(
+    'clears an anchored main chat after reset from %s',
+    async (source) => {
+      const user = userEvent.setup();
+      const main = mainFixture();
+      const events = scriptedAgentEvents();
+      let cleared = false;
+      const reset = () => {
+        cleared = true;
+        const session = {
+          ...main,
+          clearGeneration: 1,
+          messageCount: 0,
+          preview: null,
+        };
+        routes.sessions.splice(routes.sessions.indexOf(main), 1, session);
+        return session;
+      };
+      vi.spyOn(daemon, 'clearSession').mockImplementation(async () => reset());
+      vi.mocked(daemon.sessionMessages).mockImplementation(
+        async (_agent, _session, options = {}) => {
+          if (cleared && options.anchor)
+            throw new DaemonHttpError(404, 'Old anchor deleted');
+          return options.anchor
+            ? {
+                messages: [
+                  {
+                    id: 'old-anchor',
+                    role: 'assistant',
+                    text: 'Private old anchored reply',
+                    attachments: [],
+                    metadata: {},
+                    createdAtMs: 1,
+                  },
+                ],
+                nextBefore: 'older',
+                anchorMessageId: 'old-anchor',
+                hasNewer: true,
+              }
+            : { messages: [], nextBefore: null };
+        },
+      );
+      window.history.replaceState(
+        null,
+        '',
+        '/#/s/chat%3Aprimary?messageId=old-anchor',
+      );
+      render(<ViewHarness />);
+      expect(
+        await screen.findByText('Private old anchored reply'),
+      ).toBeVisible();
+      await waitFor(() => expect(events.streams).toHaveLength(1));
+      if (source === 'slash') {
+        await user.type(
+          screen.getByPlaceholderText('Message Nova…'),
+          '/clear{Enter}',
+        );
+        await waitFor(() =>
+          expect(daemon.clearSession).toHaveBeenCalledWith(
+            'agent-main',
+            main.id,
+          ),
+        );
+      } else {
+        reset();
+        act(() =>
+          events.streams[0].push(sessionEvent('session.cleared', main.id, 1)),
+        );
+      }
+      await waitFor(() =>
+        expect(window.location.hash).toBe('#/s/chat%3Aprimary'),
+      );
+      expect(
+        screen.queryByText('Private old anchored reply'),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Return to latest messages' }),
+      ).not.toBeInTheDocument();
+      expect(daemon.startRun).not.toHaveBeenCalled();
+    },
+  );
+
   it('opens an exact old message through Ctrl K and restores latest without losing the draft', async () => {
     const user = userEvent.setup();
     mainFixture();

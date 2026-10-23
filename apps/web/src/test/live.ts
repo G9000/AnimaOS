@@ -61,7 +61,11 @@ export function resyncEvent(
 }
 
 export function sessionEvent(
-  type: 'session.created' | 'session.updated' | 'session.deleted',
+  type:
+    | 'session.created'
+    | 'session.updated'
+    | 'session.deleted'
+    | 'session.cleared',
   sessionId: string,
   seq: number,
   agentId = 'agent-main',

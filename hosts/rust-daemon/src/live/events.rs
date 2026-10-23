@@ -16,6 +16,7 @@ use crate::runs::{RunRecord, RunStatus};
 pub(crate) enum LiveEventBody {
     SessionCreated,
     SessionUpdated,
+    SessionCleared,
     SessionDeleted,
     RunQueued(RunRecord),
     RunStarted(RunRecord),
@@ -95,6 +96,7 @@ impl LiveEventBody {
         match self {
             Self::SessionCreated => "session.created",
             Self::SessionUpdated => "session.updated",
+            Self::SessionCleared => "session.cleared",
             Self::SessionDeleted => "session.deleted",
             Self::RunQueued(_) => "run.queued",
             Self::RunStarted(_) => "run.started",
@@ -173,6 +175,7 @@ impl LiveEvent {
         match &self.body {
             LiveEventBody::SessionCreated
             | LiveEventBody::SessionUpdated
+            | LiveEventBody::SessionCleared
             | LiveEventBody::SessionDeleted => {}
             LiveEventBody::RunQueued(record)
             | LiveEventBody::RunStarted(record)

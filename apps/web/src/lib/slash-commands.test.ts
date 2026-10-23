@@ -31,6 +31,14 @@ describe('parseSlashCommand', () => {
 });
 
 describe('SLASH_COMMANDS', () => {
+  it('offers clear and reset without shadowing them with skills', () => {
+    for (const name of ['clear', 'reset']) {
+      expect(parseSlashCommand(`/${name}`)?.command.description).toBe(
+        'Clear the main chat; keep your companion and memories',
+      );
+      expect(skillSlashCommands([skillFixture(name)])).toEqual([]);
+    }
+  });
   it('offers learn as a normal source-gathering turn and reserves its name', () => {
     expect(parseSlashCommand('/learn docs/api.md focus on errors')).toEqual({
       command: expect.objectContaining({ name: 'learn', turn: true }),

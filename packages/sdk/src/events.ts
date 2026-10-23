@@ -73,7 +73,11 @@ export type AgentEvent =
     })
   | (EventBase & { type: 'stream.resync'; missed: number })
   | (EventBase & {
-      type: 'session.created' | 'session.updated' | 'session.deleted';
+      type:
+        | 'session.created'
+        | 'session.updated'
+        | 'session.deleted'
+        | 'session.cleared';
     })
   | (EventBase & { type: RunLifecycleEventType; run: Run })
   | (EventBase & { type: 'run.progress'; phase: string })

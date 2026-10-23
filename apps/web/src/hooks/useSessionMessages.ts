@@ -73,15 +73,21 @@ export function useSessionMessages(
   sessionId: string | null,
   refreshKey = 0,
   pollMs = SESSION_MESSAGES_POLL_MS,
-  options: { anchorMessageId?: string | null; jumpRequestKey?: number } = {},
+  options: {
+    anchorMessageId?: string | null;
+    jumpRequestKey?: number;
+    resetKey?: number;
+  } = {},
 ) {
   const anchorMessageId = options.anchorMessageId ?? null;
   const jumpRequestKey = options.jumpRequestKey ?? 0;
+  const resetKey = options.resetKey ?? 0;
   const anchorReadKey = JSON.stringify([
     agentId,
     sessionId,
     anchorMessageId,
     jumpRequestKey,
+    resetKey,
   ]);
   const [settledAnchorKey, setSettledAnchorKey] = useState<string | null>(null);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
@@ -128,7 +134,7 @@ export function useSessionMessages(
     setNewestError(null);
     setOlderError(null);
     setAppliedRead(0);
-  }, [agentId, sessionId, anchorMessageId, jumpRequestKey]);
+  }, [agentId, sessionId, anchorMessageId, jumpRequestKey, resetKey]);
 
   /** Newest-page reads begun so far, by any caller (a poll, a refresh key,
    *  an event): a read numbered above this began after now. */

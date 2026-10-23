@@ -194,7 +194,7 @@ afterEach(() => {
 });
 
 describe('SessionView', () => {
-  it('answers a side question while the active task continues without sending or stopping it', async () => {
+  it('answers a side question alongside the active task and removes it when the chat resets', async () => {
     const ask = vi
       .spyOn(daemon.interactions, 'sideQuestion')
       .mockResolvedValue({
@@ -205,7 +205,7 @@ describe('SessionView', () => {
     const send = vi.fn();
     const stop = vi.fn();
     const session = sessionFixture('chat:side');
-    renderView({
+    const view = renderView({
       session,
       composer: {
         draft: '/btw What does the report cover?',
@@ -236,6 +236,13 @@ describe('SessionView', () => {
     ).toBeInTheDocument();
     expect(send).not.toHaveBeenCalled();
     expect(stop).not.toHaveBeenCalled();
+    view.rerender({ session: { ...session, clearGeneration: 1 } });
+    expect(
+      screen.queryByText('The report covers three sources.'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('What does the report cover?'),
+    ).not.toBeInTheDocument();
   });
   it('refreshes the context estimate while historical messages and visible runs stay fixed', async () => {
     const initialContext = {

@@ -7,6 +7,65 @@ use crate::sessions::{SessionKind, SessionOrigin, SessionRecord, TitleSource};
 
 const OWNER_ORIGIN: &str = "http://localhost:4200";
 
+#[tokio::test]
+async fn main_chat_clear_preserves_companion_and_other_conversations() {
+    let (app, state, agent) = app_with_session().await;
+    let response = app
+        .clone()
+        .oneshot(main_chat_request(&agent))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let before = state.read().await.get_agent(&agent).unwrap().state.config;
+    let response = app
+        .clone()
+        .oneshot(send(
+            "POST",
+            &format!("/api/agents/{agent}/sessions/chat%3Aplans/clear"),
+            OWNER_ORIGIN,
+            serde_json::json!({}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let cleared = json(response).await;
+    assert_eq!(cleared["session"]["id"], "chat:plans");
+    assert_eq!(cleared["session"]["mainChat"], true);
+    assert_eq!(cleared["session"]["messageCount"], 0);
+    let guard = state.read().await;
+    assert_eq!(guard.get_agent(&agent).unwrap().state.config, before);
+    assert!(guard
+        .agents
+        .get(&agent)
+        .unwrap()
+        .messages()
+        .iter()
+        .all(|m| m.room_id != "chat:plans"));
+    assert!(guard.sessions.get(&agent, "chat:plans").unwrap().main_chat);
+}
+
+#[tokio::test]
+async fn main_chat_clear_rejects_non_owner_and_non_main_sessions() {
+    let (app, _, agent) = app_with_session().await;
+    let path = format!("/api/agents/{agent}/sessions/chat%3Aplans/clear");
+    let response = app
+        .clone()
+        .oneshot(send("POST", &path, OWNER_ORIGIN, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let response = app
+        .oneshot(send(
+            "POST",
+            &path,
+            "https://untrusted.example",
+            serde_json::json!({}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
 #[test]
 fn m83_history_projects_only_successful_tool_source_metadata() {
     use crate::routes::contracts::SessionMessageResponse;

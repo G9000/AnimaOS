@@ -413,13 +413,48 @@ export function ViewHarness() {
       : agent;
   // The composer waits for the record: a send needs the session's kind.
   const sessionLoading = routeSessionId !== null && activeSession === null;
+  const clearBoundary = useRef<{ key: string; generation: number } | null>(
+    null,
+  );
+  const clearGeneration = activeSession?.clearGeneration ?? 0;
+  useEffect(() => {
+    if (!activeSession || !routeSessionId || !routeAgentId) {
+      clearBoundary.current = null;
+      return;
+    }
+    const key = `${routeAgentId}\u0000${routeSessionId}`;
+    const previous = clearBoundary.current;
+    clearBoundary.current = { key, generation: clearGeneration };
+    if (
+      previous?.key === key &&
+      clearGeneration > previous.generation &&
+      routeMessageId &&
+      conversationRoute.kind === 'session'
+    )
+      navigate(
+        { ...conversationRoute, messageId: undefined },
+        { replace: true },
+      );
+  }, [
+    activeSession,
+    routeSessionId,
+    routeAgentId,
+    routeMessageId,
+    clearGeneration,
+    conversationRoute,
+    navigate,
+  ]);
   const [messagesRefresh, setMessagesRefresh] = useState(0);
   const history = useSessionMessages(
     routeSessionId ? routeAgentId : null,
     routeSessionId,
     messagesRefresh,
     streamOpen ? SESSION_MESSAGES_LIVE_POLL_MS : SESSION_MESSAGES_POLL_MS,
-    { anchorMessageId: routeMessageId, jumpRequestKey },
+    {
+      anchorMessageId: routeMessageId,
+      jumpRequestKey,
+      resetKey: clearGeneration,
+    },
   );
   const chatMessages = useMemo(
     () => history.messages.map(toChatMessage),
@@ -1268,6 +1303,7 @@ export function ViewHarness() {
     queueSend,
     slashCommands,
     refreshRuns: live.refreshRuns,
+    refreshMessages: () => setMessagesRefresh((value) => value + 1),
     setError: setWorkspaceError,
     navigate,
     listedSessions: sessions.sessions,

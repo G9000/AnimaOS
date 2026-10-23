@@ -115,6 +115,8 @@ export interface Session {
   archived: boolean;
   /** The daemon-designated primary web chat; absent on older records. */
   mainChat?: boolean;
+  /** Changes when the same conversation identity is cleared. */
+  clearGeneration?: number;
   parentSessionId: string | null;
   parentRunId: string | null;
   parentAgentId: string | null;

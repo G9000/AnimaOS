@@ -42,7 +42,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 290, "complete registered operation count");
+    assert_eq!(actual.len(), 291, "complete registered operation count");
     let runtime_capability_additions = [
         ("GET", "/api/doctor"),
         ("GET", "/api/doctor/memory-index"),
@@ -219,11 +219,14 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             "individual message search must be registered"
         );
     }
-    let main_chat_additions = [("POST", "/api/agents/{agent_id}/main-chat")];
+    let main_chat_additions = [
+        ("POST", "/api/agents/{agent_id}/main-chat"),
+        ("POST", "/api/agents/{agent_id}/sessions/{session_id}/clear"),
+    ];
     for (method, path) in main_chat_additions {
         assert!(
             actual.contains(&(method.to_string(), path.to_string())),
-            "main chat resolution must be registered"
+            "main chat resolution and clearing must be registered"
         );
     }
     let report_additions = [("GET", "/api/workspace/file/download")];

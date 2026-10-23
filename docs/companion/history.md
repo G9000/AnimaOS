@@ -1,5 +1,13 @@
 # Conversation history as evidence
 
+The owner can ask Anima to clear or reset the main chat, or enter `/clear` or
+`/reset` there. Anima's `clear_main_chat` tool requests the reset; the host applies
+it after the current reply settles. This removes that chat's transcript, summary
+and run history while keeping the same main-chat identity, companion settings
+and saved memories. Other conversations remain available. Reset is unavailable
+while background helpers from this chat are still pending. Old queued inputs are
+discarded, and new input is accepted after durable history cleanup finishes.
+
 The owner console also provides **Messages** results in Ctrl K. Unlike the
 agent's conversation-discovery tool below, console search can return several
 individual matches in one conversation, including the current main chat and

@@ -354,6 +354,7 @@ export function SessionView({
       !composer.offline &&
       !missing,
     refreshKey: `${messages.length}:${runs.length}`,
+    resetKey: session?.clearGeneration,
   });
   const sendWithSideQuestion = (override?: string) => {
     const text = override ?? composer.draft;

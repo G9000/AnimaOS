@@ -543,6 +543,25 @@ describe('trimCommittedRun (S3b-B)', () => {
 });
 
 describe('selectors', () => {
+  it('drops cleared chat activity while preserving other conversations', () => {
+    const old = runFixture('old', {
+      sessionId: 'chat:main',
+      status: 'completed',
+    });
+    const other = runFixture('other', { sessionId: 'chat:other' });
+    const before = applyEvent(
+      EMPTY_LIVE_STATE,
+      snapshotEvent([snapshotRun(old), snapshotRun(other)]),
+    );
+    const after = applyEvent(before, {
+      type: 'session.cleared',
+      agentId: 'agent-main',
+      sessionId: 'chat:main',
+      seq: before.seq + 1,
+      atMs: 5,
+    });
+    expect(Object.keys(after.runs)).toEqual(['other']);
+  });
   it('lists one session’s runs oldest first and names a step’s run', () => {
     const later = runFixture('run_a', { createdAtMs: 5 });
     const earlier = runFixture('run_b', { createdAtMs: 3 });

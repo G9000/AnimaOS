@@ -501,6 +501,7 @@ fn registry_defines_every_registered_tool_schema() {
         ),
         ("get_current_time", &[][..], &[][..]),
         ("calculate", &["expression"][..], &[][..]),
+        ("clear_main_chat", &[][..], &[][..]),
         (
             "search_conversations",
             &["query"][..],

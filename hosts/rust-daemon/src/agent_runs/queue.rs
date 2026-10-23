@@ -532,6 +532,10 @@ impl AgentRunCoordinator {
             {
                 return Err(ApiError::not_found());
             }
+            if super::main_chat_clear::clear_pending(&guard, &request.agent_id, &request.session_id)
+            {
+                return Err(ApiError::conflict(super::main_chat_clear::CLEAR_PENDING));
+            }
             if let Some(answer) = replayed(
                 &guard,
                 &request.agent_id,

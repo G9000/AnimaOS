@@ -12,6 +12,7 @@ export interface SessionInteractionOptions {
   client: Pick<InteractionsClient, 'list' | 'answer' | 'sideQuestion'>;
   enabled?: boolean;
   refreshKey?: string | number;
+  resetKey?: number;
 }
 export interface SideQuestionView {
   id: number;
@@ -21,9 +22,18 @@ export interface SideQuestionView {
   error: string | null;
 }
 export function useSessionInteractions(options: SessionInteractionOptions) {
-  const { agentId, sessionId, client, enabled = true, refreshKey } = options;
+  const {
+    agentId,
+    sessionId,
+    client,
+    enabled = true,
+    refreshKey,
+    resetKey = 0,
+  } = options;
   const key =
-    enabled && agentId && sessionId ? `${agentId}\u0000${sessionId}` : null;
+    enabled && agentId && sessionId
+      ? `${agentId}\u0000${sessionId}\u0000${resetKey}`
+      : null;
   const latest = useRef({ key, agentId, sessionId, client });
   latest.current = { key, agentId, sessionId, client };
   const [read, setRead] = useState<{

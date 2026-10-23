@@ -31,6 +31,7 @@ pub(crate) mod attachments;
 mod automations;
 mod compact;
 mod conversations;
+pub(crate) mod main_chat_clear;
 mod queue;
 mod recovery;
 mod shutdown;
@@ -1269,6 +1270,14 @@ impl AgentRunCoordinator {
             "a waiting unit belongs to the agent whose run holds it"
         );
         let room_id = request.room.resolve(&request.agent_id);
+        let session_id = crate::sessions::session_id_for_room(&room_id);
+        let clear_generation = self
+            .state
+            .read()
+            .await
+            .sessions
+            .get(&request.agent_id, &session_id)
+            .map_or(0, |session| session.clear_generation);
         let mode = if matches!(
             request.room,
             RunRoom::Delegated { .. } | RunRoom::Peer { .. }
@@ -1293,6 +1302,19 @@ impl AgentRunCoordinator {
         // No longer waiting: the unit goes back to the agent's budget now,
         // not when the run finishes.
         drop(waiting);
+        if self
+            .state
+            .read()
+            .await
+            .sessions
+            .get(&request.agent_id, &session_id)
+            .map_or(0, |session| session.clear_generation)
+            != clear_generation
+        {
+            return Err(ApiError::conflict(
+                "The conversation was cleared while this input was waiting; send it again",
+            ));
+        }
         Ok(RunTicket {
             room_id,
             _reservation: reservation,
@@ -1639,6 +1661,9 @@ impl AgentRunCoordinator {
             // An accepted run starts only from its queued record, checked
             // before anything below touches session state (audit M6).
             let session_id = crate::sessions::session_id_for_room(&room_id);
+            if main_chat_clear::clear_pending(&guard, &agent_id, &session_id) {
+                return Err(ApiError::conflict(main_chat_clear::CLEAR_PENDING));
+            }
             if matches!(&room, RunRoom::DelegatedIn { .. }) {
                 self::async_helpers::validate_accepted_helper(
                     &guard,
@@ -2219,6 +2244,26 @@ impl AgentRunCoordinator {
             // isolated run may explain it, but cannot poll or start other work.
             tools.clear();
         }
+        // Session control is available only on a host-proven owner main-chat turn.
+        tools.retain(|t| t.name != "clear_main_chat");
+        if standing_admission.local_owner
+            && delegated_parent.is_none()
+            && peer_sources.is_empty()
+            && !is_helper_config(&original_config)
+            && self
+                .state
+                .read()
+                .await
+                .sessions
+                .get(&agent_id, &session_id)
+                .is_some_and(|s| s.main_chat)
+        {
+            tools.push(
+                registry
+                    .descriptor("clear_main_chat")
+                    .expect("registered chat control"),
+            );
+        }
         let run_origin = if is_reminder_verification {
             "This is a one-time reminder verification. Explain the supplied runtime status snapshot and its timestamps. No tools or further checks are available. Never infer receipt from a run, spoke, or a send acknowledgement.".to_string()
         } else if source == RunSource::Discord {
@@ -2717,6 +2762,29 @@ impl AgentRunCoordinator {
         // Disarmed only once the terminal event is out, so a panic before it
         // still ends the run's events.
         in_flight.disarm();
+
+        if self
+            .main_chat_clear_requested(&agent_id, &session_id, &run_id)
+            .await
+        {
+            self.clear_main_chat_locked(&agent_id, &session_id).await?;
+            let snapshot = self
+                .state
+                .read()
+                .await
+                .get_agent(&agent_id)
+                .ok_or_else(ApiError::not_found)?;
+            return Ok(AgentRunEnvelope {
+                agent: AgentRuntimeSnapshotResponse::from(&snapshot),
+                result: TaskResultResponse::from(&TaskResult::success(
+                    Content {
+                        text: main_chat_clear::CLEAR_DONE.into(),
+                        ..Default::default()
+                    },
+                    result.duration_ms,
+                )),
+            });
+        }
 
         // Both launching-parent and child settlement use the same durable,
         // event-driven admission seam. It never waits for model capacity.

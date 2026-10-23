@@ -275,6 +275,12 @@ pub(crate) struct SessionRecord {
     /// have no designation until the owner resolves it for the first time.
     #[serde(default)]
     pub(crate) main_chat: bool,
+    /// Durable owner request, applied only after this run releases its transcript.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) pending_clear_run_id: Option<String>,
+    /// Invalidates inputs that began waiting before the last conversation reset.
+    #[serde(default)]
+    pub(crate) clear_generation: u64,
     #[serde(default)]
     pub(crate) parent_session_id: Option<String>,
     #[serde(default)]
@@ -339,6 +345,8 @@ impl SessionRecord {
             last_read_at_ms: None,
             archived: false,
             main_chat: false,
+            pending_clear_run_id: None,
+            clear_generation: 0,
             parent_session_id: None,
             parent_run_id: None,
             parent_agent_id: None,

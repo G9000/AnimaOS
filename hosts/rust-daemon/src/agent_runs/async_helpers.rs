@@ -487,6 +487,9 @@ impl AgentRunCoordinator {
         let (record, helper_id, baseline, slot, persist) = {
             let mut guard = self.state.write().await;
             let parent_agent = active_caller(&guard, &owner, &parent, "spawn_helper_async")?;
+            if super::main_chat_clear::clear_pending(&guard, &owner, &parent.session_id) {
+                return Err(super::main_chat_clear::CLEAR_PENDING.into());
+            }
             if let Some(original) = guard.runs.async_launch(&owner, &key) {
                 if original
                     .async_helper

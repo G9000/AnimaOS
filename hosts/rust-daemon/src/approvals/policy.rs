@@ -57,6 +57,7 @@ const READ_TOOLS: &[&str] = &[
 /// calendar writes still only create records the owner approves in
 /// Connectors.
 const WRITE_TOOLS: &[&str] = &[
+    "clear_main_chat",
     "write_file",
     "doctor_repair",
     "doctor_undo",

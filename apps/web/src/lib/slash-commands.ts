@@ -4,6 +4,8 @@ import type { Skill } from '@animaos/sdk';
  *  skills (M5). */
 export type SlashCommandName =
   | 'new'
+  | 'clear'
+  | 'reset'
   | 'stop'
   | 'rename'
   | 'archive'
@@ -39,6 +41,14 @@ export const SLASH_COMMANDS: readonly (SlashCommand & {
   name: SlashCommandName;
 })[] = [
   { name: 'new', description: 'Return to the main chat' },
+  {
+    name: 'clear',
+    description: 'Clear the main chat; keep your companion and memories',
+  },
+  {
+    name: 'reset',
+    description: 'Clear the main chat; keep your companion and memories',
+  },
   { name: 'stop', description: 'Stop the reply in progress' },
   {
     name: 'rename',
