@@ -18,27 +18,91 @@ use crate::history::{
 use crate::memory_embeddings::{spawn_model_load, MemoryEmbeddingRuntime};
 use crate::memory_store::{load_memory_snapshot, MemoryMutation, MemoryStoreConfig};
 use crate::postgres::SqlxPostgresAdapter;
+use crate::profile_owner::{ProfileOwner, ProfileResource};
 use crate::state::{memory_query_expander_from_env, memory_text_analyzer_from_env};
+
+/// Resolve every profile payload before opening any of them. The retained
+/// handle is acquired before model/auth/browser setup in the production host.
+pub(crate) struct PersistencePreflight {
+    owner: ProfileOwner,
+    memory: Option<MemoryStoreChoice>,
+    control_plane: Option<PathBuf>,
+    history: Option<PathBuf>,
+}
+
+pub(crate) fn prepare_persistence(config: &DaemonConfig) -> io::Result<PersistencePreflight> {
+    let postgres = matches!(config.persistence_mode, PersistenceMode::Postgres);
+    let control_plane = non_empty_env_path("ANIMAOS_RS_CONTROL_PLANE_FILE")?;
+    let memory = memory_store_choice(
+        non_empty_env_path("ANIMAOS_RS_MEMORY_FILE")?,
+        non_empty_env_path("ANIMAOS_RS_MEMORY_SQLITE_FILE")?,
+        postgres,
+        control_plane.as_deref(),
+    )?;
+    let history = non_empty_env_path(HISTORY_SQLITE_FILE_ENV)?
+        .or_else(|| control_plane.as_deref().map(default_history_sqlite_path));
+    let embedding = non_empty_env_path("ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE")?;
+    let checkpoint = non_empty_env_path("ANIMAOS_RS_CHECKPOINT_ROOT")?;
+    let canonical_control_plane = control_plane
+        .as_ref()
+        .map(|path| ProfileOwner::resolve_path(path))
+        .transpose()?;
+    let explicit_tool_root = non_empty_env_path("ANIMAOS_RS_TOOL_RESULTS_DIR")?;
+    let resources = typed_profile_resources(
+        canonical_control_plane.as_deref(),
+        memory.as_ref(),
+        postgres,
+        history.as_deref(),
+        embedding.as_deref(),
+        checkpoint.as_deref(),
+        explicit_tool_root.as_deref(),
+    );
+    let owner = ProfileOwner::acquire_resources(resources)?;
+    Ok(PersistencePreflight {
+        owner,
+        memory,
+        control_plane,
+        history,
+    })
+}
 
 pub(crate) async fn configure_persistence(
     state: &SharedDaemonState,
     config: &DaemonConfig,
+    preflight: PersistencePreflight,
 ) -> io::Result<()> {
-    let postgres_pool = configure_database(state, config).await?;
-    let memory_store = memory_store_from_env(postgres_pool.as_ref())?;
-    let control_plane_store = control_plane_store_from_env(postgres_pool.as_ref())?;
-    let history_sqlite = non_empty_env_path(HISTORY_SQLITE_FILE_ENV)?;
-
+    let PersistencePreflight {
+        owner,
+        memory,
+        control_plane,
+        history,
+    } = preflight;
+    let postgres_pool = configure_database(state, config, &owner).await?;
+    let memory_store = memory
+        .and_then(|choice| match choice {
+            MemoryStoreChoice::Json(path) => Some(MemoryStoreConfig::Json(path)),
+            MemoryStoreChoice::Sqlite(path) => Some(MemoryStoreConfig::Sqlite(path)),
+            MemoryStoreChoice::Postgres => postgres_pool.clone().map(MemoryStoreConfig::Postgres),
+        })
+        .map(|store| store.with_owner(owner.clone()))
+        .transpose()?;
+    let control_plane_store = control_plane
+        .map(ControlPlaneStoreConfig::Json)
+        .or_else(|| postgres_pool.clone().map(ControlPlaneStoreConfig::Postgres))
+        .map(|store| store.with_owner(owner.clone()))
+        .transpose()?;
+    state.write().await.profile_owner = Some(owner.clone());
     let memory_store = configure_memory_store(state, memory_store).await?;
-    configure_memory_embeddings(state, memory_store.as_ref()).await?;
-    configure_control_plane_and_history(state, control_plane_store, history_sqlite).await?;
-    write_core_memory_copies(state).await;
+    configure_memory_embeddings(state, memory_store.as_ref(), owner).await?;
+    configure_control_plane_and_history(state, control_plane_store, history).await?;
+    write_core_memory_copies(state).await?;
     Ok(())
 }
 
 async fn configure_database(
     state: &SharedDaemonState,
     config: &DaemonConfig,
+    owner: &ProfileOwner,
 ) -> io::Result<Option<PgPool>> {
     match config.persistence_mode {
         PersistenceMode::Memory => {
@@ -69,8 +133,10 @@ async fn configure_database(
                     )
                 })?;
 
+            owner.attach_postgres(&pool).await?;
+            let mut writer = owner.postgres_writer().await?;
             sqlx::migrate!("./migrations")
-                .run(&pool)
+                .run_direct(&mut *writer)
                 .await
                 .map_err(|error| {
                     io::Error::new(
@@ -79,7 +145,9 @@ async fn configure_database(
                     )
                 })?;
 
-            let adapter = Arc::new(SqlxPostgresAdapter::new(pool.clone()));
+            writer.complete()?;
+            drop(writer);
+            let adapter = Arc::new(SqlxPostgresAdapter::new_owned(pool.clone(), owner.clone()));
             state.write().await.set_database(adapter);
             info!("Postgres connected, migrations applied");
             Ok(Some(pool))
@@ -207,8 +275,8 @@ async fn migrate_legacy_pins(
 }
 
 /// Writes every agent's core memory file copy once at boot.
-async fn write_core_memory_copies(state: &SharedDaemonState) {
-    let (memory, workspace_root, agents) = {
+async fn write_core_memory_copies(state: &SharedDaemonState) -> io::Result<()> {
+    let (memory, workspace_root, agents, owner) = {
         let guard = state.read().await;
         (
             guard.memory_handle(),
@@ -217,12 +285,20 @@ async fn write_core_memory_copies(state: &SharedDaemonState) {
                 .as_ref()
                 .map(|workspace| workspace.root_path.clone()),
             guard.agents.keys().cloned().collect::<Vec<_>>(),
+            guard.profile_owner(),
         )
     };
+    if let Some(owner) = &owner {
+        owner.verify_owned().await?;
+    }
     let manager = memory.read().await;
     for agent_id in agents {
+        if let Some(owner) = &owner {
+            owner.ensure_owned()?;
+        }
         crate::core_memory::files::write_copies(workspace_root.as_deref(), &manager, &agent_id);
     }
+    Ok(())
 }
 
 /// The SQLite history file (spec §13.1); defaults beside the control plane.
@@ -251,19 +327,34 @@ pub(crate) async fn history_store_for(
     control_plane: Option<&ControlPlaneStoreConfig>,
     sqlite_override: Option<PathBuf>,
 ) -> io::Result<Arc<dyn HistoryStore>> {
-    let sqlite_path = match (control_plane, sqlite_override) {
+    let owner = control_plane
+        .and_then(ControlPlaneStoreConfig::owner)
+        .cloned();
+    let sqlite_path = match (
+        control_plane.map(ControlPlaneStoreConfig::store),
+        sqlite_override,
+    ) {
         (None, Some(_)) => {
             warn!("ANIMAOS_RS_HISTORY_SQLITE_FILE is ignored without a durable control plane; history stays in memory");
             return Ok(Arc::new(MemoryHistoryStore::new()));
         }
         (None, None) => return Ok(Arc::new(MemoryHistoryStore::new())),
         (Some(_), Some(path)) => path,
+        (Some(ControlPlaneStoreConfig::Owned { .. }), _) => unreachable!(),
         (Some(ControlPlaneStoreConfig::Json(file)), None) => default_history_sqlite_path(file),
         (Some(ControlPlaneStoreConfig::Postgres(pool)), None) => {
-            return Ok(Arc::new(PostgresHistoryStore::new(pool.clone())))
+            return Ok(Arc::new(match owner {
+                Some(owner) => PostgresHistoryStore::new_owned(pool.clone(), owner),
+                None => PostgresHistoryStore::new(pool.clone()),
+            }))
         }
     };
-    let store = SqliteHistoryStore::open(sqlite_path)
+    let sqlite_path = owner
+        .as_ref()
+        .map(|owner| owner.owned_sqlite_path(&sqlite_path))
+        .transpose()?
+        .unwrap_or(sqlite_path);
+    let store = SqliteHistoryStore::open_with_owner(sqlite_path, owner)
         .await
         .map_err(|error| {
             io::Error::new(
@@ -382,10 +473,12 @@ async fn repair_saved_from_chat_sessions(
 async fn configure_memory_embeddings(
     state: &SharedDaemonState,
     memory_store: Option<&MemoryStoreConfig>,
+    owner: ProfileOwner,
 ) -> io::Result<()> {
-    let mut embeddings = MemoryEmbeddingRuntime::from_env(
+    let mut embeddings = MemoryEmbeddingRuntime::from_env_owned(
         memory_store.and_then(MemoryStoreConfig::embedding_store_default),
         memory_store.and_then(default_model_cache_dir),
+        Some(owner),
     )?;
     let memories = {
         let memory = { state.read().await.memory_handle() };
@@ -470,6 +563,87 @@ enum MemoryStoreChoice {
     Postgres,
 }
 
+#[cfg(test)]
+fn profile_resource_paths(
+    control_plane: Option<&Path>,
+    memory: Option<&MemoryStoreChoice>,
+    postgres: bool,
+    history_override: Option<&Path>,
+    embedding_override: Option<&Path>,
+    checkpoint: Option<&Path>,
+) -> Vec<PathBuf> {
+    typed_profile_resources(
+        control_plane,
+        memory,
+        postgres,
+        history_override,
+        embedding_override,
+        checkpoint,
+        None,
+    )
+    .into_iter()
+    .map(|resource| match resource {
+        ProfileResource::File(path)
+        | ProfileResource::Sqlite(path)
+        | ProfileResource::Directory(path) => path,
+    })
+    .collect()
+}
+
+fn typed_profile_resources(
+    control_plane: Option<&Path>,
+    memory: Option<&MemoryStoreChoice>,
+    postgres: bool,
+    history_override: Option<&Path>,
+    embedding_override: Option<&Path>,
+    checkpoint: Option<&Path>,
+    explicit_tool_root: Option<&Path>,
+) -> Vec<ProfileResource> {
+    let mut paths = Vec::new();
+    if let Some(path) = control_plane {
+        paths.push(ProfileResource::File(path.to_path_buf()));
+        if let Some(root) = default_tool_results_root(path) {
+            paths.push(ProfileResource::Directory(root));
+        }
+    }
+    if let Some(root) = explicit_tool_root {
+        paths.push(ProfileResource::Directory(root.to_path_buf()));
+    }
+    let memory_sqlite = match memory {
+        Some(MemoryStoreChoice::Json(path)) => {
+            paths.push(ProfileResource::File(path.clone()));
+            None
+        }
+        Some(MemoryStoreChoice::Sqlite(path)) => {
+            paths.push(ProfileResource::Sqlite(path.clone()));
+            Some(path)
+        }
+        _ => None,
+    };
+    if control_plane.is_some() || postgres {
+        if let Some(path) = history_override {
+            paths.push(ProfileResource::Sqlite(path.to_path_buf()));
+        } else if let Some(control) = control_plane {
+            paths.push(ProfileResource::Sqlite(default_history_sqlite_path(
+                control,
+            )));
+        }
+    }
+    if let Some(path) = embedding_override.or(memory_sqlite.map(PathBuf::as_path)) {
+        paths.push(ProfileResource::Sqlite(path.to_path_buf()));
+    }
+    if let Some(path) = checkpoint {
+        paths.push(ProfileResource::Directory(path.to_path_buf()));
+    }
+    paths
+}
+
+pub(crate) fn default_tool_results_root(control_plane: &Path) -> Option<PathBuf> {
+    let mut name = control_plane.file_name()?.to_os_string();
+    name.push(".tool-results");
+    Some(control_plane.with_file_name(name))
+}
+
 /// Explicit JSON or SQLite file wins, then Postgres, then `memory.sqlite` next to the
 /// control-plane file. No control-plane file means memory-only, as before.
 fn memory_store_choice(
@@ -500,16 +674,6 @@ fn memory_store_choice_from_env(postgres: bool) -> io::Result<Option<MemoryStore
     memory_store_choice(json, sqlite, postgres, control_plane.as_deref())
 }
 
-fn memory_store_from_env(postgres_pool: Option<&PgPool>) -> io::Result<Option<MemoryStoreConfig>> {
-    Ok(
-        memory_store_choice_from_env(postgres_pool.is_some())?.and_then(|choice| match choice {
-            MemoryStoreChoice::Json(path) => Some(MemoryStoreConfig::Json(path)),
-            MemoryStoreChoice::Sqlite(path) => Some(MemoryStoreConfig::Sqlite(path)),
-            MemoryStoreChoice::Postgres => postgres_pool.cloned().map(MemoryStoreConfig::Postgres),
-        }),
-    )
-}
-
 /// Startup-log label for the memory store, derived from the same choice the daemon makes.
 /// `postgres` says whether the daemon runs with a Postgres pool.
 pub fn runtime_memory_store_label(postgres: bool) -> String {
@@ -520,17 +684,6 @@ pub fn runtime_memory_store_label(postgres: bool) -> String {
         Ok(None) => "memory-only".to_string(),
         Err(error) => format!("invalid ({error})"),
     }
-}
-
-fn control_plane_store_from_env(
-    postgres_pool: Option<&PgPool>,
-) -> io::Result<Option<ControlPlaneStoreConfig>> {
-    let Some(path) = non_empty_env_path("ANIMAOS_RS_CONTROL_PLANE_FILE")? else {
-        return Ok(postgres_pool
-            .cloned()
-            .map(ControlPlaneStoreConfig::Postgres));
-    };
-    Ok(Some(ControlPlaneStoreConfig::Json(path)))
 }
 
 fn non_empty_env_path(name: &'static str) -> io::Result<Option<PathBuf>> {
@@ -549,6 +702,185 @@ fn non_empty_env_path(name: &'static str) -> io::Result<Option<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn profile_owner_discovery_covers_default_history_and_embedding_memory_alias() {
+        let control = PathBuf::from("private/profile.json");
+        let memory = MemoryStoreChoice::Sqlite(PathBuf::from("private/memory.sqlite"));
+        let resources =
+            profile_resource_paths(Some(&control), Some(&memory), false, None, None, None);
+        assert!(resources.contains(&control));
+        assert!(resources.contains(&PathBuf::from("private/profile.json.tool-results")));
+        assert!(resources.contains(&PathBuf::from("private/history.sqlite")));
+        assert!(resources.contains(&PathBuf::from("private/memory.sqlite")));
+    }
+
+    #[test]
+    fn profile_owner_discovery_covers_explicit_resources_even_with_different_control_plane() {
+        let control = PathBuf::from("one/control.json");
+        let memory = MemoryStoreChoice::Json(PathBuf::from("shared/memory.json"));
+        let history = Path::new("shared/history.sqlite");
+        let embeddings = Path::new("shared/embedding.sqlite");
+        let checkpoint = Path::new("shared/checkpoints");
+        let resources = profile_resource_paths(
+            Some(&control),
+            Some(&memory),
+            false,
+            Some(history),
+            Some(embeddings),
+            Some(checkpoint),
+        );
+        for path in [
+            &control,
+            &PathBuf::from("shared/memory.json"),
+            &history.to_path_buf(),
+            &embeddings.to_path_buf(),
+            &checkpoint.to_path_buf(),
+        ] {
+            assert!(
+                resources.contains(path),
+                "profile discovery missed {}",
+                path.display()
+            );
+        }
+    }
+
+    fn profile_child_command(control: &Path, ready: &Path) -> std::process::Command {
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command.args([
+            "--exact",
+            "app::persistence::tests::profile_owner_startup_child",
+            "--nocapture",
+        ]);
+        for name in [
+            "DATABASE_URL",
+            "ANIMAOS_RS_MEMORY_FILE",
+            "ANIMAOS_RS_MEMORY_SQLITE_FILE",
+            "ANIMAOS_RS_HISTORY_SQLITE_FILE",
+            "ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE",
+            "ANIMAOS_RS_CHECKPOINT_ROOT",
+            "ANIMAOS_RS_TOOL_RESULTS_DIR",
+            "ANIMA_TEST_PROFILE_OWNER_REFUSED",
+        ] {
+            command.env_remove(name);
+        }
+        command
+            .env("ANIMAOS_RS_CONTROL_PLANE_FILE", control)
+            .env("ANIMAOS_RS_MEMORY_EMBEDDINGS", "off")
+            .env("ANIMA_TEST_PROFILE_OWNER_STARTUP_READY", ready)
+            .env(
+                "ANIMA_TEST_PROFILE_OWNER_REGISTRY_DIR",
+                crate::profile_owner::test_registry_path().unwrap(),
+            )
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::inherit());
+        command
+    }
+
+    struct ProfileChild(std::process::Child);
+    impl Drop for ProfileChild {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    fn running_profile(control: &Path, ready: &Path) -> ProfileChild {
+        let mut child = ProfileChild(profile_child_command(control, ready).spawn().unwrap());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !ready.exists() {
+            assert!(
+                child.0.try_wait().unwrap().is_none(),
+                "profile child exited before startup"
+            );
+            assert!(
+                std::time::Instant::now() < deadline,
+                "profile startup did not finish"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        child
+    }
+
+    #[tokio::test]
+    async fn profile_owner_startup_child() {
+        let Some(ready) = std::env::var_os("ANIMA_TEST_PROFILE_OWNER_STARTUP_READY") else {
+            return;
+        };
+        let config = DaemonConfig {
+            persistence_mode: PersistenceMode::Memory,
+            ..DaemonConfig::default()
+        };
+        let preflight = prepare_persistence(&config);
+        if std::env::var_os("ANIMA_TEST_PROFILE_OWNER_REFUSED").is_some() {
+            assert!(
+                preflight.is_err(),
+                "a second process entered production persistence startup"
+            );
+            return;
+        }
+        let state = Arc::new(tokio::sync::RwLock::new(super::super::configured_state(
+            &config,
+            Arc::new(crate::model::DeterministicModelAdapter),
+        )));
+        configure_persistence(&state, &config, preflight.unwrap())
+            .await
+            .unwrap();
+        std::fs::write(ready, b"ready").unwrap();
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        drop(state);
+    }
+
+    #[test]
+    fn profile_owner_two_real_startups_refuse_before_any_payload_or_backup_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let control = temp.path().join("profile.json");
+        let first = running_profile(&control, &temp.path().join("ready-one"));
+        let paths: Vec<_> = std::fs::read_dir(temp.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                !path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .ends_with(".owner.lock")
+            })
+            .collect();
+        let before: Vec<_> = paths
+            .iter()
+            .map(|path| std::fs::read(path).unwrap())
+            .collect();
+        let entries = std::fs::read_dir(temp.path()).unwrap().count();
+        let output = profile_child_command(&control, &temp.path().join("unused-ready"))
+            .env("ANIMA_TEST_PROFILE_OWNER_REFUSED", "1")
+            .env("ANIMAOS_RS_BIND_ADDR", "127.0.0.1:51999")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "the competing startup was not refused"
+        );
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), entries);
+        for (path, original) in paths.iter().zip(before) {
+            assert_eq!(std::fs::read(path).unwrap(), original);
+        }
+        drop(first);
+        let _successor = running_profile(&control, &temp.path().join("ready-successor"));
+    }
+
+    #[test]
+    fn profile_owner_two_real_startups_with_separate_profiles_are_independent() {
+        let temp = tempfile::tempdir().unwrap();
+        let _one = running_profile(
+            &temp.path().join("one/state.json"),
+            &temp.path().join("ready-one"),
+        );
+        let _two = running_profile(
+            &temp.path().join("two/state.json"),
+            &temp.path().join("ready-two"),
+        );
+    }
 
     fn temp_dir(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -783,7 +1115,7 @@ mod tests {
             configure_control_plane_store(&state, Some(control_config.clone()))
                 .await
                 .unwrap();
-            write_core_memory_copies(&state).await;
+            write_core_memory_copies(&state).await.unwrap();
             state
         };
         let too_long_id = too_long.id.clone();

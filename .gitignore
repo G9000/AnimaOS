@@ -83,3 +83,4 @@ target/
 
 # Local verification logs and isolated turn-recovery evidence
 /.tmp/unified-turn-recovery-*/
+/.tmp/harness-hardening-*/

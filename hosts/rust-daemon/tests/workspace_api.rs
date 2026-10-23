@@ -1077,12 +1077,16 @@ async fn resumed_agents_survive_restart() {
     let _guard = EnvVarGuard::set("ANIMAOS_RS_CONTROL_PLANE_FILE", &control_plane_path);
     std::fs::write(workspace.path().join("anima.yaml"), RESUME_RESTORE_YAML).expect("yaml writes");
 
-    let first_app = app_with_configured_persistence(DaemonConfig::default())
-        .await
-        .expect("first app should configure persistence");
-    let (status, body) = resume_workspace(&first_app, workspace.path()).await;
-    assert_eq!(status, 201, "{body}");
-    drop(first_app);
+    let first_root = workspace.path().to_path_buf();
+    support::run_in_joined_runtime(move || async move {
+        let first_app = app_with_configured_persistence(DaemonConfig::default())
+            .await
+            .expect("first app should configure persistence");
+        let (status, body) = resume_workspace(&first_app, &first_root).await;
+        assert_eq!(status, 201, "{body}");
+        drop(first_app);
+    })
+    .await;
 
     // Respawn against the same control-plane file (mirrors
     // control_plane_store_recovers_agents_and_swarms_after_restart).
@@ -1350,13 +1354,18 @@ async fn team_model_overrides_survive_yaml_resume_and_restart() {
     assert_eq!(inspected["orchestrator"]["model"], "setup-model");
     assert_eq!(inspected["workers"][0]["provider"], "ollama");
     assert_eq!(inspected["workers"][0]["model"], "worker-model");
-    let fresh = app_with_configured_persistence(DaemonConfig::default())
-        .await
-        .unwrap();
-    let (status, body) = resume_workspace(&fresh, root.path()).await;
-    assert_eq!(status, 201, "{body}");
-    assert_team_model_overrides(&fresh).await;
-    drop(fresh);
+    let first_root = root.path().to_path_buf();
+    support::run_in_joined_runtime(move || async move {
+        let fresh = app_with_configured_persistence(DaemonConfig::default())
+            .await
+            .unwrap();
+        let (status, body) = resume_workspace(&fresh, &first_root).await;
+        assert_eq!(status, 201, "{body}");
+        assert_team_model_overrides(&fresh).await;
+        drop(fresh);
+    })
+    .await;
+
     let restarted = app_with_configured_persistence(DaemonConfig::default())
         .await
         .unwrap();
@@ -1390,67 +1399,72 @@ async fn settings_model_updates_preserve_yaml_fields_and_survive_resume_and_rest
     original["custom"] = serde_yaml::from_str("retained: [one, two]").unwrap();
     original["agents"][0]["customAgent"] = serde_yaml::Value::String("retain me".into());
     std::fs::write(&yaml_path, serde_yaml::to_string(&original).unwrap()).unwrap();
-    let app = app_with_configured_persistence(DaemonConfig::default())
-        .await
-        .unwrap();
-    let (status, body) = resume_workspace(&app, root.path()).await;
-    assert_eq!(status, 201, "{body}");
-    let (_, body) = send_empty_request(&app, "GET", "/api/agents").await;
-    let roster = roster(&body);
-    let lead = &roster.iter().find(|(_, name)| name == "Anima").unwrap().0;
-    let worker = &roster.iter().find(|(_, name)| name == "Scout").unwrap().0;
-    let (status, body) = send_json_request(
-        &app,
-        "PATCH",
-        &format!("/api/agents/{lead}"),
-        r#"{"model":"lead-new","provider":"ollama"}"#,
-    )
+    let first_root = root.path().to_path_buf();
+    support::run_in_joined_runtime(move || async move {
+        let app = app_with_configured_persistence(DaemonConfig::default())
+            .await
+            .unwrap();
+        let (status, body) = resume_workspace(&app, &first_root).await;
+        assert_eq!(status, 201, "{body}");
+        let (_, body) = send_empty_request(&app, "GET", "/api/agents").await;
+        let roster = roster(&body);
+        let lead = &roster.iter().find(|(_, name)| name == "Anima").unwrap().0;
+        let worker = &roster.iter().find(|(_, name)| name == "Scout").unwrap().0;
+        let (status, body) = send_json_request(
+            &app,
+            "PATCH",
+            &format!("/api/agents/{lead}"),
+            r#"{"model":"lead-new","provider":"ollama"}"#,
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        let after_lead: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&yaml_path).unwrap()).unwrap();
+        assert_eq!(after_lead["orchestrator"]["model"], "lead-new");
+        assert_eq!(after_lead["orchestrator"]["provider"], "ollama");
+        assert_eq!(after_lead["agents"], original["agents"]);
+        assert_eq!(after_lead["provider"], "moonshot");
+        assert_eq!(after_lead["model"], "kimi-k2");
+        let inherited = test_app();
+        let (status, body) = resume_workspace(&inherited, &first_root).await;
+        assert_eq!(status, 201, "{body}");
+        let (_, body) = send_empty_request(&inherited, "GET", "/api/agents").await;
+        let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let inherited_worker = body["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|agent| agent["state"]["name"] == "Scout")
+            .unwrap();
+        assert_eq!(inherited_worker["state"]["config"]["provider"], "moonshot");
+        assert_eq!(inherited_worker["state"]["config"]["model"], "kimi-k2");
+        let (status, body) = send_json_request(
+            &app,
+            "PATCH",
+            &format!("/api/agents/{worker}"),
+            r#"{"name":"Scout renamed","model":"worker-new","provider":"openai"}"#,
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        let (status, body) = send_json_request(
+            &app,
+            "PATCH",
+            &format!("/api/agents/{worker}"),
+            r#"{"model":"worker-final"}"#,
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        let updated: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&yaml_path).unwrap()).unwrap();
+        assert_eq!(updated["custom"], original["custom"]);
+        assert_eq!(updated["agents"][0]["customAgent"], "retain me");
+        assert_eq!(updated["agents"][0]["name"], "Scout renamed");
+        assert_eq!(updated["agents"][0]["provider"], "openai");
+        assert_eq!(updated["agents"][0]["model"], "worker-final");
+        drop(app);
+    })
     .await;
-    assert_eq!(status, 200, "{body}");
-    let after_lead: serde_yaml::Value =
-        serde_yaml::from_str(&std::fs::read_to_string(&yaml_path).unwrap()).unwrap();
-    assert_eq!(after_lead["orchestrator"]["model"], "lead-new");
-    assert_eq!(after_lead["orchestrator"]["provider"], "ollama");
-    assert_eq!(after_lead["agents"], original["agents"]);
-    assert_eq!(after_lead["provider"], "moonshot");
-    assert_eq!(after_lead["model"], "kimi-k2");
-    let inherited = test_app();
-    let (status, body) = resume_workspace(&inherited, root.path()).await;
-    assert_eq!(status, 201, "{body}");
-    let (_, body) = send_empty_request(&inherited, "GET", "/api/agents").await;
-    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
-    let inherited_worker = body["agents"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|agent| agent["state"]["name"] == "Scout")
-        .unwrap();
-    assert_eq!(inherited_worker["state"]["config"]["provider"], "moonshot");
-    assert_eq!(inherited_worker["state"]["config"]["model"], "kimi-k2");
-    let (status, body) = send_json_request(
-        &app,
-        "PATCH",
-        &format!("/api/agents/{worker}"),
-        r#"{"name":"Scout renamed","model":"worker-new","provider":"openai"}"#,
-    )
-    .await;
-    assert_eq!(status, 200, "{body}");
-    let (status, body) = send_json_request(
-        &app,
-        "PATCH",
-        &format!("/api/agents/{worker}"),
-        r#"{"model":"worker-final"}"#,
-    )
-    .await;
-    assert_eq!(status, 200, "{body}");
-    let updated: serde_yaml::Value =
-        serde_yaml::from_str(&std::fs::read_to_string(&yaml_path).unwrap()).unwrap();
-    assert_eq!(updated["custom"], original["custom"]);
-    assert_eq!(updated["agents"][0]["customAgent"], "retain me");
-    assert_eq!(updated["agents"][0]["name"], "Scout renamed");
-    assert_eq!(updated["agents"][0]["provider"], "openai");
-    assert_eq!(updated["agents"][0]["model"], "worker-final");
-    drop(app);
+
     let restarted = app_with_configured_persistence(DaemonConfig::default())
         .await
         .unwrap();
@@ -1737,37 +1751,53 @@ async fn bootstrap_team_survives_restart_and_persist_failure_rolls_back() {
     let control_plane_path = workspace.path().join("control-plane.json");
     let _guard = EnvVarGuard::set("ANIMAOS_RS_CONTROL_PLANE_FILE", &control_plane_path);
     let root = workspace.path().join("team");
-    let app = app_with_configured_persistence(DaemonConfig::default())
-        .await
-        .unwrap();
-    std::fs::remove_file(&control_plane_path).unwrap();
-    std::fs::create_dir(&control_plane_path).unwrap();
-    let (status, body) = send_json_request(
-        &app,
-        "POST",
-        "/api/workspace/bootstrap",
-        &team_bootstrap_body(&root).to_string(),
-    )
+    let first_root = root.clone();
+    let first_control_plane = control_plane_path.clone();
+    support::run_in_joined_runtime(move || async move {
+        let app = app_with_configured_persistence(DaemonConfig::default())
+            .await
+            .unwrap();
+        std::fs::remove_file(&first_control_plane).unwrap();
+        std::fs::create_dir(&first_control_plane).unwrap();
+        let (status, body) = send_json_request(
+            &app,
+            "POST",
+            "/api/workspace/bootstrap",
+            &team_bootstrap_body(&first_root).to_string(),
+        )
+        .await;
+        assert_eq!(status, 503, "{body}");
+        let (_, agents) = send_empty_request(&app, "GET", "/api/agents").await;
+        assert_eq!(roster(&agents).len(), 0);
+        assert!(!first_root.join("anima.yaml").exists());
+        let (_, body) = send_empty_request(&app, "GET", "/api/workspace").await;
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).unwrap()["configured"],
+            false
+        );
+        drop(app);
+    })
     .await;
-    assert_eq!(status, 503, "{body}");
-    let (_, agents) = send_empty_request(&app, "GET", "/api/agents").await;
-    assert_eq!(roster(&agents).len(), 0);
-    assert!(!root.join("anima.yaml").exists());
-    let (_, body) = send_empty_request(&app, "GET", "/api/workspace").await;
-    assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&body).unwrap()["configured"],
-        false
-    );
+
+    // A replaced payload revokes its owner permanently; recover with a new boot.
     std::fs::remove_dir(&control_plane_path).unwrap();
-    let (status, body) = send_json_request(
-        &app,
-        "POST",
-        "/api/workspace/bootstrap",
-        &team_bootstrap_body(&root).to_string(),
-    )
+    let bootstrap_root = root.clone();
+    support::run_in_joined_runtime(move || async move {
+        let fresh = app_with_configured_persistence(DaemonConfig::default())
+            .await
+            .unwrap();
+        let (status, body) = send_json_request(
+            &fresh,
+            "POST",
+            "/api/workspace/bootstrap",
+            &team_bootstrap_body(&bootstrap_root).to_string(),
+        )
+        .await;
+        assert_eq!(status, 201, "{body}");
+        drop(fresh);
+    })
     .await;
-    assert_eq!(status, 201, "{body}");
-    drop(app);
+
     let restored = app_with_configured_persistence(DaemonConfig::default())
         .await
         .unwrap();

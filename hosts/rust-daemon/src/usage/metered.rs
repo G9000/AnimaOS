@@ -44,6 +44,21 @@ pub(crate) struct MeteredCall {
 }
 
 impl Metered {
+    fn record(
+        &self,
+        config: &AgentConfig,
+        at_ms: u64,
+        started: Instant,
+        response: &ModelGenerateResponse,
+    ) {
+        self.calls().push(MeteredCall {
+            usage: response.usage.clone(),
+            at_ms,
+            duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            provider: config.provider.clone(),
+            model: config.model.clone(),
+        });
+    }
     pub(crate) fn new(inner: Arc<dyn ModelAdapter>) -> Self {
         Self {
             inner,
@@ -69,6 +84,60 @@ impl ModelAdapter for Metered {
         self.inner.provider()
     }
 
+    async fn generate_controlled(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        context: &anima_core::execution_limits::ModelCallContext,
+    ) -> Result<ModelGenerateResponse, String> {
+        let at_ms = now_millis();
+        let started = Instant::now();
+        let capture = MeteredFinal {
+            downstream: None,
+            response: StdMutex::new(None),
+        };
+        let result = self
+            .inner
+            .stream_controlled(config, request, &capture, context)
+            .await;
+        let response = capture
+            .response
+            .into_inner()
+            .map_err(|_| "Metered response unavailable")?;
+        if let Some(response) = &response {
+            self.record(config, at_ms, started, response);
+        }
+        result?;
+        response.ok_or("Metered model stream ended without a final response".into())
+    }
+
+    async fn stream_controlled(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        sink: &dyn anima_core::ModelStreamSink,
+        context: &anima_core::execution_limits::ModelCallContext,
+    ) -> Result<(), String> {
+        let at_ms = now_millis();
+        let started = Instant::now();
+        let capture = MeteredFinal {
+            downstream: Some(sink),
+            response: StdMutex::new(None),
+        };
+        let result = self
+            .inner
+            .stream_controlled(config, request, &capture, context)
+            .await;
+        if let Some(response) = capture
+            .response
+            .into_inner()
+            .map_err(|_| "Metered response unavailable")?
+        {
+            self.record(config, at_ms, started, &response);
+        }
+        result
+    }
+
     async fn generate(
         &self,
         config: &AgentConfig,
@@ -86,6 +155,32 @@ impl ModelAdapter for Metered {
             model: config.model.clone(),
         });
         Ok(response)
+    }
+}
+
+struct MeteredFinal<'a> {
+    downstream: Option<&'a dyn anima_core::ModelStreamSink>,
+    response: StdMutex<Option<ModelGenerateResponse>>,
+}
+#[async_trait]
+impl anima_core::ModelStreamSink for MeteredFinal<'_> {
+    async fn emit(&self, frame: anima_core::ModelStreamFrame) -> Result<(), String> {
+        if let anima_core::ModelStreamFrame::Final(response) = &frame {
+            *self
+                .response
+                .lock()
+                .map_err(|_| "Metered response unavailable")? = Some(response.clone());
+        }
+        match self.downstream {
+            Some(sink) => sink.emit(frame).await,
+            None => Ok(()),
+        }
+    }
+    async fn complete_usage(&self, usage: TokenUsage) -> Result<(), String> {
+        match self.downstream {
+            Some(sink) => sink.complete_usage(usage).await,
+            None => Ok(()),
+        }
     }
 }
 
@@ -191,6 +286,12 @@ mod tests {
 
     #[async_trait]
     impl ModelAdapter for Fixed {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "fixed"
         }

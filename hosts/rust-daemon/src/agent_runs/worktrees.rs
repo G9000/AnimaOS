@@ -13,6 +13,8 @@ use anima_worktree::{Finished, Worktree, Worktrees};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::profile_owner::ProfileOwner;
+
 /// Helper config keys, written only by the daemon for one assignment.
 pub(crate) const ROOT_KEY: &str = "workspaceRoot";
 pub(crate) const WORKTREE_KEY: &str = "worktree";
@@ -92,11 +94,14 @@ fn repo_dir(workspace: &Path, repo: &str) -> Result<(PathBuf, PathBuf), String> 
 pub(crate) async fn create(
     workspace: Option<PathBuf>,
     repo: String,
+    owner: Option<ProfileOwner>,
 ) -> Result<HelperWorktree, String> {
     let workspace = workspace.ok_or("Helper worktrees need a configured workspace folder")?;
+    verify_owner(&owner).await?;
     tokio::task::spawn_blocking(move || {
         let (workspace, dir) = repo_dir(&workspace, &repo)?;
         let name = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
+        ensure_owner(&owner)?;
         let worktree = Worktrees::new()
             .create(&dir, &name)
             .map_err(|error| format!("Could not create a helper worktree: {error}"))?;
@@ -125,21 +130,50 @@ pub(crate) async fn create(
 
 /// Inspects the worktree after the helper's run; removes it when it holds no
 /// work. Returns the companion's report.
-pub(crate) async fn finish(worktree: &HelperWorktree) -> Value {
+pub(crate) async fn finish(worktree: &HelperWorktree, owner: Option<ProfileOwner>) -> Value {
+    if let Err(error) = verify_owner(&owner).await {
+        return report(worktree, &unavailable(error));
+    }
     let record = worktree.worktree.clone();
-    let finished = tokio::task::spawn_blocking(move || Worktrees::new().finish(&record))
-        .await
-        .unwrap_or_else(|_| Finished {
-            inspection_failed: true,
-            error: Some("inspection stopped unexpectedly".into()),
-            ..Finished::default()
-        });
+    let finished = tokio::task::spawn_blocking(move || {
+        if let Err(error) = ensure_owner(&owner) {
+            return unavailable(error);
+        }
+        Worktrees::new().finish(&record)
+    })
+    .await
+    .unwrap_or_else(|_| unavailable("inspection stopped unexpectedly".into()));
     report(worktree, &finished)
 }
 
 /// Removes an unused worktree after a refused spawn (kept if anything is in it).
-pub(crate) async fn discard(worktree: &HelperWorktree) {
-    let _ = finish(worktree).await;
+pub(crate) async fn discard(worktree: &HelperWorktree, owner: Option<ProfileOwner>) {
+    let _ = finish(worktree, owner).await;
+}
+
+async fn verify_owner(owner: &Option<ProfileOwner>) -> Result<(), String> {
+    if let Some(owner) = owner {
+        owner
+            .verify_owned()
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn ensure_owner(owner: &Option<ProfileOwner>) -> Result<(), String> {
+    owner
+        .as_ref()
+        .map_or(Ok(()), ProfileOwner::ensure_owned)
+        .map_err(|error| error.to_string())
+}
+
+fn unavailable(error: String) -> Finished {
+    Finished {
+        inspection_failed: true,
+        error: Some(error),
+        ..Finished::default()
+    }
 }
 
 fn report(worktree: &HelperWorktree, finished: &Finished) -> Value {
@@ -251,7 +285,7 @@ pub(crate) fn run_root(config: &AgentConfig) -> Option<PathBuf> {
 /// Sweeps stale helper worktrees of the workspace repository and of every
 /// remembered repository, sparing those of unfinished async assignments.
 pub(crate) async fn startup_sweep(state: crate::app::SharedDaemonState) {
-    let (repos, live) = {
+    let (repos, live, owner) = {
         let guard = state.read().await;
         let mut repos: Vec<PathBuf> = guard
             .workspace
@@ -267,9 +301,18 @@ pub(crate) async fn startup_sweep(state: crate::app::SharedDaemonState) {
             .filter_map(|record| record.async_helper.as_ref()?.worktree.as_ref())
             .map(|worktree| worktree.worktree.path.clone())
             .collect();
-        (repos, live)
+        (repos, live, guard.profile_owner())
     };
+    if let Err(error) = verify_owner(&owner).await {
+        tracing::warn!(%error, "helper worktree sweep refused without profile ownership");
+        return;
+    }
     let swept = tokio::task::spawn_blocking(move || {
+        // The worker keeps the lease even after its waiter and State are dropped.
+        if let Err(error) = ensure_owner(&owner) {
+            tracing::warn!(%error, "helper worktree sweep refused without profile ownership");
+            return;
+        }
         let worktrees = Worktrees::new();
         let mut seen = Vec::new();
         for repo in repos {
@@ -278,6 +321,10 @@ pub(crate) async fn startup_sweep(state: crate::app::SharedDaemonState) {
             };
             if seen.contains(&root) {
                 continue;
+            }
+            if let Err(error) = ensure_owner(&owner) {
+                tracing::warn!(%error, "helper worktree sweep stopped after profile ownership loss");
+                return;
             }
             match worktrees.sweep(&root, &live) {
                 Ok(report) if !report.removed.is_empty() || !report.errors.is_empty() => {

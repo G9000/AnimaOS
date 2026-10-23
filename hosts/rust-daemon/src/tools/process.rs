@@ -122,6 +122,7 @@ pub(super) fn execute_bash(
         }
         let configured_root = ctx_workspace_root(&context).map(Path::to_path_buf);
         let cancel = context.cancel.clone();
+        let profile_owner = context.profile_owner.clone();
         #[cfg(windows)]
         let call = BashCallCancellation(anima_core::CancelSignal::new());
         #[cfg(windows)]
@@ -131,6 +132,9 @@ pub(super) fn execute_bash(
         #[cfg(windows)]
         let unproven_run_cancel = context.cancel.clone();
         let result = tokio::task::spawn_blocking(move || {
+            if let Some(owner) = &profile_owner {
+                owner.ensure_owned().map_err(|error| error.to_string())?;
+            }
             #[cfg(windows)]
             {
                 shell::execute_bash_command_owned(
@@ -140,10 +144,12 @@ pub(super) fn execute_bash(
                     &cwd,
                     cancel,
                     worker_cancel,
+                    profile_owner,
                 )
             }
             #[cfg(not(windows))]
             {
+                let _profile_owner = profile_owner;
                 execute_bash_command(
                     configured_root.as_deref(),
                     &command,
@@ -256,6 +262,7 @@ pub(super) fn execute_bg_start(
             &cwd,
             notifier,
             watch,
+            context.profile_owner.clone(),
         ) {
             Ok(text) => TaskResult::success(
                 Content {
@@ -316,9 +323,13 @@ pub(super) fn execute_bg_stop(
 
         // Retiring a tree blocks until it is proven gone.
         let manager = context.process_manager.clone();
-        let stopped = tokio::task::spawn_blocking(move || stop_background_process(&manager, &id))
-            .await
-            .unwrap_or_else(|error| Err(format!("bg_stop worker panicked: {error}")));
+        let profile_owner = context.profile_owner.clone();
+        let stopped = tokio::task::spawn_blocking(move || {
+            let _profile_owner = profile_owner;
+            stop_background_process(&manager, &id)
+        })
+        .await
+        .unwrap_or_else(|error| Err(format!("bg_stop worker panicked: {error}")));
         match stopped {
             Ok(text) => TaskResult::success(
                 Content {

@@ -202,20 +202,49 @@ impl From<rusqlite::Error> for HistoryError {
 }
 
 pub(crate) struct SqliteHistoryStore {
-    connection: Arc<Mutex<Connection>>,
+    connection: Arc<OwnedHistoryConnection>,
     path: PathBuf,
 }
 
+struct OwnedHistoryConnection {
+    // SQLite close/WAL cleanup must finish before the final owner is dropped.
+    connection: Mutex<Connection>,
+    owner: Option<crate::profile_owner::ProfileOwner>,
+}
+
 impl SqliteHistoryStore {
+    /// Direct test/ephemeral stores deliberately have no production authority.
     pub(crate) async fn open(path: PathBuf) -> Result<Self, HistoryError> {
+        Self::open_with_owner(path, None).await
+    }
+
+    pub(crate) async fn open_with_owner(
+        path: PathBuf,
+        owner: Option<crate::profile_owner::ProfileOwner>,
+    ) -> Result<Self, HistoryError> {
+        let path = owner
+            .as_ref()
+            .map(|owner| owner.owned_sqlite_path(&path))
+            .transpose()
+            .map_err(HistoryError::new)?
+            .unwrap_or(path);
         let opening = path.clone();
-        let connection = tokio::task::spawn_blocking(move || open_connection(&opening))
-            .await
-            .map_err(|error| {
-                HistoryError::new(format!("history store worker stopped: {error}"))
-            })??;
+        // The blocking task itself owns the guard. Cancelling startup cannot
+        // release a lease while SQLite still opens/migrates its payload.
+        let connection = tokio::task::spawn_blocking(move || {
+            if let Some(owner) = &owner {
+                owner.ensure_owned().map_err(HistoryError::new)?;
+            }
+            let connection = open_connection(&opening)?;
+            Ok::<_, HistoryError>(OwnedHistoryConnection {
+                connection: Mutex::new(connection),
+                owner,
+            })
+        })
+        .await
+        .map_err(|error| HistoryError::new(format!("history store worker stopped: {error}")))??;
         Ok(Self {
-            connection: Arc::new(Mutex::new(connection)),
+            connection: Arc::new(connection),
             path,
         })
     }
@@ -232,10 +261,14 @@ impl SqliteHistoryStore {
     {
         let connection = Arc::clone(&self.connection);
         tokio::task::spawn_blocking(move || {
-            let mut connection = connection
+            let mut locked = connection
+                .connection
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            work(&mut connection)
+            if let Some(owner) = &connection.owner {
+                owner.ensure_owned().map_err(HistoryError::new)?;
+            }
+            work(&mut locked)
         })
         .await
         .map_err(|error| HistoryError::new(format!("history store worker stopped: {error}")))?
@@ -1265,5 +1298,156 @@ mod tests {
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(version, 1);
+    }
+}
+
+#[cfg(test)]
+mod profile_ownership_tests {
+    use super::*;
+    use crate::profile_owner::ProfileOwner;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn profile_owner_renamed_sqlite_keeps_identity_custody_until_detached_job_retires() {
+        use crate::profile_owner::ProfileResource;
+        use std::process::{Command, Stdio};
+        let fixture = tempfile::tempdir().unwrap();
+        let original = fixture.path().join("history.sqlite");
+        let renamed = fixture.path().join("relocated.sqlite");
+        let owner =
+            ProfileOwner::acquire_resources([ProfileResource::Sqlite(original.clone())]).unwrap();
+        let store = Arc::new(
+            SqliteHistoryStore::open_with_owner(original.clone(), Some(owner))
+                .await
+                .unwrap(),
+        );
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let working = Arc::clone(&store);
+        let task = tokio::spawn(async move {
+            working
+                .run(move |_| {
+                    entered.send(()).unwrap();
+                    let _ = wait.recv();
+                    Ok(())
+                })
+                .await
+        });
+        started.await.unwrap();
+        std::fs::rename(&original, &renamed).unwrap();
+        task.abort();
+        let _ = task.await;
+        drop(store);
+        let status = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "profile_owner::tests::ownership_child",
+                "--nocapture",
+            ])
+            .env("ANIMA_TEST_OWNERSHIP_RESOURCE", &renamed)
+            .env(
+                "ANIMA_TEST_PROFILE_OWNER_REGISTRY_DIR",
+                crate::profile_owner::test_registry_path().unwrap(),
+            )
+            .env("ANIMA_TEST_OWNERSHIP_REFUSED", "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .status()
+            .unwrap();
+        assert!(status.success(), "a renamed database acquired a second owner while its detached blocking job retained the connection");
+        release.send(()).unwrap();
+        wait_until_released(&renamed).await;
+    }
+
+    async fn wait_until_released(path: &Path) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if ProfileOwner::acquire([path.to_path_buf()]).is_ok() {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "finished SQLite work leaked its profile lease"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    #[test]
+    fn profile_owner_cancelled_history_initialization_retains_queued_blocking_lease() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .max_blocking_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let temp = tempfile::tempdir().unwrap();
+            let path = temp.path().join("history.sqlite");
+            let owner =
+                ProfileOwner::acquire_resources([crate::profile_owner::ProfileResource::Sqlite(
+                    path.clone(),
+                )])
+                .unwrap();
+            let (entered, started) = tokio::sync::oneshot::channel();
+            let (release, wait) = std::sync::mpsc::channel();
+            let busy = tokio::task::spawn_blocking(move || {
+                entered.send(()).unwrap();
+                let _ = wait.recv();
+            });
+            started.await.unwrap();
+            let mut opening = Box::pin(SqliteHistoryStore::open_with_owner(
+                path.clone(),
+                Some(owner),
+            ));
+            assert!(futures::poll!(opening.as_mut()).is_pending());
+            drop(opening);
+            assert!(
+                ProfileOwner::acquire([path.clone()]).is_err(),
+                "cancelled startup released the guard still captured by SQLite initialization"
+            );
+            release.send(()).unwrap();
+            busy.await.unwrap();
+            wait_until_released(&path).await;
+        });
+    }
+
+    #[tokio::test]
+    async fn profile_owner_detached_history_write_keeps_lease_after_waiter_is_aborted() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("history.sqlite");
+        let owner =
+            ProfileOwner::acquire_resources([crate::profile_owner::ProfileResource::Sqlite(
+                path.clone(),
+            )])
+            .unwrap();
+        let store = Arc::new(
+            SqliteHistoryStore::open_with_owner(path.clone(), Some(owner))
+                .await
+                .unwrap(),
+        );
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let working = Arc::clone(&store);
+        let task = tokio::spawn(async move {
+            working
+                .run(move |_| {
+                    entered.send(()).unwrap();
+                    let _ = wait.recv();
+                    Ok(())
+                })
+                .await
+        });
+        started.await.unwrap();
+        task.abort();
+        let _ = task.await;
+        drop(store);
+        assert!(
+            ProfileOwner::acquire([path.clone()]).is_err(),
+            "aborted history waiter released an active blocking job's guard"
+        );
+        release.send(()).unwrap();
+        wait_until_released(&path).await;
     }
 }

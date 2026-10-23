@@ -83,6 +83,8 @@ pub struct AgentRuntimeSnapshot {
     pub events: Vec<EngineEvent>,
     pub last_task: Option<TaskResult<Content>>,
     pub step_count: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_binding: Option<crate::execution_limits::ExecutionBindingHint>,
 }
 
 pub struct AgentRuntime {
@@ -118,6 +120,8 @@ pub struct AgentRuntime {
     turn_sequence: u64,
     /// The host's stop signal and steering inbox for this run (spec §4.6–§4.7).
     control: Option<RunControl>,
+    execution_context: Option<crate::execution_limits::ExecutionContext>,
+    execution_binding: Option<crate::execution_limits::ExecutionBindingHint>,
 }
 
 #[derive(Clone, Debug)]
@@ -169,6 +173,8 @@ impl AgentRuntime {
             turn_checkpoint: None,
             turn_sequence: 0,
             control: None,
+            execution_context: None,
+            execution_binding: None,
             agent_files: crate::RenderedAgentFiles::default(),
             host_guidance: String::new(),
             host_tool_iterations: None,
@@ -217,6 +223,8 @@ impl AgentRuntime {
             turn_checkpoint: None,
             turn_sequence: 0,
             control: None,
+            execution_context: None,
+            execution_binding: snapshot.execution_binding,
             agent_files: crate::RenderedAgentFiles::default(),
             host_guidance: String::new(),
             host_tool_iterations: None,
@@ -320,7 +328,17 @@ impl AgentRuntime {
                 .collect();
         }
         checkpoint.validate(binding)?;
-        sink.save(checkpoint).await?;
+        let save = sink.save(checkpoint);
+        if let Some(context) = &self.execution_context {
+            context.observe(save).await?;
+        } else if let Some(control) = &self.control {
+            match select(save, control.cancel.cancelled()).await {
+                Either::Left((result, _)) => result?,
+                Either::Right(((), _)) => return Err(control.cancel.run_error().into()),
+            }
+        } else {
+            save.await?;
+        }
         self.turn_sequence = sequence;
         Ok(())
     }
@@ -341,7 +359,63 @@ impl AgentRuntime {
 
     /// Lets the host stop this run and steer messages into it.
     pub fn set_run_control(&mut self, control: RunControl) {
+        if let Some(context) = &mut self.execution_context {
+            context.secondary_cancel = Some(control.cancel.clone());
+        }
         self.control = Some(control);
+    }
+
+    /// Reattach trusted admission authority explicitly; snapshots contain none.
+    pub fn set_execution_context(
+        &mut self,
+        mut context: crate::execution_limits::ExecutionContext,
+    ) -> Result<(), String> {
+        if self.execution_binding.as_ref().is_some_and(|binding| {
+            binding.scope_id != context.scope_id
+                || binding.run_id != context.run_id
+                || context.deadline_at_ms > binding.deadline_at_ms
+        }) {
+            return Err("Restored execution scope requires matching explicit reattachment".into());
+        }
+        if self.run_id.as_ref().is_some_and(|id| id != &context.run_id) {
+            return Err("Execution scope does not match the runtime run".into());
+        }
+        self.run_id = Some(context.run_id.clone());
+        self.execution_binding = Some(context.binding_hint());
+        if let Some(control) = &self.control {
+            context.secondary_cancel = Some(control.cancel.clone());
+        }
+        self.execution_context = Some(context);
+        Ok(())
+    }
+
+    pub fn execution_context(&self) -> Option<&crate::execution_limits::ExecutionContext> {
+        self.execution_context.as_ref()
+    }
+
+    /// Explicit trusted-host admission of a new independent input. Recovery and
+    /// restored continuations must use matching `set_execution_context` instead.
+    pub fn begin_new_execution_context(
+        &mut self,
+        mut context: crate::execution_limits::ExecutionContext,
+    ) -> Result<(), String> {
+        // Attaching already admitted custody must also work after Stop or a
+        // deadline, so normal terminal recording can finish. Every dispatch
+        // still checks the attached context's live authority separately.
+        if self
+            .turn_checkpoint
+            .as_ref()
+            .is_some_and(|(binding, _)| binding.attempt_run_id != context.run_id)
+        {
+            return Err("A new independent execution cannot reuse another turn checkpoint".into());
+        }
+        if let Some(control) = &self.control {
+            context.secondary_cancel = Some(control.cancel.clone());
+        }
+        self.run_id = Some(context.run_id.clone());
+        self.execution_binding = Some(context.binding_hint());
+        self.execution_context = Some(context);
+        Ok(())
     }
 
     pub fn run_control(&self) -> Option<&RunControl> {
@@ -403,6 +477,12 @@ impl AgentRuntime {
         if let Some(fallbacks) = patch.fallbacks {
             config.fallbacks = fallbacks;
         }
+        if let Some(limits) = patch.execution_limits {
+            config
+                .settings
+                .get_or_insert_with(Default::default)
+                .execution_limits = Some(limits);
+        }
     }
 
     /// Replace the complete configuration, preserving optional field shapes.
@@ -425,6 +505,7 @@ impl AgentRuntime {
             events: self.events().to_vec(),
             last_task: self.last_task.clone(),
             step_count: self.step_counter,
+            execution_binding: self.execution_binding.clone(),
         }
     }
 
@@ -568,6 +649,11 @@ impl AgentRuntime {
         Fut: Future<Output = TaskResult<Content>>,
     {
         let start = now_millis();
+        if self.execution_binding.is_some() && self.execution_context.is_none() {
+            let error = "Restored runtime requires explicit execution scope reattachment";
+            self.mark_failed(error, 0);
+            return TaskResult::error(error, 0);
+        }
         self.mark_running();
         let input = self.tag_for_run(input, None, Vec::new());
         let user_message = self.record_message_in_room(room_id.clone(), MessageRole::User, input);
@@ -716,11 +802,35 @@ impl AgentRuntime {
             let sink = StepSink::new(self.observer.clone(), step_id.clone());
             let cancel = self.control.as_ref().map(|control| control.cancel.clone());
             let streamed = {
-                let call = self.model_adapter.stream(
-                    call_config.as_ref().unwrap_or(&self.state.config),
-                    &request,
-                    &sink,
-                );
+                let model_context = self.execution_context.clone().map(|execution| {
+                    crate::execution_limits::ModelCallContext::new(
+                        execution,
+                        Uuid::new_v4().to_string(),
+                    )
+                });
+                let call = Box::pin(async {
+                    if let Some(context) = &model_context {
+                        if self.run_id.as_deref() != Some(context.execution.run_id.as_str()) {
+                            return Err("Execution scope does not match the runtime run".into());
+                        }
+                        self.model_adapter
+                            .stream_controlled(
+                                call_config.as_ref().unwrap_or(&self.state.config),
+                                &request,
+                                &sink,
+                                context,
+                            )
+                            .await
+                    } else {
+                        self.model_adapter
+                            .stream(
+                                call_config.as_ref().unwrap_or(&self.state.config),
+                                &request,
+                                &sink,
+                            )
+                            .await
+                    }
+                });
                 let guarded_call = Box::pin(async {
                     match select(call, sink.repetition_cancelled()).await {
                         Either::Left((outcome, _)) => outcome,
@@ -738,24 +848,40 @@ impl AgentRuntime {
                 }
             };
             let partial = sink.streamed_text();
-            let Some(streamed) = streamed else {
+            // A controlled adapter can observe the same Stop before the outer
+            // select does. Both completion orders use the stopped projection.
+            let Some(streamed) = streamed.filter(|_| !self.stop_requested()) else {
                 // The partial text stays, marked stopped (spec §4.6); usage
                 // the provider already reported stays with the run.
-                self.record_partial_usage(&sink, &step_id);
-                let message_id =
-                    self.record_unfinished_step(&room_id, &step_id, &partial, STOPPED_METADATA_KEY);
-                self.emit_frame(RunFrame::StepFinished {
-                    step_id,
-                    message_id,
-                });
+                if let Some(response) = sink.take_response() {
+                    self.apply_token_usage(&response.usage);
+                    self.emit_response_usage(&sink, &step_id, &response.usage);
+                    self.record_stopped_model_response(&room_id, &step_id, &response);
+                } else {
+                    self.record_partial_usage(&sink, &step_id);
+                    let message_id = self.record_unfinished_step(
+                        &room_id,
+                        &step_id,
+                        &partial,
+                        STOPPED_METADATA_KEY,
+                    );
+                    self.emit_frame(RunFrame::StepFinished {
+                        step_id,
+                        message_id,
+                    });
+                }
                 return self.finish_stopped(start);
             };
-            let outcome = match streamed {
-                _ if sink.repetition_detected() => Err(REPETITION_ERROR.to_string()),
-                Ok(()) => sink
-                    .take_response()
-                    .ok_or_else(|| MODEL_STREAM_WITHOUT_FINAL.to_string()),
-                Err(error) => Err(error),
+            let stream_failure = if sink.repetition_detected() {
+                Some(REPETITION_ERROR.to_string())
+            } else {
+                streamed.err()
+            };
+            let outcome = match sink.take_response() {
+                Some(response) => Ok(response),
+                None => Err(stream_failure
+                    .clone()
+                    .unwrap_or_else(|| MODEL_STREAM_WITHOUT_FINAL.to_string())),
             };
 
             match outcome {
@@ -777,6 +903,13 @@ impl AgentRuntime {
                             self.record_stopped_model_response(&room_id, &step_id, &response);
                             return self.finish_stopped(start);
                         }
+                        self.record_unexecuted_model_response(
+                            &room_id,
+                            &step_id,
+                            &response,
+                            &error,
+                            INCOMPLETE_METADATA_KEY,
+                        );
                         let duration = now_millis().saturating_sub(start);
                         self.mark_failed(error.clone(), duration);
                         return TaskResult::error(error, duration);
@@ -799,6 +932,26 @@ impl AgentRuntime {
                             );
                     }
                     self.emit_response_usage(&sink, &step_id, &response.usage);
+
+                    if let Some(error) = stream_failure.or_else(|| {
+                        self.execution_context
+                            .as_ref()
+                            .and_then(|context| context.failure())
+                    }) {
+                        self.record_unexecuted_model_response(
+                            &room_id,
+                            &step_id,
+                            &response,
+                            &error,
+                            INCOMPLETE_METADATA_KEY,
+                        );
+                        if self.stop_requested() {
+                            return self.finish_stopped(start);
+                        }
+                        let duration = now_millis().saturating_sub(start);
+                        self.mark_failed(error.clone(), duration);
+                        return TaskResult::error(error, duration);
+                    }
 
                     if is_runaway(&response.content.text) {
                         return self.fail_step(
@@ -1168,31 +1321,82 @@ impl AgentRuntime {
 
                             let execute_tool = &execute_tool;
                             let observer = self.observer.clone();
+                            let execution_context = self.execution_context.clone();
+                            let run_cancel =
+                                self.control.as_ref().map(|control| control.cancel.clone());
+                            let budget_failure = Arc::new(std::sync::Mutex::new(None::<String>));
                             let tool_results =
                                 join_all(prepared_steps.into_iter().map(|prepared_step| {
                                     let tool_started = now_millis();
                                     let state = self.state.clone();
                                     let user_message = user_message.clone();
                                     let observer = observer.clone();
+                                     let execution_context = execution_context.clone();
+                                      let run_cancel = run_cancel.clone();
+                                     let budget_failure = budget_failure.clone();
                                     let frame_step_id = step_id.clone();
                                     async move {
-                                        if let Some(observer) = &observer {
-                                            observer.on_frame(RunFrame::ToolStarted {
-                                                step_id: frame_step_id.clone(),
-                                                tool_call: prepared_step.tool_call.clone(),
-                                            });
-                                        }
                                         let recovered = prepared_step.recovered_result.is_some();
+                                        let admission = match (&execution_context, recovered) {
+                                            (Some(context), false) => context.reserve_tool(&prepared_step.idempotency_key).await.map(Some),
+                                            _ => Ok(None),
+                                        };
                                         let tool_result = match prepared_step.recovered_result {
-                                            Some(tool_result) => tool_result,
-                                            None => {
-                                                execute_tool(
-                                                    state,
-                                                    user_message,
-                                                    prepared_step.tool_call.clone(),
-                                                )
-                                                .await
-                                            }
+                                            Some(tool_result) => {
+                                                if let Some(observer) = &observer {
+                                                    observer.on_frame(RunFrame::ToolStarted { step_id: frame_step_id.clone(), tool_call: prepared_step.tool_call.clone() });
+                                                }
+                                                tool_result
+                                            },
+                                            None => match admission {
+                                                Err(error) => {
+                                                    budget_failure.lock().unwrap().get_or_insert(error.clone());
+                                                    TaskResult::error(error, 0)
+                                                }
+                                                Ok(mut permit) => {
+                                                    let revalidated = match &permit {
+                                                        Some(permit) => permit.revalidate().await,
+                                                        None => Ok(()),
+                                                    };
+                                                    if let Err(error) = revalidated {
+                                                        if let Some(permit) = &mut permit {
+                                                            let _ = permit.finish(crate::execution_limits::SettlementOutcome::ProvenNeverSent).await;
+                                                        }
+                                                        budget_failure.lock().unwrap().get_or_insert(error.clone());
+                                                        TaskResult::error(error, 0)
+                                                    } else {
+                                                        if let Some(observer) = &observer {
+                                                            observer.on_frame(RunFrame::ToolStarted { step_id: frame_step_id.clone(), tool_call: prepared_step.tool_call.clone() });
+                                                        }
+                                                        let started = std::sync::atomic::AtomicBool::new(false);
+                                                        let call = async {
+                                                            if run_cancel.as_ref().is_some_and(CancelSignal::is_cancelled) {
+                                                                return Err(run_cancel.as_ref().unwrap().run_error().to_string());
+                                                            }
+                                                            if let Some(context) = &execution_context { context.check_live()?; }
+                                                            started.store(true, std::sync::atomic::Ordering::SeqCst);
+                                                            Ok(execute_tool(state, user_message, prepared_step.tool_call.clone()).await)
+                                                        };
+                                                        let outcome = match &execution_context {
+                                                            Some(context) => context.until_retired(call, run_cancel.clone()).await.and_then(|result| result),
+                                                            None => call.await,
+                                                        };
+                                                        let result = outcome.unwrap_or_else(|error| {
+                                                            budget_failure.lock().unwrap().get_or_insert(error.clone());
+                                                            TaskResult::error(error, 0)
+                                                        });
+                                                        if let Some(permit) = &mut permit {
+                                                            let outcome = if started.load(std::sync::atomic::Ordering::SeqCst) {
+                                                                crate::execution_limits::SettlementOutcome::Unknown { observed: None }
+                                                            } else { crate::execution_limits::SettlementOutcome::ProvenNeverSent };
+                                                            if let Err(error) = permit.finish(outcome).await {
+                                                                budget_failure.lock().unwrap().get_or_insert(error.clone());
+                                                            }
+                                                        }
+                                                        result
+                                                    }
+                                                }
+                                            },
                                         };
                                         let tool_duration = if recovered {
                                             0
@@ -1347,6 +1551,15 @@ impl AgentRuntime {
                             }
 
                             self.record_token_event();
+                            if self.stop_requested() {
+                                return self.finish_stopped(start);
+                            }
+                            let budget_error = budget_failure.lock().unwrap().clone();
+                            if let Some(error) = budget_error {
+                                let duration = now_millis().saturating_sub(start);
+                                self.mark_failed(error.clone(), duration);
+                                return TaskResult::error(error, duration);
+                            }
                         }
                     }
                 }
@@ -1397,14 +1610,24 @@ impl AgentRuntime {
         step: &str,
         response: &crate::ModelGenerateResponse,
     ) {
+        let reason = self
+            .winning_cancel()
+            .map_or(CANCELLED_TOOL_RESULT, |cancel| cancel.tool_result());
+        self.record_unexecuted_model_response(room, step, response, reason, STOPPED_METADATA_KEY);
+    }
+
+    fn record_unexecuted_model_response(
+        &mut self,
+        room: &str,
+        step: &str,
+        response: &crate::ModelGenerateResponse,
+        reason: &str,
+        marker: &'static str,
+    ) {
         let calls = response.tool_calls.as_deref().unwrap_or_default();
         if calls.is_empty() {
-            let message_id = self.record_unfinished_step(
-                room,
-                step,
-                &response.content.text,
-                STOPPED_METADATA_KEY,
-            );
+            let message_id =
+                self.record_unfinished_step(room, step, &response.content.text, marker);
             self.emit_frame(RunFrame::StepFinished {
                 step_id: step.into(),
                 message_id,
@@ -1423,18 +1646,7 @@ impl AgentRuntime {
             });
             for call in calls {
                 let cancelled = self.tag_for_run(
-                    content_from_tool_result(
-                        call,
-                        TaskResult::error(
-                            self.control
-                                .as_ref()
-                                .map_or(CANCELLED_TOOL_RESULT, |control| {
-                                    control.cancel.tool_result()
-                                }),
-                            0,
-                        ),
-                        false,
-                    ),
+                    content_from_tool_result(call, TaskResult::error(reason, 0), false),
                     Some(step),
                     self.tool_markers(TaskStatus::Error, 0),
                 );
@@ -1551,9 +1763,20 @@ impl AgentRuntime {
     }
 
     fn stop_requested(&self) -> bool {
+        self.winning_cancel().is_some()
+    }
+
+    fn winning_cancel(&self) -> Option<&CancelSignal> {
         self.control
             .as_ref()
-            .is_some_and(|control| control.cancel.is_cancelled())
+            .map(|control| &control.cancel)
+            .filter(|cancel| cancel.is_cancelled())
+            .or_else(|| {
+                self.execution_context
+                    .as_ref()
+                    .map(|context| &context.cancel)
+                    .filter(|cancel| cancel.is_cancelled())
+            })
     }
 
     /// Ends a stopped run (spec §4.6): the result is the `stopped` error and
@@ -1567,9 +1790,8 @@ impl AgentRuntime {
     /// Completed effects and previously recorded text/usage remain unchanged.
     pub fn mark_cancelled(&mut self, duration_ms: u64) -> TaskResult<Content> {
         let error = self
-            .control
-            .as_ref()
-            .map_or(RUN_STOPPED_ERROR, |control| control.cancel.run_error());
+            .winning_cancel()
+            .map_or(RUN_STOPPED_ERROR, |cancel| cancel.run_error());
         let result = TaskResult::error(error, duration_ms);
         if error != RUN_STOPPED_ERROR {
             self.mark_failed(error, duration_ms);

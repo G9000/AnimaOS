@@ -1,0 +1,133 @@
+name: Harness reliability
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/harness-reliability.yml'
+      - 'hosts/rust-daemon/**'
+      - 'hosts/anima/**'
+      - 'packages/core-rust/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'bun.lock'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/harness-reliability.yml'
+      - 'hosts/rust-daemon/**'
+      - 'hosts/anima/**'
+      - 'packages/core-rust/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'bun.lock'
+  workflow_dispatch:
+    inputs:
+      postgres:
+        description: Run ownership takeover against this job's disposable PostgreSQL service
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-reliability-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deterministic:
+    name: Deterministic gate (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      NX_DAEMON: 'false'
+      NX_ISOLATE_PLUGINS: 'false'
+      NX_NO_CLOUD: 'true'
+      CARGO_TARGET_DIR: target/cargo
+      RUST_TEST_THREADS: '4'
+      ANIMA_RUN_TRACE_LIVE: '0'
+      ANTHROPIC_API_KEY: ''
+      OPENAI_API_KEY: ''
+      ANIMA_HARNESS_RELIABILITY_OUTPUT_DIR: ${{ github.workspace }}/target/harness-reliability-evidence
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: harness-reliability-${{ matrix.os }}
+      - name: Linux native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libdbus-1-dev libssl-dev
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Validate Nx project identities
+        run: bun x nx show projects --json
+      - name: Bounded trace-driver and incomplete-matrix regressions
+        run: bun x nx run core-rust:harness-reliability-test --skipNxCache
+      - name: Core and daemon tests including real child-process sequences
+        # rust-daemon:test depends on core-rust:test; both run through Nx.
+        run: bun x nx run rust-daemon:test --skipNxCache
+      - name: Rust format gate
+        run: bun x nx run rust-daemon:lint --skipNxCache
+      - name: Packaged supervisor lifecycle tests
+        run: bun x nx run anima:test --skipNxCache
+      - name: Retain deterministic seed traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-reliability-${{ matrix.os }}
+          path: target/harness-reliability-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+  isolated-postgres:
+    name: Disposable PostgreSQL ownership takeover (opt in)
+    if: github.event_name == 'workflow_dispatch' && inputs.postgres
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: anima_gate
+          POSTGRES_PASSWORD: isolated_gate_only
+          POSTGRES_DB: anima_harness_gate
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U anima_gate -d anima_harness_gate"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      NX_DAEMON: 'false'
+      NX_ISOLATE_PLUGINS: 'false'
+      NX_NO_CLOUD: 'true'
+      CARGO_TARGET_DIR: target/cargo
+      RUST_TEST_THREADS: '1'
+      ANIMA_RUN_TRACE_LIVE: '0'
+      ANIMA_TEST_PROFILE_OWNER_POSTGRES_URL: postgres://anima_gate:isolated_gate_only@127.0.0.1:5432/anima_harness_gate
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: harness-reliability-isolated-postgres
+      - run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libdbus-1-dev libssl-dev
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Serialize session-death takeover and stale-writer acceptance
+        run: bun x nx run core-rust:test --skipNxCache --command="cargo test -p anima-daemon profile_owner_postgres_ -- --ignored --test-threads=1"

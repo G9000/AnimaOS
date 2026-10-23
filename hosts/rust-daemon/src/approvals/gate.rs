@@ -509,10 +509,18 @@ impl ApprovalGate {
             mut woken,
             mut abandoned,
         } = pending;
+        let profile_lost = self.coordinator.profile_loss_signal().await;
         let mut wake_open = true;
         let settled = loop {
             tokio::select! {
                 biased;
+                () = profile_lost.cancelled() => {
+                    // The former writer cannot settle durable approval state.
+                    // Retain that evidence for recovery and release only its waiter.
+                    self.coordinator.forget_approval_waiter(&id);
+                    abandoned.disarm();
+                    return None;
+                },
                 settled = &mut woken, if wake_open => match settled {
                     Ok(approval) => break Some(approval),
                     // Dropped unsent: no wake-up is coming, but that is not a

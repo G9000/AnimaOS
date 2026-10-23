@@ -257,7 +257,7 @@ impl AgentRunCoordinator {
             // JSON escaping can expand a control byte to six bytes.
             preview = super::bounded_text(&preview, preview.len() / 2);
         };
-        let (record, persist, parent, room) = {
+        let (record, execution_candidate, persist, parent, room) = {
             let mut guard = self.state.write().await;
             let config = guard
                 .agents
@@ -293,6 +293,23 @@ impl AgentRunCoordinator {
                 .await;
                 return;
             }
+            let execution_candidate = match crate::execution_budgets::prepare_run_binding(
+                &guard,
+                &record,
+                now_millis(),
+            ) {
+                Ok(candidate) => candidate,
+                Err(error) => {
+                    drop(guard);
+                    self.close_helper_completion(
+                        child_id,
+                        &format!("Shared execution admission refused: {error}"),
+                    )
+                    .await;
+                    return;
+                }
+            };
+            guard.execution_budget_candidate_snapshot = Some(execution_candidate.registry.clone());
             guard
                 .runs
                 .get_mut(child_id)
@@ -313,6 +330,7 @@ impl AgentRunCoordinator {
                 .to_string();
             (
                 record,
+                execution_candidate,
                 guard.control_plane_persist_request(),
                 RunLink {
                     run_id: helper.parent_run_id.clone(),
@@ -322,7 +340,10 @@ impl AgentRunCoordinator {
                 room,
             )
         };
-        if let Err(error) = persist.save().await {
+        if let Err(error) =
+            crate::execution_budgets::save_admission(&self.state, execution_candidate, persist)
+                .await
+        {
             let mut guard = self.state.write().await;
             guard.runs.remove(&reserved);
             let source = guard.runs.get_mut(child_id).expect("source stays retained");

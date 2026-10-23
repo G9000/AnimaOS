@@ -6,11 +6,18 @@ use sqlx::PgPool;
 
 pub struct SqlxPostgresAdapter {
     pool: PgPool,
+    owner: Option<crate::profile_owner::ProfileOwner>,
 }
 
 impl SqlxPostgresAdapter {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self { pool, owner: None }
+    }
+    pub(crate) fn new_owned(pool: PgPool, owner: crate::profile_owner::ProfileOwner) -> Self {
+        Self {
+            pool,
+            owner: Some(owner),
+        }
     }
 }
 
@@ -18,7 +25,7 @@ impl SqlxPostgresAdapter {
 impl DatabaseAdapter for SqlxPostgresAdapter {
     async fn write_step(&self, step: &Step) -> PersistenceResult<()> {
         let status = step.status.as_str();
-        sqlx::query(
+        let query = sqlx::query(
             r#"
             INSERT INTO step_log (id, agent_id, step_index, idempotency_key, type, status, input, output)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -45,10 +52,25 @@ impl DatabaseAdapter for SqlxPostgresAdapter {
         .bind(&step.step_type)
         .bind(status)
         .bind(&step.input)
-        .bind(&step.output)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| PersistenceError::Write(e.to_string()))?;
+        .bind(&step.output);
+        if let Some(owner) = &self.owner {
+            let mut writer = owner
+                .postgres_writer()
+                .await
+                .map_err(|error| PersistenceError::Write(error.to_string()))?;
+            query
+                .execute(&mut *writer)
+                .await
+                .map_err(|error| PersistenceError::Write(error.to_string()))?;
+            writer
+                .complete()
+                .map_err(|error| PersistenceError::Write(error.to_string()))?;
+        } else {
+            query
+                .execute(&self.pool)
+                .await
+                .map_err(|error| PersistenceError::Write(error.to_string()))?;
+        }
         Ok(())
     }
 

@@ -225,6 +225,50 @@ impl SkillService {
         _physical: tokio::sync::OwnedSemaphorePermit,
     ) {
         let absolute = Instant::now() + Duration::from_millis(RUN_TIMEOUT_MS);
+        let execution = match crate::execution_budgets::standalone_context_with_limits(
+            &self.state,
+            self.transactions.clone(),
+            format!("skill-evaluation:{report_id}"),
+            anima_core::CancelSignal::new(),
+            captured
+                .config
+                .settings
+                .as_ref()
+                .and_then(|settings| settings.execution_limits.clone()),
+        )
+        .await
+        {
+            Ok(execution) => execution,
+            Err(error) => {
+                let _ = self
+                    .finish_evaluation(
+                        &report_id,
+                        EvaluationStatus::Inconclusive,
+                        &format!("Evaluation execution budget unavailable: {error}"),
+                    )
+                    .await;
+                let _ = self
+                    .evaluation_transaction(move |service| async move {
+                        let mut state = service.state.write().await;
+                        if let Some(row) = state
+                            .skill_evaluations
+                            .reports
+                            .iter_mut()
+                            .find(|row| row.id == report_id)
+                        {
+                            row.retired_at_ms = Some(now_millis());
+                        }
+                        let persist = state.control_plane_persist_request();
+                        drop(state);
+                        persist
+                            .save()
+                            .await
+                            .map_err(|_| unavailable("Evaluation retirement could not be saved"))
+                    })
+                    .await;
+                return;
+            }
+        };
         let mut config = captured.config.clone();
         config.tools = None;
         config.plugins = None;
@@ -251,8 +295,9 @@ impl SkillService {
             .take()
             .unwrap_or(captured.suite.suite.trial_timeout_ms)
             .min(captured.suite.suite.trial_timeout_ms);
-        let adapter = self.state.read().await.model_adapter.clone();
-        'fixtures: for fixture in &captured.suite.suite.fixtures {
+        let adapter = self.state.read().await.profile_model_adapter();
+        'fixtures: for (fixture_index, fixture) in captured.suite.suite.fixtures.iter().enumerate()
+        {
             for repetition in 0..captured.suite.suite.trials_per_fixture {
                 for variant in [TrialVariant::Baseline, TrialVariant::Candidate] {
                     if Instant::now() >= absolute
@@ -260,6 +305,11 @@ impl SkillService {
                     {
                         break 'fixtures;
                     }
+                    let trial_adapter = crate::controlled_model::bind(
+                        adapter.clone(),
+                        execution.clone(),
+                        format!("{report_id}:fixture-{fixture_index}:{repetition}:{variant:?}"),
+                    );
                     let package = if variant == TrialVariant::Candidate {
                         Some(&captured.candidate)
                     } else {
@@ -322,7 +372,7 @@ impl SkillService {
                     // Do not timeout/drop this future. Sink rejection asks a
                     // cooperative adapter to stop; noncooperative work retains
                     // this permit until it really exits.
-                    let stream = std::panic::AssertUnwindSafe(adapter.stream(
+                    let stream = std::panic::AssertUnwindSafe(trial_adapter.stream(
                         &config,
                         &request,
                         sink.as_ref(),

@@ -63,9 +63,14 @@ async fn guarded<T>(call: impl std::future::Future<Output = T>) -> std::thread::
 }
 
 /// One call for the single worker, in the order it was queued.
-enum Job {
+enum JobPayload {
     Turn(TurnRecord),
     Write(MemoryWriteEvent),
+}
+
+struct Job {
+    payload: JobPayload,
+    owner: Option<crate::profile_owner::ProfileOwner>,
 }
 
 /// The active provider and the queue to its one worker. Mirror events and
@@ -97,9 +102,15 @@ impl Active {
         // holds the provider, not the `Active`, so there is no cycle. Each call
         // is guarded on its own, so a panicking one never stops the worker.
         runtime.spawn(async move {
-            while let Some(job) = jobs.recv().await {
-                let (call, outcome) = match job {
-                    Job::Turn(turn) => (
+            while let Some(Job { payload, owner }) = jobs.recv().await {
+                if let Some(owner) = &owner {
+                    if owner.verify_owned().await.is_err() {
+                        warn!(provider = %worker.id(), "external memory job refused after profile ownership loss");
+                        continue;
+                    }
+                }
+                let (call, outcome) = match payload {
+                    JobPayload::Turn(turn) => (
                         "sync_turn",
                         tokio::time::timeout(
                             call_timeout,
@@ -107,7 +118,7 @@ impl Active {
                         )
                         .await,
                     ),
-                    Job::Write(event) => (
+                    JobPayload::Write(event) => (
                         "on_memory_write",
                         tokio::time::timeout(
                             call_timeout,
@@ -116,6 +127,12 @@ impl Active {
                         .await,
                     ),
                 };
+                // The job retains its authority through the remote call. If
+                // ownership was lost after dispatch, its outcome remains an
+                // external effect requiring review; no rollback is claimed.
+                if owner.as_ref().is_some_and(|owner| owner.ensure_owned().is_err()) {
+                    warn!(provider = %worker.id(), call, "external memory outcome requires review after profile ownership loss");
+                }
                 match outcome {
                     Ok(Ok(Ok(()))) => {}
                     Ok(Ok(Err(error))) => {
@@ -224,23 +241,44 @@ pub(crate) async fn status() -> (String, ProviderStatus) {
 /// Queues a finished owner turn for the provider. With none, `turn` is never
 /// built.
 pub(crate) fn sync_turn(turn: impl FnOnce() -> TurnRecord) {
+    sync_turn_with_owner(None, turn);
+}
+
+pub(crate) fn sync_turn_with_owner(
+    owner: Option<crate::profile_owner::ProfileOwner>,
+    turn: impl FnOnce() -> TurnRecord,
+) {
     let Some(active) = active() else {
         return;
     };
-    active.enqueue([Job::Turn(turn())]);
+    active.enqueue([Job {
+        payload: JobPayload::Turn(turn()),
+        owner,
+    }]);
 }
 
 /// Queues a persisted memory change for the provider. With no provider
 /// (`none`) this returns before `current` runs, so the default path never
 /// snapshots or diffs.
 pub(crate) fn mirror_persisted(previous: &[Memory], current: impl FnOnce() -> Vec<Memory>) {
+    mirror_persisted_with_owner(previous, current, None);
+}
+
+pub(crate) fn mirror_persisted_with_owner(
+    previous: &[Memory],
+    current: impl FnOnce() -> Vec<Memory>,
+    owner: Option<crate::profile_owner::ProfileOwner>,
+) {
     let Some(active) = active() else {
         return;
     };
     #[cfg(test)]
     SNAPSHOT_DIFFS.with(|count| count.set(count.get() + 1));
     let events = memory_write_events(previous, &current());
-    active.enqueue(events.into_iter().map(Job::Write));
+    active.enqueue(events.into_iter().map(|event| Job {
+        payload: JobPayload::Write(event),
+        owner: owner.clone(),
+    }));
 }
 
 /// Adds, updates (content changed) and removes between two snapshots, by id.
@@ -460,3 +498,118 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod profile_ownership_tests {
+    use super::*;
+    use crate::profile_owner::ProfileOwner;
+    use test_support::{inject_with, FakeProvider};
+
+    fn turn(text: &str) -> TurnRecord {
+        TurnRecord {
+            agent_id: "owner".into(),
+            session_id: "session".into(),
+            user_text: text.into(),
+            reply_text: "reply".into(),
+            at_ms: 1,
+        }
+    }
+    fn event(content: &str) -> MemoryWriteEvent {
+        MemoryWriteEvent {
+            agent_id: "owner".into(),
+            action: MemoryWriteAction::Add,
+            memory_type: "fact".into(),
+            memory_id: content.into(),
+            content: content.into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn profile_owner_queued_remote_write_and_turn_are_refused_after_loss() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("memory.json");
+        let owner = ProfileOwner::acquire([path.clone()]).unwrap();
+        let mut fake = FakeProvider::new("profile-owner-queue");
+        fake.hang_write_content = Some("hold".into());
+        let fake = Arc::new(fake);
+        let _injected = inject_with(
+            fake.clone(),
+            8,
+            Duration::from_millis(200),
+            Duration::from_secs(1),
+        );
+        active().unwrap().enqueue([Job {
+            payload: JobPayload::Write(event("hold")),
+            owner: None,
+        }]);
+        fake.wait_until(|provider| !provider.writes.lock().unwrap().is_empty())
+            .await;
+        let mut manager = anima_memory::MemoryManager::new();
+        let memory = manager
+            .add(anima_memory::NewMemory {
+                agent_id: "owner".into(),
+                agent_name: "Owner".into(),
+                memory_type: anima_memory::MemoryType::Fact,
+                content: "must not dispatch".into(),
+                importance: 0.5,
+                tags: None,
+                scope: None,
+                room_id: None,
+                world_id: None,
+                session_id: None,
+            })
+            .unwrap();
+        mirror_persisted_with_owner(&[], || vec![memory], Some(owner.clone()));
+        sync_turn_with_owner(Some(owner.clone()), || turn("must not dispatch"));
+        owner.mark_lost();
+        drop(owner);
+        sync_turn(|| turn("barrier"));
+        fake.wait_until(|provider| !provider.turns.lock().unwrap().is_empty())
+            .await;
+        assert_eq!(
+            fake.writes.lock().unwrap().len(),
+            1,
+            "a revoked queued memory write reached the provider"
+        );
+        assert_eq!(fake.turns.lock().unwrap()[0].user_text, "barrier");
+        ProfileOwner::acquire([path]).unwrap();
+    }
+
+    #[tokio::test]
+    async fn profile_owner_admitted_remote_job_retains_lease_through_await() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("memory.json");
+        let owner = ProfileOwner::acquire([path.clone()]).unwrap();
+        let mut fake = FakeProvider::new("profile-owner-inflight");
+        fake.hang_write_content = Some("hold".into());
+        let fake = Arc::new(fake);
+        let injected = inject_with(
+            fake.clone(),
+            8,
+            Duration::from_millis(300),
+            Duration::from_secs(1),
+        );
+        active().unwrap().enqueue([Job {
+            payload: JobPayload::Write(event("hold")),
+            owner: Some(owner),
+        }]);
+        fake.wait_until(|provider| !provider.writes.lock().unwrap().is_empty())
+            .await;
+        drop(injected);
+        assert!(
+            ProfileOwner::acquire([path.clone()]).is_err(),
+            "a dispatched provider future released its profile authority"
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if ProfileOwner::acquire([path.clone()]).is_ok() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "completed provider job leaked ownership"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+}

@@ -2,14 +2,16 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use anima_core::{AgentConfig, AgentSettings, EngineEvent, ModelAdapter};
+use anima_core::execution_limits::{ExecutionContext, ExecutionLimits};
+use anima_core::turn_recovery::{TurnBinding, TurnCheckpointSink};
+use anima_core::{AgentConfig, AgentSettings, EngineEvent, ModelAdapter, RunControl, RunObserver};
 use anima_model_adapters::{
     provider_definitions, ProviderAdapterConfig, ProviderCredential, ProviderDefinition,
     ProviderModelAdapter,
 };
 
 use crate::harness::Harness;
-use crate::tool::{HarnessTool, ToolSet};
+use crate::tool::{HarnessTool, ToolPolicy, ToolSet};
 
 /// Errors returned by [`HarnessBuilder::build`].
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,6 +22,8 @@ pub enum HarnessError {
     MissingProvider,
     /// The provider id/alias is not in the anima-model-adapters catalog.
     UnknownProvider(String),
+    /// Invalid limits or mismatched host execution/checkpoint identity.
+    InvalidExecutionOptions(String),
 }
 
 impl fmt::Display for HarnessError {
@@ -35,11 +39,25 @@ impl fmt::Display for HarnessError {
             Self::UnknownProvider(provider) => {
                 write!(formatter, "unknown model provider: {provider}")
             }
+            Self::InvalidExecutionOptions(error) => {
+                write!(formatter, "invalid harness execution options: {error}")
+            }
         }
     }
 }
 
 impl std::error::Error for HarnessError {}
+
+#[derive(Default)]
+pub(crate) struct HarnessControls {
+    pub run_id: Option<String>,
+    pub run_control: Option<RunControl>,
+    pub observer: Option<Arc<dyn RunObserver>>,
+    pub execution_limits: ExecutionLimits,
+    pub execution_context: Option<ExecutionContext>,
+    pub checkpoint: Option<(TurnBinding, Arc<dyn TurnCheckpointSink>)>,
+    pub tool_policy: Option<Arc<dyn ToolPolicy>>,
+}
 
 /// Builder for [`Harness`].
 ///
@@ -60,6 +78,7 @@ pub struct HarnessBuilder {
     tools: ToolSet,
     adapter: Option<Arc<dyn ModelAdapter>>,
     event_listener: Option<Arc<dyn Fn(EngineEvent) + Send + Sync>>,
+    controls: HarnessControls,
 }
 
 impl HarnessBuilder {
@@ -77,6 +96,7 @@ impl HarnessBuilder {
             tools: ToolSet::new(),
             adapter: None,
             event_listener: None,
+            controls: HarnessControls::default(),
         }
     }
 
@@ -167,6 +187,57 @@ impl HarnessBuilder {
         self
     }
 
+    /// Bind this harness to one host run. Repeated calls share its finite
+    /// allowance; omit this for independent ephemeral scopes per input.
+    pub fn run_id(mut self, id: impl Into<String>) -> Self {
+        self.controls.run_id = Some(id.into());
+        self
+    }
+
+    /// Attach the host's Stop signal and steering inbox.
+    pub fn run_control(mut self, control: RunControl) -> Self {
+        self.controls.run_control = Some(control);
+        self
+    }
+
+    /// Observe model usage, streaming output and tool results inline.
+    pub fn run_observer(mut self, observer: Arc<dyn RunObserver>) -> Self {
+        self.controls.observer = Some(observer);
+        self
+    }
+
+    /// Finite limits for ephemeral scopes. Defaults to core ExecutionLimits.
+    /// An explicit execution context retains its host's existing allowance.
+    pub fn execution_limits(mut self, limits: ExecutionLimits) -> Self {
+        self.controls.execution_limits = limits;
+        self
+    }
+
+    /// Attach an existing shared allowance, including its current consumption.
+    /// Calls share this context; the builder never resets or replaces it.
+    pub fn execution_context(mut self, context: ExecutionContext) -> Self {
+        self.controls.execution_context = Some(context);
+        self
+    }
+
+    /// Attach trusted host checkpoint custody for one attempt. This selects a
+    /// bound context whose run ID must equal `binding.attempt_run_id`.
+    pub fn turn_checkpoint(
+        mut self,
+        binding: TurnBinding,
+        sink: Arc<dyn TurnCheckpointSink>,
+    ) -> Self {
+        self.controls.checkpoint = Some((binding, sink));
+        self
+    }
+
+    /// Require host approval and live revalidation for every actual tool call.
+    /// Without a policy, registering a tool is trusted embedder authority.
+    pub fn tool_policy(mut self, policy: Arc<dyn ToolPolicy>) -> Self {
+        self.controls.tool_policy = Some(policy);
+        self
+    }
+
     pub fn build(self) -> Result<Harness, HarnessError> {
         let model = self
             .model
@@ -226,17 +297,20 @@ impl HarnessBuilder {
                 timeout_ms: None,
                 max_retries: None,
                 max_tool_iterations: self.max_tool_iterations,
+                execution_limits: Some(self.controls.execution_limits.clone()),
                 additional: BTreeMap::new(),
             }),
             fallbacks: Vec::new(),
         };
 
-        Ok(Harness::new(
+        Harness::new(
             config,
             adapter,
             self.tools,
             self.event_listener,
-        ))
+            self.controls,
+        )
+        .map_err(HarnessError::InvalidExecutionOptions)
     }
 }
 

@@ -116,6 +116,7 @@ pub(crate) struct MemoryEmbeddingRuntime {
     index: InMemoryVectorIndex<MemoryEmbeddingProvider>,
     indexed_content: HashMap<String, [u8; 32]>,
     store: Option<SqliteMemoryEmbeddingStore>,
+    owner: Option<crate::profile_owner::ProfileOwner>,
     load: MemoryEmbeddingLoad,
     /// Bumped on every embedder swap. Query vectors carry it, so one prepared
     /// before a swap is never scored against the new index.
@@ -185,6 +186,17 @@ impl MemoryEmbeddingRuntime {
         default_sqlite_path: Option<PathBuf>,
         default_model_cache_dir: Option<PathBuf>,
     ) -> io::Result<Self> {
+        Self::from_env_owned(default_sqlite_path, default_model_cache_dir, None)
+    }
+
+    pub(crate) fn from_env_owned(
+        default_sqlite_path: Option<PathBuf>,
+        default_model_cache_dir: Option<PathBuf>,
+        owner: Option<crate::profile_owner::ProfileOwner>,
+    ) -> io::Result<Self> {
+        if let Some(owner) = &owner {
+            owner.ensure_owned()?;
+        }
         let explicit = std::env::var("ANIMAOS_RS_MEMORY_EMBEDDINGS").ok();
         if explicit.as_deref().is_some_and(|mode| {
             matches!(
@@ -192,7 +204,9 @@ impl MemoryEmbeddingRuntime {
                 "0" | "off" | "false" | "disabled"
             )
         }) {
-            return Ok(Self::disabled());
+            let mut runtime = Self::disabled();
+            runtime.owner = owner;
+            return Ok(runtime);
         }
 
         let dimension = embedding_dimension_from_env()?;
@@ -230,8 +244,17 @@ impl MemoryEmbeddingRuntime {
         let storage_path =
             env_path("ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE")?.or(default_sqlite_path);
         if let Some(path) = storage_path {
-            runtime.store = Some(SqliteMemoryEmbeddingStore::new(path)?);
+            let path = owner
+                .as_ref()
+                .map(|owner| owner.owned_sqlite_path(&path))
+                .transpose()?
+                .unwrap_or(path);
+            runtime.store = Some(SqliteMemoryEmbeddingStore::new_with_owner(
+                path,
+                owner.clone(),
+            )?);
         }
+        runtime.owner = owner;
         Ok(runtime)
     }
 
@@ -319,6 +342,7 @@ impl MemoryEmbeddingRuntime {
             index: InMemoryVectorIndex::new(embedder),
             indexed_content: HashMap::new(),
             store: None,
+            owner: None,
             load: MemoryEmbeddingLoad::Ready,
             generation: 0,
             persist_vectors: true,
@@ -533,7 +557,16 @@ impl MemoryEmbeddingRuntime {
 
     /// Hands out the background model loader once; `None` when nothing loads.
     pub(crate) fn take_model_loader(&mut self) -> Option<MemoryModelLoader> {
-        self.model_loader.take()
+        let loader = self.model_loader.take()?;
+        let Some(owner) = self.owner.clone() else {
+            return Some(loader);
+        };
+        Some(Box::new(move || {
+            owner.ensure_owned().map_err(|error| error.to_string())?;
+            let loaded = loader()?;
+            owner.ensure_owned().map_err(|error| error.to_string())?;
+            Ok(loaded)
+        }))
     }
 
     /// The model did not load: keep the hashed vectors until restart.
@@ -1313,6 +1346,7 @@ const UPSERT_EMBEDDING_SQL: &str = r#"
 #[derive(Clone, Debug)]
 struct SqliteMemoryEmbeddingStore {
     path: PathBuf,
+    owner: Option<crate::profile_owner::ProfileOwner>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1325,18 +1359,36 @@ struct StoredEmbedding {
 
 impl SqliteMemoryEmbeddingStore {
     fn new(path: PathBuf) -> io::Result<Self> {
+        Self::new_with_owner(path, None)
+    }
+
+    fn new_with_owner(
+        path: PathBuf,
+        owner: Option<crate::profile_owner::ProfileOwner>,
+    ) -> io::Result<Self> {
+        let path = owner
+            .as_ref()
+            .map(|owner| owner.owned_sqlite_path(&path))
+            .transpose()?
+            .unwrap_or(path);
+        if let Some(owner) = &owner {
+            owner.ensure_owned()?;
+        }
         if let Some(parent) = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
         {
             std::fs::create_dir_all(parent)?;
         }
-        let store = Self { path };
+        let store = Self { path, owner };
         store.ensure_schema()?;
         Ok(store)
     }
 
     fn connection(&self) -> io::Result<Connection> {
+        if let Some(owner) = &self.owner {
+            owner.ensure_owned()?;
+        }
         let connection = Connection::open(&self.path).map_err(sqlite_error)?;
         connection
             .execute_batch("PRAGMA foreign_keys = ON;")
@@ -3350,5 +3402,74 @@ mod tests {
                 std::env::remove_var(self.name);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod profile_ownership_tests {
+    use super::*;
+    use crate::profile_owner::ProfileOwner;
+
+    #[test]
+    fn profile_owner_extracted_model_loader_retains_lease_after_runtime_is_dropped() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("memory.sqlite");
+        let owner =
+            ProfileOwner::acquire_resources([crate::profile_owner::ProfileResource::Sqlite(
+                path.clone(),
+            )])
+            .unwrap();
+        let mut runtime = MemoryEmbeddingRuntime::awaiting_model(
+            "test",
+            "test".into(),
+            Box::new(|| {
+                Ok(LoadedMemoryEmbedder(MemoryEmbeddingProvider::Local(
+                    LocalMemoryEmbedder::new(16),
+                )))
+            }),
+        );
+        runtime.owner = Some(owner);
+        let loader = runtime.take_model_loader().unwrap();
+        drop(runtime);
+        assert!(
+            ProfileOwner::acquire([path.clone()]).is_err(),
+            "the detached model loader dropped its profile lease"
+        );
+        loader().unwrap();
+        ProfileOwner::acquire([path]).unwrap();
+    }
+
+    #[test]
+    fn profile_owner_revoked_embedding_store_cannot_write_vectors() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("memory.sqlite");
+        let owner =
+            ProfileOwner::acquire_resources([crate::profile_owner::ProfileResource::Sqlite(
+                path.clone(),
+            )])
+            .unwrap();
+        let store =
+            SqliteMemoryEmbeddingStore::new_with_owner(path.clone(), Some(owner.clone())).unwrap();
+        store
+            .upsert("memory", "test", &[1.0, 2.0], &[1; 32])
+            .unwrap();
+        owner.mark_lost();
+        assert!(store
+            .upsert("memory", "test", &[3.0, 4.0], &[2; 32])
+            .is_err());
+        let read_only =
+            rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .unwrap();
+        let saved: String = read_only
+            .query_row(
+                "SELECT vector_json FROM memory_embeddings WHERE memory_id = 'memory'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Vec<f32>>(&saved).unwrap(),
+            vec![1.0, 2.0]
+        );
     }
 }

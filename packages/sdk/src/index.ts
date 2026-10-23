@@ -510,6 +510,7 @@ export type {
   AgentStatus,
   Attachment,
   Content,
+  ExecutionLimits,
   TaskResult,
   TokenUsage,
   UUID,

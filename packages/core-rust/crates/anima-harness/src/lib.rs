@@ -25,7 +25,7 @@ mod tool;
 
 pub use config::{HarnessBuilder, HarnessError};
 pub use harness::Harness;
-pub use tool::{HarnessTool, ToolSet};
+pub use tool::{HarnessTool, ToolApproval, ToolInvocation, ToolPolicy, ToolSet};
 
 pub use anima_core;
 pub use anima_model_adapters;

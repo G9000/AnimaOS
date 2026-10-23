@@ -275,15 +275,17 @@ pub(super) fn execute_bash_command_owned(
     cwd: &str,
     run_cancel: Option<CancelSignal>,
     call_cancel: CancelSignal,
+    profile_owner: Option<crate::profile_owner::ProfileOwner>,
 ) -> Result<BashCommandResult, String> {
     let root = workspace_root_path("bash", configured_root)?;
-    execute_windows_from_root(
+    execute_windows_from_root_owned(
         &root,
         command,
         timeout_ms,
         cwd,
         run_cancel,
         Some(call_cancel),
+        profile_owner,
     )
 }
 
@@ -371,6 +373,27 @@ fn execute_windows_from_root(
     run_cancel: Option<CancelSignal>,
     call_cancel: Option<CancelSignal>,
 ) -> ShellResult {
+    execute_windows_from_root_owned(
+        root,
+        command,
+        timeout_ms,
+        cwd,
+        run_cancel,
+        call_cancel,
+        None,
+    )
+}
+
+#[cfg(windows)]
+fn execute_windows_from_root_owned(
+    root: &Path,
+    command: &str,
+    timeout_ms: u64,
+    cwd: &str,
+    run_cancel: Option<CancelSignal>,
+    call_cancel: Option<CancelSignal>,
+    profile_owner: Option<crate::profile_owner::ProfileOwner>,
+) -> ShellResult {
     let fuse = cleanup_fuse();
     if fuse.load(std::sync::atomic::Ordering::SeqCst) {
         return Err(BASH_CLEANUP_DISABLED.into());
@@ -405,6 +428,13 @@ fn execute_windows_from_root(
     creation.0 .0 = 0x08000000;
     wrapped.wrap(creation).wrap(JobObject);
     owned_windows_worker(fuse, move |sender, fuse| {
+        let _profile_owner = profile_owner;
+        if let Some(profile_owner) = &_profile_owner {
+            if let Err(error) = profile_owner.ensure_owned() {
+                let _ = sender.send(Err(error.to_string()));
+                return;
+            }
+        }
         let mut owner = WindowsShellOwner {
             command: wrapped,
             child: None,
@@ -435,7 +465,7 @@ fn execute_windows_from_root(
                 // forever; a process-wide broken-cleanup fuse denies new bash.
                 loop {
                     thread::park();
-                    std::hint::black_box(&owner);
+                    std::hint::black_box((&owner, &_profile_owner));
                 }
             }
         }

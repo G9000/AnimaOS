@@ -37,6 +37,27 @@ struct Harness {
     permits: Arc<Semaphore>,
 }
 
+// These fixtures represent already-admitted owner turns. Use the same budget
+// transaction as production rather than inventing allowance when a child asks.
+async fn admit_fixture_run(coordinator: &AgentRunCoordinator, run: &RunRecord) {
+    let _transaction = coordinator.control_plane_transaction().await;
+    let (candidate, persist) = {
+        let mut guard = coordinator.state.write().await;
+        let candidate = crate::execution_budgets::prepare_run_binding(
+            &guard,
+            run,
+            anima_core::primitives::now_millis(),
+        )
+        .unwrap();
+        guard.execution_budget_candidate_snapshot = Some(candidate.registry.clone());
+        guard.runs.insert(run.clone());
+        (candidate, guard.control_plane_persist_request())
+    };
+    crate::execution_budgets::save_admission(&coordinator.state, candidate, persist)
+        .await
+        .unwrap();
+}
+
 impl Harness {
     async fn new(capacity: usize) -> Self {
         let model = ScriptedModel::new(vec![Step::Text(vec!["recorded child result"])]);
@@ -86,10 +107,10 @@ impl Harness {
             },
             1,
         );
+        admit_fixture_run(&coordinator, &run).await;
         let context = {
             let mut guard = state.write().await;
             guard.live.runs().register(&run.id);
-            guard.runs.insert(run.clone());
             guard
                 .tool_execution_context()
                 .with_team(coordinator.clone(), true)
@@ -385,17 +406,20 @@ async fn foreign_actor(harness: &Harness) -> (AgentState, ToolExecutionContext) 
         .unwrap()
         .state;
     add_chat(&harness.coordinator, &agent.id, "chat:owner").await;
-    let context = {
-        let mut guard = harness.coordinator.state.write().await;
-        let mut run = guard
+    let mut run = {
+        let guard = harness.coordinator.state.read().await;
+        guard
             .runs
             .get(&harness.context.run_link.as_ref().unwrap().run_id)
             .unwrap()
-            .clone();
-        run.id = format!("run_{}", uuid::Uuid::new_v4());
-        run.agent_id = agent.id.clone();
+            .clone()
+    };
+    run.id = format!("run_{}", uuid::Uuid::new_v4());
+    run.agent_id = agent.id.clone();
+    admit_fixture_run(&harness.coordinator, &run).await;
+    let context = {
+        let mut guard = harness.coordinator.state.write().await;
         guard.live.runs().register(&run.id);
-        guard.runs.insert(run.clone());
         guard
             .tool_execution_context()
             .with_team(harness.coordinator.clone(), true)
@@ -722,6 +746,7 @@ async fn async_helper_management_queued_terminal_and_revoked_steers_never_create
 }
 
 async fn attach_queued_completion(harness: &Harness, child_id: &str) -> String {
+    let _transaction = harness.coordinator.control_plane_transaction().await;
     let mut guard = harness.coordinator.state.write().await;
     let parent = harness.context.run_link.as_ref().unwrap();
     let mut completion = RunRecord::queued(
@@ -742,6 +767,13 @@ async fn attach_queued_completion(harness: &Harness, child_id: &str) -> String {
         helper_run_id: child_id.into(),
         launch_parent_run_id: parent.run_id.clone(),
     });
+    let candidate = crate::execution_budgets::prepare_run_binding(
+        &guard,
+        &completion,
+        anima_core::primitives::now_millis(),
+    )
+    .unwrap();
+    guard.execution_budget_candidate_snapshot = Some(candidate.registry.clone());
     let id = completion.id.clone();
     guard.live.runs().register(&id);
     guard.runs.insert(completion);
@@ -753,6 +785,11 @@ async fn attach_queued_completion(harness: &Harness, child_id: &str) -> String {
         .as_mut()
         .unwrap()
         .completion = crate::runs::HelperCompletionState::Queued { run_id: id.clone() };
+    let persist = guard.control_plane_persist_request();
+    drop(guard);
+    crate::execution_budgets::save_admission(&harness.coordinator.state, candidate, persist)
+        .await
+        .unwrap();
     id
 }
 

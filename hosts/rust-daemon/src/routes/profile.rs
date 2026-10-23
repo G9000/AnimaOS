@@ -165,7 +165,7 @@ pub(crate) async fn handle_generate_profile(
                 "{PROFILE_GENERATION_UNAVAILABLE}: no generative provider configured"
             )));
         }
-        std::sync::Arc::clone(&guard.model_adapter)
+        guard.profile_model_adapter()
     };
 
     let identity = WorkspaceIdentity {
@@ -256,6 +256,12 @@ mod tests {
 
     #[async_trait]
     impl ModelAdapter for ScriptedModelAdapter {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "scripted"
         }

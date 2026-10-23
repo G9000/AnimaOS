@@ -3,7 +3,7 @@ use super::AgentRunCoordinator;
 use crate::routes::ApiError;
 use crate::sessions::{hidden_message_ids, SessionKind};
 use crate::usage::{
-    metered::{record_secondary, Metered, SecondaryCall},
+    metered::{record_secondary, SecondaryCall},
     UsageSource,
 };
 use anima_core::{
@@ -11,7 +11,6 @@ use anima_core::{
     ModelAdapter,
 };
 use serde::Serialize;
-use std::sync::Arc;
 use std::time::Duration;
 use utoipa::ToSchema;
 
@@ -34,7 +33,7 @@ impl AgentRunCoordinator {
         let _slot = SIDE_QUESTION_SLOTS.try_acquire().map_err(|_| {
             ApiError::too_many_requests("Two side questions are already in progress")
         })?;
-        let (config, adapter, request, snapshot_through_message_id, snapshot_at_ms) = {
+        let (config, adapter, request, snapshot_through_message_id, snapshot_at_ms, active_scope) = {
             let state = self.state.read().await;
             let record = state
                 .sessions
@@ -66,6 +65,22 @@ impl AgentRunCoordinator {
                 .collect();
             messages.reverse();
             let through = messages.last().map(|message| message.id.clone());
+            let active_scope = state
+                .runs
+                .for_session(agent, session)
+                .into_iter()
+                .find(|run| run.status.is_in_flight())
+                .map(|run| {
+                    (
+                        run.id.clone(),
+                        state
+                            .live
+                            .runs()
+                            .control(&run.id)
+                            .map(|control| control.cancel)
+                            .unwrap_or_default(),
+                    )
+                });
             // The canonical transcript commits when a run finishes. Capture
             // its accepted owner input separately so a first-turn side
             // question can still explain the task currently in progress.
@@ -115,20 +130,47 @@ impl AgentRunCoordinator {
             .map_err(ApiError::bad_request)?;
             (
                 runtime.config().clone(),
-                Arc::clone(&state.model_adapter),
+                state.profile_model_adapter(),
                 request,
                 through,
                 now_millis(),
+                active_scope,
             )
         };
-        let meter = Metered::new(adapter);
+        let operation_id = format!("side-question:{}", uuid::Uuid::new_v4());
+        let execution = match active_scope {
+            Some((run_id, cancel)) => {
+                crate::execution_budgets::context_for_run(
+                    &self.state,
+                    self.control_plane_transactions(),
+                    &run_id,
+                    cancel,
+                )
+                .await
+            }
+            None => {
+                crate::execution_budgets::standalone_context_with_limits(
+                    &self.state,
+                    self.control_plane_transactions(),
+                    operation_id.clone(),
+                    anima_core::CancelSignal::new(),
+                    config
+                        .settings
+                        .as_ref()
+                        .and_then(|settings| settings.execution_limits.clone()),
+                )
+                .await
+            }
+        }
+        .map_err(ApiError::service_unavailable)?;
+        let (meter, model) = crate::controlled_model::metered(adapter, execution, operation_id);
         let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
         let response = tokio::time::timeout_at(
             deadline,
             crate::side_model::side_call(&self.state, &config, deadline, |mut config| {
                 config.tools = None;
-                let (meter, request) = (&meter, &request);
-                async move { meter.generate(&config, request).await }
+                let (model, request) = (&model, &request);
+                async move { model.generate(&config, request).await }
             }),
         )
         .await;
@@ -176,6 +218,116 @@ mod tests {
     use crate::agent_runs::test_support::{
         add_chat, calculate_call, chat_request, coordinator_with, ScriptedModel, Step,
     };
+
+    struct SingleAttemptModel(std::sync::Arc<ScriptedModel>);
+    #[async_trait::async_trait]
+    impl anima_core::ModelAdapter for SingleAttemptModel {
+        fn provider(&self) -> &str {
+            "scripted"
+        }
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        async fn generate(
+            &self,
+            config: &anima_core::AgentConfig,
+            request: &anima_core::ModelGenerateRequest,
+        ) -> Result<anima_core::ModelGenerateResponse, String> {
+            anima_core::ModelAdapter::generate(self.0.as_ref(), config, request).await
+        }
+    }
+
+    #[tokio::test]
+    async fn host_budget_exhausted_active_scope_refuses_side_question_before_dispatch() {
+        use crate::runs::{RunRecord, RunSource, RunStart, RunStatus};
+        use anima_core::execution_limits::{
+            ExecutionLimits, ExecutionOperation, ExecutionScope, ReservationRequest,
+            ReservationSettlement, SettlementOutcome,
+        };
+        let model =
+            ScriptedModel::with_secondary(vec![], vec![Step::Text(vec!["must not dispatch"])]);
+        let (coordinator, agent) =
+            coordinator_with(std::sync::Arc::new(SingleAttemptModel(model.clone()))).await;
+        add_chat(&coordinator, &agent, "chat:budget-side").await;
+        let storage = tempfile::tempdir().unwrap();
+        let now = anima_core::primitives::now_millis();
+        let mut run = RunRecord::queued(
+            RunStart {
+                agent_id: agent.clone(),
+                session_id: "chat:budget-side".into(),
+                source: RunSource::Api,
+                source_ref: None,
+                idempotency_key: None,
+                text: "active request".into(),
+                model: "test".into(),
+                provider: Some("scripted".into()),
+                parent_run_id: None,
+            },
+            now,
+        );
+        run.status = RunStatus::Running;
+        run.started_at_ms = Some(now);
+        let mut scope = ExecutionScope::new(
+            "side-exhausted".into(),
+            run.id.clone(),
+            ExecutionLimits {
+                max_model_attempts: 1,
+                max_retries: 0,
+                ..Default::default()
+            },
+            now,
+        )
+        .unwrap();
+        scope
+            .reserve(
+                ReservationRequest {
+                    id: "spent".into(),
+                    run_id: run.id.clone(),
+                    logical_call_id: "spent".into(),
+                    operation: ExecutionOperation::ModelAttempt,
+                    input_tokens: 100,
+                    output_tokens: 50,
+                },
+                now,
+            )
+            .unwrap();
+        scope
+            .settle(ReservationSettlement {
+                reservation_id: "spent".into(),
+                outcome: SettlementOutcome::Unknown { observed: None },
+                physical_retired: true,
+                observed_usage: None,
+            })
+            .unwrap();
+        {
+            let mut state = coordinator.state.write().await;
+            state.set_control_plane_store(Some(
+                crate::control_plane_store::ControlPlaneStoreConfig::Json(
+                    storage.path().join("control.json"),
+                ),
+            ));
+            state
+                .execution_budgets
+                .run_scopes
+                .insert(run.id.clone(), scope.id.clone());
+            state
+                .execution_budgets
+                .scopes
+                .insert(scope.id.clone(), scope);
+            state.runs.insert(run);
+        }
+        assert!(
+            coordinator
+                .side_question(&agent, "chat:budget-side", "Why?")
+                .await
+                .is_err(),
+            "an exhausted owner scope admitted a detached secondary model call"
+        );
+        assert!(
+            model.secondary_requests().is_empty(),
+            "side question dispatched before shared budget admission"
+        );
+    }
 
     #[tokio::test]
     async fn interaction_side_question_finishes_while_the_main_run_continues() {

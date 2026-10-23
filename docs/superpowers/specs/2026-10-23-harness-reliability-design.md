@@ -1,0 +1,35 @@
+# Harness reliability hardening
+
+Approved 2026-10-23: implement all four recommendations, beginning with one writer per profile. Work in the existing main checkout at 042f95612839789b64fb085ab51a50d66a753929. No staging, commits or pushes. Preserve owner approval, Stop, current grants, reviewed recovery and exact Undo. No ordinary owner daemon/profile may be stopped or modified by acceptance tooling.
+
+## 1. Profile ownership
+
+Acquire nonblocking lifetime ownership before opening, loading, migrating or writing persistent profile state. Protect canonical control-plane, memory and explicitly shared history storage, including path aliases and overlapping configured resources. Resolve all defaults first and include ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE (defaulting to the memory SQLite path); retain guards in embeddings rebuild/background loaders and SQLite spawn_blocking opening/work closures. Canonicalization alone does not cover hard links: protect stable file identity or refuse multiply linked resources before loading payloads. Metadata-only opens are allowed during ownership discovery. Use retained OS file locks for local stores; never use PID existence, a port, timestamps or deleting a stale lock file as authority. Retain guards in pending writes so shutdown cannot release ownership before detached persistence retires. The lock file is stable and is not removed on release. On Windows deny deletion/replacement of the retained lock; on Unix validate stable identity before mutations. Fail closed if lock acquisition or ownership validation is uncertain. Independent profiles remain usable concurrently.
+
+For PostgreSQL, use database-scoped ownership on a dedicated retained session, not a pooled lock whose connection can return unnoticed. Storage writes must be fenced against stale ownership and must not reconnect into fresh authority automatically. Lost ownership blocks new admission, checkpoints, native effects and final commits; uncertain effects retain existing review semantics. Ephemeral states are explicitly ephemeral. Older binaries that ignore the protocol are outside its cooperative guarantee.
+
+Persist a writer identity/generation only as host-issued custody metadata, never as owner approval. Starting another runtime on a different port must not evade ownership. Preserve migration backups and newer-version refusal. Tests cover same-profile contenders, independent profiles, canonical aliases, failed startup cleanup, abnormal process death/takeover and stale pending work.
+
+## 2. Shared execution limits
+
+Use a portable core contract and existing execution Budget/Usage primitives where suitable. One persisted budget scope follows the original turn across helpers, secondary calls and reviewed recovery; retries and fallback/key-rotation attempts consume the same allowance. A root budget contains finite wall-time, model-attempt, tool-call, retry and token limits. Current owner config may tighten authority, never reset consumed allowance. A new independent owner turn gets its own scope. Profile/agency and other unparented secondary tasks use their own explicit bounded scope.
+
+Reserve before actual model/network or tool dispatch, persist the reservation before acknowledging admission, settle observed usage idempotently, and retain unknown/in-flight reservations after cancellation/crash. Use conservative token reservations and report unknown usage honestly; no complete remote billing guarantee. Deadline/limit failure prevents further dispatch while keeping known results/usage and stopped protocol pairs. Owner approval and storage waits remain bounded without unsafe effect cancellation. Admission and settlement share existing control-plane transactions and must not deadlock/reenter them.
+
+Native provider transport retries, fallback and key rotation must be controlled at the attempt seam; opaque adapters must honor a no-hidden-retry contract. Cancellation remains request-local and must prevent another attempt. Defaults should be generous, finite and documented, with explicit owner settings and honest summaries. Persist compatible snapshot defaults/validation/migration; never silently evict active scope or accepted usage.
+
+## 3. Consistent embeddable harness controls
+
+Extend anima-harness through focused portable options for RunControl, run identity, TurnCheckpointSink, RunObserver and shared execution limits. Use the same core AgentRuntime hooks as the daemon. Add an explicit host-supplied approval-aware tool executor/policy seam; descriptor availability is never approval. Approval failure/denial/cancellation prevents execution. No HTTP/SQL/host dependency enters anima-core or anima-harness. Ephemeral run/chat remain usable and their lack of durable host custody is explicit. Runtime controls/authority are not restored from a serialized snapshot; reattach deliberately after restore. Add conformance cases for both wrappers: Stop, failed checkpoint, denied tool, observed usage, budget exhaustion, fresh restore, and no dispatch after authority loss.
+
+## 4. Permanent reliability gate
+
+Add bounded, reproducible generated lifecycle/event sequences plus real process contention/crash tests and public owner/MCP path checks where applicable. Assert invariants against an independent model: one writer, no duplicate input claim/unsafe replay, no execution after Stop/denial, immutable accepted accounting, no completed turn resurrection, and exhausted budgets survive restart. Record seeds for reproduction; no unbounded fuzz loop.
+
+Add Windows and Linux CI jobs running the relevant Rust/core, ownership, budget and harness conformance cases through Nx. Preserve existing CI/native package jobs. Add an opt-in bounded repeated provider trace runner using matched baseline/candidate settings and independent fixture oracles; deterministic controls and live evidence are distinct. Never rerun an uncertain external action. Archive sanitized traces, configuration and complete comparison matrix, and keep evaluation from granting approval/promotion.
+
+## Reference and verification
+
+Local Hermes a9b5598909585b851b1ed65f05034033676d1a86: gateway/status.py retained OS locks, gateway/run.py stale-generation filtering, cancellation-before-retry tests, atomic budget admission. Reimplement native contracts; its in-memory generations and independent/reset child budgets do not meet this design. Retain existing legal notices; literal/substantial copied MIT code must preserve its notice.
+
+Meaningful regressions are test-first. Root serializes Cargo/Nx validation. Required full rust-daemon:test --skipNxCache, rust-daemon:lint, rust-daemon:build, packaged anima:test when startup is affected, core/harness conformance, applicable SDK/client checks if owner contracts change and docs sync. Use private temporary profiles/ports/stores and an isolated Cargo target. Test PostgreSQL against an isolated available service; otherwise report its acceptance limitation explicitly. Independent spec and code review, exact changed-file hashes, main/empty-index/unstaged audit, and no commit.

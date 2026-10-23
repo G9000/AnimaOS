@@ -144,6 +144,109 @@ const CONTENT: &str = "m21 recovery checkpoint amber-742";
 const SESSION_ID: &str = "chat:m21-receipt";
 const SOURCE_REF: &str = "m21-receipt-regression";
 
+struct NativeBudgetAckClock {
+    now: std::sync::atomic::AtomicU64,
+    changed: tokio::sync::Notify,
+}
+#[async_trait::async_trait]
+impl anima_core::ExecutionClock for NativeBudgetAckClock {
+    fn now_ms(&self) -> u64 {
+        self.now.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    async fn wait_until_ms(&self, deadline: u64) {
+        loop {
+            let changed = self.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            if self.now_ms() >= deadline {
+                return;
+            }
+            changed.await;
+        }
+    }
+}
+
+async fn native_budget_pre_effect_wait(stopped: bool) {
+    use anima_core::execution_limits::{ExecutionContext, ExecutionLimits};
+    let mut fixture = ActionFixture::new(
+        if stopped {
+            "native-budget-stop-ack"
+        } else {
+            "native-budget-deadline-ack"
+        },
+        true,
+    )
+    .await;
+    let mut budget = ExecutionContext::ephemeral(
+        fixture.run.run_id.clone(),
+        ExecutionLimits::default(),
+        fixture.cancel.clone(),
+    )
+    .unwrap();
+    let deadline = budget.deadline_at_ms;
+    let clock = Arc::new(NativeBudgetAckClock {
+        now: std::sync::atomic::AtomicU64::new(budget.clock.now_ms()),
+        changed: tokio::sync::Notify::new(),
+    });
+    budget.clock = clock.clone();
+    fixture.context = fixture.context.clone().with_execution_budget(budget, false);
+    let gate = fixture.journal.install_test_before_save_gate();
+    let mut calling = fixture.call(write_call());
+    tokio::time::timeout(Duration::from_secs(5), gate.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    assert!(!fixture.root.join(FILE_PATH).exists());
+    if stopped {
+        fixture.cancel.cancel();
+    } else {
+        clock
+            .now
+            .store(deadline, std::sync::atomic::Ordering::SeqCst);
+        clock.changed.notify_waiters();
+    }
+    let waited = tokio::time::timeout(Duration::from_millis(300), &mut calling).await;
+    let bounded = waited.is_ok();
+    // Always release/join owned storage before any assertion can destroy its
+    // temporary workspace, including on the deliberately failing RED path.
+    gate.release.add_permits(1);
+    let result = match waited {
+        Ok(result) => result.unwrap(),
+        Err(_) => tokio::time::timeout(Duration::from_secs(5), calling)
+            .await
+            .unwrap()
+            .unwrap(),
+    };
+    tokio::time::timeout(Duration::from_secs(5), fixture.journal.settle())
+        .await
+        .unwrap();
+    assert!(
+        !fixture.root.join(FILE_PATH).exists(),
+        "pre-effect cancellation must never dispatch the file handler"
+    );
+    assert_eq!(result.status, anima_core::TaskStatus::Error);
+    assert!(
+        bounded,
+        "Stop/shared deadline did not bound the native pre-effect receipt acknowledgement"
+    );
+    assert_eq!(
+        fixture.saved_run().await["actionReceipts"][0]["status"],
+        "started",
+        "dropping the acknowledgement lost the already-owned unused intent save"
+    );
+}
+
+#[tokio::test]
+async fn native_budget_pre_effect_stop_bounds_pending_intent_acknowledgement() {
+    native_budget_pre_effect_wait(true).await;
+}
+
+#[tokio::test]
+async fn native_budget_pre_effect_deadline_bounds_pending_intent_acknowledgement() {
+    native_budget_pre_effect_wait(false).await;
+}
+
 fn write_call() -> ToolCall {
     ToolCall {
         id: CALL_ID.into(),
@@ -458,7 +561,14 @@ async fn superseded_native_intent_honors_cancellation() {
 
 #[tokio::test]
 async fn superseded_native_outcome_settles_after_stop_without_clearing_stop() {
-    let fixture = ActionFixture::new("superseded-native-stop-outcome", true).await;
+    let mut fixture = ActionFixture::new("superseded-native-stop-outcome", true).await;
+    let budget = anima_core::execution_limits::ExecutionContext::ephemeral(
+        fixture.run.run_id.clone(),
+        Default::default(),
+        fixture.cancel.clone(),
+    )
+    .unwrap();
+    fixture.context = fixture.context.clone().with_execution_budget(budget, false);
     let intent = fixture.journal.install_test_before_save_gate();
     let calling = fixture.call(write_call());
     tokio::time::timeout(Duration::from_secs(5), intent.entered.acquire())
@@ -1235,4 +1345,111 @@ async fn execution_current_journal_refuses_revoke_and_stop_after_waiting_for_aut
         assert!(!f.root.join("execution-authority.txt").exists());
         assert_eq!(service.in_flight_count(), 0);
     }
+}
+
+#[tokio::test]
+async fn profile_owner_revocation_blocks_native_dispatch_and_preserves_prior_evidence() {
+    let fixture = ActionFixture::new("profile-owner-native-revocation", true).await;
+    let ownership_root = tempfile::tempdir().unwrap();
+    let owner =
+        crate::profile_owner::ProfileOwner::acquire([ownership_root.path().join("profile.json")])
+            .unwrap();
+    fixture.coordinator.state.write().await.profile_owner = Some(owner.clone());
+    let first = fixture.call(write_call()).await.unwrap();
+    assert_eq!(
+        first.status,
+        anima_core::TaskStatus::Success,
+        "{:?}",
+        first.error
+    );
+    let before = fixture.public_run().await;
+    owner.mark_lost();
+    let mut next = write_call();
+    next.id = "after-profile-owner-loss".into();
+    next.args.insert(
+        "file_path".into(),
+        DataValue::String("must-not-exist.txt".into()),
+    );
+    let result = fixture.call(next).await.unwrap();
+    let after = fixture.public_run().await;
+    fixture.coordinator.state.write().await.profile_owner = None;
+    drop(owner);
+    assert_eq!(
+        result.status,
+        anima_core::TaskStatus::Error,
+        "lost profile authority dispatched a native write"
+    );
+    assert!(!fixture.root.join("must-not-exist.txt").exists());
+    assert_eq!(
+        after["actionReceipts"], before["actionReceipts"],
+        "lost ownership must retain prior evidence without publishing another action"
+    );
+}
+
+#[tokio::test]
+async fn profile_owner_loss_during_approval_cannot_be_revived_by_allow_once() {
+    use super::test_support::{decision, pending_approvals};
+    use crate::approvals::ApprovalDecisionKind;
+    let fixture = ActionFixture::new("profile-owner-approval-revocation", true).await;
+    let ownership_root = tempfile::tempdir().unwrap();
+    let owner =
+        crate::profile_owner::ProfileOwner::acquire([ownership_root.path().join("profile.json")])
+            .unwrap();
+    {
+        let mut state = fixture.coordinator.state.write().await;
+        state.profile_owner = Some(owner.clone());
+        state.approvals.set_policy(
+            &fixture.agent.id,
+            ApprovalPolicy::default().with(RiskClass::Write, PolicyAction::Ask),
+        );
+    }
+    let worker = fixture.call(write_call());
+    let approval = pending_approvals(&fixture.coordinator, 1).await.remove(0);
+    owner.mark_lost();
+    let _ = fixture
+        .coordinator
+        .decide_approval(
+            &approval.id,
+            decision(ApprovalDecisionKind::AllowOnce, approval.revision),
+        )
+        .await;
+    let result = tokio::time::timeout(Duration::from_secs(5), worker)
+        .await
+        .unwrap()
+        .unwrap();
+    fixture.coordinator.state.write().await.profile_owner = None;
+    drop(owner);
+    assert_eq!(result.status, anima_core::TaskStatus::Error);
+    assert!(
+        !fixture.root.join(FILE_PATH).exists(),
+        "AllowOnce revived lost profile ownership"
+    );
+}
+
+#[tokio::test]
+async fn profile_owner_direct_context_cannot_bypass_ownership_without_a_journal() {
+    let fixture = ActionFixture::new("profile-owner-direct-context", false).await;
+    let temp = tempfile::tempdir().unwrap();
+    let owner =
+        crate::profile_owner::ProfileOwner::acquire([temp.path().join("profile.json")]).unwrap();
+    let context = fixture
+        .coordinator
+        .state
+        .read()
+        .await
+        .tool_execution_context()
+        .with_profile_owner(Some(owner.clone()));
+    owner.mark_lost();
+    let result = context
+        .execute_tool(
+            fixture.agent.clone(),
+            tool_input(&fixture.run.agent_id, SESSION_ID),
+            write_call(),
+        )
+        .await;
+    assert_eq!(result.status, anima_core::TaskStatus::Error);
+    assert!(
+        !fixture.root.join(FILE_PATH).exists(),
+        "direct context dispatched outside the ownership fence"
+    );
 }

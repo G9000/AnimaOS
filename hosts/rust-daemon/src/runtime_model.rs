@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use std::{collections::BTreeMap, future::Future, sync::Arc, time::Duration};
 
 use crate::model::DeterministicModelAdapter;
+use anima_core::execution_limits::ModelCallContext;
 
 fn first_env_value(names: &[&str]) -> Option<String> {
     names.iter().find_map(|name| {
@@ -414,10 +415,115 @@ async fn configured_model_call<T>(
     }
 }
 
+struct ControlledRequestDrop {
+    cancel: anima_core::CancelSignal,
+    finished: bool,
+}
+impl Drop for ControlledRequestDrop {
+    fn drop(&mut self) {
+        if !self.finished {
+            self.cancel.cancel();
+        }
+    }
+}
+
 #[async_trait]
 impl ModelAdapter for RuntimeModelAdapter {
     fn provider(&self) -> &str {
         "runtime"
+    }
+
+    async fn generate_controlled(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        context: &ModelCallContext,
+    ) -> Result<ModelGenerateResponse, String> {
+        context.check_live()?;
+        let mut retirement = ControlledRequestDrop {
+            cancel: context.request_cancel.clone(),
+            finished: false,
+        };
+        let result = configured_model_call(config, async {
+            let provider =
+                canonical_provider(config.provider.as_deref().unwrap_or("deterministic"));
+            match provider.as_str() {
+                "deterministic" | "test" => {
+                    DeterministicModelAdapter
+                        .generate_controlled(config, request, context)
+                        .await
+                }
+                "chatgpt" => {
+                    let (token, account) = context
+                        .bounded(self.chatgpt_auth.usable_credential())
+                        .await?;
+                    anima_model_adapters::ChatGptResponsesAdapter::new(token, account)?
+                        .generate_controlled(config, request, context)
+                        .await
+                }
+                _ => {
+                    self.providers
+                        .generate_controlled(config, request, context)
+                        .await
+                }
+            }
+        })
+        .await;
+        if result
+            .as_ref()
+            .is_err_and(|error| error == "Model call timed out")
+        {
+            context.request_cancel.cancel();
+        }
+        retirement.finished = true;
+        result
+    }
+
+    async fn stream_controlled(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        sink: &dyn anima_core::ModelStreamSink,
+        context: &ModelCallContext,
+    ) -> Result<(), String> {
+        context.check_live()?;
+        let mut retirement = ControlledRequestDrop {
+            cancel: context.request_cancel.clone(),
+            finished: false,
+        };
+        let result = configured_model_call(config, async {
+            let provider =
+                canonical_provider(config.provider.as_deref().unwrap_or("deterministic"));
+            match provider.as_str() {
+                "deterministic" | "test" => {
+                    DeterministicModelAdapter
+                        .stream_controlled(config, request, sink, context)
+                        .await
+                }
+                "chatgpt" => {
+                    let (token, account) = context
+                        .bounded(self.chatgpt_auth.usable_credential())
+                        .await?;
+                    anima_model_adapters::ChatGptResponsesAdapter::new(token, account)?
+                        .stream_controlled(config, request, sink, context)
+                        .await
+                }
+                _ => {
+                    self.providers
+                        .stream_controlled(config, request, sink, context)
+                        .await
+                }
+            }
+        })
+        .await;
+        if result
+            .as_ref()
+            .is_err_and(|error| error == "Model call timed out")
+        {
+            context.request_cancel.cancel();
+        }
+        retirement.finished = true;
+        result
     }
 
     async fn generate(

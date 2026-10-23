@@ -54,6 +54,12 @@ fn response(text: &str, calls: Option<Vec<ToolCall>>) -> ModelGenerateResponse {
 
 #[async_trait::async_trait]
 impl ModelAdapter for WorktreeModel {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "worktree-offline"
     }
@@ -427,5 +433,167 @@ fn run_root_only_trusts_helper_worktree_roots() {
             Some(&forged)
         )),
         None
+    );
+}
+
+#[tokio::test]
+async fn profile_owner_custody_revocation_preserves_sweep_worktrees() {
+    let fixture = fixture("spawn_helper", false, true).await;
+    let worktree = super::worktrees::create(Some(fixture.root.clone()), ".".into(), None)
+        .await
+        .unwrap();
+    let owner = crate::profile_owner::ProfileOwner::acquire([fixture
+        ._private
+        .path()
+        .join("custody-profile.json")])
+    .unwrap();
+    fixture.coordinator.state.write().await.profile_owner = Some(owner.clone());
+    let before = git(&fixture.root, &["worktree", "list", "--porcelain"]);
+    owner.mark_lost();
+
+    super::worktrees::startup_sweep(fixture.coordinator.state.clone()).await;
+
+    assert!(
+        worktree.worktree.path.exists(),
+        "a revoked profile removed the helper worktree during startup sweep"
+    );
+    assert_eq!(
+        git(&fixture.root, &["worktree", "list", "--porcelain"]),
+        before
+    );
+}
+
+#[test]
+fn profile_owner_custody_queued_sweep_retains_lease_after_waiter_drop() {
+    let private = tempfile::tempdir().unwrap();
+    let resource = private.path().join("custody-profile.json");
+    let owner = crate::profile_owner::ProfileOwner::acquire([resource.clone()]).unwrap();
+    let mut daemon = DaemonState::new();
+    daemon.profile_owner = Some(owner.clone());
+    let state = Arc::new(RwLock::new(daemon));
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+    let retained = runtime.block_on(async move {
+        let (started, running) = tokio::sync::oneshot::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            let _ = started.send(());
+            let _ = held.recv_timeout(std::time::Duration::from_secs(10));
+        });
+        running.await.unwrap();
+        let mut sweep = Box::pin(super::worktrees::startup_sweep(state));
+        assert!(futures::poll!(sweep.as_mut()).is_pending());
+        // The worker is queued, but its caller and daemon state are gone.
+        drop(sweep);
+        drop(owner);
+        let retained = crate::profile_owner::ProfileOwner::acquire([resource.clone()]).is_err();
+        release.send(()).unwrap();
+        blocker.await.unwrap();
+        retained
+    });
+    // Runtime drop waits for the detached blocking worker to actually exit.
+    drop(runtime);
+    assert!(
+        retained,
+        "dropping the sweep waiter released a queued worker's profile lease"
+    );
+    crate::profile_owner::ProfileOwner::acquire([private.path().join("custody-profile.json")])
+        .expect("the lease releases after the worker exits");
+}
+
+#[test]
+fn profile_owner_custody_queued_sweep_rechecks_revocation_before_git() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let fixture = fixture("spawn_helper", false, true).await;
+        let worktree = super::worktrees::create(Some(fixture.root.clone()), ".".into(), None)
+            .await
+            .unwrap();
+        let owner = crate::profile_owner::ProfileOwner::acquire([fixture
+            ._private
+            .path()
+            .join("custody-profile.json")])
+        .unwrap();
+        fixture.coordinator.state.write().await.profile_owner = Some(owner.clone());
+        let (started, running) = tokio::sync::oneshot::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            let _ = started.send(());
+            let _ = held.recv_timeout(std::time::Duration::from_secs(10));
+        });
+        running.await.unwrap();
+        let mut sweep = Box::pin(super::worktrees::startup_sweep(
+            fixture.coordinator.state.clone(),
+        ));
+        assert!(futures::poll!(sweep.as_mut()).is_pending());
+        // Admission succeeded, then authority was revoked while the worker queued.
+        owner.mark_lost();
+        release.send(()).unwrap();
+        blocker.await.unwrap();
+        sweep.await;
+        assert!(
+            worktree.worktree.path.exists(),
+            "the queued sweep used authority checked only before spawn_blocking"
+        );
+    });
+}
+
+#[tokio::test]
+async fn profile_owner_custody_revocation_refuses_worktree_create() {
+    let fixture = fixture("spawn_helper", false, true).await;
+    let owner = crate::profile_owner::ProfileOwner::acquire([fixture
+        ._private
+        .path()
+        .join("custody-profile.json")])
+    .unwrap();
+    owner.mark_lost();
+
+    let result =
+        super::worktrees::create(Some(fixture.root.clone()), ".".into(), Some(owner)).await;
+
+    assert!(result.is_err());
+    assert!(!fixture.root.join(".worktrees").exists());
+    assert_eq!(
+        git(&fixture.root, &["branch", "--list", "anima-helper/*"]),
+        ""
+    );
+}
+
+#[tokio::test]
+async fn profile_owner_custody_revocation_preserves_finished_worktree() {
+    let fixture = fixture("spawn_helper", false, true).await;
+    let worktree = super::worktrees::create(Some(fixture.root.clone()), ".".into(), None)
+        .await
+        .unwrap();
+    let owner = crate::profile_owner::ProfileOwner::acquire([fixture
+        ._private
+        .path()
+        .join("custody-profile.json")])
+    .unwrap();
+    owner.mark_lost();
+
+    let result = super::worktrees::finish(&worktree, Some(owner)).await;
+
+    assert_eq!(result["inspectionFailed"], true);
+    assert_eq!(result["removed"], false);
+    assert!(worktree.worktree.path.exists());
+    assert_eq!(
+        git(
+            &fixture.root,
+            &[
+                "branch",
+                "--format=%(refname:short)",
+                "--list",
+                "anima-helper/*"
+            ]
+        ),
+        worktree.worktree.branch
     );
 }

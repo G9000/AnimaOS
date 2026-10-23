@@ -40,6 +40,7 @@ impl HostTurnCheckpointSink {
         state: &'a DaemonState,
         phase: TurnPhase,
     ) -> Result<&'a crate::runs::RunRecord, String> {
+        state.ensure_profile_owned().map_err(|e| e.to_string())?;
         let record = state
             .runs
             .get(&self.run.run_id)
@@ -63,6 +64,7 @@ impl HostTurnCheckpointSink {
 
     async fn persist(&self, checkpoint: TurnCheckpoint) -> Result<(), String> {
         let state = self.state.upgrade().ok_or("Turn owner is unavailable")?;
+        super::ownership::verify(&state).await?;
         let _transaction =
             tokio::time::timeout(std::time::Duration::from_secs(15), self.transactions.lock())
                 .await

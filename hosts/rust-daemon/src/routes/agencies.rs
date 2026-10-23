@@ -17,7 +17,7 @@ use crate::tools::{
     canonical_workspace_root, normalized_relative_path, resolve_workspace_write_path,
     workspace_root_path, ToolRegistry,
 };
-use crate::usage::metered::{record_secondary, Metered, SecondaryCall, USAGE_NO_AGENT};
+use crate::usage::metered::{record_secondary, SecondaryCall, USAGE_NO_AGENT};
 use crate::usage::UsageSource;
 
 const TEAM_MIN: u64 = 2;
@@ -246,9 +246,23 @@ pub(crate) async fn handle_create_agency(
         model: request.model,
         model_pool: request.model_pool,
     })?;
-    let agency = generate_agency_from_prepared(prepared.clone(), state, transactions).await?;
+    let execution = crate::execution_budgets::standalone_context(
+        state,
+        transactions.clone(),
+        format!("agency:{}", uuid::Uuid::new_v4()),
+        anima_core::CancelSignal::new(),
+    )
+    .await
+    .map_err(ApiError::service_unavailable)?;
+    let agency = generate_agency_from_prepared(
+        prepared.clone(),
+        state,
+        transactions,
+        Some(execution.clone()),
+    )
+    .await?;
     let seeds = if seed_memories {
-        generate_seed_memories(&prepared, &agency, state, transactions).await?
+        generate_seed_memories(&prepared, &agency, state, transactions, Some(execution)).await?
     } else {
         Vec::new()
     };
@@ -303,7 +317,7 @@ async fn generate_agency_from_request(
 ) -> Result<AgencyGenerateResponse, ApiError> {
     let prepared = prepare_generate_request(request)?;
 
-    generate_agency_from_prepared(prepared, state, transactions).await
+    generate_agency_from_prepared(prepared, state, transactions, None).await
 }
 
 fn prepare_generate_request(
@@ -372,7 +386,19 @@ async fn generate_agency_from_prepared(
     prepared: PreparedAgencyRequest,
     state: &SharedDaemonState,
     transactions: &Arc<tokio::sync::Mutex<()>>,
+    execution: Option<anima_core::execution_limits::ExecutionContext>,
 ) -> Result<AgencyGenerateResponse, ApiError> {
+    let execution = match execution {
+        Some(execution) => execution,
+        None => crate::execution_budgets::standalone_context(
+            state,
+            transactions.clone(),
+            format!("agency:{}", uuid::Uuid::new_v4()),
+            anima_core::CancelSignal::new(),
+        )
+        .await
+        .map_err(ApiError::service_unavailable)?,
+    };
     let PreparedAgencyRequest {
         name,
         description,
@@ -385,10 +411,7 @@ async fn generate_agency_from_prepared(
 
     let (adapter, tool_registry): (Arc<dyn ModelAdapter>, ToolRegistry) = {
         let guard = state.read().await;
-        (
-            Arc::clone(&guard.model_adapter),
-            guard.tool_registry.clone(),
-        )
+        (guard.profile_model_adapter(), guard.tool_registry.clone())
     };
     let prompt = build_prompt(
         &name,
@@ -434,7 +457,16 @@ async fn generate_agency_from_prepared(
         max_tokens: None,
     };
 
-    let response = generate_metered(state, transactions, adapter, &agent_config, &request).await?;
+    let response = generate_metered(
+        state,
+        transactions,
+        adapter,
+        &agent_config,
+        &request,
+        &execution,
+        "agency-team",
+    )
+    .await?;
 
     let agents = parse_agents_payload(&response.content.text, &tool_registry)?;
     let (mission, values, definitions) = agents;
@@ -644,10 +676,22 @@ async fn generate_seed_memories(
     agency: &AgencyGenerateResponse,
     state: &SharedDaemonState,
     transactions: &Arc<tokio::sync::Mutex<()>>,
+    execution: Option<anima_core::execution_limits::ExecutionContext>,
 ) -> Result<Vec<AgentSeedMemories>, ApiError> {
+    let execution = match execution {
+        Some(execution) => execution,
+        None => crate::execution_budgets::standalone_context(
+            state,
+            transactions.clone(),
+            format!("agency-seeds:{}", uuid::Uuid::new_v4()),
+            anima_core::CancelSignal::new(),
+        )
+        .await
+        .map_err(ApiError::service_unavailable)?,
+    };
     let adapter: Arc<dyn ModelAdapter> = {
         let guard = state.read().await;
-        Arc::clone(&guard.model_adapter)
+        guard.profile_model_adapter()
     };
 
     let agent_config = AgentConfig {
@@ -685,7 +729,16 @@ async fn generate_seed_memories(
         max_tokens: None,
     };
 
-    let response = generate_metered(state, transactions, adapter, &agent_config, &request).await?;
+    let response = generate_metered(
+        state,
+        transactions,
+        adapter,
+        &agent_config,
+        &request,
+        &execution,
+        "agency-seeds",
+    )
+    .await?;
 
     parse_seed_payload(&response.content.text, &agency.agents)
 }
@@ -698,9 +751,15 @@ async fn generate_metered(
     adapter: Arc<dyn ModelAdapter>,
     config: &AgentConfig,
     request: &ModelGenerateRequest,
+    execution: &anima_core::execution_limits::ExecutionContext,
+    logical_id: &str,
 ) -> Result<anima_core::ModelGenerateResponse, ApiError> {
-    let meter = Metered::new(adapter);
-    let response = meter.generate(config, request).await;
+    let (meter, model) = crate::controlled_model::metered(
+        adapter,
+        execution.clone(),
+        format!("{}:{logical_id}", execution.run_id),
+    );
+    let response = model.generate(config, request).await;
     let call = SecondaryCall::for_config(USAGE_NO_AGENT, None, UsageSource::Agency, config);
     record_secondary(state, transactions.clone(), &meter, call)
         .await
@@ -2131,6 +2190,13 @@ agents:
             "scripted"
         }
 
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
+
         async fn generate(
             &self,
             _config: &anima_core::AgentConfig,
@@ -2165,6 +2231,12 @@ agents:
         let state: crate::app::SharedDaemonState = std::sync::Arc::new(tokio::sync::RwLock::new(
             crate::state::DaemonState::with_model_adapter(std::sync::Arc::new(adapter)),
         ));
+        let storage = tempfile::tempdir().unwrap();
+        state.write().await.set_control_plane_store(Some(
+            crate::control_plane_store::ControlPlaneStoreConfig::Json(
+                storage.path().join("control.json"),
+            ),
+        ));
         let prepared = super::prepare_generate_request(
             serde_json::from_value(json!({
                 "name": "Studio",
@@ -2178,14 +2250,47 @@ agents:
         .unwrap();
 
         let transactions = std::sync::Arc::new(tokio::sync::Mutex::new(()));
-        let agency = super::generate_agency_from_prepared(prepared.clone(), &state, &transactions)
-            .await
-            .unwrap();
-        super::generate_seed_memories(&prepared, &agency, &state, &transactions)
-            .await
-            .unwrap();
+        let execution = crate::execution_budgets::standalone_context(
+            &state,
+            transactions.clone(),
+            "agency-test".into(),
+            anima_core::CancelSignal::new(),
+        )
+        .await
+        .unwrap();
+        let agency = super::generate_agency_from_prepared(
+            prepared.clone(),
+            &state,
+            &transactions,
+            Some(execution.clone()),
+        )
+        .await
+        .unwrap();
+        super::generate_seed_memories(
+            &prepared,
+            &agency,
+            &state,
+            &transactions,
+            Some(execution.clone()),
+        )
+        .await
+        .unwrap();
 
         let rows = state.read().await.history.pending_usage();
+        let guard = state.read().await;
+        assert_eq!(
+            guard.execution_budgets.scopes.len(),
+            1,
+            "team and seed generation must share one finite scope"
+        );
+        assert_eq!(
+            guard.execution_budgets.scopes[&execution.scope_id]
+                .consumption()
+                .unwrap()
+                .model_attempts,
+            2
+        );
+        drop(guard);
         assert_eq!(rows.len(), 2);
         for row in &rows {
             assert_eq!(row.source, crate::usage::UsageSource::Agency);

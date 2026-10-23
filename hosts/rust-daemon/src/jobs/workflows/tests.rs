@@ -38,6 +38,12 @@ struct TruncatedModel;
 
 #[async_trait::async_trait]
 impl anima_core::ModelAdapter for TruncatedModel {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "workflow-truncated-test"
     }
@@ -105,6 +111,12 @@ struct WaitingModel {
 
 #[async_trait::async_trait]
 impl anima_core::ModelAdapter for WaitingModel {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "workflow-waiting-test"
     }
@@ -127,6 +139,12 @@ impl anima_core::ModelAdapter for WaitingModel {
 
 #[async_trait::async_trait]
 impl anima_core::ModelAdapter for CountingModel {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "workflow-counting-test"
     }

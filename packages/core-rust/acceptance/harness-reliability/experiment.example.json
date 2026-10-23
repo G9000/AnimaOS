@@ -1,0 +1,8 @@
+{
+  "baselineManifest": "baseline-build.json",
+  "candidateManifest": "candidate-build.json",
+  "model": "explicit-provider-model-id",
+  "repetitions": 2,
+  "timeoutMs": 45000,
+  "output": "new-experiment-evidence"
+}

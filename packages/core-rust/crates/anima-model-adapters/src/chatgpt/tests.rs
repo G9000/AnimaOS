@@ -767,6 +767,57 @@ fn completed_sse() -> String {
 }
 
 #[tokio::test]
+async fn execution_limits_subscription_unknown_usage_cannot_mint_more_output() {
+    use anima_core::execution_limits::{ExecutionContext, ExecutionLimits, ModelCallContext};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = calls.clone();
+    let (endpoint, task) = server(axum::Router::new().route(
+        "/responses",
+        axum::routing::post(move || {
+            let seen = seen.clone();
+            async move {
+                seen.fetch_add(1, Ordering::SeqCst);
+                ([("content-type", "text/event-stream")], completed_sse())
+            }
+        }),
+    ))
+    .await;
+    let mut adapter =
+        ChatGptResponsesAdapter::new("synthetic-token".into(), "synthetic-account".into()).unwrap();
+    adapter.endpoint = endpoint;
+    let execution = ExecutionContext::ephemeral(
+        "subscription-run".into(),
+        ExecutionLimits::default(),
+        anima_core::CancelSignal::new(),
+    )
+    .unwrap();
+    let first = ModelCallContext::new(execution.clone(), "first".into());
+    assert_eq!(
+        adapter
+            .generate_controlled(&config(), &request(), &first)
+            .await
+            .unwrap()
+            .content
+            .text,
+        "ok"
+    );
+    assert!(adapter
+        .generate_controlled(
+            &config(),
+            &request(),
+            &ModelCallContext::new(execution, "second".into())
+        )
+        .await
+        .is_err());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    task.abort();
+}
+
+#[tokio::test]
 async fn prestream_retry_none_reuses_the_same_request_after_503() {
     use axum::{extract::Json, http::HeaderMap, response::Response, routing::post};
     use std::sync::{

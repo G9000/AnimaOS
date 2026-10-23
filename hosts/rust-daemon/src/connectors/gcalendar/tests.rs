@@ -235,6 +235,50 @@ async fn fixture_with_transport(
 }
 
 #[tokio::test]
+async fn profile_owner_calendar_registration_releases_state_after_final_manager_drops() {
+    let private = tempfile::tempdir().unwrap();
+    let payload = private.path().join("control-plane.json");
+    let fixture = fixture(None).await;
+    fixture.state.write().await.profile_owner =
+        Some(crate::profile_owner::ProfileOwner::acquire([payload.clone()]).unwrap());
+    let state = Arc::downgrade(&fixture.state);
+
+    drop(fixture);
+
+    assert!(
+        state.upgrade().is_none(),
+        "calendar registration retained daemon state"
+    );
+    assert!(crate::profile_owner::ProfileOwner::acquire([payload]).is_ok());
+}
+
+#[tokio::test]
+async fn profile_owner_active_calendar_manager_retains_custody_until_its_final_drop() {
+    let private = tempfile::tempdir().unwrap();
+    let payload = private.path().join("control-plane.json");
+    let fixture = fixture(None).await;
+    fixture.state.write().await.profile_owner =
+        Some(crate::profile_owner::ProfileOwner::acquire([payload.clone()]).unwrap());
+    let state = Arc::downgrade(&fixture.state);
+    let active_manager = fixture.manager.clone();
+
+    drop(fixture);
+    assert!(
+        state.upgrade().is_some(),
+        "active calendar work lost its daemon state"
+    );
+    assert!(crate::profile_owner::ProfileOwner::acquire([payload.clone()]).is_err());
+
+    drop(active_manager);
+
+    assert!(
+        state.upgrade().is_none(),
+        "retired calendar work retained daemon state"
+    );
+    assert!(crate::profile_owner::ProfileOwner::acquire([payload]).is_ok());
+}
+
+#[tokio::test]
 async fn saving_google_oauth_config_enables_calendar_without_restart() {
     let fixture = fixture(None).await;
     assert!(!fixture.manager.oauth_configured().await.unwrap());

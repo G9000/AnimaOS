@@ -343,6 +343,12 @@ async fn document_snapshot_reloaded_binding_reaches_generate_and_stream_without_
     struct StreamingCapture(Capture);
     #[async_trait]
     impl ModelAdapter for StreamingCapture {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "test"
         }
@@ -359,12 +365,12 @@ async fn document_snapshot_reloaded_binding_reaches_generate_and_stream_without_
             input: &ModelGenerateRequest,
             sink: &dyn ModelStreamSink,
         ) -> Result<(), String> {
-            sink.emit(ModelStreamFrame::Final(
-                self.0.generate(config, input).await?,
-            ))
-            .await
+            let response = self.0.generate(config, input).await?;
+            sink.complete_usage(response.usage.clone()).await?;
+            sink.emit(ModelStreamFrame::Final(response)).await
         }
     }
+
     struct Sink;
     #[async_trait]
     impl ModelStreamSink for Sink {
@@ -659,6 +665,12 @@ fn content(records: &[AttachmentRecord]) -> Content {
 struct Capture(Mutex<Vec<ModelGenerateRequest>>);
 #[async_trait]
 impl ModelAdapter for Capture {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "openai"
     }
@@ -1071,6 +1083,12 @@ async fn attachment_model_forwards_stream_frames_and_usage_once_and_preserves_er
     }
     #[async_trait]
     impl ModelAdapter for Inner {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "openai"
         }
@@ -1094,9 +1112,11 @@ async fn attachment_model_forwards_stream_frames_and_usage_once_and_preserves_er
                 .await?;
             sink.emit(ModelStreamFrame::Usage(response.usage.clone()))
                 .await?;
+            sink.complete_usage(response.usage.clone()).await?;
             sink.emit(ModelStreamFrame::Final(response)).await
         }
     }
+
     struct Sink(Mutex<Vec<ModelStreamFrame>>);
     #[async_trait]
     impl ModelStreamSink for Sink {
@@ -1171,6 +1191,9 @@ async fn attachment_model_failed_run_snapshot_and_history_retain_only_references
     struct Failing(Capture);
     #[async_trait]
     impl ModelAdapter for Failing {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "openai"
         }
@@ -1183,6 +1206,7 @@ async fn attachment_model_failed_run_snapshot_and_history_retain_only_references
             Err("planned model failure".into())
         }
     }
+
     let temp = Temp::new();
     let failing = Arc::new(Failing(Capture::default()));
     let mut state = crate::state::DaemonState::with_model_adapter(failing.clone());

@@ -21,7 +21,7 @@ use crate::sessions::context::{mark_context_trimmed, newest_left_out, ContextBud
 use crate::sessions::{SessionCompactionError, SessionSummary};
 use crate::side_model::side_call;
 use crate::state::{RunBuild, RunContextReport};
-use crate::usage::metered::{record_secondary, Metered, SecondaryCall};
+use crate::usage::metered::{record_secondary, SecondaryCall};
 use crate::usage::UsageSource;
 
 /// A provider error is cut to this many characters on the session.
@@ -222,7 +222,7 @@ impl AgentRunCoordinator {
                 return Compacted::Nothing;
             };
             (
-                Arc::clone(&guard.model_adapter),
+                guard.profile_model_adapter(),
                 run.map_or_else(|| runtime.config().clone(), |run| run.config.clone()),
                 session.summary.clone(),
                 session.checkpoint.clone(),
@@ -231,7 +231,7 @@ impl AgentRunCoordinator {
                 guard.history.store(),
                 through,
                 crate::attachments::model::AttachmentModelAdapter::new(
-                    Arc::clone(&guard.model_adapter),
+                    guard.profile_model_adapter(),
                     guard.history.store(),
                     guard.workspace.as_ref().map(|w| w.root_path.clone()),
                     agent_id.into(),
@@ -245,7 +245,41 @@ impl AgentRunCoordinator {
             )
         };
         let budget_tokens = ContextBudget::for_config(&config).budget_tokens;
-        let meter = Metered::new(adapter);
+        let execution = if let Some(run) = run {
+            run.tools
+                .execution_budget()
+                .cloned()
+                .ok_or_else(|| "The run's shared execution budget is unavailable".to_string())
+        } else if let Some(owner) = owner {
+            crate::execution_budgets::context_for_run(
+                &self.state,
+                self.control_plane_transactions(),
+                &owner.run_id,
+                cancel.clone().unwrap_or_default(),
+            )
+            .await
+        } else {
+            crate::execution_budgets::standalone_context_with_limits(
+                &self.state,
+                self.control_plane_transactions(),
+                format!("compaction:{}", uuid::Uuid::new_v4()),
+                cancel.clone().unwrap_or_default(),
+                config
+                    .settings
+                    .as_ref()
+                    .and_then(|settings| settings.execution_limits.clone()),
+            )
+            .await
+        };
+        let execution = match execution {
+            Ok(execution) => execution,
+            Err(error) => return Compacted::Failed(error),
+        };
+        let (meter, model) = crate::controlled_model::metered(
+            adapter,
+            execution,
+            format!("compaction:{}", uuid::Uuid::new_v4()),
+        );
         // Controller ruling 3 (audit M7): a stop ends the run at once. Fix
         // round 1: the read and the call end by the compaction's deadline,
         // or a helper's earlier one; the save below is never cut short.
@@ -297,15 +331,15 @@ impl AgentRunCoordinator {
             documents.prepare_compaction_documents(&mut turns).await;
             let previous = previous.as_ref().map(|summary| summary.text.as_str());
             let output = side_call(&self.state, &config, deadline, |config| {
-                let (meter, turns, inputs, checkpoint) = (
-                    &meter,
+                let (model, turns, inputs, checkpoint) = (
+                    &model,
                     &turns,
                     &checkpoint_inputs,
                     previous_checkpoint.as_ref(),
                 );
                 async move {
                     summarize_with_focus(
-                        meter,
+                        model.as_ref(),
                         &config,
                         previous,
                         turns,

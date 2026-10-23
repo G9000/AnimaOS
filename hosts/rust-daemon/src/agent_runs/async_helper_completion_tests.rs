@@ -926,6 +926,12 @@ struct SixCallModel {
 
 #[async_trait::async_trait]
 impl anima_core::ModelAdapter for SixCallModel {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "fp05-six-recordings"
     }

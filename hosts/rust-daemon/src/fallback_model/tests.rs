@@ -75,6 +75,12 @@ fn response(text: &str) -> ModelGenerateResponse {
 
 #[async_trait]
 impl ModelAdapter for Scripted {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "scripted"
     }
@@ -97,7 +103,11 @@ impl ModelAdapter for Scripted {
         sink: &dyn ModelStreamSink,
     ) -> Result<(), String> {
         match self.next(config) {
-            Outcome::Answer(text) => sink.emit(ModelStreamFrame::Final(response(text))).await,
+            Outcome::Answer(text) => {
+                let response = response(text);
+                sink.complete_usage(response.usage.clone()).await?;
+                sink.emit(ModelStreamFrame::Final(response)).await
+            }
             Outcome::TextThenFail(text, error) => {
                 sink.emit(ModelStreamFrame::TextDelta(text.into())).await?;
                 Err(error.into())

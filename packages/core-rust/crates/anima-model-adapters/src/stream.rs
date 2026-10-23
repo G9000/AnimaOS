@@ -38,6 +38,12 @@ impl DeterministicModelAdapter {
 
 #[async_trait]
 impl ModelAdapter for DeterministicModelAdapter {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "deterministic"
     }
@@ -86,7 +92,12 @@ pub(crate) async fn consume_openai_sse(
     .await?;
     // `[DONE]` is terminal, as is a finish reason (`openai` records that one).
     accumulator.terminal |= saw_done;
-    sink.emit(ModelStreamFrame::Final(accumulator.finish()?))
+    let complete = accumulator.usage.prompt.is_some() && accumulator.usage.completion.is_some();
+    let response = accumulator.finish()?;
+    if complete {
+        sink.complete_usage(response.usage.clone()).await?;
+    }
+    sink.emit(ModelStreamFrame::Final(response))
         .await
         .map_err(|_| "provider stream consumer failed".to_owned())
 }
@@ -106,7 +117,12 @@ pub(crate) async fn consume_anthropic_sse(
         sink,
     )
     .await?;
-    sink.emit(ModelStreamFrame::Final(accumulator.finish()?))
+    let complete = accumulator.usage.prompt.is_some() && accumulator.usage.completion.is_some();
+    let response = accumulator.finish()?;
+    if complete {
+        sink.complete_usage(response.usage.clone()).await?;
+    }
+    sink.emit(ModelStreamFrame::Final(response))
         .await
         .map_err(|_| "provider stream consumer failed".to_owned())
 }
@@ -129,7 +145,12 @@ pub(crate) async fn consume_google_sse(
     )
     .await
     .map_err(|error| crate::adapter::sanitize_upstream_body(&error, Some(api_key)))?;
-    sink.emit(ModelStreamFrame::Final(accumulator.finish()?))
+    let complete = accumulator.usage_complete();
+    let response = accumulator.finish()?;
+    if complete {
+        sink.complete_usage(response.usage.clone()).await?;
+    }
+    sink.emit(ModelStreamFrame::Final(response))
         .await
         .map_err(|_| "provider stream consumer failed".to_owned())
 }
@@ -169,7 +190,12 @@ pub(crate) async fn consume_ollama_ndjson(
             let _ = sink.emit(ModelStreamFrame::TextDelta(delta)).await;
         }
     }
-    sink.emit(ModelStreamFrame::Final(accumulator.finish()?))
+    let complete = accumulator.usage_complete();
+    let response = accumulator.finish()?;
+    if complete {
+        sink.complete_usage(response.usage.clone()).await?;
+    }
+    sink.emit(ModelStreamFrame::Final(response))
         .await
         .map_err(|_| "provider stream consumer failed".to_owned())
 }

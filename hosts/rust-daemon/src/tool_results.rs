@@ -20,6 +20,7 @@ pub(crate) struct ToolResultStore {
     root: PathBuf,
     max_count: usize,
     max_bytes: u64,
+    owner: Option<crate::profile_owner::ProfileOwner>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -183,7 +184,23 @@ impl ToolResultStore {
             root,
             max_count: 1024,
             max_bytes: 128 * 1024 * 1024,
+            owner: None,
         }
+    }
+    pub(crate) fn with_profile_owner(
+        mut self,
+        owner: Option<crate::profile_owner::ProfileOwner>,
+    ) -> Self {
+        self.owner = owner;
+        self
+    }
+    fn ensure_owned(&self) -> Result<(), String> {
+        self.owner.as_ref().map_or(Ok(()), |owner| {
+            owner
+                .canonical_path(&self.root)
+                .map(|_| ())
+                .map_err(|_| "Profile ownership is unavailable or uncertain".into())
+        })
     }
     pub(crate) fn save(
         &self,
@@ -194,6 +211,7 @@ impl ToolResultStore {
         name: &str,
         result: &TaskResult<Content>,
     ) -> Result<ToolResultArtifact, String> {
+        self.ensure_owned()?;
         if [agent, run, call, name]
             .iter()
             .any(|v| v.is_empty() || v.len() > 512)
@@ -212,7 +230,13 @@ impl ToolResultStore {
         let _serial = WRITES
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let dir = open_directory(&self.root, true)?;
+        self.ensure_owned()?;
+        let dir = match &self.owner {
+            Some(owner) => owner
+                .with_directory(&self.root, || open_directory(&self.root, true))
+                .map_err(|_| "Profile ownership is unavailable or uncertain")??,
+            None => open_directory(&self.root, true)?,
+        };
         // The OS releases this exclusive lock on normal exit and process crash.
         let mut lock_options = OpenOptions::new();
         lock_options
@@ -289,18 +313,22 @@ impl ToolResultStore {
             .follow(FollowSymlinks::No)
             .nonblock(true);
         let write = (|| {
+            self.ensure_owned()?;
             let mut file = dir
                 .open_with(&temporary, &options)
                 .map_err(|_| UNAVAILABLE)?;
             file.write_all(&bytes).map_err(|_| UNAVAILABLE)?;
             file.sync_all().map_err(|_| UNAVAILABLE)?;
             drop(file);
+            self.ensure_owned()?;
             // Atomic create without replacement: exact retry can never mutate it.
             dir.hard_link(&temporary, &dir, &filename)
                 .map_err(|_| UNAVAILABLE)?;
             Ok::<_, String>(())
         })();
-        let _ = dir.remove_file(&temporary);
+        if self.ensure_owned().is_ok() {
+            let _ = dir.remove_file(&temporary);
+        }
         write?;
         #[cfg(unix)]
         dir.try_clone()

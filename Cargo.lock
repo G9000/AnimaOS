@@ -173,6 +173,7 @@ dependencies = [
  "rfd",
  "rmcp",
  "rusqlite",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -194,6 +195,7 @@ dependencies = [
  "utoipa-scalar",
  "uuid",
  "win-custody",
+ "winreg 0.56.0",
  "zeroize",
 ]
 
@@ -216,6 +218,7 @@ dependencies = [
  "anima-model-adapters",
  "async-trait",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

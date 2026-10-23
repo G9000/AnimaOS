@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
-use sqlx::{PgPool, Row};
+use sqlx::{Connection, PgConnection, PgPool, Row};
 
 use super::{
     message_ordinal, role_name, search_tokens, searchable_text, to_i64, validate_after_query,
@@ -108,11 +108,58 @@ impl From<sqlx::Error> for HistoryError {
 
 pub(crate) struct PostgresHistoryStore {
     pool: PgPool,
+    owner: Option<crate::profile_owner::ProfileOwner>,
 }
 
 impl PostgresHistoryStore {
     pub(crate) fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self { pool, owner: None }
+    }
+
+    pub(crate) fn new_owned(pool: PgPool, owner: crate::profile_owner::ProfileOwner) -> Self {
+        Self {
+            pool,
+            owner: Some(owner),
+        }
+    }
+
+    async fn writer(&self) -> Result<HistoryWriter, HistoryError> {
+        Ok(match &self.owner {
+            Some(owner) => {
+                HistoryWriter::Owned(owner.postgres_writer().await.map_err(HistoryError::new)?)
+            }
+            None => HistoryWriter::Ephemeral(self.pool.acquire().await?),
+        })
+    }
+}
+
+enum HistoryWriter {
+    Owned(crate::profile_owner::OwnedPostgresWriter),
+    Ephemeral(sqlx::pool::PoolConnection<sqlx::Postgres>),
+}
+impl HistoryWriter {
+    fn complete(&mut self) -> Result<(), HistoryError> {
+        match self {
+            Self::Owned(writer) => writer.complete().map_err(HistoryError::new),
+            Self::Ephemeral(_) => Ok(()),
+        }
+    }
+}
+impl std::ops::Deref for HistoryWriter {
+    type Target = PgConnection;
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Owned(writer) => writer,
+            Self::Ephemeral(connection) => connection,
+        }
+    }
+}
+impl std::ops::DerefMut for HistoryWriter {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            Self::Owned(writer) => writer,
+            Self::Ephemeral(connection) => connection,
+        }
     }
 }
 
@@ -142,7 +189,8 @@ impl HistoryStore for PostgresHistoryStore {
     }
 
     async fn upsert_attachments(&self, rows: &[AttachmentRecord]) -> Result<(), HistoryError> {
-        let mut transaction = self.pool.begin().await?;
+        let mut writer = self.writer().await?;
+        let mut transaction = writer.begin().await?;
         for row in rows {
             let count = sqlx::query("INSERT INTO history_attachments (id, agent_id, session_id, created_at_ms, record) VALUES ($1,$2,$3,$4,$5)
                 ON CONFLICT(id) DO UPDATE SET record = history_attachments.record
@@ -155,6 +203,7 @@ impl HistoryStore for PostgresHistoryStore {
             }
         }
         transaction.commit().await?;
+        writer.complete()?;
         Ok(())
     }
     async fn get_attachment(
@@ -179,7 +228,8 @@ impl HistoryStore for PostgresHistoryStore {
         if messages.is_empty() {
             return Ok(());
         }
-        let mut transaction = self.pool.begin().await?;
+        let mut writer = self.writer().await?;
+        let mut transaction = writer.begin().await?;
         for row in messages {
             sqlx::query(UPSERT_MESSAGE)
                 .bind(&row.message.id)
@@ -202,6 +252,7 @@ impl HistoryStore for PostgresHistoryStore {
                 .await?;
         }
         transaction.commit().await?;
+        writer.complete()?;
         Ok(())
     }
 
@@ -209,7 +260,8 @@ impl HistoryStore for PostgresHistoryStore {
         if runs.is_empty() {
             return Ok(());
         }
-        let mut transaction = self.pool.begin().await?;
+        let mut writer = self.writer().await?;
+        let mut transaction = writer.begin().await?;
         for run in runs {
             let status = serde_json::to_value(run.status)?
                 .as_str()
@@ -227,6 +279,7 @@ impl HistoryStore for PostgresHistoryStore {
                 .await?;
         }
         transaction.commit().await?;
+        writer.complete()?;
         Ok(())
     }
 
@@ -234,7 +287,8 @@ impl HistoryStore for PostgresHistoryStore {
         if approvals.is_empty() {
             return Ok(());
         }
-        let mut transaction = self.pool.begin().await?;
+        let mut writer = self.writer().await?;
+        let mut transaction = writer.begin().await?;
         for approval in approvals {
             sqlx::query(UPSERT_APPROVAL)
                 .bind(&approval.id)
@@ -246,6 +300,7 @@ impl HistoryStore for PostgresHistoryStore {
                 .await?;
         }
         transaction.commit().await?;
+        writer.complete()?;
         Ok(())
     }
 
@@ -292,7 +347,8 @@ impl HistoryStore for PostgresHistoryStore {
         if records.is_empty() {
             return Ok(());
         }
-        let mut transaction = self.pool.begin().await?;
+        let mut writer = self.writer().await?;
+        let mut transaction = writer.begin().await?;
         for record in records {
             sqlx::query(UPSERT_USAGE)
                 .bind(&record.id)
@@ -305,6 +361,7 @@ impl HistoryStore for PostgresHistoryStore {
                 .await?;
         }
         transaction.commit().await?;
+        writer.complete()?;
         Ok(())
     }
 
@@ -335,7 +392,8 @@ impl HistoryStore for PostgresHistoryStore {
         if fires.is_empty() {
             return Ok(());
         }
-        let mut transaction = self.pool.begin().await?;
+        let mut writer = self.writer().await?;
+        let mut transaction = writer.begin().await?;
         for fire in fires {
             sqlx::query(UPSERT_SCHEDULE_RUN)
                 .bind(&fire.id)
@@ -347,6 +405,7 @@ impl HistoryStore for PostgresHistoryStore {
                 .await?;
         }
         transaction.commit().await?;
+        writer.complete()?;
         Ok(())
     }
 
@@ -624,7 +683,8 @@ impl HistoryStore for PostgresHistoryStore {
     }
 
     async fn delete_session(&self, agent_id: &str, session_id: &str) -> Result<(), HistoryError> {
-        let mut transaction = self.pool.begin().await?;
+        let mut writer = self.writer().await?;
+        let mut transaction = writer.begin().await?;
         for table in [
             "history_messages",
             "history_runs",
@@ -640,11 +700,13 @@ impl HistoryStore for PostgresHistoryStore {
             .await?;
         }
         transaction.commit().await?;
+        writer.complete()?;
         Ok(())
     }
 
     async fn delete_agent(&self, agent_id: &str) -> Result<(), HistoryError> {
-        let mut transaction = self.pool.begin().await?;
+        let mut writer = self.writer().await?;
+        let mut transaction = writer.begin().await?;
         // Usage rows stay (spec §3.3); approvals and automation fires go with their agent.
         for table in [
             "history_messages",
@@ -659,6 +721,7 @@ impl HistoryStore for PostgresHistoryStore {
                 .await?;
         }
         transaction.commit().await?;
+        writer.complete()?;
         Ok(())
     }
 }

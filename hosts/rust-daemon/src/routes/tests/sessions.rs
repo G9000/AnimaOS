@@ -208,6 +208,12 @@ struct PendingModelAdapter {
 
 #[async_trait]
 impl ModelAdapter for PendingModelAdapter {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "pending"
     }
@@ -233,6 +239,7 @@ impl ModelAdapter for PendingModelAdapter {
             usage: TokenUsage {
                 prompt_tokens: 1,
                 completion_tokens: 1,
+                total_tokens: 2,
                 ..TokenUsage::default()
             },
             stop_reason: ModelStopReason::End,

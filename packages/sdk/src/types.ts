@@ -35,11 +35,24 @@ export type AgentStatus =
   | 'failed'
   | 'terminated';
 
+/** Finite limits shared by a turn, its helpers and reviewed recovery attempts. */
+export interface ExecutionLimits {
+  maxWallTimeMs?: number;
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  maxTotalTokens?: number;
+  maxModelAttempts?: number;
+  maxToolCalls?: number;
+  maxRetries?: number;
+  maxInflightOperations?: number;
+}
+
 export interface AgentSettings {
   temperature?: number;
   maxTokens?: number;
   timeoutMs?: number;
   maxRetries?: number;
+  executionLimits?: ExecutionLimits;
   [key: string]: unknown;
 }
 

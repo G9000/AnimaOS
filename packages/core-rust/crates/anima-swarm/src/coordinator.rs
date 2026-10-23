@@ -553,14 +553,19 @@ impl SwarmCoordinator {
             on_running(self.state_snapshot());
         }
 
-        let spawn_coordinator = self.clone();
+        // Managers retain dispatch callbacks. Keep their idle references weak;
+        // an active spawn owns the upgraded coordinator until it returns.
+        let spawn_coordinator = Arc::downgrade(&self.inner);
         let spawn_agent = Arc::new(
             move |config: AgentConfig,
                   delegate_task: Option<Arc<CoordinatorDelegateFn>>,
                   delegate_tasks: Option<Arc<CoordinatorBatchDelegateFn>>| {
                 let spawn_coordinator = spawn_coordinator.clone();
                 Box::pin(async move {
-                    spawn_coordinator
+                    let inner = spawn_coordinator
+                        .upgrade()
+                        .ok_or_else(|| "swarm is no longer active".to_string())?;
+                    SwarmCoordinator { inner }
                         .spawn_for_dispatch(config, delegate_task, delegate_tasks)
                         .await
                 }) as CoordinatorFuture<Result<CoordinatorAgentRef, String>>
@@ -980,7 +985,7 @@ impl SwarmCoordinator {
         agent_id: &str,
         liveness: Arc<CoordinatorAgentLiveness>,
     ) -> Arc<CoordinatorParticipantsFn> {
-        let inner = self.inner.clone();
+        let inner = Arc::downgrade(&self.inner);
         let agent_id = agent_id.to_string();
         Arc::new(move || {
             let inner = inner.clone();
@@ -990,6 +995,10 @@ impl SwarmCoordinator {
                 if !liveness.is_active() {
                     return Err(inactive_agent_error(&agent_id));
                 }
+
+                let inner = inner
+                    .upgrade()
+                    .ok_or_else(|| "swarm is no longer active".to_string())?;
 
                 let mut participants = inner
                     .agents

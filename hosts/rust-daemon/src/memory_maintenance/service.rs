@@ -228,7 +228,7 @@ impl MaintenanceService {
                 },
                 policy,
                 runtime.config().clone(),
-                Arc::clone(&guard.model_adapter),
+                guard.profile_model_adapter(),
                 Arc::clone(&guard.learning_slots),
                 guard.learning_mode(agent_id) == LearningMode::Free,
             )

@@ -203,12 +203,64 @@ impl ModelStreamSink for AttemptSink<'_> {
         }
         self.sink.emit(frame).await
     }
+    async fn complete_usage(&self, usage: anima_core::TokenUsage) -> Result<(), String> {
+        self.sink.complete_usage(usage).await
+    }
 }
 
 #[async_trait]
 impl ModelAdapter for FallbackModelAdapter {
     fn provider(&self) -> &str {
         self.inner.provider()
+    }
+
+    async fn generate_controlled(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        context: &anima_core::execution_limits::ModelCallContext,
+    ) -> Result<ModelGenerateResponse, String> {
+        self.through_chain(config, |choice, _served| async move {
+            let result = match context.check_live() {
+                Ok(()) => {
+                    self.inner
+                        .generate_controlled(&choice, request, context)
+                        .await
+                }
+                Err(error) => Err(error),
+            };
+            (result, context.check_live().is_err())
+        })
+        .await
+    }
+
+    async fn stream_controlled(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        sink: &dyn ModelStreamSink,
+        context: &anima_core::execution_limits::ModelCallContext,
+    ) -> Result<(), String> {
+        self.through_chain(config, |choice, served| async move {
+            let attempt = AttemptSink {
+                sink,
+                served: Mutex::new(served),
+                committed: AtomicBool::new(false),
+            };
+            let result = match context.check_live() {
+                Ok(()) => {
+                    self.inner
+                        .stream_controlled(&choice, request, &attempt, context)
+                        .await
+                }
+                Err(error) => Err(error),
+            };
+            (
+                result,
+                attempt.committed.load(Ordering::SeqCst) || context.check_live().is_err(),
+            )
+        })
+        .await
     }
 
     async fn generate(

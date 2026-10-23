@@ -217,6 +217,7 @@ pub(super) fn start_background_process(
     cwd: &str,
     exit_notifier: Option<ExitNotifier>,
     watch: Option<(ExitNotifier, Vec<(String, WaitUntil)>)>,
+    profile_owner: Option<crate::profile_owner::ProfileOwner>,
 ) -> Result<String, String> {
     let workspace_root = workspace_root_path("bg_start", configured_root)?;
     start_background_process_watching(
@@ -226,6 +227,7 @@ pub(super) fn start_background_process(
         cwd,
         exit_notifier,
         watch,
+        profile_owner,
     )
 }
 
@@ -254,6 +256,7 @@ fn start_background_process_with_notifier(
         cwd,
         notifier,
         None,
+        None,
     )
 }
 
@@ -264,7 +267,11 @@ fn start_background_process_watching(
     cwd: &str,
     notifier: Option<ExitNotifier>,
     watch: Option<(ExitNotifier, Vec<(String, WaitUntil)>)>,
+    profile_owner: Option<crate::profile_owner::ProfileOwner>,
 ) -> Result<String, String> {
+    if let Some(owner) = &profile_owner {
+        owner.ensure_owned().map_err(|error| error.to_string())?;
+    }
     let cwd_path = resolve_workspace_search_root(
         &canonical_workspace_root(workspace_root, "bg_start")?,
         cwd,
@@ -306,7 +313,10 @@ fn start_background_process_watching(
     custody.attach(child.as_ref());
     let (Some(stdout), Some(stderr)) = (child.stdout().take(), child.stderr().take()) else {
         runtime.spawn(async move {
-            custody.retire(&mut child).await;
+            let _profile_owner = profile_owner;
+            if !custody.retire(&mut child).await {
+                futures::future::pending::<()>().await;
+            }
         });
         return Err("bg_start output could not be captured".to_string());
     };
@@ -347,6 +357,7 @@ fn start_background_process_watching(
         readers,
         stop_requests,
         exit_note,
+        profile_owner,
     ));
     manager.processes.insert(
         id.clone(),
@@ -395,12 +406,20 @@ async fn supervise(
     mut readers: [tokio::task::JoinHandle<()>; 2],
     mut stop_requests: oneshot::Receiver<StopReply>,
     exit_note: Option<ExitNote>,
+    profile_owner: Option<crate::profile_owner::ProfileOwner>,
 ) {
+    let _profile_owner = profile_owner;
+    let lost = _profile_owner
+        .as_ref()
+        .map(|owner| owner.lost_signal())
+        .unwrap_or_default();
     enum First {
         Exited(std::io::Result<std::process::ExitStatus>),
         Stop(Option<StopReply>),
     }
     let first = tokio::select! {
+        biased;
+        _ = lost.cancelled() => First::Stop(None),
         status = child.inner_mut().wait() => First::Exited(status),
         request = &mut stop_requests => First::Stop(request.ok()),
     };
@@ -416,6 +435,9 @@ async fn supervise(
             shared.finish(code, true);
             if let Some(reply) = reply {
                 let _ = reply.send(retired);
+            }
+            if !retired {
+                futures::future::pending::<()>().await;
             }
             return;
         }
@@ -452,12 +474,15 @@ async fn supervise(
             }
             // Descendants the leader left behind stay in custody until the
             // job is stopped or removed.
-            stop_requests.await.ok()
+            tokio::select! { biased; _ = lost.cancelled() => None, request = stop_requests => request.ok() }
         }
     };
     let retired = custody.retire(&mut child).await;
     if let Some(reply) = stop_reply {
         let _ = reply.send(retired);
+    }
+    if !retired {
+        futures::future::pending::<()>().await;
     }
 }
 
@@ -1036,6 +1061,7 @@ mod tests {
                     ),
                 ],
             )),
+            None,
         )
         .unwrap();
         let note = tokio::time::timeout(Duration::from_secs(10), notes.recv())
@@ -1067,6 +1093,7 @@ mod tests {
                 }),
                 vec![("ready".to_string(), WaitUntil::Literal("ready".into()))],
             )),
+            None,
         )
         .unwrap();
         wait_background_process(
@@ -1089,6 +1116,43 @@ mod tests {
         assert!(note.contains(&format!("`{}…`", "x".repeat(79))), "{note}");
         assert!(note.contains("exited 0 after 4m12s"), "{note}");
         assert_eq!(format_elapsed(Duration::from_secs(3725)), "1h2m5s");
+    }
+
+    #[tokio::test]
+    async fn profile_owner_background_supervisor_retains_lease_until_process_retirement() {
+        let root = workspace();
+        let profile = root.path().join("profile.json");
+        let owner = crate::profile_owner::ProfileOwner::acquire([profile.clone()]).unwrap();
+        let manager = new_shared_process_manager();
+        start_background_process_watching(
+            &manager,
+            root.path(),
+            "echo ready; sleep 30",
+            ".",
+            None,
+            None,
+            Some(owner.clone()),
+        )
+        .unwrap();
+        drop(owner);
+        assert!(
+            crate::profile_owner::ProfileOwner::acquire([profile.clone()]).is_err(),
+            "running child released its profile lease with the caller"
+        );
+        // The independent process supervisor performs retirement; this wait does
+        // not depend on the async test executor continuing to poll its tasks.
+        drop(manager);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if crate::profile_owner::ProfileOwner::acquire([profile.clone()]).is_ok() {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "retired process did not release its profile lease"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 
     #[test]

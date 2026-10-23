@@ -44,6 +44,12 @@ struct PausedModel {
 }
 #[async_trait::async_trait]
 impl anima_core::ModelAdapter for PausedModel {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "paused-test"
     }
@@ -156,6 +162,12 @@ struct GatedModel {
 }
 #[async_trait::async_trait]
 impl anima_core::ModelAdapter for GatedModel {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "gated-test"
     }

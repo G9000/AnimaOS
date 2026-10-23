@@ -1,4 +1,6 @@
 pub(crate) mod entry;
+#[cfg(test)]
+mod harness_reliability_tests;
 pub(crate) mod lifecycle;
 pub(crate) mod persistence;
 
@@ -16,7 +18,9 @@ use tokio::sync::{RwLock, Semaphore};
 use self::{
     entry::ServeOptions,
     lifecycle::shutdown_signal,
-    persistence::{configure_persistence, skip_memory_model_load, start_memory_model_load},
+    persistence::{
+        configure_persistence, prepare_persistence, skip_memory_model_load, start_memory_model_load,
+    },
 };
 use crate::agent_runs::AgentRunCoordinator;
 use crate::connectors::credentials::{
@@ -212,11 +216,12 @@ fn app_with_runtime(
 }
 
 pub async fn app_with_configured_persistence(config: DaemonConfig) -> io::Result<Router> {
+    let preflight = prepare_persistence(&config)?;
     let state = Arc::new(RwLock::new(configured_state(
         &config,
         Arc::new(DeterministicModelAdapter),
     )));
-    configure_persistence(&state, &config).await?;
+    configure_persistence(&state, &config, preflight).await?;
     skip_memory_model_load(&state).await;
     state.write().await.chatgpt_auth = crate::chatgpt_auth::ChatGptAuth::new();
     let runtime = daemon_runtime(Arc::clone(&state), &config)?;
@@ -240,7 +245,10 @@ pub async fn app_with_configured_persistence(config: DaemonConfig) -> io::Result
     let scheduler = runtime.scheduler.clone();
     // Install synchronous services before any producer can contend for state.
     let router = router_with_runtime(state, config, runtime, false);
-    turn_recovery.recover_main_chat_clears().await.map_err(|error| io::Error::other(error.message()))?;
+    turn_recovery
+        .recover_main_chat_clears()
+        .await
+        .map_err(|error| io::Error::other(error.message()))?;
     turn_recovery.auto_recover_unstarted().await;
     learning.recover_skill_work();
     jobs.start().await.map_err(|error| {
@@ -267,6 +275,7 @@ pub async fn serve_with(
     config: DaemonConfig,
     options: ServeOptions,
 ) -> io::Result<()> {
+    let preflight = prepare_persistence(&config)?;
     // Only the real daemon reads explicit operator configuration. Embeddings
     // and deterministic constructors remain independent of ambient config.
     // An unknown external memory provider id stops boot.
@@ -311,7 +320,7 @@ pub async fn serve_with(
         ),
     )));
 
-    configure_persistence(&state, &config).await?;
+    configure_persistence(&state, &config, preflight).await?;
     start_memory_model_load(&state).await;
 
     {
@@ -426,7 +435,10 @@ async fn serve_with_state_and_voice(
     };
     // Router installation uses uncontended construction-time state. Restored
     // workers and the scanner may acquire it immediately after being started.
-    agent_runs.recover_main_chat_clears().await.map_err(|error| io::Error::other(error.message()))?;
+    agent_runs
+        .recover_main_chat_clears()
+        .await
+        .map_err(|error| io::Error::other(error.message()))?;
     agent_runs.auto_recover_unstarted().await;
     agent_runs.learning().recover_skill_work();
     jobs.start().await.map_err(|error| {

@@ -626,7 +626,7 @@ impl AgentRunCoordinator {
             })?;
             super::attachments::validate_available(root, attachments.clone()).await?;
         }
-        let (record, previous_title, previous_recovery_mirrored, persist) = {
+        let (record, previous_title, previous_recovery_mirrored, execution_candidate, persist) = {
             let mut guard = self.state.write().await;
             // Attachment/history validation above may await I/O. Recovery data
             // is not authority; recheck the exact claim under admission's lock.
@@ -777,6 +777,9 @@ impl AgentRunCoordinator {
                     ApiError::conflict("Could not bind accepted turn to its current owner")
                 })?,
             );
+            let execution_candidate =
+                crate::execution_budgets::prepare_run_binding(&guard, &record, now_ms)
+                    .map_err(ApiError::conflict)?;
             if let Some(admission) = &recovery {
                 let source = guard
                     .runs
@@ -800,15 +803,20 @@ impl AgentRunCoordinator {
                         .get_mut(&request.agent_id, &request.session_id)
                         .map(|session| std::mem::replace(&mut session.title, title))
                 });
+            guard.execution_budget_candidate_snapshot = Some(execution_candidate.registry.clone());
             guard.runs.insert(record.clone());
             (
                 record,
                 previous_title,
                 previous_recovery_mirrored,
+                execution_candidate,
                 guard.control_plane_persist_request(),
             )
         };
-        if let Err(error) = persist.save().await {
+        if let Err(error) =
+            crate::execution_budgets::save_admission(&self.state, execution_candidate, persist)
+                .await
+        {
             let mut guard = self.state.write().await;
             guard.runs.remove(&record.id);
             if let Some(admission) = &recovery {

@@ -319,6 +319,12 @@ struct OriginModel {
 }
 #[async_trait::async_trait]
 impl ModelAdapter for OriginModel {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "fp05-origin-offline"
     }

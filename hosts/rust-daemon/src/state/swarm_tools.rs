@@ -22,6 +22,14 @@ pub(super) async fn execute_swarm_tool(
     user_message: Message,
     tool_call: ToolCall,
 ) -> TaskResult<Content> {
+    if let Err(error) = tool_context.verify_profile_owner().await {
+        return error;
+    }
+    if let Some(budget) = tool_context.execution_budget() {
+        if let Err(error) = budget.check_authority().await {
+            return TaskResult::error(error, 0);
+        }
+    }
     match tool_call.name.as_str() {
         "send_message" => {
             let Some(message) = string_arg(&tool_call, "message") else {
@@ -31,6 +39,15 @@ pub(super) async fn execute_swarm_tool(
                 Ok(recipient) => recipient,
                 Err(error) => return TaskResult::error(error, 0),
             };
+
+            if let Err(error) = tool_context.verify_profile_owner().await {
+                return error;
+            }
+            if let Some(budget) = tool_context.execution_budget() {
+                if let Err(error) = budget.check_authority().await {
+                    return TaskResult::error(error, 0);
+                }
+            }
 
             match send(recipient.agent_id.clone(), text_content(message)).await {
                 Ok(()) => TaskResult::success(

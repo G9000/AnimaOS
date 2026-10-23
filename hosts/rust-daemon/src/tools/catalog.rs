@@ -87,7 +87,13 @@ impl RunToolCatalog {
                 }
                 match explicit {
                     _ if descriptor.name == "clear_main_chat" => Origin::MainChatClear,
-                    _ if matches!(descriptor.name.as_str(), "rename_chat" | "compact_chat" | "export_chat") => Origin::OwnerChatControl,
+                    _ if matches!(
+                        descriptor.name.as_str(),
+                        "rename_chat" | "compact_chat" | "export_chat"
+                    ) =>
+                    {
+                        Origin::OwnerChatControl
+                    }
                     Some(source) => Origin::Explicit(source.clone()),
                     None if descriptor.name == "core_memory"
                         && original.allows_tool("memory_add") =>
@@ -242,8 +248,10 @@ impl RunToolCatalog {
                 }
             }
             Origin::OwnerChatControl => {
-                if !self.peer_sources.is_empty() || self.delegated_parent.is_some()
-                    || crate::agent_runs::chat_controls::validate_owner_chat(state, &self.run).is_err()
+                if !self.peer_sources.is_empty()
+                    || self.delegated_parent.is_some()
+                    || crate::agent_runs::chat_controls::validate_owner_chat(state, &self.run)
+                        .is_err()
                 {
                     return Err(REFUSED);
                 }

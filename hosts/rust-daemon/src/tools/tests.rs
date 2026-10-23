@@ -644,6 +644,9 @@ fn registry_defines_every_registered_tool_schema() {
             &["event_id"][..],
             &["calendar_id"][..],
         ),
+        ("remove_skill", &["slug"][..], &[][..]),
+        ("undo_skill", &["slug"][..], &[][..]),
+        ("skill_history", &[][..], &["slug"][..]),
         ("drive_search", &[][..], &["query"][..]),
         ("drive_read", &["file_id"][..], &[][..]),
         ("propose_plan", &["title", "steps"][..], &["estimate"][..]),
@@ -4966,4 +4969,75 @@ async fn memory_search_and_recent_memories_hide_a_flagged_core_entry_but_keep_it
         );
         assert!(text.contains(&ordinary.content), "{name}: {text}");
     }
+}
+
+#[tokio::test]
+async fn host_budget_native_children_share_the_remaining_tool_slot() {
+    use anima_core::execution_limits::{ExecutionContext, ExecutionLimits};
+    let root = tempfile::tempdir().unwrap();
+    let registry = ToolRegistry::new();
+    let descriptor = registry.descriptor("write_file").unwrap();
+    let budget = ExecutionContext::ephemeral(
+        "native-budget".into(),
+        ExecutionLimits {
+            max_tool_calls: 1,
+            ..Default::default()
+        },
+        Default::default(),
+    )
+    .unwrap();
+    let context = ToolExecutionContext::new(
+        Arc::new(AsyncRwLock::new(MemoryManager::new())),
+        Arc::new(AsyncRwLock::new(MemoryEmbeddingRuntime::disabled())),
+        None,
+        registry,
+        new_shared_process_manager_with_limit(DEFAULT_MAX_BACKGROUND_PROCESSES),
+        Some(root.path().to_path_buf()),
+        None,
+    )
+    .with_execution_budget(budget, false);
+    let agent = AgentState {
+        id: "native-budget-owner".into(),
+        name: "fixture".into(),
+        status: AgentStatus::Running,
+        config: serde_json::from_value(
+            json!({"name":"fixture","model":"fixture","tools":[descriptor]}),
+        )
+        .unwrap(),
+        created_at_ms: 1,
+        token_usage: Default::default(),
+    };
+    let input = Message {
+        id: "input".into(),
+        agent_id: agent.id.clone(),
+        room_id: "room".into(),
+        content: Default::default(),
+        role: MessageRole::User,
+        created_at_ms: 1,
+    };
+    for (id, text, expected) in [
+        ("one", "admitted", TaskStatus::Success),
+        ("two", "forbidden", TaskStatus::Error),
+    ] {
+        let result = context
+            .clone()
+            .execute_tool(
+                agent.clone(),
+                input.clone(),
+                ToolCall {
+                    id: id.into(),
+                    name: "write_file".into(),
+                    args: BTreeMap::from([
+                        ("file_path".into(), DataValue::String("effect.txt".into())),
+                        ("content".into(), DataValue::String(text.into())),
+                    ]),
+                },
+            )
+            .await;
+        assert_eq!(result.status, expected, "{id}: {result:?}");
+    }
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("effect.txt")).unwrap(),
+        "admitted"
+    );
 }

@@ -75,6 +75,12 @@ struct StopBeforeToolsModel {
 
 #[async_trait]
 impl ModelAdapter for StopBeforeToolsModel {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "stop-before-tools"
     }

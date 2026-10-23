@@ -66,6 +66,12 @@ async fn failed_task_memory_save_does_not_publish_or_leak_into_later_save() {
 struct PeerModelAdapter;
 #[async_trait]
 impl ModelAdapter for PeerModelAdapter {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "peer-test"
     }
@@ -175,6 +181,12 @@ struct HelperModelAdapter {
 
 #[async_trait]
 impl ModelAdapter for HelperModelAdapter {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "helper-test"
     }
@@ -697,6 +709,12 @@ struct BurstHelperModelAdapter;
 
 #[async_trait]
 impl ModelAdapter for BurstHelperModelAdapter {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "burst-helper-test"
     }
@@ -915,6 +933,12 @@ impl anima_core::Evaluator for MemoryLockEvaluator {
 
 #[async_trait]
 impl ModelAdapter for SignalThenAnswerAdapter {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "signal-then-answer"
     }
@@ -1032,6 +1056,12 @@ struct RevokedHelperToolAdapter {
 
 #[async_trait]
 impl ModelAdapter for RevokedHelperToolAdapter {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "revoked-helper-test"
     }
@@ -1112,6 +1142,12 @@ struct TeamModelAdapter {
 
 #[async_trait]
 impl ModelAdapter for TeamModelAdapter {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "team-test"
     }
@@ -1345,6 +1381,12 @@ struct OrderedGateModelAdapter {
 
 #[async_trait]
 impl ModelAdapter for OrderedGateModelAdapter {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "ordered-gate"
     }
@@ -1368,6 +1410,12 @@ impl ModelAdapter for OrderedGateModelAdapter {
 
 #[async_trait]
 impl ModelAdapter for GateModelAdapter {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "gate"
     }
@@ -1396,6 +1444,12 @@ impl ModelAdapter for GateModelAdapter {
 
 #[async_trait]
 impl ModelAdapter for CapturingModelAdapter {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "capturing"
     }
@@ -2309,6 +2363,12 @@ struct ConfigGateModelAdapter {
 
 #[async_trait]
 impl ModelAdapter for ConfigGateModelAdapter {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "config-gate"
     }
@@ -2329,6 +2389,9 @@ struct PanickingModelAdapter;
 
 #[async_trait]
 impl ModelAdapter for PanickingModelAdapter {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "panicking"
     }
@@ -2569,6 +2632,12 @@ struct ToolThenGateModelAdapter {
 
 #[async_trait]
 impl ModelAdapter for ToolThenGateModelAdapter {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "tool-then-gate"
     }
@@ -3312,6 +3381,39 @@ async fn spawned_helpers_record_the_companion_run_that_started_them() {
         session_id: "chat:plan".into(),
         agent_id: lead.id.clone(),
     };
+    super::test_support::add_chat(&coordinator, &lead.id, &link.session_id).await;
+    // This test supplies an admitted parent turn rather than a bare link whose
+    // original accounting authority never existed.
+    let transaction = coordinator.control_plane_transaction().await;
+    let (candidate, persist) = {
+        let mut state = coordinator.state.write().await;
+        let now_ms = anima_core::primitives::now_millis();
+        let mut parent = RunRecord::running(
+            RunStart {
+                agent_id: lead.id.clone(),
+                session_id: link.session_id.clone(),
+                source: RunSource::Web,
+                source_ref: None,
+                idempotency_key: None,
+                text: "Research sources".into(),
+                model: lead.config.model.clone(),
+                provider: lead.config.provider.clone(),
+                parent_run_id: None,
+            },
+            now_ms,
+        );
+        parent.id = link.run_id.clone();
+        let candidate =
+            crate::execution_budgets::prepare_run_binding(&state, &parent, now_ms).unwrap();
+        state.execution_budget_candidate_snapshot = Some(candidate.registry.clone());
+        state.live.runs().register(&parent.id);
+        state.runs.insert(parent);
+        (candidate, state.control_plane_persist_request())
+    };
+    crate::execution_budgets::save_admission(&coordinator.state, candidate, persist)
+        .await
+        .unwrap();
+    drop(transaction);
 
     let text = coordinator
         .spawn_helper(
@@ -3330,6 +3432,10 @@ async fn spawned_helpers_record_the_companion_run_that_started_them() {
     let guard = coordinator.state.read().await;
     let run = guard.runs.for_agent(&helper_id)[0].clone();
     assert_eq!(run.parent_run_id.as_deref(), Some("run_companion"));
+    assert_eq!(
+        guard.execution_budgets.run_scopes[&run.id],
+        guard.execution_budgets.run_scopes["run_companion"]
+    );
     let session = guard
         .sessions
         .get(&helper_id, &run.session_id)
@@ -3785,6 +3891,12 @@ struct CheckinModel;
 
 #[async_trait]
 impl ModelAdapter for CheckinModel {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "checkin"
     }

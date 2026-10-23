@@ -14,6 +14,112 @@ use crate::state::UpdateAgentError;
 pub(crate) const AGENT_BUSY_MESSAGE: &str =
     "Agent has a run in progress; wait for it to finish before deleting it";
 
+#[cfg(test)]
+mod execution_limit_persistence_tests {
+    use super::*;
+    use crate::{
+        control_plane_store::{load_control_plane_snapshot, ControlPlaneStoreConfig},
+        state::DaemonState,
+    };
+    use anima_core::execution_limits::ExecutionLimits;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn owner_execution_limits_uncertain_patch_keeps_fieldwise_min_while_known_failure_rolls_back(
+    ) {
+        for old_attempts in [1, 3] {
+            for uncertain in [false, true] {
+                let directory = tempfile::tempdir().unwrap();
+                let store = ControlPlaneStoreConfig::Json(directory.path().join("control.json"));
+                let mut daemon = DaemonState::new();
+                daemon.set_control_plane_store(Some(store.clone()));
+                let mut original = ExecutionLimits::default();
+                original.max_model_attempts = old_attempts;
+                original.max_retries = 0;
+                original.budget.max_wall_time_ms = Some(2000);
+                original.budget.max_input_tokens = Some(300);
+                original.budget.max_output_tokens = Some(200);
+                original.budget.max_total_tokens = Some(500);
+                let settings = anima_core::AgentSettings {
+                    execution_limits: Some(original.clone()),
+                    ..Default::default()
+                };
+                let created = daemon
+                    .create_agent(
+                        serde_json::from_value(serde_json::json!({
+                            "name": "before", "model": "test", "settings": settings
+                        }))
+                        .unwrap(),
+                    )
+                    .unwrap();
+                let state = Arc::new(tokio::sync::RwLock::new(daemon));
+                state
+                    .write()
+                    .await
+                    .control_plane_persist_request()
+                    .save()
+                    .await
+                    .unwrap();
+                let gate = if uncertain {
+                    state
+                        .write()
+                        .await
+                        .install_test_control_plane_uncertain_save_gate()
+                } else {
+                    state
+                        .write()
+                        .await
+                        .install_test_control_plane_save_gate(true)
+                };
+                gate.release.add_permits(1);
+                let response = handle_update_agent(&created.state.id, serde_json::to_vec(&serde_json::json!({
+                    "name": "candidate", "settings": { "executionLimits": {
+                        "maxModelAttempts": 2, "maxRetries": 0, "maxToolCalls": 2, "maxInflightOperations": 2,
+                        "maxWallTimeMs": 3000, "maxInputTokens": 200, "maxOutputTokens": 300, "maxTotalTokens": 600
+                    }}
+                })).unwrap(), &state).await;
+                assert!(response.is_err());
+                let current = state.read().await.get_agent(&created.state.id).unwrap();
+                assert_eq!(current.state.config.name, "before");
+                let live = current
+                    .state
+                    .config
+                    .settings
+                    .as_ref()
+                    .unwrap()
+                    .execution_limits
+                    .as_ref()
+                    .unwrap();
+                if uncertain {
+                    assert_eq!(live.max_model_attempts, old_attempts.min(2));
+                    assert_eq!(live.budget.max_wall_time_ms, Some(2000));
+                    assert_eq!(live.budget.max_input_tokens, Some(200));
+                    assert_eq!(live.budget.max_output_tokens, Some(200));
+                } else {
+                    assert_eq!(live, &original);
+                }
+                let saved = load_control_plane_snapshot(&store).await.unwrap().unwrap();
+                let mut restarted = DaemonState::new();
+                restarted.restore_control_plane_snapshot(saved).unwrap();
+                let restored = restarted.get_agent(&created.state.id).unwrap();
+                let restored_limits = restored
+                    .state
+                    .config
+                    .settings
+                    .as_ref()
+                    .unwrap()
+                    .execution_limits
+                    .as_ref()
+                    .unwrap();
+                assert_eq!(
+                    restored_limits.max_model_attempts,
+                    if uncertain { 2 } else { old_attempts }
+                );
+            }
+        }
+    }
+}
+
 /// Rooms owned by connectors, automations, jobs, agent-to-agent requests, and
 /// mapped legacy sessions; the generic run route may not write into them, so
 /// a client `roomId` can never alias a mapped `legacy-room:<hash>` session id
@@ -229,6 +335,22 @@ pub(crate) async fn handle_update_agent(
         }
         check_fallbacks(&patched)?;
     }
+    let uncertain_execution_limits = patch
+        .execution_limits
+        .as_ref()
+        .map(|proposed| {
+            let previous_limits = previous
+                .state
+                .config
+                .settings
+                .as_ref()
+                .and_then(|settings| settings.execution_limits.as_ref())
+                .cloned()
+                .unwrap_or_default();
+            crate::execution_budgets::intersect_limits(&previous_limits, proposed)
+        })
+        .transpose()
+        .map_err(ApiError::service_unavailable)?;
     let snapshot = match guard.update_agent(agent_id, patch) {
         Ok(snapshot) => snapshot,
         Err(UpdateAgentError::InvalidTools(message)) => return Err(ApiError::bad_request(message)),
@@ -241,7 +363,18 @@ pub(crate) async fn handle_update_agent(
         }
     }
     if let Err(error) = guard.control_plane_persist_request().save().await {
-        guard.restore_agent_config(agent_id, previous.state.config);
+        let mut restored = previous.state.config;
+        if crate::control_plane_store::is_durability_uncertain(&error) {
+            if let Some(limits) = uncertain_execution_limits {
+                // Atomic replacement may already contain the proposed limit.
+                // Keep the stricter live ceiling while other fields roll back.
+                restored
+                    .settings
+                    .get_or_insert_with(Default::default)
+                    .execution_limits = Some(limits);
+            }
+        }
+        guard.restore_agent_config(agent_id, restored);
         if let Some(update) = &yaml_update {
             update.rollback().map_err(|rollback| {
                 ApiError::service_unavailable(format!(
@@ -398,6 +531,12 @@ mod tests {
 
     #[async_trait]
     impl ModelAdapter for RequestCapturingModelAdapter {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "request-capturing"
         }
@@ -426,6 +565,12 @@ mod tests {
 
     #[async_trait]
     impl ModelAdapter for PendingModelAdapter {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "pending"
         }
@@ -461,6 +606,12 @@ mod tests {
 
     #[async_trait]
     impl ModelAdapter for CapturingModelAdapter {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "capturing"
         }

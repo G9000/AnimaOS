@@ -20,9 +20,7 @@ pub(crate) use self::run_commit::RunContextReport;
 pub(crate) use self::session_state::RunSessionRequest;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-#[cfg(test)]
-use std::sync::Mutex as StdMutex;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use anima_core::{
     AgentConfig, AgentConfigUpdate, AgentRuntime, AgentRuntimeSnapshot, AgentState, AgentStatus,
@@ -210,8 +208,7 @@ mod tests {
             forged_tool("read_file", "forged duplicate"),
             forged_tool("bash", "forged bash"),
         ]);
-        let legacy_snapshot =
-            AgentRuntime::new(config, Arc::clone(&source.model_adapter)).snapshot();
+        let legacy_snapshot = AgentRuntime::new(config, source.profile_model_adapter()).snapshot();
         let mut restored = DaemonState::new();
 
         restored
@@ -1649,6 +1646,7 @@ pub(crate) struct DaemonState {
     /// Ephemeral acknowledged browser grant epochs. Scopes are never restored.
     pub(crate) browser_permission_epochs: HashMap<String, u64>,
     pub(crate) control_plane_store: Option<ControlPlaneStoreConfig>,
+    pub(crate) profile_owner: Option<crate::profile_owner::ProfileOwner>,
     control_plane_revision: u64,
     control_plane_persist_order: Arc<ControlPlanePersistOrder>,
     pub(crate) agents: HashMap<String, AgentRuntime>,
@@ -1675,6 +1673,14 @@ pub(crate) struct DaemonState {
     pub(crate) workflow_templates:
         HashMap<String, anima_core::workflow_templates::WorkflowTemplate>,
     pub(crate) runs: crate::runs::RunLedger,
+    pub(crate) execution_budgets: crate::execution_budgets::HostExecutionBudgets,
+    /// Persistence-only provisional accounting. Runtime ports never read this
+    /// field as authority before the admission acknowledgement is published.
+    pub(crate) execution_budget_candidate_snapshot:
+        Option<crate::execution_budgets::HostExecutionBudgets>,
+    pub(crate) execution_budget_failures: HashMap<String, Arc<StdMutex<Option<String>>>>,
+    pub(crate) swarm_execution_contexts:
+        Arc<StdMutex<HashMap<String, anima_core::execution_limits::ExecutionContext>>>,
     pub(crate) learning: crate::learning::LearningRegistry,
     pub(crate) memory_maintenance: crate::memory_maintenance::MaintenanceRegistry,
     pub(crate) doctor: crate::doctor::DoctorRegistry,
@@ -1726,7 +1732,7 @@ pub(crate) struct DaemonState {
     pub(crate) pending_history_deletions: Vec<crate::history::HistoryDeletion>,
     pub(crate) calendar_connectors: HashMap<String, GoogleCalendarConnectorRecord>,
     pub(crate) calendar_writes: HashMap<String, CalendarPendingWriteRecord>,
-    calendar_manager: Option<CalendarManager>,
+    calendar_manager: Option<crate::connectors::gcalendar::WeakCalendarManager>,
     pub(crate) mail_manager: Option<crate::connectors::mail::WeakMailManager>,
     pub(crate) drive_records: HashMap<String, crate::connectors::drive::DriveRecord>,
     pub(crate) drive_manager: Option<crate::connectors::drive::WeakDriveManager>,
@@ -1750,6 +1756,7 @@ pub(crate) struct DaemonState {
 }
 
 pub(crate) struct ControlPlanePersistRequest {
+    profile_owner: Option<crate::profile_owner::ProfileOwner>,
     config: Option<ControlPlaneStoreConfig>,
     snapshot: ControlPlaneSnapshot,
     revision: u64,
@@ -1759,6 +1766,7 @@ pub(crate) struct ControlPlanePersistRequest {
     mcp_candidate: bool,
     mcp_removed_grants: Option<(String, Vec<String>)>,
     bundle_candidate: bool,
+    execution_expected_generation: Option<u64>,
 }
 
 struct ControlPlanePersistOrder {
@@ -1770,6 +1778,9 @@ struct ControlPlanePersistOrder {
 #[derive(Default)]
 struct ControlPlaneAcknowledged {
     revision: u64,
+    /// Complete acknowledged accounting survives ordinary snapshots prepared
+    /// before a budget candidate acquired its state publication lock.
+    execution_budgets: Option<crate::execution_budgets::HostExecutionBudgets>,
     /// Action-only patches from the last acknowledged snapshot, bounded by
     /// its retained ledger. Never restore a row a later snapshot removed.
     run_actions: HashMap<String, AcknowledgedRunActions>,
@@ -1828,11 +1839,30 @@ pub(crate) struct TestControlPlaneSaveGate {
     fail: bool,
     uncertain_after_save: bool,
     skip_turn_checkpoints: bool,
+    skip_execution_accounting: bool,
 }
 
 impl ControlPlanePersistRequest {
+    pub(crate) fn store_config(&self) -> Option<ControlPlaneStoreConfig> {
+        self.config.clone()
+    }
+
     pub(crate) async fn save(self) -> std::io::Result<()> {
         self.save_ordered(false).await
+    }
+
+    pub(crate) fn with_execution_budgets(
+        mut self,
+        expected_generation: u64,
+        registry: crate::execution_budgets::HostExecutionBudgets,
+    ) -> Self {
+        self.snapshot.execution_budgets = registry;
+        self.execution_expected_generation = Some(expected_generation);
+        self
+    }
+
+    pub(crate) async fn save_execution_candidate(self) -> std::io::Result<()> {
+        self.save_ordered(true).await
     }
 
     /// Prepare an unpublished run-action patch. An ordered save that was
@@ -1932,7 +1962,49 @@ impl ControlPlanePersistRequest {
     }
 
     async fn save_ordered(mut self, require_current: bool) -> std::io::Result<()> {
+        if let Some(owner) = &self.profile_owner {
+            owner.verify_owned().await?;
+        }
         let mut acknowledged = self.order.acknowledged.lock().await;
+        self.snapshot
+            .execution_budgets
+            .validate()
+            .map_err(std::io::Error::other)?;
+        if let Some(expected) = self.execution_expected_generation {
+            let next = expected.checked_add(1);
+            let generation = self.snapshot.execution_budgets.generation;
+            if generation != expected && Some(generation) != next {
+                return Err(std::io::Error::other(
+                    "Execution budget candidate generation is invalid",
+                ));
+            }
+            if let Some(saved) = &acknowledged.execution_budgets {
+                if saved.generation > expected
+                    || (generation == saved.generation && saved != &self.snapshot.execution_budgets)
+                {
+                    return Err(std::io::Error::other("Execution budget candidate was superseded or conflicts with acknowledged accounting"));
+                }
+                self.snapshot
+                    .execution_budgets
+                    .retains(saved)
+                    .map_err(std::io::Error::other)?;
+            }
+        } else if let Some(saved) = &acknowledged.execution_budgets {
+            if self.snapshot.execution_budgets.generation < saved.generation {
+                self.snapshot.execution_budgets = saved.clone();
+            } else if self.snapshot.execution_budgets.generation == saved.generation
+                && &self.snapshot.execution_budgets != saved
+            {
+                return Err(std::io::Error::other(
+                    "Execution budget snapshot conflicts with acknowledged accounting",
+                ));
+            } else {
+                self.snapshot
+                    .execution_budgets
+                    .retains(saved)
+                    .map_err(std::io::Error::other)?;
+            }
+        }
         if self.revision <= acknowledged.revision {
             if require_current {
                 return Err(std::io::Error::other(SupersededControlPlaneSave));
@@ -2106,11 +2178,11 @@ impl ControlPlanePersistRequest {
                 .test_save_gate
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if self.turn_candidate.is_some()
-                && pending
-                    .as_ref()
-                    .is_some_and(|gate| gate.skip_turn_checkpoints)
-            {
+            if pending.as_ref().is_some_and(|gate| {
+                (self.turn_candidate.is_some() && gate.skip_turn_checkpoints)
+                    || (self.execution_expected_generation.is_some()
+                        && gate.skip_execution_accounting)
+            }) {
                 None
             } else {
                 pending.take()
@@ -2132,6 +2204,9 @@ impl ControlPlanePersistRequest {
                 return Err(std::io::Error::other("injected control-plane save failure"));
             }
         }
+        if let Some(owner) = &self.profile_owner {
+            owner.verify_owned().await?;
+        }
         let save_result = save_control_plane_snapshot(self.config.as_ref(), &self.snapshot).await;
         #[cfg(test)]
         let save_result = if save_result.is_ok() && uncertain_after_save {
@@ -2140,6 +2215,12 @@ impl ControlPlanePersistRequest {
             save_result
         };
         if let Err(error) = save_result {
+            if self.execution_expected_generation.is_some()
+                && crate::control_plane_store::is_durability_uncertain(&error)
+            {
+                acknowledged.revision = self.revision;
+                acknowledged.execution_budgets = Some(self.snapshot.execution_budgets.clone());
+            }
             if self.mcp_candidate && crate::control_plane_store::is_durability_uncertain(&error) {
                 // Retain the complete candidate as observed settlement data;
                 // the service publishes it fail-closed, never as a ready RPC.
@@ -2152,6 +2233,7 @@ impl ControlPlanePersistRequest {
             return Err(error);
         }
         acknowledged.revision = self.revision;
+        acknowledged.execution_budgets = Some(self.snapshot.execution_budgets.clone());
         acknowledged.bundles = Some(acknowledged_bundles(&self.snapshot));
         if self.mcp_candidate || acknowledged.mcp_connections.is_some() {
             acknowledged.mcp_connections = Some(self.snapshot.mcp_connections.clone());
@@ -2334,6 +2416,7 @@ impl DaemonState {
             mcp_publication: crate::mcp::McpRegistry::default().published(),
             mcp_manager: None,
             control_plane_store: None,
+            profile_owner: None,
             control_plane_revision: 0,
             control_plane_persist_order: Arc::new(ControlPlanePersistOrder {
                 acknowledged: AsyncMutex::new(ControlPlaneAcknowledged::default()),
@@ -2360,6 +2443,10 @@ impl DaemonState {
             workflow_templates: HashMap::new(),
             goals: HashMap::new(),
             runs: crate::runs::RunLedger::default(),
+            execution_budgets: crate::execution_budgets::HostExecutionBudgets::default(),
+            execution_budget_candidate_snapshot: None,
+            execution_budget_failures: HashMap::new(),
+            swarm_execution_contexts: Arc::new(StdMutex::new(HashMap::new())),
             learning: crate::learning::LearningRegistry::default(),
             memory_maintenance: crate::memory_maintenance::MaintenanceRegistry::default(),
             doctor: crate::doctor::DoctorRegistry::default(),
@@ -2470,6 +2557,16 @@ impl DaemonState {
         true
     }
 
+    pub(crate) fn profile_owner(&self) -> Option<crate::profile_owner::ProfileOwner> {
+        self.profile_owner.clone()
+    }
+
+    pub(crate) fn ensure_profile_owned(&self) -> std::io::Result<()> {
+        self.profile_owner
+            .as_ref()
+            .map_or(Ok(()), crate::profile_owner::ProfileOwner::ensure_owned)
+    }
+
     pub(crate) fn set_control_plane_store(
         &mut self,
         control_plane_store: Option<ControlPlaneStoreConfig>,
@@ -2478,7 +2575,7 @@ impl DaemonState {
     }
 
     pub(crate) fn set_calendar_manager(&mut self, calendar_manager: Option<CalendarManager>) {
-        self.calendar_manager = calendar_manager;
+        self.calendar_manager = calendar_manager.map(|manager| manager.weak());
     }
 
     pub(crate) fn control_plane_persist_request(&mut self) -> ControlPlanePersistRequest {
@@ -2487,6 +2584,7 @@ impl DaemonState {
             .checked_add(1)
             .expect("control-plane persistence revision overflowed");
         ControlPlanePersistRequest {
+            profile_owner: self.profile_owner.clone(),
             config: self.control_plane_store.clone(),
             snapshot: self.control_plane_snapshot(),
             revision: self.control_plane_revision,
@@ -2496,6 +2594,7 @@ impl DaemonState {
             mcp_candidate: false,
             mcp_removed_grants: None,
             bundle_candidate: false,
+            execution_expected_generation: None,
         }
     }
 
@@ -2510,6 +2609,7 @@ impl DaemonState {
             fail,
             uncertain_after_save: false,
             skip_turn_checkpoints: false,
+            skip_execution_accounting: false,
         };
         *self
             .control_plane_persist_order
@@ -2520,7 +2620,7 @@ impl DaemonState {
     }
 
     /// Target an existing action/approval/commit save while allowing the new
-    /// awaited progress checkpoints to retain their normal persistence custody.
+    /// awaited progress and execution accounting to retain their normal custody.
     #[cfg(test)]
     pub(crate) fn install_test_control_plane_non_turn_save_gate(
         &mut self,
@@ -2528,6 +2628,7 @@ impl DaemonState {
     ) -> TestControlPlaneSaveGate {
         let mut gate = self.install_test_control_plane_save_gate(fail);
         gate.skip_turn_checkpoints = true;
+        gate.skip_execution_accounting = true;
         *self
             .control_plane_persist_order
             .test_save_gate
@@ -2661,6 +2762,11 @@ impl DaemonState {
             .into_iter()
             .map(|record| self.with_live_tools(record))
             .collect();
+        snapshot.execution_budgets = self
+            .execution_budget_candidate_snapshot
+            .as_ref()
+            .unwrap_or(&self.execution_budgets)
+            .clone();
         snapshot.sessions = self.sessions.snapshot_records(&self.live_agent_ids());
         snapshot.tool_grants_applied = self.tool_grants_applied.iter().cloned().collect();
         snapshot.pending_history_deletions = self.pending_history_deletions.clone();
@@ -2730,6 +2836,14 @@ impl DaemonState {
         mut snapshot: ControlPlaneSnapshot,
     ) -> Result<(usize, usize), String> {
         self.validate_control_plane_snapshot(&snapshot)?;
+        self.execution_budgets = snapshot.execution_budgets.clone();
+        self.execution_budget_candidate_snapshot = None;
+        self.execution_budget_failures.clear();
+        self.control_plane_persist_order
+            .acknowledged
+            .try_lock()
+            .map_err(|_| "Execution accounting cannot be restored during a pending save")?
+            .execution_budgets = Some(self.execution_budgets.clone());
         let origin_pins = crate::runs::origin_pins(&snapshot);
         crate::connectors::discord::validate_snapshot(&snapshot)?;
         crate::connectors::drive::validate_snapshot(&snapshot)?;
@@ -3040,12 +3154,22 @@ impl DaemonState {
         &self,
         snapshot: &ControlPlaneSnapshot,
     ) -> Result<(), String> {
+        snapshot.execution_budgets.validate()?;
         let mut persisted_agents = self
             .list_agents()
             .into_iter()
             .map(|agent| (agent.state.id.clone(), agent))
             .collect::<HashMap<_, _>>();
         for agent in &snapshot.agents {
+            if let Some(limits) = agent
+                .state
+                .config
+                .settings
+                .as_ref()
+                .and_then(|settings| settings.execution_limits.as_ref())
+            {
+                limits.validate()?;
+            }
             persisted_agents.insert(agent.state.id.clone(), agent.clone());
         }
         let mcp_owners: HashSet<_> = persisted_agents
@@ -3628,7 +3752,10 @@ impl DaemonState {
             name.push(".tool-results");
             file.with_file_name(name)
         };
-        Some(crate::tool_results::ToolResultStore::new(root))
+        Some(
+            crate::tool_results::ToolResultStore::new(root)
+                .with_profile_owner(self.profile_owner()),
+        )
     }
 
     pub(crate) fn control_plane_durability(&self) -> String {
@@ -3826,7 +3953,7 @@ impl DaemonState {
         mut config: AgentConfig,
     ) -> Result<AgentRuntimeSnapshot, String> {
         config.tools = self.resolve_agent_tools(None, config.tools)?;
-        let mut runtime = AgentRuntime::new(config, Arc::clone(&self.model_adapter));
+        let mut runtime = AgentRuntime::new(config, self.profile_model_adapter());
         runtime.set_providers(default_providers_in_zone(
             Arc::clone(&self.memory),
             Arc::clone(&self.memory_embeddings),
@@ -3903,7 +4030,7 @@ impl DaemonState {
     /// position; secondary calls keep the base adapter.
     fn session_model_adapter(&self, agent_id: &str, room_id: &str) -> Arc<dyn ModelAdapter> {
         let attachments = crate::attachments::model::AttachmentModelAdapter::new(
-            Arc::clone(&self.model_adapter),
+            self.profile_model_adapter(),
             self.history.store(),
             self.workspace
                 .as_ref()
@@ -3920,7 +4047,7 @@ impl DaemonState {
         snapshot.state.config.tools =
             self.resolve_restored_agent_tools(&snapshot.state.id, snapshot.state.config.tools)?;
         let agent_id = snapshot.state.id.clone();
-        let mut runtime = AgentRuntime::from_snapshot(snapshot, Arc::clone(&self.model_adapter));
+        let mut runtime = AgentRuntime::from_snapshot(snapshot, self.profile_model_adapter());
         self.wire_runtime(&mut runtime);
         if runtime.state().status == AgentStatus::Running {
             runtime.mark_failed("daemon restarted before task completed", 0);

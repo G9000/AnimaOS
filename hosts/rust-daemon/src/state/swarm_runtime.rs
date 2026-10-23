@@ -40,7 +40,8 @@ impl DaemonState {
         let memory = Arc::clone(&self.memory);
         let memory_embeddings = Arc::clone(&self.memory_embeddings);
         let memory_store = self.memory_store.clone();
-        let model_adapter = Arc::clone(&self.model_adapter);
+        let model_adapter = self.profile_model_adapter();
+        let profile_owner = self.profile_owner();
         let tool_registry = self.tool_registry.clone();
         let process_manager = Arc::clone(&self.process_manager);
         let workspace_root = self.workspace.as_ref().map(|w| w.root_path.clone());
@@ -49,21 +50,25 @@ impl DaemonState {
         let drive = self.drive_manager.clone();
         let db = self.db.clone();
         let owner_time_zone = self.owner_time_zone.clone();
+        let execution_contexts = self.swarm_execution_contexts.clone();
 
         Arc::new(move |context: CoordinatorAgentFactoryContext| {
             let memory = Arc::clone(&memory);
             let memory_embeddings = Arc::clone(&memory_embeddings);
             let memory_store = memory_store.clone();
             let model_adapter = Arc::clone(&model_adapter);
+            let profile_owner = profile_owner.clone();
             let tool_registry = tool_registry.clone();
             let process_manager = Arc::clone(&process_manager);
             let workspace_root = workspace_root.clone();
             let calendar = calendar.clone();
-            let mail = mail.as_ref().and_then(|mail| mail.upgrade());
-            let drive = drive.as_ref().and_then(|manager| manager.upgrade());
+            let mail = mail.clone();
+            let drive = drive.clone();
             let event_stream = event_stream.clone();
             let db = db.clone();
             let owner_time_zone = owner_time_zone.clone();
+            let execution_contexts = execution_contexts.clone();
+            let swarm_id = context.swarm_id.clone();
 
             Box::pin(async move {
                 let config = with_swarm_messaging_tools(context.config.clone(), &tool_registry);
@@ -80,11 +85,10 @@ impl DaemonState {
                     tool_registry,
                     process_manager,
                     workspace_root,
-                    calendar,
+                    None,
                 )
+                .with_profile_owner(profile_owner)
                 .with_owner_time_zone(owner_time_zone)
-                .with_mail(mail)
-                .with_drive(drive)
                 .with_todo_owner(swarm_task_owner_id(&context.swarm_id, &context.agent_id));
                 let runtime_events: Arc<dyn Fn(EngineEvent) + Send + Sync> = Arc::new({
                     let event_stream = event_stream.clone();
@@ -140,9 +144,16 @@ impl DaemonState {
                         let inbox = inbox.clone();
                         let participants = participants.clone();
                         let tool_context = tool_context.clone();
+                        let calendar = calendar.clone();
+                        let mail = mail.clone();
+                        let drive = drive.clone();
                         let runtime_events = Arc::clone(&runtime_events);
                         let db = db.clone();
+                        let execution_contexts = execution_contexts.clone();
+                        let swarm_id = swarm_id.clone();
                         move |input: Content| {
+                            let execution_contexts = execution_contexts.clone();
+                            let swarm_id = swarm_id.clone();
                             let runtime = Arc::clone(&runtime);
                             let persistence_agent_id = persistence_agent_id.clone();
                             let config = config.clone();
@@ -158,6 +169,9 @@ impl DaemonState {
                             let inbox = inbox.clone();
                             let participants = participants.clone();
                             let tool_context = tool_context.clone();
+                            let calendar = calendar.clone();
+                            let mail = mail.clone();
+                            let drive = drive.clone();
                             let runtime_events = Arc::clone(&runtime_events);
                             let db = db.clone();
                             Box::pin(async move {
@@ -194,7 +208,33 @@ impl DaemonState {
                                     tool_context.todo_owner_id(&runtime.state()),
                                     runtime.config(),
                                 );
-                                let tool_context = tool_context.with_todo_baseline(todo_baseline);
+                                let execution = execution_contexts
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .get(&swarm_id)
+                                    .cloned();
+                                let Some(execution) = execution else {
+                                    return anima_core::TaskResult::error(
+                                        "Swarm execution authority is unavailable",
+                                        0,
+                                    );
+                                };
+                                if let Err(error) =
+                                    runtime.begin_new_execution_context(execution.clone())
+                                {
+                                    return anima_core::TaskResult::error(error, 0);
+                                }
+                                // Idle shells retain weak handles; only this dispatch
+                                // holds connector custody through its physical work.
+                                let mut tool_context = tool_context
+                                    .with_todo_baseline(todo_baseline)
+                                    .with_execution_budget(execution, true)
+                                    .with_mail(mail.as_ref().and_then(|manager| manager.upgrade()))
+                                    .with_drive(
+                                        drive.as_ref().and_then(|manager| manager.upgrade()),
+                                    );
+                                tool_context.calendar =
+                                    calendar.as_ref().and_then(|manager| manager.upgrade());
                                 let result = runtime
                                     .run_with_tools(input, |agent, user_message, tool_call| {
                                         let delegate_task = delegate_task.clone();
@@ -252,7 +292,16 @@ impl DaemonState {
                     stop: Arc::new({
                         let runtime = Arc::clone(&runtime);
                         let token_usage = Arc::clone(&token_usage);
+                        let execution_contexts = execution_contexts.clone();
+                        let swarm_id = swarm_id.clone();
                         move || {
+                            if let Some(execution) = execution_contexts
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .get(&swarm_id)
+                            {
+                                execution.cancel.cancel();
+                            }
                             let runtime = Arc::clone(&runtime);
                             let token_usage = Arc::clone(&token_usage);
                             Box::pin(async move {
@@ -288,6 +337,42 @@ fn record_model_usage(usage: &Mutex<TokenUsage>, response: &TokenUsage) {
 impl ModelAdapter for BudgetedSwarmModel {
     fn provider(&self) -> &str {
         self.inner.provider()
+    }
+
+    async fn generate_controlled(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        context: &anima_core::execution_limits::ModelCallContext,
+    ) -> Result<ModelGenerateResponse, String> {
+        (self.check_budget)()?;
+        let response = self
+            .inner
+            .generate_controlled(config, request, context)
+            .await?;
+        record_model_usage(&self.usage, &response.usage);
+        Ok(response)
+    }
+
+    async fn stream_controlled(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        sink: &dyn ModelStreamSink,
+        context: &anima_core::execution_limits::ModelCallContext,
+    ) -> Result<(), String> {
+        (self.check_budget)()?;
+        self.inner
+            .stream_controlled(
+                config,
+                request,
+                &MeteredSwarmSink {
+                    sink,
+                    usage: &self.usage,
+                },
+                context,
+            )
+            .await
     }
 
     async fn generate(
@@ -329,6 +414,9 @@ struct MeteredSwarmSink<'a> {
 
 #[async_trait]
 impl ModelStreamSink for MeteredSwarmSink<'_> {
+    async fn complete_usage(&self, usage: TokenUsage) -> Result<(), String> {
+        self.sink.complete_usage(usage).await
+    }
     async fn emit(&self, frame: ModelStreamFrame) -> Result<(), String> {
         if let ModelStreamFrame::Final(response) = &frame {
             record_model_usage(self.usage, &response.usage);
@@ -509,6 +597,78 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
+    async fn assert_registered_idle_swarm_releases_profile_custody(use_mail: bool) {
+        let private = tempfile::tempdir().unwrap();
+        let payload = private.path().join("control-plane.json");
+        let mut daemon = crate::state::DaemonState::new();
+        daemon.profile_owner =
+            Some(crate::profile_owner::ProfileOwner::acquire([payload.clone()]).unwrap());
+        let state = Arc::new(tokio::sync::RwLock::new(daemon));
+        let runs = crate::agent_runs::AgentRunCoordinator::new(
+            state.clone(),
+            Arc::new(tokio::sync::Semaphore::new(1)),
+        );
+        let credentials =
+            Arc::new(crate::connectors::gcalendar::store::InMemoryGoogleCredentialStore::default());
+        let oauth_apps = crate::connectors::oauth_apps::OAuthAppService::in_memory();
+        let (calendar, mail) = if use_mail {
+            let manager = crate::connectors::mail::MailManager::new(
+                &state,
+                runs,
+                credentials,
+                Arc::new(crate::app::DeterministicMailTransport),
+                oauth_apps,
+            );
+            state.write().await.mail_manager = Some(manager.weak());
+            (None, Some(manager))
+        } else {
+            let manager = crate::connectors::gcalendar::CalendarManager::new(
+                &state,
+                runs,
+                credentials,
+                Arc::new(crate::connectors::gcalendar::client::UnconfiguredGoogleTransport),
+                oauth_apps,
+            );
+            state
+                .write()
+                .await
+                .set_calendar_manager(Some(manager.clone()));
+            (Some(manager), None)
+        };
+        let (coordinator, events) = state.read().await.build_swarm(m82_config()).unwrap();
+        state
+            .write()
+            .await
+            .register_swarm(coordinator.clone(), events);
+        coordinator.start().await.unwrap();
+        assert!(
+            !coordinator.get_state().agent_ids.is_empty(),
+            "the registered swarm must retain actual started worker shells",
+        );
+        let weak_state = Arc::downgrade(&state);
+
+        drop(coordinator);
+        drop(calendar);
+        drop(mail);
+        drop(state);
+
+        assert!(
+            weak_state.upgrade().is_none(),
+            "registered idle swarm retained daemon state through its connector manager",
+        );
+        assert!(crate::profile_owner::ProfileOwner::acquire([payload]).is_ok());
+    }
+
+    #[tokio::test]
+    async fn profile_owner_idle_registered_swarm_does_not_retain_calendar_manager_custody() {
+        assert_registered_idle_swarm_releases_profile_custody(false).await;
+    }
+
+    #[tokio::test]
+    async fn profile_owner_idle_registered_swarm_does_not_retain_mail_manager_custody() {
+        assert_registered_idle_swarm_releases_profile_custody(true).await;
+    }
+
     struct M82Step {
         expected: Option<(&'static str, String)>,
         next: Option<ToolCall>,
@@ -525,6 +685,12 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ModelAdapter for M82TodoAdapter {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "m82-script"
         }
@@ -678,6 +844,61 @@ mod tests {
         state
     }
 
+    /// These factory tests intentionally bypass HTTP/durable admission. Supply
+    /// explicit finite ephemeral authority for one independent dispatch, shared
+    /// by its members, without adding any production fallback authority.
+    async fn dispatch_with_test_execution(
+        state: &crate::state::DaemonState,
+        coordinator: &anima_swarm::coordinator::SwarmCoordinator,
+        task: &str,
+    ) -> anima_core::TaskResult<Content> {
+        let swarm_id = coordinator.get_state().id;
+        let execution = anima_core::execution_limits::ExecutionContext::ephemeral(
+            format!("test-swarm:{swarm_id}:{}", uuid::Uuid::new_v4()),
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
+        let previous = state
+            .swarm_execution_contexts
+            .lock()
+            .unwrap()
+            .insert(swarm_id.clone(), execution);
+        assert!(
+            previous.is_none(),
+            "a test must not replace active authority"
+        );
+        let result = coordinator.dispatch(task).await;
+        state
+            .swarm_execution_contexts
+            .lock()
+            .unwrap()
+            .remove(&swarm_id)
+            .expect("the dispatched operation retains its context")
+            .cancel
+            .cancel();
+        result
+    }
+
+    #[tokio::test]
+    async fn swarm_direct_dispatch_without_explicit_execution_context_does_not_call_model() {
+        let root = tempfile::tempdir().unwrap();
+        let adapter = Arc::new(M82TodoAdapter::default());
+        let state = m82_state(root.path(), adapter.clone());
+        let (coordinator, _) = state.build_swarm(m82_config()).unwrap();
+        coordinator.start().await.unwrap();
+        let result = coordinator.dispatch("unadmitted direct input").await;
+        assert_eq!(result.status, TaskStatus::Error);
+        assert!(result
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("Swarm execution authority is unavailable"));
+        assert_eq!(adapter.calls.load(Ordering::SeqCst), 0);
+        assert!(state.swarm_execution_contexts.lock().unwrap().is_empty());
+        coordinator.stop().await.unwrap();
+    }
+
     fn m82_config() -> anima_swarm::SwarmConfig {
         let registry = ToolRegistry::new();
         let mut member = agent_config();
@@ -782,7 +1003,9 @@ mod tests {
             m82_step(Some(("success", m82_updated(1))), None),
         ]);
         assert_eq!(
-            coordinator.dispatch("first dispatch").await.status,
+            dispatch_with_test_execution(&state, &coordinator, "first dispatch")
+                .await
+                .status,
             TaskStatus::Success
         );
         let first_snapshot = read_agent_todos(Some(root.path()), &owner).unwrap();
@@ -794,10 +1017,13 @@ mod tests {
             "second",
         ));
         assert_eq!(
-            coordinator
-                .dispatch("second dispatch resets the inner runtime")
-                .await
-                .status,
+            dispatch_with_test_execution(
+                &state,
+                &coordinator,
+                "second dispatch resets the inner runtime",
+            )
+            .await
+            .status,
             TaskStatus::Success
         );
         assert_eq!(m82_owner(&coordinator), owner);
@@ -836,7 +1062,9 @@ mod tests {
             ),
         ]);
         assert_eq!(
-            coordinator.dispatch("fresh startup baseline").await.status,
+            dispatch_with_test_execution(&state, &coordinator, "fresh startup baseline")
+                .await
+                .status,
             TaskStatus::Success
         );
         coordinator.stop().await.unwrap();
@@ -925,8 +1153,7 @@ mod tests {
         }));
         adapter.steps.lock().unwrap().extend(steps);
         assert_eq!(
-            coordinator
-                .dispatch("malformed repair recovery")
+            dispatch_with_test_execution(&state, &coordinator, "malformed repair recovery")
                 .await
                 .status,
             TaskStatus::Success
@@ -994,7 +1221,9 @@ mod tests {
             m82_step(Some(("success", m82_updated(2))), None),
         ]);
         assert_eq!(
-            coordinator.dispatch("stale CAS").await.status,
+            dispatch_with_test_execution(&state, &coordinator, "stale CAS")
+                .await
+                .status,
             TaskStatus::Success
         );
         coordinator.stop().await.unwrap();
@@ -1024,26 +1253,43 @@ mod tests {
             .lock()
             .unwrap()
             .extend(m82_read_write(&[], &["swarm A task"], "a-first"));
-        assert_eq!(first.dispatch("first A").await.status, TaskStatus::Success);
+        assert_eq!(
+            dispatch_with_test_execution(&state, &first, "first A")
+                .await
+                .status,
+            TaskStatus::Success
+        );
         adapter
             .steps
             .lock()
             .unwrap()
             .extend(m82_read_write(&[], &["swarm B task"], "b-first"));
-        assert_eq!(second.dispatch("first B").await.status, TaskStatus::Success);
+        assert_eq!(
+            dispatch_with_test_execution(&state, &second, "first B")
+                .await
+                .status,
+            TaskStatus::Success
+        );
         adapter.steps.lock().unwrap().extend(m82_read_write(
             &["swarm A task"],
             &["swarm A task", "A second task"],
             "a-second",
         ));
-        assert_eq!(first.dispatch("repeat A").await.status, TaskStatus::Success);
+        assert_eq!(
+            dispatch_with_test_execution(&state, &first, "repeat A")
+                .await
+                .status,
+            TaskStatus::Success
+        );
         adapter.steps.lock().unwrap().extend(m82_read_write(
             &["swarm B task"],
             &["swarm B task", "B second task"],
             "b-second",
         ));
         assert_eq!(
-            second.dispatch("repeat B").await.status,
+            dispatch_with_test_execution(&state, &second, "repeat B")
+                .await
+                .status,
             TaskStatus::Success
         );
         first.stop().await.unwrap();
@@ -1125,7 +1371,12 @@ mod tests {
                 &format!("{tag}-a-again"),
             ));
             adapter.steps.lock().unwrap().extend(script);
-            assert_eq!(coordinator.dispatch(tag).await.status, TaskStatus::Success);
+            assert_eq!(
+                dispatch_with_test_execution(&state, &coordinator, tag)
+                    .await
+                    .status,
+                TaskStatus::Success
+            );
         }
         coordinator.stop().await.unwrap();
         let ids = observed
@@ -1176,8 +1427,7 @@ mod tests {
             "long-first",
         ));
         assert_eq!(
-            coordinator
-                .dispatch("long name first dispatch")
+            dispatch_with_test_execution(&state, &coordinator, "long name first dispatch")
                 .await
                 .status,
             TaskStatus::Success
@@ -1188,8 +1438,7 @@ mod tests {
             "long-second",
         ));
         assert_eq!(
-            coordinator
-                .dispatch("long name second dispatch")
+            dispatch_with_test_execution(&state, &coordinator, "long name second dispatch")
                 .await
                 .status,
             TaskStatus::Success
@@ -1221,6 +1470,12 @@ mod tests {
 
     #[async_trait::async_trait]
     impl anima_core::ModelAdapter for DelegatingAdapter {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "test"
         }
@@ -1290,7 +1545,7 @@ mod tests {
             })
             .unwrap();
         coordinator.start().await.unwrap();
-        let result = coordinator.dispatch("work").await;
+        let result = dispatch_with_test_execution(&state, &coordinator, "work").await;
         (
             result.status,
             adapter.0.load(std::sync::atomic::Ordering::SeqCst),
@@ -1324,6 +1579,12 @@ mod tests {
         struct StreamingOnly;
         #[async_trait]
         impl ModelAdapter for StreamingOnly {
+            fn single_attempt_contract(&self) -> bool {
+                true
+            }
+            fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+                true
+            }
             fn provider(&self) -> &str {
                 "streaming-test"
             }
@@ -1342,7 +1603,7 @@ mod tests {
             ) -> Result<(), String> {
                 sink.emit(ModelStreamFrame::TextDelta("hello".into()))
                     .await?;
-                sink.emit(ModelStreamFrame::Final(ModelGenerateResponse {
+                let response = ModelGenerateResponse {
                     content: Content {
                         text: "hello".into(),
                         ..Default::default()
@@ -1355,10 +1616,12 @@ mod tests {
                         ..TokenUsage::default()
                     },
                     stop_reason: anima_core::ModelStopReason::End,
-                }))
-                .await
+                };
+                sink.complete_usage(response.usage.clone()).await?;
+                sink.emit(ModelStreamFrame::Final(response)).await
             }
         }
+
         struct RecordingSink(Mutex<Vec<ModelStreamFrame>>);
         #[async_trait]
         impl ModelStreamSink for RecordingSink {
@@ -1410,6 +1673,12 @@ mod tests {
         struct WithCacheAndReasoning;
         #[async_trait]
         impl ModelAdapter for WithCacheAndReasoning {
+            fn single_attempt_contract(&self) -> bool {
+                true
+            }
+            fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+                true
+            }
             fn provider(&self) -> &str {
                 "cache-test"
             }

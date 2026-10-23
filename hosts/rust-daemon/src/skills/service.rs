@@ -223,6 +223,19 @@ impl SkillService {
             .ok_or(SkillError::NoWorkspace)
     }
 
+    async fn profile_authority(
+        &self,
+    ) -> Result<Option<crate::profile_owner::ProfileOwner>, SkillError> {
+        let owner = self.state.read().await.profile_owner();
+        if let Some(owner) = &owner {
+            owner
+                .verify_owned()
+                .await
+                .map_err(|error| SkillError::Unavailable(error.to_string()))?;
+        }
+        Ok(owner)
+    }
+
     /// Runs `work` holding the control-plane transaction, in its own task,
     /// so it reaches its end even if the caller is dropped.
     pub(super) async fn locked<T, F, Fut>(&self, work: F) -> Result<T, SkillError>
@@ -234,6 +247,7 @@ impl SkillService {
         let this = self.clone();
         tokio::spawn(async move {
             let _transaction = Arc::clone(&this.transactions).lock_owned().await;
+            let _owner = this.profile_authority().await?;
             let root = this.workspace().await?;
             work(this, root).await
         })
@@ -284,6 +298,8 @@ impl SkillService {
         evaluation: Option<super::evaluation_service::EvaluationGate>,
         change: impl FnOnce(&mut SkillRegistry, u64) -> Result<Change<T>, SkillError>,
     ) -> Result<T, SkillError> {
+        let owner = self.profile_authority().await?;
+        let rollback_owner = owner.clone();
         // Undo must remain retryable after a definite persistence failure.
         // Read the preimage before changing the registry, while the caller holds
         // the shared transaction; an I/O error here changes nothing.
@@ -306,6 +322,9 @@ impl SkillService {
             None
         };
         let mut guard = self.state.write().await;
+        guard
+            .ensure_profile_owned()
+            .map_err(|error| SkillError::Unavailable(error.to_string()))?;
         if let Some(gate) = evaluation.as_ref() {
             super::evaluation_service::check_promotion(&guard, root, gate)?;
         }
@@ -355,6 +374,9 @@ impl SkillService {
         if let Some((written, package)) = write {
             let (workspace, target) = (root.to_path_buf(), written.clone());
             let outcome = blocking(move || {
+                if let Some(owner) = &owner {
+                    owner.ensure_owned().map_err(|error| error.to_string())?;
+                }
                 super::package::write_package(&workspace, &target, &package)?;
                 disk::scan_skill(&workspace, &target, None)
             })
@@ -434,6 +456,9 @@ impl SkillService {
                     let workspace = root.to_path_buf();
                     let scanned_target = target.clone();
                     let restored = blocking(move || {
+                        if let Some(owner) = &rollback_owner {
+                            owner.ensure_owned().map_err(|error| error.to_string())?;
+                        }
                         let current = super::package::read_package(&workspace, &target)?;
                         if current.as_ref().map(|package| package.hash()) != written_hash {
                             return Err(
@@ -806,20 +831,30 @@ impl SkillService {
                 "Remove this skill through its community bundle",
             ));
         }
-        let (previous, prior_ledger) = {
+        let (previous, owner, prior_ledger) = {
             let mut guard = service.state.write().await;
+            guard
+                .ensure_profile_owned()
+                .map_err(|error| SkillError::Unavailable(error.to_string()))?;
             if let Some(history) = &history {
                 history.check(&guard)?;
             }
             (
                 guard.skills.remove(&slug),
+                guard.profile_owner(),
                 history.as_ref().map(|_| guard.skill_ledger.clone()),
             )
         };
         let (workspace, target) = (root.clone(), slug.clone());
-        let moved = blocking(move || disk::trash_skill_folder(&workspace, &target, now_millis()))
-            .await
-            .and_then(|result| result.map_err(SkillError::Unavailable));
+        let move_owner = owner.clone();
+        let moved = blocking(move || {
+            if let Some(owner) = &move_owner {
+                owner.ensure_owned().map_err(|error| error.to_string())?;
+            }
+            disk::trash_skill_folder(&workspace, &target, now_millis())
+        })
+        .await
+        .and_then(|result| result.map_err(SkillError::Unavailable));
         let trashed = match moved {
             Ok(trashed) => trashed,
             Err(error) => {
@@ -853,13 +888,17 @@ impl SkillService {
             // Put the folder back and read it again in one bounded call.
             let (workspace, target) = (root.clone(), slug.clone());
             let back = blocking(move || {
+                if let Some(owner) = &owner {
+                    owner.ensure_owned().map_err(|error| error.to_string())?;
+                }
                 let untrashed = match trashed {
                     Some(name) => disk::untrash_skill_folder(&workspace, &target, &name),
                     None => Ok(()),
                 };
-                (untrashed, disk::scan_skill(&workspace, &target, None))
+                Ok((untrashed, disk::scan_skill(&workspace, &target, None)))
             })
-            .await;
+            .await
+            .and_then(|result| result.map_err(SkillError::Unavailable));
             let untrashed = match back {
                 Ok((untrashed, scanned)) => {
                     if let Ok(scanned) = scanned {
@@ -1134,6 +1173,68 @@ mod tests {
             .state
             .id;
         (Arc::new(RwLock::new(state)), root, agent_id)
+    }
+
+    #[tokio::test]
+    async fn profile_owner_custody_refuses_skill_save_before_file_write() {
+        let private = tempfile::tempdir().unwrap();
+        let root = private.path().join("workspace");
+        std::fs::create_dir(&root).unwrap();
+        let owner = crate::profile_owner::ProfileOwner::acquire([private
+            .path()
+            .join("control-plane.json")])
+        .unwrap();
+        let mut daemon = with_workspace(DaemonState::new(), &root);
+        daemon.profile_owner = Some(owner.clone());
+        let state = Arc::new(RwLock::new(daemon));
+        owner.mark_lost();
+
+        let result = service(&state).save("notes", content("notes")).await;
+
+        assert!(result.is_err(), "a revoked profile accepted a skill save");
+        assert!(
+            !root.join("skills/notes/SKILL.md").exists(),
+            "the guarded registry save failed after unauthorized skill bytes were written"
+        );
+        assert!(state.read().await.skills.get("notes").is_none());
+    }
+
+    #[tokio::test]
+    async fn profile_owner_custody_rechecks_before_package_write() {
+        let private = tempfile::tempdir().unwrap();
+        let root = private.path().join("workspace");
+        std::fs::create_dir(&root).unwrap();
+        let owner = crate::profile_owner::ProfileOwner::acquire([private
+            .path()
+            .join("control-plane.json")])
+        .unwrap();
+        let mut daemon = with_workspace(DaemonState::new(), &root);
+        daemon.profile_owner = Some(owner.clone());
+        let state = Arc::new(RwLock::new(daemon));
+        let package = super::super::package::SkillPackage {
+            bytes: skill_text("notes").into_bytes(),
+            files: vec![],
+        };
+
+        let result = service(&state)
+            .apply(&root, move |_, _| {
+                // Simulate loss after admission and before the blocking write.
+                owner.mark_lost();
+                Ok(Change {
+                    value: (),
+                    undo: Box::new(|_| {}),
+                    write: Some(("notes".into(), package)),
+                    slug: Some("notes".into()),
+                    draft_id: None,
+                })
+            })
+            .await;
+
+        assert!(result.is_err());
+        assert!(
+            !root.join("skills/notes/SKILL.md").exists(),
+            "ownership was checked only before scheduling the package write"
+        );
     }
 
     #[tokio::test]

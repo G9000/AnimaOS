@@ -659,6 +659,21 @@ impl BeforeSummary {
 
 #[async_trait]
 impl ModelAdapter for BeforeSummary {
+    async fn stream_controlled(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        sink: &dyn ModelStreamSink,
+        context: &anima_core::execution_limits::ModelCallContext,
+    ) -> Result<(), String> {
+        if super::test_support::scripted_secondary(context) {
+            let state = self.state.get().expect("the test sets the state");
+            (self.hook)(&mut *state.write().await);
+        }
+        self.inner
+            .stream_controlled(config, request, sink, context)
+            .await
+    }
     fn provider(&self) -> &str {
         "before-summary"
     }
@@ -730,6 +745,27 @@ async fn quality_checkpoint_failed_save_rolls_back_summary_and_checkpoint_togeth
     }
     #[async_trait]
     impl ModelAdapter for BeforeUsageSave {
+        async fn stream_controlled(
+            &self,
+            config: &AgentConfig,
+            request: &ModelGenerateRequest,
+            sink: &dyn ModelStreamSink,
+            context: &anima_core::execution_limits::ModelCallContext,
+        ) -> Result<(), String> {
+            if super::test_support::scripted_secondary(context) {
+                let gate = self
+                    .state
+                    .get()
+                    .unwrap()
+                    .write()
+                    .await
+                    .install_test_control_plane_non_turn_save_gate(false);
+                assert!(self.gate.lock().unwrap().take().unwrap().send(gate).is_ok());
+            }
+            self.inner
+                .stream_controlled(config, request, sink, context)
+                .await
+        }
         fn provider(&self) -> &str {
             "before-usage-save"
         }
@@ -839,6 +875,27 @@ async fn a_summary_that_cannot_be_saved_is_recorded_and_the_run_goes_on_trimmed(
     }
     #[async_trait]
     impl ModelAdapter for BeforeUsageSave {
+        async fn stream_controlled(
+            &self,
+            config: &AgentConfig,
+            request: &ModelGenerateRequest,
+            sink: &dyn ModelStreamSink,
+            context: &anima_core::execution_limits::ModelCallContext,
+        ) -> Result<(), String> {
+            if super::test_support::scripted_secondary(context) {
+                let gate = self
+                    .state
+                    .get()
+                    .unwrap()
+                    .write()
+                    .await
+                    .install_test_control_plane_non_turn_save_gate(false);
+                assert!(self.gate.lock().unwrap().take().unwrap().send(gate).is_ok());
+            }
+            self.inner
+                .stream_controlled(config, request, sink, context)
+                .await
+        }
         fn provider(&self) -> &str {
             "before-usage-save"
         }
@@ -1143,7 +1200,7 @@ async fn run_parts(
     agent_id: &str,
     input: &Content,
 ) -> (RunBuild, LiveRun, RunRecord) {
-    let (build, hub) = {
+    let (mut build, hub) = {
         let guard = coordinator.state.read().await;
         (
             guard
@@ -1166,6 +1223,36 @@ async fn run_parts(
         },
         1,
     );
+    let transaction = coordinator.control_plane_transaction().await;
+    let (candidate, persist) = {
+        let mut state = coordinator.state.write().await;
+        let candidate = crate::execution_budgets::prepare_run_binding(
+            &state,
+            &record,
+            anima_core::primitives::now_millis(),
+        )
+        .unwrap();
+        state.execution_budget_candidate_snapshot = Some(candidate.registry.clone());
+        state.runs.insert(record.clone());
+        (candidate, state.control_plane_persist_request())
+    };
+    crate::execution_budgets::save_admission(&coordinator.state, candidate, persist)
+        .await
+        .unwrap();
+    drop(transaction);
+    let execution = crate::execution_budgets::context_for_run(
+        &coordinator.state,
+        coordinator.control_plane_transactions(),
+        &record.id,
+        Default::default(),
+    )
+    .await
+    .unwrap();
+    build
+        .runtime
+        .begin_new_execution_context(execution.clone())
+        .unwrap();
+    build.tools = build.tools.with_execution_budget(execution, true);
     let live_run = LiveRun::register(hub, &record, None);
     (build, live_run, record)
 }

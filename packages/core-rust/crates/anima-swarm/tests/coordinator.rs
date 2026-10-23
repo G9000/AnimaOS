@@ -17,6 +17,114 @@ use anima_swarm::strategies::resolve_strategy;
 use anima_swarm::strategies::supervisor::supervisor_strategy;
 use anima_swarm::{SwarmConfig, SwarmCoordinator, SwarmDelegation, SwarmStatus, SwarmStrategy};
 
+#[test]
+fn participants_hook_does_not_retain_an_idle_coordinator_or_its_factory() {
+    struct FactoryDropWitness(Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for FactoryDropWitness {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let participants = Arc::new(Mutex::new(None));
+    let harness = TestHarness::new(HashMap::new());
+    let base = harness.factory();
+    let factory: Arc<CoordinatorAgentFactoryFn> = Arc::new({
+        let witness = FactoryDropWitness(dropped.clone());
+        let participants = participants.clone();
+        move |context| {
+            let _factory_custody = &witness;
+            *participants.lock().unwrap() = Some(context.participants.clone());
+            base(context)
+        }
+    });
+    let coordinator = SwarmCoordinator::with_hooks(
+        base_config(&["worker-a"]),
+        resolve_strategy(SwarmStrategy::Supervisor),
+        factory,
+    );
+    block_on(coordinator.start()).unwrap();
+    let participants = participants.lock().unwrap().take().unwrap();
+    let live = block_on(participants()).unwrap();
+    assert_eq!(live.len(), 1);
+    assert_eq!(live[0].agent_name, "worker-a");
+
+    // No explicit stop: dropping idle custody must release retained factories,
+    // including host factories which own profile lifetime guards.
+    drop(coordinator);
+    assert!(
+        dropped.load(std::sync::atomic::Ordering::SeqCst),
+        "idle participant hooks retained the coordinator's factory custody"
+    );
+    assert_eq!(
+        block_on(participants()).unwrap_err(),
+        "swarm is no longer active"
+    );
+}
+
+#[test]
+fn interrupted_dispatch_callbacks_do_not_retain_the_coordinator_factory() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct FactoryDropWitness(Arc<AtomicBool>);
+    impl Drop for FactoryDropWitness {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    let dropped = Arc::new(AtomicBool::new(false));
+    let manager_entered = Arc::new(AtomicBool::new(false));
+    let factory: Arc<CoordinatorAgentFactoryFn> = Arc::new({
+        let witness = FactoryDropWitness(dropped.clone());
+        let manager_entered = manager_entered.clone();
+        move |context| {
+            let _factory_custody = &witness;
+            let delegate = context.delegate_task;
+            let manager_entered = manager_entered.clone();
+            Box::pin(async move {
+                Ok(CoordinatorAgentShell {
+                    run: content_run(move |_| {
+                        let delegate = delegate.clone();
+                        let manager_entered = manager_entered.clone();
+                        Box::pin(async move {
+                            if delegate.is_some() {
+                                manager_entered.store(true, Ordering::SeqCst);
+                                let result = std::future::pending().await;
+                                drop(delegate);
+                                result
+                            } else {
+                                TaskResult::success(text_content("unused worker"), 0)
+                            }
+                        })
+                    }),
+                    token_usage: Arc::new(TokenUsage::default),
+                    clear_task_state: Arc::new(|| {}),
+                    stop: Arc::new(|| Box::pin(async {})),
+                })
+            })
+        }
+    });
+    let coordinator = SwarmCoordinator::with_hooks(
+        base_config(&["worker-a"]),
+        resolve_strategy(SwarmStrategy::Supervisor),
+        factory,
+    );
+    block_on(coordinator.start()).unwrap();
+    let mut dispatch = Box::pin(coordinator.dispatch("interrupted manager"));
+    let mut context = Context::from_waker(futures::task::noop_waker_ref());
+    assert!(dispatch.as_mut().poll(&mut context).is_pending());
+    assert!(manager_entered.load(Ordering::SeqCst));
+
+    // Interrupt before run_task reaches its normal ephemeral-agent cleanup.
+    drop(dispatch);
+    drop(coordinator);
+    assert!(
+        dropped.load(Ordering::SeqCst),
+        "interrupted manager callbacks retained the coordinator's factory custody"
+    );
+}
+
 fn worker_config(name: &str) -> AgentConfig {
     AgentConfig {
         name: name.into(),

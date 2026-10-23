@@ -3,6 +3,8 @@ use crate::attachments::{model_supports_images, prepare_user_content};
 use crate::common::{
     assistant_tool_calls_json, tool_call_args, tool_call_id, tool_parameters_schema_json,
 };
+use crate::controlled::PreparedAttempt;
+use anima_core::execution_limits::ModelCallContext;
 use anima_core::{
     model_transport_delay, AgentConfig, Content, MessageRole, ModelAdapter, ModelGenerateRequest,
     ModelGenerateResponse, ModelStopReason, ModelStreamFrame, ModelStreamSink, TokenUsage,
@@ -91,6 +93,86 @@ impl ChatGptResponsesAdapter {
 impl ModelAdapter for ChatGptResponsesAdapter {
     fn provider(&self) -> &str {
         "chatgpt"
+    }
+
+    async fn generate_controlled(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        context: &ModelCallContext,
+    ) -> Result<ModelGenerateResponse, String> {
+        let sink = FinalSink(Mutex::new(None));
+        self.stream_controlled(config, request, &sink, context)
+            .await?;
+        sink.0
+            .into_inner()
+            .map_err(|_| "ChatGPT response lock failed")?
+            .ok_or("ChatGPT stream ended without a completed response".into())
+    }
+
+    async fn stream_controlled(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        sink: &dyn ModelStreamSink,
+        context: &ModelCallContext,
+    ) -> Result<(), String> {
+        if self.token.is_empty() || self.account_id.is_empty() {
+            return Err("Connect your ChatGPT subscription in settings".into());
+        }
+        let retries = config
+            .settings
+            .as_ref()
+            .and_then(|s| s.max_retries)
+            .unwrap_or(1)
+            .min(1);
+        for number in 0..=retries {
+            context.check_live()?;
+            // This subscription protocol does not accept API output-token caps.
+            // Reserve the remaining output allowance rather than pretending its
+            // ignored max_tokens setting bounds unknown remote generation.
+            let mut reservation = request.clone();
+            reservation.max_tokens = Some(u32::MAX);
+            let mut attempt = PreparedAttempt::new(Some(context), config, &reservation).await?;
+            let observed = attempt.sink(sink);
+            let mut retryable = false;
+            let result = attempt
+                .bounded(async {
+                    let body = request_body(config, &attempt.request)?;
+                    let response = self
+                        .client
+                        .post(&self.endpoint)
+                        .bearer_auth(self.token.as_str())
+                        .header("chatgpt-account-id", &self.account_id)
+                        .header("originator", "anima")
+                        .header("User-Agent", "anima/0.1.0")
+                        .header("OpenAI-Beta", "responses=experimental")
+                        .header("accept", "text/event-stream")
+                        .json(&body)
+                        .send()
+                        .await
+                        .map_err(|_| "ChatGPT request failed or timed out".to_owned())?;
+                    if !response.status().is_success() {
+                        let failure = http_failure(response).await;
+                        retryable = failure.retryable;
+                        return Err(failure.diagnostic);
+                    }
+                    consume(response, &observed).await
+                })
+                .await;
+            drop(observed);
+            attempt.finish(&result).await;
+            if result.is_ok() || !retryable || number == retries {
+                return result;
+            }
+            context
+                .bounded(async {
+                    model_transport_delay(Duration::from_millis(250)).await;
+                    Ok(())
+                })
+                .await?;
+        }
+        unreachable!("finite retry range includes its initial attempt")
     }
 
     async fn generate(
@@ -612,9 +694,11 @@ async fn consume(response: reqwest::Response, sink: &dyn ModelStreamSink) -> Res
                                 Value::Array(completed_items.into_values().collect()),
                             );
                         }
-                        return sink
-                            .emit(ModelStreamFrame::Final(completed_response(&response)?))
-                            .await;
+                        let normalized = completed_response(&response)?;
+                        if crate::controlled::json_usage_complete(&response, "chatgpt") {
+                            sink.complete_usage(normalized.usage.clone()).await?;
+                        }
+                        return sink.emit(ModelStreamFrame::Final(normalized)).await;
                     }
                     Some("error" | "response.failed") => {
                         return Err(if data.len() <= MAX_ERROR_BODY {

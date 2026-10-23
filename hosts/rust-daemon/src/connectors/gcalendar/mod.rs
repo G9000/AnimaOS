@@ -278,7 +278,9 @@ pub(crate) enum CalendarError {
 // ---------------------------------------------------------------------------
 
 #[derive(Clone)]
-pub(crate) struct CalendarManager {
+pub(crate) struct CalendarManager(Arc<CalendarManagerInner>);
+
+pub(crate) struct CalendarManagerInner {
     state: Weak<RwLock<DaemonState>>,
     agent_runs: AgentRunCoordinator,
     credentials: Arc<dyn GoogleCredentialStore>,
@@ -286,7 +288,28 @@ pub(crate) struct CalendarManager {
     pub(crate) oauth_apps: OAuthAppService,
 }
 
+impl std::ops::Deref for CalendarManager {
+    type Target = CalendarManagerInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct WeakCalendarManager(Weak<CalendarManagerInner>);
+
+impl WeakCalendarManager {
+    pub(crate) fn upgrade(&self) -> Option<CalendarManager> {
+        self.0.upgrade().map(CalendarManager)
+    }
+}
+
 impl CalendarManager {
+    pub(crate) fn weak(&self) -> WeakCalendarManager {
+        WeakCalendarManager(Arc::downgrade(&self.0))
+    }
+
     pub(crate) fn new(
         state: &SharedDaemonState,
         agent_runs: AgentRunCoordinator,
@@ -294,13 +317,13 @@ impl CalendarManager {
         transport: Arc<dyn GoogleCalendarTransport>,
         oauth_apps: OAuthAppService,
     ) -> Self {
-        Self {
+        Self(Arc::new(CalendarManagerInner {
             state: Arc::downgrade(state),
             agent_runs,
             credentials,
             transport,
             oauth_apps,
-        }
+        }))
     }
 
     pub(crate) async fn oauth_configured(&self) -> Result<bool, CalendarError> {

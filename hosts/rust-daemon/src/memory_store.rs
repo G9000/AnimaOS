@@ -25,18 +25,50 @@ pub(crate) enum MemoryStoreConfig {
     Json(PathBuf),
     Sqlite(PathBuf),
     Postgres(PgPool),
+    Owned {
+        store: Box<Self>,
+        owner: crate::profile_owner::ProfileOwner,
+    },
 }
 
 impl MemoryStoreConfig {
-    pub(crate) fn file_path(&self) -> Option<&PathBuf> {
+    pub(crate) fn with_owner(self, owner: crate::profile_owner::ProfileOwner) -> io::Result<Self> {
+        let store = match self {
+            Self::Json(path) => Self::Json(owner.canonical_path(&path)?),
+            Self::Sqlite(path) => Self::Sqlite(owner.owned_sqlite_path(&path)?),
+            other => other,
+        };
+        Ok(Self::Owned {
+            store: Box::new(store),
+            owner,
+        })
+    }
+
+    pub(crate) fn store(&self) -> &Self {
         match self {
+            Self::Owned { store, .. } => store.store(),
+            other => other,
+        }
+    }
+
+    pub(crate) fn owner(&self) -> Option<&crate::profile_owner::ProfileOwner> {
+        match self {
+            Self::Owned { owner, .. } => Some(owner),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn file_path(&self) -> Option<&PathBuf> {
+        match self.store() {
+            Self::Owned { .. } => unreachable!(),
             Self::Json(path) | Self::Sqlite(path) => Some(path),
             Self::Postgres(_) => None,
         }
     }
 
-    pub(crate) const fn storage_label(&self) -> &'static str {
-        match self {
+    pub(crate) fn storage_label(&self) -> &'static str {
+        match self.store() {
+            Self::Owned { .. } => unreachable!(),
             Self::Json(_) => "json",
             Self::Sqlite(_) => "sqlite",
             Self::Postgres(_) => "postgres",
@@ -44,14 +76,16 @@ impl MemoryStoreConfig {
     }
 
     pub(crate) fn location_label(&self) -> String {
-        match self {
+        match self.store() {
+            Self::Owned { .. } => unreachable!(),
             Self::Json(path) | Self::Sqlite(path) => path.display().to_string(),
             Self::Postgres(_) => "postgres:host_snapshots/memory".into(),
         }
     }
 
     pub(crate) fn embedding_store_default(&self) -> Option<PathBuf> {
-        match self {
+        match self.store() {
+            Self::Owned { .. } => unreachable!(),
             Self::Json(_) => None,
             Self::Sqlite(path) => Some(path.clone()),
             Self::Postgres(_) => None,
@@ -87,18 +121,29 @@ impl<'a> MemoryMutation<'a> {
 
     pub(crate) async fn persist(&mut self, config: Option<&MemoryStoreConfig>) -> io::Result<()> {
         let result = save_memory_manager(config, self.manager).await;
-        self.finish_persist(result)
+        self.finish_persist_with_owner(result, config.and_then(MemoryStoreConfig::owner).cloned())
     }
 
+    #[cfg(test)]
     fn finish_persist(&mut self, result: io::Result<()>) -> io::Result<()> {
+        self.finish_persist_with_owner(result, None)
+    }
+
+    fn finish_persist_with_owner(
+        &mut self,
+        result: io::Result<()>,
+        owner: Option<crate::profile_owner::ProfileOwner>,
+    ) -> io::Result<()> {
         if result.is_ok() {
             // An external memory provider mirrors what was just saved. With
             // none the diff never runs.
             if let Some(previous) = &self.previous {
                 let manager = &*self.manager;
-                crate::memory_provider::mirror_persisted(&previous.memories, || {
-                    manager.snapshot().memories
-                });
+                crate::memory_provider::mirror_persisted_with_owner(
+                    &previous.memories,
+                    || manager.snapshot().memories,
+                    owner,
+                );
             }
         }
         if result.is_ok()
@@ -157,7 +202,11 @@ impl Drop for MemoryMutation<'_> {
 pub(crate) async fn load_memory_snapshot(
     config: &MemoryStoreConfig,
 ) -> io::Result<Option<MemoryManagerSnapshot>> {
-    match config {
+    if let Some(owner) = config.owner() {
+        owner.verify_owned().await?;
+    }
+    match config.store() {
+        MemoryStoreConfig::Owned { .. } => unreachable!(),
         MemoryStoreConfig::Json(path) => load_json_snapshot(path),
         MemoryStoreConfig::Sqlite(path) => load_sqlite_snapshot(path),
         MemoryStoreConfig::Postgres(pool) => load_postgres_snapshot(pool).await,
@@ -168,10 +217,26 @@ async fn save_memory_snapshot(
     config: &MemoryStoreConfig,
     snapshot: &MemoryManagerSnapshot,
 ) -> io::Result<()> {
-    match config {
+    if let Some(owner) = config.owner() {
+        owner.ensure_owned()?;
+    }
+    match config.store() {
+        MemoryStoreConfig::Owned { .. } => unreachable!(),
         MemoryStoreConfig::Json(path) => save_json_snapshot(path, snapshot),
         MemoryStoreConfig::Sqlite(path) => save_sqlite_snapshot(path, snapshot),
-        MemoryStoreConfig::Postgres(pool) => save_postgres_snapshot(pool, snapshot).await,
+        MemoryStoreConfig::Postgres(pool) => {
+            if let Some(owner) = config.owner() {
+                let mut writer = owner.postgres_writer().await?;
+                save_postgres_snapshot(&mut *writer, snapshot).await?;
+                // The server acknowledged this snapshot before authority was
+                // rechecked. Losing authority cannot justify local rollback.
+                writer
+                    .complete()
+                    .map_err(|error| io::Error::other(SnapshotDurabilityUncertain(error)))
+            } else {
+                save_postgres_snapshot(pool, snapshot).await
+            }
+        }
     }
 }
 
@@ -285,7 +350,10 @@ fn parse_snapshot_value(value: serde_json::Value) -> io::Result<MemoryManagerSna
     snapshot_from_store(store)
 }
 
-async fn save_postgres_snapshot(pool: &PgPool, snapshot: &MemoryManagerSnapshot) -> io::Result<()> {
+async fn save_postgres_snapshot<'e>(
+    executor: impl sqlx::Executor<'e, Database = sqlx::Postgres>,
+    snapshot: &MemoryManagerSnapshot,
+) -> io::Result<()> {
     let store = StoredMemoryStore::from(snapshot);
     let payload = serde_json::to_value(&store).map_err(serde_error)?;
     sqlx::query(
@@ -302,7 +370,7 @@ async fn save_postgres_snapshot(pool: &PgPool, snapshot: &MemoryManagerSnapshot)
     .bind(MEMORY_SNAPSHOT_KEY)
     .bind(STORE_VERSION as i32)
     .bind(payload)
-    .execute(pool)
+    .execute(executor)
     .await
     .map_err(postgres_error)?;
     Ok(())
@@ -880,6 +948,154 @@ mod tests {
     use super::*;
 
     static NEXT_TEMP_FILE_ID: AtomicU64 = AtomicU64::new(0);
+
+    #[tokio::test]
+    #[ignore = "requires ANIMA_TEST_PROFILE_OWNER_POSTGRES_URL pointing to an isolated disposable database"]
+    async fn profile_owner_postgres_acknowledged_snapshot_keeps_state_when_authority_is_lost() {
+        use crate::control_plane_store::{
+            self, ControlPlaneSnapshot, ControlPlaneStoreConfig, WorkspaceConfig,
+        };
+        use crate::profile_owner::ProfileOwner;
+        use sqlx::Connection;
+        use std::time::Duration;
+
+        async fn wait_until_blocked(observer: &mut sqlx::PgConnection, pid: i32) {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    let blocked: bool = sqlx::query_scalar("SELECT COALESCE(wait_event_type = 'Lock', false) FROM pg_stat_activity WHERE pid = $1")
+                        .bind(pid).fetch_one(&mut *observer).await.unwrap();
+                    if blocked { return; }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            }).await.expect("the admitted snapshot never reached the blocked PostgreSQL write");
+        }
+
+        let url = std::env::var("ANIMA_TEST_PROFILE_OWNER_POSTGRES_URL")
+            .expect("set only the dedicated isolated test database URL");
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
+            .await
+            .unwrap();
+        let mut observer = sqlx::PgConnection::connect_with(pool.connect_options().as_ref())
+            .await
+            .unwrap();
+        let owner = ProfileOwner::acquire(Vec::<PathBuf>::new()).unwrap();
+        owner.attach_postgres(&pool).await.unwrap();
+        let mut writer = owner.postgres_writer().await.unwrap();
+        sqlx::migrate!("./migrations")
+            .run_direct(&mut *writer)
+            .await
+            .unwrap();
+        let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *writer)
+            .await
+            .unwrap();
+        writer.complete().unwrap();
+        drop(writer);
+        let config = MemoryStoreConfig::Postgres(pool.clone())
+            .with_owner(owner.clone())
+            .unwrap();
+        let mut manager = sample_manager();
+        save_memory_manager(Some(&config), &manager).await.unwrap();
+        let mut blocker = pool.begin().await.unwrap();
+        sqlx::query("SELECT key FROM host_snapshots WHERE key = 'memory' FOR UPDATE")
+            .fetch_one(&mut *blocker)
+            .await
+            .unwrap();
+        let saving = tokio::spawn(async move {
+            let error = {
+                let mut mutation = MemoryMutation::new(&mut manager);
+                mutation.clear(None);
+                mutation.persist(Some(&config)).await.unwrap_err()
+            };
+            (manager, error)
+        });
+        wait_until_blocked(&mut observer, pid).await;
+        owner.mark_lost();
+        blocker.commit().await.unwrap();
+        let (manager, error) = saving.await.unwrap();
+        assert!(error
+            .get_ref()
+            .is_some_and(|source| source.is::<SnapshotDurabilityUncertain>()));
+        let payload: serde_json::Value =
+            sqlx::query_scalar("SELECT payload FROM host_snapshots WHERE key = 'memory'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let committed = parse_snapshot_value(payload).unwrap();
+        assert_eq!(
+            manager.size(),
+            0,
+            "an acknowledged snapshot was rolled back in memory after authority loss"
+        );
+        assert_eq!(committed.memories.len(), manager.size());
+        assert!(
+            sqlx::query_scalar::<_, bool>("SELECT pg_terminate_backend($1)")
+                .bind(pid)
+                .fetch_one(&mut observer)
+                .await
+                .unwrap()
+        );
+        drop(owner);
+
+        let owner = ProfileOwner::acquire(Vec::<PathBuf>::new()).unwrap();
+        owner.attach_postgres(&pool).await.unwrap();
+        let config = ControlPlaneStoreConfig::Postgres(pool.clone())
+            .with_owner(owner.clone())
+            .unwrap();
+        control_plane_store::save_control_plane_snapshot(
+            Some(&config),
+            &ControlPlaneSnapshot::default(),
+        )
+        .await
+        .unwrap();
+        let mut writer = owner.postgres_writer().await.unwrap();
+        let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *writer)
+            .await
+            .unwrap();
+        writer.complete().unwrap();
+        drop(writer);
+        let mut blocker = pool.begin().await.unwrap();
+        sqlx::query("SELECT key FROM host_snapshots WHERE key = 'control_plane' FOR UPDATE")
+            .fetch_one(&mut *blocker)
+            .await
+            .unwrap();
+        let saving = tokio::spawn(async move {
+            let mut snapshot = ControlPlaneSnapshot::default();
+            snapshot.workspace = Some(WorkspaceConfig {
+                root_path: PathBuf::from("isolated-post-ack-probe"),
+                company_name: "test".into(),
+                mission: "acknowledged-before-authority-loss".into(),
+                values: Vec::new(),
+            });
+            control_plane_store::save_control_plane_snapshot(Some(&config), &snapshot)
+                .await
+                .unwrap_err()
+        });
+        wait_until_blocked(&mut observer, pid).await;
+        owner.mark_lost();
+        blocker.commit().await.unwrap();
+        let error = saving.await.unwrap();
+        assert!(control_plane_store::is_durability_uncertain(&error));
+        let payload: serde_json::Value =
+            sqlx::query_scalar("SELECT payload FROM host_snapshots WHERE key = 'control_plane'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            payload["workspace"]["mission"],
+            "acknowledged-before-authority-loss"
+        );
+        assert!(
+            sqlx::query_scalar::<_, bool>("SELECT pg_terminate_backend($1)")
+                .bind(pid)
+                .fetch_one(&mut observer)
+                .await
+                .unwrap()
+        );
+    }
 
     #[test]
     fn memory_json_post_commit_error_keeps_memory_aligned_with_disk() {

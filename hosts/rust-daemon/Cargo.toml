@@ -60,8 +60,12 @@ twilight-gateway = { version = "=0.17.1", default-features = false, features = [
 twilight-model = "=0.17.1"
 
 [target.'cfg(windows)'.dependencies]
+winreg = "=0.56.0"
 rfd = "0.17.2"
 win-custody = "=0.1.1"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "=1.1.4", features = ["process", "fs"] }
 
 [[example]]
 name = "document_worker_peer"

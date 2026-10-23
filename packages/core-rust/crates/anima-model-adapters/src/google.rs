@@ -397,6 +397,18 @@ impl GoogleStreamAccumulator {
             .filter(|usage| usage.total_tokens > 0)
     }
 
+    pub(crate) fn usage_complete(&self) -> bool {
+        self.usage.as_ref().is_some_and(|usage| {
+            [
+                "promptTokenCount",
+                "candidatesTokenCount",
+                "totalTokenCount",
+            ]
+            .iter()
+            .all(|field| usage[*field].as_u64().is_some())
+        })
+    }
+
     /// The whole response, parsed like a non-streamed one. A candidate's
     /// `finishReason` is terminal; a stream that ends (EOF) after a candidate
     /// but without any `finishReason` is a truncated reply, not a completed

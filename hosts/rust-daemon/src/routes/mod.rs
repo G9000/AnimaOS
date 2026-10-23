@@ -10,9 +10,8 @@ mod browser;
 #[cfg(test)]
 mod browser_tests;
 mod capabilities;
-mod chatgpt;
 mod chat_controls;
-mod queue_controls;
+mod chatgpt;
 mod coding;
 mod community_bundles;
 mod connectors;
@@ -42,6 +41,7 @@ mod memory_export;
 mod memory_maintenance;
 mod multipart;
 mod paired_devices;
+mod queue_controls;
 mod standing_intents;
 pub(crate) use multipart::MAX_FORM_HEADER_BYTES;
 mod oauth_apps;
@@ -3033,6 +3033,12 @@ mod tests {
 
     #[async_trait]
     impl ModelAdapter for SlowAgencyModelAdapter {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "slow-agency-test"
         }
@@ -3172,6 +3178,12 @@ mod tests {
 
     #[async_trait]
     impl ModelAdapter for SlowModelAdapter {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "slow"
         }
@@ -3205,6 +3217,12 @@ mod tests {
 
     #[async_trait]
     impl ModelAdapter for CountingModelAdapter {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "counting"
         }
@@ -3221,6 +3239,12 @@ mod tests {
 
     #[async_trait]
     impl ModelAdapter for GateFirstModelAdapter {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "gate-first"
         }
@@ -3244,6 +3268,12 @@ mod tests {
 
     #[async_trait]
     impl ModelAdapter for TransactionalSwarmModelAdapter {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "transactional-swarm"
         }
@@ -4558,6 +4588,12 @@ mod tests {
 
     #[async_trait]
     impl ModelAdapter for OrderedGateModelAdapter {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "ordered-gate"
         }

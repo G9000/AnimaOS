@@ -413,14 +413,17 @@ impl AgentRunCoordinator {
             // assignment that does not take the worktree discards it.
             let worktree = match &worktree_repo {
                 Some(repo) => {
-                    let workspace = coordinator
-                        .state
-                        .read()
-                        .await
-                        .workspace
-                        .as_ref()
-                        .map(|workspace| workspace.root_path.clone());
-                    Some(super::worktrees::create(workspace, repo.clone()).await?)
+                    let (workspace, owner) = {
+                        let guard = coordinator.state.read().await;
+                        (
+                            guard
+                                .workspace
+                                .as_ref()
+                                .map(|workspace| workspace.root_path.clone()),
+                            guard.profile_owner(),
+                        )
+                    };
+                    Some(super::worktrees::create(workspace, repo.clone(), owner).await?)
                 }
                 None => None,
             };
@@ -438,7 +441,8 @@ impl AgentRunCoordinator {
                 .await;
             if let Some(worktree) = &worktree {
                 if !matches!(result, Ok((_, true))) {
-                    super::worktrees::discard(worktree).await;
+                    let owner = coordinator.state.read().await.profile_owner();
+                    super::worktrees::discard(worktree, owner).await;
                 }
             }
             result.map(|(answer, _)| answer)
@@ -484,7 +488,7 @@ impl AgentRunCoordinator {
             None => task.clone(),
         };
         let transaction = self.control_plane_transaction().await;
-        let (record, helper_id, baseline, slot, persist) = {
+        let (record, helper_id, baseline, slot, execution_candidate, persist) = {
             let mut guard = self.state.write().await;
             let parent_agent = active_caller(&guard, &owner, &parent, "spawn_helper_async")?;
             if super::main_chat_clear::clear_pending(&guard, &owner, &parent.session_id) {
@@ -633,19 +637,37 @@ impl AgentRunCoordinator {
                 unconsumed_steers: Vec::new(),
                 worktree: worktree.clone(),
             });
+            let execution_candidate =
+                match crate::execution_budgets::prepare_run_binding(&guard, &record, now_ms) {
+                    Ok(candidate) => candidate,
+                    Err(error) => {
+                        guard.sessions.remove(&record.agent_id, &record.session_id);
+                        if let Some(config) = baseline {
+                            guard.restore_agent_config(&helper.state.id, config);
+                        } else {
+                            guard.remove_agent(&helper.state.id);
+                        }
+                        return Err(error);
+                    }
+                };
             if let Some(worktree) = &worktree {
                 super::worktrees::remember_repo(&mut guard.helper_worktree_repos, worktree);
             }
+            guard.execution_budget_candidate_snapshot = Some(execution_candidate.registry.clone());
             guard.runs.insert(record.clone());
             (
                 record,
                 helper.state.id,
                 baseline,
                 slot,
+                execution_candidate,
                 guard.control_plane_persist_request(),
             )
         };
-        if let Err(error) = persist.save().await {
+        if let Err(error) =
+            crate::execution_budgets::save_admission(&self.state, execution_candidate, persist)
+                .await
+        {
             let mut guard = self.state.write().await;
             guard.runs.remove(&record.id);
             guard.sessions.remove(&record.agent_id, &record.session_id);

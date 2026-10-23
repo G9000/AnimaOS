@@ -51,6 +51,9 @@ pub(crate) struct RunContextReport {
 }
 
 impl DaemonState {
+    pub(crate) fn profile_model_adapter(&self) -> Arc<dyn anima_core::ModelAdapter> {
+        crate::owned_model::bind(self.model_adapter.clone(), self.profile_owner())
+    }
     /// A tool context wired to this daemon's memory, workspace, and connectors.
     pub(crate) fn tool_execution_context(&self) -> ToolExecutionContext {
         ToolExecutionContext::new(
@@ -62,8 +65,11 @@ impl DaemonState {
             self.workspace
                 .as_ref()
                 .map(|workspace| workspace.root_path.clone()),
-            self.calendar_manager.clone(),
+            self.calendar_manager
+                .as_ref()
+                .and_then(|manager| manager.upgrade()),
         )
+        .with_profile_owner(self.profile_owner())
         .with_tool_results(self.tool_result_store())
         .with_tool_rpc_service(self.tool_rpc_service.clone())
         .with_execution_service(self.execution.clone())
@@ -413,6 +419,12 @@ mod tests {
 
     #[async_trait]
     impl ModelAdapter for FixedUsageModel {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "fixed-usage"
         }
@@ -452,6 +464,12 @@ mod tests {
 
     #[async_trait]
     impl ModelAdapter for RecordingModel {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "recording"
         }

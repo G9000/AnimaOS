@@ -20,6 +20,12 @@ pub(crate) struct DeterministicModelAdapter;
 
 #[async_trait]
 impl ModelAdapter for DeterministicModelAdapter {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "deterministic"
     }
@@ -83,6 +89,7 @@ impl ModelAdapter for DeterministicModelAdapter {
             sink.emit(ModelStreamFrame::TextDelta(word.to_string()))
                 .await?;
         }
+        sink.complete_usage(response.usage.clone()).await?;
         sink.emit(ModelStreamFrame::Final(response)).await
     }
 }

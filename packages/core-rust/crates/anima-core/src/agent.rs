@@ -34,6 +34,9 @@ pub struct AgentSettings {
     /// Cap on tool-calling turns inside a single `AgentRuntime::run` invocation.
     /// Defaults to `runtime::MAX_TOOL_ITERATIONS` (8) when not set.
     pub max_tool_iterations: Option<usize>,
+    /// Shared physical execution limits. Hosts retain accounting across runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_limits: Option<crate::execution_limits::ExecutionLimits>,
     pub additional: BTreeMap<String, DataValue>,
 }
 
@@ -86,6 +89,8 @@ pub struct AgentConfigUpdate {
     pub provider: Option<String>,
     pub system: Option<String>,
     pub tools: Option<Vec<ToolDescriptor>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_limits: Option<crate::execution_limits::ExecutionLimits>,
     /// Replaces the fallback chain; `Some(vec![])` clears it.
     #[serde(default)]
     pub fallbacks: Option<Vec<ModelChoice>>,

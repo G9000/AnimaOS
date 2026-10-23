@@ -27,12 +27,15 @@ pub enum CancelCause {
     OwnerStop = 1,
     HelperDeadline = 2,
     DaemonShutdown = 3,
+    ProfileOwnershipLost = 4,
+    ExecutionDeadline = 5,
 }
 
 pub const HELPER_DEADLINE_TOOL_RESULT: &str = "Cancelled before running (helper deadline reached)";
 pub const DAEMON_SHUTDOWN_TOOL_RESULT: &str = "Cancelled before running (daemon shutting down)";
 pub const HELPER_DEADLINE_ERROR: &str = "Helper task timed out";
 pub const DAEMON_SHUTDOWN_ERROR: &str = "Daemon shutting down";
+pub const PROFILE_OWNERSHIP_LOST_ERROR: &str = "Profile ownership lost; effects require review";
 
 #[derive(Debug, Default)]
 struct CancelState {
@@ -78,6 +81,8 @@ impl CancelSignal {
             1 => Some(CancelCause::OwnerStop),
             2 => Some(CancelCause::HelperDeadline),
             3 => Some(CancelCause::DaemonShutdown),
+            4 => Some(CancelCause::ProfileOwnershipLost),
+            5 => Some(CancelCause::ExecutionDeadline),
             _ => None,
         }
     }
@@ -86,6 +91,12 @@ impl CancelSignal {
         match self.cause() {
             Some(CancelCause::HelperDeadline) => HELPER_DEADLINE_TOOL_RESULT,
             Some(CancelCause::DaemonShutdown) => DAEMON_SHUTDOWN_TOOL_RESULT,
+            Some(CancelCause::ProfileOwnershipLost) => {
+                "Cancelled before running (profile ownership lost)"
+            }
+            Some(CancelCause::ExecutionDeadline) => {
+                "Cancelled before running (shared execution deadline reached)"
+            }
             _ => CANCELLED_TOOL_RESULT,
         }
     }
@@ -94,6 +105,8 @@ impl CancelSignal {
         match self.cause() {
             Some(CancelCause::HelperDeadline) => HELPER_DEADLINE_ERROR,
             Some(CancelCause::DaemonShutdown) => DAEMON_SHUTDOWN_ERROR,
+            Some(CancelCause::ProfileOwnershipLost) => PROFILE_OWNERSHIP_LOST_ERROR,
+            Some(CancelCause::ExecutionDeadline) => "Shared execution deadline reached",
             _ => RUN_STOPPED_ERROR,
         }
     }

@@ -151,25 +151,67 @@ async fn run_swarm_owned(
         return Err(ApiError::not_found());
     };
 
+    let config = coordinator.config();
     let running_transaction = agent_runs.control_plane_transaction().await;
-    let (previous_snapshot, persist_request) = {
+    let operation_id = format!("swarm:{}:{}", swarm_id, uuid::Uuid::new_v4());
+    let (previous_snapshot, budget_candidate, persist_request) = {
         let mut running_snapshot = coordinator.get_state();
         running_snapshot.status = SwarmStatus::Running;
         running_snapshot.started_at = Some(anima_core::primitives::now_millis());
         running_snapshot.completed_at = None;
         running_snapshot.token_usage = Default::default();
         let mut guard = state.write().await;
+        let mut budget_candidate = guard
+            .execution_budgets
+            .prepare_operation(&operation_id, anima_core::primitives::now_millis())
+            .map_err(ApiError::service_unavailable)?;
+        // Every member spends the same operation allowance. An owner ceiling
+        // on either the manager or a worker can only tighten that shared scope.
+        for agent in std::iter::once(&config.manager).chain(config.workers.iter()) {
+            if let Some(limits) = agent
+                .settings
+                .as_ref()
+                .and_then(|settings| settings.execution_limits.as_ref())
+            {
+                crate::execution_budgets::tighten_candidate(&mut budget_candidate, limits)
+                    .map_err(ApiError::service_unavailable)?;
+            }
+        }
+        guard.execution_budget_candidate_snapshot = Some(budget_candidate.registry.clone());
         let previous_snapshot = guard.swarm_snapshots.get(swarm_id).cloned();
         guard.store_swarm_snapshot(running_snapshot);
-        (previous_snapshot, guard.control_plane_persist_request())
+        (
+            previous_snapshot,
+            budget_candidate,
+            guard.control_plane_persist_request(),
+        )
     };
-    if let Err(error) = persist_request.save().await {
+    if let Err(error) =
+        crate::execution_budgets::save_admission(state, budget_candidate, persist_request).await
+    {
         if let Some(previous_snapshot) = previous_snapshot {
             state.write().await.store_swarm_snapshot(previous_snapshot);
         }
         return Err(ApiError::service_unavailable(error.to_string()));
     }
     drop(running_transaction);
+    let execution = crate::execution_budgets::context_for_run(
+        state,
+        agent_runs.control_plane_transactions(),
+        &operation_id,
+        Default::default(),
+    )
+    .await
+    .map_err(ApiError::service_unavailable)?;
+    let contexts = state.read().await.swarm_execution_contexts.clone();
+    contexts
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(swarm_id.into(), execution);
+    let _execution_custody = SwarmExecutionCustody {
+        contexts,
+        swarm_id: swarm_id.into(),
+    };
 
     let running_swarm_id = swarm_id.to_string();
     let running_global_event_fanout = global_event_fanout.clone();
@@ -215,6 +257,27 @@ async fn run_swarm_owned(
         swarm: SwarmStateResponse::from(&snapshot),
         result: TaskResultResponse::from(&result),
     })
+}
+
+struct SwarmExecutionCustody {
+    contexts: std::sync::Arc<
+        std::sync::Mutex<
+            std::collections::HashMap<String, anima_core::execution_limits::ExecutionContext>,
+        >,
+    >,
+    swarm_id: String,
+}
+impl Drop for SwarmExecutionCustody {
+    fn drop(&mut self) {
+        if let Some(context) = self
+            .contexts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.swarm_id)
+        {
+            context.cancel.cancel();
+        }
+    }
 }
 
 pub(crate) async fn handle_subscribe_swarm_events(

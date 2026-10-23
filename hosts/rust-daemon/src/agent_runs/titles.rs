@@ -1,7 +1,6 @@
 //! Naming a new chat after its first completed reply (spec §12.3).
 
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use anima_core::{Content, DataValue, Message, MessageRole, TaskResult};
 use tracing::warn;
@@ -12,7 +11,7 @@ use crate::runs::RunChangeSet;
 use crate::sessions::titles::{auto_title_enabled, generate_title};
 use crate::sessions::{SessionKind, TitleSource};
 use crate::side_model::side_call;
-use crate::usage::metered::{record_secondary, Metered, SecondaryCall};
+use crate::usage::metered::{record_secondary, SecondaryCall};
 use crate::usage::UsageSource;
 
 /// Ruling 2 (M3 pre-flight audit, M19): an assistant message a run's own
@@ -72,6 +71,7 @@ impl AgentRunCoordinator {
             }
         }
         let run_messages: HashSet<String> = change_set.message_ids.iter().cloned().collect();
+        let run_id = change_set.run_id.clone();
         let coordinator = self.clone();
         let (agent_id, session_id, room_id) = (
             agent_id.to_string(),
@@ -80,7 +80,15 @@ impl AgentRunCoordinator {
         );
         tokio::spawn(async move {
             coordinator
-                .title_session(agent_id, session_id, room_id, run_messages, first, reply)
+                .title_session(
+                    agent_id,
+                    session_id,
+                    room_id,
+                    run_id,
+                    run_messages,
+                    first,
+                    reply,
+                )
                 .await;
         });
     }
@@ -90,6 +98,7 @@ impl AgentRunCoordinator {
         agent_id: String,
         session_id: String,
         room_id: String,
+        run_id: String,
         run_messages: HashSet<String>,
         first: String,
         reply: String,
@@ -121,17 +130,32 @@ impl AgentRunCoordinator {
             if earlier_reply {
                 return;
             }
-            (Arc::clone(&guard.model_adapter), runtime.config().clone())
+            (guard.profile_model_adapter(), runtime.config().clone())
         };
         // The call's tokens count whether or not its title is usable (spec
         // §11); a timed-out call was dropped and records nothing.
-        let meter = Metered::new(adapter);
+        let execution = match crate::execution_budgets::context_for_run(
+            &self.state,
+            self.control_plane_transactions(),
+            &run_id,
+            anima_core::CancelSignal::new(),
+        )
+        .await
+        {
+            Ok(execution) => execution,
+            Err(error) => {
+                warn!(agent_id = %agent_id, session_id = %session_id, error = %error, "chat title execution budget is unavailable");
+                return;
+            }
+        };
+        let (meter, model) =
+            crate::controlled_model::metered(adapter, execution, format!("title:{run_id}"));
         let deadline = tokio::time::Instant::now() + self.title_timeout;
         let generated = tokio::time::timeout_at(
             deadline,
             side_call(&self.state, &config, deadline, |config| {
-                let (meter, first, reply) = (&meter, &first, &reply);
-                async move { generate_title(meter, &config, first, reply).await }
+                let (model, first, reply) = (&model, &first, &reply);
+                async move { generate_title(model.as_ref(), &config, first, reply).await }
             }),
         )
         .await;

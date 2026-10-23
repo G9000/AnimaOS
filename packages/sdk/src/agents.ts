@@ -1,4 +1,4 @@
-import type { AgentConfig, Content } from './types.js';
+import type { AgentConfig, Content, ExecutionLimits } from './types.js';
 
 import type { DaemonClient } from './client.js';
 import type {
@@ -192,6 +192,8 @@ export interface AgentUpdateInput {
   /** An empty string clears the custom system prompt. */
   system?: string;
   tools?: AgentToolInput[];
+  /** Tightens active execution scopes without resetting consumed allowance. */
+  settings?: { executionLimits?: ExecutionLimits };
   /** Models tried in order when the primary fails before replying: at most
    *  three, none equal to the primary. An empty list clears them. */
   fallbacks?: ModelChoice[];

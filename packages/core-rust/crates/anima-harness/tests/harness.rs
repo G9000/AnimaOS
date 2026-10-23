@@ -29,6 +29,13 @@ impl ModelAdapter for ScriptedAdapter {
         "scripted"
     }
 
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _response: &ModelGenerateResponse) -> bool {
+        true
+    }
+
     async fn generate(
         &self,
         _config: &AgentConfig,
@@ -238,6 +245,13 @@ struct BudgetAwareAdapter {
 impl ModelAdapter for BudgetAwareAdapter {
     fn provider(&self) -> &str {
         "budget-aware"
+    }
+
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _response: &ModelGenerateResponse) -> bool {
+        true
     }
 
     async fn generate(

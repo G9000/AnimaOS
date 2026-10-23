@@ -551,6 +551,41 @@ impl LearningService {
                 return;
             }
         }
+        let execution = if row.trigger == LearningTrigger::Manual {
+            crate::execution_budgets::standalone_context_with_limits(
+                &self.state,
+                self.transactions.clone(),
+                format!("learning:{}", row.id),
+                anima_core::CancelSignal::new(),
+                source
+                    .config
+                    .settings
+                    .as_ref()
+                    .and_then(|settings| settings.execution_limits.clone()),
+            )
+            .await
+        } else {
+            crate::execution_budgets::context_for_run(
+                &self.state,
+                self.transactions.clone(),
+                &row.source_run_id,
+                anima_core::CancelSignal::new(),
+            )
+            .await
+        };
+        let execution = match execution {
+            Ok(execution) => execution,
+            Err(error) => {
+                self.fail_pending(&row.id, "review_budget_unavailable", &error)
+                    .await;
+                return;
+            }
+        };
+        let adapter = crate::controlled_model::bind(
+            source.adapter.clone(),
+            execution,
+            format!("learning:{}", row.id),
+        );
         let sink = Arc::new(ReviewSink {
             state: self.state.clone(),
             review_id: row.id.clone(),
@@ -597,7 +632,7 @@ impl LearningService {
         let ran = Mutex::new((config.provider.clone(), config.model.clone()));
         let side_deadline = tokio::time::Instant::from_std(sink.deadline);
         let stream_result = side_call(&self.state, &config, side_deadline, |config| {
-            let (adapter, request, sink, ran) = (&source.adapter, &request, &sink, &ran);
+            let (adapter, request, sink, ran) = (&adapter, &request, &sink, &ran);
             async move {
                 {
                     let mut data = sink.data.lock().unwrap();

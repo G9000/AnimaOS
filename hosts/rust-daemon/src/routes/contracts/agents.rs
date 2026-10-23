@@ -48,6 +48,7 @@ pub(crate) struct AgentSettingsResponse {
     pub(crate) max_retries: Option<u32>,
     #[serde(rename = "maxToolIterations")]
     pub(crate) max_tool_iterations: Option<usize>,
+    pub(crate) execution_limits: Option<ExecutionLimitsSettings>,
     pub(crate) additional: BTreeMap<String, Value>,
 }
 
@@ -216,8 +217,73 @@ pub(crate) struct AgentSettingsRequest {
     pub(crate) max_retries: Option<Value>,
     #[serde(rename = "maxToolIterations")]
     pub(crate) max_tool_iterations: Option<Value>,
+    pub(crate) execution_limits: Option<ExecutionLimitsSettings>,
     #[serde(flatten)]
     pub(crate) additional: HashMap<String, Value>,
+}
+
+/// Owner limits only tighten the finite runtime ceiling. Omitted fields use
+/// the documented default ceiling; changing settings never replenishes usage.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ExecutionLimitsSettings {
+    pub(crate) max_wall_time_ms: Option<u64>,
+    pub(crate) max_input_tokens: Option<u64>,
+    pub(crate) max_output_tokens: Option<u64>,
+    pub(crate) max_total_tokens: Option<u64>,
+    pub(crate) max_model_attempts: Option<u64>,
+    pub(crate) max_tool_calls: Option<u64>,
+    pub(crate) max_retries: Option<u64>,
+    pub(crate) max_inflight_operations: Option<u64>,
+}
+
+impl ExecutionLimitsSettings {
+    fn into_domain(self) -> Result<anima_core::execution_limits::ExecutionLimits, &'static str> {
+        let mut limits = anima_core::execution_limits::ExecutionLimits::default();
+        macro_rules! apply {
+            ($field:ident) => {
+                if let Some(value) = self.$field {
+                    limits.$field = value;
+                }
+            };
+        }
+        apply!(max_model_attempts);
+        apply!(max_tool_calls);
+        apply!(max_inflight_operations);
+        limits.max_retries = self
+            .max_retries
+            .unwrap_or(limits.max_retries.min(limits.max_model_attempts));
+        macro_rules! apply_budget {
+            ($field:ident) => {
+                if let Some(value) = self.$field {
+                    limits.budget.$field = Some(value);
+                }
+            };
+        }
+        apply_budget!(max_wall_time_ms);
+        apply_budget!(max_input_tokens);
+        apply_budget!(max_output_tokens);
+        apply_budget!(max_total_tokens);
+        limits.validate().map_err(|_| {
+            "executionLimits must contain finite positive bounds and coherent attempt counts"
+        })?;
+        Ok(limits)
+    }
+}
+
+impl From<&anima_core::execution_limits::ExecutionLimits> for ExecutionLimitsSettings {
+    fn from(limits: &anima_core::execution_limits::ExecutionLimits) -> Self {
+        Self {
+            max_wall_time_ms: limits.budget.max_wall_time_ms,
+            max_input_tokens: limits.budget.max_input_tokens,
+            max_output_tokens: limits.budget.max_output_tokens,
+            max_total_tokens: limits.budget.max_total_tokens,
+            max_model_attempts: Some(limits.max_model_attempts),
+            max_tool_calls: Some(limits.max_tool_calls),
+            max_retries: Some(limits.max_retries),
+            max_inflight_operations: Some(limits.max_inflight_operations),
+        }
+    }
 }
 
 /// A fallback provider + model. The route checks the chain as a whole.
@@ -274,6 +340,8 @@ pub(crate) struct AgentUpdateRequest {
     pub(crate) provider: Option<String>,
     pub(crate) system: Option<String>,
     pub(crate) tools: Option<Vec<ToolDescriptorRequest>>,
+    /// Only execution limits are supported as an in-place settings update.
+    pub(crate) settings: Option<AgentSettingsRequest>,
     /// Replaces the fallback chain; `[]` clears it.
     pub(crate) fallbacks: Option<Vec<ModelChoiceRequest>>,
 }
@@ -293,12 +361,32 @@ impl AgentUpdateRequest {
         let system = self.system.map(|value| value.trim().to_string());
         let tools = parse_tool_requests(self.tools)?;
         let fallbacks = parse_fallbacks(self.fallbacks);
+        let execution_limits = self
+            .settings
+            .map(|settings| {
+                if settings.temperature.is_some()
+                    || settings.max_tokens.is_some()
+                    || settings.timeout_ms.is_some()
+                    || settings.max_retries.is_some()
+                    || settings.max_tool_iterations.is_some()
+                    || !settings.additional.is_empty()
+                {
+                    return Err("PATCH settings supports executionLimits only");
+                }
+                settings
+                    .execution_limits
+                    .map(ExecutionLimitsSettings::into_domain)
+                    .transpose()
+            })
+            .transpose()?
+            .flatten();
         if name.is_none()
             && model.is_none()
             && provider.is_none()
             && system.is_none()
             && tools.is_none()
             && fallbacks.is_none()
+            && execution_limits.is_none()
         {
             return Err("at least one field must be provided");
         }
@@ -309,6 +397,7 @@ impl AgentUpdateRequest {
             system,
             tools,
             fallbacks,
+            execution_limits,
         })
     }
 }
@@ -434,6 +523,11 @@ impl PluginDescriptorRequest {
 impl AgentSettingsRequest {
     fn into_domain(mut self) -> Result<AgentSettings, &'static str> {
         let mut settings = AgentSettings::default();
+        settings.execution_limits = self
+            .execution_limits
+            .take()
+            .map(ExecutionLimitsSettings::into_domain)
+            .transpose()?;
         if self
             .additional
             .get("toolDiscovery")
@@ -548,6 +642,10 @@ impl From<&AgentSettings> for AgentSettingsResponse {
             timeout_ms: value.timeout_ms,
             max_retries: value.max_retries,
             max_tool_iterations: value.max_tool_iterations,
+            execution_limits: value
+                .execution_limits
+                .as_ref()
+                .map(ExecutionLimitsSettings::from),
             additional: value
                 .additional
                 .iter()
@@ -636,5 +734,61 @@ fn message_role_to_str(role: MessageRole) -> &'static str {
         MessageRole::Assistant => "assistant",
         MessageRole::System => "system",
         MessageRole::Tool => "tool",
+    }
+}
+
+#[cfg(test)]
+mod execution_limit_tests {
+    use super::*;
+
+    #[test]
+    fn owner_execution_limits_are_typed_finite_and_returned_by_the_owner_contract() {
+        let request: AgentSettingsRequest = serde_json::from_value(serde_json::json!({
+            "executionLimits": { "maxModelAttempts": 1, "maxRetries": 0 }
+        }))
+        .unwrap();
+        let settings = request.into_domain().unwrap();
+        let domain = serde_json::to_value(&settings).unwrap();
+        assert_eq!(domain["execution_limits"]["maxModelAttempts"], 1);
+        assert!(domain["additional"].get("executionLimits").is_none());
+        let response = serde_json::to_value(AgentSettingsResponse::from(&settings)).unwrap();
+        assert_eq!(response["executionLimits"]["maxModelAttempts"], 1);
+        assert!(
+            response["executionLimits"]["maxWallTimeMs"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+    }
+
+    #[test]
+    fn owner_execution_limits_reject_unbounded_or_incoherent_authority() {
+        for limits in [
+            serde_json::json!({ "maxModelAttempts": 0 }),
+            serde_json::json!({ "maxModelAttempts": 1, "maxRetries": 2 }),
+            serde_json::json!({ "maxInflightOperations": 257 }),
+            serde_json::json!({ "maxTotalTokens": 0 }),
+        ] {
+            let request: AgentSettingsRequest = serde_json::from_value(serde_json::json!({
+                "executionLimits": limits
+            }))
+            .unwrap();
+            assert!(request.into_domain().is_err());
+        }
+    }
+
+    #[test]
+    fn owner_execution_limits_can_be_tightened_through_native_patch() {
+        let request: AgentUpdateRequest = serde_json::from_value(serde_json::json!({
+            "settings": { "executionLimits": { "maxModelAttempts": 1, "maxRetries": 0 } }
+        }))
+        .unwrap();
+        let update = request.into_domain();
+        assert!(
+            update.is_ok(),
+            "owner PATCH must expose the typed execution limits"
+        );
+        let update = serde_json::to_value(update.unwrap()).unwrap();
+        assert_eq!(update["execution_limits"]["maxModelAttempts"], 1);
     }
 }

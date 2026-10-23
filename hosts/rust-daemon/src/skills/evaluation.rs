@@ -180,6 +180,12 @@ mod tests {
     }
     #[async_trait]
     impl ModelAdapter for ResponseModel {
+        fn single_attempt_contract(&self) -> bool {
+            true
+        }
+        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+            true
+        }
         fn provider(&self) -> &str {
             "test"
         }
@@ -249,10 +255,12 @@ mod tests {
                 .await?;
             }
             let response = self.generate(config, request).await?;
+            sink.complete_usage(response.usage.clone()).await?;
             sink.emit(anima_core::ModelStreamFrame::Final(response))
                 .await
         }
     }
+
     async fn evaluated_daemon(
         label: &str,
     ) -> (

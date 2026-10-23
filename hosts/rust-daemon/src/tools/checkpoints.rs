@@ -90,14 +90,9 @@ impl ToolExecutionContext {
             }
             transform(source)
         };
-        let result = NativeCheckpointService::new(store.to_path_buf()).mutate_checked(
-            workspace,
-            run,
-            call,
-            path,
-            bound_transform,
-            validate,
-        );
+        let result = NativeCheckpointService::new(store.to_path_buf())
+            .with_profile_owner(self.profile_owner.clone())
+            .mutate_checked(workspace, run, call, path, bound_transform, validate);
         if result
             .as_ref()
             .err()
@@ -128,7 +123,9 @@ pub(super) fn list(
                 context.action_approved,
                 true,
             )?;
-            let rows = NativeCheckpointService::new(store.to_path_buf()).list(workspace, run)?;
+            let rows = NativeCheckpointService::new(store.to_path_buf())
+                .with_profile_owner(context.profile_owner.clone())
+                .list(workspace, run)?;
             serde_json::to_string(&rows)
                 .map_err(|_| "Checkpoint listing could not be encoded".into())
         })();
@@ -163,6 +160,7 @@ pub(super) fn restore(
             };
             validate()?;
             let result = NativeCheckpointService::new(store.to_path_buf())
+                .with_profile_owner(context.profile_owner.clone())
                 .restore_checked(workspace, run, id, validate);
             if result
                 .as_ref()

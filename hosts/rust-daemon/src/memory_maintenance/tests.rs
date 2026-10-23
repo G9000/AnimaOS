@@ -285,6 +285,12 @@ struct Reviewer {
 }
 #[async_trait]
 impl ModelAdapter for Reviewer {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "maintenance-fixture"
     }
@@ -317,6 +323,7 @@ impl ModelAdapter for Reviewer {
         })
     }
 }
+
 struct Fixture {
     service: MaintenanceService,
     agent: String,

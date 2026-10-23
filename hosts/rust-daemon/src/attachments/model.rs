@@ -310,6 +310,35 @@ impl ModelAdapter for AttachmentModelAdapter {
         self.inner.provider()
     }
 
+    async fn generate_controlled(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        context: &anima_core::execution_limits::ModelCallContext,
+    ) -> Result<ModelGenerateResponse, String> {
+        let prepared = context
+            .bounded(self.prepare_request(config, request))
+            .await?;
+        self.inner
+            .generate_controlled(config, &prepared, context)
+            .await
+    }
+
+    async fn stream_controlled(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        sink: &dyn ModelStreamSink,
+        context: &anima_core::execution_limits::ModelCallContext,
+    ) -> Result<(), String> {
+        let prepared = context
+            .bounded(self.prepare_request(config, request))
+            .await?;
+        self.inner
+            .stream_controlled(config, &prepared, sink, context)
+            .await
+    }
+
     async fn generate(
         &self,
         config: &AgentConfig,

@@ -195,8 +195,55 @@ fn response(text: String, tool_calls: Option<Vec<ToolCall>>) -> ModelGenerateRes
     }
 }
 
+pub(crate) fn scripted_secondary(context: &anima_core::execution_limits::ModelCallContext) -> bool {
+    ["compaction:", "title:", "side-question:"]
+        .iter()
+        .any(|prefix| context.logical_call_id.starts_with(prefix))
+}
+
 #[async_trait]
 impl ModelAdapter for ScriptedModel {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &ModelGenerateResponse) -> bool {
+        true
+    }
+
+    async fn stream_controlled(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        sink: &dyn ModelStreamSink,
+        context: &anima_core::execution_limits::ModelCallContext,
+    ) -> Result<(), String> {
+        let (request, mut permit) = context.reserve_prepared(config, request).await?;
+        permit.revalidate().await?;
+        let observed = permit.stream_sink(sink);
+        // These producers historically called generate; learning/evaluation used
+        // stream and retain the main scripted queue. Both pass the same physical
+        // admission/settlement boundary as a single transport send.
+        let secondary = scripted_secondary(context);
+        let result = if !secondary {
+            context
+                .bounded(self.stream(config, &request, &observed))
+                .await
+        } else {
+            context
+                .bounded(async {
+                    let response = self.generate(config, &request).await?;
+                    observed.complete_usage(response.usage.clone()).await?;
+                    observed.emit(ModelStreamFrame::Final(response)).await
+                })
+                .await
+        };
+        drop(observed);
+        let retired = result.is_ok() || context.check_live().is_ok();
+        let _ = permit
+            .finish_with_retirement(permit.observed_outcome(), retired)
+            .await;
+        result
+    }
     fn provider(&self) -> &str {
         "scripted"
     }
@@ -229,15 +276,14 @@ impl ModelAdapter for ScriptedModel {
                     sink.emit(ModelStreamFrame::TextDelta((*chunk).to_string()))
                         .await?;
                 }
-                sink.emit(ModelStreamFrame::Final(response(chunks.concat(), None)))
-                    .await
+                let response = response(chunks.concat(), None);
+                sink.complete_usage(response.usage.clone()).await?;
+                sink.emit(ModelStreamFrame::Final(response)).await
             }
             Step::Tools(calls) => {
-                sink.emit(ModelStreamFrame::Final(response(
-                    String::new(),
-                    Some(calls),
-                )))
-                .await
+                let response = response(String::new(), Some(calls));
+                sink.complete_usage(response.usage.clone()).await?;
+                sink.emit(ModelStreamFrame::Final(response)).await
             }
             Step::Fail(error) => Err(error.to_string()),
             Step::HoldAfterUsage(usage, chunks) => {

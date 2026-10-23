@@ -220,8 +220,14 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         );
     }
     let main_chat_additions = [
-        ("POST", "/api/agents/{agent_id}/sessions/{session_id}/revise"),
-        ("PATCH", "/api/agents/{agent_id}/sessions/{session_id}/queue/{run_id}"),
+        (
+            "POST",
+            "/api/agents/{agent_id}/sessions/{session_id}/revise",
+        ),
+        (
+            "PATCH",
+            "/api/agents/{agent_id}/sessions/{session_id}/queue/{run_id}",
+        ),
         ("POST", "/api/agents/{agent_id}/main-chat"),
         ("POST", "/api/agents/{agent_id}/sessions/{session_id}/clear"),
     ];

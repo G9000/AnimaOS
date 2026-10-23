@@ -1587,4 +1587,4 @@ not replay effects or mark unfinished tasks complete.
 
 ### Turn recovery and durable secondary usage
 
-See [Turn recovery and trace evaluation](../../docs/companion/turn-recovery.md) for host-bound ordinary chat progress, conservative startup adoption, reviewed continuation, durable usage custody and the crash/trace acceptance boundaries. Snapshot format 27 preserves an exact version-26 pre-upgrade backup.
+See [Turn recovery and trace evaluation](../../docs/companion/turn-recovery.md) for host-bound ordinary chat progress, conservative startup adoption, reviewed continuation, durable usage custody and the crash/trace acceptance boundaries. Snapshot format 28 retains shared execution accounting and preserves an exact pre-upgrade backup.

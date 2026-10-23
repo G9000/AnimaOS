@@ -29,13 +29,14 @@ pub(crate) use side_questions::SideQuestionAnswer;
 mod async_helpers;
 pub(crate) mod attachments;
 mod automations;
+pub(crate) mod chat_controls;
+pub(crate) mod chat_revisions;
 mod compact;
 mod conversations;
 pub(crate) mod main_chat_clear;
-pub(crate) mod chat_revisions;
-pub(crate) mod chat_controls;
 mod queue_controls;
 pub(crate) use queue_controls::QueuedRunPatch;
+mod ownership;
 mod queue;
 mod recovery;
 mod shutdown;
@@ -171,6 +172,7 @@ fn helper_config_base(parent: &AgentState, name: String) -> AgentConfig {
             timeout_ms: Some(parent_settings.timeout_ms.unwrap_or(MAX_HELPER_RUN_MS).min(MAX_HELPER_RUN_MS)),
             max_retries: Some(parent_settings.max_retries.unwrap_or(2).min(2)),
             max_tool_iterations: Some(parent_settings.max_tool_iterations.unwrap_or(MAX_HELPER_TOOL_ITERATIONS).min(MAX_HELPER_TOOL_ITERATIONS)),
+            execution_limits: parent_settings.execution_limits.clone(),
             additional: std::collections::BTreeMap::from([
                 ("workspaceRole".into(), DataValue::String("helper".into())),
                 ("parentAgentId".into(), DataValue::String(parent.id.clone())),
@@ -641,14 +643,17 @@ impl AgentRunCoordinator {
                 // Git runs before any reservation, never under the state lock.
                 let worktree = match worktree_repo {
                     Some(repo) => {
-                        let workspace = coordinator
-                            .state
-                            .read()
-                            .await
-                            .workspace
-                            .as_ref()
-                            .map(|workspace| workspace.root_path.clone());
-                        Some(worktrees::create(workspace, repo).await?)
+                        let (workspace, owner) = {
+                            let guard = coordinator.state.read().await;
+                            (
+                                guard
+                                    .workspace
+                                    .as_ref()
+                                    .map(|workspace| workspace.root_path.clone()),
+                                guard.profile_owner(),
+                            )
+                        };
+                        Some(worktrees::create(workspace, repo, owner).await?)
                     }
                     None => None,
                 };
@@ -658,7 +663,8 @@ impl AgentRunCoordinator {
                 let Some(worktree) = worktree else {
                     return result;
                 };
-                let report = worktrees::finish(&worktree).await;
+                let owner = coordinator.state.read().await.profile_owner();
+                let report = worktrees::finish(&worktree, owner).await;
                 match result {
                     Ok(text) => {
                         let mut value: serde_json::Value = serde_json::from_str(&text)
@@ -1534,7 +1540,13 @@ impl AgentRunCoordinator {
     /// an invalid request fails fast; `run_locked` repeats them authoritatively
     /// under the control-plane transaction.
     async fn prevalidate(&self, request: &AgentRunRequest) -> Result<(), ApiError> {
+        ownership::verify(&self.state)
+            .await
+            .map_err(ApiError::service_unavailable)?;
         let guard = self.state.read().await;
+        guard
+            .ensure_profile_owned()
+            .map_err(|e| ApiError::service_unavailable(e.to_string()))?;
         validate_run_request(&guard, &request.agent_id, &request.room)?;
         if guard.agents.contains_key(&request.agent_id) {
             Ok(())
@@ -1593,6 +1605,9 @@ impl AgentRunCoordinator {
         }
         let retry_key = content_retry_key(&content).map(str::to_owned);
         let checkin_input = crate::schedules::is_checkin_content(&content);
+        ownership::verify(&self.state)
+            .await
+            .map_err(ApiError::service_unavailable)?;
 
         // Phase A: record the run as running and publish that durable marker
         // before any model work (the run-start save that already existed).
@@ -1609,6 +1624,7 @@ impl AgentRunCoordinator {
             mut in_flight,
             (live_run, started),
             running_persist_request,
+            execution_candidate,
             standing_admission,
         ) = {
             let mut guard = self.state.write().await;
@@ -1863,6 +1879,16 @@ impl AgentRunCoordinator {
                     }
                 }
             }
+            let execution_candidate =
+                match crate::execution_budgets::prepare_run_binding(&guard, &record, now_ms) {
+                    Ok(candidate) => candidate,
+                    Err(error) => {
+                        if session_created {
+                            guard.sessions.remove(&agent_id, &session_id);
+                        }
+                        return Err(ApiError::conflict(&error));
+                    }
+                };
             let standing_admission = match crate::standing_intents::admit(
                 &mut guard,
                 &record,
@@ -1886,6 +1912,7 @@ impl AgentRunCoordinator {
                 guard.live_parent_agent(&agent_id, &session_id),
             );
             let started = record.clone();
+            guard.execution_budget_candidate_snapshot = Some(execution_candidate.registry.clone());
             guard.runs.insert(record);
             // Armed before anything else can fail, so a panic before the start
             // save cannot leave a permanently in-flight record.
@@ -1908,10 +1935,18 @@ impl AgentRunCoordinator {
                 in_flight,
                 (live_run, started),
                 guard.control_plane_persist_request(),
+                execution_candidate,
                 standing_admission,
             )
         };
-        if let Err(error) = running_persist_request.save().await {
+        let _profile_watch = ownership::watch(&self.state, live_run.control().cancel).await;
+        if let Err(error) = crate::execution_budgets::save_admission(
+            &self.state,
+            execution_candidate,
+            running_persist_request,
+        )
+        .await
+        {
             let mut guard = self.state.write().await;
             standing_admission.rollback_known_failure(&mut guard, &error);
             if accepted.is_some() {
@@ -2041,6 +2076,18 @@ impl AgentRunCoordinator {
                     tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms),
                 )
             });
+        // Admission durably fixed this run's lineage before any model producer.
+        // Rebuilds (including compaction) retain the same scope and charges.
+        let execution_budget = crate::execution_budgets::context_for_run(
+            &self.state,
+            self.control_plane_transactions(),
+            &run_id,
+            live_run.control().cancel,
+        )
+        .await
+        .map_err(ApiError::service_unavailable)?;
+        // The lineage keeps its durable wall-clock deadline. The helper's
+        // separate Tokio deadline below cancels only this run with HelperDeadline.
         let frozen_config = runtime.config().clone();
         crate::attachments::documents::admission::admit(
             &self.state,
@@ -2075,6 +2122,7 @@ impl AgentRunCoordinator {
             base,
             mut context,
         } = admitted;
+        let tool_context = tool_context.with_execution_budget(execution_budget.clone(), true);
         // Spec §5.4: turns about to leave the context are summarized first;
         // if that fails the run goes on with the trimmed context.
         let rebuilt = self
@@ -2102,6 +2150,10 @@ impl AgentRunCoordinator {
             ),
             None => (runtime, tool_context, base, context),
         };
+        runtime
+            .begin_new_execution_context(execution_budget.clone())
+            .map_err(ApiError::service_unavailable)?;
+        let tool_context = tool_context.with_execution_budget(execution_budget, true);
         // A worktree helper's tools work in its own checkout; agent files,
         // memory and attachments above keep the global workspace.
         let tool_context = match worktrees::run_root(runtime.config()) {
@@ -2494,6 +2546,11 @@ impl AgentRunCoordinator {
             execution.await
         };
         action_journal.settle().await;
+        // A former writer may retain a model response, but cannot publish it or
+        // inspect/merge a helper checkout after its profile authority is lost.
+        ownership::verify(&self.state)
+            .await
+            .map_err(ApiError::service_unavailable)?;
         let result = if let Some(error) = action_journal.failure() {
             let owner_stopped = self
                 .state
@@ -2522,7 +2579,8 @@ impl AgentRunCoordinator {
             .get(&run_id)
             .and_then(|record| record.async_helper.as_ref()?.worktree.clone());
         if let Some(worktree) = assigned_worktree {
-            worktree_report = Some(worktrees::finish(&worktree).await);
+            let owner = self.state.read().await.profile_owner();
+            worktree_report = Some(worktrees::finish(&worktree, owner).await);
         }
         live_run.flush();
         // The run's steering ends with its execution (spec §4.7): a steer
@@ -2564,6 +2622,9 @@ impl AgentRunCoordinator {
         // Phase C: merge exactly this run's changes, let the source commit, then
         // save; a rejected or undurable commit removes exactly those changes
         // (spec §4.4 items 3–4).
+        ownership::verify(&self.state)
+            .await
+            .map_err(ApiError::service_unavailable)?;
         let transaction = self.control_plane_transaction().await;
         let (
             snapshot,
@@ -2581,6 +2642,9 @@ impl AgentRunCoordinator {
             side_posts,
         ) = {
             let mut guard = self.state.write().await;
+            guard
+                .ensure_profile_owned()
+                .map_err(|e| ApiError::service_unavailable(e.to_string()))?;
             let mut change_set = RunChangeSet::new(
                 run_id.clone(),
                 agent_id.clone(),
@@ -2840,22 +2904,25 @@ impl AgentRunCoordinator {
         // The same owner turns that count toward a conversation review also go
         // to the external memory provider, in the background (a no-op for none).
         if turn_counted {
-            crate::memory_provider::sync_turn(|| anima_memory::TurnRecord {
-                agent_id: agent_id.clone(),
-                session_id: session_id.clone(),
-                user_text: change_set
-                    .delta
-                    .messages
-                    .iter()
-                    .find(|message| message.role == anima_core::MessageRole::User)
-                    .map(|message| message.content.text.clone())
-                    .unwrap_or_default(),
-                reply_text: result
-                    .data
-                    .as_ref()
-                    .map(|reply| reply.text.clone())
-                    .unwrap_or_default(),
-                at_ms: anima_core::primitives::now_millis(),
+            let profile_owner = self.state.read().await.profile_owner();
+            crate::memory_provider::sync_turn_with_owner(profile_owner, || {
+                anima_memory::TurnRecord {
+                    agent_id: agent_id.clone(),
+                    session_id: session_id.clone(),
+                    user_text: change_set
+                        .delta
+                        .messages
+                        .iter()
+                        .find(|message| message.role == anima_core::MessageRole::User)
+                        .map(|message| message.content.text.clone())
+                        .unwrap_or_default(),
+                    reply_text: result
+                        .data
+                        .as_ref()
+                        .map(|reply| reply.text.clone())
+                        .unwrap_or_default(),
+                    at_ms: anima_core::primitives::now_millis(),
+                }
             });
         }
 

@@ -34,11 +34,13 @@ use crate::schedules::ScheduledPromptRecord;
 /// recovery lineage and event occurrences; 24 adds workflows, 25 adds reusable
 /// workflow templates, and 26 adds opt-in memory maintenance with per-cohort
 /// recovery journals, Doctor repair images, standing intentions and paired-node
-/// identity records; 27 adds bound turn progress and durable secondary usage.
+/// identity records; 27 adds bound turn progress and durable secondary usage;
+/// 28 adds durable shared execution scopes and immutable run bindings.
 /// Runtime transport sessions/processes are never persisted. Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 27;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 28;
+pub(crate) const PRE_EXECUTION_BUDGETS_BACKUP_SUFFIX: &str = ".pre-execution-budgets.bak";
 pub(crate) const PRE_TURN_RECOVERY_BACKUP_SUFFIX: &str = ".pre-turn-recovery.bak";
 pub(crate) const PRE_MEMORY_MAINTENANCE_BACKUP_SUFFIX: &str = ".pre-memory-maintenance.bak";
 pub(crate) const PRE_WORKFLOW_TEMPLATES_BACKUP_SUFFIX: &str = ".pre-workflow-templates.bak";
@@ -104,25 +106,57 @@ const CONTROL_PLANE_SNAPSHOT_KEY: &str = "control_plane";
 pub(crate) enum ControlPlaneStoreConfig {
     Json(PathBuf),
     Postgres(PgPool),
+    Owned {
+        store: Box<Self>,
+        owner: crate::profile_owner::ProfileOwner,
+    },
 }
 
 impl ControlPlaneStoreConfig {
-    pub(crate) fn file_path(&self) -> Option<&PathBuf> {
+    pub(crate) fn with_owner(self, owner: crate::profile_owner::ProfileOwner) -> io::Result<Self> {
+        let store = match self {
+            Self::Json(path) => Self::Json(owner.canonical_path(&path)?),
+            other => other,
+        };
+        Ok(Self::Owned {
+            store: Box::new(store),
+            owner,
+        })
+    }
+
+    pub(crate) fn store(&self) -> &Self {
         match self {
+            Self::Owned { store, .. } => store.store(),
+            other => other,
+        }
+    }
+
+    pub(crate) fn owner(&self) -> Option<&crate::profile_owner::ProfileOwner> {
+        match self {
+            Self::Owned { owner, .. } => Some(owner),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn file_path(&self) -> Option<&PathBuf> {
+        match self.store() {
+            Self::Owned { .. } => unreachable!(),
             Self::Json(path) => Some(path),
             Self::Postgres(_) => None,
         }
     }
 
-    pub(crate) const fn storage_label(&self) -> &'static str {
-        match self {
+    pub(crate) fn storage_label(&self) -> &'static str {
+        match self.store() {
+            Self::Owned { .. } => unreachable!(),
             Self::Json(_) => "json",
             Self::Postgres(_) => "postgres",
         }
     }
 
     pub(crate) fn location_label(&self) -> String {
-        match self {
+        match self.store() {
+            Self::Owned { .. } => unreachable!(),
             Self::Json(path) => path.display().to_string(),
             Self::Postgres(_) => "postgres:host_snapshots/control_plane".into(),
         }
@@ -188,6 +222,8 @@ pub(crate) struct ControlPlaneSnapshot {
     pub(crate) workspace: Option<WorkspaceConfig>,
     #[serde(default)]
     pub(crate) runs: Vec<crate::runs::RunRecord>,
+    #[serde(default)]
+    pub(crate) execution_budgets: crate::execution_budgets::HostExecutionBudgets,
     #[serde(default)]
     pub(crate) learning_reviews: Vec<crate::learning::LearningReviewRecord>,
     #[serde(default)]
@@ -292,9 +328,21 @@ pub(crate) async fn save_control_plane_snapshot(
         return Ok(());
     };
 
-    match config {
+    if let Some(owner) = config.owner() {
+        owner.ensure_owned()?;
+    }
+    match config.store() {
         ControlPlaneStoreConfig::Json(path) => save_json_snapshot(path, snapshot),
-        ControlPlaneStoreConfig::Postgres(pool) => save_postgres_snapshot(pool, snapshot).await,
+        ControlPlaneStoreConfig::Postgres(pool) => {
+            if let Some(owner) = config.owner() {
+                let mut writer = owner.postgres_writer().await?;
+                save_postgres_snapshot(&mut *writer, snapshot).await?;
+                writer.complete().map_err(|_| durability_uncertain_error())
+            } else {
+                save_postgres_snapshot(pool, snapshot).await
+            }
+        }
+        ControlPlaneStoreConfig::Owned { .. } => unreachable!(),
     }
 }
 
@@ -318,7 +366,11 @@ pub(crate) fn is_durability_uncertain(error: &io::Error) -> bool {
 pub(crate) async fn load_control_plane_snapshot(
     config: &ControlPlaneStoreConfig,
 ) -> io::Result<Option<ControlPlaneSnapshot>> {
-    match config {
+    if let Some(owner) = config.owner() {
+        owner.verify_owned().await?;
+    }
+    match config.store() {
+        ControlPlaneStoreConfig::Owned { .. } => unreachable!(),
         ControlPlaneStoreConfig::Json(path) => load_json_snapshot(path),
         ControlPlaneStoreConfig::Postgres(pool) => load_postgres_snapshot(pool).await,
     }
@@ -503,8 +555,10 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
                 PRE_WORKFLOW_TEMPLATES_BACKUP_SUFFIX
             } else if loaded_version < 26 {
                 PRE_MEMORY_MAINTENANCE_BACKUP_SUFFIX
-            } else {
+            } else if loaded_version < 27 {
                 PRE_TURN_RECOVERY_BACKUP_SUFFIX
+            } else {
+                PRE_EXECUTION_BUDGETS_BACKUP_SUFFIX
             }
         });
         path.with_file_name(name)
@@ -540,12 +594,23 @@ pub(crate) async fn write_pre_upgrade_backup(
     config: &ControlPlaneStoreConfig,
     loaded_version: u32,
 ) -> io::Result<String> {
-    match config {
+    if let Some(owner) = config.owner() {
+        owner.ensure_owned()?;
+    }
+    match config.store() {
+        ControlPlaneStoreConfig::Owned { .. } => unreachable!(),
         ControlPlaneStoreConfig::Json(path) => {
             backup_json_snapshot(path, loaded_version).map(|backup| backup.display().to_string())
         }
         ControlPlaneStoreConfig::Postgres(pool) => {
-            backup_postgres_snapshot(pool, loaded_version).await
+            if let Some(owner) = config.owner() {
+                let mut writer = owner.postgres_writer().await?;
+                let result = backup_postgres_snapshot(&mut *writer, loaded_version).await?;
+                writer.complete()?;
+                Ok(result)
+            } else {
+                backup_postgres_snapshot(pool, loaded_version).await
+            }
         }
     }
 }
@@ -563,7 +628,10 @@ fn backup_json_snapshot(path: &Path, loaded_version: u32) -> io::Result<PathBuf>
     Ok(backup)
 }
 
-async fn backup_postgres_snapshot(pool: &PgPool, version: u32) -> io::Result<String> {
+async fn backup_postgres_snapshot<'e>(
+    executor: impl sqlx::Executor<'e, Database = sqlx::Postgres>,
+    version: u32,
+) -> io::Result<String> {
     let key = postgres_backup_key(version);
     sqlx::query(
         r#"
@@ -578,13 +646,16 @@ async fn backup_postgres_snapshot(pool: &PgPool, version: u32) -> io::Result<Str
     )
     .bind(&key)
     .bind(CONTROL_PLANE_SNAPSHOT_KEY)
-    .execute(pool)
+    .execute(executor)
     .await
     .map_err(postgres_error)?;
     Ok(format!("postgres:host_snapshots/{key}"))
 }
 
-async fn save_postgres_snapshot(pool: &PgPool, snapshot: &ControlPlaneSnapshot) -> io::Result<()> {
+async fn save_postgres_snapshot<'e>(
+    executor: impl sqlx::Executor<'e, Database = sqlx::Postgres>,
+    snapshot: &ControlPlaneSnapshot,
+) -> io::Result<()> {
     let payload = serde_json::to_value(snapshot).map_err(serde_error)?;
     sqlx::query(
         r#"
@@ -600,7 +671,7 @@ async fn save_postgres_snapshot(pool: &PgPool, snapshot: &ControlPlaneSnapshot) 
     .bind(CONTROL_PLANE_SNAPSHOT_KEY)
     .bind(CONTROL_PLANE_STORE_VERSION as i32)
     .bind(payload)
-    .execute(pool)
+    .execute(executor)
     .await
     .map_err(|_| durability_uncertain_error())?;
     Ok(())
@@ -717,6 +788,7 @@ impl ControlPlaneSnapshot {
     ) -> Self {
         Self {
             version: CONTROL_PLANE_STORE_VERSION,
+            execution_budgets: crate::execution_budgets::HostExecutionBudgets::default(),
             agents,
             swarms,
             connectors,
@@ -1743,8 +1815,10 @@ mod turn_recovery_migration_tests {
             .await
             .unwrap();
         let reloaded = load_control_plane_snapshot(&config).await.unwrap().unwrap();
-        assert_eq!(reloaded.version, 27);
+        assert_eq!(reloaded.version, CONTROL_PLANE_STORE_VERSION);
         assert!(reloaded.pending_usage.is_empty());
+        assert!(reloaded.execution_budgets.scopes.is_empty());
+        assert!(reloaded.execution_budgets.run_scopes.is_empty());
         assert_eq!(
             fs::read(path.with_file_name("state.json.pre-turn-recovery.bak")).unwrap(),
             original

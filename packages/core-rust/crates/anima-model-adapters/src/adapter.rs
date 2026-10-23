@@ -10,6 +10,7 @@ use reqwest::Client;
 use crate::anthropic::{build_anthropic_body, parse_anthropic_response};
 use crate::attachments::{request_contains_images, request_error, IMAGE_REQUEST_FAILED};
 use crate::catalog::{resolve_provider, ProviderKind};
+use crate::controlled::{json_usage_complete, PreparedAttempt};
 use crate::google::{build_google_body, parse_google_response};
 use crate::ollama::{build_ollama_body, parse_ollama_response};
 use crate::openai_compatible::{build_openai_compatible_body, parse_openai_compatible_response};
@@ -19,6 +20,7 @@ use crate::stream::{
 use crate::transport::{transport_error, with_retry_hint};
 use crate::ProviderDefinition;
 use crate::{ProviderAdapterConfig, ProviderCredential};
+use anima_core::execution_limits::ModelCallContext;
 
 const ANTHROPIC_API_VERSION: &str = "2023-06-01";
 
@@ -104,7 +106,11 @@ fn is_json_response(response: &reqwest::Response) -> bool {
 async fn emit_final(
     sink: &dyn ModelStreamSink,
     response: ModelGenerateResponse,
+    complete_usage: bool,
 ) -> Result<(), String> {
+    if complete_usage {
+        sink.complete_usage(response.usage.clone()).await?;
+    }
     sink.emit(ModelStreamFrame::Final(response))
         .await
         .map_err(|_| "provider stream consumer failed".to_owned())
@@ -114,6 +120,7 @@ async fn emit_final(
 pub struct ProviderModelAdapter {
     client: Client,
     config: ProviderAdapterConfig,
+    execution: Option<ModelCallContext>,
 }
 
 impl ProviderModelAdapter {
@@ -129,7 +136,11 @@ impl ProviderModelAdapter {
     }
 
     pub fn with_client(config: ProviderAdapterConfig, client: Client) -> Self {
-        Self { client, config }
+        Self {
+            client,
+            config,
+            execution: None,
+        }
     }
 
     fn credential_for(&self, provider: &str, default_base_url: &str) -> ProviderCredential {
@@ -289,51 +300,78 @@ impl ProviderModelAdapter {
         let api_key = self.key_required(&credential, "ANTHROPIC_API_KEY", "anthropic")?;
         let mut retried = false;
         loop {
-            let mut body = build_anthropic_body(config, request)?;
-            body["stream"] = serde_json::Value::Bool(true);
-            let response = self
-                .client
-                .post(join_base_url(&credential.base_url, "/v1/messages"))
-                .header("content-type", "application/json")
-                .header("x-api-key", &api_key)
-                .header("anthropic-version", ANTHROPIC_API_VERSION)
-                .json(&body)
-                .send()
-                .await
-                .map_err(|error| {
-                    after_retry(
-                        retried,
-                        transport_error("Anthropic", "stream request", error),
-                    )
-                })?;
-            if response.status().is_success() {
-                if is_json_response(&response) {
-                    let payload = response_payload(
+            let mut attempt =
+                PreparedAttempt::new(self.execution.as_ref(), config, request).await?;
+            let observed = attempt.sink(sink);
+            let request = &attempt.request;
+            let result = attempt
+                .bounded(async {
+                    let sink: &dyn ModelStreamSink = &observed;
+                    let mut body = build_anthropic_body(config, request)?;
+                    body["stream"] = serde_json::Value::Bool(true);
+                    let response = self
+                        .client
+                        .post(join_base_url(&credential.base_url, "/v1/messages"))
+                        .header("content-type", "application/json")
+                        .header("x-api-key", &api_key)
+                        .header("anthropic-version", ANTHROPIC_API_VERSION)
+                        .json(&body)
+                        .send()
+                        .await
+                        .map_err(|error| {
+                            after_retry(
+                                retried,
+                                transport_error("Anthropic", "stream request", error),
+                            )
+                        })?;
+                    if response.status().is_success() {
+                        if is_json_response(&response) {
+                            let payload = response_payload(
+                                response,
+                                "Anthropic",
+                                Some(&api_key),
+                                request_contains_images(request),
+                            )
+                            .await?;
+                            return emit_final(
+                                sink,
+                                parse_anthropic_response(&payload)?,
+                                json_usage_complete(&payload, "anthropic"),
+                            )
+                            .await
+                            .map(|()| true);
+                        }
+                        return consume_anthropic_sse(
+                            response,
+                            sink,
+                            request_contains_images(request),
+                        )
+                        .await
+                        .map(|()| true);
+                    }
+                    let retry = transport_retries_enabled(config)
+                        && !retried
+                        && retryable(response.status());
+                    let error = response_payload(
                         response,
                         "Anthropic",
                         Some(&api_key),
                         request_contains_images(request),
                     )
-                    .await?;
-                    return emit_final(sink, parse_anthropic_response(&payload)?).await;
-                }
-                return consume_anthropic_sse(response, sink, request_contains_images(request))
-                    .await;
+                    .await
+                    .unwrap_err();
+                    if !retry {
+                        return Err(after_retry(retried, error));
+                    }
+                    Ok(false)
+                })
+                .await;
+            drop(observed);
+            attempt.finish(&result).await;
+            match result {
+                Ok(false) => retried = true,
+                result => return result.map(|_| ()),
             }
-            let retry =
-                transport_retries_enabled(config) && !retried && retryable(response.status());
-            let error = response_payload(
-                response,
-                "Anthropic",
-                Some(&api_key),
-                request_contains_images(request),
-            )
-            .await
-            .unwrap_err();
-            if !retry {
-                return Err(after_retry(retried, error));
-            }
-            retried = true;
         }
     }
 
@@ -350,63 +388,82 @@ impl ProviderModelAdapter {
         let provider_name = provider.label;
         let mut retried = false;
         loop {
-            let mut body = build_openai_compatible_body(config, request)?;
-            shape_openai_body(&mut body, shape);
-            body["stream"] = serde_json::Value::Bool(true);
-            if shape.stream_usage {
-                body["stream_options"] = serde_json::json!({ "include_usage": true });
-            }
-            let mut builder = self
-                .client
-                .post(&endpoint)
-                .header("content-type", "application/json")
-                .json(&body);
-            if let Some(api_key) = api_key {
-                builder = builder.bearer_auth(api_key);
-            }
-            let response = builder.send().await.map_err(|error| {
-                after_retry(
-                    retried,
-                    transport_error(provider_name, "stream request", error),
-                )
-            })?;
-            if response.status().is_success() {
-                if is_json_response(&response) {
-                    let payload = response_payload(
+            let mut attempt =
+                PreparedAttempt::new(self.execution.as_ref(), config, request).await?;
+            let observed = attempt.sink(sink);
+            let request = &attempt.request;
+            let result = attempt
+                .bounded(async {
+                    let sink: &dyn ModelStreamSink = &observed;
+                    let mut body = build_openai_compatible_body(config, request)?;
+                    shape_openai_body(&mut body, shape);
+                    body["stream"] = serde_json::Value::Bool(true);
+                    if shape.stream_usage {
+                        body["stream_options"] = serde_json::json!({ "include_usage": true });
+                    }
+                    let mut builder = self
+                        .client
+                        .post(&endpoint)
+                        .header("content-type", "application/json")
+                        .json(&body);
+                    if let Some(api_key) = api_key {
+                        builder = builder.bearer_auth(api_key);
+                    }
+                    let response = builder.send().await.map_err(|error| {
+                        after_retry(
+                            retried,
+                            transport_error(provider_name, "stream request", error),
+                        )
+                    })?;
+                    if response.status().is_success() {
+                        if is_json_response(&response) {
+                            let payload = response_payload(
+                                response,
+                                provider_name,
+                                api_key,
+                                request_contains_images(request),
+                            )
+                            .await?;
+                            return emit_final(
+                                sink,
+                                parse_openai_compatible_response(&payload, provider_name)?,
+                                json_usage_complete(&payload, "openai"),
+                            )
+                            .await
+                            .map(|()| true);
+                        }
+                        return consume_openai_sse(
+                            response,
+                            sink,
+                            provider,
+                            request_contains_images(request),
+                        )
+                        .await
+                        .map(|()| true);
+                    }
+                    let retry = transport_retries_enabled(config)
+                        && !retried
+                        && retryable(response.status());
+                    let error = response_payload(
                         response,
                         provider_name,
                         api_key,
                         request_contains_images(request),
                     )
-                    .await?;
-                    return emit_final(
-                        sink,
-                        parse_openai_compatible_response(&payload, provider_name)?,
-                    )
-                    .await;
-                }
-                return consume_openai_sse(
-                    response,
-                    sink,
-                    provider,
-                    request_contains_images(request),
-                )
+                    .await
+                    .unwrap_err();
+                    if !retry {
+                        return Err(after_retry(retried, error));
+                    }
+                    Ok(false)
+                })
                 .await;
+            drop(observed);
+            attempt.finish(&result).await;
+            match result {
+                Ok(false) => retried = true,
+                result => return result.map(|_| ()),
             }
-            let retry =
-                transport_retries_enabled(config) && !retried && retryable(response.status());
-            let error = response_payload(
-                response,
-                provider_name,
-                api_key,
-                request_contains_images(request),
-            )
-            .await
-            .unwrap_err();
-            if !retry {
-                return Err(after_retry(retried, error));
-            }
-            retried = true;
         }
     }
 
@@ -425,50 +482,73 @@ impl ProviderModelAdapter {
         );
         let mut retried = false;
         loop {
-            let response = self
-                .client
-                .post(&endpoint)
-                .header("content-type", "application/json")
-                .header("x-goog-api-key", &api_key)
-                .json(&build_google_body(config, request)?)
-                .send()
-                .await
-                .map_err(|error| {
-                    after_retry(retried, transport_error("Google", "stream request", error))
-                })?;
-            if response.status().is_success() {
-                if is_json_response(&response) {
-                    let payload = response_payload(
+            let mut attempt =
+                PreparedAttempt::new(self.execution.as_ref(), config, request).await?;
+            let observed = attempt.sink(sink);
+            let request = &attempt.request;
+            let result = attempt
+                .bounded(async {
+                    let sink: &dyn ModelStreamSink = &observed;
+                    let response = self
+                        .client
+                        .post(&endpoint)
+                        .header("content-type", "application/json")
+                        .header("x-goog-api-key", &api_key)
+                        .json(&build_google_body(config, request)?)
+                        .send()
+                        .await
+                        .map_err(|error| {
+                            after_retry(retried, transport_error("Google", "stream request", error))
+                        })?;
+                    if response.status().is_success() {
+                        if is_json_response(&response) {
+                            let payload = response_payload(
+                                response,
+                                "Google",
+                                Some(&api_key),
+                                request_contains_images(request),
+                            )
+                            .await?;
+                            return emit_final(
+                                sink,
+                                parse_google_response(&payload)?,
+                                json_usage_complete(&payload, "google"),
+                            )
+                            .await
+                            .map(|()| true);
+                        }
+                        return consume_google_sse(
+                            response,
+                            sink,
+                            &api_key,
+                            request_contains_images(request),
+                        )
+                        .await
+                        .map(|()| true);
+                    }
+                    let retry = transport_retries_enabled(config)
+                        && !retried
+                        && retryable(response.status());
+                    let error = response_payload(
                         response,
                         "Google",
                         Some(&api_key),
                         request_contains_images(request),
                     )
-                    .await?;
-                    return emit_final(sink, parse_google_response(&payload)?).await;
-                }
-                return consume_google_sse(
-                    response,
-                    sink,
-                    &api_key,
-                    request_contains_images(request),
-                )
+                    .await
+                    .unwrap_err();
+                    if !retry {
+                        return Err(after_retry(retried, error));
+                    }
+                    Ok(false)
+                })
                 .await;
+            drop(observed);
+            attempt.finish(&result).await;
+            match result {
+                Ok(false) => retried = true,
+                result => return result.map(|_| ()),
             }
-            let retry =
-                transport_retries_enabled(config) && !retried && retryable(response.status());
-            let error = response_payload(
-                response,
-                "Google",
-                Some(&api_key),
-                request_contains_images(request),
-            )
-            .await
-            .unwrap_err();
-            if !retry {
-                return Err(after_retry(retried, error));
-            }
-            retried = true;
         }
     }
 
@@ -479,45 +559,61 @@ impl ProviderModelAdapter {
         request: &ModelGenerateRequest,
         sink: &dyn ModelStreamSink,
     ) -> Result<(), String> {
-        let mut body = build_ollama_body(config, request)?;
-        body["stream"] = serde_json::Value::Bool(true);
-        let api_key = credential
-            .api_key
-            .as_deref()
-            .filter(|key| !key.trim().is_empty());
-        let mut builder = self
-            .client
-            .post(ollama_native_endpoint(&credential.base_url))
-            .header("content-type", "application/json")
-            .json(&body);
-        if let Some(api_key) = api_key {
-            builder = builder.bearer_auth(api_key);
-        }
-        let response = builder
-            .send()
-            .await
-            .map_err(|error| transport_error("Ollama", "stream request", error))?;
-        if !response.status().is_success() {
-            return Err(response_payload(
-                response,
-                "Ollama",
-                api_key,
-                request_contains_images(request),
-            )
-            .await
-            .unwrap_err());
-        }
-        if is_json_response(&response) {
-            let payload = response_payload(
-                response,
-                "Ollama",
-                api_key,
-                request_contains_images(request),
-            )
-            .await?;
-            return emit_final(sink, parse_ollama_response(&payload)?).await;
-        }
-        consume_ollama_ndjson(response, sink, request_contains_images(request)).await
+        let mut attempt = PreparedAttempt::new(self.execution.as_ref(), config, request).await?;
+        let observed = attempt.sink(sink);
+        let request = &attempt.request;
+        let result = attempt
+            .bounded(async {
+                let sink: &dyn ModelStreamSink = &observed;
+                let mut body = build_ollama_body(config, request)?;
+                body["stream"] = serde_json::Value::Bool(true);
+                let api_key = credential
+                    .api_key
+                    .as_deref()
+                    .filter(|key| !key.trim().is_empty());
+                let mut builder = self
+                    .client
+                    .post(ollama_native_endpoint(&credential.base_url))
+                    .header("content-type", "application/json")
+                    .json(&body);
+                if let Some(api_key) = api_key {
+                    builder = builder.bearer_auth(api_key);
+                }
+                let response = builder
+                    .send()
+                    .await
+                    .map_err(|error| transport_error("Ollama", "stream request", error))?;
+                if !response.status().is_success() {
+                    return Err(response_payload(
+                        response,
+                        "Ollama",
+                        api_key,
+                        request_contains_images(request),
+                    )
+                    .await
+                    .unwrap_err());
+                }
+                if is_json_response(&response) {
+                    let payload = response_payload(
+                        response,
+                        "Ollama",
+                        api_key,
+                        request_contains_images(request),
+                    )
+                    .await?;
+                    return emit_final(
+                        sink,
+                        parse_ollama_response(&payload)?,
+                        json_usage_complete(&payload, "ollama"),
+                    )
+                    .await;
+                }
+                consume_ollama_ndjson(response, sink, request_contains_images(request)).await
+            })
+            .await;
+        drop(observed);
+        attempt.finish(&result).await;
+        result
     }
 }
 
@@ -763,12 +859,43 @@ impl ModelStreamSink for FrameCountingSink<'_> {
         self.frames.fetch_add(1, Ordering::SeqCst);
         self.inner.emit(frame).await
     }
+    async fn complete_usage(&self, usage: anima_core::TokenUsage) -> Result<(), String> {
+        self.inner.complete_usage(usage).await
+    }
 }
 
 #[async_trait]
 impl ModelAdapter for ProviderModelAdapter {
     fn provider(&self) -> &str {
         "providers"
+    }
+
+    async fn generate_controlled(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        context: &ModelCallContext,
+    ) -> Result<ModelGenerateResponse, String> {
+        let sink = ControlledFinal(std::sync::Mutex::new(None));
+        self.stream_controlled(config, request, &sink, context)
+            .await?;
+        sink.0
+            .into_inner()
+            .map_err(|_| "Provider response unavailable")?
+            .ok_or("Provider stream ended without a final response".into())
+    }
+
+    async fn stream_controlled(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        sink: &dyn ModelStreamSink,
+        context: &ModelCallContext,
+    ) -> Result<(), String> {
+        context.check_live()?;
+        let mut adapter = self.clone();
+        adapter.execution = Some(context.clone());
+        adapter.stream(config, request, sink).await
     }
 
     async fn generate(
@@ -790,6 +917,17 @@ impl ModelAdapter for ProviderModelAdapter {
         self.stream_inner(config, request, sink)
             .await
             .map_err(|error| request_error(error, request_contains_images(request)))
+    }
+}
+
+struct ControlledFinal(std::sync::Mutex<Option<ModelGenerateResponse>>);
+#[async_trait]
+impl ModelStreamSink for ControlledFinal {
+    async fn emit(&self, frame: ModelStreamFrame) -> Result<(), String> {
+        if let ModelStreamFrame::Final(response) = frame {
+            *self.0.lock().map_err(|_| "Provider response unavailable")? = Some(response);
+        }
+        Ok(())
     }
 }
 

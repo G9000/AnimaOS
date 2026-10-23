@@ -70,6 +70,8 @@ impl AgentRuntime {
             events: Vec::new(),
             last_task: self.last_task.clone(),
             step_count: self.step_counter,
+            // This API explicitly creates a new isolated run, not a continuation.
+            execution_binding: None,
         }
     }
 

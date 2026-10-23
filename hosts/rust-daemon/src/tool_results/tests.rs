@@ -515,3 +515,60 @@ async fn model_reads_require_live_grant_current_workspace_and_known_arguments() 
     assert_eq!(refused.status, TaskStatus::Error);
     assert!(refused.error.unwrap().contains("permission was revoked"));
 }
+
+#[test]
+fn profile_owner_tool_result_store_retains_lease_and_refuses_revoked_mutations() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("results");
+    let workspace = temp.path().join("workspace");
+    std::fs::create_dir(&workspace).unwrap();
+    let owner = crate::profile_owner::ProfileOwner::acquire_resources([
+        crate::profile_owner::ProfileResource::Directory(root.clone()),
+    ])
+    .unwrap();
+    let store = ToolResultStore::new(root.clone()).with_profile_owner(Some(owner.clone()));
+    drop(owner);
+    assert!(crate::profile_owner::ProfileOwner::acquire_resources([
+        crate::profile_owner::ProfileResource::Directory(root.clone())
+    ])
+    .is_err());
+    store
+        .save(
+            "owner",
+            &workspace,
+            "run",
+            "call-one",
+            "read",
+            &result("first"),
+        )
+        .unwrap();
+    let before: Vec<_> = std::fs::read_dir(&root)
+        .unwrap()
+        .map(|entry| {
+            let path = entry.unwrap().path();
+            (path.clone(), std::fs::read(path).unwrap())
+        })
+        .collect();
+    let detached = store.clone();
+    drop(store);
+    detached.owner.as_ref().unwrap().mark_lost();
+    assert!(detached
+        .save(
+            "owner",
+            &workspace,
+            "run",
+            "call-two",
+            "read",
+            &result("stale")
+        )
+        .is_err());
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), before.len());
+    for (path, bytes) in before {
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
+    drop(detached);
+    crate::profile_owner::ProfileOwner::acquire_resources([
+        crate::profile_owner::ProfileResource::Directory(root),
+    ])
+    .unwrap();
+}

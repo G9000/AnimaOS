@@ -13,6 +13,112 @@ struct Fixture {
     _workspace: WorkspaceAvatarTemp,
 }
 
+struct CountingSwarmCeilingModel {
+    calls: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl ModelAdapter for CountingSwarmCeilingModel {
+    fn provider(&self) -> &str {
+        "swarm-ceiling-fixture"
+    }
+
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+
+    fn generated_usage_is_complete(&self, _: &ModelGenerateResponse) -> bool {
+        true
+    }
+
+    async fn generate(
+        &self,
+        config: &AgentConfig,
+        _: &ModelGenerateRequest,
+    ) -> Result<ModelGenerateResponse, String> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(model_response(config))
+    }
+}
+
+#[tokio::test]
+async fn swarm_owner_execution_limits_bound_actual_dispatches_across_members() {
+    // Either configured member can tighten the one shared operation. These are
+    // actual model dispatches through the public swarm API, not fabricated rows.
+    for (manager_attempts, worker_attempts) in [(1, 3), (3, 1)] {
+        let workspace = WorkspaceAvatarTemp::new("swarm-owner-execution-ceiling");
+        let store = ControlPlaneStoreConfig::Json(workspace.root.join("control-plane.json"));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut daemon = DaemonState::with_model_adapter(Arc::new(CountingSwarmCeilingModel {
+            calls: calls.clone(),
+        }));
+        daemon.set_control_plane_store(Some(store.clone()));
+        let state = Arc::new(RwLock::new(daemon));
+        let app = router(state.clone(), DaemonConfig::default());
+        let config = serde_json::json!({
+            "strategy": "round-robin",
+            "manager": {
+                "name": "manager", "model": "fixture",
+                "settings": { "executionLimits": {
+                    "maxModelAttempts": manager_attempts, "maxRetries": 0
+                }}
+            },
+            "workers": [{
+                "name": "worker", "model": "fixture",
+                "settings": { "executionLimits": {
+                    "maxModelAttempts": worker_attempts, "maxRetries": 0
+                }}
+            }],
+            "maxTurns": 2
+        });
+        let created = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/swarms")
+                    .header("content-type", "application/json")
+                    .body(Body::from(config.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let swarm_id = state.read().await.list_swarms()[0].id.clone();
+        let response = tokio::time::timeout(
+            Duration::from_secs(5),
+            app.oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/swarms/{swarm_id}/run"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"text":"finish within the owner's ceiling"}"#,
+                    ))
+                    .unwrap(),
+            ),
+        )
+        .await
+        .expect("the finite swarm must retire")
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "swarm ignored the minimum configured owner model-attempt ceiling"
+        );
+        let body = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["result"]["status"], "error");
+        let snapshot = load_control_plane_snapshot(&store).await.unwrap().unwrap();
+        assert_eq!(snapshot.execution_budgets.scopes.len(), 1);
+        let scope = snapshot.execution_budgets.scopes.values().next().unwrap();
+        assert_eq!(scope.limits.max_model_attempts, 1);
+        assert_eq!(scope.limits.max_retries, 0);
+        assert_eq!(scope.reservations.len(), 1);
+    }
+}
+
 impl Fixture {
     async fn new(timeout: Duration, limit: usize) -> Self {
         let workspace = WorkspaceAvatarTemp::new("swarm-reliability");
@@ -201,7 +307,7 @@ async fn swarm_queued_request_waits_for_the_first_durable_commit() {
         .state
         .write()
         .await
-        .install_test_control_plane_save_gate(false);
+        .install_test_control_plane_non_turn_save_gate(false);
     let second = fixture.start();
     let early_save = tokio::time::timeout(Duration::from_millis(50), gate.entered.acquire()).await;
     let second_published_early = early_save.is_ok();
@@ -235,7 +341,7 @@ async fn swarm_failed_final_commit_preserves_the_durable_running_marker() {
         .state
         .write()
         .await
-        .install_test_control_plane_save_gate(true);
+        .install_test_control_plane_non_turn_save_gate(true);
     gate.release.add_permits(1);
     fixture.release.add_permits(1);
     assert_eq!(

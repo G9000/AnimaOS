@@ -15,6 +15,7 @@ pub(crate) const NATIVE_RECOVERY_REQUIRED: &str = "Filesystem checkpoint Recover
 #[derive(Clone)]
 pub(crate) struct NativeCheckpointService {
     store_root: PathBuf,
+    owner: Option<crate::profile_owner::ProfileOwner>,
     #[cfg(test)]
     limits: Option<CaptureLimits>,
     #[cfg(test)]
@@ -279,6 +280,7 @@ impl NativeCheckpointService {
     pub(crate) fn new(store_root: PathBuf) -> Self {
         Self {
             store_root,
+            owner: None,
             #[cfg(test)]
             limits: None,
             #[cfg(test)]
@@ -286,6 +288,14 @@ impl NativeCheckpointService {
             #[cfg(test)]
             before_lease: Default::default(),
         }
+    }
+
+    pub(crate) fn with_profile_owner(
+        mut self,
+        owner: Option<crate::profile_owner::ProfileOwner>,
+    ) -> Self {
+        self.owner = owner;
+        self
     }
 
     /// Filesystem-only test entry; production dispatch must supply a current
@@ -818,12 +828,20 @@ impl NativeCheckpointService {
                 &policy,
             )?,
         };
-        CheckpointStore::provision_private_root(CaptureConfig {
+        let config = CaptureConfig {
             workspace_root: workspace.into(),
             store_root: self.store_root.clone(),
             scope,
             policy,
-        })
+        };
+        match &self.owner {
+            Some(owner) => owner
+                .with_directory(&self.store_root, || {
+                    CheckpointStore::provision_private_root(config)
+                })
+                .map_err(|_| CaptureError::InsecureStore)?,
+            None => CheckpointStore::provision_private_root(config),
+        }
     }
 
     fn reserve(

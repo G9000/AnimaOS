@@ -93,7 +93,7 @@ impl AgentRunCoordinator {
                 return SmartVerdict::Escalate;
             };
             (
-                std::sync::Arc::clone(&guard.model_adapter),
+                guard.profile_model_adapter(),
                 runtime.config().clone(),
                 autonomy.smart_policy,
             )

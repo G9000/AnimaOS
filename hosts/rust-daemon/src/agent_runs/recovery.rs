@@ -320,7 +320,8 @@ mod tests {
         .await;
         add_chat(&coordinator, &agent, "chat:recovery").await;
         let dir = tempfile::tempdir().unwrap();
-        let source = {
+        let admission_transaction = coordinator.control_plane_transaction().await;
+        let (source, candidate, persist) = {
             let mut state = coordinator.state.write().await;
             state.set_control_plane_store(Some(
                 crate::control_plane_store::ControlPlaneStoreConfig::Json(
@@ -341,12 +342,40 @@ mod tests {
                 },
                 1,
             );
+            // This fixture represents a previously admitted run with an
+            // uncertain tool effect, rather than a started legacy run whose
+            // accounting was lost. Retain its charged/in-flight tool slot.
+            let now_ms = anima_core::primitives::now_millis();
+            let mut candidate =
+                crate::execution_budgets::prepare_run_binding(&state, &source, now_ms).unwrap();
+            candidate
+                .registry
+                .scopes
+                .get_mut(&candidate.binding.scope_id)
+                .unwrap()
+                .reserve(
+                    anima_core::execution_limits::ReservationRequest {
+                        id: "fixture-source-effect".into(),
+                        run_id: source.id.clone(),
+                        logical_call_id: "fixture-source-effect".into(),
+                        operation: anima_core::execution_limits::ExecutionOperation::Tool,
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                    now_ms,
+                )
+                .unwrap();
             source.tools_started.push("send_email".into());
             source.finish(RunStatus::Interrupted, None, 2);
             source.mirrored = true;
+            state.execution_budget_candidate_snapshot = Some(candidate.registry.clone());
             state.runs.insert(source.clone());
-            source
+            (source, candidate, state.control_plane_persist_request())
         };
+        crate::execution_budgets::save_admission(&coordinator.state, candidate, persist)
+            .await
+            .unwrap();
+        drop(admission_transaction);
         let view = coordinator
             .recovery_summary(&agent, &source.id)
             .await
@@ -379,6 +408,13 @@ mod tests {
             .unwrap();
         assert!(matches!(second,AcceptedRun::Replayed(r) if r.id == child.id));
         let state = coordinator.state.read().await;
+        let source_scope = &state.execution_budgets.run_scopes[&source.id];
+        assert_eq!(&state.execution_budgets.run_scopes[&child.id], source_scope);
+        assert!(
+            state.execution_budgets.scopes[source_scope].reservations["fixture-source-effect"]
+                .settlement
+                .is_none()
+        );
         let saved = state.runs.get(&source.id).unwrap();
         assert_eq!(saved.action_receipts, source.action_receipts);
         assert_eq!(saved.tools_started, source.tools_started);

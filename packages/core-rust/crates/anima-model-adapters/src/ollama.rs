@@ -157,6 +157,12 @@ impl OllamaStreamAccumulator {
         Ok((!delta.is_empty()).then_some(delta))
     }
 
+    pub(crate) fn usage_complete(&self) -> bool {
+        self.done
+            .as_ref()
+            .is_some_and(|payload| crate::controlled::json_usage_complete(payload, "ollama"))
+    }
+
     pub(crate) fn finish(self) -> Result<ModelGenerateResponse, String> {
         let mut payload = self
             .done

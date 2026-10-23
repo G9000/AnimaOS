@@ -100,6 +100,33 @@ impl MaintenanceService {
         adapter: Arc<dyn ModelAdapter>,
         _physical: OwnedSemaphorePermit,
     ) {
+        let execution = match crate::execution_budgets::standalone_context_with_limits(
+            &self.state,
+            self.transactions.clone(),
+            format!("maintenance:{}", row.id),
+            anima_core::CancelSignal::new(),
+            source_config
+                .settings
+                .as_ref()
+                .and_then(|settings| settings.execution_limits.clone()),
+        )
+        .await
+        {
+            Ok(execution) => execution,
+            Err(error) => {
+                let _transaction = self.transactions.lock().await;
+                let _ = self
+                    .finish(
+                        &row.id,
+                        MaintenanceState::Failed,
+                        &format!("Review execution budget unavailable: {error}"),
+                    )
+                    .await;
+                return;
+            }
+        };
+        let adapter =
+            crate::controlled_model::bind(adapter, execution, format!("maintenance:{}", row.id));
         let sink = Arc::new(Sink {
             service: self.clone(),
             id: row.id.clone(),

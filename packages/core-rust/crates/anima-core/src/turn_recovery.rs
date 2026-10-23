@@ -119,6 +119,9 @@ pub struct TurnCheckpoint {
 
 #[async_trait]
 pub trait TurnCheckpointSink: Send + Sync {
+    /// A started durable write must retain its own physical custody if this
+    /// acknowledgement future is dropped on Stop/deadline. Progress is evidence,
+    /// never permission to execute or replay an effect.
     async fn save(&self, checkpoint: TurnCheckpoint) -> Result<(), String>;
 }
 

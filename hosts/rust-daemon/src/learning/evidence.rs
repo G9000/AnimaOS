@@ -44,7 +44,7 @@ pub(super) async fn capture_source(
         (
             guard.runs.get(run_id).cloned(),
             runtime.config().clone(),
-            Arc::clone(&guard.model_adapter),
+            guard.profile_model_adapter(),
             guard.history.store(),
         )
     };
@@ -245,7 +245,7 @@ pub(super) async fn capture_conversation(
             .collect();
         (
             runtime.config().clone(),
-            Arc::clone(&guard.model_adapter),
+            guard.profile_model_adapter(),
             guard.history.store(),
             guard.memory_handle(),
             hot_runs,

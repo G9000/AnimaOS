@@ -65,6 +65,11 @@ pub enum ModelStreamFrame {
 #[async_trait]
 pub trait ModelStreamSink: Send + Sync {
     async fn emit(&self, frame: ModelStreamFrame) -> Result<(), String>;
+    /// An adapter may attest complete provider counters separately from a Final
+    /// whose normalized usage may contain defaults for missing statistics.
+    async fn complete_usage(&self, _usage: TokenUsage) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -77,6 +82,69 @@ pub struct ToolCall {
 #[async_trait]
 pub trait ModelAdapter: Send + Sync {
     fn provider(&self) -> &str;
+
+    /// Opt-in guarantee: one physical attempt, no hidden retry or detached work.
+    /// Native retrying adapters override controlled calls at their transport seam.
+    fn single_attempt_contract(&self) -> bool {
+        false
+    }
+    /// Explicit attestation for successful generated responses, including zero.
+    /// Adapters that cannot distinguish missing counters leave this false.
+    fn generated_usage_is_complete(&self, _response: &ModelGenerateResponse) -> bool {
+        false
+    }
+
+    async fn generate_controlled(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        context: &crate::execution_limits::ModelCallContext,
+    ) -> Result<ModelGenerateResponse, String> {
+        if !self.single_attempt_contract() {
+            return Err("Adapter must explicitly support controlled physical attempts".into());
+        }
+        let (request, mut permit) = context.reserve_prepared(config, request).await?;
+        permit.revalidate().await?;
+        let result = context.bounded(self.generate(config, &request)).await;
+        let outcome = match &result {
+            Ok(response) if self.generated_usage_is_complete(response) => {
+                crate::execution_limits::SettlementOutcome::Known(response.usage.clone())
+            }
+            Ok(response) => crate::execution_limits::SettlementOutcome::Unknown {
+                observed: Some(response.usage.clone()),
+            },
+            Err(_) => permit.observed_outcome(),
+        };
+        let physical_retired = result.is_ok() || context.check_live().is_ok();
+        let _ = permit
+            .finish_with_retirement(outcome, physical_retired)
+            .await;
+        result
+    }
+
+    async fn stream_controlled(
+        &self,
+        config: &AgentConfig,
+        request: &ModelGenerateRequest,
+        sink: &dyn ModelStreamSink,
+        context: &crate::execution_limits::ModelCallContext,
+    ) -> Result<(), String> {
+        if !self.single_attempt_contract() {
+            return Err("Adapter must explicitly support controlled physical attempts".into());
+        }
+        let (request, mut permit) = context.reserve_prepared(config, request).await?;
+        permit.revalidate().await?;
+        let observed = permit.stream_sink(sink);
+        let result = context
+            .bounded(self.stream(config, &request, &observed))
+            .await;
+        drop(observed);
+        let physical_retired = result.is_ok() || context.check_live().is_ok();
+        let _ = permit
+            .finish_with_retirement(permit.observed_outcome(), physical_retired)
+            .await;
+        result
+    }
 
     async fn generate(
         &self,
@@ -91,11 +159,11 @@ pub trait ModelAdapter: Send + Sync {
         request: &ModelGenerateRequest,
         sink: &dyn ModelStreamSink,
     ) -> Result<(), String> {
-        let _ = sink
-            .emit(ModelStreamFrame::Final(
-                self.generate(config, request).await?,
-            ))
-            .await;
+        let response = self.generate(config, request).await?;
+        if self.generated_usage_is_complete(&response) {
+            sink.complete_usage(response.usage.clone()).await?;
+        }
+        let _ = sink.emit(ModelStreamFrame::Final(response)).await;
         Ok(())
     }
 }

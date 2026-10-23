@@ -284,6 +284,7 @@ impl RunActionJournal {
             .state
             .upgrade()
             .ok_or("Native action owner is unavailable")?;
+        super::ownership::verify(&shared).await?;
         let guard = shared.read().await;
         self.check_owner(&guard, true)?;
         let record = guard
@@ -443,11 +444,13 @@ impl RunActionJournal {
             .state
             .upgrade()
             .ok_or("Native action owner is unavailable")?;
+        super::ownership::verify(&state).await?;
         let guard = state.read().await;
         self.check_owner(&guard, true)
     }
 
     fn check_owner(&self, state: &DaemonState, starting: bool) -> Result<(), String> {
+        state.ensure_profile_owned().map_err(|e| e.to_string())?;
         if starting {
             // State locks may have waited since the previous check. Recheck
             // synchronous liveness under the acquired guard before admission;

@@ -6,6 +6,7 @@ pub(crate) mod calendar;
 pub(crate) mod catalog;
 #[cfg(test)]
 mod catalog_tests;
+mod chat_controls;
 mod checkpoints;
 mod clarify;
 pub(crate) mod completion;
@@ -16,7 +17,6 @@ mod execution;
 mod filesystem;
 mod mail;
 mod main_chat_clear;
-mod chat_controls;
 mod mcp;
 #[cfg(test)]
 mod mcp_tests;
@@ -40,7 +40,10 @@ mod workspace_document;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{atomic::AtomicUsize, Arc};
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc,
+};
 
 use anima_core::{
     tool_not_configured_error, AgentState, Content, DataValue, Message, TaskResult, ToolCall,
@@ -139,6 +142,9 @@ pub(crate) struct ToolExecutionContext {
     /// tool calls, which have no session or owner to ask.
     pub(super) approvals: Option<crate::approvals::ApprovalGate>,
     action_journal: Option<crate::agent_runs::action_receipts::RunActionJournal>,
+    profile_owner: Option<crate::profile_owner::ProfileOwner>,
+    execution_budget: Option<anima_core::execution_limits::ExecutionContext>,
+    budget_reserved_by_core: bool,
     rpc_fence: Option<crate::tool_rpc::RpcGrantFence>,
     completion_review: Option<completion::HostCompletionReview>,
     tool_rpc_service: Arc<crate::tool_rpc::ToolRpcService>,
@@ -239,6 +245,9 @@ impl ToolExecutionContext {
             cancel: None,
             approvals: None,
             action_journal: None,
+            profile_owner: None,
+            execution_budget: None,
+            budget_reserved_by_core: false,
             rpc_fence: None,
             completion_review: None,
             tool_rpc_service: crate::tool_rpc::ToolRpcService::disabled(),
@@ -353,6 +362,24 @@ impl ToolExecutionContext {
         self
     }
 
+    pub(crate) fn with_profile_owner(
+        mut self,
+        owner: Option<crate::profile_owner::ProfileOwner>,
+    ) -> Self {
+        self.profile_owner = owner;
+        self
+    }
+
+    pub(crate) async fn verify_profile_owner(&self) -> Result<(), TaskResult<Content>> {
+        if let Some(owner) = &self.profile_owner {
+            owner
+                .verify_owned()
+                .await
+                .map_err(|error| TaskResult::error(error.to_string(), 0))?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn rpc_journal(
         &self,
     ) -> Option<&crate::agent_runs::action_receipts::RunActionJournal> {
@@ -372,8 +399,25 @@ impl ToolExecutionContext {
     }
 
     pub(crate) fn with_rpc_fence(mut self, fence: crate::tool_rpc::RpcGrantFence) -> Self {
+        self.budget_reserved_by_core = false;
         self.rpc_fence = Some(fence);
         self
+    }
+
+    pub(crate) fn with_execution_budget(
+        mut self,
+        budget: anima_core::execution_limits::ExecutionContext,
+        reserved_by_core: bool,
+    ) -> Self {
+        self.execution_budget = Some(budget);
+        self.budget_reserved_by_core = reserved_by_core;
+        self
+    }
+
+    pub(crate) fn execution_budget(
+        &self,
+    ) -> Option<&anima_core::execution_limits::ExecutionContext> {
+        self.execution_budget.as_ref()
     }
 
     pub(crate) fn with_execution_service(
@@ -420,9 +464,63 @@ impl ToolExecutionContext {
             let prepared = review.prepare(self.workspace_root.as_deref(), &tool_call);
             (review, prepared, tool_call.clone())
         });
-        let result = self
-            .execute_tool_inner(agent, user_message, tool_call)
-            .await;
+        let budget = self.execution_budget.clone();
+        let cancel = self.cancel.clone();
+        let pre_effect_error = |error: String| {
+            let stopped = cancel
+                .as_ref()
+                .filter(|signal| signal.is_cancelled())
+                .or_else(|| {
+                    budget.as_ref().and_then(|context| {
+                        std::iter::once(&context.cancel)
+                            .chain(context.secondary_cancel.as_ref())
+                            .find(|signal| signal.is_cancelled())
+                    })
+                });
+            match stopped {
+                Some(signal) => TaskResult::error(signal.tool_result(), 0),
+                None => TaskResult::error(error, 0),
+            }
+        };
+        let mut reservation =
+            if let Some(budget) = budget.as_ref().filter(|_| !self.budget_reserved_by_core) {
+                match budget
+                    .reserve_tool(&format!("native:{}", tool_call.id))
+                    .await
+                {
+                    Ok(permit) => Some(permit),
+                    Err(error) => return pre_effect_error(error),
+                }
+            } else {
+                None
+            };
+        let handler_started = Arc::new(AtomicBool::new(false));
+        let work = self.execute_tool_inner(agent, user_message, tool_call, handler_started.clone());
+        futures::pin_mut!(work);
+        let result = if let Some(budget) = &budget {
+            match budget.check_live() {
+                Err(error) => pre_effect_error(error),
+                Ok(()) => match budget.observe(async { Ok(work.as_mut().await) }).await {
+                    Ok(result) => result,
+                    // Before handler entry, only admission and owned-save
+                    // acknowledgement waits may be abandoned. Once entered,
+                    // retain the exact effect and outcome future until retirement.
+                    Err(_) if handler_started.load(Ordering::Acquire) => work.await,
+                    Err(error) => pre_effect_error(error),
+                },
+            }
+        } else {
+            work.await
+        };
+        if let Some(permit) = reservation.as_mut() {
+            // Keep the real effect result even if its accounting acknowledgement
+            // fails. The shared failure latch closes subsequent admission.
+            let _ = permit
+                .finish(anima_core::execution_limits::SettlementOutcome::Known(
+                    Default::default(),
+                ))
+                .await;
+        }
         // execute_tool_inner acknowledges the action journal before returning.
         // An actual effect with an uncertain outcome save is an error here and
         // cannot be converted into successful completion evidence.
@@ -446,6 +544,7 @@ impl ToolExecutionContext {
         agent: AgentState,
         user_message: Message,
         tool_call: ToolCall,
+        handler_started: Arc<AtomicBool>,
     ) -> TaskResult<Content> {
         if let Err(refused) = self.live_checks(&agent, &tool_call).await {
             return refused;
@@ -558,6 +657,9 @@ impl ToolExecutionContext {
                 );
             }
         }
+        if let Err(refused) = self.verify_profile_owner().await {
+            return refused;
+        }
         if let Err(result) = self.revalidate_browser().await {
             return result;
         }
@@ -612,6 +714,20 @@ impl ToolExecutionContext {
                 return refused;
             }
         }
+        // No awaited custody proof may follow the final grant/RPC checks.
+        if let Some(owner) = &self.profile_owner {
+            if let Err(error) = owner.ensure_owned() {
+                return TaskResult::error(error.to_string(), 0);
+            }
+        }
+        if let Some(cancel) = self.cancel.as_ref().filter(|cancel| cancel.is_cancelled()) {
+            return TaskResult::error(cancel.tool_result(), 0);
+        }
+        if let Some(budget) = &self.execution_budget {
+            if let Err(error) = budget.check_live() {
+                return TaskResult::error(error, 0);
+            }
+        }
         let call = tool_call.clone();
         let browser_cleanup = if is_browser_tool(&call.name) {
             self.browser.clone().zip(self.run_link.clone())
@@ -630,6 +746,7 @@ impl ToolExecutionContext {
         }
         self.action_approved = approved;
         self.protected_write = protected;
+        handler_started.store(true, Ordering::Release);
         let result = handler(self, agent, user_message, tool_call).await;
         if let Some(journal) = journal {
             let duration = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
@@ -673,6 +790,19 @@ impl ToolExecutionContext {
         agent: &AgentState,
         tool_call: &ToolCall,
     ) -> Result<(), TaskResult<Content>> {
+        self.verify_profile_owner().await?;
+        if let Some(budget) = &self.execution_budget {
+            budget
+                .check_authority()
+                .await
+                .map_err(|error| TaskResult::error(error, 0))?;
+        }
+        if let Some(journal) = &self.action_journal {
+            journal
+                .revalidate()
+                .await
+                .map_err(|error| TaskResult::error(error, 0))?;
+        }
         self.revalidate_catalog(agent, tool_call).await?;
         if tool_call.name != "clear_main_chat" {
             if let (Some(coordinator), Some(run)) = (&self.team, &self.run_link) {

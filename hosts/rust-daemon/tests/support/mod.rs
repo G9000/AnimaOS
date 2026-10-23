@@ -161,3 +161,24 @@ pub(crate) fn extract_sse_event_data<'a>(stream: &'a str, event_name: &str) -> O
     let end = data.find("\n\n").unwrap_or(data.len());
     Some(&data[..end])
 }
+
+/// End all first-boot workers and blocking persistence before simulating a restart.
+#[allow(dead_code)]
+pub(crate) async fn run_in_joined_runtime<F, Fut, T>(make_work: F) -> T
+where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = T>,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test boot runtime should start");
+        let result = runtime.block_on(make_work());
+        drop(runtime);
+        result
+    })
+    .await
+    .expect("test boot runtime should fully shut down")
+}

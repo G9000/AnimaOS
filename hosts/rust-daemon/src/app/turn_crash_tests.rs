@@ -15,7 +15,7 @@ use std::{
 };
 
 const TOKEN: &str = "isolated-turn-crash-owner";
-fn durable_marker(root: &Path, name: &str, value: &str) {
+pub(super) fn durable_marker(root: &Path, name: &str, value: &str) {
     let mut f = OpenOptions::new()
         .create(true)
         .append(true)
@@ -33,6 +33,12 @@ impl ModelAdapter for CrashModel {
     fn provider(&self) -> &str {
         "crash-fixture"
     }
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &ModelGenerateResponse) -> bool {
+        true
+    }
     async fn generate(
         &self,
         _: &AgentConfig,
@@ -46,13 +52,21 @@ impl ModelAdapter for CrashModel {
             .map(|m| m.content.text.as_str())
             .unwrap_or("");
         let is_write = input.contains("CRASH_WRITE");
+        let effect_id = input
+            .split_whitespace()
+            .find_map(|word| word.strip_prefix("EFFECT_ID="))
+            .filter(|id| {
+                !id.is_empty()
+                    && id.len() <= 80
+                    && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            });
         let has_result = r
             .messages
             .iter()
             .rev()
             .take_while(|m| m.role != MessageRole::User)
             .any(|m| m.role == MessageRole::Tool);
-        durable_marker(&self.root,"calls.jsonl",&json!({"write":is_write,"result":has_result,"safe":input.contains("SAFE_INPUT"),"block":input.contains("BLOCK_INPUT")}).to_string());
+        durable_marker(&self.root,"calls.jsonl",&json!({"effectId":effect_id,"write":is_write,"result":has_result,"safe":input.contains("SAFE_INPUT"),"block":input.contains("BLOCK_INPUT")}).to_string());
         if input.contains("BLOCK_INPUT") {
             durable_marker(&self.root, "blocked", "model-entered");
             std::future::pending::<()>().await;
@@ -61,19 +75,29 @@ impl ModelAdapter for CrashModel {
             durable_marker(&self.root, "effect-settled", "receipt-before-final");
             std::future::pending::<()>().await;
         }
-        let calls = (is_write && !has_result).then(|| {
-            vec![ToolCall {
-                id: "crash-write".into(),
-                name: "write_file".into(),
-                args: BTreeMap::from([
-                    ("file_path".into(), DataValue::String("effect.txt".into())),
-                    (
-                        "content".into(),
-                        DataValue::String("exact-approved-effect".into()),
-                    ),
-                ]),
-            }]
-        });
+        let calls =
+            (is_write && !has_result).then(|| {
+                vec![ToolCall {
+                    id: effect_id.map_or_else(|| "crash-write".into(), |id| format!("effect-{id}")),
+                    name: "write_file".into(),
+                    args: BTreeMap::from([
+                        (
+                            "file_path".into(),
+                            DataValue::String(effect_id.map_or_else(
+                                || "effect.txt".into(),
+                                |id| format!("effect-{id}.txt"),
+                            )),
+                        ),
+                        (
+                            "content".into(),
+                            DataValue::String(effect_id.map_or_else(
+                                || "exact-approved-effect".into(),
+                                |id| format!("effect:{id}"),
+                            )),
+                        ),
+                    ]),
+                }]
+            });
         Ok(ModelGenerateResponse {
             content: Content {
                 text: if calls.is_some() {
@@ -124,8 +148,59 @@ fn turn_crash_worker() {
                 after_effect: stage == "after-effect",
             }),
         )));
-        configure_persistence(&state, &config).await.unwrap();
+        configure_persistence(
+            &state,
+            &config,
+            crate::app::persistence::prepare_persistence(&config).unwrap(),
+        )
+        .await
+        .unwrap();
         skip_memory_model_load(&state).await;
+        if stage == "reliability-controls" {
+            // Test-only fault commands act on real persistence/ownership hooks;
+            // no run, approval, receipt or budget row is manufactured.
+            let state = state.clone();
+            let root = root.clone();
+            tokio::spawn(async move {
+                let deadline = Instant::now() + Duration::from_secs(120);
+                while Instant::now() < deadline {
+                    if root.join("arm-save-failure").exists() {
+                        let gate = state
+                            .write()
+                            .await
+                            .install_test_control_plane_save_gate(true);
+                        durable_marker(&root, "save-armed", "next actual save");
+                        tokio::time::timeout(Duration::from_secs(10), gate.entered.acquire())
+                            .await
+                            .unwrap()
+                            .unwrap()
+                            .forget();
+                        durable_marker(&root, "save-entered", "actual persistence waiting");
+                        let deadline = Instant::now() + Duration::from_secs(5);
+                        while !root.join("release-save").exists() {
+                            assert!(
+                                Instant::now() < deadline,
+                                "parent did not release owned save gate"
+                            );
+                            tokio::time::sleep(Duration::from_millis(10)).await;
+                        }
+                        gate.release.add_permits(1);
+                        return;
+                    }
+                    if root.join("lose-owner").exists() {
+                        state
+                            .read()
+                            .await
+                            .profile_owner()
+                            .expect("owned fixture profile")
+                            .mark_lost();
+                        durable_marker(&root, "owner-lost", "host writer revoked");
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            });
+        }
         if stage == "usage-before-flush" {
             let row = crate::usage::usage_record(
                 &crate::usage::UsageCall {
@@ -167,7 +242,7 @@ fn turn_crash_worker() {
             .unwrap();
     });
 }
-struct OwnedDaemon {
+pub(super) struct OwnedDaemon {
     child: Child,
     url: String,
     client: reqwest::Client,
@@ -179,7 +254,7 @@ impl Drop for OwnedDaemon {
     }
 }
 impl OwnedDaemon {
-    async fn start(root: &Path, stage: &str) -> Self {
+    pub(super) async fn start(root: &Path, stage: &str) -> Self {
         let ready = root.join(format!("ready-{}", uuid::Uuid::new_v4()));
         let log = OpenOptions::new()
             .create(true)
@@ -264,11 +339,11 @@ impl OwnedDaemon {
         }
         d
     }
-    fn kill(&mut self) {
+    pub(super) fn kill(&mut self) {
         self.child.kill().unwrap();
         self.child.wait().unwrap();
     }
-    async fn request(
+    pub(super) async fn request(
         &self,
         method: &str,
         route: &str,
@@ -291,12 +366,18 @@ impl OwnedDaemon {
         let v = serde_json::from_str(&text).unwrap_or_else(|_| json!({"body":text}));
         (status, v)
     }
-    async fn api(&self, method: &str, route: &str, body: Value, key: Option<&str>) -> Value {
+    pub(super) async fn api(
+        &self,
+        method: &str,
+        route: &str,
+        body: Value,
+        key: Option<&str>,
+    ) -> Value {
         let (s, v) = self.request(method, route, body, key).await;
         assert!((200..300).contains(&s), "{method} {route}: {s} {v}");
         v
     }
-    async fn setup(&self, root: &Path) -> (String, String) {
+    pub(super) async fn setup(&self, root: &Path) -> (String, String) {
         self.api("PUT","/api/workspace",json!({"rootPath":root.join("workspace"),"companyName":"isolated crash acceptance","mission":"deterministic synthetic state only","values":[]}),None).await;
         let a=self.api("POST","/api/agents",json!({"name":"crash-companion","model":"fixture","provider":"deterministic","tools":["write_file"],"settings":{"agentFilesProfileEnabled":false,"maxToolIterations":3},"fallbacks":[]}),None).await;
         let id = a["agent"]["state"]["id"].as_str().unwrap().to_string();
@@ -324,7 +405,7 @@ impl OwnedDaemon {
             .await;
         (id, s["session"]["id"].as_str().unwrap().to_string())
     }
-    async fn submit(&self, agent: &str, session: &str, text: &str, key: &str) -> Value {
+    pub(super) async fn submit(&self, agent: &str, session: &str, text: &str, key: &str) -> Value {
         self.api(
             "POST",
             &format!("/api/agents/{agent}/sessions/{session}/runs"),
@@ -334,7 +415,7 @@ impl OwnedDaemon {
         .await["run"]
             .clone()
     }
-    async fn run(&self, agent: &str, id: &str) -> Value {
+    pub(super) async fn run(&self, agent: &str, id: &str) -> Value {
         self.api(
             "GET",
             &format!("/api/agents/{agent}/runs/{id}"),
@@ -344,7 +425,7 @@ impl OwnedDaemon {
         .await["run"]
             .clone()
     }
-    async fn wait_run(&self, agent: &str, id: &str, status: &str) -> Value {
+    pub(super) async fn wait_run(&self, agent: &str, id: &str, status: &str) -> Value {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let r = self.run(agent, id).await;
@@ -356,7 +437,7 @@ impl OwnedDaemon {
         }
     }
 }
-fn profile() -> tempfile::TempDir {
+pub(super) fn profile() -> tempfile::TempDir {
     let d = tempfile::Builder::new()
         .prefix("anima-turn-crash-")
         .tempdir()
@@ -365,7 +446,7 @@ fn profile() -> tempfile::TempDir {
     fs::create_dir_all(d.path().join("home")).unwrap();
     d
 }
-async fn marker(root: &Path, name: &str) {
+pub(super) async fn marker(root: &Path, name: &str) {
     let deadline = Instant::now() + Duration::from_secs(30);
     while !root.join(name).exists() {
         assert!(Instant::now() < deadline, "missing process barrier {name}");

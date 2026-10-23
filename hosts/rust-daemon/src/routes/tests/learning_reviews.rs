@@ -130,6 +130,13 @@ impl AdviceModel {
 
 #[async_trait]
 impl ModelAdapter for AdviceModel {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, response: &anima_core::ModelGenerateResponse) -> bool {
+        // This fixture deliberately uses default counters to exercise missing usage.
+        response.usage != anima_core::TokenUsage::default()
+    }
     fn provider(&self) -> &str {
         "learning-route-fixture"
     }
@@ -148,10 +155,11 @@ impl ModelAdapter for AdviceModel {
         request: &ModelGenerateRequest,
         sink: &dyn ModelStreamSink,
     ) -> Result<(), String> {
-        sink.emit(ModelStreamFrame::Final(
-            self.answer(config, request, Some(sink)).await?,
-        ))
-        .await
+        let response = self.answer(config, request, Some(sink)).await?;
+        if self.generated_usage_is_complete(&response) {
+            sink.complete_usage(response.usage.clone()).await?;
+        }
+        sink.emit(ModelStreamFrame::Final(response)).await
     }
 }
 
@@ -160,6 +168,13 @@ struct FinalOnlyAdvice(Arc<AdviceModel>);
 
 #[async_trait]
 impl ModelAdapter for FinalOnlyAdvice {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, response: &anima_core::ModelGenerateResponse) -> bool {
+        // This fixture deliberately uses default counters to exercise missing usage.
+        response.usage != anima_core::TokenUsage::default()
+    }
     fn provider(&self) -> &str {
         self.0.provider()
     }

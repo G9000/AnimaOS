@@ -9,6 +9,12 @@ struct ObservedModel {
 }
 #[async_trait::async_trait]
 impl anima_core::ModelAdapter for ObservedModel {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "shutdown-test"
     }
@@ -28,6 +34,7 @@ impl anima_core::ModelAdapter for ObservedModel {
         .await
     }
 }
+
 fn observed_service() -> (
     JobService,
     String,

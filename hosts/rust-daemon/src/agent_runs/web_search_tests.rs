@@ -111,6 +111,12 @@ impl EvidenceModel {
 }
 #[async_trait]
 impl ModelAdapter for EvidenceModel {
+    fn single_attempt_contract(&self) -> bool {
+        true
+    }
+    fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
+        true
+    }
     fn provider(&self) -> &str {
         "m83-scripted-zero-paid-generation"
     }
@@ -166,7 +172,7 @@ impl ModelAdapter for EvidenceModel {
         } else {
             ModelStopReason::End
         };
-        sink.emit(ModelStreamFrame::Final(ModelGenerateResponse {
+        let response = ModelGenerateResponse {
             content: Content {
                 text,
                 ..Default::default()
@@ -174,8 +180,9 @@ impl ModelAdapter for EvidenceModel {
             tool_calls,
             usage: Default::default(),
             stop_reason,
-        }))
-        .await
+        };
+        sink.complete_usage(response.usage.clone()).await?;
+        sink.emit(ModelStreamFrame::Final(response)).await
     }
 }
 

@@ -25,6 +25,8 @@ use crate::{
 
 #[path = "attachments_error_tests.rs"]
 mod attachment_errors;
+#[path = "execution_tests.rs"]
+mod execution;
 #[path = "key_rotation_tests.rs"]
 mod key_rotation;
 

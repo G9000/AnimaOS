@@ -9,6 +9,7 @@ mod attachments;
 mod catalog;
 mod chatgpt;
 mod common;
+mod controlled;
 mod google;
 mod models;
 mod ollama;

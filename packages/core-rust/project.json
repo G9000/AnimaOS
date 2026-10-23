@@ -4,6 +4,16 @@
   "root": "packages/core-rust",
   "projectType": "library",
   "targets": {
+    "harness-reliability-test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --test packages/core-rust/acceptance/harness-reliability/driver.test.mjs"
+      },
+      "inputs": ["{projectRoot}/acceptance/harness-reliability/**/*", "{projectRoot}/acceptance/turn-quality/fixtures.json"],
+      "cache": false,
+      "parallelism": false
+    },
     "coding-acceptance-m87-test": {
       "executor": "nx:run-commands",
       "options": {
