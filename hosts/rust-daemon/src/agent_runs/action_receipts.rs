@@ -583,9 +583,12 @@ impl RunActionJournal {
                             "Native action witness limit reached; the tool will not run".into()
                         );
                     }
-                    let arguments =
+                    let arguments = if call.name == crate::tools::mcp_management::NAME {
+                        crate::tools::mcp_management::arguments_preview(&call)
+                    } else {
                         crate::routes::data_value_to_json(&DataValue::Object(call.args.clone()))
-                            .to_string();
+                            .to_string()
+                    };
                     let (arguments_preview, arguments_truncated) = preview(&arguments);
                     candidate.action_receipts.push(ActionReceipt {
                         tool_call_id: call.id.clone(),

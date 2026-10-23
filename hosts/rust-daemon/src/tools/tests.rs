@@ -446,6 +446,21 @@ fn registry_defines_every_registered_tool_schema() {
             &["keepLatestExchanges", "focus"][..],
         ),
         ("export_chat", &[][..], &[][..]),
+        (
+            "manage_mcp",
+            &["action"][..],
+            &[
+                "label",
+                "configuration",
+                "connection_id",
+                "expected_version",
+                "enabled",
+                "discovery_id",
+                "descriptor_digest",
+                "alias",
+                "granted",
+            ][..],
+        ),
         ("execution_targets", &[][..], &[][..]),
         ("execution_status", &["executionId"][..], &[][..]),
         (

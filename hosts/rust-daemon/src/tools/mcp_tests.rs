@@ -4,6 +4,9 @@
 #[path = "catalog_mcp_tests.rs"]
 mod tool_discovery_catalog_tests;
 
+#[path = "mcp_management_tests.rs"]
+mod management_tests;
+
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},

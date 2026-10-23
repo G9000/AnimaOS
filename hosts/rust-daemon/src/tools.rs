@@ -18,6 +18,7 @@ mod filesystem;
 mod mail;
 mod main_chat_clear;
 mod mcp;
+pub(crate) mod mcp_management;
 #[cfg(test)]
 mod mcp_tests;
 mod memory;
@@ -553,6 +554,11 @@ impl ToolExecutionContext {
         let Some(handler) = self.tool_registry.lookup(&tool_call.name) else {
             return TaskResult::error(format!("Unknown tool: {}", tool_call.name), 0);
         };
+        if tool_call.name == mcp_management::NAME {
+            if let Err(error) = mcp_management::preflight(&tool_call) {
+                return TaskResult::error(error, 0);
+            }
+        }
         if tool_call.name == "execute_code" {
             let arguments =
                 crate::routes::data_value_to_json(&DataValue::Object(tool_call.args.clone()))
@@ -977,6 +983,7 @@ impl ToolRegistry {
         };
         clarify::register(&mut registry);
         chat_controls::register(&mut registry);
+        mcp_management::register(&mut registry);
         registry.register(tool_descriptor("clear_main_chat", "Clear/reset this main conversation only when the owner explicitly asks. Keeps the companion, settings and all saved memories. The host clears messages and conversation summaries after this turn settles. After a successful request, finish your reply immediately; do not call other tools or save conversation memories. A request is pending until the host applies it.", object_parameters(vec![])), main_chat_clear::execute);
         let mut code_parameters = object_parameters(vec![required_parameter("code", non_blank_string_parameter("Complete Python program; serialized arguments must fit the 16 KiB execution review")), optional_parameter("reset", boolean_parameter("Explicit state-reset request; one-shot execution is always fresh"))]);
         code_parameters.insert("additionalProperties".into(), DataValue::Bool(false));

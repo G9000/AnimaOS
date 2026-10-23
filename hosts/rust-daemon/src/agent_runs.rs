@@ -2305,7 +2305,7 @@ impl AgentRunCoordinator {
         tools.retain(|tool| {
             !matches!(
                 tool.name.as_str(),
-                "rename_chat" | "compact_chat" | "export_chat"
+                "rename_chat" | "compact_chat" | "export_chat" | "manage_mcp"
             )
         });
         if standing_admission.local_owner
@@ -2324,6 +2324,13 @@ impl AgentRunCoordinator {
         {
             for name in ["rename_chat", "compact_chat", "export_chat"] {
                 tools.push(registry.descriptor(name).expect("registered chat control"));
+            }
+            if self.mcp.is_some() {
+                tools.push(
+                    registry
+                        .descriptor("manage_mcp")
+                        .expect("registered MCP setup control"),
+                );
             }
         }
         if standing_admission.local_owner

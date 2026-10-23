@@ -99,6 +99,7 @@ const WRITE_TOOLS: &[&str] = &[
     "acp_edit",
 ];
 const EXEC_TOOLS: &[&str] = &[
+    "manage_mcp",
     "create_workflow",
     "run_workflow_template",
     "execute_code",

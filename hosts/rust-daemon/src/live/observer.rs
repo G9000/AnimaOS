@@ -227,8 +227,11 @@ impl RunObserver for RunEvents {
             }
             RunFrame::StepFinished { .. } => inner.publish_after_flush(None),
             RunFrame::ToolStarted { step_id, tool_call } => {
-                let arguments =
-                    data_value_to_json(&DataValue::Object(tool_call.args.clone())).to_string();
+                let arguments = if tool_call.name == crate::tools::mcp_management::NAME {
+                    crate::tools::mcp_management::arguments_preview(&tool_call)
+                } else {
+                    data_value_to_json(&DataValue::Object(tool_call.args.clone())).to_string()
+                };
                 let (arguments_preview, arguments_truncated) = preview(&arguments);
                 inner.hub.runs().tool_started(
                     &inner.run_id,

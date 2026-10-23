@@ -45,6 +45,7 @@ pub(crate) struct McpDispatchStamp {
 #[derive(Clone)]
 pub(crate) struct McpManager {
     inner: Arc<Inner>,
+    management_run: Option<RunLink>,
 }
 struct Inner {
     state: Weak<RwLock<DaemonState>>,
@@ -160,6 +161,7 @@ impl McpManager {
         credentials: Arc<dyn McpCredentialStore>,
     ) -> Self {
         Self {
+            management_run: None,
             inner: Arc::new(Inner {
                 state,
                 transactions,
@@ -175,6 +177,25 @@ impl McpManager {
                 settled: Notify::new(),
             }),
         }
+    }
+    /// Scope chat administration without changing owner API or invocation behavior.
+    /// Each operation checks this after its transaction wait, before admission.
+    pub(crate) fn for_owner_chat(&self, run: RunLink) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            management_run: Some(run),
+        }
+    }
+
+    fn management_scope(&self, state: &DaemonState, agent: &str) -> Result<(), McpServiceError> {
+        if let Some(run) = &self.management_run {
+            if run.agent_id != agent
+                || crate::agent_runs::chat_controls::validate_owner_chat(state, run).is_err()
+            {
+                return Err(McpServiceError::Cancelled);
+            }
+        }
+        Ok(())
     }
     pub(crate) async fn set_bearer(
         &self,
@@ -475,6 +496,7 @@ impl McpManager {
         let state = self.state()?;
         let rows = {
             let guard = state.read().await;
+            self.management_scope(&guard, agent)?;
             Self::owner(&guard, agent)?;
             self.same_publication(&guard)?;
             guard
@@ -597,6 +619,7 @@ impl McpManager {
         let state = self.state()?;
         let (next, descriptor, persist) = {
             let mut guard = state.write().await;
+            self.management_scope(&guard, agent)?;
             Self::owner(&guard, agent)?;
             self.same_publication(&guard)?;
             crate::community_bundles::check_mcp_edit(&guard, id, input.granted, false)?;
@@ -705,6 +728,7 @@ impl McpManager {
         let state = self.state()?;
         let (next, persist, result_id, retire, remove_grants, bundle_patch) = {
             let mut guard = state.write().await;
+            self.management_scope(&guard, agent)?;
             Self::owner(&guard, agent)?;
             self.same_publication(&guard)?;
             if guard.control_plane_store.is_none() {
@@ -1146,7 +1170,12 @@ impl McpManager {
         let record = tokio::time::timeout_at(deadline, self.record(agent, id, Some(expected)))
             .await
             .map_err(|_| McpServiceError::TimedOut)??;
-        crate::community_bundles::check_mcp_edit(&*self.state()?.read().await, id, true, false)?;
+        {
+            let state = self.state()?;
+            let guard = state.read().await;
+            self.management_scope(&guard, agent)?;
+            crate::community_bundles::check_mcp_edit(&guard, id, true, false)?;
+        }
         if !record.enabled {
             return Err(McpServiceError::Conflict);
         }
@@ -1220,6 +1249,16 @@ impl McpManager {
         } else {
             None
         };
+        // Vault loading may await after the transaction was admitted. An owner
+        // Stop during that wait must not start a new transport afterward.
+        if self.management_run.is_some() {
+            let state = self.state()?;
+            let current = self.management_scope(&*state.read().await, agent);
+            if let Err(error) = current {
+                self.retire_if_generation(id, generation, Some(error))?;
+                return Err(error);
+            }
+        }
         let session = match session {
             Some(session) => session,
             None => match self
@@ -1347,6 +1386,10 @@ impl McpManager {
         self.owned(async move {
             let _transaction = manager.inner.transactions.lock().await;
             let record = manager.record(&agent, &id, Some(expected)).await?;
+            {
+                let state = manager.state()?;
+                manager.management_scope(&*state.read().await, &agent)?;
+            }
             manager.retire(&id, None)?;
             manager.view(record)
         })

@@ -443,9 +443,10 @@ async fn swarm_event_stream_emits_live_agent_activity_and_lifecycle_events() {
     pin_mut!(stream);
 
     let mut chunks = String::new();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     for _ in 0..256 {
-        match futures::poll!(stream.next()) {
-            std::task::Poll::Ready(Some(Ok(bytes))) => {
+        match tokio::time::timeout_at(deadline, stream.next()).await {
+            Ok(Some(Ok(bytes))) => {
                 chunks.push_str(std::str::from_utf8(&bytes).expect("chunk should be utf-8"));
                 if chunks.contains("event: swarm:running")
                     && chunks.contains("event: task:started")
@@ -455,9 +456,8 @@ async fn swarm_event_stream_emits_live_agent_activity_and_lifecycle_events() {
                     break;
                 }
             }
-            std::task::Poll::Ready(Some(Err(error))) => panic!("stream errored: {error}"),
-            std::task::Poll::Ready(None) => break,
-            std::task::Poll::Pending => tokio::task::yield_now().await,
+            Ok(Some(Err(error))) => panic!("stream errored: {error}"),
+            Ok(None) | Err(_) => break,
         }
     }
 
@@ -522,9 +522,10 @@ async fn swarm_event_stream_emits_swarm_messaging_tool_results() {
     pin_mut!(stream);
 
     let mut chunks = String::new();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     for _ in 0..256 {
-        match futures::poll!(stream.next()) {
-            std::task::Poll::Ready(Some(Ok(bytes))) => {
+        match tokio::time::timeout_at(deadline, stream.next()).await {
+            Ok(Some(Ok(bytes))) => {
                 chunks.push_str(std::str::from_utf8(&bytes).expect("chunk should be utf-8"));
                 if chunks.contains("event: swarm:message")
                     && chunks.contains("event: tool:after")
@@ -533,9 +534,8 @@ async fn swarm_event_stream_emits_swarm_messaging_tool_results() {
                     break;
                 }
             }
-            std::task::Poll::Ready(Some(Err(error))) => panic!("stream errored: {error}"),
-            std::task::Poll::Ready(None) => break,
-            std::task::Poll::Pending => tokio::task::yield_now().await,
+            Ok(Some(Err(error))) => panic!("stream errored: {error}"),
+            Ok(None) | Err(_) => break,
         }
     }
 
@@ -614,18 +614,18 @@ async fn swarm_event_stream_emits_tool_results() {
     pin_mut!(stream);
 
     let mut chunks = String::new();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     for _ in 0..256 {
-        match futures::poll!(stream.next()) {
-            std::task::Poll::Ready(Some(Ok(bytes))) => {
+        match tokio::time::timeout_at(deadline, stream.next()).await {
+            Ok(Some(Ok(bytes))) => {
                 chunks.push_str(std::str::from_utf8(&bytes).expect("chunk should be utf-8"));
                 if chunks.contains("event: tool:after") && chunks.contains("event: swarm:completed")
                 {
                     break;
                 }
             }
-            std::task::Poll::Ready(Some(Err(error))) => panic!("stream errored: {error}"),
-            std::task::Poll::Ready(None) => break,
-            std::task::Poll::Pending => tokio::task::yield_now().await,
+            Ok(Some(Err(error))) => panic!("stream errored: {error}"),
+            Ok(None) | Err(_) => break,
         }
     }
 
@@ -694,18 +694,18 @@ async fn swarm_event_stream_emits_todo_tool_results() {
     pin_mut!(stream);
 
     let mut chunks = String::new();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     for _ in 0..256 {
-        match futures::poll!(stream.next()) {
-            std::task::Poll::Ready(Some(Ok(bytes))) => {
+        match tokio::time::timeout_at(deadline, stream.next()).await {
+            Ok(Some(Ok(bytes))) => {
                 chunks.push_str(std::str::from_utf8(&bytes).expect("chunk should be utf-8"));
                 if chunks.contains("event: tool:after") && chunks.contains("event: swarm:completed")
                 {
                     break;
                 }
             }
-            std::task::Poll::Ready(Some(Err(error))) => panic!("stream errored: {error}"),
-            std::task::Poll::Ready(None) => break,
-            std::task::Poll::Pending => tokio::task::yield_now().await,
+            Ok(Some(Err(error))) => panic!("stream errored: {error}"),
+            Ok(None) | Err(_) => break,
         }
     }
 
@@ -783,18 +783,18 @@ async fn swarm_event_stream_emits_write_file_tool_results() {
     pin_mut!(stream);
 
     let mut chunks = String::new();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     for _ in 0..256 {
-        match futures::poll!(stream.next()) {
-            std::task::Poll::Ready(Some(Ok(bytes))) => {
+        match tokio::time::timeout_at(deadline, stream.next()).await {
+            Ok(Some(Ok(bytes))) => {
                 chunks.push_str(std::str::from_utf8(&bytes).expect("chunk should be utf-8"));
                 if chunks.contains("event: tool:after") && chunks.contains("event: swarm:completed")
                 {
                     break;
                 }
             }
-            std::task::Poll::Ready(Some(Err(error))) => panic!("stream errored: {error}"),
-            std::task::Poll::Ready(None) => break,
-            std::task::Poll::Pending => tokio::task::yield_now().await,
+            Ok(Some(Err(error))) => panic!("stream errored: {error}"),
+            Ok(None) | Err(_) => break,
         }
     }
 
@@ -883,17 +883,17 @@ async fn second_run_running_event_clears_stale_token_usage() {
     pin_mut!(stream);
 
     let mut chunks = String::new();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     for _ in 0..256 {
-        match futures::poll!(stream.next()) {
-            std::task::Poll::Ready(Some(Ok(bytes))) => {
+        match tokio::time::timeout_at(deadline, stream.next()).await {
+            Ok(Some(Ok(bytes))) => {
                 chunks.push_str(std::str::from_utf8(&bytes).expect("chunk should be utf-8"));
                 if chunks.contains("event: swarm:running") {
                     break;
                 }
             }
-            std::task::Poll::Ready(Some(Err(error))) => panic!("stream errored: {error}"),
-            std::task::Poll::Ready(None) => break,
-            std::task::Poll::Pending => tokio::task::yield_now().await,
+            Ok(Some(Err(error))) => panic!("stream errored: {error}"),
+            Ok(None) | Err(_) => break,
         }
     }
 
