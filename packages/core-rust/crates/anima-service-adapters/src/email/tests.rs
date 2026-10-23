@@ -444,11 +444,15 @@ async fn email_imap_rejects_deep_server_nesting_before_recursive_parser() {
 
 #[tokio::test]
 async fn email_imap_expunge_invalidates_sequence_page() {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
     let (client, mut server) = tokio::io::duplex(4096);
     let server = tokio::spawn(async move {
-        let mut bytes = [0; 1024];
-        server.read(&mut bytes).await.unwrap();
+        // Wait for the complete command line rather than trusting one partial read.
+        let mut command = Vec::new();
+        tokio::io::BufReader::new(&mut server)
+            .read_until(b'\n', &mut command)
+            .await
+            .unwrap();
         server
             .write_all(b"* 1 EXPUNGE\r\nA000001 OK completed\r\n")
             .await

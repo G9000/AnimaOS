@@ -13,23 +13,21 @@ pub(super) fn subscribe_swarm_events_response(
     subscriber: EventSubscriber,
 ) -> axum::response::Response {
     let stream = stream::unfold(subscriber, |mut subscriber| async move {
-        loop {
-            match subscriber.recv().await {
-                Ok(message) => {
-                    let event = Event::default().event(message.event).data(message.data);
-                    return Some((Ok::<Event, Infallible>(event), subscriber));
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
-                    // Surface the gap so the client can resync (refetch the
-                    // swarm state). Without this the consumer would silently
-                    // see a hole in the event sequence.
-                    let event = Event::default()
-                        .event("swarm:lagged")
-                        .data(format!("{{\"missed\":{missed}}}"));
-                    return Some((Ok::<Event, Infallible>(event), subscriber));
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+        match subscriber.recv().await {
+            Ok(message) => {
+                let event = Event::default().event(message.event).data(message.data);
+                Some((Ok::<Event, Infallible>(event), subscriber))
             }
+            // Surface the gap so the client can resync (refetch the
+            // swarm state). Without this the consumer would silently
+            // see a hole in the event sequence.
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                let event = Event::default()
+                    .event("swarm:lagged")
+                    .data(format!("{{\"missed\":{missed}}}"));
+                Some((Ok::<Event, Infallible>(event), subscriber))
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => None,
         }
     });
 

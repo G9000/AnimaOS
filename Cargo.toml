@@ -28,6 +28,16 @@ sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "migrate", "m
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+# Constructors and event records in the engine take many explicit fields by
+# design; a builder per record would add indirection without removing risk.
+too_many_arguments = "allow"
+# Nested generic return types (e.g. async adapter results) are clearer inline.
+type_complexity = "allow"
+# Workspace types are constructed explicitly; `Default` is not part of their API.
+new_without_default = "allow"
+
 # Keep local/test builds useful for backtraces without storing full dependency
 # symbols or incremental test state in the build cache.
 [profile.dev]

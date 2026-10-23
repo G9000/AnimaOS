@@ -511,6 +511,9 @@ async fn serve_with_state_and_voice(
         workflow_expired.store(!drained, std::sync::atomic::Ordering::SeqCst);
         shutdown_live.close();
     });
+    // The start-deadline future resolves to the shutdown deadline, which
+    // `run_server_until_shutdown` awaits later; returning it unawaited is intended.
+    #[allow(clippy::async_yields_async)]
     let outcome = lifecycle::run_server_until_shutdown(async { server.await }, async {
         let deadline = match deadline_started.await {
             Ok(deadline) => deadline,

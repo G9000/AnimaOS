@@ -23,7 +23,7 @@
   "ignorePatterns": [
     "dist",
     "node_modules",
-    "packages/animaos-rs/target",
+    "target",
     "coverage",
     "*.d.ts"
   ]
