@@ -406,7 +406,11 @@ impl SkillService {
                     ));
                 }
             }
-            let ledger = if automatic {
+            let ledger = if automatic
+                || linked
+                    .as_ref()
+                    .is_some_and(|draft| draft.proposed_by.is_some())
+            {
                 let draft = linked.as_ref().ok_or(SkillError::NotFound)?;
                 if !draft.is_pending() {
                     return Err(SkillError::conflict(SKILL_DRAFT_DECIDED));
@@ -416,7 +420,7 @@ impl SkillService {
                 })?;
                 let read_root = root.clone();
                 let read_slug = draft.slug.clone();
-                let previous =
+                let mut previous =
                     blocking(move || super::package::read_package(&read_root, &read_slug))
                         .await?
                         .map_err(SkillError::Unavailable)?;
@@ -427,6 +431,28 @@ impl SkillService {
                     .skills
                     .get(&draft.slug)
                     .map(|record| record.approved_hash.clone());
+                {
+                    let guard = service.state.read().await;
+                    review
+                        .as_ref()
+                        .ok_or_else(|| SkillError::conflict(SKILL_FILE_UNREVIEWED))?
+                        .check(&guard.skills, &root, &draft.slug)?;
+                    // Replacing a rejected unregistered file is an owner create,
+                    // not an update whose Undo may re-approve rejected content.
+                    if !automatic && current_hash.is_none() && previous.is_some() {
+                        let hash = previous.as_ref().map(|package| package.hash());
+                        let rejected = guard.skills.decided_drafts().iter().any(|known| {
+                            known.source == DraftSource::File
+                                && known.status == DraftStatus::Rejected
+                                && known.slug == draft.slug
+                                && known.file_hash == hash
+                        });
+                        if !rejected {
+                            return Err(SkillError::conflict(SKILL_FILE_UNREVIEWED));
+                        }
+                        previous = None;
+                    }
+                }
                 if current_hash != draft.base_hash
                     || previous.as_ref().map(|p| p.hash()) != draft.base_hash
                 {
@@ -452,6 +478,13 @@ impl SkillService {
                 };
                 Some(super::ledger::SkillLedgerEntry {
                     previous_files,
+                    previous_enabled: service
+                        .state
+                        .read()
+                        .await
+                        .skills
+                        .get(&draft.slug)
+                        .map(|record| record.enabled),
                     id: format!(
                         "{}{}",
                         super::ledger::LEDGER_ID_PREFIX,
@@ -478,6 +511,7 @@ impl SkillService {
                     at: 0, // Filled with the approval timestamp under the same write guard.
                     run_id: Some(by.run_id.clone()),
                     reverted_at: None,
+                    superseded_at: None,
                 })
             } else {
                 None
@@ -510,66 +544,84 @@ impl SkillService {
                     evidence,
                 });
             let (slug, draft) = service
-                .apply_with_ledger(&root, ledger, gate, move |skills, now_ms| {
-                    let previous_draft = skills.draft(&id).cloned().ok_or(SkillError::NotFound)?;
-                    if !previous_draft.is_pending() {
-                        return Err(SkillError::conflict(SKILL_DRAFT_DECIDED));
-                    }
-                    if (automatic || previous_draft.learning_source.is_some())
-                        && previous_draft.base_hash
-                            != skills
-                                .get(&previous_draft.slug)
-                                .map(|record| record.approved_hash.clone())
-                    {
-                        return Err(SkillError::conflict(
-                            "Skill base changed; review a fresh draft before replacing it",
-                        ));
-                    }
-                    // Pending now but not when read: refuse (fail closed).
-                    review
-                        .as_ref()
-                        .ok_or_else(|| SkillError::conflict(SKILL_FILE_UNREVIEWED))?
-                        .check(skills, &reviewed_root, &previous_draft.slug)?;
-                    let file = SkillFile {
-                        name: previous_draft.name.clone(),
-                        description: previous_draft.description.clone(),
-                        body: approval.body.unwrap_or_else(|| previous_draft.body.clone()),
-                    };
-                    let bytes =
-                        compose_skill_file(&file.name, &file.description, &file.body).into_bytes();
-                    let files = approval
-                        .files
-                        .unwrap_or_else(|| previous_draft.files.clone());
-                    anima_core::skill_packages::validate_skill_package(&bytes, &files)
-                        .map_err(SkillError::invalid)?;
-                    let package = super::package::SkillPackage { bytes, files };
-                    let slug = previous_draft.slug.clone();
-                    let previous_record = skills.get(&slug).cloned();
-                    let mut record = SkillRecord::approved(&slug, &file, package.hash(), now_ms);
-                    if let Some(previous) = &previous_record {
-                        record.enabled = previous.enabled;
-                    }
-                    skills.put(record).map_err(SkillError::conflict)?;
-                    let mut draft = previous_draft.clone();
-                    // Keep the original proposal as its durable provenance and
-                    // idempotent handoff identity. Edited approved content is
-                    // pinned by the installed package and skill record.
-                    draft.decide(DraftStatus::Approved, now_ms);
-                    draft.decided_by = decided_by;
-                    skills.put_draft(draft.clone());
-                    skills.prune_decided(now_ms);
-                    let undo_slug = slug.clone();
-                    Ok(Change {
-                        value: (slug.clone(), draft),
-                        undo: Box::new(move |skills: &mut SkillRegistry| {
-                            skills.restore(&undo_slug, previous_record);
-                            skills.put_draft(previous_draft);
+                .apply_with_history(
+                    &root,
+                    ledger
+                        .map(|entry| super::ledger::LedgerChange::Append {
+                            entry,
+                            require_free: automatic,
+                        })
+                        .or_else(|| {
+                            linked.as_ref().map(|draft| {
+                                super::ledger::LedgerChange::Supersede(draft.slug.clone())
+                            })
                         }),
-                        write: Some((slug.clone(), package)),
-                        slug: Some(slug),
-                        draft_id: Some(id),
-                    })
-                })
+                    gate,
+                    move |skills, now_ms| {
+                        let previous_draft =
+                            skills.draft(&id).cloned().ok_or(SkillError::NotFound)?;
+                        if !previous_draft.is_pending() {
+                            return Err(SkillError::conflict(SKILL_DRAFT_DECIDED));
+                        }
+                        if (automatic
+                            || previous_draft.proposed_by.is_some()
+                            || previous_draft.learning_source.is_some())
+                            && previous_draft.base_hash
+                                != skills
+                                    .get(&previous_draft.slug)
+                                    .map(|record| record.approved_hash.clone())
+                        {
+                            return Err(SkillError::conflict(
+                                "Skill base changed; review a fresh draft before replacing it",
+                            ));
+                        }
+                        // Pending now but not when read: refuse (fail closed).
+                        review
+                            .as_ref()
+                            .ok_or_else(|| SkillError::conflict(SKILL_FILE_UNREVIEWED))?
+                            .check(skills, &reviewed_root, &previous_draft.slug)?;
+                        let file = SkillFile {
+                            name: previous_draft.name.clone(),
+                            description: previous_draft.description.clone(),
+                            body: approval.body.unwrap_or_else(|| previous_draft.body.clone()),
+                        };
+                        let bytes = compose_skill_file(&file.name, &file.description, &file.body)
+                            .into_bytes();
+                        let files = approval
+                            .files
+                            .unwrap_or_else(|| previous_draft.files.clone());
+                        anima_core::skill_packages::validate_skill_package(&bytes, &files)
+                            .map_err(SkillError::invalid)?;
+                        let package = super::package::SkillPackage { bytes, files };
+                        let slug = previous_draft.slug.clone();
+                        let previous_record = skills.get(&slug).cloned();
+                        let mut record =
+                            SkillRecord::approved(&slug, &file, package.hash(), now_ms);
+                        if let Some(previous) = &previous_record {
+                            record.enabled = previous.enabled;
+                        }
+                        skills.put(record).map_err(SkillError::conflict)?;
+                        let mut draft = previous_draft.clone();
+                        // Keep the original proposal as its durable provenance and
+                        // idempotent handoff identity. Edited approved content is
+                        // pinned by the installed package and skill record.
+                        draft.decide(DraftStatus::Approved, now_ms);
+                        draft.decided_by = decided_by;
+                        skills.put_draft(draft.clone());
+                        skills.prune_decided(now_ms);
+                        let undo_slug = slug.clone();
+                        Ok(Change {
+                            value: (slug.clone(), draft),
+                            undo: Box::new(move |skills: &mut SkillRegistry| {
+                                skills.restore(&undo_slug, previous_record);
+                                skills.put_draft(previous_draft);
+                            }),
+                            write: Some((slug.clone(), package)),
+                            slug: Some(slug),
+                            draft_id: Some(id),
+                        })
+                    },
+                )
                 .await?;
             Ok(ApprovedDraft {
                 skill: service.record(&slug).await?,
@@ -646,32 +698,37 @@ impl SkillService {
             };
             let (target, approved_file) = (slug.clone(), file.clone());
             service
-                .apply_with_ledger(&root, None, Some(gate), move |skills, now_ms| {
-                    if skills.get(&target).is_some() {
-                        return Err(SkillError::conflict(SKILL_DRAFT_DECIDED));
-                    }
-                    if let Some(scanned) = &scanned {
-                        if skills.scan_moved(&target, &seen, &scanned.hash) {
-                            return Err(SkillError::conflict(SKILL_HASH_MISMATCH));
+                .apply_with_history(
+                    &root,
+                    Some(super::ledger::LedgerChange::Supersede(target.clone())),
+                    Some(gate),
+                    move |skills, now_ms| {
+                        if skills.get(&target).is_some() {
+                            return Err(SkillError::conflict(SKILL_DRAFT_DECIDED));
                         }
-                    }
-                    let record =
-                        SkillRecord::approved(&target, &approved_file, approved_hash, now_ms);
-                    skills.put(record).map_err(SkillError::conflict)?;
-                    if let Some(scanned) = scanned {
-                        skills.set_scanned(&target, Some(scanned));
-                    }
-                    let undo_slug = target.clone();
-                    Ok(Change {
-                        value: (),
-                        undo: Box::new(move |skills: &mut SkillRegistry| {
-                            skills.restore(&undo_slug, None)
-                        }),
-                        write: edited.then(|| (target.clone(), approved_package)),
-                        draft_id: Some(file_draft_id(&target)),
-                        slug: Some(target),
-                    })
-                })
+                        if let Some(scanned) = &scanned {
+                            if skills.scan_moved(&target, &seen, &scanned.hash) {
+                                return Err(SkillError::conflict(SKILL_HASH_MISMATCH));
+                            }
+                        }
+                        let record =
+                            SkillRecord::approved(&target, &approved_file, approved_hash, now_ms);
+                        skills.put(record).map_err(SkillError::conflict)?;
+                        if let Some(scanned) = scanned {
+                            skills.set_scanned(&target, Some(scanned));
+                        }
+                        let undo_slug = target.clone();
+                        Ok(Change {
+                            value: (),
+                            undo: Box::new(move |skills: &mut SkillRegistry| {
+                                skills.restore(&undo_slug, None)
+                            }),
+                            write: edited.then(|| (target.clone(), approved_package)),
+                            draft_id: Some(file_draft_id(&target)),
+                            slug: Some(target),
+                        })
+                    },
+                )
                 .await?;
             let skill = service.record(&slug).await?;
             let mut draft = SkillDraft::new(

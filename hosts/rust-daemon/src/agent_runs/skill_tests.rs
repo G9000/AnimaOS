@@ -925,3 +925,120 @@ async fn omitted_skill_files_preserve_approved_packages_and_support_normal_new_s
         }
     }
 }
+
+#[tokio::test]
+async fn free_skill_lifecycle_removes_and_restores_the_complete_package() {
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![call("remove_skill", &[("slug", "notes")])]),
+        Step::Text(vec!["removed"]),
+        Step::Tools(vec![call("skill_history", &[("slug", "notes")])]),
+        Step::Text(vec!["history"]),
+        Step::Tools(vec![call("undo_skill", &[("slug", "notes")])]),
+        Step::Text(vec!["restored"]),
+    ]);
+    let (coordinator, agent, root) = skilled(
+        model,
+        &["remove_skill", "skill_history", "undo_skill"],
+        "free-skill-lifecycle",
+    )
+    .await;
+    coordinator.state.write().await.start_free(&agent);
+    let mut initial = content("Notes");
+    initial.enabled = Some(false);
+    initial.files = Some(vec![crate::skills::SkillSupportingFile {
+        path: "templates/note.md".into(),
+        content: "Hello {audience}".into(),
+    }]);
+    coordinator.skills().save("notes", initial).await.unwrap();
+    coordinator
+        .run(chat_request(&agent, "chat:lifecycle", "Remove notes"))
+        .await
+        .unwrap();
+    assert!(coordinator.state.read().await.skills.get("notes").is_none());
+    assert!(!root.join("skills/notes").exists());
+    let history = coordinator.skills().ledger(10).await;
+    assert_eq!(
+        serde_json::to_value(&history[0]).unwrap()["action"],
+        "removed"
+    );
+    assert_eq!(history[0].agent_id, agent);
+    coordinator
+        .run(chat_request(&agent, "chat:lifecycle", "Show history"))
+        .await
+        .unwrap();
+    assert!(tool_results(&coordinator, &agent)
+        .await
+        .last()
+        .unwrap()
+        .contains("removed"));
+    coordinator
+        .run(chat_request(&agent, "chat:lifecycle", "Undo removal"))
+        .await
+        .unwrap();
+    assert!(
+        !coordinator
+            .state
+            .read()
+            .await
+            .skills
+            .get("notes")
+            .unwrap()
+            .enabled
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("skills/notes/templates/note.md")).unwrap(),
+        "Hello {audience}"
+    );
+    assert!(coordinator.skills().ledger(10).await[0]
+        .reverted_at
+        .is_some());
+}
+
+#[tokio::test]
+async fn strict_skill_removal_waits_for_approval_and_denial_keeps_the_skill() {
+    for (decision_kind, removed) in [
+        (ApprovalDecisionKind::AllowOnce, true),
+        (ApprovalDecisionKind::Deny, false),
+    ] {
+        let model = ScriptedModel::new(vec![
+            Step::Tools(vec![call("remove_skill", &[("slug", "notes")])]),
+            Step::Text(vec!["finished"]),
+        ]);
+        let (coordinator, agent, root) =
+            skilled(model, &["remove_skill"], "strict-skill-removal").await;
+        let coordinator = coordinator.with_approval_timeouts(patient());
+        coordinator
+            .state
+            .write()
+            .await
+            .approvals
+            .set_policy(&agent, ask_before_writes());
+        coordinator
+            .skills()
+            .save("notes", content("Notes"))
+            .await
+            .unwrap();
+        let running = {
+            let (coordinator, agent) = (coordinator.clone(), agent.clone());
+            tokio::spawn(async move {
+                coordinator
+                    .run(chat_request(&agent, "chat:lifecycle", "Remove notes"))
+                    .await
+            })
+        };
+        let pending = pending_approvals(&coordinator, 1).await.remove(0);
+        assert_eq!(pending.tool, "remove_skill");
+        assert!(root.join("skills/notes/SKILL.md").exists());
+        assert!(coordinator.skills().ledger(10).await.is_empty());
+        coordinator
+            .decide_approval(&pending.id, decision(decision_kind, 1))
+            .await
+            .unwrap();
+        running.await.unwrap().unwrap();
+        assert_eq!(!root.join("skills/notes").exists(), removed);
+        assert_eq!(
+            coordinator.skills().ledger(10).await.len(),
+            usize::from(removed)
+        );
+    }
+}

@@ -190,3 +190,100 @@ fn supporting_files(
         })
         .collect()
 }
+
+pub(super) fn remove_skill(
+    context: ToolExecutionContext,
+    agent: AgentState,
+    _message: Message,
+    call: ToolCall,
+) -> BoxFuture<'static, TaskResult<Content>> {
+    Box::pin(async move {
+        if is_helper_config(&agent.config) {
+            return TaskResult::error("Helpers cannot manage skills", 0);
+        }
+        let Some(slug) = text_arg(&call, "slug").filter(|s| crate::skills::is_valid_slug(s)) else {
+            return TaskResult::error("remove_skill needs an exact skill slug", 0);
+        };
+        let (Some(coordinator), Some(link)) = (context.team, context.run_link) else {
+            return TaskResult::error(SKILLS_UNAVAILABLE, 0);
+        };
+        match coordinator
+            .skills()
+            .remove_from_agent(
+                slug,
+                ProposedBy {
+                    agent_id: agent.id,
+                    session_id: link.session_id,
+                    run_id: link.run_id,
+                },
+                context.action_approved,
+            )
+            .await
+        {
+            Ok(path) => text(format!(
+                "Removed /{slug}. Its history is saved; use undo_skill to restore it. Trash: {}",
+                path.as_deref().unwrap_or("no folder")
+            )),
+            Err(error) => TaskResult::error(error.message(), 0),
+        }
+    })
+}
+
+pub(super) fn undo_skill(
+    context: ToolExecutionContext,
+    agent: AgentState,
+    _message: Message,
+    call: ToolCall,
+) -> BoxFuture<'static, TaskResult<Content>> {
+    Box::pin(async move {
+        if is_helper_config(&agent.config) {
+            return TaskResult::error("Helpers cannot manage skills", 0);
+        }
+        let Some(slug) = text_arg(&call, "slug").filter(|s| crate::skills::is_valid_slug(s)) else {
+            return TaskResult::error("undo_skill needs an exact skill slug", 0);
+        };
+        let (Some(coordinator), Some(link)) = (context.team, context.run_link) else {
+            return TaskResult::error(SKILLS_UNAVAILABLE, 0);
+        };
+        match coordinator.skills().revert_from_agent(slug, ProposedBy {
+            agent_id: agent.id, session_id: link.session_id, run_id: link.run_id,
+        }, context.action_approved).await {
+            Ok(crate::skills::ledger::RevertOutcome::Restored(_)) => text(format!("Undid the last change to /{slug}; its previous package and enabled state are restored.")),
+            Ok(crate::skills::ledger::RevertOutcome::Removed) => text(format!("Undid creation of /{slug}; its folder is in the workspace trash.")),
+            Err(error) => TaskResult::error(error.message(), 0),
+        }
+    })
+}
+
+pub(super) fn skill_history(
+    context: ToolExecutionContext,
+    _agent: AgentState,
+    _message: Message,
+    call: ToolCall,
+) -> BoxFuture<'static, TaskResult<Content>> {
+    Box::pin(async move {
+        let slug = match call.args.get("slug") {
+            None => None,
+            Some(DataValue::String(slug)) if crate::skills::is_valid_slug(slug) => {
+                Some(slug.as_str())
+            }
+            _ => return TaskResult::error("skill_history slug must be an exact skill slug", 0),
+        };
+        let Some(coordinator) = context.team else {
+            return TaskResult::error(SKILLS_UNAVAILABLE, 0);
+        };
+        let entries: Vec<_> = coordinator
+            .skills()
+            .ledger(crate::skills::ledger::MAX_SKILL_LEDGER_PAGE)
+            .await
+            .into_iter()
+            .filter(|entry| slug.is_none_or(|slug| entry.skill_slug == slug))
+            .map(|entry| {
+                serde_json::json!({"id":entry.id, "slug":entry.skill_slug,
+                "action":entry.action, "agentId":entry.agent_id, "runId":entry.run_id,
+                "at":entry.at, "revertedAt":entry.reverted_at, "supersededAt":entry.superseded_at})
+            })
+            .collect();
+        text(serde_json::json!({"entries":entries, "undoTool":"undo_skill"}).to_string())
+    })
+}

@@ -11,6 +11,7 @@ mod evaluation_service;
 pub(crate) mod experience;
 pub(crate) mod file;
 pub(crate) mod ledger;
+mod lifecycle;
 pub(crate) mod package;
 pub(crate) mod registry;
 pub(crate) mod runtime;
@@ -141,7 +142,7 @@ pub(crate) const TOO_MANY_PENDING_DRAFTS: &str = "You already have 10 skill draf
 pub(crate) const HELPERS_CANNOT_PROPOSE_SKILLS: &str = "Helpers cannot propose skills";
 pub(crate) const SKILLS_UNAVAILABLE: &str = "Skills are unavailable in this execution context";
 pub(crate) const PROPOSAL_NOT_SAVED: &str =
-    "The skill draft could not be saved; nothing was proposed";
+    "The skill change could not be confirmed; inspect skill_history and the Skills page before retrying";
 
 pub(crate) const UNKNOWN_SKILL: &str = "unknown skill";
 pub(crate) const SKILL_NOT_RUNNABLE: &str =

@@ -15,7 +15,7 @@ use tracing::warn;
 use utoipa::ToSchema;
 
 use super::drafts::{ApprovedDraft, DraftApproval, Proposal};
-use super::service::{blocking, SkillContent, SkillError, SkillService};
+use super::service::{blocking, SkillError, SkillService};
 use super::{is_valid_slug, parse_skill_file, SkillDraft, SkillRecord};
 
 /// `decidedBy` of a draft approved because its agent runs in Free.
@@ -42,15 +42,19 @@ pub(crate) enum SkillLedgerAction {
     Created,
     /// The agent's skill replaced approved content.
     Updated,
+    /// The agent moved the complete skill package to trash.
+    Removed,
 }
 
-/// One automatic create or update of a skill.
+/// One agent create, update or removal, including owner-approved drafts.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SkillLedgerEntry {
     #[serde(default)]
     #[schema(value_type = Vec<serde_json::Value>)]
     pub(crate) previous_files: Vec<super::SkillSupportingFile>,
+    #[serde(default)]
+    pub(crate) previous_enabled: Option<bool>,
     /// `skl_<uuid>`.
     pub(crate) id: String,
     pub(crate) agent_id: String,
@@ -63,7 +67,7 @@ pub(crate) struct SkillLedgerEntry {
     /// The replaced content's approved hash; `null` for a new skill.
     #[serde(default)]
     pub(crate) previous_content_hash: Option<String>,
-    /// The approved hash the change pinned.
+    /// The approved hash the change pinned; empty after removal.
     pub(crate) content_hash: String,
     /// When it was saved, in milliseconds.
     pub(crate) at: u64,
@@ -72,6 +76,68 @@ pub(crate) struct SkillLedgerEntry {
     /// When the owner undid it, in milliseconds.
     #[serde(default)]
     pub(crate) reverted_at: Option<u64>,
+    /// An explicit owner mutation fenced off this historical change.
+    #[serde(default)]
+    pub(crate) superseded_at: Option<u64>,
+}
+
+/// A history mutation persisted with the corresponding file/registry change.
+pub(super) enum LedgerChange {
+    Append {
+        entry: SkillLedgerEntry,
+        require_free: bool,
+    },
+    Revert(String),
+    Supersede(String),
+}
+impl LedgerChange {
+    pub(super) fn check(&self, state: &crate::state::DaemonState) -> Result<(), SkillError> {
+        match self {
+            Self::Append {
+                entry,
+                require_free,
+            } => {
+                if *require_free
+                    && (!state.agents.contains_key(&entry.agent_id)
+                        || !state.agent_autonomy(&entry.agent_id).is_free())
+                {
+                    return Err(SkillError::conflict("Automatic skill activation requires the originating agent to remain in Free mode"));
+                }
+            }
+            Self::Supersede(_) => {}
+            Self::Revert(id) => {
+                if !state
+                    .skill_ledger
+                    .iter()
+                    .any(|e| &e.id == id && e.reverted_at.is_none() && e.superseded_at.is_none())
+                {
+                    return Err(SkillError::conflict("This skill change was already undone"));
+                }
+            }
+        }
+        Ok(())
+    }
+    pub(super) fn apply(self, ledger: &mut Vec<SkillLedgerEntry>, at: u64) {
+        match self {
+            Self::Append { mut entry, .. } => {
+                entry.at = at;
+                push_entry(ledger, entry);
+            }
+            Self::Supersede(slug) => {
+                for entry in ledger
+                    .iter_mut()
+                    .filter(|entry| entry.skill_slug == slug && entry.reverted_at.is_none())
+                {
+                    entry.superseded_at = Some(at);
+                }
+            }
+            Self::Revert(id) => {
+                if let Some(entry) = ledger.iter_mut().find(|e| e.id == id) {
+                    entry.reverted_at = Some(at);
+                }
+            }
+        }
+    }
 }
 
 /// What a companion's `propose_skill` did.
@@ -121,6 +187,7 @@ pub(crate) fn activated_reply(approved: &ApprovedDraft, action: SkillLedgerActio
     let verb = match action {
         SkillLedgerAction::Created => "Saved",
         SkillLedgerAction::Updated => "Updated",
+        SkillLedgerAction::Removed => "Removed",
     };
     format!(
         "{verb} the skill \"{}\" (/{}). It is active now; use load_skill to read it. The owner can undo this on the Skills page.",
@@ -150,6 +217,18 @@ impl SkillService {
         match self.activate_learning_draft(draft.clone()).await {
             Ok(outcome) => Ok(outcome),
             Err(error) => {
+                // An uncertain acknowledgement may already have committed activation.
+                // Never report the old pending clone when the retained candidate is active.
+                if self
+                    .state
+                    .read()
+                    .await
+                    .skills
+                    .draft(&draft.id)
+                    .is_none_or(|stored| !stored.is_pending())
+                {
+                    return Err(error);
+                }
                 warn!(
                     skill = %draft.slug,
                     error = %error.message(),
@@ -203,35 +282,6 @@ impl SkillService {
         })
     }
 
-    /// Serializes bookkeeping with activation and rolls it back on a definite
-    /// save failure. An uncertain acknowledgement retains the recoverable
-    /// candidate rather than discarding a ledger that may already be on disk.
-    async fn change_ledger(
-        &self,
-        change: impl FnOnce(&mut Vec<SkillLedgerEntry>) + Send + 'static,
-    ) {
-        let saved = self
-            .locked(move |service, _root| async move {
-                let (previous, persist) = {
-                    let mut guard = service.state.write().await;
-                    let previous = guard.skill_ledger.clone();
-                    change(&mut guard.skill_ledger);
-                    (previous, guard.control_plane_persist_request())
-                };
-                if let Err(error) = persist.save().await {
-                    if !crate::control_plane_store::is_durability_uncertain(&error) {
-                        service.state.write().await.skill_ledger = previous;
-                    }
-                    return Err(SkillError::Unavailable(error.to_string()));
-                }
-                Ok(())
-            })
-            .await;
-        if let Err(error) = saved {
-            warn!(error = %error.message(), "the skill ledger could not be saved");
-        }
-    }
-
     /// The ledger, newest first, at most `limit` (capped at 100) entries.
     pub(crate) async fn ledger(&self, limit: usize) -> Vec<SkillLedgerEntry> {
         self.state
@@ -249,66 +299,124 @@ impl SkillService {
     /// previous approved content comes back, or a skill the agent created is
     /// deleted. 404 without one; 409 when the skill changed since.
     pub(crate) async fn revert_last(&self, slug: &str) -> Result<RevertOutcome, SkillError> {
+        self.revert_with_authority(slug, None).await
+    }
+
+    pub(crate) async fn revert_from_agent(
+        &self,
+        slug: &str,
+        by: super::ProposedBy,
+        approved: bool,
+    ) -> Result<RevertOutcome, SkillError> {
+        self.revert_with_authority(slug, Some((by, approved))).await
+    }
+
+    async fn revert_with_authority(
+        &self,
+        slug: &str,
+        authority: Option<(super::ProposedBy, bool)>,
+    ) -> Result<RevertOutcome, SkillError> {
         if !is_valid_slug(slug) {
             return Err(SkillError::NotFound);
         }
-        self.workspace().await?;
-        let (entry, current) = {
-            let guard = self.state.read().await;
-            let entry = guard
-                .skill_ledger
-                .iter()
-                .rev()
-                .find(|entry| entry.skill_slug == slug && entry.reverted_at.is_none())
-                .cloned()
-                .ok_or(SkillError::NotFound)?;
-            let current = guard
-                .skills
-                .get(slug)
-                .map(|record| record.approved_hash.clone());
-            (entry, current)
-        };
-        if current.as_deref() != Some(entry.content_hash.as_str()) {
-            return Err(SkillError::conflict(SKILL_CHANGED_SINCE_AUTOMATIC));
-        }
-        let workspace = self.workspace().await?;
-        let target = slug.to_string();
-        let actual = blocking(move || super::package::read_package(&workspace, &target))
+        let slug = slug.to_string();
+        self.locked(move |service, root| async move {
+            if let Some((by, approved)) = authority {
+                service
+                    .check_agent_skill_write(&by, "undo_skill", &slug, approved)
+                    .await?;
+            }
+            let (entry, current) = {
+                let guard = service.state.read().await;
+                let entry = guard
+                    .skill_ledger
+                    .iter()
+                    .rev()
+                    .find(|entry| entry.skill_slug == slug && entry.reverted_at.is_none())
+                    .cloned()
+                    .ok_or(SkillError::NotFound)?;
+                let current = guard.skills.get(&slug).map(|r| r.approved_hash.clone());
+                (entry, current)
+            };
+            let (workspace, target) = (root.clone(), slug.clone());
+            let (actual, partial) = blocking(move || {
+                let package = super::package::read_package(&workspace, &target)?;
+                let partial =
+                    package.is_none() && super::package::folder_has_content(&workspace, &target)?;
+                Ok::<_, String>((package, partial))
+            })
             .await?
             .map_err(SkillError::Unavailable)?;
-        if actual.as_ref().map(|p| p.hash()).as_deref() != Some(entry.content_hash.as_str()) {
-            return Err(SkillError::conflict(SKILL_CHANGED_SINCE_AUTOMATIC));
-        }
-        let outcome = match entry.action {
-            SkillLedgerAction::Created => {
-                self.delete(slug).await?;
-                RevertOutcome::Removed
+            if entry.superseded_at.is_some() {
+                return Err(SkillError::conflict(SKILL_CHANGED_SINCE_AUTOMATIC));
             }
-            SkillLedgerAction::Updated => {
-                let text = entry
-                    .previous_content
-                    .as_deref()
-                    .ok_or_else(|| SkillError::conflict(PREVIOUS_SKILL_NOT_KEPT))?;
-                let file = parse_skill_file(text.as_bytes()).map_err(SkillError::conflict)?;
-                let content = SkillContent {
-                    files: Some(entry.previous_files.clone()),
-                    name: file.name,
-                    description: file.description,
-                    body: file.body,
-                    enabled: None,
-                };
-                let (record, _) = self.save(slug, content).await?;
-                RevertOutcome::Restored(record)
+            if entry.action == SkillLedgerAction::Removed {
+                if current.is_some() || actual.is_some() || partial {
+                    return Err(SkillError::conflict(SKILL_CHANGED_SINCE_AUTOMATIC));
+                }
+            } else if current.as_deref() != Some(entry.content_hash.as_str())
+                || actual.as_ref().map(|p| p.hash()).as_deref() != Some(entry.content_hash.as_str())
+            {
+                return Err(SkillError::conflict(SKILL_CHANGED_SINCE_AUTOMATIC));
             }
-        };
-        let (id, at) = (entry.id, anima_core::primitives::now_millis());
-        self.change_ledger(move |ledger| {
-            if let Some(entry) = ledger.iter_mut().find(|entry| entry.id == id) {
-                entry.reverted_at = Some(at);
+            let history = Some(LedgerChange::Revert(entry.id));
+            match entry.action {
+                SkillLedgerAction::Created => {
+                    service.delete_locked(root, slug, history).await?;
+                    Ok(RevertOutcome::Removed)
+                }
+                SkillLedgerAction::Updated | SkillLedgerAction::Removed => {
+                    let text = entry
+                        .previous_content
+                        .as_deref()
+                        .ok_or_else(|| SkillError::conflict(PREVIOUS_SKILL_NOT_KEPT))?;
+                    let file = parse_skill_file(text.as_bytes()).map_err(SkillError::conflict)?;
+                    let package = super::package::SkillPackage {
+                        bytes: text.as_bytes().to_vec(),
+                        files: entry.previous_files,
+                    };
+                    anima_core::skill_packages::validate_skill_package(
+                        &package.bytes,
+                        &package.files,
+                    )
+                    .map_err(SkillError::conflict)?;
+                    let hash = package.hash();
+                    if entry
+                        .previous_content_hash
+                        .as_ref()
+                        .is_some_and(|expected| expected != &hash)
+                    {
+                        return Err(SkillError::conflict(PREVIOUS_SKILL_NOT_KEPT));
+                    }
+                    let review = service.review_file(&slug).await?;
+                    let target = slug.clone();
+                    let reviewed_root = root.clone();
+                    service
+                        .apply_with_history(&root, history, None, move |skills, now_ms| {
+                            review.check(skills, &reviewed_root, &target)?;
+                            let previous = skills.get(&target).cloned();
+                            let mut record = SkillRecord::approved(&target, &file, hash, now_ms);
+                            record.enabled = entry.previous_enabled.unwrap_or_else(|| {
+                                previous.as_ref().is_none_or(|record| record.enabled)
+                            });
+                            skills.put(record).map_err(SkillError::conflict)?;
+                            let undo_slug = target.clone();
+                            Ok(super::service::Change {
+                                value: (),
+                                slug: Some(target.clone()),
+                                draft_id: None,
+                                write: Some((target, package)),
+                                undo: Box::new(move |skills| {
+                                    skills.restore(&undo_slug, previous);
+                                }),
+                            })
+                        })
+                        .await?;
+                    Ok(RevertOutcome::Restored(service.record(&slug).await?))
+                }
             }
         })
-        .await;
-        Ok(outcome)
+        .await
     }
 }
 
@@ -687,9 +795,7 @@ mod tests {
         let changing = skills.clone();
         let held_count = Arc::strong_count(&skills.transactions);
         let task = tokio::spawn(async move {
-            changing
-                .change_ledger(|ledger| ledger[0].reverted_at = Some(42))
-                .await;
+            changing.revert_last("notes").await.unwrap();
         });
         tokio::time::timeout(std::time::Duration::from_secs(10), async {
             while Arc::strong_count(&skills.transactions) <= held_count {
@@ -705,7 +811,7 @@ mod tests {
             during, None,
             "bookkeeping must not race an activation rollback"
         );
-        assert_eq!(skills.ledger(1).await[0].reverted_at, Some(42));
+        assert!(skills.ledger(1).await[0].reverted_at.is_some());
     }
 
     #[tokio::test]
@@ -721,9 +827,7 @@ mod tests {
             .write()
             .await
             .set_control_plane_store(Some(crate::skills::test_support::broken_store()));
-        skills
-            .change_ledger(|ledger| ledger[0].reverted_at = Some(42))
-            .await;
+        assert!(skills.revert_last("notes").await.is_err());
         assert_eq!(skills.ledger(1).await, before);
     }
 
@@ -917,6 +1021,7 @@ mod tests {
     fn the_ledger_keeps_the_newest_two_hundred() {
         let entry = |at: u64| SkillLedgerEntry {
             previous_files: Vec::new(),
+            previous_enabled: None,
             id: format!("{LEDGER_ID_PREFIX}{at}"),
             agent_id: "agent-1".into(),
             skill_slug: "notes".into(),
@@ -927,6 +1032,7 @@ mod tests {
             at,
             run_id: None,
             reverted_at: None,
+            superseded_at: None,
         };
         let mut ledger = Vec::new();
         for at in 0..(MAX_SKILL_LEDGER_ENTRIES as u64 + 5) {

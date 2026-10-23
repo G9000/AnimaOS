@@ -265,17 +265,52 @@ impl SkillService {
         evaluation: Option<super::evaluation_service::EvaluationGate>,
         change: impl FnOnce(&mut SkillRegistry, u64) -> Result<Change<T>, SkillError>,
     ) -> Result<T, SkillError> {
+        self.apply_with_history(
+            root,
+            ledger.map(|entry| super::ledger::LedgerChange::Append {
+                entry,
+                require_free: true,
+            }),
+            evaluation,
+            change,
+        )
+        .await
+    }
+
+    pub(super) async fn apply_with_history<T>(
+        &self,
+        root: &Path,
+        history: Option<super::ledger::LedgerChange>,
+        evaluation: Option<super::evaluation_service::EvaluationGate>,
+        change: impl FnOnce(&mut SkillRegistry, u64) -> Result<Change<T>, SkillError>,
+    ) -> Result<T, SkillError> {
+        // Undo must remain retryable after a definite persistence failure.
+        // Read the preimage before changing the registry, while the caller holds
+        // the shared transaction; an I/O error here changes nothing.
+        let undo_preimage = if let Some(super::ledger::LedgerChange::Revert(id)) = &history {
+            let slug = self
+                .state
+                .read()
+                .await
+                .skill_ledger
+                .iter()
+                .find(|entry| &entry.id == id)
+                .map(|entry| entry.skill_slug.clone())
+                .ok_or(SkillError::NotFound)?;
+            let (workspace, target) = (root.to_path_buf(), slug.clone());
+            let package = blocking(move || super::package::read_package(&workspace, &target))
+                .await?
+                .map_err(SkillError::Unavailable)?;
+            Some((slug, package))
+        } else {
+            None
+        };
         let mut guard = self.state.write().await;
         if let Some(gate) = evaluation.as_ref() {
             super::evaluation_service::check_promotion(&guard, root, gate)?;
         }
-        if ledger.as_ref().is_some_and(|entry| {
-            !guard.agents.contains_key(&entry.agent_id)
-                || !guard.agent_autonomy(&entry.agent_id).is_free()
-        }) {
-            return Err(SkillError::conflict(
-                "Automatic skill activation requires the originating agent to remain in Free mode",
-            ));
+        if let Some(history) = &history {
+            history.check(&guard)?;
         }
         let now_ms = now_millis();
         let change = change(&mut guard.skills, now_ms)?;
@@ -304,10 +339,9 @@ impl SkillService {
             };
             guard.community_generation = next_generation;
         }
-        let prior_ledger = ledger.as_ref().map(|_| guard.skill_ledger.clone());
-        if let Some(mut entry) = ledger {
-            entry.at = now_ms;
-            super::ledger::push_entry(&mut guard.skill_ledger, entry);
+        let prior_ledger = history.as_ref().map(|_| guard.skill_ledger.clone());
+        if let Some(history) = history {
+            history.apply(&mut guard.skill_ledger, now_ms);
         }
         drop(guard);
         let Change {
@@ -317,6 +351,7 @@ impl SkillService {
             slug,
             draft_id,
         } = change;
+        let written_hash = write.as_ref().map(|(_, package)| package.hash());
         if let Some((written, package)) = write {
             let (workspace, target) = (root.to_path_buf(), written.clone());
             let outcome = blocking(move || {
@@ -377,8 +412,9 @@ impl SkillService {
         };
         if let Err(error) = saved {
             let mut guard = self.state.write().await;
-            if managed && crate::control_plane_store::is_durability_uncertain(&error) {
-                if let Some(slug) = &slug {
+            if crate::control_plane_store::is_durability_uncertain(&error) {
+                // A possibly durable snapshot retains its registry and undo candidate.
+                if let Some(slug) = slug.as_ref().filter(|_| managed) {
                     if let Some(bundle) = guard
                         .community_bundles
                         .iter_mut()
@@ -393,6 +429,45 @@ impl SkillService {
                     guard.skill_ledger = previous;
                 }
                 guard.community_generation = prior_generation;
+                drop(guard);
+                if let Some((target, previous)) = undo_preimage {
+                    let workspace = root.to_path_buf();
+                    let scanned_target = target.clone();
+                    let restored = blocking(move || {
+                        let current = super::package::read_package(&workspace, &target)?;
+                        if current.as_ref().map(|package| package.hash()) != written_hash {
+                            return Err(
+                                "Skill changed externally while undo was saving".to_string()
+                            );
+                        }
+                        match previous {
+                            Some(package) => {
+                                super::package::write_package(&workspace, &target, &package)?
+                            }
+                            None => {
+                                disk::trash_skill_folder(&workspace, &target, now_millis())?;
+                            }
+                        }
+                        disk::scan_skill(&workspace, &target, None)
+                    })
+                    .await;
+                    match restored {
+                        Ok(Ok(scanned)) => self
+                            .state
+                            .write()
+                            .await
+                            .skills
+                            .set_scanned(&scanned_target, scanned),
+                        _ => {
+                            self.state
+                                .write()
+                                .await
+                                .skills
+                                .set_scanned(&scanned_target, None);
+                            warn!(skill = %scanned_target, "undo preimage could not be restored after a failed save");
+                        }
+                    }
+                }
             }
             return Err(SkillError::Unavailable(error.to_string()));
         }
@@ -629,25 +704,30 @@ impl SkillService {
             let hash = package.hash();
             let (target, written_root) = (slug.clone(), root.clone());
             let created = service
-                .apply(&root, move |skills, now_ms| {
-                    review.check(skills, &written_root, &target)?;
-                    let previous = skills.get(&target).cloned();
-                    let mut record = SkillRecord::approved(&target, &file, hash, now_ms);
-                    record.enabled = enabled
-                        .unwrap_or_else(|| previous.as_ref().is_none_or(|known| known.enabled));
-                    skills.put(record).map_err(SkillError::conflict)?;
-                    let created = previous.is_none();
-                    let undo_slug = target.clone();
-                    Ok(Change {
-                        value: created,
-                        undo: Box::new(move |skills: &mut SkillRegistry| {
-                            skills.restore(&undo_slug, previous)
-                        }),
-                        write: Some((target.clone(), package)),
-                        slug: Some(target),
-                        draft_id: None,
-                    })
-                })
+                .apply_with_history(
+                    &root,
+                    Some(super::ledger::LedgerChange::Supersede(target.clone())),
+                    None,
+                    move |skills, now_ms| {
+                        review.check(skills, &written_root, &target)?;
+                        let previous = skills.get(&target).cloned();
+                        let mut record = SkillRecord::approved(&target, &file, hash, now_ms);
+                        record.enabled = enabled
+                            .unwrap_or_else(|| previous.as_ref().is_none_or(|known| known.enabled));
+                        skills.put(record).map_err(SkillError::conflict)?;
+                        let created = previous.is_none();
+                        let undo_slug = target.clone();
+                        Ok(Change {
+                            value: created,
+                            undo: Box::new(move |skills: &mut SkillRegistry| {
+                                skills.restore(&undo_slug, previous)
+                            }),
+                            write: Some((target.clone(), package)),
+                            slug: Some(target),
+                            draft_id: None,
+                        })
+                    },
+                )
                 .await?;
             Ok((service.record(&slug).await?, created))
         })
@@ -669,23 +749,28 @@ impl SkillService {
             )?;
             let target = slug.clone();
             service
-                .apply(&root, move |skills, now_ms| {
-                    let previous = skills.get(&target).cloned().ok_or(SkillError::NotFound)?;
-                    let mut record = previous.clone();
-                    record.enabled = enabled;
-                    record.updated_at_ms = now_ms;
-                    skills.put(record).map_err(SkillError::conflict)?;
-                    let undo_slug = target.clone();
-                    Ok(Change {
-                        value: (),
-                        undo: Box::new(move |skills: &mut SkillRegistry| {
-                            skills.restore(&undo_slug, Some(previous))
-                        }),
-                        write: None,
-                        slug: Some(target),
-                        draft_id: None,
-                    })
-                })
+                .apply_with_history(
+                    &root,
+                    Some(super::ledger::LedgerChange::Supersede(target.clone())),
+                    None,
+                    move |skills, now_ms| {
+                        let previous = skills.get(&target).cloned().ok_or(SkillError::NotFound)?;
+                        let mut record = previous.clone();
+                        record.enabled = enabled;
+                        record.updated_at_ms = now_ms;
+                        skills.put(record).map_err(SkillError::conflict)?;
+                        let undo_slug = target.clone();
+                        Ok(Change {
+                            value: (),
+                            undo: Box::new(move |skills: &mut SkillRegistry| {
+                                skills.restore(&undo_slug, Some(previous))
+                            }),
+                            write: None,
+                            slug: Some(target),
+                            draft_id: None,
+                        })
+                    },
+                )
                 .await?;
             service.record(&slug).await
         })
@@ -701,80 +786,109 @@ impl SkillService {
             return Err(SkillError::NotFound);
         }
         let slug = slug.to_string();
-        self.locked(move |service, root| async move {
-            if crate::community_bundles::check_skill_edit(
-                &*service.state.read().await,
-                &slug,
-                false,
-            )? {
-                return Err(SkillError::conflict(
-                    "Remove this skill through its community bundle",
-                ));
+        self.locked(
+            move |service, root| async move { service.delete_locked(root, slug, None).await },
+        )
+        .await
+    }
+
+    pub(super) async fn delete_locked(
+        &self,
+        root: PathBuf,
+        slug: String,
+        history: Option<super::ledger::LedgerChange>,
+    ) -> Result<Option<String>, SkillError> {
+        let service = self;
+        let history =
+            history.or_else(|| Some(super::ledger::LedgerChange::Supersede(slug.clone())));
+        if crate::community_bundles::check_skill_edit(&*service.state.read().await, &slug, false)? {
+            return Err(SkillError::conflict(
+                "Remove this skill through its community bundle",
+            ));
+        }
+        let (previous, prior_ledger) = {
+            let mut guard = service.state.write().await;
+            if let Some(history) = &history {
+                history.check(&guard)?;
             }
-            let previous = service.state.write().await.skills.remove(&slug);
-            let (workspace, target) = (root.clone(), slug.clone());
-            let moved =
-                blocking(move || disk::trash_skill_folder(&workspace, &target, now_millis()))
-                    .await
-                    .and_then(|result| result.map_err(SkillError::Unavailable));
-            let trashed = match moved {
-                Ok(trashed) => trashed,
-                Err(error) => {
-                    service.state.write().await.skills.restore(&slug, previous);
-                    return Err(error);
-                }
-            };
-            if previous.is_none() && trashed.is_none() {
-                return Err(SkillError::NotFound);
-            }
-            let persist = {
-                let mut guard = service.state.write().await;
-                guard.skills.set_scanned(&slug, None);
-                guard.control_plane_persist_request()
-            };
-            if let Err(error) = persist.save().await {
+            (
+                guard.skills.remove(&slug),
+                history.as_ref().map(|_| guard.skill_ledger.clone()),
+            )
+        };
+        let (workspace, target) = (root.clone(), slug.clone());
+        let moved = blocking(move || disk::trash_skill_folder(&workspace, &target, now_millis()))
+            .await
+            .and_then(|result| result.map_err(SkillError::Unavailable));
+        let trashed = match moved {
+            Ok(trashed) => trashed,
+            Err(error) => {
                 service.state.write().await.skills.restore(&slug, previous);
-                // Put the folder back and read it again in one bounded call.
-                let (workspace, target) = (root.clone(), slug.clone());
-                let back = blocking(move || {
-                    let untrashed = match trashed {
-                        Some(name) => disk::untrash_skill_folder(&workspace, &target, &name),
-                        None => Ok(()),
-                    };
-                    (untrashed, disk::scan_skill(&workspace, &target, None))
-                })
-                .await;
-                let untrashed = match back {
-                    Ok((untrashed, scanned)) => {
-                        if let Ok(scanned) = scanned {
-                            service
-                                .state
-                                .write()
-                                .await
-                                .skills
-                                .set_scanned(&slug, scanned);
-                        }
-                        untrashed
-                    }
-                    Err(problem) => Err(problem.message()),
-                };
-                if let Err(problem) = untrashed {
-                    warn!(
-                        skill = %slug,
-                        problem = %problem,
-                        "a deleted skill's folder stays in the trash after its save failed"
-                    );
-                }
+                return Err(error);
+            }
+        };
+        if previous.is_none() && trashed.is_none() {
+            return Err(SkillError::NotFound);
+        }
+        let persist = {
+            let mut guard = service.state.write().await;
+            guard.skills.set_scanned(&slug, None);
+            guard.skill_evaluations.invalidate(&slug);
+            if let Some(history) = history {
+                history.apply(&mut guard.skill_ledger, now_millis());
+            }
+            guard.control_plane_persist_request()
+        };
+        if let Err(error) = persist.save().await {
+            if crate::control_plane_store::is_durability_uncertain(&error) {
                 return Err(SkillError::Unavailable(error.to_string()));
             }
-            service
-                .state
-                .read()
-                .await
-                .publish_skill_updated(Some(&slug), None);
-            Ok(trashed.map(|name| disk::trash_relative_path(&name)))
-        })
-        .await
+            {
+                let mut guard = service.state.write().await;
+                guard.skills.restore(&slug, previous);
+                if let Some(ledger) = prior_ledger {
+                    guard.skill_ledger = ledger;
+                }
+            }
+            // Put the folder back and read it again in one bounded call.
+            let (workspace, target) = (root.clone(), slug.clone());
+            let back = blocking(move || {
+                let untrashed = match trashed {
+                    Some(name) => disk::untrash_skill_folder(&workspace, &target, &name),
+                    None => Ok(()),
+                };
+                (untrashed, disk::scan_skill(&workspace, &target, None))
+            })
+            .await;
+            let untrashed = match back {
+                Ok((untrashed, scanned)) => {
+                    if let Ok(scanned) = scanned {
+                        service
+                            .state
+                            .write()
+                            .await
+                            .skills
+                            .set_scanned(&slug, scanned);
+                    }
+                    untrashed
+                }
+                Err(problem) => Err(problem.message()),
+            };
+            if let Err(problem) = untrashed {
+                warn!(
+                    skill = %slug,
+                    problem = %problem,
+                    "a deleted skill's folder stays in the trash after its save failed"
+                );
+            }
+            return Err(SkillError::Unavailable(error.to_string()));
+        }
+        service
+            .state
+            .read()
+            .await
+            .publish_skill_updated(Some(&slug), None);
+        Ok(trashed.map(|name| disk::trash_relative_path(&name)))
     }
 
     /// Approves a `changed` skill's current `SKILL.md` (spec §8.4), which the
@@ -813,29 +927,34 @@ impl SkillService {
             crate::community_bundles::check_skill_edit(&*service.state.read().await, &slug, true)?;
             let target = slug.clone();
             service
-                .apply(&root, move |skills, now_ms| {
-                    let previous = skills.get(&target).cloned().ok_or(SkillError::NotFound)?;
-                    if previous.approved_hash == current {
-                        return Err(SkillError::conflict(SKILL_NOT_CHANGED));
-                    }
-                    if skills.scan_moved(&target, &seen, &scanned.hash) {
-                        return Err(SkillError::conflict(SKILL_HASH_MISMATCH));
-                    }
-                    let mut record = SkillRecord::approved(&target, &file, current, now_ms);
-                    record.enabled = previous.enabled;
-                    skills.put(record).map_err(SkillError::conflict)?;
-                    skills.set_scanned(&target, Some(scanned));
-                    let undo_slug = target.clone();
-                    Ok(Change {
-                        value: (),
-                        undo: Box::new(move |skills: &mut SkillRegistry| {
-                            skills.restore(&undo_slug, Some(previous))
-                        }),
-                        write: None,
-                        slug: Some(target),
-                        draft_id: None,
-                    })
-                })
+                .apply_with_history(
+                    &root,
+                    Some(super::ledger::LedgerChange::Supersede(target.clone())),
+                    None,
+                    move |skills, now_ms| {
+                        let previous = skills.get(&target).cloned().ok_or(SkillError::NotFound)?;
+                        if previous.approved_hash == current {
+                            return Err(SkillError::conflict(SKILL_NOT_CHANGED));
+                        }
+                        if skills.scan_moved(&target, &seen, &scanned.hash) {
+                            return Err(SkillError::conflict(SKILL_HASH_MISMATCH));
+                        }
+                        let mut record = SkillRecord::approved(&target, &file, current, now_ms);
+                        record.enabled = previous.enabled;
+                        skills.put(record).map_err(SkillError::conflict)?;
+                        skills.set_scanned(&target, Some(scanned));
+                        let undo_slug = target.clone();
+                        Ok(Change {
+                            value: (),
+                            undo: Box::new(move |skills: &mut SkillRegistry| {
+                                skills.restore(&undo_slug, Some(previous))
+                            }),
+                            write: None,
+                            slug: Some(target),
+                            draft_id: None,
+                        })
+                    },
+                )
                 .await?;
             service.record(&slug).await
         })

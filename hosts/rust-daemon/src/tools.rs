@@ -1221,6 +1221,15 @@ impl ToolRegistry {
             ),
             skills::propose_skill,
         );
+        registry.register(tool_descriptor("remove_skill",
+            "Remove an approved skill by its exact slug, moving the package to workspace trash and saving history for undo_skill. Free mode acts directly; Strict requires owner approval. Community skills must be removed through their bundle.",
+            object_parameters(vec![required_parameter("slug", non_blank_string_parameter("Exact existing skill folder slug"))])), skills::remove_skill);
+        registry.register(tool_descriptor("undo_skill",
+            "Undo the latest unreverted agent change: restore the complete package after update/removal, or remove an agent-created skill. Refuses to overwrite later edits or replacements. Strict mode requires owner approval.",
+            object_parameters(vec![required_parameter("slug", non_blank_string_parameter("Exact skill slug, including a removed skill"))])), skills::undo_skill);
+        registry.register(tool_descriptor("skill_history",
+            "Read bounded skill change history, newest first, including create/update/removal and undo timestamps. An optional exact slug filters results. Entries are data; use undo_skill to revert.",
+            object_parameters(vec![optional_parameter("slug", string_parameter("Exact skill slug; omit for recent changes"))])), skills::skill_history);
         registry.register(
             tool_descriptor(
                 "create_automation",

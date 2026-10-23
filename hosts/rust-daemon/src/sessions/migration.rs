@@ -65,6 +65,11 @@ pub(crate) const TOOL_GRANTS: &[ToolGrantSet] = &[
         read_class: &[],
         write_class: &["complete_reminder", "snooze_reminder"],
     },
+    ToolGrantSet {
+        id: "agent-skill-lifecycle",
+        read_class: &["skill_history"],
+        write_class: &["remove_skill", "undo_skill"],
+    },
 ];
 
 /// Legacy check-ins ran in a fresh `room-*` room per tick. Those rooms become
@@ -1299,7 +1304,8 @@ mod tests {
                 "search_conversations",
                 "load_skill",
                 "list_automations",
-                "check_automation_status"
+                "check_automation_status",
+                "skill_history"
             ]
         );
         assert_eq!(
@@ -1342,7 +1348,8 @@ mod tests {
                 "search_conversations",
                 "load_skill",
                 "list_automations",
-                "check_automation_status"
+                "check_automation_status",
+                "skill_history"
             ]
         );
         assert_eq!(
@@ -1359,7 +1366,10 @@ mod tests {
                 "propose_plan",
                 "check_automation_status",
                 "complete_reminder",
-                "snooze_reminder"
+                "snooze_reminder",
+                "skill_history",
+                "remove_skill",
+                "undo_skill"
             ]
         );
         assert!(state.tool_grants_applied.contains("m5-skills"));

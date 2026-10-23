@@ -22,6 +22,31 @@ Completed reviews with an unfinished handoff are reconciled after restart. A lin
 
 The owner can inspect and approve/reject drafts in **Skills** and use the existing undo action for automatic changes. Skill observations never delete, archive, disable or change permissions automatically.
 
+## Managing skills from chat
+
+Agents use propose_skill to add a skill or update an existing slug. Free mode
+activates the change immediately and records its complete previous package.
+Strict and Custom leave a draft for owner approval in Skills. Approving an
+agent draft also records history and supports undo.
+
+remove_skill moves an approved skill package to the existing workspace trash.
+skill_history reads recent changes, including removed skills and undo
+timestamps. undo_skill restores the previous instructions, supporting files
+and enabled state, or removes a skill the agent created. Removal and undo run
+directly in Free mode and require the existing write approval in Strict mode.
+Custom follows the configured write policy. Helpers cannot mutate shared skills.
+
+History and its file/registry change share one control-plane save. Undo checks
+the latest live package inside the same transaction and refuses later edits or
+same-slug replacements. History is bounded to 200 changes; reads return at most
+100 entries. These tools preserve existing package limits, path checks and
+community-bundle ownership restrictions. A persistence error is reported as an
+error rather than a successful change; an uncertain acknowledgement retains the
+recoverable snapshot candidate.
+
+The owner APIs remain GET /api/skill-ledger,
+POST /api/skills/{slug}/revert-last and DELETE /api/skills/{slug}.
+
 ## Background memory maintenance
 
 Memory maintenance has a separate default-off policy, including in Free autonomy. It reviews one bounded group of two to eight same-scope Facts, with at most two attempts per rolling 24 hours and a six-hour automatic cadence. Failed, cancelled and interrupted attempts still consume their reservation. One physical model slot is shared with learning reviews. The reviewer has no tools, receives at most 12 KiB of source evidence, and may return no change. Later eligible groups take priority over groups already reviewed.

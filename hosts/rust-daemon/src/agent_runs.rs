@@ -164,7 +164,7 @@ fn helper_config_base(parent: &AgentState, name: String) -> AgentConfig {
         // and process tools and `propose_skill` (spec §8.3: helpers cannot
         // propose skills; they keep `load_skill`). The automation tools never reach a helper either
         // (spec §9.3: they would schedule runs of the helper).
-        tools: Some(parent.config.tools.iter().flatten().filter(|tool| !is_coordination_tool(&tool.name) && !crate::tools::is_process_tool(&tool.name) && !crate::tools::is_browser_tool(&tool.name) && !tool.name.starts_with("mcp_") && tool.name != "search_conversations" && tool.name != "read_conversation_window" && tool.name != "propose_skill" && tool.name != "core_memory" && tool.name != crate::tools::PLAN_TOOL && tool.name != "checkpoint_list" && tool.name != "checkpoint_restore" && !crate::tools::is_automation_tool(&tool.name)).cloned().collect()),
+        tools: Some(parent.config.tools.iter().flatten().filter(|tool| !is_coordination_tool(&tool.name) && !crate::tools::is_process_tool(&tool.name) && !crate::tools::is_browser_tool(&tool.name) && !tool.name.starts_with("mcp_") && tool.name != "search_conversations" && tool.name != "read_conversation_window" && !matches!(tool.name.as_str(), "propose_skill" | "remove_skill" | "undo_skill") && tool.name != "core_memory" && tool.name != crate::tools::PLAN_TOOL && tool.name != "checkpoint_list" && tool.name != "checkpoint_restore" && !crate::tools::is_automation_tool(&tool.name)).cloned().collect()),
         settings: Some(AgentSettings {
             temperature: parent_settings.temperature,
             max_tokens: Some(parent_settings.max_tokens.unwrap_or(4096).min(4096)),
